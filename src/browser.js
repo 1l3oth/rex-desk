@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { shellCommand, stopTree, fingerprint } from './processes.js';
 import { now } from './store.js';
 import { flowPreview } from './flow-runtime.js';
+import { electronLaunch } from './electron-runtime.js';
 
 const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
@@ -19,8 +20,9 @@ export class Evidence {
     const run = this.getRun(runId);
     if (!run.worktree) throw new Error('This run has no worktree.');
     const repository = this.store.config().repositories.find(item => item.id === run.repositoryId);
-    if (!repository?.devCommand && !repository?.flowRuntime) throw new Error('Set this repository’s dev command or Flow Tomcat preset in Settings.');
+    if (!repository?.devCommand && !repository?.flowRuntime && !repository?.electronRuntime) throw new Error('Set this repository’s dev command, Flow Tomcat preset, or Electron preset in Settings.');
     const directory = this.directory(runId);
+    if (repository.electronRuntime) return this.startElectron(runId, run, repository, directory);
     const command = String(repository.devCommand || '').replaceAll('{port}', String(run.port)).replaceAll('{worktree}', run.worktree);
     const onData = text => this.emit(runId, 'dev-output', { text });
     const process = repository.flowRuntime ? flowPreview(repository, run, this.store.directory, onData)
@@ -48,6 +50,22 @@ export class Evidence {
     await page.goto(baseUrl + repository.browserPath, { waitUntil: 'domcontentloaded', timeout: 30000 });
     return session;
   }
+  // Desktop runs record the app's own window; its profile, logs, updater, and protocol handlers stay isolated per run.
+  async startElectron(runId, run, repository, directory) {
+    const { _electron } = await import('playwright');
+    const { home, options } = electronLaunch(repository, run, this.store.directory, directory);
+    this.emit(runId, 'electron-start', { home, executable: options.executablePath, note: 'Separate user data, logs, and session; updater, auto-launch, and protocol registration disabled.' });
+    const app = await _electron.launch(options);
+    const page = await app.firstWindow({ timeout: 90000 });
+    const context = app.context();
+    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    page.on('pageerror', error => this.emit(runId, 'browser-error', { message: error.message }));
+    page.on('console', message => { if (message.type() === 'error') this.emit(runId, 'browser-console', { text: message.text() }); });
+    await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
+    const session = { electron: app, context, page, baseUrl: new URL(page.url()).origin, assertions: [], actions: 0 };
+    this.sessions.set(runId, session);
+    return session;
+  }
   async action(runId, { action, selector, value, url, expected }) {
     if (action === 'close') return this.close(runId);
     const session = await this.start(runId);
@@ -56,8 +74,8 @@ export class Evidence {
     switch (action) {
       case 'open': break;
       case 'navigate': {
-        const target = new URL(url || '/', session.baseUrl);
-        if (target.origin !== session.baseUrl) throw new Error('Recorded browser navigation must stay on this run’s preview origin.');
+        const target = new URL(url || '/', session.electron ? page.url() : session.baseUrl);
+        if (target.origin !== (session.electron ? new URL(page.url()).origin : session.baseUrl)) throw new Error('Recorded browser navigation must stay on this run’s preview origin.');
         await page.goto(target.href, { waitUntil: 'domcontentloaded' }); break;
       }
       case 'click': await page.locator(selector).click({ timeout: 15000 }); break;
@@ -95,10 +113,14 @@ export class Evidence {
     const video = session.page.video();
     try {
       await session.context.tracing.stop({ path: traceFile });
-      await session.context.close();
+      if (session.electron) { await session.electron.close().catch(() => {}); session.electron = { close: async () => {} }; }
+      else await session.context.close();
       if (video) this.attach(runId, await video.path(), 'Recorded browser test', 'video/webm', { assertions: session.assertions, actions: session.actions });
       this.attach(runId, traceFile, 'Playwright trace', 'application/zip');
-    } finally { await session.browser.close(); stopTree(session.process.child); }
+    } finally {
+      if (session.electron) await session.electron.close().catch(() => {});
+      else { await session.browser.close(); stopTree(session.process.child); }
+    }
     return { closed: true, assertions: session.assertions.length };
   }
   report(runId, { summary, checks, risk }) {

@@ -9,7 +9,7 @@ import { Sources } from './providers.js';
 import { AgentProfiles } from './agents.js';
 import { Evidence } from './browser.js';
 import { issueBranch } from './branches.js';
-import { seedFlowWorktree } from './flow-runtime.js';
+import { seedFlowWorktree, runtimeProfile } from './flow-runtime.js';
 import { assessRisk, automaticPrAllowed } from './risk.js';
 import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from './processes.js';
 
@@ -85,7 +85,7 @@ export class Desk {
       state: 'queued', taskIds: [], repositoryId: source.repositoryId || this.store.config().repositories[0]?.id, createdAt: now() };
     this.store.put('run', run.id, run); void this.drain(); return run;
   }
-  async startTask({ taskId, repositoryId, provider, baseBranch, targetBranch, instructions = '', category, parentRunId }) {
+  async startTask({ taskId, repositoryId, provider, baseBranch, targetBranch, instructions = '', category, parentRunId, runtimeProfile: profileId }) {
     const task = this.task(taskId);
     if (task.demo) throw new Error('Demo tasks cannot launch agents or change a repository.');
     if (this.store.list('run').some(run => run.taskId === taskId && !terminalStates.has(run.state))) throw new Error('This task already has an active run.');
@@ -96,7 +96,8 @@ export class Desk {
     const run = { id: id(), role: 'worker', taskId, title: task.title, repositoryId: repository.id,
       provider: provider || config.provider, state: 'queued', phase: 'queued', createdAt: now(), instructions,
       baseBranch: baseBranch || parent.baseBranch || repository.baseBranch,
-      targetBranch: targetBranch || parent.targetBranch || repository.targetBranch, parentRunId };
+      targetBranch: targetBranch || parent.targetBranch || repository.targetBranch, parentRunId,
+      ...(repository.flowRuntime ? { runtimeProfile: runtimeProfile(repository, profileId || undefined).id } : {}) };
     if (!['claude', 'codex'].includes(run.provider)) throw new Error('Unknown agent provider.');
     this.store.put('run', run.id, run);
     this.store.put('task', taskId, { ...task, category: category || task.category, runId: run.id });
@@ -130,8 +131,9 @@ export class Desk {
         run = this.patchRun(runId, { worktree: worktree.directory, branch, baseCommit: worktree.commit, port: await freePort() });
         this.store.event(runId, 'worktree-created', { branch, directory: worktree.directory });
         if (repository.flowRuntime) {
-          const files = seedFlowWorktree(repository, run.worktree);
-          this.store.event(runId, 'flow-runtime-prepared', { files, note: 'Isolated Tomcat uses this branch with copied local JEX configuration.' });
+          const prepared = seedFlowWorktree(repository, run.worktree, run.runtimeProfile);
+          this.store.event(runId, 'flow-runtime-prepared', { ...prepared, note: 'Isolated Tomcat uses this branch with copied local JEX configuration and the selected product profile.' });
+          this.store.event(runId, 'phase', { text: `Runtime profile: ${prepared.profile.name} (${prepared.profile.region})` }, true);
         }
         if (repository.setupCommand) {
           this.store.event(runId, 'phase', { text: 'Preparing worktree dependencies' }, true);
@@ -177,7 +179,7 @@ export class Desk {
     }
     if (run.role === 'coordinator') return `${common}\nYou are the main coordinator. Read desk_tasks and desk_task for the selected IDs ${JSON.stringify(run.taskIds)}. Classify issues by affected module, severity, likely dependency, and reproduction path. Do not guess fixes. Use desk_categorize to label tasks and desk_dispatch to start workers. Respect dependencies: serialize related changes and parallelize independent tasks. You may choose Claude Code or Codex per worker. Do not modify source code yourself. Each dispatched worker gets its own branch, worktree, and port. Use desk_runs to track workers; report what you dispatched through desk_message. Never mark a source task complete without verified evidence. Base override: ${run.baseBranch || 'repository setting'}. PR target override: ${run.targetBranch || 'repository setting'}. User instruction: ${run.prompt || 'Analyze and dispatch these assigned QA issues.'}`;
     const task = this.task(run.taskId);
-    return `${common}\nYou own one issue. Work only in ${run.worktree}, branch ${run.branch}, based on ${run.baseBranch}. Never switch or edit the original checkout. Do not bind shared ports; use PORT=${run.port}. Read repository AGENTS.md and CLAUDE.md. Do not install or start machine-wide services.\nWorkflow: inspect the full issue using desk_task; reproduce before editing; use desk_browser to record browser reproduction and verification; fix at the responsible layer; run desk_verify for the configured tests; make at least one relevant assertText or assertVisible browser assertion after the fix; self-review the complete diff and call desk_finish with a factual report and risk {score:1-10,requiresHumanReview,reason,factors}. Explain security, data, behavior, rollback, and verification risks. A low score needs concrete reasons; uncertainty requires human review. A worker stopping is not proof of success. For Flow/Morningmate, desk_browser starts isolated Java 8 Tomcat when its preset is configured. Read docs/claude/build.md before Java or frontend builds. Local JEX config is copied; build this branch's own frontend output and never link node_modules or reuse another branch's dist. Do not run the original fixed-port start.sh. If the app cannot run independently, use desk_ask and report the exact blocker. Never fabricate screenshots, videos, test passes, or reproduction. All browser actions through desk_browser are recorded into video and a Playwright trace. Other browser tools are not automatically recorded. Do not push, create PRs, merge, deploy, or change tracker status through another tool. desk_publish and desk_status apply dashboard approvals. PR target: ${run.targetBranch}.\nIssue: ${JSON.stringify({ id: task.id, externalId: task.externalId, title: task.title, description: task.description, source: task.source, projectId: task.projectId, status: task.status })}\nAdditional instructions: ${run.instructions || 'Fix the assigned issue and attach proof.'}`;
+    return `${common}\nYou own one issue. Work only in ${run.worktree}, branch ${run.branch}, based on ${run.baseBranch}. Never switch or edit the original checkout. Do not bind shared ports; use PORT=${run.port}. Read repository AGENTS.md and CLAUDE.md. Do not install or start machine-wide services.\nWorkflow: inspect the full issue using desk_task; reproduce before editing; use desk_browser to record browser reproduction and verification; fix at the responsible layer; run desk_verify for the configured tests; make at least one relevant assertText or assertVisible browser assertion after the fix; self-review the complete diff and call desk_finish with a factual report and risk {score:1-10,requiresHumanReview,reason,factors}. Explain security, data, behavior, rollback, and verification risks. A low score needs concrete reasons; uncertainty requires human review. A worker stopping is not proof of success. For Flow/Morningmate, desk_browser starts isolated Java 8 Tomcat when its preset is configured. ${run.runtimeProfile ? `This run uses the ${run.runtimeProfile} runtime profile; do not edit jex.content.user.xml to switch products.` : ''} Read docs/claude/build.md before Java or frontend builds. Local JEX config is copied; build this branch's own frontend output and never link node_modules or reuse another branch's dist. Do not run the original fixed-port start.sh. For an Electron repository, desk_browser opens this worktree's app with its own user data; never launch the installed app, change protocol handlers, or trigger updates. If the app cannot run independently, use desk_ask and report the exact blocker. Never fabricate screenshots, videos, test passes, or reproduction. All browser actions through desk_browser are recorded into video and a Playwright trace. Other browser tools are not automatically recorded. Do not push, create PRs, merge, deploy, or change tracker status through another tool. desk_publish and desk_status apply dashboard approvals. PR target: ${run.targetBranch}.\nIssue: ${JSON.stringify({ id: task.id, externalId: task.externalId, title: task.title, description: task.description, source: task.source, projectId: task.projectId, status: task.status })}\nAdditional instructions: ${run.instructions || 'Fix the assigned issue and attach proof.'}`;
   }
   beginAsk(runId, request) {
     const run = this.run(runId);

@@ -154,3 +154,20 @@ html[data-theme=dark]{--rail:#122e37;--rail-text:#e2eef0;--ground:#101b20;--surf
 .picker-list [role=option][aria-selected=true] span:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin:0 7px 2px 0;vertical-align:middle}
 .picker-empty{padding:9px;font-size:12px;color:var(--muted)}
 html[data-theme=dark] .picker-list{box-shadow:0 10px 30px #0008}
+
+/* Runtime product profiles */
+.runtime-profiles{border:1px solid var(--line);border-radius:6px;padding:12px 14px 4px;margin:4px 0 18px;min-width:0}
+.runtime-profiles legend{font-size:12px;font-weight:600;padding:0 4px}
+.runtime-profiles>p{font-size:12px;line-height:1.65;margin:0 0 14px}
+.runtime-profile{padding:12px 0 2px;border-top:1px solid var(--line-soft)}
+.runtime-profile-heading{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
+.field-row.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:900px){.field-row.four{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.field-row.four{grid-template-columns:1fr}}
+
+/* Cloud backup */
+.database-status{display:flex;align-items:flex-start;gap:18px;margin-bottom:16px;flex-wrap:wrap}
+.database-status dl{display:flex;gap:28px;margin:0;flex-wrap:wrap}
+.database-status dt{font-size:11px;color:var(--muted)}
+.database-status dd{margin:2px 0 0;font-size:13px;font-variant-numeric:tabular-nums}
+#cloud-backup .actions{margin:0 0 12px;flex-wrap:wrap}

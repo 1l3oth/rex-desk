@@ -18,7 +18,10 @@ if ($runtimePath -eq $templatePath -or $runtimePath.StartsWith($worktreePath + [
 $java = Join-Path $JavaHome 'bin/java.exe'
 $bootstrap = Join-Path $CatalinaHome 'bin/bootstrap.jar'
 if (!(Test-Path -LiteralPath $java) -or !(Test-Path -LiteralPath $bootstrap)) { throw 'Java 8 or the Tomcat installation is missing. Check repository settings.' }
-$javaVersion = (& $java -version 2>&1 | Out-String)
+# Windows PowerShell turns native stderr into error records; java -version and Tomcat logging both write there.
+$ErrorActionPreference = 'Continue'
+$javaVersion = (& $java -version 2>&1 | ForEach-Object { "$_" }) -join "`n"
+$ErrorActionPreference = 'Stop'
 if ($javaVersion -notmatch 'version "1\.8\.') { throw 'Flow requires Java 8. Select a Java 8 home in repository settings.' }
 $sourceRoot = Join-Path $worktreePath 'src'
 if (!(Test-Path -LiteralPath (Join-Path $sourceRoot 'WEB-INF'))) { throw 'Selected branch has no src/WEB-INF application.' }
@@ -72,5 +75,6 @@ $javaArgs = @(
   '-Djava.util.logging.manager=org.apache.juli.ClassLoaderLogManager', '-Djava.protocol.handler.pkgs=org.apache.catalina.webresources',
   '-classpath', "$bootstrap;$(Join-Path $CatalinaHome 'bin/tomcat-juli.jar')", 'org.apache.catalina.startup.Bootstrap', 'start'
 )
-& $java @javaArgs
+$ErrorActionPreference = 'Continue'
+& $java @javaArgs 2>&1 | ForEach-Object { "$_" }
 exit $LASTEXITCODE

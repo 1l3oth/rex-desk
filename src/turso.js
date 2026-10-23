@@ -6,8 +6,8 @@ import { randomUUID, createHash } from 'node:crypto';
 
 // Local transactions and their cloud outbox commit together. Failed uploads can be retried without losing work.
 export class TursoSync {
-  constructor(store, { clientFactory = createClient } = {}) {
-    this.store = store; this.clientFactory = clientFactory; this.state = 'local'; this.error = ''; this.ready = false;
+  constructor(store, { clientFactory = createClient, retryMs = 30000 } = {}) {
+    this.store = store; this.clientFactory = clientFactory; this.retryMs = retryMs; this.state = 'local'; this.error = ''; this.ready = false;
     this.connectionFile = path.join(store.directory, 'turso.connection');
     this.marker = path.join(store.directory, 'turso.migrated');
     const workspaceFile = path.join(store.directory, 'workspace.id');
@@ -43,8 +43,15 @@ export class TursoSync {
     this.error = String(error.message || error).replaceAll(this.connection?.authToken || '\0', '[redacted]').replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]');
     this.notify();
   }
-  async open() {
-    if (!this.enabled || this.closed) return this.status();
+  // One connection attempt at a time: a second caller waits instead of replacing the client during a flush.
+  open() {
+    if (!this.enabled || this.closed) return Promise.resolve(this.status());
+    this.opening ||= this.connectNow().finally(() => { this.opening = null; });
+    return this.opening;
+  }
+  retry() { return this.ready ? this.flush() : this.open(); }
+  async connectNow() {
+    if (this.flushing) await this.flushing;
     this.state = 'connecting'; this.notify();
     try {
       this.client?.close();
@@ -59,8 +66,9 @@ export class TursoSync {
       this.ready = true; this.error = '';
       await this.flush();
       if (this.state === 'connected') writeFileSync(this.marker, JSON.stringify({ url: this.connection.url, workspace: this.workspace }), { mode: 0o600 });
-      if (!this.retryTimer) { this.retryTimer = setInterval(() => { if (!this.ready) void this.open(); else void this.flush(); }, 30000); this.retryTimer.unref(); }
     } catch (error) { this.ready = false; this.fail(error); }
+    // Retry even when the first connection fails, so an offline start catches up without a restart.
+    if (!this.retryTimer && !this.closed) { this.retryTimer = setInterval(() => void this.retry(), this.retryMs); this.retryTimer.unref(); }
     return this.status();
   }
   seed() {
@@ -78,7 +86,7 @@ export class TursoSync {
     this.store.transaction(() => {
       const insert = this.store.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value');
       for (const row of records.rows) insert.run(row.kind, row.id, row.value);
-      const event = this.store.db.prepare('INSERT OR REPLACE INTO events(sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?)');
+      const event = this.store.db.prepare('INSERT OR REPLACE INTO events(sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?)');
       for (const row of events.rows) event.run(Number(row.sequence), row.run_id, row.kind, Number(row.visible), row.value, row.created_at);
     });
     this.store.token = this.store.decrypt(this.store.get('secret', 'mcp-token'));
@@ -132,6 +140,7 @@ export class TursoSync {
   }
   async close() {
     clearTimeout(this.timer); clearInterval(this.retryTimer);
+    if (this.opening) await this.opening;
     if (this.ready) await this.flush();
     this.closed = true; this.client?.close();
   }

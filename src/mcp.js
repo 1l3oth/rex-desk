@@ -53,7 +53,8 @@ export function createMcp(desk, scope) {
     desk.store.put('task', taskId, { ...task, category }); return { updated: true };
   });
   tool('desk_dispatch', 'Queue an isolated coding worker. Each task receives its own worktree, branch, and preview port. Respect task dependencies.',
-    { taskId: z.string(), repositoryId: z.string().optional(), provider: z.enum(['claude', 'codex']).optional(), baseBranch: z.string().optional(), targetBranch: z.string().optional(), instructions: z.string().optional(), category: z.string().optional() },
+    { taskId: z.string(), repositoryId: z.string().optional(), provider: z.enum(['claude', 'codex']).optional(), baseBranch: z.string().optional(), targetBranch: z.string().optional(), instructions: z.string().optional(), category: z.string().optional(),
+      runtimeProfile: z.string().optional().describe('Flow/Morningmate Tomcat profile ID from desk_repositories, for example flow or morningmate. Omit for the repository default.') },
     input => { desk.authorize(scope, null, { coordinator: true }); return desk.startTask({ ...input, parentRunId: scope.runId }); });
   tool('desk_runs', 'Read task execution states and evidence checks without internal reasoning.', {}, () =>
     desk.store.list('run').filter(run => scope.role !== 'worker' || run.id === scope.runId), true);

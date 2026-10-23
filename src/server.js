@@ -83,7 +83,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       }
       if (url.pathname === '/api/state') return json(response, 200, desk.snapshot());
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
-      if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.open(); return json(response, 200, await store.cloud.verify()); }
+      if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
       if (url.pathname === '/api/repositories/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());
       if (url.pathname === '/api/repositories/branch-preview' && request.method === 'POST') {

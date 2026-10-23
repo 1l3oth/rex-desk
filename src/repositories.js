@@ -2,6 +2,8 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { defaultProfiles, seedProduct } from './flow-runtime.js';
+import { detectElectron } from './electron-runtime.js';
 
 const exec = promisify(execFile);
 const options = { windowsHide: true, timeout: 20000, maxBuffer: 4 * 1024 * 1024,
@@ -68,7 +70,8 @@ export async function inspectRepository(directory, { execute = run } = {}) {
     remote: remote || '', remoteUrl: safeRemote(remoteUrl), branches: list, preferredBranch,
     gitAuthor: { name: authorName, email: authorEmail }, github, warnings,
     flow: flow ? { available: existsSync(path.join(templateBase, 'conf/server.xml')), templateBase,
-      javaHome: 'C:\\Program Files\\Java\\jdk1.8.0_181', catalinaHome: 'C:\\Program Files\\Apache Software Foundation\\Tomcat 9.0', seedPath: root, maxHeapMb: 512 } : null };
+      javaHome: 'C:\\Program Files\\Java\\jdk1.8.0_181', catalinaHome: 'C:\\Program Files\\Apache Software Foundation\\Tomcat 9.0', seedPath: root, maxHeapMb: 512,
+      profiles: defaultProfiles(), defaultProfile: seedProduct(root)?.product || 'flow', seed: seedProduct(root) } : null, electron: detectElectron(root) };
 }
 
 let picking = false;

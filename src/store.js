@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
 import { issueBranch } from './branches.js';
 import { validateFlowRuntime } from './flow-runtime.js';
+import { validateElectronRuntime } from './electron-runtime.js';
 import { TursoSync } from './turso.js';
 
 export const now = () => new Date().toISOString();
@@ -145,7 +146,7 @@ export class Store extends EventEmitter {
       issueBranch(branchPattern, { prefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, '') });
       return { id: repository.id || id(), name: repository.name || path.basename(repository.path), path: path.resolve(repository.path),
         baseBranch: repository.baseBranch || 'develop', targetBranch: repository.targetBranch || repository.baseBranch || 'develop',
-        branchPattern, flowRuntime: validateFlowRuntime(repository.flowRuntime), ...commands, browserPath: repository.browserPath || '/' };
+        branchPattern, flowRuntime: validateFlowRuntime(repository.flowRuntime), electronRuntime: validateElectronRuntime(repository.electronRuntime), ...commands, browserPath: repository.browserPath || '/' };
     });
     const config = { ...defaults, name: String(input.name || 'Rex'), provider: input.provider,
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
