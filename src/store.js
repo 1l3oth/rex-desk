@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { randomUUID, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
@@ -12,8 +12,17 @@ export const id = () => randomUUID();
 export const defaults = {
   name: 'Rex', provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
   syncMinutes: 5, requireVideo: true, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
-  models: { claude: '', codex: '' },
+  models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false,
 };
+// null keeps the profile inherited from the launching terminal; '' selects the CLI's default home folder.
+function agentProfile(value, name) {
+  if (value === undefined || value === null) return null;
+  const folder = String(value).trim();
+  if (!folder) return '';
+  if (!path.isAbsolute(folder)) throw new Error(`${name} profile must be an absolute folder.`);
+  try { if (!statSync(folder).isDirectory()) throw new Error(); } catch { throw new Error(`${name} profile folder does not exist: ${folder}`); }
+  return path.resolve(folder);
+}
 
 export function redact(value) {
   if (Array.isArray(value)) return value.map(redact);
@@ -126,7 +135,7 @@ export class Store extends EventEmitter {
       if (source.clearKey) secretUpdates.push({ id: sourceId, remove: true });
       return { id: sourceId, name: source.name || source.type, type: source.type, baseUrl: base.origin,
         userId: String(source.userId || '').trim(), projectIds: [...new Set((source.projectIds || []).map(String).filter(Boolean))],
-        repositoryId: source.repositoryId || '', statusFilter: ['active', 'unfinished', 'all'].includes(source.statusFilter) ? source.statusFilter : 'active', statusMap: source.statusMap || {} };
+        repositoryId: source.repositoryId || (input.repositories.length === 1 ? input.repositories[0].id || '' : ''), statusFilter: ['active', 'unfinished', 'all'].includes(source.statusFilter) ? source.statusFilter : 'active', statusMap: source.statusMap || {} };
     });
     const repositories = input.repositories.map(repository => {
       if (!path.isAbsolute(repository.path || '')) throw new Error('Repository path must be absolute.');
@@ -140,7 +149,9 @@ export class Store extends EventEmitter {
     });
     const config = { ...defaults, name: String(input.name || 'Rex'), provider: input.provider,
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
-      syncMinutes: input.syncMinutes, requireVideo: input.requireVideo !== false, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: input.models || defaults.models, sources, repositories };
+      syncMinutes: input.syncMinutes, requireVideo: input.requireVideo !== false, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: input.models || defaults.models, sources, repositories,
+      agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
+      tourDismissed: Boolean(input.tourDismissed) };
     for (const update of secretUpdates) {
       if (update.remove) this.delete('secret', `source:${update.id}`);
       else this.put('secret', `source:${update.id}`, update.value);
@@ -149,6 +160,7 @@ export class Store extends EventEmitter {
     for (const source of this.config().sources) if (!sources.some(item => item.id === source.id)) {
       this.delete('secret', `source:${source.id}`);
       this.delete('directory', source.id);
+      this.delete('sync', source.id);
       for (const task of this.list('task').filter(task => task.sourceId === source.id)) this.put('task', task.id, { ...task, active: false });
     }
     this.put('config', 'main', config);

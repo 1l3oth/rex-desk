@@ -7,21 +7,79 @@ const readable = value => String(value || '').replace(/<br\s*\/?\s*>/gi, '\n').r
   .replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&amp;/gi, '&')
   .replace(/\\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 export function postContent(record) {
-  const original = record.content || record.contents || record.htmlContent || '';
+  const original = record.content || record.contents || '';
   let content = original;
   for (let attempt = 0; attempt < 2 && typeof content === 'string'; attempt++) {
     try { content = JSON.parse(content); } catch { break; }
   }
   const components = content && typeof content === 'object' ? content.COMPS : null;
-  if (!Array.isArray(components)) return { description: readable(original), contentImages: [], contentFiles: [] };
+  const fallback = readable(record.outContent || '');
+  if (!Array.isArray(components)) return { description: fallback || readable(/^\s*\{"COMPS"/.test(String(original)) ? '' : original), contentImages: [], contentFiles: [] };
   const paragraphs = [], contentImages = [], contentFiles = [];
   for (const component of components) {
     const detail = component.COMP_DETAIL || {};
     if (component.COMP_TYPE === 'TEXT' && typeof detail.CONTENTS === 'string') paragraphs.push(readable(detail.CONTENTS));
-    else if (component.COMP_TYPE === 'IMAGE' && detail.ATCH_URL) contentImages.push({ url: detail.ATCH_URL, name: detail.ORCP_FILE_NM || 'Issue screenshot' });
+    else if (component.COMP_TYPE === 'IMAGE' && detail.ATCH_URL) contentImages.push(image(detail, 'Issue screenshot'));
     else if (/FILE|ATTACHMENT/.test(component.COMP_TYPE || '') && (detail.FILE_DOWN_URL || detail.ATCH_URL)) contentFiles.push({ url: detail.FILE_DOWN_URL || detail.ATCH_URL, name: detail.ORCP_FILE_NM || 'Attachment' });
   }
-  return { description: paragraphs.filter(Boolean).join('\n\n'), contentImages, contentFiles };
+  return { description: paragraphs.filter(Boolean).join('\n\n') || fallback, contentImages, contentFiles };
+}
+const image = (item, name) => ({ url: item.ATCH_URL || item.url, name: item.ORCP_FILE_NM || item.name || name,
+  ...(item.THUM_IMG_PATH ? { thumbnail: item.THUM_IMG_PATH } : {}), ...(Number(item.WIDTH) ? { width: Number(item.WIDTH) } : {}), ...(Number(item.HEIGHT) ? { height: Number(item.HEIGHT) } : {}) });
+// The post body and its attachment list repeat the same screenshot, sometimes with a different query string.
+export function uniqueImages(...lists) {
+  const seen = new Map();
+  for (const item of lists.flat()) {
+    if (!item?.url) continue;
+    const key = String(item.url).split('?')[0], previous = seen.get(key);
+    seen.set(key, previous ? { ...item, ...previous, name: previous.name === 'Issue screenshot' ? item.name : previous.name } : item);
+  }
+  return [...seen.values()];
+}
+export const flowDate = value => {
+  const match = String(value || '').match(/^(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2}))?/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}${match[4] ? ` ${match[4]}:${match[5]}` : ''}` : String(value || '');
+};
+function readColumns(columns = []) {
+  return columns.map(column => ({ id: String(column.columnId ?? column.columnSrno ?? column.COLUMN_SRNO ?? ''),
+    type: String(column.columnType || column.COLUMN_TYPE || ''), role: String(column.defaultColumnType || column.DEFAULT_COLUMN_TYPE || ''),
+    values: (column.columnData || column.COLUMN_DATA_REC || []).map(item => ({ option: String(item.optionName ?? item.OPTION_NAME ?? ''),
+      user: String(item.userName ?? item.USER_NM ?? ''), data: String(item.customColumnData ?? item.CUSTOM_COLUMN_DATA ?? '') })) }));
+}
+export function columnNames(columns = []) {
+  return Object.fromEntries(columns.map(column => [String(column.columnSrno ?? column.columnId ?? column.COLUMN_SRNO ?? ''), text(column.columnName ?? column.COLUMN_NAME ?? '')])
+    .filter(([key, name]) => key && name));
+}
+// Task columns hold the readable title and tracker properties; the post body holds only the description.
+export function taskFields(columns = [], names = {}) {
+  const fields = [], meta = {};
+  const roles = { TASK_NM: 'title', TASK_NUM: 'taskNumber', RGSR_ID: 'reporter', RGSN_DTTM: 'createdAt', EDTR_DTTM: 'updatedAt', START_DT: 'startDate', END_DT: 'dueDate', PRIORITY: 'priorityName', SECTION: 'section', PROGRESS: 'progress' };
+  for (const column of readColumns(columns)) {
+    const values = column.values.map(item => column.type === 'USER' ? item.user || item.data : column.type === 'DATE' ? flowDate(item.data)
+      : column.type === 'CHECKBOX' ? (/^(y|true|1)$/i.test(item.data) ? 'Yes' : item.data ? 'No' : '') : item.option || item.data).filter(Boolean);
+    const value = text(values.join(', '));
+    if (roles[column.role]) { if (value) meta[roles[column.role]] = value; continue; }
+    if (['STATUS', 'WORKER_ID'].includes(column.role)) continue;
+    if (value) fields.push({ name: names[column.id] || `Field ${column.id}`, value });
+  }
+  return { ...meta, fields };
+}
+export function taskComments(remarks = []) {
+  return remarks.filter(remark => remark.DELETE_YN !== 'Y').map(remark => {
+    const system = remark.SYSTEM_REMARK_YN === 'Y';
+    const body = postContent({ content: system ? remark.REMARK_CNTN || remark.CNTN || '' : remark.CNTN || remark.REMARK_CNTN || '' });
+    return { id: String(remark.COLABO_REMARK_SRNO || ''), author: text(remark.RGSR_NM), at: flowDate(remark.RGSN_DTTM), system, text: body.description,
+      images: uniqueImages(body.contentImages, (remark.REMARK_IMG_ATCH_REC || []).map(item => image(item, 'Comment image'))),
+      files: [...body.contentFiles, ...(remark.REMARK_ATCH_REC || []).map(item => ({ url: item.FILE_DOWN_URL || item.ATCH_URL, name: item.ORCP_FILE_NM || 'Attachment' }))].filter(item => item.url) };
+  }).filter(comment => comment.text || comment.images.length || comment.files.length);
+}
+// A subtask keeps its own body; the parent issue is appended as separately parsed context.
+export function subtaskRecord(child, parent) {
+  const own = postContent(child), inherited = postContent(parent);
+  return { record: { ...child, taskId: String(child.taskId || child.TASK_SRNO), title: child.taskName || child.TASK_NM, content: '',
+    columns: child.taskColumns || child.TASK_COLUMN_REC || child.columns || [], connectUrl: parent.connectUrl, projectColumns: parent.projectColumns },
+  content: { description: [own.description, inherited.description && `Parent issue: ${text(parent.title)}\n${inherited.description}`].filter(Boolean).join('\n\n'),
+    contentImages: uniqueImages(own.contentImages, inherited.contentImages), contentFiles: [...own.contentFiles, ...inherited.contentFiles] } };
 }
 export function matchesTaskStatus(task, filter = 'active') {
   if (filter === 'all') return true;
@@ -73,7 +131,7 @@ export function taskAssignees(post) {
   return [...result].filter(Boolean);
 }
 
-export function normalizeTask(source, projectId, post, detail = {}) {
+export function normalizeTask(source, projectId, post, detail = {}, { names, content } = {}) {
   const record = detail.post || detail;
   const task = record.task || record.taskInfo || record.taskData || record.tasks?.[0] || {};
   const taskId = String(record.taskId || task.taskId || task.TASK_SRNO || post.taskId || post.postId);
@@ -81,13 +139,20 @@ export function normalizeTask(source, projectId, post, detail = {}) {
   const statusColumn = columns.find(column => /STATUS/i.test(column.defaultColumnType || column.DEFAULT_COLUMN_TYPE || column.columnType || ''));
   const statusData = (statusColumn?.columnData || statusColumn?.COLUMN_DATA_REC || [])[0];
   const status = record.taskStatus ?? task.status ?? record.STTS ?? task.STTS ?? post.taskStatus ?? statusData?.customColumnData ?? statusColumn?.optionName ?? 'unknown';
+  const properties = taskFields(columns, names || columnNames(record.projectColumns));
+  const body = content || postContent({ ...record, content: record.content || post.content || '' });
+  const images = uniqueImages(body.contentImages, (record.imageAttachments || []).map(item => image(item, 'Issue screenshot')));
+  const files = [...body.contentFiles, ...(record.attachments || []).map(item => ({ url: item.FILE_DOWN_URL || item.ATCH_URL, name: item.ORCP_FILE_NM || 'Attachment' }))].filter(item => item.url);
   return { id: `${source.id}:${projectId}:${taskId}`, externalId: taskId, postId: String(post.postId || record.postId),
     sourceId: source.id, source: source.type, sourceName: source.name, projectId: String(projectId),
     projectName: record.projectTitle || post.projectTitle || String(projectId),
-    title: text(record.title || post.title || task.content), ...postContent({ ...record, content: record.content || post.content || '' }),
-    status: String(status), statusName: statusData?.optionName || statusData?.OPTION_NAME || '', statusCategory: statusData?.optionCategory || statusData?.OPTION_CATEGORY || '', priority: record.priority || record.PRIORITY || task.priority || task.PRIORITY || 'normal',
+    title: text(properties.title || record.title || post.title || task.TASK_NM || task.content) || `Task ${taskId}`,
+    description: body.description, contentImages: body.contentImages, contentFiles: body.contentFiles, images, files, comments: taskComments(record.remarks), fields: properties.fields,
+    reporter: properties.reporter || text(record.registerName), createdAt: properties.createdAt || flowDate(record.registeredDateTime), updatedAt: properties.updatedAt || flowDate(record.editedDateTime),
+    startDate: properties.startDate || '', section: properties.section || text(task.SECTION_NAME), taskNumber: properties.taskNumber || String(task.TASK_NUM || ''),
+    status: String(status), statusName: statusData?.optionName || statusData?.OPTION_NAME || '', statusCategory: statusData?.optionCategory || statusData?.OPTION_CATEGORY || '', priority: String(properties.priorityName || record.priority || record.PRIORITY || task.priority || task.PRIORITY || 'normal').toLowerCase(),
     assignees: taskAssignees(record), repositoryId: source.repositoryId || '', category: '',
-    dueDate: record.scheduleFinishDateTime || record.END_DT || task.endDate || task.END_DT || post.scheduleFinishDateTime || '',
+    dueDate: properties.dueDate || flowDate(record.scheduleFinishDateTime || record.END_DT || task.endDate || task.END_DT || post.scheduleFinishDateTime || ''),
     url: record.connectUrl || record.tinyUrl || '', syncedAt: now(), active: true,
     raw: { post: record, summary: post }, demo: false };
 }
@@ -184,8 +249,8 @@ export class Sources {
           if (task.assignees.includes(identity(account)) && matchesTaskStatus(task, source.statusFilter)) fetched.push(task);
           const record = detail.post || detail;
           for (const subtask of record.subTasks || []) {
-            const child = normalizeTask(source, projectId, { ...post, title: subtask.taskName || subtask.TASK_NM, taskId: subtask.taskId || subtask.TASK_SRNO },
-              { ...subtask, taskId: subtask.taskId || subtask.TASK_SRNO, title: subtask.taskName || subtask.TASK_NM, content: `${subtask.content || ''}\nParent issue: ${record.title || post.title}\n${record.content || post.content || ''}`, columns: subtask.taskColumns || subtask.TASK_COLUMN_REC || [] });
+            const nested = subtaskRecord(subtask, { ...record, title: record.title || post.title, content: record.content || post.content || '' });
+            const child = normalizeTask(source, projectId, { ...post, title: nested.record.title, taskId: nested.record.taskId }, nested.record, { content: nested.content });
             if (child.assignees.includes(identity(account)) && matchesTaskStatus(child, source.statusFilter)) fetched.push({ ...child, parentPostId: String(post.postId) });
           }
         };
@@ -201,7 +266,9 @@ export class Sources {
     for (const task of this.store.list('task').filter(item => item.sourceId === source.id)) this.store.put('task', task.id, { ...task, active: false });
     for (const task of fetched) {
       const previous = this.store.get('task', task.id);
-      this.store.put('task', task.id, { ...task, category: previous?.category || '', runId: previous?.runId });
+      const reusable = previous?.detailLoaded && task.detailLoaded === false && previous.postId === task.postId && (!task.updatedAt || previous.updatedAt === task.updatedAt);
+      const detail = reusable ? Object.fromEntries(['description', 'contentImages', 'contentFiles', 'images', 'files', 'comments', 'url', 'detailLoadedAt'].map(key => [key, previous[key]])) : {};
+      this.store.put('task', task.id, { ...task, ...detail, ...(reusable ? { detailLoaded: true, raw: { ...task.raw, post: previous.raw?.post } } : {}), category: previous?.category || '', runId: previous?.runId });
     }
     for (const set of statusSets) this.store.put('statuses', `${source.id}:${set.projectId}`, set);
     const result = { sourceId: source.id, name: source.name, count: fetched.length, account, at: now() };
@@ -215,6 +282,7 @@ export class Sources {
     if (!Array.isArray(definitions.columns)) return null;
     const worker = definitions.columns.find(column => /WORKER|ASSIGNEE/i.test(column.defaultColumnType || ''));
     if (!worker) return null;
+    const names = columnNames(definitions.columns);
     const filterRecords = [{ COLUMN_SRNO: String(worker.columnSrno || worker.columnId), OPERATOR_TYPE: 'IN', FILTER_DATA: String(account) }];
     const tasks = [], cursors = new Set(); let cursor = 0;
     while (true) {
@@ -227,9 +295,8 @@ export class Sources {
       for (const row of page.tasks) {
         // Filter responses may include a parent only as context for an assigned subtask.
         if (!taskAssignees(row).includes(identity(account))) continue;
-        const task = normalizeTask(source, projectId, row, { ...row, title: row.content, content: '' });
-        const number = row.columns?.find(column => column.defaultColumnType === 'TASK_NUM')?.columnData?.[0]?.customColumnData;
-        if (matchesTaskStatus(task, source.statusFilter)) tasks.push({ ...task, taskNumber: number || '', parentTaskId: row.upTaskId || '', description: '', detailLoaded: false });
+        const task = normalizeTask(source, projectId, row, { ...row, title: '', content: '' }, { names });
+        if (matchesTaskStatus(task, source.statusFilter)) tasks.push({ ...task, parentTaskId: row.upTaskId && row.upTaskId !== '-1' ? row.upTaskId : '', parentTitle: text(row.upTaskName), description: '', detailLoaded: false });
       }
       if (!page.hasNext) break;
       if (page.lastCursor === undefined || Number(page.lastCursor) < 0) throw new Error('Filtered task API omitted its next cursor.');
@@ -237,19 +304,22 @@ export class Sources {
     }
     return [...new Map(tasks.map(task => [task.id, task])).values()];
   }
-  async taskDetail(taskId) {
+  async taskDetail(taskId, { refresh = false } = {}) {
     const task = this.store.get('task', taskId);
     if (!task) throw new Error('Task not found.');
-    if (task.demo || task.detailLoaded !== false) return task;
+    if (task.demo || (!refresh && task.detailLoaded !== false)) return task;
     const source = this.store.config().sources.find(item => item.id === task.sourceId);
     if (!source) throw new Error('Source connection no longer exists.');
     const detail = await this.request(source, `/user/posts/${encodeURIComponent(task.postId)}`), record = detail.post || detail;
     const child = record.subTasks?.find(item => String(item.taskId || item.TASK_SRNO) === task.externalId);
-    const complete = child ? { ...child, taskId: task.externalId, title: child.taskName || child.TASK_NM,
-      content: `${child.content || ''}\nParent issue: ${record.title || ''}\n${record.content || ''}`, connectUrl: record.connectUrl } : record;
-    const normalized = normalizeTask(source, task.projectId, { postId: task.postId, taskId: task.externalId }, complete);
-    const fresh = { ...task, ...normalized, id: task.id, externalId: task.externalId, taskNumber: task.taskNumber,
-      category: task.category, runId: task.runId, parentTaskId: task.parentTaskId, detailLoaded: true };
+    const nested = child ? subtaskRecord(child, record) : null;
+    const normalized = normalizeTask(source, task.projectId, { postId: task.postId, taskId: task.externalId }, nested ? nested.record : record, nested ? { content: nested.content } : {});
+    const kept = Object.fromEntries(['title', 'taskNumber', 'projectName', 'reporter', 'createdAt', 'updatedAt', 'startDate', 'dueDate', 'section', 'status', 'statusName', 'statusCategory']
+      .filter(key => task[key] && (!normalized[key] || ['title', 'taskNumber', 'projectName', 'status', 'statusName', 'statusCategory'].includes(key))).map(key => [key, task[key]]));
+    const fresh = { ...task, ...normalized, ...kept, fields: normalized.fields.length ? normalized.fields : task.fields || [],
+      comments: child ? task.comments || [] : normalized.comments, raw: { ...task.raw, post: record },
+      id: task.id, externalId: task.externalId, category: task.category, runId: task.runId, parentTaskId: task.parentTaskId,
+      parentTitle: task.parentTitle, assignees: task.assignees?.length ? task.assignees : normalized.assignees, detailLoaded: true, detailLoadedAt: now() };
     this.store.put('task', taskId, fresh); return fresh;
   }
   async updateStatus(task, phase) {

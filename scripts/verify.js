@@ -6,5 +6,5 @@ for (const file of files) {
   const result = spawnSync(process.execPath, ['--check', file], { stdio: 'inherit', windowsHide: true });
   if (result.status !== 0) process.exit(result.status || 1);
 }
-const result = spawnSync(process.execPath, ['--test', 'test/core.test.js'], { stdio: 'inherit', windowsHide: true });
+const result = spawnSync(process.execPath, ['--test', ...readdirSync('test').filter(file => file.endsWith('.test.js')).map(file => `test/${file}`)], { stdio: 'inherit', windowsHide: true });
 process.exit(result.status || 0);

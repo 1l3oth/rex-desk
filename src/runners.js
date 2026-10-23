@@ -5,9 +5,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand, stopTree } from './processes.js';
 
-export function existingMcpConnections(sourcePath) {
+export function existingMcpConnections(sourcePath, configDirectory = process.env.CLAUDE_CONFIG_DIR) {
   let connections = {};
-  const configs = [...new Set([path.join(os.homedir(), '.claude.json'), process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : ''].filter(Boolean))];
+  const configs = [...new Set([path.join(os.homedir(), '.claude.json'), configDirectory ? path.join(configDirectory, '.claude.json') : ''].filter(Boolean))];
   for (const config of configs) if (existsSync(config)) {
     const data = JSON.parse(readFileSync(config, 'utf8'));
     connections = { ...connections, ...data.mcpServers };
@@ -34,8 +34,8 @@ export function codexAnswer(method, request, answer) {
 }
 
 export class CodexRunner {
-  constructor({ run, cwd, token, mcpUrl, model, ask, event, signal, sourcePath }) {
-    Object.assign(this, { run, cwd, token, mcpUrl, model, ask, event, signal, sourcePath });
+  constructor({ run, cwd, token, mcpUrl, model, ask, event, signal, sourcePath, agentEnv }) {
+    Object.assign(this, { run, cwd, token, mcpUrl, model, ask, event, signal, sourcePath, agentEnv });
     this.pending = new Map(); this.sequence = 0; this.closed = false;
   }
   async start(prompt) {
@@ -45,7 +45,7 @@ export class CodexRunner {
       '-c', `mcp_servers.rex_desk_run.url=${JSON.stringify(this.mcpUrl)}`,
       '-c', 'mcp_servers.rex_desk_run.bearer_token_env_var="REX_AGENT_TOKEN"',
       '-c', 'mcp_servers.rex_desk_run.tool_timeout_sec=86400'];
-    this.child = spawn(executable.command, args, { cwd: this.cwd, env: { ...process.env, REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl },
+    this.child = spawn(executable.command, args, { cwd: this.cwd, env: { ...(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl },
       windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     const completed = new Promise((resolve, reject) => { this.resolveTurn = resolve; this.rejectTurn = reject; });
     // Attach immediately, so early process errors never become unhandled rejections.
@@ -131,10 +131,10 @@ export class ClaudeRunner {
   constructor(options) { Object.assign(this, options); }
   async start(prompt) {
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
-    const env = { ...process.env, REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
+    const env = { ...(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
     delete env.CLAUDECODE;
     const executable = resolveCommand('claude');
-    const connections = existingMcpConnections(this.sourcePath);
+    const connections = existingMcpConnections(this.sourcePath, env.CLAUDE_CONFIG_DIR);
     delete connections.rex_desk;
     const options = { cwd: this.cwd, env, abortController: this.controller,
       permissionMode: this.run.role === 'coordinator' ? 'default' : 'acceptEdits',
@@ -168,6 +168,8 @@ export class ClaudeRunner {
       if (message.type === 'user') this.event('agent-operation', { type: 'tool-result', content: message.message?.content });
       if (message.type === 'result') {
         this.event('agent-result', { result: message.result, errors: message.errors, subtype: message.subtype, cost: message.total_cost_usd });
+        // The CLI reports a signed-out profile as an ordinary result. Surface it as a setup problem, not agent output.
+        if (/not logged in|please run \/login/i.test(String(message.result || ''))) throw new Error(`Claude Code profile ${env.CLAUDE_CONFIG_DIR || '~/.claude'} is not signed in. Open Setup, choose a signed-in Claude Code profile, then continue this run.`);
         if (message.is_error) throw new Error(message.errors?.join('\n') || message.result || `Claude ended with ${message.subtype}.`);
       }
     }

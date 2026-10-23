@@ -10,19 +10,22 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { inspectRepository, pickRepositoryFolder } from './repositories.js';
 import { issueBranch } from './branches.js';
+import { profileEnvironment } from './agents.js';
+import { setupPrompt } from './setup-prompt.js';
+import { cachedTaskImage } from './images.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.webm': 'video/webm', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml' };
+const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml' };
 const json = (response, code, data) => { response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(data)); };
 async function body(request) {
   let input = '';
   for await (const chunk of request) { input += chunk; if (Buffer.byteLength(input) > 2 * 1024 * 1024) throw new Error('Request exceeds 2 MB.'); }
   try { return input ? JSON.parse(input) : {}; } catch { throw new Error('Request body must be JSON.'); }
 }
-function serveFile(request, response, file, { sandbox = false, download = false } = {}) {
+function serveFile(request, response, file, { sandbox = false, download = false, cache = 'no-store' } = {}) {
   const stat = statSync(file), type = mime[path.extname(file)] || 'application/octet-stream';
-  const headers = { 'Content-Type': type, 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff' };
+  const headers = { 'Content-Type': type, 'Cache-Control': cache, 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff' };
   if (sandbox) headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self';";
   if (download) headers['Content-Disposition'] = `attachment; filename="${path.basename(file).replaceAll('"', '')}"`;
   const range = request.headers.range?.match(/^bytes=(\d+)-(\d*)$/);
@@ -35,7 +38,7 @@ function serveFile(request, response, file, { sandbox = false, download = false 
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || path.join(root, '.local'), port = Number(process.env.PORT || 4317), runnerFactory, fetcher } = {}) {
+export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || path.join(root, '.local'), port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch } = {}) {
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataDirectory, 'runtime.lock');
   if (existsSync(lockPath)) {
@@ -46,7 +49,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
     unlinkSync(lockPath);
   }
   writeFileSync(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 });
-  const store = new Store(dataDirectory), desk = new Desk(store, { root, runnerFactory, fetcher });
+  const store = new Store(dataDirectory), desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand });
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
   store.on('change', notify);
@@ -54,7 +57,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
-    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
     try {
       const host = request.headers.host;
       const hostname = host ? new URL(`http://${host}`).hostname : '';
@@ -87,7 +90,31 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         const input = await body(request);
         return json(response, 200, { branch: issueBranch(input.pattern, { prefix: input.prefix || 'temp/rex' }) });
       }
-      if (url.pathname === '/api/config' && request.method === 'PUT') return json(response, 200, store.saveConfig(await body(request)));
+      if (url.pathname === '/api/config' && request.method === 'PUT') { const saved = store.saveConfig(await body(request)); desk.agents.invalidate(); return json(response, 200, saved); }
+      if (url.pathname === '/api/agents' && request.method === 'GET') return json(response, 200, await desk.agents.overview({ refresh: url.searchParams.has('refresh') }));
+      if (url.pathname === '/api/agents/profile' && request.method === 'POST') {
+        const input = await body(request);
+        if (!['claude', 'codex'].includes(input.provider)) throw new Error('Choose Claude Code or Codex.');
+        const config = store.publicConfig();
+        store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [input.provider]: input.profile ?? null } });
+        desk.agents.invalidate(input.provider);
+        return json(response, 200, await desk.agents.overview());
+      }
+      if (url.pathname === '/api/agents/mcp' && request.method === 'POST') {
+        const { provider } = await body(request);
+        if (!['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
+        if (desk.agents.mcpInstalled(provider)) return json(response, 200, { installed: true, already: true });
+        const command = resolveCommand(provider), proxy = path.join(root, 'src', 'stdio.js');
+        const args = provider === 'claude' ? [...command.args, 'mcp', 'add', '--scope', 'user', 'rex_desk', '--', process.execPath, proxy]
+          : [...command.args, 'mcp', 'add', 'rex_desk', '--', process.execPath, proxy];
+        // Profile environment decides which signed-in CLI configuration receives the local stdio entry.
+        await exec(command.command, args, { env: profileEnvironment(provider, desk.agents.selected(provider)), windowsHide: true, timeout: 30000 });
+        return json(response, 200, { installed: desk.agents.mcpInstalled(provider) });
+      }
+      if (url.pathname === '/api/setup-prompt' && request.method === 'POST') {
+        const input = await body(request);
+        return json(response, 200, { prompt: setupPrompt({ target: input.target, root, dataDirectory: store.directory, mcpUrl: desk.mcpUrl, profiles: { claude: desk.agents.selected('claude'), codex: desk.agents.selected('codex') } }) });
+      }
       if (url.pathname === '/api/sources/connect' && request.method === 'POST') {
         const source = store.saveConnection(await body(request));
         return json(response, 200, { source, directory: await desk.sources.directory(source.id) });
@@ -122,7 +149,11 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       }
       const interactionMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/answer$/);
       const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
-      if (taskMatch && request.method === 'GET') return json(response, 200, await desk.sources.taskDetail(decodeURIComponent(taskMatch[1])));
+      if (taskMatch && request.method === 'GET') return json(response, 200, await desk.sources.taskDetail(decodeURIComponent(taskMatch[1]), { refresh: url.searchParams.has('refresh') }));
+      if (url.pathname === '/api/task-image' && request.method === 'GET') {
+        const image = await cachedTaskImage(store, url.searchParams.get('task') || '', url.searchParams.get('url') || '', { fetcher: imageFetcher });
+        return serveFile(request, response, image, { cache: 'private, max-age=604800' });
+      }
       if (interactionMatch && request.method === 'POST') return json(response, 200, desk.answer(interactionMatch[1], await body(request)));
       const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish))?$/);
       if (runMatch) {

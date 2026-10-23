@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { now, id } from './store.js';
 import { CodexRunner, ClaudeRunner } from './runners.js';
 import { Sources } from './providers.js';
+import { AgentProfiles } from './agents.js';
 import { Evidence } from './browser.js';
 import { issueBranch } from './branches.js';
 import { seedFlowWorktree } from './flow-runtime.js';
@@ -38,8 +39,9 @@ export function validateAnswer(interaction, answer) {
 }
 
 export class Desk {
-  constructor(store, { root, runnerFactory, fetcher } = {}) {
+  constructor(store, { root, runnerFactory, fetcher, agentCommand } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory;
+    this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     this.sources = new Sources(store, { fetcher }); this.live = new Map(); this.waiters = new Map(); this.tokens = new Map();
     this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
     this.evidence = new Evidence(store, runId => this.run(runId), (runId, kind, data) => store.event(runId, kind, data));
@@ -54,7 +56,7 @@ export class Desk {
     return { config: this.store.publicConfig(), tasks: this.store.list('task').filter(task => task.active),
       runs: this.store.list('run').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
       interactions: this.store.list('interaction').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
-      artifacts: this.store.list('artifact'), sync: this.store.list('sync'), statuses: this.store.list('statuses'),
+      artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
       directories: this.store.list('directory'), database: this.store.cloud.status(), syncing: this.sources.syncing };
   }
   scopeToken(runId) { const token = randomBytes(32).toString('base64url'); this.tokens.set(token, runId); return token; }
@@ -117,6 +119,8 @@ export class Desk {
   async execute(runId, controller) {
     let run = this.run(runId), token;
     try {
+      // Check the selected CLI profile before creating worktrees or spending an agent turn.
+      if (!this.runnerFactory) await this.agents.ensureSignedIn(run.provider);
       if (run.role === 'worker' && !run.worktree) {
         const config = this.store.config();
         const repository = { ...config.repositories.find(item => item.id === run.repositoryId), baseBranch: run.baseBranch };
@@ -141,7 +145,7 @@ export class Desk {
       token = this.scopeToken(runId);
       const options = { run, cwd: run.worktree || path.join(this.store.directory, 'coordinator'), token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
-        mcpUrl: this.mcpUrl, model: this.store.config().models[run.provider], controller, signal: controller.signal,
+        mcpUrl: this.mcpUrl, model: this.store.config().models[run.provider], controller, signal: controller.signal, agentEnv: this.agents.environment(run.provider),
         ask: request => this.ask(runId, request), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
@@ -173,7 +177,7 @@ export class Desk {
     }
     if (run.role === 'coordinator') return `${common}\nYou are the main coordinator. Read desk_tasks and desk_task for the selected IDs ${JSON.stringify(run.taskIds)}. Classify issues by affected module, severity, likely dependency, and reproduction path. Do not guess fixes. Use desk_categorize to label tasks and desk_dispatch to start workers. Respect dependencies: serialize related changes and parallelize independent tasks. You may choose Claude Code or Codex per worker. Do not modify source code yourself. Each dispatched worker gets its own branch, worktree, and port. Use desk_runs to track workers; report what you dispatched through desk_message. Never mark a source task complete without verified evidence. Base override: ${run.baseBranch || 'repository setting'}. PR target override: ${run.targetBranch || 'repository setting'}. User instruction: ${run.prompt || 'Analyze and dispatch these assigned QA issues.'}`;
     const task = this.task(run.taskId);
-    return `${common}\nYou own one issue. Work only in ${run.worktree}, branch ${run.branch}, based on ${run.baseBranch}. Never switch or edit the original checkout. Do not bind shared ports; use PORT=${run.port}. Read repository AGENTS.md and CLAUDE.md. Do not install or start machine-wide services.\nWorkflow: inspect the full issue using desk_task; reproduce before editing; use desk_browser to record browser reproduction and verification; fix at the responsible layer; run desk_verify for the configured tests; make at least one relevant assertText or assertVisible browser assertion after the fix; self-review the complete diff and call desk_finish with a factual report and risk {score:1-10,requiresHumanReview,reason,factors}. Explain security, data, behavior, rollback, and verification risks. A low score needs concrete reasons; uncertainty requires human review. A worker stopping is not proof of success. For Flow/Morningmate, desk_browser starts isolated Java 8 Tomcat when its preset is configured. Read docs/claude/build.md before Java or frontend builds. Local JEX config is copied; build this branch?s own frontend output and never link node_modules or reuse another branch?s dist. Do not run the original fixed-port start.sh. If the app cannot run independently, use desk_ask and report the exact blocker. Never fabricate screenshots, videos, test passes, or reproduction. All browser actions through desk_browser are recorded into video and a Playwright trace. Other browser tools are not automatically recorded. Do not push, create PRs, merge, deploy, or change tracker status through another tool. desk_publish and desk_status apply dashboard approvals. PR target: ${run.targetBranch}.\nIssue: ${JSON.stringify({ id: task.id, externalId: task.externalId, title: task.title, description: task.description, source: task.source, projectId: task.projectId, status: task.status })}\nAdditional instructions: ${run.instructions || 'Fix the assigned issue and attach proof.'}`;
+    return `${common}\nYou own one issue. Work only in ${run.worktree}, branch ${run.branch}, based on ${run.baseBranch}. Never switch or edit the original checkout. Do not bind shared ports; use PORT=${run.port}. Read repository AGENTS.md and CLAUDE.md. Do not install or start machine-wide services.\nWorkflow: inspect the full issue using desk_task; reproduce before editing; use desk_browser to record browser reproduction and verification; fix at the responsible layer; run desk_verify for the configured tests; make at least one relevant assertText or assertVisible browser assertion after the fix; self-review the complete diff and call desk_finish with a factual report and risk {score:1-10,requiresHumanReview,reason,factors}. Explain security, data, behavior, rollback, and verification risks. A low score needs concrete reasons; uncertainty requires human review. A worker stopping is not proof of success. For Flow/Morningmate, desk_browser starts isolated Java 8 Tomcat when its preset is configured. Read docs/claude/build.md before Java or frontend builds. Local JEX config is copied; build this branch's own frontend output and never link node_modules or reuse another branch's dist. Do not run the original fixed-port start.sh. If the app cannot run independently, use desk_ask and report the exact blocker. Never fabricate screenshots, videos, test passes, or reproduction. All browser actions through desk_browser are recorded into video and a Playwright trace. Other browser tools are not automatically recorded. Do not push, create PRs, merge, deploy, or change tracker status through another tool. desk_publish and desk_status apply dashboard approvals. PR target: ${run.targetBranch}.\nIssue: ${JSON.stringify({ id: task.id, externalId: task.externalId, title: task.title, description: task.description, source: task.source, projectId: task.projectId, status: task.status })}\nAdditional instructions: ${run.instructions || 'Fix the assigned issue and attach proof.'}`;
   }
   beginAsk(runId, request) {
     const run = this.run(runId);
