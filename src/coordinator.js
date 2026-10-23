@@ -7,6 +7,7 @@ import { now, id } from './store.js';
 import { CodexRunner, ClaudeRunner } from './runners.js';
 import { Sources } from './providers.js';
 import { AgentProfiles } from './agents.js';
+import { OrcaRunner } from './orca.js';
 import { Evidence } from './browser.js';
 import { issueBranch } from './branches.js';
 import { seedFlowWorktree, runtimeProfile } from './flow-runtime.js';
@@ -85,7 +86,7 @@ export class Desk {
       state: 'queued', taskIds: [], repositoryId: source.repositoryId || this.store.config().repositories[0]?.id, createdAt: now() };
     this.store.put('run', run.id, run); void this.drain(); return run;
   }
-  async startTask({ taskId, repositoryId, provider, baseBranch, targetBranch, instructions = '', category, parentRunId, runtimeProfile: profileId }) {
+  async startTask({ taskId, repositoryId, provider, baseBranch, targetBranch, instructions = '', category, parentRunId, runtimeProfile: profileId, execution }) {
     const task = this.task(taskId);
     if (task.demo) throw new Error('Demo tasks cannot launch agents or change a repository.');
     if (this.store.list('run').some(run => run.taskId === taskId && !terminalStates.has(run.state))) throw new Error('This task already has an active run.');
@@ -96,9 +97,10 @@ export class Desk {
     const run = { id: id(), role: 'worker', taskId, title: task.title, repositoryId: repository.id,
       provider: provider || config.provider, state: 'queued', phase: 'queued', createdAt: now(), instructions,
       baseBranch: baseBranch || parent.baseBranch || repository.baseBranch,
-      targetBranch: targetBranch || parent.targetBranch || repository.targetBranch, parentRunId,
+      targetBranch: targetBranch || parent.targetBranch || repository.targetBranch, parentRunId, execution: execution || config.execution || 'rex',
       ...(repository.flowRuntime ? { runtimeProfile: runtimeProfile(repository, profileId || undefined).id } : {}) };
     if (!['claude', 'codex'].includes(run.provider)) throw new Error('Unknown agent provider.');
+    if (!['rex', 'orca'].includes(run.execution)) throw new Error('Run workers in Rex Desk or an Orca terminal.');
     this.store.put('run', run.id, run);
     this.store.put('task', taskId, { ...task, category: category || task.category, runId: run.id });
     void this.drain(); return run;
@@ -153,7 +155,9 @@ export class Desk {
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
           this.store.event(runId, kind, data);
         } };
-      const runner = this.runnerFactory ? this.runnerFactory(options) : run.provider === 'codex' ? new CodexRunner(options) : new ClaudeRunner(options);
+      const runner = this.runnerFactory ? this.runnerFactory(options)
+        : run.execution === 'orca' && run.role === 'worker' ? new OrcaRunner({ ...options, dataDirectory: this.store.directory, isDone: () => terminalStates.has(this.run(runId).state) })
+        : run.provider === 'codex' ? new CodexRunner(options) : new ClaudeRunner(options);
       this.live.get(runId).runner = runner;
       this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), error: '' });
       await runner.start(this.prompt(run));
@@ -222,14 +226,16 @@ export class Desk {
     this.cancelQuestions(runId); await active?.runner?.interrupt();
     await this.evidence.close(runId); this.patchRun(runId, { state: 'stopped', endedAt: now() }); return { stopped: true };
   }
-  async resume(runId, { provider, prompt = '', targetBranch } = {}) {
+  async resume(runId, { provider, prompt = '', targetBranch, execution } = {}) {
     const run = this.run(runId);
     if (run.external) throw new Error('Reconnect this conversation from the external AI using desk_connect.');
     if (provider && !['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
+    if (execution && !['rex', 'orca'].includes(execution)) throw new Error('Run workers in Rex Desk or an Orca terminal.');
     if (this.live.has(runId)) throw new Error('Stop the active run before resuming.');
-    const sameProvider = !provider || provider === run.provider;
+    const sameProvider = (!provider || provider === run.provider) && (!execution || execution === (run.execution || 'rex'));
     this.patchRun(runId, { state: 'queued', provider: provider || run.provider, sessionId: sameProvider ? run.sessionId : undefined,
-      instructions: `${run.instructions || ''}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null });
+      instructions: `${run.instructions || ''}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
+      ...(execution && run.role === 'worker' ? { execution } : {}) });
     void this.drain(); return this.run(runId);
   }
   async verify(runId) {

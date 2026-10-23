@@ -13,6 +13,7 @@ import { issueBranch } from './branches.js';
 import { profileEnvironment } from './agents.js';
 import { setupPrompt } from './setup-prompt.js';
 import { cachedTaskImage } from './images.js';
+import { orcaStatus, showWorktreesInOrca, openInOrca } from './orca.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -111,6 +112,12 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         await exec(command.command, args, { env: profileEnvironment(provider, desk.agents.selected(provider)), windowsHide: true, timeout: 30000 });
         return json(response, 200, { installed: desk.agents.mcpInstalled(provider) });
       }
+      if (url.pathname === '/api/orca' && ['GET', 'POST'].includes(request.method)) {
+        const repository = store.config().repositories.find(item => item.id === url.searchParams.get('repositoryId'));
+        if (url.searchParams.get('repositoryId') && !repository) return json(response, 404, { error: 'Repository not found.' });
+        if (request.method === 'POST') { if (!repository) throw new Error('Choose a repository.'); await showWorktreesInOrca(repository.path); }
+        return json(response, 200, await orcaStatus(repository?.path));
+      }
       if (url.pathname === '/api/setup-prompt' && request.method === 'POST') {
         const input = await body(request);
         return json(response, 200, { prompt: setupPrompt({ target: input.target, root, dataDirectory: store.directory, mcpUrl: desk.mcpUrl, profiles: { claude: desk.agents.selected('claude'), codex: desk.agents.selected('codex') } }) });
@@ -155,7 +162,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         return serveFile(request, response, image, { cache: 'private, max-age=604800' });
       }
       if (interactionMatch && request.method === 'POST') return json(response, 200, desk.answer(interactionMatch[1], await body(request)));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish|orca))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         if (request.method === 'GET') {
@@ -168,6 +175,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));
           if (action === 'verify') return json(response, 200, await desk.verify(runId));
           if (action === 'publish') return json(response, 200, await desk.publish(runId, { ...input, approved: true }));
+          if (action === 'orca') { const run = desk.run(runId); if (!run.worktree) throw new Error('This run has no worktree to open.'); return json(response, 200, await openInOrca(run)); }
         }
       }
       const artifactMatch = url.pathname.match(/^\/artifacts\/([a-f0-9-]+)\/([^/]+)$/);

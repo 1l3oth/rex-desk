@@ -54,6 +54,7 @@ export function createMcp(desk, scope) {
   });
   tool('desk_dispatch', 'Queue an isolated coding worker. Each task receives its own worktree, branch, and preview port. Respect task dependencies.',
     { taskId: z.string(), repositoryId: z.string().optional(), provider: z.enum(['claude', 'codex']).optional(), baseBranch: z.string().optional(), targetBranch: z.string().optional(), instructions: z.string().optional(), category: z.string().optional(),
+      execution: z.enum(['rex', 'orca']).optional().describe('rex runs headless with dashboard approvals; orca opens a visible Orca terminal where tool approvals happen. Omit for the Settings default.'),
       runtimeProfile: z.string().optional().describe('Flow/Morningmate Tomcat profile ID from desk_repositories, for example flow or morningmate. Omit for the repository default.') },
     input => { desk.authorize(scope, null, { coordinator: true }); return desk.startTask({ ...input, parentRunId: scope.runId }); });
   tool('desk_runs', 'Read task execution states and evidence checks without internal reasoning.', {}, () =>

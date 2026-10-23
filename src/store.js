@@ -13,7 +13,7 @@ export const id = () => randomUUID();
 export const defaults = {
   name: 'Rex', provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
   syncMinutes: 5, requireVideo: true, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
-  models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false,
+  models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false, execution: 'rex',
 };
 // null keeps the profile inherited from the launching terminal; '' selects the CLI's default home folder.
 function agentProfile(value, name) {
@@ -152,7 +152,7 @@ export class Store extends EventEmitter {
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
       syncMinutes: input.syncMinutes, requireVideo: input.requireVideo !== false, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: input.models || defaults.models, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
-      tourDismissed: Boolean(input.tourDismissed) };
+      tourDismissed: Boolean(input.tourDismissed), execution: input.execution === 'orca' ? 'orca' : 'rex' };
     for (const update of secretUpdates) {
       if (update.remove) this.delete('secret', `source:${update.id}`);
       else this.put('secret', `source:${update.id}`, update.value);
