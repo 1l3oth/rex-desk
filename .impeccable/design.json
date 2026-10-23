@@ -1,0 +1,331 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-23T09:35:57.745431+00:00",
+  "title": "Design System: Rex Desk",
+  "extensions": {
+    "colorMeta": {
+      "rail": {
+        "role": "primary",
+        "displayName": "Rail"
+      },
+      "rail-text": {
+        "role": "primary",
+        "displayName": "Rail Text"
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Ground"
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted"
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line"
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Accent"
+      },
+      "accent-soft": {
+        "role": "primary",
+        "displayName": "Accent Soft"
+      },
+      "amber": {
+        "role": "secondary",
+        "displayName": "Amber"
+      },
+      "amber-soft": {
+        "role": "secondary",
+        "displayName": "Amber Soft"
+      },
+      "red": {
+        "role": "secondary",
+        "displayName": "Red"
+      },
+      "red-soft": {
+        "role": "secondary",
+        "displayName": "Red Soft"
+      },
+      "green": {
+        "role": "secondary",
+        "displayName": "Green"
+      },
+      "green-soft": {
+        "role": "secondary",
+        "displayName": "Green Soft"
+      },
+      "status-neutral": {
+        "role": "neutral",
+        "displayName": "Status Neutral"
+      },
+      "status-neutral-ink": {
+        "role": "neutral",
+        "displayName": "Status Neutral Ink"
+      },
+      "status-working-ink": {
+        "role": "neutral",
+        "displayName": "Status Working Ink"
+      },
+      "row-selected": {
+        "role": "neutral",
+        "displayName": "Row Selected"
+      },
+      "row-hover": {
+        "role": "neutral",
+        "displayName": "Row Hover"
+      },
+      "row-selected-hover": {
+        "role": "neutral",
+        "displayName": "Row Selected Hover"
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "Primary Hover"
+      },
+      "navigation-hover": {
+        "role": "primary",
+        "displayName": "Navigation Hover"
+      },
+      "navigation-active": {
+        "role": "primary",
+        "displayName": "Navigation Active"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page headings; 24px at the 900px breakpoint."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Selected issue title; 18px at 1150px, 20px at 700px."
+      },
+      "section-title": {
+        "displayName": "Section Title",
+        "purpose": "Section and empty-state headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Application baseline."
+      },
+      "issue-title": {
+        "displayName": "Issue Title",
+        "purpose": "Compact semibold issue-list titles."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Labeled form fields and compact controls."
+      },
+      "metadata": {
+        "displayName": "Metadata",
+        "purpose": "Supporting row metadata."
+      },
+      "state-label": {
+        "displayName": "State Label",
+        "purpose": "Tracker/Agent captions and decision provenance."
+      },
+      "code": {
+        "displayName": "Code",
+        "purpose": "Technical identifiers and preformatted evidence."
+      }
+    },
+    "shadows": [
+      {
+        "name": "selected-view",
+        "value": "0 1px 2px #24414c12",
+        "purpose": "Selected List/Kanban segment."
+      },
+      {
+        "name": "toast",
+        "value": "0 6px 25px #152c3a22",
+        "purpose": "Temporary feedback overlay."
+      },
+      {
+        "name": "dialog",
+        "value": "0 20px 80px #173c4633",
+        "purpose": "Modal overlay."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(.16,1,.3,1)",
+        "purpose": "Page and toast entrance."
+      },
+      {
+        "name": "page-entry",
+        "value": ".25s",
+        "purpose": "Opacity .85 to 1 and translateY 3px to 0."
+      },
+      {
+        "name": "toast-entry",
+        "value": ".2s",
+        "purpose": "Opacity 0 to 1 and vertical displacement 8px to 0."
+      },
+      {
+        "name": "busy-spin",
+        "value": "1.4s linear infinite",
+        "purpose": "Busy icon rotation."
+      },
+      {
+        "name": "board-border",
+        "value": "border-color .15s",
+        "purpose": "Board task border hover transition."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "wide",
+        "value": "1600px",
+        "query": "(min-width:1600px)"
+      },
+      {
+        "name": "compact-desktop",
+        "value": "1150px",
+        "query": "(max-width:1150px)"
+      },
+      {
+        "name": "icon-rail",
+        "value": "900px",
+        "query": "(max-width:900px)"
+      },
+      {
+        "name": "bottom-navigation",
+        "value": "700px",
+        "query": "(max-width:700px)"
+      }
+    ],
+    "reducedMotion": {
+      "query": "(prefers-reduced-motion:reduce)",
+      "behavior": "All animations and transitions are disabled; scroll behavior becomes auto."
+    }
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Petrol action with inherited keyboard focus and disabled treatment.",
+      "html": "<button class=\"ds-button ds-primary\">Analyze &amp; run</button>",
+      "css": ".ds-button{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 12px;min-height:36px;border:1px solid var(--line, #dbe4e6);border-radius:6px;background:white;color:var(--ink, #20353d);font-weight:550;text-decoration:none;white-space:nowrap}.ds-button:hover{background:#f1f6f6;border-color:#afc3c8}.ds-button.ds-primary{background:var(--rail, #173c46);border-color:var(--rail, #173c46);color:white}.ds-button.ds-primary:hover{background:#245663}.ds-button:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Bordered white action with a tonal hover treatment.",
+      "html": "<button class=\"ds-button\">Sync tasks</button>",
+      "css": ".ds-button{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 12px;min-height:36px;border:1px solid var(--line, #dbe4e6);border-radius:6px;background:white;color:var(--ink, #20353d);font-weight:550;text-decoration:none;white-space:nowrap}.ds-button:hover{background:#f1f6f6;border-color:#afc3c8}.ds-button:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+    },
+    {
+      "name": "Quiet button",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Transparent contextual action with a muted default.",
+      "html": "<button class=\"ds-button ds-quiet\">Cancel request</button>",
+      "css": ".ds-button{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 12px;min-height:36px;border:1px solid var(--line, #dbe4e6);border-radius:6px;background:white;color:var(--ink, #20353d);font-weight:550;text-decoration:none;white-space:nowrap}.ds-button:hover{background:#f1f6f6;border-color:#afc3c8}.ds-button.ds-quiet{background:transparent;border-color:transparent;color:var(--muted, #5d6e75)}.ds-button.ds-quiet:hover{background:#e7eeee;color:var(--ink, #20353d)}.ds-button:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+    },
+    {
+      "name": "Labeled field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Compact settings and decision field with helper text.",
+      "html": "<label class=\"ds-field\"><span>Repository name</span><input placeholder=\"Choose a name\"><small>Used to identify this repository.</small></label>",
+      "css": ".ds-field{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-field{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;min-width:0}.ds-field>span{font-size:12px;font-weight:600;color:var(--ink, #20353d)}.ds-field>label{font-size:12px;font-weight:600;color:var(--ink, #20353d)}.ds-field small{color:var(--muted, #5d6e75);font-size:11px;line-height:1.5}.ds-field input{width:100%;background:white;border:1px solid #cdd9dc;border-radius:5px;padding:9px 10px;min-height:38px;color:var(--ink, #20353d);font-size:13px}.ds-field select{width:100%;background:white;border:1px solid #cdd9dc;border-radius:5px;padding:9px 10px;min-height:38px;color:var(--ink, #20353d);font-size:13px}.ds-field textarea{width:100%;background:white;border:1px solid #cdd9dc;border-radius:5px;padding:9px 10px;min-height:38px;color:var(--ink, #20353d);font-size:13px}.ds-field textarea{resize:vertical;min-height:85px;line-height:1.6}.ds-field input::placeholder{color:#6f7d84}.ds-field textarea::placeholder{color:#6f7d84}.ds-field input[type=checkbox]{width:16px;min-height:16px;accent-color:var(--accent, #226b79)}.ds-field input:focus-visible,.ds-field textarea:focus-visible,.ds-field select:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+    },
+    {
+      "name": "Active navigation",
+      "kind": "nav",
+      "refersTo": "navigation-active",
+      "description": "Persistent filled navigation state; source rail color supplies the local context.",
+      "html": "<div style=\"background:var(--rail,#173c46);padding:14px\"><button class=\"ds-nav-button ds-active\" aria-current=\"page\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m4 4-2 10v6h20v-6L20 4H4Z M2 14h6l2 3h4l2-3h6\"/></svg><span>My issues</span></button></div>",
+      "css": ".ds-nav-button{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.ds-nav-button{width:100%;border:0;background:none;color:#cee0e3;padding:10px 12px;display:flex;align-items:center;gap:11px;border-radius:6px;text-align:left}.ds-nav-button:hover{background:#244c57;color:white}.ds-nav-button.ds-active{background:#315b66;color:white}.ds-nav-button:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+    },
+    {
+      "name": "Tracker and agent tags",
+      "kind": "chip",
+      "refersTo": "tag",
+      "description": "Separate state captions and neutral/semantic fills preserve the two state systems.",
+      "html": "<span class=\"ds-task-states\"><span class=\"ds-state-pair\"><span>Tracker:</span><span class=\"ds-tag\">REQUEST</span></span><span class=\"ds-state-pair\"><span>Agent:</span><span class=\"ds-tag ds-ready_for_review\">Ready for review</span></span></span>",
+      "css": ".ds-tag{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;background:#edf1f2;color:#50646c;border-radius:4px;padding:2px 7px;white-space:nowrap;line-height:1.6}.ds-tag.ds-running{background:var(--accent-soft, #e2eff0);color:#21606d}.ds-tag.ds-working{background:var(--accent-soft, #e2eff0);color:#21606d}.ds-tag.ds-waiting{background:var(--amber-soft, #fff2d8);color:var(--amber, #8b550b)}.ds-tag.ds-needs_evidence{background:var(--amber-soft, #fff2d8);color:var(--amber, #8b550b)}.ds-tag.ds-queued{background:var(--amber-soft, #fff2d8);color:var(--amber, #8b550b)}.ds-tag.ds-ready_for_review{background:var(--green-soft, #e7f2eb);color:var(--green, #28704a)}.ds-tag.ds-published{background:var(--green-soft, #e7f2eb);color:var(--green, #28704a)}.ds-tag.ds-finished{background:var(--green-soft, #e7f2eb);color:var(--green, #28704a)}.ds-tag.ds-failed{background:var(--red-soft, #fbe8e9);color:var(--red, #a33c41)}.ds-tag.ds-interrupted{background:var(--red-soft, #fbe8e9);color:var(--red, #a33c41)}\n.ds-task-states{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap}.ds-state-pair{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--muted, #5d6e75)}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+    },
+    {
+      "name": "Work panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Flat bordered panel with a compact section heading.",
+      "html": "<section class=\"ds-panel\"><h2>Worktree &amp; proof</h2><p style=\"margin:0\">Review the current verification evidence.</p></section>",
+      "css": ".ds-panel{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-panel{background:white;border:1px solid var(--line, #dbe4e6);border-radius:8px;padding:22px}.ds-panel h2{font-size:17px;margin-bottom:18px}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}.ds-panel h2{margin-top:0;}"
+    },
+    {
+      "name": "Selected issue row",
+      "kind": "custom",
+      "refersTo": "issue-row-selected",
+      "description": "Selection remains visible alongside the row hover treatment.",
+      "html": "<div class=\"ds-task-row ds-selected\"><input type=\"checkbox\" aria-label=\"Select issue 4821\"><button class=\"ds-task-open\"><span class=\"ds-task-title\">File preview stays blank after switching projects</span><span class=\"ds-task-meta\"><span>4821</span><span>Frontend</span><span class=\"ds-state-pair\">Tracker: <span class=\"ds-tag\">REQUEST</span></span></span></button></div>",
+      "css": ".ds-task-row, .ds-tag{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-task-row{display:grid;grid-template-columns:16px 1fr;align-items:start;gap:11px;border-bottom:1px solid #e8eeee;padding:17px 17px 16px;position:relative}.ds-task-row.ds-selected{background:#edf5f6}.ds-task-row:hover{background:#f3f8f8}.ds-task-row.ds-selected:hover{background:#e7f1f3}.ds-task-row input[type=checkbox]{margin:4px 0 0;accent-color:var(--accent, #226b79);width:14px;height:14px}.ds-task-open{border:0;background:none;padding:0;text-align:left;color:var(--ink, #20353d);display:block;width:100%}.ds-task-title{font-size:13px;font-weight:600;line-height:1.5;display:block}.ds-task-meta{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted, #5d6e75);margin-top:9px;flex-wrap:wrap}.ds-task-meta .ds-tag{padding:1px 5px;font-size:10px}.ds-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;background:#edf1f2;color:#50646c;border-radius:4px;padding:2px 7px;white-space:nowrap;line-height:1.6}.ds-task-open:focus-visible,.ds-task-row input:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}.ds-state-pair{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--muted, #5d6e75)}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+    },
+    {
+      "name": "Decision with provenance",
+      "kind": "custom",
+      "refersTo": "decision",
+      "description": "A request retains its origin link, run ID, and provider above the request.",
+      "html": "<form class=\"ds-decision ds-approval\"><div class=\"ds-decision-context\"><button class=\"ds-decision-run-link\" type=\"button\">Morningmate #4821 ? File preview stays blank</button><small>Run 8f7c2160 ? Claude Code</small></div><div class=\"ds-decision-heading\">Approval requested ? claude</div><h3>Create a draft pull request?</h3><div class=\"ds-actions\"><button class=\"ds-button ds-primary ds-small\" type=\"button\">Approve once</button><button class=\"ds-button ds-small\" type=\"button\">Decline</button></div></form>",
+      "css": ".ds-decision, .ds-button{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-actions{display:flex;align-items:center;gap:8px}.ds-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 12px;min-height:36px;border:1px solid var(--line, #dbe4e6);border-radius:6px;background:white;color:var(--ink, #20353d);font-weight:550;text-decoration:none;white-space:nowrap}.ds-button:hover{background:#f1f6f6;border-color:#afc3c8}.ds-button.ds-primary{background:var(--rail, #173c46);border-color:var(--rail, #173c46);color:white}.ds-button.ds-primary:hover{background:#245663}.ds-button.ds-small{min-height:29px;padding:4px 8px;font-size:12px}.ds-decision{border:1px solid #d5dfe1;border-radius:8px;background:#fbfdfd;margin:0 0 18px;padding:18px}.ds-decision.ds-approval{background:#fffcf5;border-color:#eadabc}.ds-decision-heading{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:11px;color:var(--accent, #226b79)}.ds-decision.ds-approval .ds-decision-heading{color:var(--amber, #8b550b)}.ds-decision h3{font-size:14px;line-height:1.5;margin-bottom:12px;overflow-wrap:anywhere}.ds-decision pre{max-height:180px;overflow:auto;background:#eef3f3;padding:10px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 14px}.ds-decision .ds-actions{margin-top:15px;flex-wrap:wrap}dialog .ds-actions{justify-content:flex-end;margin-top:23px}.ds-decision-run-link:focus-visible,.ds-button:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}.ds-decision-context{border-bottom:1px solid var(--line, #dbe4e6);padding-bottom:12px;margin-bottom:14px}.ds-decision-run-link{display:flex;gap:7px;align-items:flex-start;border:0;background:none;padding:0;color:var(--accent, #226b79);text-align:left;font-size:12px;line-height:1.5}.ds-decision-run-link:hover{text-decoration:underline;text-underline-offset:3px}.ds-decision-run-link span{overflow-wrap:anywhere}.ds-decision-context small{display:block;color:var(--muted, #5d6e75);margin-top:5px;font-size:10px}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}.ds-decision h3{font-weight:650;margin-top:0;}"
+    },
+    {
+      "name": "Active detail tab",
+      "kind": "nav",
+      "refersTo": "tab-active",
+      "description": "A text tab uses a thin accent underline and semibold selected label.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab ds-active\" role=\"tab\" aria-selected=\"true\">Issue brief</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Messages</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Evidence</button></div>",
+      "css": ".ds-tab{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-tabs{display:flex;gap:20px;padding:0 23px;border-bottom:1px solid var(--line, #dbe4e6);flex-wrap:wrap}.ds-tab{border:0;border-bottom:2px solid transparent;background:none;padding:13px 0 11px;font-size:12px;color:var(--muted, #5d6e75);white-space:nowrap}.ds-tab.ds-active{color:var(--accent, #226b79);border-bottom-color:var(--accent, #226b79);font-weight:600}.ds-tab:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The QA Acceptance Sheet",
+    "overview": "Rex Desk uses a familiar application shell to keep issues, human decisions, and verification evidence readable in one working space. Deep petrol navigation anchors a pale blue-gray ground; white work areas carry compact rows, restrained headings, and explicit state labels.\n\nThe visual language is code-led and utilitarian. Borders and small tonal shifts separate information, while semantic colors identify work, attention, review, and failure. Monospace is reserved for identifiers and technical evidence; application headings use the same workhorse sans family as the controls.",
+    "keyCharacteristics": [
+      "Compact rows with a clear issue-title and metadata hierarchy.",
+      "Flat white work surfaces on a cool working ground.",
+      "Separately labeled tracker and agent states.",
+      "Decisions retain their originating issue and run.",
+      "Evidence is presented with its verification checklist."
+    ],
+    "rules": [
+      {
+        "name": "The State Pair Rule",
+        "body": "Keep tracker status and local agent state separately labeled wherever both are shown. A finished agent is not a resolved tracker issue.",
+        "section": "colors"
+      },
+      {
+        "name": "The Flat Work Surface Rule",
+        "body": "Use borders and tonal separation for ordinary work surfaces. The small selected-view shadow and the toast and modal shadows have specific state and overlay roles.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do pair compact metadata with the stronger issue-title hierarchy.",
+      "Do preserve visible Tracker and Agent labels when both states are present.",
+      "Do keep the issue/run link and provider context with a decision request.",
+      "Do retain the accent focus outline and the reduced-motion override.",
+      "Do let long branch names, descriptions, and request details wrap or scroll within their own content areas."
+    ],
+    "donts": [
+      "Don't represent tracker completion with an agent-only state.",
+      "Don't turn the overlay shadows into ordinary card elevation.",
+      "Don't remove origin context from approval or question forms.",
+      "Don't replace the horizontally scrolling Kanban board with compressed, unreadable columns."
+    ]
+  }
+}

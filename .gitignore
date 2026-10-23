@@ -1,0 +1,8 @@
+node_modules/
+worktrees/
+.local/
+.env
+coverage/
+*.log
+.impeccable/review/
+.impeccable/questions/
