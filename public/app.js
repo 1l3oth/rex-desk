@@ -281,26 +281,39 @@ function renderSourceCatalog(source) {
   const agents = `<div class="agent-lookup"><span>Find choices through your installed service MCP:</span>${button('Find with Claude Code', 'source-agent', 'small quiet', `type="button" data-id="${source.id}" data-provider="claude"`)}${button('Find with Codex', 'source-agent', 'small quiet', `type="button" data-id="${source.id}" data-provider="codex"`)}</div>`;
   if (!directory) return `<p class="discovery-status muted">Connect to load project names and employee accounts. Choose them before syncing.</p>${agents}`;
   const selected = new Set(source.projectIds), employeeId = source.userId || '', employees = directory.employees;
-  return `<div class="source-catalog"><p class="discovery-status muted">${directory.origin === 'mcp' ? 'Agent found these choices. Review them before saving.' : 'Connected. Select projects and the employee whose assigned tasks you want.'}</p>${Object.entries(directory.errors || {}).map(([kind, error]) => `<p class="error-text">${esc(kind)}: ${esc(error)}</p>`).join('')}<fieldset class="project-picker"><legend>Projects to sync</legend>${directory.projects.length ? `<input type="search" class="catalog-search" aria-label="Search projects for ${esc(source.name)}" placeholder="Search projects" data-catalog-search="${source.id}"><div class="project-options">${directory.projects.map(project => `<label class="project-choice"><input type="checkbox" data-source-project="${source.id}" value="${esc(project.id)}" ${selected.has(project.id) ? 'checked' : ''}><span>${esc(project.name)}<small>${esc(project.id)}</small></span></label>`).join('')}</div>` : '<p class="muted">No projects returned. Check access, reload, or use the MCP agent below.</p>'}</fieldset><label class="field"><span>Assigned employee</span><select data-source-employee="${source.id}"><option value="">Use signed-in API account${directory.accountId ? ` · ${esc(directory.accountId)}` : ''}</option>${employees.map(employee => `<option value="${esc(employee.id)}" ${employee.id === employeeId ? 'selected' : ''}>${esc(employee.name)} · ${esc(employee.email || employee.id)}${employee.department ? ` · ${esc(employee.department)}` : ''}${employee.id === directory.accountId ? ' · me' : ''}</option>`).join('')}${employeeId && !employees.some(employee => employee.id === employeeId) ? `<option selected value="${esc(employeeId)}">${esc(employeeId)} · saved account</option>` : ''}</select><small>Sync matches this task assignee, rather than the post author.</small></label>${agents}</div>`;
+  return `<div class="source-catalog"><p class="discovery-status muted">${directory.origin === 'mcp' ? 'Agent found these choices. Review them before saving.' : 'Connected. Select projects and the employee whose assigned tasks you want.'}</p>${Object.entries(directory.errors || {}).map(([kind, error]) => `<p class="error-text">${esc(kind)}: ${esc(error)}</p>`).join('')}<fieldset class="project-picker"><legend>Projects to sync</legend>${directory.projects.length ? `<input type="search" class="catalog-search" aria-label="Search projects for ${esc(source.name)}" placeholder="Search projects" data-catalog-search="${source.id}"><div class="project-options">${directory.projects.map(project => `<label class="project-choice"><input type="checkbox" data-source-project="${source.id}" value="${esc(project.id)}" ${selected.has(project.id) ? 'checked' : ''}><span>${esc(project.name)}<small>${esc(project.id)}</small></span></label>`).join('')}</div>` : '<p class="muted">No projects returned. Check access, reload, or use the MCP agent below.</p>'}</fieldset><div class="field"><span>Assigned employee</span>${picker({ value: employeeId, label: `Assigned employee for ${source.name}`, placeholder: 'Search name, email, or team', attrs: `data-source-employee="${source.id}"`, empty: 'No colleague matches. Reload the directory or use the API account.',
+    options: [{ value: '', label: 'Use signed-in API account', detail: directory.accountId || '' }, ...employees.map(employee => ({ value: employee.id, label: `${employee.name}${employee.id === directory.accountId ? ' (me)' : ''}`, detail: [employee.email || employee.id, employee.department].filter(Boolean).join(' · ') })),
+      ...(employeeId && !employees.some(employee => employee.id === employeeId) ? [{ value: employeeId, label: employeeId, detail: 'Saved account' }] : [])] })}<small>${employees.length} people loaded. Sync matches this task assignee, rather than the post author.</small></div>${agents}</div>`;
 }
 async function connectSource(sourceId, provider) {
   readSettings();
   const source = ui.draft.sources.find(item => item.id === sourceId);
   if (!source || connectingSources.has(sourceId)) return;
-  connectingSources.add(sourceId); render();
+  const sentKey = source.apiKey || '';
+  connectingSources.add(sourceId); updateSourceCard(sourceId);
   try {
     const result = await api(provider ? '/sources/setup-agent' : '/sources/connect', { method: 'POST', data: provider ? { source, provider } : source });
     readSettings();
-    const current = ui.draft?.sources.find(item => item.id === sourceId);
-    if (current) { current.hasKey = result.source.hasKey; current.apiKey = ''; current.clearKey = false; }
-    const form = document.querySelector('#settings-form');
-    if (form?.elements[`source.${sourceId}.apiKey`]) form.elements[`source.${sourceId}.apiKey`].value = '';
+    const current = ui.draft?.sources.find(item => item.id === sourceId), form = document.querySelector('#settings-form');
+    const keyField = form?.elements[`source.${sourceId}.apiKey`];
+    if (current) { current.hasKey = result.source.hasKey; current.clearKey = false; }
+    // A key typed after the request started is newer than the saved one; keep it for the next save.
+    if (current && keyField?.value === sentKey) { current.apiKey = ''; keyField.value = ''; }
     if (form?.elements[`source.${sourceId}.clearKey`]) form.elements[`source.${sourceId}.clearKey`].checked = false;
     ui.snapshot.config.sources = [...ui.snapshot.config.sources.filter(item => item.id !== sourceId), result.source];
     if (result.directory) ui.snapshot.directories = [...(ui.snapshot.directories || []).filter(item => item.sourceId !== sourceId), result.directory];
     toast(provider ? 'Connection agent queued. Check Agent runs for questions and results.' : 'Connection saved. Choose projects and an employee, then Save settings.');
   } catch (error) { toast(error.message, true); }
-  finally { connectingSources.delete(sourceId); if (ui.page === 'settings') { readSettings(); render(); } }
+  finally { connectingSources.delete(sourceId); if (ui.page === 'settings') { readSettings(); updateSourceCard(sourceId); } }
+}
+function updateSourceCard(sourceId) {
+  const source = ui.draft?.sources.find(item => item.id === sourceId), catalog = document.querySelector(`[data-source-catalog="${sourceId}"]`);
+  const control = document.querySelector(`[data-action="connect-source"][data-id="${sourceId}"]`);
+  if (!source || !catalog) { render(); return; }
+  if (!catalog.contains(document.activeElement)) catalog.innerHTML = renderSourceCatalog(source);
+  if (control) { control.disabled = connectingSources.has(sourceId); control.textContent = connectingSources.has(sourceId) ? 'Loading projects & people…' : 'Connect & load projects / people'; }
+  const label = document.querySelector(`[name="source.${sourceId}.apiKey"]`)?.closest('.field')?.querySelector('span');
+  if (label) label.textContent = source.hasKey ? 'API key · saved' : 'API key';
 }
 function renderRisk(run) {
   if (!run?.risk) return '';
@@ -317,7 +330,8 @@ function repositoryBranches(repository) {
     const branches = info?.branches || [], value = repository[key] || '';
     if (!branches.length) return inputField(label, `repository.${repository.id}.${key}`, value, 'Inspect a repository to choose its branches.', 'text', 'Select after inspection');
     const options = branches.some(branch => branch.name === value) ? branches : [...branches, ...(value ? [{ name: value }] : [])];
-    return `<label class="field"><span>${label}</span><select name="repository.${repository.id}.${key}">${!value ? '<option value="">Choose a branch…</option>' : ''}${options.map(branch => `<option value="${esc(branch.name)}" ${branch.name === value ? 'selected' : ''}>${esc(branch.name)}${branch.local ? ' · local' : branch.remote ? ' · remote' : ' · saved'}</option>`).join('')}</select><small>${key === 'baseBranch' ? 'Workers branch from this version of the project.' : 'You can change this before creating the PR.'}</small></label>`;
+    return `<div class="field"><span>${label}</span>${picker({ name: `repository.${repository.id}.${key}`, value, label: `${label} for ${repository.name || 'repository'}`, placeholder: `Search ${branches.length} branches`, empty: 'No branch matches. Fetch the remote, then inspect again.',
+      options: options.map(branch => ({ value: branch.name, label: branch.name, detail: branch.local && branch.remote ? 'local and remote' : branch.local ? 'local' : branch.remote ? 'remote' : 'saved' })) })}<small>${key === 'baseBranch' ? 'Workers branch from this version of the project.' : 'You can change this before creating the PR.'}</small></div>`;
   }).join('')}</div>`;
 }
 function repositoryDiscovery(repository) {
@@ -498,6 +512,74 @@ function renderTaskResults() {
   if (count) count.textContent = `${tasks.length} issues`;
   return Boolean(list || board);
 }
+
+// ---- Searchable picker: a combobox with a filtered listbox. The hidden input carries the form value and fires change.
+let pickerSequence = 0;
+function picker({ name = '', value = '', options = [], placeholder = 'Search…', label = '', attrs = '', empty = 'No matches' }) {
+  const id = `picker-${++pickerSequence}`, current = options.find(option => option.value === value);
+  return `<div class="picker" data-picker><input type="hidden" ${name ? `name="${esc(name)}"` : ''} value="${esc(value)}" ${attrs}><input type="text" class="picker-input" role="combobox" aria-expanded="false" aria-controls="${id}" aria-autocomplete="list" autocomplete="off" spellcheck="false" ${label ? `aria-label="${esc(label)}"` : ''} placeholder="${esc(placeholder)}" value="${esc(current?.label ?? value)}" data-label="${esc(current?.label ?? value)}">${icon('chevron')}<ul class="picker-list" id="${id}" role="listbox" hidden>${options.map((option, index) => `<li role="option" id="${id}-${index}" data-value="${esc(option.value)}" data-label="${esc(option.label)}" aria-selected="${option.value === value}"><span>${esc(option.label)}</span>${option.detail ? `<small>${esc(option.detail)}</small>` : ''}</li>`).join('')}<li class="picker-empty" hidden>${esc(empty)}</li></ul></div>`;
+}
+const pickerParts = element => { const root = element.closest('[data-picker]'); return root && { root, hidden: root.querySelector('input[type=hidden]'), input: root.querySelector('.picker-input'), list: root.querySelector('.picker-list') }; };
+const visibleOptions = list => [...list.querySelectorAll('[role=option]')].filter(option => !option.hidden);
+function setActive(parts, option) {
+  for (const item of parts.list.querySelectorAll('.active')) item.classList.remove('active');
+  if (!option) { parts.input.removeAttribute('aria-activedescendant'); return; }
+  option.classList.add('active'); parts.input.setAttribute('aria-activedescendant', option.id); option.scrollIntoView({ block: 'nearest' });
+}
+function filterPicker(parts, query) {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  for (const option of parts.list.querySelectorAll('[role=option]')) option.hidden = !terms.every(term => option.textContent.toLowerCase().includes(term));
+  const shown = visibleOptions(parts.list);
+  parts.list.querySelector('.picker-empty').hidden = shown.length > 0;
+  setActive(parts, shown.find(option => option.dataset.value === parts.hidden.value) || shown[0]);
+}
+function openPicker(parts) {
+  if (!parts.list.hidden) return;
+  parts.list.hidden = false; parts.input.setAttribute('aria-expanded', 'true'); parts.root.classList.add('open');
+  filterPicker(parts, ''); parts.input.select();
+}
+function closePicker(parts, { restore = true } = {}) {
+  parts.list.hidden = true; parts.input.setAttribute('aria-expanded', 'false'); parts.root.classList.remove('open'); setActive(parts, null);
+  if (restore) parts.input.value = parts.input.dataset.label;
+}
+function choosePicker(parts, option) {
+  parts.input.dataset.label = option.dataset.label; parts.input.value = option.dataset.label;
+  for (const item of parts.list.querySelectorAll('[aria-selected=true]')) item.setAttribute('aria-selected', 'false');
+  option.setAttribute('aria-selected', 'true');
+  const changed = parts.hidden.value !== option.dataset.value;
+  parts.hidden.value = option.dataset.value; closePicker(parts, { restore: false });
+  if (changed) parts.hidden.dispatchEvent(new Event('change', { bubbles: true }));
+}
+document.addEventListener('focusin', event => { if (event.target.classList?.contains('picker-input')) openPicker(pickerParts(event.target)); });
+document.addEventListener('focusout', event => {
+  if (!event.target.classList?.contains('picker-input')) return;
+  const parts = pickerParts(event.target);
+  if (!parts.root.contains(event.relatedTarget)) closePicker(parts);
+});
+document.addEventListener('mousedown', event => {
+  const option = event.target.closest('.picker-list [role=option]');
+  if (option) { event.preventDefault(); choosePicker(pickerParts(option), option); return; }
+  const input = event.target.closest('.picker-input');
+  if (input && document.activeElement === input) { const parts = pickerParts(input); if (parts.list.hidden) openPicker(parts); }
+});
+document.addEventListener('keydown', event => {
+  if (!event.target.classList?.contains('picker-input')) return;
+  const parts = pickerParts(event.target), shown = visibleOptions(parts.list), active = parts.list.querySelector('.active');
+  const position = shown.indexOf(active);
+  if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp'].includes(event.key)) {
+    event.preventDefault(); openPicker(parts);
+    const next = { ArrowDown: position + 1, ArrowUp: position - 1, Home: 0, End: shown.length - 1, PageDown: position + 8, PageUp: position - 8 }[event.key];
+    setActive(parts, shown[Math.max(0, Math.min(shown.length - 1, next))]); return;
+  }
+  if (event.key === 'Enter') { event.preventDefault(); if (active && !parts.list.hidden) choosePicker(parts, active); else openPicker(parts); return; }
+  if (event.key === 'Escape' && !parts.list.hidden) { event.preventDefault(); event.stopPropagation(); closePicker(parts); parts.input.select(); }
+});
+document.addEventListener('input', event => {
+  if (!event.target.classList?.contains('picker-input')) return;
+  const parts = pickerParts(event.target);
+  if (parts.list.hidden) { parts.list.hidden = false; parts.input.setAttribute('aria-expanded', 'true'); parts.root.classList.add('open'); }
+  filterPicker(parts, event.target.value);
+}, true);
 
 async function loadMessages() {
   if (ui.page === 'inbox') await loadTaskDetail();
