@@ -151,9 +151,12 @@ try {
   assert.equal(await page.locator('input[name$=".apiKey"]').inputValue(), 'synthetic-key-typed-during-discovery');
   assert.equal(await page.getByRole('textbox', { name: 'Repository name', exact: true }).evaluate(element => element === document.activeElement), true, 'Discovery must not steal focus');
   await page.getByRole('checkbox', { name: /Synthetic QA acceptance project/ }).check();
+  await page.locator('[data-catalog-search]').fill('unrelated');
+  assert.equal(await page.locator('.project-choice:visible').count(), 1, 'Project search hides non-matching projects');
+  await page.locator('[data-catalog-search]').fill('');
   const employee = page.getByRole('combobox', { name: 'Assigned employee for Morningmate · synthetic QA' });
   await employee.click(); await employee.fill('mina mobile');
-  assert.equal(await page.locator('.picker.open [role=option]:not([hidden])').count(), 1, 'Employee search matches name and team');
+  assert.equal(await page.locator('.picker.open [role=option]:visible').count(), 1, 'Employee search shows only the match for name and team');
   await employee.press('Enter');
   assert.equal(await page.locator('input[name$=".userId"]').inputValue(), 'mina@example.invalid');
   await employee.click(); await employee.fill('rex tester'); await employee.press('Enter');

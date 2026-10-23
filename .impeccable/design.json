@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-23T09:35:57.745431+00:00",
+  "generatedAt": "2026-10-23T11:25:07.703Z",
   "title": "Design System: Rex Desk",
   "extensions": {
     "colorMeta": {
@@ -99,6 +99,42 @@
       "navigation-active": {
         "role": "primary",
         "displayName": "Navigation Active"
+      },
+      "dark-rail": {
+        "role": "primary",
+        "displayName": "Dark Rail"
+      },
+      "dark-ground": {
+        "role": "neutral",
+        "displayName": "Dark Ground"
+      },
+      "dark-surface": {
+        "role": "neutral",
+        "displayName": "Dark Surface"
+      },
+      "dark-ink": {
+        "role": "neutral",
+        "displayName": "Dark Ink"
+      },
+      "dark-muted": {
+        "role": "neutral",
+        "displayName": "Dark Muted"
+      },
+      "dark-line": {
+        "role": "neutral",
+        "displayName": "Dark Line"
+      },
+      "dark-accent": {
+        "role": "primary",
+        "displayName": "Dark Accent"
+      },
+      "dark-primary": {
+        "role": "primary",
+        "displayName": "Dark Primary"
+      },
+      "dark-primary-ink": {
+        "role": "primary",
+        "displayName": "Dark Primary Ink"
       }
     },
     "typographyMeta": {
