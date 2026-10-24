@@ -52,6 +52,7 @@ fn main() {
                 .title("Rex Desk")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(900.0, 600.0)
+                .maximized(true)
                 .build()?;
             thread::spawn(move || {
                 let fail = |message: String| { let _ = window.eval(&format!("showError({message:?})")); };
