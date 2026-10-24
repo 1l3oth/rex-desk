@@ -486,3 +486,10 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 .repo-setup input{flex:1;min-width:0;height:26px;padding:0 8px;border:1px solid var(--line);border-radius:5px;background:var(--sunken);font-size:12px}
 .repo-setup input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
 .dialog-more{margin:0 0 12px}.dialog-more>summary{padding:4px 0;color:var(--muted);font-size:11.5px}.dialog-more[open]>summary{margin-bottom:8px}
+.github-accounts{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:2px}
+.github-accounts li{display:flex;align-items:center;gap:8px;min-height:28px;padding:0 4px;border-radius:5px}.github-accounts li:hover{background:var(--hover)}
+.github-accounts strong{font-weight:500;flex:1}
+.github-code{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-soft)}
+.github-code code{font-size:15px;font-weight:600;letter-spacing:.08em;padding:2px 8px;border-radius:4px;background:var(--sunken);color:var(--ink)}
+.github-code small{flex-basis:100%;color:var(--muted)}
+.repo-github{flex:1 1 100%;margin-top:2px}.repo-github .actions{gap:8px}

@@ -88,6 +88,8 @@ Orca shows these worktrees only when the repository's external-worktree visibili
 
 Sync reads each project's status definitions and makes them available to agents. Optional working/review/done mappings specify the tracker status values; unmapped phases leave the tracker unchanged, and every status change needs a dashboard approval. Local Kanban progress never rewrites tracker statuses.
 
+Settings → **GitHub** lists the GitHub CLI accounts on this computer, switches the active one, and signs in more with **Sign in another GitHub account**: Rex Desk runs GitHub's device flow, shows the one-time code, and opens github.com/login/device. Tokens stay in the GitHub CLI's keyring. The start dialog can clone `owner/name` with the active account when no repository is configured.
+
 **Create draft PR** shows the title, description, and editable target branch before publishing. It checks verified code, requires a clean committed branch, pushes it to `origin`, and creates a draft with `gh`. It never merges or deploys.
 
 Orbit reporting is optional in Settings. Managed Claude workers also load MCP servers from your Claude configuration and the source repository's `.mcp.json`.
