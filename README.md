@@ -17,6 +17,17 @@ npm start
 
 Open **http://127.0.0.1:4317**. On Windows, `Start-RexDesk.ps1` starts the server in the background and opens the dashboard; `-NoBrowser` skips opening it. It reuses a running server. The launcher needs no `CLAUDE_CONFIG_DIR` or `CODEX_HOME`: agent profiles are saved in Settings.
 
+### Desktop app
+
+`desktop/` is a Tauri window around the same dashboard. Install it from the GitHub release (`Rex Desk_<version>_x64-setup.exe`, per-user, no admin) or build it with Rust and the MSVC build tools:
+
+```powershell
+npm install --prefix desktop
+npm run build --prefix desktop
+```
+
+On launch it starts `node src/server.js` from the checkout if nothing answers on port 4317, then shows the dashboard. It finds the checkout through `REX_DESK_HOME`, then the folder it was built from, then `F:\rex-desk`. Closing the window leaves the server running, so agent runs continue. The dashboard page gets no Tauri APIs. `Start-RexDesk.ps1 -App` opens the dashboard as an Edge app window instead.
+
 ## Guided setup
 
 A new workspace opens **Setup**. Each step reads your real settings, so the page always shows the actual remaining work; the issue list shows the next step until required setup is done.
