@@ -8,3 +8,4 @@ coverage/
 .impeccable/questions/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+.playwright-mcp/

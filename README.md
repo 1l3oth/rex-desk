@@ -52,6 +52,8 @@ Search matches title, number, status, fields, reporter, and description without 
 
 The main agent receives the selected issue IDs and uses the Rex Desk MCP to read, categorize, and dispatch work. It keeps related changes sequential and parallelizes independent issues. Worker concurrency is enforced by the local queue.
 
+Each run page shows the agent's conversation live: its text, every tool call with input and result (expand a row), and pending approvals at the end. Raw command and preview output stays in the work journal.
+
 Each worker receives a new worktree and a unique branch from the repository's pattern (default `{prefix}/{source}-{taskId}/{title}-{runId}`):
 
 ```text

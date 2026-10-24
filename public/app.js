@@ -4,7 +4,7 @@ const loadingTasks = new Set(), taskErrors = new Map();
 const providerName = provider => provider === 'codex' ? 'Codex' : 'Claude Code';
 const samePath = (left, right) => String(left || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase() === String(right || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
 const taskImage = (task, address) => `/api/task-image?task=${encodeURIComponent(task.id)}&url=${encodeURIComponent(address)}`;
-const ui = { page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', checked: new Set(), search: '', source: '', category: '', snapshot: null, messages: [], journal: [], draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false };
+const ui = { page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', checked: new Set(), search: '', source: '', category: '', snapshot: null, messages: [], journal: [], openOps: new Set(), transcriptRun: '', transcriptStick: true, transcriptTop: 0, draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false };
 const labels = { queued: 'Queued', starting: 'Preparing', running: 'Working', waiting: 'Needs you', needs_evidence: 'Needs evidence', ready_for_review: 'Ready for review', published: 'PR created', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted', finished: 'Finished' };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const icon = name => `<svg class="icon" aria-hidden="true"><use href="/icons.svg#${name}"></use></svg>`;
@@ -73,6 +73,7 @@ function render() {
     <main class="main" id="main" tabindex="-1"><header class="topbar"><div class="breadcrumbs"><span>Workspace</span>${icon('chevron')}<strong>${esc(pageName)}</strong></div><div class="topbar-right">${themeButton()}<span class="muted">${state.config.concurrency} parallel workers</span><span>${state.config.provider === 'claude' ? 'Claude Code' : 'Codex'} default</span><div class="avatar" title="${esc(state.config.name)}">${esc(state.config.name.slice(0, 2).toUpperCase())}</div></div></header>
     <div class="content">${ui.page === 'setup' ? renderSetup(steps) : ui.page === 'settings' ? renderSettings() : ui.page === 'decisions' ? renderDecisions() : ui.page === 'runs' ? renderRuns() : ui.page === 'evidence' ? renderEvidence() : renderInbox()}</div></main></div>`;
   if (ui.page === 'settings') for (const repository of ui.draft.repositories) previewBranch(repository.id);
+  restoreTranscript();
   if (['setup', 'settings'].includes(ui.page) && !ui.agents && !ui.agentsLoading && !ui.agentsError) void loadAgents();
 }
 function heading(title, subtitle, controls = '') {
@@ -193,9 +194,58 @@ function messageText(message) {
   if (message.kind === 'tracker-status') return message.result?.skipped ? message.result.reason : `Tracker status updated: ${message.phase}`;
   return message.kind.replaceAll('-', ' ');
 }
+const toolName = name => String(name || 'tool').replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '');
+const clip = (value, size) => { const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? ''; return text.length > size ? `${text.slice(0, size)}\n… ${text.length - size} more characters` : text; };
+// Prefer the field that says what the call does over the IDs it targets.
+const toolSummary = input => {
+  const fields = Object.entries(input || {}).filter(([, value]) => typeof value === 'string' && value.trim());
+  const preferred = fields.find(([key]) => ['category', 'command', 'message', 'text', 'question', 'title', 'url', 'query', 'instructions', 'description'].includes(key)) || fields.find(([key]) => !/id$/i.test(key)) || fields[0];
+  const line = preferred ? preferred[1].replace(/\s+/g, ' ').trim() : '';
+  return line.length > 90 ? `${line.slice(0, 89)}…` : line;
+};
+const resultText = content => Array.isArray(content) ? content.map(block => block.type === 'text' ? block.text : `[${block.type}]`).join('\n') : content;
+// Claude and Codex record their operations differently; both become agent text, tool calls with their results, and the deliberate messages.
+function transcript(events) {
+  const items = [], calls = new Map();
+  for (const event of events) {
+    if (event.kind === 'agent-operation' && event.type === 'assistant') {
+      for (const block of event.content || []) {
+        if (block.type === 'text' && block.text?.trim()) items.push({ role: 'agent', text: block.text, at: event.createdAt });
+        if (block.type === 'tool_use') { const call = { role: 'tool', key: block.id, name: toolName(block.name), input: block.input, at: event.createdAt }; calls.set(block.id, call); items.push(call); }
+      }
+    } else if (event.kind === 'agent-operation' && event.type === 'tool-result') {
+      for (const block of Array.isArray(event.content) ? event.content : []) {
+        const call = calls.get(block.tool_use_id); if (call) { call.result = resultText(block.content); call.error = block.is_error; }
+      }
+    } else if (event.kind === 'agent-operation' && event.item) {
+      const item = event.item;
+      if (item.type === 'agentMessage') { if (event.method === 'item/completed' && item.text?.trim()) items.push({ role: 'agent', text: item.text, at: event.createdAt }); continue; }
+      if (item.type === 'userMessage') continue;
+      const known = calls.get(item.id);
+      const call = known || { role: 'tool', key: item.id, name: item.type === 'mcpToolCall' ? toolName(item.tool) : item.type === 'commandExecution' ? 'command' : item.type, input: item.arguments || (item.command ? { command: item.command } : item.changes ? { files: item.changes.map(change => change.path) } : {}), at: event.createdAt };
+      if (event.method === 'item/completed') { call.result = item.aggregatedOutput ?? item.result ?? item.error ?? item.status; call.error = item.status === 'failed'; }
+      if (!known) { calls.set(item.id, call); items.push(call); }
+    } else if (event.kind === 'agent-result') items.push({ role: 'status', text: `Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${event.cost ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
+    else if (event.visible || event.kind === 'error') items.push({ role: 'message', event });
+  }
+  return items;
+}
+function renderTranscriptItem(item) {
+  if (item.role === 'agent') return `<article class="message agent-text"><div class="message-label">${icon('agents')}<strong>Agent</strong><time>${time(item.at)}</time></div><p>${esc(item.text)}</p></article>`;
+  if (item.role === 'tool') return `<details class="tool-call${item.error ? ' failed' : ''}" data-op="${esc(item.key)}" ${ui.openOps.has(item.key) ? 'open' : ''}><summary>${icon(item.result === undefined ? 'clock' : item.error ? 'alert' : 'check')}<strong>${esc(item.name)}</strong><span>${esc(toolSummary(item.input))}</span><time>${time(item.at)}</time></summary><pre>${esc(clip(item.input, 4000))}</pre>${item.result !== undefined ? `<pre class="tool-result">${esc(clip(item.result, 6000))}</pre>` : ''}</details>`;
+  if (item.role === 'status') return `<p class="transcript-status">${esc(item.text)} · ${time(item.at)}</p>`;
+  const message = item.event;
+  return `<article class="message"><div class="message-label">${icon(message.kind === 'error' ? 'question' : 'agents')}<strong>${message.kind === 'error' ? 'Run needs attention' : message.kind === 'message' ? 'Agent' : 'Verification'}</strong><time>${time(message.createdAt)}</time></div><p>${esc(messageText(message))}</p>${message.kind === 'error' && /not signed in|not logged in|\/login/i.test(messageText(message)) ? button(`${icon('compass')} Fix agent sign-in`, 'setup', 'small') : ''}</article>`;
+}
 function renderMessages(runId) {
-  const messages = ui.messages.filter(message => !message.runId || message.runId === runId);
-  return `${pending(runId).map(renderDecision).join('')}${messages.length ? messages.map(message => `<article class="message"><div class="message-label">${icon(message.kind === 'error' ? 'question' : 'agents')}<strong>${message.kind === 'error' ? 'Run needs attention' : message.kind === 'message' ? 'Agent' : 'Verification'}</strong><time>${time(message.createdAt)}</time></div><p>${esc(messageText(message))}</p>${message.kind === 'error' && /not signed in|not logged in|\/login/i.test(messageText(message)) ? button(`${icon('compass')} Fix agent sign-in`, 'setup', 'small') : ''}</article>`).join('') : `<p class="empty-small">Deliberate messages from this agent appear here. Detailed operations stay in the work journal.</p>`}`;
+  const items = transcript(ui.messages.filter(message => !message.runId || message.runId === runId));
+  const decisions = pending(runId).map(renderDecision).join('');
+  return `<div class="transcript">${items.length ? items.map(renderTranscriptItem).join('') : '<p class="empty-small">The agent\'s messages and tool calls appear here as it works.</p>'}${decisions}</div>`;
+}
+// Keep the transcript pinned to the newest entry unless the reader scrolled up.
+function restoreTranscript() {
+  const box = document.querySelector('.transcript'); if (!box) return;
+  box.scrollTop = ui.transcriptStick ? box.scrollHeight : ui.transcriptTop;
 }
 function renderDecision(item) {
   const request = item.request || {};
@@ -241,7 +291,7 @@ function renderRunDetail(run) {
   return `${button(`${icon('chevron')} All runs`, 'all-runs', 'quiet small')}${heading(esc(run.title), `${run.provider === 'claude' ? 'Claude Code' : 'Codex'} · ${esc(run.role === 'coordinator' ? 'Main agent' : run.branch || 'Worktree preparing')}`, `${tag(run.state)}${active ? button('Stop run', 'stop-run', 'danger') : run.external ? '' : button('Continue / switch agent', 'resume-run')}${run.worktree ? button('Open in Orca', 'open-orca', '', 'title="Open a plain terminal in this worktree. It does not start another agent."') : ''}${run.state === 'ready_for_review' ? button('Create draft PR', 'publish-run', 'primary') : ''}`)}
     ${run.execution === 'orca' ? `<div class="run-status-strip">${icon('terminal')}<strong>Runs in an Orca terminal</strong><span>Tool approvals appear in that terminal. Questions, evidence, and PR approval appear here.</span></div>` : ''}
     ${run.error ? `<div class="notice">${icon('alert')}<span>${esc(run.error)}</span>${/not signed in|not logged in|\/login/i.test(run.error) ? button('Fix agent sign-in', 'setup', 'small') : ''}</div>` : ''}
-    <div class="run-detail"><section class="panel"><h2>Agent messages</h2><div id="messages">${renderMessages(run.id)}</div><details class="activity-link" id="journal-details"><summary>Work journal · commands and tool activity</summary><div id="journal" class="journal">${renderJournal()}</div></details></section><aside class="panel"><h2>${run.role === 'coordinator' ? 'Dispatch' : 'Worktree & proof'}</h2>${run.worktree ? `<dl class="detail-properties"><dt>Base</dt><dd>${esc(run.baseBranch)}</dd><dt>PR target</dt><dd>${esc(run.targetBranch)}</dd><dt>Preview port</dt><dd>${run.port}</dd><dt>Folder</dt><dd><code title="${esc(run.worktree)}">${esc(run.worktree).replace(/([\\/])/g, '$1<wbr>')}</code></dd></dl>` : '<p class="muted">The main agent analyzes tasks and delegates work. It does not edit your source checkout.</p>'}${run.prUrl ? `<p><a href="${esc(safeUrl(run.prUrl))}" target="_blank" rel="noopener">Open draft pull request</a></p>` : ''}${renderProof(run.id)}</aside></div>`;
+    <div class="run-detail"><section class="panel"><h2>Conversation</h2><div id="messages">${renderMessages(run.id)}</div><details class="activity-link" id="journal-details"><summary>Work journal · commands and tool activity</summary><div id="journal" class="journal">${renderJournal()}</div></details></section><aside class="panel"><h2>${run.role === 'coordinator' ? 'Dispatch' : 'Worktree & proof'}</h2>${run.worktree ? `<dl class="detail-properties"><dt>Base</dt><dd>${esc(run.baseBranch)}</dd><dt>PR target</dt><dd>${esc(run.targetBranch)}</dd><dt>Preview port</dt><dd>${run.port}</dd><dt>Folder</dt><dd><code title="${esc(run.worktree)}">${esc(run.worktree).replace(/([\\/])/g, '$1<wbr>')}</code></dd></dl>` : '<p class="muted">The main agent analyzes tasks and delegates work. It does not edit your source checkout.</p>'}${run.prUrl ? `<p><a href="${esc(safeUrl(run.prUrl))}" target="_blank" rel="noopener">Open draft pull request</a></p>` : ''}${renderProof(run.id)}</aside></div>`;
 }
 function journalText(event) {
   if (event.text || event.message || event.result) return event.text || event.message || event.result;
@@ -636,8 +686,11 @@ async function loadMessages() {
   if (ui.page === 'inbox') await loadTaskDetail();
   const run = ui.page === 'runs' ? selectedRun() : selectedTask() ? taskRun(selectedTask()) : null;
   if (!run) return;
-  const messages = await api(`/runs/${run.id}/messages`); ui.messages = messages.map(message => ({ ...message, runId: run.id }));
-  const target = document.querySelector('#messages'); if (target) target.innerHTML = renderMessages(run.id);
+  if (ui.transcriptRun !== run.id) { ui.transcriptRun = run.id; ui.transcriptStick = true; ui.openOps.clear(); }
+  // The journal carries every operation; raw command and preview output stays in the work journal.
+  const events = await api(`/runs/${run.id}/journal`);
+  ui.messages = events.filter(event => !['command-output', 'dev-output'].includes(event.kind)).map(message => ({ ...message, runId: run.id }));
+  const target = document.querySelector('#messages'); if (target) { target.innerHTML = renderMessages(run.id); restoreTranscript(); }
 }
 function runtimeProfileField(repository) {
   if (!repository?.flowRuntime) return '';
@@ -882,7 +935,12 @@ document.addEventListener('change', event => {
   }
   if (target.closest('.decision') && target.tagName === 'SELECT' && target.value === '__custom') target.parentElement.querySelector('.custom-answer')?.classList.remove('hidden');
 });
+document.addEventListener('scroll', event => {
+  if (!event.target.classList?.contains('transcript')) return;
+  const box = event.target; ui.transcriptTop = box.scrollTop; ui.transcriptStick = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+}, true);
 document.addEventListener('toggle', event => {
+  const op = event.target.dataset?.op; if (op) { if (event.target.open) ui.openOps.add(op); else ui.openOps.delete(op); }
   if (event.target.id === 'journal-details' && event.target.open) void action(async () => {
     ui.journal = await api(`/runs/${ui.selectedRun}/journal`); const target = document.querySelector('#journal'); if (target) target.innerHTML = renderJournal();
   });
