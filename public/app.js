@@ -244,14 +244,35 @@ const toolSummary = input => {
   const fields = Object.entries(input || {}).filter(([, value]) => typeof value === 'string' && value.trim());
   const preferred = fields.find(([key]) => ['category', 'command', 'message', 'text', 'question', 'title', 'url', 'query', 'instructions', 'description'].includes(key)) || fields.find(([key]) => !/id$/i.test(key)) || fields[0];
   const line = preferred ? preferred[1].replace(/\s+/g, ' ').trim() : '';
-  return line.length > 90 ? `${line.slice(0, 89)}…` : line;
+  const plain = line.replace(/\*\*|`/g, '');
+  return plain.length > 90 ? `${plain.slice(0, 89)}…` : plain;
 };
 const resultText = content => Array.isArray(content) ? content.map(block => block.type === 'text' ? block.text : `[${block.type}]`).join('\n') : content;
 // A safe markdown subset: everything is escaped first, then fenced code, inline code, bold, headings and bullets are restored.
+function inlineMarkdown(text) {
+  return esc(text).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
 function renderMarkdown(text) {
-  return String(text ?? '').split(/```[^\n]*\n?/).map((part, index) => index % 2 ? `<pre class="md-code">${esc(part.replace(/\n$/, ''))}</pre>` : esc(part)
-    .replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/^#{1,4} (.+)$/gm, '<strong>$1</strong>').replace(/^(\s*)[-*] /gm, '$1• ')).join('');
+  const lines = String(text ?? '').split('\n'), blocks = [];
+  const tableRow = line => /^\s*\|.*\|\s*$/.test(line), cells = row => row.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim());
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    if (/^\s*```/.test(line)) {
+      const code = []; index++;
+      while (index < lines.length && !/^\s*```/.test(lines[index])) code.push(lines[index++]);
+      index++; blocks.push({ block: true, html: `<pre class="md-code">${esc(code.join('\n'))}</pre>` }); continue;
+    }
+    if (tableRow(line) && /^\s*\|?\s*:?-{2,}/.test(lines[index + 1] || '')) {
+      const rows = []; while (index < lines.length && tableRow(lines[index])) rows.push(lines[index++]);
+      const [head, , ...body] = rows;
+      blocks.push({ block: true, html: `<div class="md-table"><table><thead><tr>${cells(head).map(cell => `<th>${inlineMarkdown(cell)}</th>`).join('')}</tr></thead><tbody>${body.map(row => `<tr>${cells(row).map(cell => `<td>${inlineMarkdown(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` }); continue;
+    }
+    const heading = line.match(/^#{1,6} (.+)/);
+    blocks.push({ block: false, html: heading ? `<strong class="md-heading">${inlineMarkdown(heading[1])}</strong>` : inlineMarkdown(line.replace(/^(\s*)[-*] /, '$1• ')) }); index++;
+  }
+  // Text lines keep their line breaks (the container preserves whitespace); tables and code blocks bring their own spacing.
+  return blocks.map((item, position) => item.html + (!item.block && blocks[position + 1] && !blocks[position + 1].block ? '\n' : '')).join('');
 }
 const duration = ms => { const minutes = Math.max(0, Math.round(ms / 60000)); return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`; };
 // What moved in this run, from recorded data: categorized issues, dispatched workers, finished tool calls, elapsed time.
@@ -813,16 +834,16 @@ function runtimeProfileField(repository) {
   if (!repository?.flowRuntime) return '';
   return `<label class="field"><span>Runtime profile</span><select name="runtimeProfile">${runtimeProfiles(repository).map(profile => `<option value="${esc(profile.id)}" ${profile.id === repository.flowRuntime.defaultProfile ? 'selected' : ''}>${esc(profile.name)} · ${esc(profile.overrides?.default_region || '')}</option>`).join('')}</select><small>Starts this branch as Flow or Morningmate in its own Tomcat. Change product profiles in Settings.</small></label>`;
 }
-async function launchDialog({ role = 'worker', resume = false } = {}) {
+async function launchDialog({ role = 'worker', resume = false, repositoryId: chosen } = {}) {
   const task = selectedTask(), run = selectedRun();
-  const repositoryId = task?.repositoryId || ui.snapshot.config.repositories[0]?.id;
+  const repositoryId = chosen || task?.repositoryId || ui.snapshot.config.repositories[0]?.id;
   const repository = ui.snapshot.config.repositories.find(item => item.id === (resume ? run.repositoryId : repositoryId));
   const count = ui.checked.size || ui.snapshot.tasks.filter(item => !item.demo).length;
   const dialog = document.querySelector('#launch-dialog');
   const title = resume ? 'Continue this run' : role === 'coordinator' ? 'Start the main agent' : 'Start an issue agent';
-  dialog.innerHTML = `<div class="dialog-heading"><h2 id="launch-title">${title}</h2>${button(icon('close'), 'close-dialog', 'quiet icon-only', 'aria-label="Close dialog"')}</div><p>${resume ? 'Continue with the same provider, or switch providers and pass the recorded issue context into a new session.' : role === 'coordinator' ? `Analyze ${count} assigned issue${count === 1 ? '' : 's'}, categorize them, and dispatch independent workers.` : esc(task?.title)}</p><form id="launch-form" data-role="${role}" data-resume="${resume}"><label class="field"><span>Agent</span>${providerSelect('provider', resume ? run.provider : ui.snapshot.config.provider)}</label>${role === 'worker' ? `<label class="field"><span>Run in</span>${executionSelect(resume ? run.execution : ui.snapshot.config.execution)}</label><div id="orca-readiness"></div>` : ''}${role === 'worker' && !resume ? `<label class="field"><span>Source repository</span><select name="repositoryId" required><option value="">Choose a repository…</option>${ui.snapshot.config.repositories.map(item => `<option value="${item.id}" ${item.id === repositoryId ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label>` : ''}<div id="runtime-profile-field">${role === 'worker' && !resume ? runtimeProfileField(repository) : ''}</div><div class="field-row">${inputField('Start from branch', 'baseBranch', resume ? run.baseBranch : role === 'coordinator' ? '' : repository?.baseBranch || '', role === 'coordinator' ? 'Blank uses each repository’s default.' : '', 'text', 'Repository default')}${inputField('PR target branch', 'targetBranch', resume ? run.targetBranch : role === 'coordinator' ? '' : repository?.targetBranch || '', 'You can change this before publishing.', 'text', 'Repository default')}</div><label class="field"><span>${resume ? 'Follow-up instruction' : 'Additional instruction (optional)'}</span><textarea name="prompt" placeholder="For example: investigate critical issues first, and keep related fixes sequential."></textarea></label><div class="form-error" id="launch-error" role="alert"></div><div class="actions">${button('Cancel', 'close-dialog', '', 'type="button"')}<button class="button primary" type="submit">${resume ? 'Continue run' : role === 'coordinator' ? 'Analyze & run' : 'Start agent'}</button></div></form>`;
+  dialog.innerHTML = `<div class="dialog-heading"><h2 id="launch-title">${title}</h2>${button(icon('close'), 'close-dialog', 'quiet icon-only', 'aria-label="Close dialog"')}</div><p>${resume ? 'Continue with the same provider, or switch providers and pass the recorded issue context into a new session.' : role === 'coordinator' ? `Analyze ${count} assigned issue${count === 1 ? '' : 's'}, categorize them, and dispatch independent workers.` : esc(task?.title)}</p><form id="launch-form" data-role="${role}" data-resume="${resume}"><label class="field"><span>Agent</span>${providerSelect('provider', resume ? run.provider : ui.snapshot.config.provider)}</label>${role === 'worker' ? `<label class="field"><span>Run in</span>${executionSelect(resume ? run.execution : ui.snapshot.config.execution)}</label><div id="orca-readiness"></div>` : ''}${role === 'coordinator' && !resume && !ui.snapshot.config.repositories.length ? `<div class="setup-callout">${icon('branch')}<span>No source repository yet, so the main agent can categorize but not dispatch fixes. Choose the local Git checkout first.</span>${button('Choose repository folder', 'add-repo-inline', 'small primary', 'type="button"')}</div>` : ''}${role === 'worker' && !resume ? (ui.snapshot.config.repositories.length ? `<div class="field"><span>Source repository</span><div class="field-inline"><select name="repositoryId" required aria-label="Source repository"><option value="">Choose a repository…</option>${ui.snapshot.config.repositories.map(item => `<option value="${item.id}" ${item.id === repositoryId ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select>${button('Add folder…', 'add-repo-inline', 'small', 'type="button" title="Choose another local Git checkout"')}</div></div>` : `<div class="setup-callout">${icon('branch')}<span>No source repository yet. Choose the local Git checkout for this project; its branches load automatically.</span>${button('Choose repository folder', 'add-repo-inline', 'small primary', 'type="button"')}</div><input type="hidden" name="repositoryId" value="">`) : ''}<div id="runtime-profile-field">${role === 'worker' && !resume ? runtimeProfileField(repository) : ''}</div><div class="field-row">${inputField('Start from branch', 'baseBranch', resume ? run.baseBranch : role === 'coordinator' ? '' : repository?.baseBranch || '', role === 'coordinator' ? 'Blank uses each repository’s default.' : '', 'text', 'Repository default')}${inputField('PR target branch', 'targetBranch', resume ? run.targetBranch : role === 'coordinator' ? '' : repository?.targetBranch || '', 'You can change this before publishing.', 'text', 'Repository default')}</div><label class="field"><span>${resume ? 'Follow-up instruction' : 'Additional instruction (optional)'}</span><textarea name="prompt" placeholder="For example: investigate critical issues first, and keep related fixes sequential."></textarea></label><div class="form-error" id="launch-error" role="alert"></div><div class="actions">${button('Cancel', 'close-dialog', '', 'type="button"')}<button class="button primary" type="submit">${resume ? 'Continue run' : role === 'coordinator' ? 'Analyze & run' : 'Start agent'}</button></div></form>`;
   if (resume) { dialog.querySelector('input[name=baseBranch]').readOnly = true; dialog.querySelector('input[name=baseBranch]').title = 'This worktree keeps its original base branch.'; }
-  dialog.showModal();
+  if (!dialog.open) dialog.showModal();
   void updateOrcaReadiness(dialog.querySelector('#launch-form'));
   if (repository) await loadBranches(repository.id);
 }
@@ -953,6 +974,24 @@ document.addEventListener('click', event => {
   if (name === 'close-dialog') { target.closest('dialog').close(); return; }
   if (name === 'launch-main') { void launchDialog({ role: 'coordinator' }); return; }
   if (name === 'launch-task') { void launchDialog(); return; }
+  // Pick a local checkout from the start dialog, save it as a repository, and reopen the dialog with its branches.
+  if (name === 'add-repo-inline') {
+    const role = target.closest('form')?.dataset.role || 'worker', label = target.textContent; target.disabled = true; target.textContent = 'Choose a folder…';
+    void action(async () => {
+      try {
+        const picked = await api('/repositories/pick', { method: 'POST' }); if (!picked.path) return;
+        target.textContent = 'Reading branches…';
+        const info = await api('/repositories/inspect', { method: 'POST', data: { path: picked.path } }), config = ui.snapshot.config;
+        let repository = config.repositories.find(item => samePath(item.path, info.path));
+        if (!repository) {
+          repository = { id: crypto.randomUUID(), name: info.name, path: info.path, baseBranch: info.preferredBranch, targetBranch: info.preferredBranch, branchPattern: '', setupCommand: '', devCommand: '', testCommand: '', browserPath: '/' };
+          ui.snapshot.config = await api('/config', { method: 'PUT', data: { ...config, repositories: [...config.repositories, repository] } });
+          toast(`Added ${info.name} · ${info.branches.length} branch${info.branches.length === 1 ? '' : 'es'}. Set its test and preview commands in Settings before verifying fixes.`);
+        }
+        await launchDialog({ role, repositoryId: repository.id });
+      } finally { if (target.isConnected) { target.disabled = false; target.textContent = label; } }
+    }); return;
+  }
   if (name === 'resume-run') { void launchDialog({ role: selectedRun().role, resume: true }); return; }
   if (name === 'publish-run') { publishDialog(); return; }
   if (name === 'select-decision') { ui.selectedDecision = target.dataset.id; render(); return; }
