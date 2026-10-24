@@ -82,9 +82,14 @@ export async function pickRepositoryFolder() {
   try {
     const script = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 $owner = New-Object System.Windows.Forms.Form
 $owner.TopMost = $true
 $owner.ShowInTaskbar = $false
+$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+$owner.Location = New-Object System.Drawing.Point(-32000, -32000)
+$owner.Size = New-Object System.Drawing.Size(1, 1)
+$owner.Show(); $owner.Activate()
 $picker = New-Object System.Windows.Forms.FolderBrowserDialog
 $picker.Description = 'Choose the source code Git repository for Rex Desk'
 $picker.ShowNewFolderButton = $false
@@ -93,4 +98,18 @@ finally { $picker.Dispose(); $owner.Dispose() }`;
     const { stdout } = await exec('powershell.exe', ['-NoProfile', '-STA', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 300000 });
     return { path: stdout.trim() };
   } finally { picking = false; }
+}
+
+// Clone owner/name with the signed-in GitHub CLI next to the Rex Desk folder. An existing folder is reused, never overwritten.
+export async function cloneRepository(spec, parent) {
+  const name = String(spec || '').trim().replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/$/, '');
+  if (!/^[\w.-]+\/[\w.-]+$/.test(name)) throw new Error('Enter a GitHub repository as owner/name, or a local folder path.');
+  const target = path.join(parent, name.split('/')[1]);
+  if (existsSync(target)) {
+    if (!existsSync(path.join(target, '.git'))) throw new Error(`${target} already exists and is not a Git checkout.`);
+    return { path: target, existed: true };
+  }
+  try { await exec('gh', ['repo', 'clone', name, target], { ...options, timeout: 1800000 }); }
+  catch (error) { throw new Error(`GitHub could not clone ${name}: ${String(error.stderr || error.message).trim().split('\n').at(-1)} Check that the active gh account can read it (gh auth switch).`); }
+  return { path: target, existed: false };
 }

@@ -482,3 +482,7 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 .field-inline{display:flex;align-items:center;gap:6px}.field-inline select{flex:1;min-width:0}
+.repo-setup>span{flex-basis:calc(100% - 30px)}.repo-setup>.field-inline{flex:1 1 100%}
+.repo-setup input{flex:1;min-width:0;height:26px;padding:0 8px;border:1px solid var(--line);border-radius:5px;background:var(--sunken);font-size:12px}
+.repo-setup input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.dialog-more{margin:0 0 12px}.dialog-more>summary{padding:4px 0;color:var(--muted);font-size:11.5px}.dialog-more[open]>summary{margin-bottom:8px}

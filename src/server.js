@@ -8,7 +8,7 @@ import { handleMcp } from './mcp.js';
 import { git, resolveCommand } from './processes.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { inspectRepository, pickRepositoryFolder } from './repositories.js';
+import { inspectRepository, pickRepositoryFolder, cloneRepository } from './repositories.js';
 import { issueBranch } from './branches.js';
 import { profileEnvironment } from './agents.js';
 import { setupPrompt } from './setup-prompt.js';
@@ -87,6 +87,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
       if (url.pathname === '/api/repositories/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());
+      if (url.pathname === '/api/repositories/clone' && request.method === 'POST') return json(response, 200, await cloneRepository((await body(request)).repository, path.dirname(root)));
       if (url.pathname === '/api/repositories/branch-preview' && request.method === 'POST') {
         const input = await body(request);
         return json(response, 200, { branch: issueBranch(input.pattern, { prefix: input.prefix || 'temp/rex' }) });
