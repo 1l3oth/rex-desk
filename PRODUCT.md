@@ -34,6 +34,10 @@ The user confirmed a compact issue list with a selected issue's messages, questi
 
 The user saved a Morningmate API key and selected two QA projects in Settings; live sync returns their assigned Request and In progress tasks through the filtered task API, with titles and fields from task columns. Flow (`F:low-was`) switches product through `globalConfig/default_region`; both profiles were started in isolated Tomcat runtimes. `F:low-electron-github` runs as an isolated Electron app. Any preview issue content must be clearly labeled as demonstration data.
 
+## Brand Commitments
+
+- Visual standard (chosen 2026-10-24): the category standard for developer tools, played straight, at the craft level of GitHub (dark) and Raycast. Dense and dark-first with small type; several runs visible at once.
+
 ## Product Principles
 
 - The issue is the unit of work and evidence.

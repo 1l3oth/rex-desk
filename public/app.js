@@ -4,7 +4,7 @@ const loadingTasks = new Set(), taskErrors = new Map();
 const providerName = provider => provider === 'codex' ? 'Codex' : 'Claude Code';
 const samePath = (left, right) => String(left || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase() === String(right || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
 const taskImage = (task, address) => `/api/task-image?task=${encodeURIComponent(task.id)}&url=${encodeURIComponent(address)}`;
-const ui = { page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', checked: new Set(), search: '', source: '', category: '', snapshot: null, messages: [], journal: [], openOps: new Set(), transcriptRun: '', transcriptStick: true, transcriptTop: 0, draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false };
+const ui = { page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', checked: new Set(), search: '', source: '', category: '', snapshot: null, runEvents: new Map(), journals: new Map(), transcripts: new Map(), openOps: new Set(), openRuns: [], layout: 'grid', runSide: 'runs', selectedDecision: '', draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false };
 const labels = { queued: 'Queued', starting: 'Preparing', running: 'Working', waiting: 'Needs you', needs_evidence: 'Needs evidence', ready_for_review: 'Ready for review', published: 'PR created', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted', finished: 'Finished' };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const icon = name => `<svg class="icon" aria-hidden="true"><use href="/icons.svg#${name}"></use></svg>`;
@@ -47,14 +47,37 @@ function searchText(task) {
 function navigate(page, { runId, taskId } = {}) {
   if (ui.page === 'settings' && page !== 'settings') ui.draft = null;
   ui.page = page;
-  if (runId) ui.selectedRun = runId;
+  if (runId) openRun(runId);
   if (taskId) ui.selectedTask = taskId;
   if (page === 'settings' && !ui.draft) ui.draft = structuredClone(ui.snapshot.config);
-  ui.messages = []; ui.journal = [];
   render(); void loadMessages();
+}
+// Open runs and the pane layout are a per-browser convenience, so they live in localStorage.
+const paneLimits = { single: 1, split: 2, grid: 4 };
+function saveWorkspace() { try { localStorage.setItem('rex-desk-workspace', JSON.stringify({ openRuns: ui.openRuns, layout: ui.layout, selectedRun: ui.selectedRun })); } catch {} }
+function restoreWorkspace() {
+  try { const saved = JSON.parse(localStorage.getItem('rex-desk-workspace') || '{}'); ui.openRuns = Array.isArray(saved.openRuns) ? saved.openRuns : []; ui.layout = paneLimits[saved.layout] ? saved.layout : 'grid'; ui.selectedRun = saved.selectedRun || ''; } catch {}
+}
+function openRun(runId) {
+  if (!ui.openRuns.includes(runId)) ui.openRuns.push(runId);
+  ui.selectedRun = runId; saveWorkspace();
+}
+function closeRun(runId) {
+  ui.openRuns = ui.openRuns.filter(id => id !== runId); ui.runEvents.delete(runId); ui.transcripts.delete(runId);
+  if (ui.selectedRun === runId) ui.selectedRun = ui.openRuns.at(-1) || '';
+  saveWorkspace();
+}
+// The focused run always shows; the remaining panes fill in tab order.
+function visibleRuns() {
+  const open = ui.openRuns.map(id => ui.snapshot.runs.find(run => run.id === id)).filter(Boolean), limit = paneLimits[ui.layout];
+  const shown = open.slice(0, limit), focused = open.find(run => run.id === ui.selectedRun);
+  if (focused && !shown.includes(focused)) shown[limit - 1] = focused;
+  return shown;
 }
 async function refresh({ force = false } = {}) {
   ui.snapshot = await api('/state');
+  ui.openRuns = ui.openRuns.filter(id => ui.snapshot.runs.some(run => run.id === id));
+  if (!ui.openRuns.includes(ui.selectedRun)) ui.selectedRun = ui.openRuns.at(-1) || '';
   if (!ui.selectedTask && ui.snapshot.tasks.length) ui.selectedTask = ui.snapshot.tasks[0].id;
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
   if (force || (ui.page !== 'settings' && !typing && !document.querySelector('dialog[open]'))) { render(); await loadMessages(); }
@@ -63,37 +86,56 @@ async function refresh({ force = false } = {}) {
 function render() {
   const state = ui.snapshot;
   if (!state) return;
-  const pages = [['inbox', 'inbox', 'My issues'], ['board', 'board', 'Kanban'], ['decisions', 'question', 'Needs you'], ['runs', 'agents', 'Agent runs'], ['evidence', 'play', 'Evidence'], ['setup', 'compass', 'Setup'], ['settings', 'settings', 'Settings']];
+  const pages = [['inbox', 'inbox', 'My issues'], ['runs', 'agents', 'Agent runs'], ['board', 'board', 'Kanban'], ['decisions', 'question', 'Needs you'], ['evidence', 'play', 'Evidence']];
   const steps = setupSteps(), remaining = steps.filter(step => !step.done && !step.optional).length;
-  const pageName = pages.find(([page]) => page === ui.page)?.[2] || 'My issues';
-  const waiting = pending().length;
-  app.innerHTML = `<div class="shell"><aside class="rail"><div class="brand"><div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></div><strong>Rex Desk</strong></div>
-    <div class="workspace-name">Your QA workspace</div><nav aria-label="Workspace">${pages.map(([page, glyph, label]) => `<button class="nav-button ${ui.page === page ? 'active' : ''}" data-page="${page}" ${ui.page === page ? 'aria-current="page"' : ''} title="${label}">${icon(glyph)}<span>${label}</span>${page === 'decisions' && waiting ? `<span class="count">${waiting}</span>` : ''}${page === 'setup' && remaining ? `<span class="count" title="${remaining} setup steps left">${remaining}</span>` : ''}</button>`).join('')}</nav>
-    <div class="rail-bottom"><div class="local-state"><span class="dot"></span>Running on this computer</div><p>Files, keys, and work history<br>stay in your workspace.</p></div></aside>
-    <main class="main" id="main" tabindex="-1"><header class="topbar"><div class="breadcrumbs"><span>Workspace</span>${icon('chevron')}<strong>${esc(pageName)}</strong></div><div class="topbar-right">${themeButton()}<span class="muted">${state.config.concurrency} parallel workers</span><span>${state.config.provider === 'claude' ? 'Claude Code' : 'Codex'} default</span><div class="avatar" title="${esc(state.config.name)}">${esc(state.config.name.slice(0, 2).toUpperCase())}</div></div></header>
-    <div class="content">${ui.page === 'setup' ? renderSetup(steps) : ui.page === 'settings' ? renderSettings() : ui.page === 'decisions' ? renderDecisions() : ui.page === 'runs' ? renderRuns() : ui.page === 'evidence' ? renderEvidence() : renderInbox()}</div></main></div>`;
+  const waiting = pending().length, active = state.runs.filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state)).length;
+  const board = ui.page === 'board' || ui.page === 'inbox' && ui.view === 'board';
+  const side = ui.page === 'runs' ? renderRunSide() : ui.page === 'inbox' && !board ? renderIssueSide() : '';
+  const navButton = ([page, glyph, label]) => `<button class="activity-button ${ui.page === page || page === 'board' && board ? 'active' : ''}" data-page="${page}" ${ui.page === page ? 'aria-current="page"' : ''} aria-label="${label}" title="${label}">${icon(glyph)}${page === 'decisions' && waiting ? `<span class="count" aria-hidden="true">${waiting}</span>` : ''}${page === 'runs' && active ? `<span class="count quiet" aria-hidden="true">${active}</span>` : ''}${page === 'setup' && remaining ? `<span class="count quiet" aria-hidden="true">${remaining}</span>` : ''}</button>`;
+  const database = state.database || {}, cloud = { connected: 'Turso synced', syncing: 'Turso uploading', connecting: 'Turso connecting', offline: 'Turso offline', error: 'Turso needs attention' }[database.state] || 'Local only';
+  const synced = state.sync.length ? relative(state.sync.map(item => item.at).sort().at(-1)) : '';
+  app.innerHTML = `<div class="shell${side ? ' with-side' : ''}"><nav class="activity" aria-label="Workspace"><span class="brand-mark" title="Rex Desk" aria-hidden="true"><i></i><i></i><i></i><i></i></span>${pages.map(navButton).join('')}<span class="activity-spacer"></span>${[['setup', 'compass', 'Setup'], ['settings', 'settings', 'Settings']].map(navButton).join('')}${themeButton()}</nav>
+    ${side ? `<aside class="side" aria-label="${ui.page === 'runs' ? 'Agent runs' : 'Assigned issues'}">${side}</aside>` : ''}
+    <main class="main page-${ui.page}${board ? ' page-board' : ''}" id="main" tabindex="-1">${ui.page === 'setup' ? renderSetup(steps) : ui.page === 'settings' ? renderSettings() : ui.page === 'decisions' ? renderDecisions() : ui.page === 'runs' ? renderWorkspace() : ui.page === 'evidence' ? renderEvidence() : board ? renderBoardPage() : renderInboxMain()}</main>
+    <footer class="statusbar"><span class="status-local"><span class="dot"></span>Running on this computer</span><span class="status-${esc(database.state || 'local')}">${cloud}${database.pending ? ` · ${Number(database.pending)} waiting` : ''}</span><span>${active} active · ${state.config.concurrency} worker${state.config.concurrency === 1 ? '' : 's'}</span>${waiting ? `<span class="status-need">${plural(waiting, 'decision')} waiting</span>` : ''}<span class="status-right">${providerName(state.config.provider)} default${synced ? ` · Synced ${synced}` : ''}</span></footer></div>`;
   if (ui.page === 'settings') for (const repository of ui.draft.repositories) previewBranch(repository.id);
   restoreTranscript();
   if (['setup', 'settings'].includes(ui.page) && !ui.agents && !ui.agentsLoading && !ui.agentsError) void loadAgents();
 }
 function heading(title, subtitle, controls = '') {
-  return `<div class="page-heading"><div><h1>${title}</h1><p>${subtitle}</p></div><div class="actions">${controls}</div></div>`;
+  return `<header class="titlebar"><div class="titlebar-text"><h1>${title}</h1><p>${subtitle}</p></div><div class="actions">${controls}</div></header>`;
 }
-function renderInbox() {
-  const tasks = filteredTasks();
+function viewSwitch(board) {
+  return `<div class="view-switch" aria-label="Task view"><button data-action="view-list" class="${!board ? 'active' : ''}">${icon('inbox')}List</button><button data-action="view-board" class="${board ? 'active' : ''}">${icon('board')}Kanban</button></div>`;
+}
+function issueActions() {
   const realTasks = ui.snapshot.tasks.filter(task => !task.demo);
-  const active = ui.snapshot.runs.filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state));
-  const controls = `${button(`${icon('sync')} Sync tasks`, 'sync', ui.busy ? 'busy' : '', ui.busy ? 'disabled' : '')}${button(`${icon('agents')} Analyze & run`, 'launch-main', 'primary', !realTasks.length ? 'disabled' : '')}`;
+  return `${button(`${icon('sync')} Sync tasks`, 'sync', `small${ui.busy ? ' busy' : ''}`, ui.busy ? 'disabled' : '')}${button(`${icon('agents')} Analyze & run`, 'launch-main', 'primary small', !realTasks.length ? 'disabled' : '')}`;
+}
+function sourceCounts() {
+  return `<div class="connection-strip">${['morningmate', 'flow'].map(source => `<span class="source-word">${sourceLogo(source)}<strong>${source === 'flow' ? 'Flow' : 'Morningmate'}</strong><span>${ui.snapshot.tasks.filter(task => task.source === source).length}</span></span>`).join('')}<span class="muted">${ui.snapshot.sync.length ? `Synced ${relative(ui.snapshot.sync.map(item => item.at).sort().at(-1))}` : 'Not synced yet'}</span></div>`;
+}
+function workspaceNotices() {
   const demo = ui.snapshot.tasks.some(task => task.demo);
-  const board = ui.page === 'board' || ui.view === 'board';
-  return `${heading('Assigned to you', `${ui.snapshot.tasks.length} issues across your selected projects${active.length ? ` · ${active.length} active agent${active.length === 1 ? '' : 's'}` : ''}`, controls)}
-    ${renderSetupBanner()}${demo ? `<div class="notice">${icon('question')}<span>Demo workspace. These issues are synthetic. Connect your projects to run real agents.</span>${button('Remove demo', 'remove-demo', 'small quiet')}</div>` : ''}
+  const coordinator = ui.snapshot.runs.find(run => run.role === 'coordinator' && ['running', 'waiting', 'starting', 'queued'].includes(run.state));
+  return `${renderSetupBanner()}${demo ? `<div class="notice">${icon('question')}<span>Demo workspace. These issues are synthetic. Connect your projects to run real agents.</span>${button('Remove demo', 'remove-demo', 'small quiet')}</div>` : ''}
     ${ui.snapshot.sync.filter(item => item.error).map(item => `<div class="notice">${icon('question')}<span><strong>${esc(item.name)} sync failed.</strong> ${esc(item.error)}</span>${button('Settings', 'settings', 'small quiet')}</div>`).join('')}
-    <div class="connection-strip">${['morningmate', 'flow'].map(source => `<span class="source-word">${sourceLogo(source)}<strong>${source === 'flow' ? 'Flow' : 'Morningmate'}</strong><span>${ui.snapshot.tasks.filter(task => task.source === source).length} issues</span></span>`).join('<span class="connection-divider"></span>')}
-    <span class="muted">${ui.snapshot.sync.length ? `Synced ${relative(ui.snapshot.sync.map(item => item.at).sort().at(-1))}` : 'Connect your first project in Settings'}</span>
-    <div class="view-switch" aria-label="Task view"><button data-action="view-list" class="${!board ? 'active' : ''}">${icon('inbox')}List</button><button data-action="view-board" class="${board ? 'active' : ''}">${icon('board')}Kanban</button></div></div>
-    ${active.some(run => run.role === 'coordinator') ? `<div class="run-status-strip">${icon('agents')}<strong>Main agent is ${esc(labels[active.find(run => run.role === 'coordinator').state]?.toLowerCase())}</strong><span>It will categorize issues and dispatch workers.</span>${button('Open messages', 'open-main', 'small')}</div>` : ''}
-    ${board ? `${toolbar()}<div id="task-board">${renderBoard(tasks)}</div>` : `<div class="workbench"><section class="task-pane" aria-label="Assigned issue list">${toolbar()}<div class="task-section-title"><span>${ui.checked.size ? `${ui.checked.size} selected` : 'Your project issues'}</span><span id="task-count">${tasks.length} issues</span></div><div id="task-list">${tasks.length ? tasks.map(renderTaskRow).join('') : emptyTasks()}</div><div class="task-footer"><span>${ui.checked.size ? 'Analyze uses selected issues' : 'Select issues to run a smaller batch'}</span>${ui.checked.size ? button('Clear selection', 'clear-selection', 'small quiet') : ''}</div></section>${renderTaskDetail()}</div>`}`;
+    ${coordinator ? `<div class="run-status-strip">${icon('agents')}<strong>Main agent · ${esc(labels[coordinator.state] || coordinator.state)}</strong><span>It categorizes issues and dispatches workers.</span>${button('Open in workspace', 'open-main', 'small')}</div>` : ''}`;
+}
+// Issues page: the list lives in the sidebar, the selected issue fills the main area.
+function renderIssueSide() {
+  const tasks = filteredTasks();
+  return `<div class="side-head"><h2>Assigned <span class="count-label">${ui.snapshot.tasks.length}</span></h2>${viewSwitch(false)}</div>
+    <div class="side-actions">${issueActions()}</div>${toolbar()}
+    <div class="task-section-title"><span>${ui.checked.size ? `${ui.checked.size} selected · Analyze uses these` : 'Select issues to run a smaller batch'}</span><span id="task-count">${tasks.length}</span>${ui.checked.size ? button('Clear', 'clear-selection', 'small quiet') : ''}</div>
+    <div id="task-list" class="task-list">${tasks.length ? tasks.map(renderTaskRow).join('') : emptyTasks()}</div>${sourceCounts()}`;
+}
+function renderInboxMain() {
+  const notices = workspaceNotices();
+  return `${notices.trim() ? `<div class="notices">${notices}</div>` : ''}${renderTaskDetail()}`;
+}
+function renderBoardPage() {
+  return `${heading('Assigned to you', `${ui.snapshot.tasks.length} issues by progress`, `${viewSwitch(true)}${issueActions()}`)}<div class="notices">${workspaceNotices()}</div>${toolbar()}<div id="task-board">${renderBoard(filteredTasks())}</div>`;
 }
 function toolbar() {
   const categories = [...new Set(ui.snapshot.tasks.map(task => task.category).filter(Boolean))];
@@ -106,9 +148,10 @@ function emptyTasks() {
 function renderTaskStates(task, run = taskRun(task)) {
   return `<span class="task-states"><span class="state-pair"><span>Tracker:</span>${tag(task.statusName || task.status)}</span>${run ? `<span class="state-pair"><span>Agent:</span>${tag(run.state)}</span>` : ''}</span>`;
 }
+// One line per issue: number, title, and the agent's state as a dot. Tracker status and category live in the preview.
 function renderTaskRow(task) {
-  const run = taskRun(task);
-  return `<div class="task-row ${task.id === ui.selectedTask ? 'selected' : ''}"><input type="checkbox" aria-label="Select issue ${esc(task.externalId)}" data-select-task="${esc(task.id)}" ${ui.checked.has(task.id) ? 'checked' : ''}><button class="task-open" data-task="${esc(task.id)}"><span class="task-title">${esc(task.title)}</span><span class="task-meta">${sourceLogo(task.source)}<span class="mono">#${esc(task.taskNumber || task.externalId)}</span><span class="priority-mark ${esc(task.priority)}" title="${esc(task.priority)} priority"></span><span>${esc(task.category || task.fields?.[0]?.value || task.projectName)}</span>${renderTaskStates(task, run)}${task.demo ? '<span class="demo-label">Demo</span>' : ''}</span></button></div>`;
+  const run = taskRun(task), hint = [task.statusName || task.status, task.category, run && `Agent: ${labels[run.state] || run.state}`].filter(Boolean).join(' · ');
+  return `<div class="task-row ${task.id === ui.selectedTask ? 'selected' : ''}"><input type="checkbox" aria-label="Select issue ${esc(task.externalId)}" data-select-task="${esc(task.id)}" ${ui.checked.has(task.id) ? 'checked' : ''}><button class="task-open" data-task="${esc(task.id)}" title="${esc(hint)}">${sourceLogo(task.source)}<span class="task-number">${esc(task.taskNumber || task.externalId)}</span><span class="task-title">${esc(task.title)}</span>${task.demo ? '<span class="demo-label">Demo</span>' : ''}<span class="state-dot ${run ? esc(run.state) : 'none'}" aria-hidden="true"></span>${run ? `<span class="sr-only">Agent ${esc(labels[run.state] || run.state)}</span>` : ''}</button></div>`;
 }
 function renderTaskDetail() {
   const task = selectedTask();
@@ -117,7 +160,7 @@ function renderTaskDetail() {
   const tabs = [['brief', 'Issue brief'], ['messages', `Messages${run && pending(run.id).length ? ` (${pending(run.id).length})` : ''}`], ['proof', 'Evidence']];
   return `<section class="detail-pane" aria-label="Selected issue"><div class="detail-top"><div class="detail-reference">${sourceLogo(task.source)}<span>${esc(task.sourceName)} · #${esc(task.taskNumber || task.externalId)}</span>${task.demo ? '<span class="demo-label">Demo</span>' : ''}${renderTaskStates(task, run)}</div><h2>${esc(task.title)}</h2>${renderIssueProperties(task, run)}</div>
     <div class="tabs" role="tablist" aria-label="Issue details">${tabs.map(([key, label]) => `<button class="tab ${ui.tab === key ? 'active' : ''}" role="tab" aria-selected="${ui.tab === key}" data-tab="${key}">${label}</button>`).join('')}</div>
-    <div class="detail-body" role="tabpanel">${ui.tab === 'brief' ? `${renderIssueBrief(task)}${run ? renderRunPath(run) : ''}${run?.error ? `<p class="error-text">${esc(run.error)}</p>` : ''}` : ui.tab === 'messages' ? `<div id="messages">${run ? renderMessages(run.id) : '<p class="empty-small">Start an agent to begin the conversation.</p>'}</div>` : renderProof(run?.id)}</div>
+    <div class="detail-body" role="tabpanel">${ui.tab === 'brief' ? `${renderIssueBrief(task)}${run ? renderRunPath(run) : ''}${run?.error ? `<p class="error-text">${esc(run.error)}</p>` : ''}` : ui.tab === 'messages' ? (run ? `<div class="issue-conversation" id="messages-${run.id}">${renderMessages(run.id)}</div>` : '<p class="empty-small">Start an agent to begin the conversation.</p>') : renderProof(run?.id)}</div>
     <div class="detail-bottom"><p>${run?.branch ? `${icon('branch')} <code>${esc(run.branch)}</code>` : link ? `<a href="${esc(link)}" target="_blank" rel="noopener">Open original issue</a>` : 'One issue. One isolated worktree.'}</p><div class="actions">${run ? button('Open run', 'open-task-run', 'small') : button(`${icon('play')} Run agent`, 'launch-task', 'primary small', task.demo ? 'disabled title="Connect real tasks to run an agent"' : '')}</div></div></section>`;
 }
 function renderIssueProperties(task, run) {
@@ -204,6 +247,26 @@ const toolSummary = input => {
   return line.length > 90 ? `${line.slice(0, 89)}…` : line;
 };
 const resultText = content => Array.isArray(content) ? content.map(block => block.type === 'text' ? block.text : `[${block.type}]`).join('\n') : content;
+// A safe markdown subset: everything is escaped first, then fenced code, inline code, bold, headings and bullets are restored.
+function renderMarkdown(text) {
+  return String(text ?? '').split(/```[^\n]*\n?/).map((part, index) => index % 2 ? `<pre class="md-code">${esc(part.replace(/\n$/, ''))}</pre>` : esc(part)
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/^#{1,4} (.+)$/gm, '<strong>$1</strong>').replace(/^(\s*)[-*] /gm, '$1• ')).join('');
+}
+const duration = ms => { const minutes = Math.max(0, Math.round(ms / 60000)); return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`; };
+// What moved in this run, from recorded data: categorized issues, dispatched workers, finished tool calls, elapsed time.
+function progressText(run) {
+  const parts = [];
+  if (run.role === 'coordinator') {
+    const ids = run.taskIds || [], workers = ui.snapshot.runs.filter(item => item.parentRunId === run.id).length;
+    parts.push(`${ui.snapshot.tasks.filter(task => ids.includes(task.id) && task.category).length} / ${ids.length} categorized`);
+    if (workers) parts.push(plural(workers, 'worker'));
+  }
+  const calls = transcript(ui.runEvents.get(run.id) || []).filter(item => item.role === 'tool');
+  if (calls.length) parts.push(`${calls.filter(call => call.result !== undefined).length} / ${calls.length} tool calls`);
+  parts.push(duration((run.endedAt ? new Date(run.endedAt) : Date.now()) - new Date(run.createdAt)));
+  return parts.join(' · ');
+}
 // Claude and Codex record their operations differently; both become agent text, tool calls with their results, and the deliberate messages.
 function transcript(events) {
   const items = [], calls = new Map();
@@ -231,21 +294,23 @@ function transcript(events) {
   return items;
 }
 function renderTranscriptItem(item) {
-  if (item.role === 'agent') return `<article class="message agent-text"><div class="message-label">${icon('agents')}<strong>Agent</strong><time>${time(item.at)}</time></div><p>${esc(item.text)}</p></article>`;
+  if (item.role === 'agent') return `<article class="message agent-text"><div class="message-label">${icon('agents')}<strong>Agent</strong><time>${time(item.at)}</time></div><div class="md">${renderMarkdown(item.text)}</div></article>`;
   if (item.role === 'tool') return `<details class="tool-call${item.error ? ' failed' : ''}" data-op="${esc(item.key)}" ${ui.openOps.has(item.key) ? 'open' : ''}><summary>${icon(item.result === undefined ? 'clock' : item.error ? 'alert' : 'check')}<strong>${esc(item.name)}</strong><span>${esc(toolSummary(item.input))}</span><time>${time(item.at)}</time></summary><pre>${esc(clip(item.input, 4000))}</pre>${item.result !== undefined ? `<pre class="tool-result">${esc(clip(item.result, 6000))}</pre>` : ''}</details>`;
   if (item.role === 'status') return `<p class="transcript-status">${esc(item.text)} · ${time(item.at)}</p>`;
   const message = item.event;
-  return `<article class="message"><div class="message-label">${icon(message.kind === 'error' ? 'question' : 'agents')}<strong>${message.kind === 'error' ? 'Run needs attention' : message.kind === 'message' ? 'Agent' : 'Verification'}</strong><time>${time(message.createdAt)}</time></div><p>${esc(messageText(message))}</p>${message.kind === 'error' && /not signed in|not logged in|\/login/i.test(messageText(message)) ? button(`${icon('compass')} Fix agent sign-in`, 'setup', 'small') : ''}</article>`;
+  return `<article class="message"><div class="message-label">${icon(message.kind === 'error' ? 'question' : 'agents')}<strong>${message.kind === 'error' ? 'Run needs attention' : message.kind === 'message' ? 'Agent' : 'Verification'}</strong><time>${time(message.createdAt)}</time></div><div class="md">${renderMarkdown(messageText(message))}</div>${message.kind === 'error' && /not signed in|not logged in|\/login/i.test(messageText(message)) ? button(`${icon('compass')} Fix agent sign-in`, 'setup', 'small') : ''}</article>`;
 }
 function renderMessages(runId) {
-  const items = transcript(ui.messages.filter(message => !message.runId || message.runId === runId));
+  const loaded = ui.runEvents.has(runId), items = transcript(ui.runEvents.get(runId) || []);
   const decisions = pending(runId).map(renderDecision).join('');
-  return `<div class="transcript">${items.length ? items.map(renderTranscriptItem).join('') : '<p class="empty-small">The agent\'s messages and tool calls appear here as it works.</p>'}${decisions}</div>`;
+  return `<div class="transcript" data-transcript="${runId}">${items.length ? items.map(renderTranscriptItem).join('') : `<p class="empty-small">${loaded ? 'The agent\'s messages and tool calls appear here as it works.' : 'Loading the conversation…'}</p>`}${decisions}</div>`;
 }
-// Keep the transcript pinned to the newest entry unless the reader scrolled up.
+// Each transcript stays pinned to its newest entry unless the reader scrolled up in that pane.
 function restoreTranscript() {
-  const box = document.querySelector('.transcript'); if (!box) return;
-  box.scrollTop = ui.transcriptStick ? box.scrollHeight : ui.transcriptTop;
+  for (const box of document.querySelectorAll('.transcript[data-transcript]')) {
+    const state = ui.transcripts.get(box.dataset.transcript) || { stick: true, top: 0 };
+    box.scrollTop = state.stick ? box.scrollHeight : state.top;
+  }
 }
 function renderDecision(item) {
   const request = item.request || {};
@@ -260,7 +325,7 @@ function renderDecision(item) {
       enum: question.options?.map(option => option.label), description: question.options?.map(option => `${option.label}: ${option.description || ''}`).join('\n') }, true)).join('');
   const details = item.kind === 'approval' ? request.command || request.input || request : null;
   const link = request.mode === 'url' ? safeUrl(request.url) : '';
-  return `<form class="decision ${esc(item.kind)}" data-interaction="${item.id}"><div class="decision-context"><button class="decision-run-link" type="button" data-run="${esc(item.runId)}">${icon('branch')}<span>${esc(originTitle)}</span></button><small>Run ${esc(item.runId.slice(0, 8))} · ${originRun?.provider === 'claude' ? 'Claude Code' : originRun?.provider === 'codex' ? 'Codex' : 'External AI'}</small></div><div class="decision-heading">${icon(item.kind === 'approval' ? 'check' : 'question')}<span>${item.kind === 'approval' ? 'Approval requested' : 'Your answer is needed'} · ${esc(ui.snapshot.runs.find(run => run.id === item.runId)?.provider || 'Agent')}</span></div><h3>${esc(item.title)}</h3>${details ? `<pre>${esc(typeof details === 'string' ? details : JSON.stringify(details, null, 2))}</pre>` : ''}${link ? `<p><a href="${esc(link)}" target="_blank" rel="noopener">Open ${esc(new URL(link).hostname)}</a></p>` : ''}${fields}<div class="actions"><button class="button primary small" type="submit" name="decision" value="accept">${item.kind === 'approval' ? 'Approve once' : 'Send answer'}</button><button class="button small" type="submit" name="decision" value="decline" formnovalidate>Decline</button><button class="button quiet small" type="submit" name="decision" value="cancel" formnovalidate>Cancel request</button></div></form>`;
+  return `<form class="decision ${esc(item.kind)}" data-interaction="${item.id}"><div class="decision-context"><button class="decision-run-link" type="button" data-run="${esc(item.runId)}">${icon('branch')}<span>${esc(originTitle)}</span></button><small>${item.kind === 'approval' ? 'Approval' : 'Question'} · Run ${esc(item.runId.slice(0, 8))} · ${originRun?.provider === 'claude' ? 'Claude Code' : originRun?.provider === 'codex' ? 'Codex' : 'External AI'}</small></div><h3>${icon(item.kind === 'approval' ? 'check' : 'question')}<span>${esc(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</span></h3>${details ? `<pre>${esc(typeof details === 'string' ? details : JSON.stringify(details, null, 2))}</pre>` : ''}${link ? `<p><a href="${esc(link)}" target="_blank" rel="noopener">Open ${esc(new URL(link).hostname)}</a></p>` : ''}${fields}<div class="actions"><button class="button primary small" type="submit" name="decision" value="accept">${item.kind === 'approval' ? 'Approve once' : 'Send answer'}</button><button class="button small" type="submit" name="decision" value="decline" formnovalidate>Decline</button><button class="button quiet small" type="submit" name="decision" value="cancel" formnovalidate>Cancel request</button></div></form>`;
 }
 function renderQuestionField(key, property, required) {
   const extra = `name="${esc(key)}" aria-label="${esc(property.title || key)}" data-type="${esc(property.type)}" ${required ? 'required' : ''}`;
@@ -277,29 +342,79 @@ function renderProof(runId) {
   return `${renderRisk(run)}${run?.checks ? `<div class="check-list">${[['testsPassed', 'Tests pass for the current code'], ['recordedVideo', 'Browser recording saved'], ['browserAssertionPassed', 'Browser assertion matches current code']].map(([key, title]) => `<div class="check-row ${run.checks[key] ? '' : 'missing'}">${icon(run.checks[key] ? 'check' : 'clock')}<span>${title}</span></div>`).join('')}</div>` : ''}
     ${artifacts.length ? artifacts.map(artifact => `<div class="proof-item"><a href="${artifactUrl(artifact)}" target="_blank" rel="noopener">${icon(artifact.type === 'video/webm' ? 'play' : 'file')}${esc(artifact.title)}</a><small>${relative(artifact.createdAt)}</small>${artifact.type === 'video/webm' ? `<video controls preload="metadata" src="${artifactUrl(artifact)}"></video>` : artifact.type === 'image/png' ? `<img src="${artifactUrl(artifact)}" alt="${esc(artifact.title)}" loading="lazy">` : ''}<a href="${artifactUrl(artifact)}?download" download>Download</a></div>`).join('') : '<p class="empty-small">No evidence yet. The agent must record its browser test and run verification.</p>'}`;
 }
+// An inbox of requests: every waiting decision in a list, the selected one answered beside it.
 function renderDecisions() {
   const items = pending();
-  return `${heading('Needs you', 'Answer a question or approve a specific action. Agents continue from your response.')}<div class="all-decisions">${items.length ? items.map(renderDecision).join('') : `<div class="panel"><div class="empty">${icon('check')}<h2>No decisions waiting</h2><p>Questions, tool permissions, and pull request approvals will appear here when an agent needs you.</p></div></div>`}</div>`;
+  if (!items.length) return `${heading('Needs you', 'Answer a question or approve a specific action. Agents continue from your response.')}<div class="panel"><div class="empty">${icon('check')}<h2>No decisions waiting</h2><p>Questions, tool permissions, and pull request approvals will appear here when an agent needs you.</p></div></div>`;
+  const current = items.find(item => item.id === ui.selectedDecision) || items[0];
+  return `${heading('Needs you', `${plural(items.length, 'request')} waiting. Agents continue from your response.`)}<div class="decision-split"><ul class="decision-list" aria-label="Waiting requests">${items.map(item => {
+    const run = ui.snapshot.runs.find(entry => entry.id === item.runId);
+    return `<li><button class="decision-item${item.id === current.id ? ' active' : ''}" data-action="select-decision" data-id="${item.id}" aria-current="${item.id === current.id}"><span class="state-dot waiting"></span><span><strong>${esc(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</strong><small>${item.kind === 'approval' ? 'Approval' : 'Question'} · ${esc(run?.title || 'Agent conversation')}</small></span><time>${item.createdAt ? relative(item.createdAt) : ''}</time></button></li>`;
+  }).join('')}</ul><div class="decision-detail">${renderDecision(current)}</div></div>`;
 }
-function renderRuns() {
-  const run = selectedRun();
-  if (run) return renderRunDetail(run);
-  return `${heading('Agent runs', 'Claude Code and Codex share the queue. Each issue keeps its own worktree and history.')}${ui.snapshot.runs.length ? `<div class="run-list">${ui.snapshot.runs.map(item => `<button class="run-row" data-run="${item.id}"><span><strong>${esc(item.title)}</strong><small>${item.provider === 'claude' ? 'Claude Code' : 'Codex'}${item.branch ? ` · ${esc(item.branch)}` : ' · Task analysis and dispatch'}</small></span><span>${tag(item.state)}</span><time class="muted">${relative(item.createdAt)}</time>${icon('chevron')}</button>`).join('')}</div>` : `<div class="panel"><div class="empty">${icon('agents')}<h2>No agent runs yet</h2><p>Sync your assigned issues, then use Analyze & run to start a main agent.</p>${button('Open my issues', 'inbox', 'primary')}</div></div>`}`;
+const activeStates = ['running', 'waiting', 'starting', 'queued'];
+const runGroups = [['Needs you', run => run.state === 'waiting' || pending(run.id).length], ['Working', run => activeStates.includes(run.state)], ['Review', run => ['ready_for_review', 'needs_evidence'].includes(run.state)], ['Done', () => true]];
+// Agent runs page: every run in the sidebar, the open ones side by side in the main area.
+function sideSwitch() {
+  return `<div class="view-switch" role="group" aria-label="Sidebar">${[['runs', 'agents', 'Runs'], ['issues', 'inbox', 'Issues']].map(([value, glyph, label]) => `<button class="${ui.runSide === value ? 'active' : ''}" data-action="run-side" data-side="${value}" aria-pressed="${ui.runSide === value}">${icon(glyph)}${label}</button>`).join('')}</div>`;
 }
-function renderRunDetail(run) {
-  const active = ['running', 'waiting', 'starting', 'queued'].includes(run.state);
-  return `${button(`${icon('chevron')} All runs`, 'all-runs', 'quiet small')}${heading(esc(run.title), `${run.provider === 'claude' ? 'Claude Code' : 'Codex'} · ${esc(run.role === 'coordinator' ? 'Main agent' : run.branch || 'Worktree preparing')}`, `${tag(run.state)}${active ? button('Stop run', 'stop-run', 'danger') : run.external ? '' : button('Continue / switch agent', 'resume-run')}${run.worktree ? button('Open in Orca', 'open-orca', '', 'title="Open a plain terminal in this worktree. It does not start another agent."') : ''}${run.state === 'ready_for_review' ? button('Create draft PR', 'publish-run', 'primary') : ''}`)}
-    ${run.execution === 'orca' ? `<div class="run-status-strip">${icon('terminal')}<strong>Runs in an Orca terminal</strong><span>Tool approvals appear in that terminal. Questions, evidence, and PR approval appear here.</span></div>` : ''}
-    ${run.error ? `<div class="notice">${icon('alert')}<span>${esc(run.error)}</span>${/not signed in|not logged in|\/login/i.test(run.error) ? button('Fix agent sign-in', 'setup', 'small') : ''}</div>` : ''}
-    <div class="run-detail"><section class="panel"><h2>Conversation</h2><div id="messages">${renderMessages(run.id)}</div><details class="activity-link" id="journal-details"><summary>Work journal · commands and tool activity</summary><div id="journal" class="journal">${renderJournal()}</div></details></section><aside class="panel"><h2>${run.role === 'coordinator' ? 'Dispatch' : 'Worktree & proof'}</h2>${run.worktree ? `<dl class="detail-properties"><dt>Base</dt><dd>${esc(run.baseBranch)}</dd><dt>PR target</dt><dd>${esc(run.targetBranch)}</dd><dt>Preview port</dt><dd>${run.port}</dd><dt>Folder</dt><dd><code title="${esc(run.worktree)}">${esc(run.worktree).replace(/([\\/])/g, '$1<wbr>')}</code></dd></dl>` : '<p class="muted">The main agent analyzes tasks and delegates work. It does not edit your source checkout.</p>'}${run.prUrl ? `<p><a href="${esc(safeUrl(run.prUrl))}" target="_blank" rel="noopener">Open draft pull request</a></p>` : ''}${renderProof(run.id)}</aside></div>`;
+// Issues beside the live panes: pick, analyze, or start an agent without leaving the workspace.
+function renderWorkspaceIssues() {
+  const tasks = filteredTasks(), task = selectedTask(), run = task && taskRun(task);
+  return `<div class="side-head"><h2>Issues <span class="count-label">${ui.snapshot.tasks.length}</span></h2>${sideSwitch()}</div><div class="side-actions">${issueActions()}</div>${toolbar()}
+    <div id="task-list" class="task-list">${tasks.length ? tasks.map(renderTaskRow).join('') : emptyTasks()}</div>
+    ${task ? `<section class="issue-preview" aria-label="Selected issue"><div class="detail-reference">${sourceLogo(task.source)}<span class="mono">#${esc(task.taskNumber || task.externalId)}</span>${renderTaskStates(task, run)}</div><h3>${esc(task.title)}</h3><dl class="detail-properties"><dt>Project</dt><dd>${esc(task.projectName || '—')}</dd><dt>Category</dt><dd>${esc(task.category || 'Not analyzed yet')}</dd>${run?.branch ? `<dt>Branch</dt><dd><code>${esc(run.branch)}</code></dd>` : ''}</dl><div class="actions">${run ? button('Open run', 'open-task-run', 'small primary') : button(`${icon('play')} Run agent`, 'launch-task', 'small primary', task.demo ? 'disabled' : '')}${button('Full issue', 'open-issue', 'small quiet')}</div></section>` : ''}`;
+}
+function renderRunSide() {
+  if (ui.runSide === 'issues') return renderWorkspaceIssues();
+  const runs = [...ui.snapshot.runs].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))), placed = new Set();
+  const groups = runGroups.map(([name, test]) => { const items = runs.filter(run => !placed.has(run.id) && test(run)); items.forEach(run => placed.add(run.id)); return [name, items]; }).filter(([, items]) => items.length);
+  const live = runs.filter(run => activeStates.includes(run.state) || pending(run.id).length);
+  return `<div class="side-head"><h2>Runs <span class="count-label">${runs.length}</span></h2>${sideSwitch()}</div>${live.length > 1 ? `<div class="side-actions">${button(`${icon('board')} Watch ${Math.min(live.length, 4)} live runs side by side`, 'open-live', 'small')}</div>` : ''}
+    ${runs.length ? groups.map(([name, items]) => `<div class="run-group"><h3>${name}<span>${items.length}</span></h3>${items.map(run => `<button class="run-item${ui.openRuns.includes(run.id) ? ' open' : ''}${run.id === ui.selectedRun ? ' focused' : ''}" data-run="${run.id}"><span class="state-dot ${esc(run.state)}"></span><span class="run-item-text"><strong>${esc(run.title)}</strong><small>${providerName(run.provider)} · ${run.role === 'coordinator' ? `${(run.taskIds || []).length} issues` : esc(run.branch ? run.branch.split('/').at(-1) : labels[run.state] || run.state)}</small></span><time>${relative(run.createdAt)}</time></button>`).join('')}</div>`).join('') : `<p class="side-empty">No agent runs yet. Select issues and choose Analyze & run.</p>`}`;
+}
+function layoutSwitch() {
+  return `<div class="layout-switch" role="group" aria-label="Pane layout">${[['single', 'One pane'], ['split', 'Two panes side by side'], ['grid', 'Up to four panes']].map(([value, label]) => `<button class="${ui.layout === value ? 'active' : ''}" data-action="set-layout" data-layout="${value}" aria-label="${label}" aria-pressed="${ui.layout === value}" title="${label}"><span class="layout-glyph ${value}" aria-hidden="true"><i></i><i></i><i></i><i></i></span></button>`).join('')}</div>`;
+}
+function renderWorkspace() {
+  const open = ui.openRuns.map(id => ui.snapshot.runs.find(run => run.id === id)).filter(Boolean), shown = visibleRuns();
+  if (!open.length) return `${workspaceNotices()}<div class="workspace-empty empty">${icon('agents')}<h2>${ui.snapshot.runs.length ? 'Open runs to watch them side by side' : 'No agent runs yet'}</h2><p>${ui.snapshot.runs.length ? 'Choose a run in the list. Up to four stay live here at once, each with its own conversation, approvals, and proof.' : 'Sync your assigned issues, then use Analyze & run to start a main agent.'}</p>${ui.snapshot.runs.length ? '' : button('Open my issues', 'inbox', 'primary small')}</div>`;
+  return `<div class="tabstrip"><div class="run-tabs" role="tablist" aria-label="Open runs">${open.map((run, index) => `<div class="run-tab${run.id === ui.selectedRun ? ' active' : ''}${shown.includes(run) ? ' shown' : ''}"><button role="tab" aria-selected="${run.id === ui.selectedRun}" data-action="focus-run" data-id="${run.id}" title="${esc(run.title)}${index < 9 ? ` · Alt+${index + 1}` : ''}"><span class="state-dot ${esc(run.state)}"></span>${esc(run.role === 'coordinator' ? 'Main agent' : run.title)}</button><button class="run-tab-close" data-action="close-run" data-id="${run.id}" aria-label="Close ${esc(run.title)}">${icon('close')}</button></div>`).join('')}</div><div class="tabstrip-tools"><span>${shown.length} of ${open.length} shown${open.length > 1 ? ` · Alt+1–${Math.min(open.length, 9)} switches` : ''}</span>${layoutSwitch()}</div></div>
+    <div class="panes count-${shown.length}">${shown.map(renderPane).join('')}</div>`;
+}
+function renderPane(run) {
+  const waiting = pending(run.id).length, workers = ui.snapshot.runs.filter(item => item.parentRunId === run.id);
+  const journal = `<details class="activity-link" data-journal="${run.id}"><summary>Work journal</summary><div class="journal" id="journal-${run.id}">${renderJournal(run.id)}</div></details>`;
+  // The main agent only earns a side column once it has dispatched workers; otherwise the transcript keeps the width.
+  const proof = run.role === 'coordinator' && !workers.length ? '' : `<aside class="pane-proof"><h3>${run.role === 'coordinator' ? 'Dispatch' : 'Worktree & proof'}</h3>${run.role === 'coordinator' ? renderDispatch(workers) : renderRunFacts(run)}${run.prUrl ? `<p><a href="${esc(safeUrl(run.prUrl))}" target="_blank" rel="noopener">Open draft pull request</a></p>` : ''}${run.role === 'coordinator' ? '' : renderProof(run.id)}${journal}</aside>`;
+  return `<section class="pane${run.id === ui.selectedRun ? ' focused' : ''}${waiting ? ' needs-you' : ''}" data-pane-run="${run.id}" aria-label="${esc(run.title)}">
+    <header class="pane-head"><span class="state-dot ${esc(run.state)}"></span><h2>${esc(run.title)}</h2><span class="pane-provider">${providerName(run.provider)}</span>${tag(run.state)}<span class="pane-actions">${run.worktree ? button(icon('terminal'), 'open-orca', 'small quiet icon-only', 'aria-label="Open in Orca" title="Open a plain terminal in this worktree in Orca"') : ''}${button(icon('close'), 'close-run', 'small quiet icon-only', `data-id="${run.id}" aria-label="Close pane"`)}</span></header>
+    <div class="pane-sub">${run.branch ? `${icon('branch')}<code title="${esc(run.branch)}">${esc(run.branch)}</code>` : `<span>${run.role === 'coordinator' ? `Analyzing ${plural((run.taskIds || []).length, 'issue')}` : 'Worktree preparing'}</span>`}<span class="pane-progress">${esc(progressText(run))}</span></div>
+    ${run.execution === 'orca' ? `<div class="run-status-strip pane-notice">${icon('terminal')}<span>Runs in an Orca terminal. Tool approvals happen there; questions, evidence, and PR approval stay here.</span></div>` : ''}
+    ${run.error ? `<div class="notice pane-notice">${icon('alert')}<span>${esc(run.error)}</span>${/not signed in|not logged in|\/login/i.test(run.error) ? button('Fix agent sign-in', 'setup', 'small') : ''}</div>` : ''}
+    <div class="pane-body"><div class="pane-conversation" id="messages-${run.id}">${renderMessages(run.id)}${proof ? '' : journal}</div>${proof}</div>${renderPaneFooter(run)}</section>`;
+}
+// A live run can only be stopped; a finished one takes a follow-up in place, continuing with the same agent.
+function renderPaneFooter(run) {
+  if (run.external) return '';
+  if (activeStates.includes(run.state)) return `<footer class="pane-foot"><span>${run.state === 'waiting' ? 'Waiting for your answer above' : 'Working. Follow-ups open when this turn ends.'}</span>${button('Stop', 'stop-run', 'small quiet danger')}</footer>`;
+  const review = run.state === 'ready_for_review';
+  return `<form class="pane-foot composer" data-composer="${run.id}"><input name="prompt" required aria-label="Follow-up for ${esc(run.title)}" placeholder="${review ? 'Request changes…' : 'Continue with a follow-up…'}" autocomplete="off"><button class="button small" type="submit">${review ? 'Request changes' : 'Send'}</button>${button('Switch agent', 'resume-run', 'small quiet', 'type="button" title="Continue with another provider or execution"')}${review ? button('Create draft PR', 'publish-run', 'small primary', 'type="button"') : ''}</form>`;
+}
+function renderDispatch(workers) {
+  return `<ul class="dispatch-list">${workers.map(worker => `<li><button data-run="${worker.id}"><span class="state-dot ${esc(worker.state)}"></span><span>${esc(worker.title)}</span></button></li>`).join('')}</ul>`;
+}
+function renderRunFacts(run) {
+  return run.worktree ?`<dl class="detail-properties"><dt>Base</dt><dd>${esc(run.baseBranch)}</dd><dt>PR target</dt><dd>${esc(run.targetBranch)}</dd><dt>Port</dt><dd>${run.port}</dd><dt>Folder</dt><dd><code title="${esc(run.worktree)}">${esc(run.worktree).replace(/([\\/])/g, '$1<wbr>')}</code></dd></dl>` : '';
 }
 function journalText(event) {
   if (event.text || event.message || event.result) return event.text || event.message || event.result;
   const { sequence, kind, visible, createdAt, ...rest } = event;
   return JSON.stringify(rest.item || rest.content || rest, null, 2);
 }
-function renderJournal() {
-  return ui.journal.length ? ui.journal.map(event => `<div class="journal-entry"><div><time>${esc(time(event.createdAt))}</time><span>${esc(event.kind.replaceAll('-', ' '))}</span></div><pre>${esc(journalText(event))}</pre></div>`).join('') : '<p class="empty-small">Open the journal to load recorded operations.</p>';
+function renderJournal(runId) {
+  const journal = ui.journals.get(runId) || [];
+  return journal.length ? journal.map(event => `<div class="journal-entry"><div><time>${esc(time(event.createdAt))}</time><span>${esc(event.kind.replaceAll('-', ' '))}</span></div><pre>${esc(journalText(event))}</pre></div>`).join('') : '<p class="empty-small">Open the journal to load recorded operations.</p>';
 }
 function renderEvidence() {
   const runs = ui.snapshot.runs.filter(run => ui.snapshot.artifacts.some(item => item.runId === run.id));
@@ -398,7 +513,7 @@ function updateSourceCard(sourceId) {
 function renderRisk(run) {
   if (!run?.risk) return '';
   const risk = run.risk;
-  return `<section class="risk-assessment" aria-label="Code risk assessment"><div class="risk-heading"><h3>Estimated code risk</h3><span class="tag ${risk.score <= 2 ? 'finished' : risk.score <= 5 ? 'waiting' : 'failed'}">${risk.score}/10 · ${esc(risk.level)}</span></div><strong>${risk.requiresHumanReview ? 'Review before creating a PR' : 'Low-risk draft PR eligible'}</strong><p>${esc(risk.reason)}</p><small>${plural(risk.files.length, 'changed file')} · ${risk.changedLines} added/removed lines${risk.agentScore ? ` · Agent score ${risk.agentScore}/10` : ''}</small>${risk.safeguards.length || risk.factors.length ? `<details><summary>Review reasons</summary><ul>${[...risk.safeguards, ...risk.factors].map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details>` : ''}<small>${risk.requiresHumanReview ? 'Review the diff before approving the draft PR.' : ui.snapshot.config.autoPrLowRisk ? 'Automatic draft PRs are enabled. Tests and evidence must match the current code.' : 'Automatic draft PRs are off. Create a draft PR after reviewing the evidence.'}</small></section>`;
+  return `<section class="risk-assessment" aria-label="Code risk assessment"><div class="risk-heading"><h3>${risk.requiresHumanReview ? 'Review before creating a PR' : 'Low-risk draft PR eligible'}</h3><span class="tag ${risk.score <= 2 ? 'finished' : risk.score <= 5 ? 'waiting' : 'failed'}" title="Estimated code risk">Risk ${risk.score}/10 · ${esc(risk.level)}</span></div><p>${esc(risk.reason)}</p><small>${plural(risk.files.length, 'changed file')} · ${risk.changedLines} added/removed lines${risk.agentScore ? ` · Agent score ${risk.agentScore}/10` : ''}</small>${risk.safeguards.length || risk.factors.length ? `<details><summary>Review reasons</summary><ul>${[...risk.safeguards, ...risk.factors].map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details>` : ''}<small>${risk.requiresHumanReview ? 'Review the diff before approving the draft PR.' : ui.snapshot.config.autoPrLowRisk ? 'Automatic draft PRs are enabled. Tests and evidence must match the current code.' : 'Automatic draft PRs are off. Create a draft PR after reviewing the evidence.'}</small></section>`;
 }
 function themeButton() {
   const dark = document.documentElement.dataset.theme === 'dark';
@@ -610,7 +725,7 @@ function renderTaskResults() {
   const tasks = filteredTasks(), list = document.querySelector('#task-list'), board = document.querySelector('#task-board'), count = document.querySelector('#task-count');
   if (list) list.innerHTML = tasks.length ? tasks.map(renderTaskRow).join('') : emptyTasks();
   if (board) board.innerHTML = renderBoard(tasks);
-  if (count) count.textContent = `${tasks.length} issues`;
+  if (count) count.textContent = tasks.length;
   return Boolean(list || board);
 }
 
@@ -684,13 +799,15 @@ document.addEventListener('input', event => {
 
 async function loadMessages() {
   if (ui.page === 'inbox') await loadTaskDetail();
-  const run = ui.page === 'runs' ? selectedRun() : selectedTask() ? taskRun(selectedTask()) : null;
-  if (!run) return;
-  if (ui.transcriptRun !== run.id) { ui.transcriptRun = run.id; ui.transcriptStick = true; ui.openOps.clear(); }
-  // The journal carries every operation; raw command and preview output stays in the work journal.
-  const events = await api(`/runs/${run.id}/journal`);
-  ui.messages = events.filter(event => !['command-output', 'dev-output'].includes(event.kind)).map(message => ({ ...message, runId: run.id }));
-  const target = document.querySelector('#messages'); if (target) { target.innerHTML = renderMessages(run.id); restoreTranscript(); }
+  const issueRun = ui.page === 'inbox' && ui.tab === 'messages' && selectedTask() ? taskRun(selectedTask()) : null;
+  const runs = ui.page === 'runs' ? visibleRuns() : issueRun ? [issueRun] : [];
+  // Every visible pane refreshes together; raw command and preview output stays in the work journal.
+  await Promise.all(runs.map(async run => {
+    const events = await api(`/runs/${run.id}/journal`);
+    ui.runEvents.set(run.id, events.filter(event => !['command-output', 'dev-output'].includes(event.kind)));
+    const target = document.getElementById(`messages-${run.id}`);
+    if (target && !target.contains(document.activeElement)) { target.innerHTML = renderMessages(run.id); restoreTranscript(); }
+  }));
 }
 function runtimeProfileField(repository) {
   if (!repository?.flowRuntime) return '';
@@ -736,14 +853,16 @@ function publishDialog() {
 
 document.addEventListener('click', event => {
   const target = event.target.closest('button,[data-task],[data-run]'); if (!target) return;
-  if (target.dataset.page) { ui.selectedRun = ''; navigate(target.dataset.page); return; }
+  if (target.dataset.page) { navigate(target.dataset.page); return; }
   if (target.dataset.task) {
-    ui.selectedTask = target.dataset.task; ui.tab = 'brief'; ui.messages = [];
+    ui.selectedTask = target.dataset.task; ui.tab = 'brief';
     if (target.dataset.fromBoard) { ui.page = 'inbox'; ui.view = 'list'; }
     render(); if (innerWidth <= 700) document.querySelector('.detail-pane')?.scrollIntoView({ block: 'start' }); void loadMessages(); return;
   }
   if (target.dataset.run) { navigate('runs', { runId: target.dataset.run }); return; }
   const name = target.dataset.action; if (!name) return;
+  // Run actions in a pane apply to that pane's run.
+  const paneRun = target.closest('[data-pane-run]')?.dataset.paneRun; if (paneRun && name !== 'close-run') ui.selectedRun = paneRun;
   if (name === 'retry-task-detail') { taskErrors.delete(ui.selectedTask); render(); void loadTaskDetail(); return; }
   if (name === 'refresh-task-detail') {
     const taskId = ui.selectedTask; loadingTasks.add(taskId); target.disabled = true;
@@ -752,7 +871,7 @@ document.addEventListener('click', event => {
       finally { loadingTasks.delete(taskId); if (ui.page === 'inbox') render(); }
     }); return;
   }
-  if (name === 'setup') { ui.selectedRun = ''; ui.setupOpen = ''; navigate('setup'); return; }
+  if (name === 'setup') { ui.setupOpen = ''; navigate('setup'); return; }
   if (name === 'orca-show') {
     target.disabled = true; target.textContent = 'Updating Orca…';
     void action(async () => {
@@ -782,7 +901,7 @@ document.addEventListener('click', event => {
   }
   if (name === 'open-step') { ui.setupOpen = target.getAttribute('aria-expanded') === 'true' ? 'none' : target.dataset.step; render(); document.querySelector(`[data-step="${target.dataset.step}"] .setup-step-header`)?.focus(); return; }
   if (name === 'recheck-setup') { void loadAgents({ refresh: true }); return; }
-  if (name === 'settings-anchor') { ui.selectedRun = ''; navigate('settings'); requestAnimationFrame(() => document.getElementById(target.dataset.anchor)?.scrollIntoView({ block: 'start' })); return; }
+  if (name === 'settings-anchor') { navigate('settings'); requestAnimationFrame(() => document.getElementById(target.dataset.anchor)?.scrollIntoView({ block: 'start' })); return; }
   if (name === 'copy-text') { void copyText(target.dataset.text, 'Command copied.'); return; }
   if (name === 'use-agent-profile') { void saveAgentProfile(target.dataset.provider, target.dataset.profile); return; }
   if (name === 'toggle-tour') {
@@ -827,7 +946,7 @@ document.addEventListener('click', event => {
     else delete repository.flowRuntime;
     render(); return;
   }
-  if (name === 'settings' || name === 'inbox') { ui.selectedRun = ''; navigate(name); return; }
+  if (name === 'settings' || name === 'inbox') { navigate(name); return; }
   if (name === 'view-list') { ui.view = 'list'; ui.page = 'inbox'; render(); void loadMessages(); return; }
   if (name === 'view-board') { ui.view = 'board'; render(); return; }
   if (name === 'clear-selection') { ui.checked.clear(); render(); return; }
@@ -836,7 +955,13 @@ document.addEventListener('click', event => {
   if (name === 'launch-task') { void launchDialog(); return; }
   if (name === 'resume-run') { void launchDialog({ role: selectedRun().role, resume: true }); return; }
   if (name === 'publish-run') { publishDialog(); return; }
-  if (name === 'all-runs') { ui.selectedRun = ''; render(); return; }
+  if (name === 'select-decision') { ui.selectedDecision = target.dataset.id; render(); return; }
+  if (name === 'run-side') { ui.runSide = target.dataset.side; render(); return; }
+  if (name === 'open-issue') { ui.tab = 'brief'; ui.view = 'list'; navigate('inbox'); return; }
+  if (name === 'focus-run') { ui.selectedRun = target.dataset.id; saveWorkspace(); render(); void loadMessages(); return; }
+  if (name === 'close-run') { closeRun(target.dataset.id); render(); void loadMessages(); return; }
+  if (name === 'set-layout') { ui.layout = target.dataset.layout; saveWorkspace(); render(); void loadMessages(); return; }
+  if (name === 'open-live') { for (const run of ui.snapshot.runs.filter(run => activeStates.includes(run.state) || pending(run.id).length).slice(0, 4).reverse()) openRun(run.id); ui.layout = 'grid'; saveWorkspace(); render(); void loadMessages(); return; }
   if (name === 'open-task-run') { navigate('runs', { runId: taskRun(selectedTask()).id }); return; }
   if (name === 'open-evidence-run') { navigate('runs', { runId: target.dataset.id }); return; }
   if (name === 'open-main') { navigate('runs', { runId: ui.snapshot.runs.find(run => run.role === 'coordinator').id }); return; }
@@ -936,20 +1061,41 @@ document.addEventListener('change', event => {
   if (target.closest('.decision') && target.tagName === 'SELECT' && target.value === '__custom') target.parentElement.querySelector('.custom-answer')?.classList.remove('hidden');
 });
 document.addEventListener('scroll', event => {
-  if (!event.target.classList?.contains('transcript')) return;
-  const box = event.target; ui.transcriptTop = box.scrollTop; ui.transcriptStick = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  const box = event.target; if (!box.dataset?.transcript) return;
+  ui.transcripts.set(box.dataset.transcript, { top: box.scrollTop, stick: box.scrollHeight - box.scrollTop - box.clientHeight < 60 });
 }, true);
 document.addEventListener('toggle', event => {
   const op = event.target.dataset?.op; if (op) { if (event.target.open) ui.openOps.add(op); else ui.openOps.delete(op); }
-  if (event.target.id === 'journal-details' && event.target.open) void action(async () => {
-    ui.journal = await api(`/runs/${ui.selectedRun}/journal`); const target = document.querySelector('#journal'); if (target) target.innerHTML = renderJournal();
+  const runId = event.target.dataset?.journal;
+  if (runId && event.target.open) void action(async () => {
+    ui.journals.set(runId, await api(`/runs/${runId}/journal`)); const target = document.getElementById(`journal-${runId}`); if (target) target.innerHTML = renderJournal(runId);
   });
 }, true);
+// Clicking into a pane focuses its run without rebuilding the page.
+document.addEventListener('pointerdown', event => {
+  const pane = event.target.closest?.('[data-pane-run]'); if (!pane || pane.dataset.paneRun === ui.selectedRun) return;
+  ui.selectedRun = pane.dataset.paneRun; saveWorkspace();
+  for (const element of document.querySelectorAll('.pane.focused, .run-tab.active')) element.classList.remove('focused', 'active');
+  pane.classList.add('focused'); document.querySelector(`.run-tab [data-id="${pane.dataset.paneRun}"]`)?.closest('.run-tab')?.classList.add('active');
+});
+// Alt+1…9 brings an open run forward, the way editors switch tabs.
+document.addEventListener('keydown', event => {
+  if (!event.altKey || event.ctrlKey || event.metaKey || !/^Digit[1-9]$/.test(event.code) || ui.page !== 'runs') return;
+  const runId = ui.openRuns[Number(event.code.slice(5)) - 1]; if (!runId) return;
+  event.preventDefault(); ui.selectedRun = runId; saveWorkspace(); render(); void loadMessages();
+  document.querySelector(`[data-pane-run="${runId}"]`)?.focus?.();
+});
 document.addEventListener('submit', event => {
   const form = event.target;
-  if (!['settings-form', 'launch-form', 'publish-form'].includes(form.id) && !form.dataset.interaction) return;
+  if (!['settings-form', 'launch-form', 'publish-form'].includes(form.id) && !form.dataset.interaction && !form.dataset.composer) return;
   event.preventDefault();
   void action(async () => {
+    if (form.dataset.composer) {
+      const run = ui.snapshot.runs.find(item => item.id === form.dataset.composer), submit = form.querySelector('[type=submit]'); submit.disabled = true;
+      try { await api(`/runs/${run.id}/resume`, { method: 'POST', data: { provider: run.provider, prompt: form.elements.prompt.value } }); form.reset(); toast(`Follow-up sent. ${providerName(run.provider)} continues this run.`); }
+      finally { submit.disabled = false; }
+      await refresh({ force: true }); return;
+    }
     if (form.id === 'settings-form') {
       const config = await api('/config', { method: 'PUT', data: readSettings() });
       ui.draft = structuredClone(config); ui.snapshot.config = config; render(); toast('Settings saved.');
@@ -986,6 +1132,7 @@ document.addEventListener('submit', event => {
 });
 
 try {
+  restoreWorkspace();
   await refresh({ force: true });
   if (!ui.snapshot.config.sources.length && !ui.snapshot.tasks.length) navigate('setup');
   void loadAgents().then(() => {

@@ -1,0 +1,114 @@
+{
+  "title": "Choose the new look for Rex Desk",
+  "question": "Denser, smaller type, many things open at once. The roll assigned Line Map. Keep it, take an alternate, or re-roll.",
+  "options": [
+    {
+      "id": "assigned",
+      "kind": "assigned",
+      "label": "Line Map",
+      "kicker": "THE ROLL",
+      "lineage": "Seoul Metro line maps and station signage",
+      "thesis": "Every agent run is a metro line; you watch all of them move at once and step into any station.",
+      "palette": ["#ffffff", "#f2f3f5", "#1a1d21", "#00a84d", "#0052a4", "#ef7c1c", "#996cac", "#e5a100"],
+      "materials": ["enamel signage", "line bullets", "1px hairlines"],
+      "viewport": "Thin top bar; a live line map across the top where each run is a colored line through Queued, Working, Needs you, Verifying, Review and PR; below it a tiled grid of 2-4 open run panes beside a compact issue strip.",
+      "risk": "Line colors can be mistaken for states; states must live on stations, never on line hue.",
+      "raised": [
+        {"from": "challenger-ikeda", "raise": "Data density: 12px body, 11px tabular numerals, no oversized headings anywhere."},
+        {"from": "challenger-annual", "raise": "1px hairlines are the only structure; no shadowed cards on the working surface."},
+        {"from": "challenger-botanical", "raise": "Every line drawn at one fixed scale on a shared baseline, so progress compares at a glance."},
+        {"from": "challenger-crouwel", "raise": "Panes snap to whole grid cells; the workspace reflows by cells, never by squeezing."},
+        {"from": "challenger-orienteering", "raise": "One reserved color, amber, belongs only to the Needs-you station."}
+      ],
+      "html": ".impeccable/mocks/decision/assigned.html"
+    },
+    {
+      "id": "model-pick",
+      "kind": "pick",
+      "label": "Strip Bay",
+      "kicker": "IMPECCABLE’S PICK",
+      "lineage": "air-traffic flight progress strips",
+      "thesis": "Each issue is a strip you slide between bays; many flights in the air, one controller.",
+      "palette": ["#2b3036", "#f3e9c6", "#cfe3f2", "#f6d3d8", "#111418", "#c8102e"],
+      "materials": ["buff and blue strips", "board slots", "grease-pencil marks"],
+      "viewport": "Graphite board of bays (Inbox, Analyzing, Working, Needs you, Review) packed with two-line strips; the right half splits into stacked live run panes.",
+      "risk": "Familiar: underneath it is a Kanban board, and most runs in this category land near it.",
+      "html": ".impeccable/mocks/decision/model-pick.html"
+    },
+    {
+      "id": "challenger-wallet",
+      "kind": "challenger",
+      "catalogId": "vernacular-ephemera-jet-age-ticket-wallet",
+      "label": "Coupon Book",
+      "verdict": "competitive",
+      "lineage": "jet-age airline ticket wallets",
+      "thesis": "Each run is a coupon book; legs tear off, and outcomes stamp themselves: verified, used, void.",
+      "palette": ["#ffffff", "#14285a", "#c8102e", "#5b3a8c", "#eef0f4"],
+      "materials": ["coupon stock", "carbon numerals", "rubber stamps"],
+      "viewport": "Runs as tabbed coupon columns side by side; each leg a ruled coupon with carbon-purple figures and a stamped state.",
+      "case": "Fuses well with explicit outcomes (nothing disappears, it cancels); loses on audience identification.",
+      "risk": "Tips into paper skeuomorph if stamps become decoration.",
+      "hero": "https://impeccable.style/worlds/cards/vernacular-ephemera-jet-age-ticket-wallet-hero.webp",
+      "html": ".impeccable/mocks/decision/challenger-wallet.html"
+    },
+    {
+      "id": "challenger-ikeda", "kind": "challenger", "catalogId": "ikeda-datamatics", "label": "Datamatics", "verdict": "declined",
+      "lineage": "Ryoji Ikeda data fields", "thesis": "Runs as strobing black-and-white data columns.",
+      "palette": ["#000000", "#ffffff"], "materials": ["barcode bars", "mono numerals"],
+      "viewport": "A barcode wall of runs.", "risk": "No room for state color.",
+      "case": "Loses both: QA states need color, and the audience does not read barcode fields.",
+      "kept": "Total commitment to data density.",
+      "hero": "https://impeccable.style/worlds/cards/ikeda-datamatics-hero.webp"
+    },
+    {
+      "id": "challenger-annual", "kind": "challenger", "catalogId": "design-annual-s-plate-section", "label": "Design Annual", "verdict": "declined",
+      "lineage": "design annual plate sections", "thesis": "Runs as registered plates on uncoated stock.",
+      "palette": ["#f5f4f6", "#16181a", "#dcddf3"], "materials": ["crosshairs", "hairlines"],
+      "viewport": "Plates on a sheet.", "risk": "Precious and spacious.",
+      "case": "Loses both: a gallery sheet is the opposite of dense multitasking.",
+      "kept": "Hairlines as the only structure.",
+      "hero": "https://impeccable.style/worlds/cards/design-annual-s-plate-section-hero.webp"
+    },
+    {
+      "id": "challenger-botanical", "kind": "challenger", "catalogId": "editorial-sequence-montage-botanical-folio-season", "label": "Botanical Folio", "verdict": "declined",
+      "lineage": "botanical season folios", "thesis": "A run's life as fixed-scale plates.",
+      "palette": ["#f3ead6", "#3f6b35", "#b3261e"], "materials": ["engraving", "cream plates"],
+      "viewport": "Five plates on one stem.", "risk": "Slow and ornamental.",
+      "case": "Loses both: lovely lifecycle, wrong audience and pace.",
+      "kept": "One fixed scale and shared baseline across every run.",
+      "hero": "https://impeccable.style/worlds/cards/editorial-sequence-montage-botanical-folio-season-hero.webp"
+    },
+    {
+      "id": "challenger-crouwel", "kind": "challenger", "catalogId": "crouwel-grid-specimen", "label": "Grid Specimen", "verdict": "declined",
+      "lineage": "Wim Crouwel grid specimens", "thesis": "The workspace as a visible construction grid.",
+      "palette": ["#ffffff", "#9bb7e0", "#e4312b"], "materials": ["graph grid", "grid letterforms"],
+      "viewport": "Monumental grid type.", "risk": "Big letters, which you asked to lose.",
+      "case": "Loses both: monumental type fights the density brief.",
+      "kept": "Panes reflow by whole grid cells.",
+      "hero": "https://impeccable.style/worlds/cards/crouwel-grid-specimen-hero.webp"
+    },
+    {
+      "id": "challenger-orienteering", "kind": "challenger", "catalogId": "notation-diagram-systems-orienteering-map", "label": "Orienteering Map", "verdict": "declined",
+      "lineage": "ISOM orienteering maps", "thesis": "Each run as a purple course over fixed terrain.",
+      "palette": ["#ffffff", "#8a3fa0", "#b07a3a", "#f5d33a"], "materials": ["contours", "control circles"],
+      "viewport": "A course map of checks.", "risk": "Terrain texture is noise on a work screen.",
+      "case": "Loses both to Line Map, its closer and more familiar transit cousin.",
+      "kept": "One color reserved for the active leg only.",
+      "hero": "https://impeccable.style/worlds/cards/notation-diagram-systems-orienteering-map-hero.webp"
+    }
+  ],
+  "reroll": {"registers": ["safer", "bolder"]},
+  "buildPath": {"value": "code"},
+  "canon": true,
+  "canonCard": {
+    "kind": "canon",
+    "label": "The category standard",
+    "thesis": "A dense dev-tool workspace: dark sidebar, tabs, and split editor panes, executed cleanly.",
+    "palette": ["#16181d", "#1f232a", "#e6e8eb", "#4c8dff"],
+    "materials": ["split panes", "tabs", "status bar"],
+    "viewport": "Sidebar of issues, tabbed runs in a 2x2 split, status bar at the bottom.",
+    "risk": "Indistinguishable from every editor-shaped tool by design.",
+    "html": ".impeccable/mocks/decision/canon.html"
+  },
+  "steer": true
+}

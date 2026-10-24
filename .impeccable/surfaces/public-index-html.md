@@ -9,34 +9,22 @@ related_targets: ["public/style.css","public/app.js"]
 
 Mode: Operate. Target: public/index.html, public/app.js, public/style.css.
 
-Confirmed by the user: compact issue list alongside the selected issue's messages, questions, approvals, and evidence; Kanban is a second view. Claude Code is the default, with per-run switching and concurrent Codex support. Credentials and source project identifiers are edited in Settings.
+Confirmed by the user (2026-10-24): less space and smaller type than the first build; a creative but working view; several runs and issues open at once because they do many things at a time. They chose the category standard on the decision page and named GitHub (dark) and Raycast as the products it sits alongside; that craft level is the bar. Kanban stays as a second view of issues. Claude Code is the default, with per-run switching and concurrent Codex support. Credentials and source identifiers are edited in Settings.
 
 ## Direction contract
 
-THESIS: Turn assigned QA issues into reviewable fixes without copying task text into terminals. The interface centers the issue and the human decision, with no decorative metric dashboard.
+THESIS: One developer conducting many agents needs every live run visible at once. The workspace is an editor-shaped split view of runs, not a page per run, and refuses the spacious one-thing-at-a-time admin dashboard.
 
-OWN-WORLD: A QA acceptance sheet translated into a familiar application shell. Deep petrol navigation, pale blue-gray working ground, white work areas, workhorse system type, compact rows, and restrained semantic status colors.
+OWN-WORLD: A dense dark developer tool at GitHub-dark and Raycast craft: near-black shell, one-step-lighter panels, 1px hairlines, a single blue accent, amber reserved for anything waiting on the person, green and red for outcomes. System UI type at 12px body and 11px metadata, Cascadia/Consolas only for IDs, branches, tool names and output. Light theme mirrors it.
 
-STORY: Connect projects and repositories once; sync assigned issues; start analysis; answer questions; review recorded proof; approve a draft PR. Source labels remain distinct from local execution states.
+STORY: Select issues in the sidebar, analyze, and watch the main agent and every worker side by side; approve or answer inside the pane that asks; open evidence and draft PRs from the same split view.
 
-FIRST VIEWPORT: A 208px navigation rail, a 62px workspace bar, task actions above source counts and view controls, then a split issue-list/detail work area. The selected issue owns brief/messages/evidence tabs. Needs-you requests are direct forms, not a terminal transcript.
+FIRST VIEWPORT: 48px activity bar (Workspace, Issues, Board, Needs you, Evidence, Setup, Settings with counts); 300px sidebar switching between the runs list and the issue list (filters, Analyze, focused-issue preview); main area with a tab strip of open runs and a layout switch (single, split, grid of up to four); panes each show header, branch line, live transcript, inline approvals and a reply/steer footer; 22px status bar with machine, Turso sync, workers and Needs-you count.
 
-FORM: Grounded candidate 6, a QA acceptance sheet. The accepted layout is user-pinned and overrides candidate topology. The signature move is an issue's evidence checklist paired with its actual recording, preserving provenance from investigation to review. seed:91cd50d4a80ccef4.
+FORM: The category standard, played straight (canon card), sitting alongside GitHub dark and Raycast. Signature interaction: open any run into a pane and keep several updating live at once, with approvals answered in place. seed:56d6c21c30334e3c.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
 
-## Grounded direction derivation
-
-1. Code-review acceptance notes: precise row hierarchy and restrained color.
-2. Team handover notebook: clear decisions separated from background activity.
-3. Bug reproduction worksheet: problem, action, and result held together.
-4. Build release checklist: explicit current state and outstanding requirements.
-5. Design-system specimen: reusable type and state grammar.
-6. QA acceptance sheet: factual issue evidence in a compact, scannable working surface.
-7. Project triage agenda: issue ordering and ownership are the organizing information.
-
-Catalog challengers were evaluated under Operate rules. Split-flap boards donate stable column priorities; consumer app surfaces donate touch-target discipline; airport signs donate clear decision priority. Botanical folios, orienteering maps, and video feeds lose audience identification and do not supply the working layout. No catalog imagery or generated bitmap is shipped. This app screen is code-led.
-
 ## Verification scope
 
-The synthetic acceptance test drives settings, source sync, list and board, questions, agent dispatch, a real Git worktree, a real regression command, and recorded browser assertions. It checks desktop and mobile overflow. No live project credentials or model calls were used. The first render round contained transient toasts; final captures settle those before review.
+The synthetic acceptance test drives settings, source sync, list and board, questions, agent dispatch, a real Git worktree, a real regression command, and recorded browser assertions, and checks desktop and mobile overflow. No live credentials or model calls are used.
