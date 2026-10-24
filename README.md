@@ -101,7 +101,7 @@ Settings → **Connect an existing AI** installs the local stdio proxy into the 
 
 An already running local or cloud AI can call `desk_connect` to obtain a conversation `runId`, then use `desk_message` and `desk_ask`. It can read tasks and delegate fixes with `desk_dispatch` (optionally `execution: "orca"` and a `runtimeProfile`). For clients with short tool timeouts, `desk_ask` accepts `wait=false` and `desk_question` polls for the answer.
 
-Managed Codex runs use the app-server protocol for native approvals and elicitation; managed Claude runs use Agent SDK `canUseTool` and `onElicitation`. Both route to the dashboard.
+Managed Codex runs use the app-server protocol for native approvals and elicitation; managed Claude runs use Agent SDK `canUseTool` and `onElicitation`. Both route to the dashboard. Rex Desk's own tools that read, label, message, or act inside the run's worktree run without a permission prompt; `desk_dispatch`, shell commands, and edits outside a worker still ask, and each approval offers **Always allow for this run**. Tracker status changes and draft PRs keep their own approval.
 
 ## Cloud access boundary
 
