@@ -3,6 +3,9 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, createReadStream, statSync } from 'node:fs';
 import { Store } from './store.js';
+import { Accounts, cleanEmail } from './accounts.js';
+import { findCloudWorkspace } from './turso.js';
+import { randomBytes } from 'node:crypto';
 import { Desk } from './coordinator.js';
 import { handleMcp } from './mcp.js';
 import { git, resolveCommand } from './processes.js';
@@ -41,9 +44,10 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || path.join(root, '.local'), port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch } = {}) {
-  mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
-  const lockPath = path.join(dataDirectory, 'runtime.lock');
+export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, cloudClientFactory } = {}) {
+  const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
+  mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
+  const lockPath = path.join(dataRoot, 'runtime.lock');
   if (existsSync(lockPath)) {
     const owner = Number(readFileSync(lockPath, 'utf8'));
     let alive = false;
@@ -52,11 +56,82 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
     unlinkSync(lockPath);
   }
   writeFileSync(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 });
-  const store = new Store(dataDirectory), desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand });
+  // One workspace is open at a time. A plain data folder (tests, scripts) opens immediately; account mode waits for sign-in.
+  const accounts = dataDirectory ? null : new Accounts(dataRoot);
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
-  store.on('change', notify);
-  void store.cloud.open();
+  let session = null, address = '';
+  const cloud = cloudClientFactory ? { clientFactory: cloudClientFactory, retryMs: 50 } : undefined;
+  async function openSession(entry, vaultKey, { staySignedIn = false } = {}) {
+    const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
+    const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand });
+    if (address) desk.mcpUrl = `${address}/mcp`;
+    store.on('change', notify);
+    session = { id: entry?.id, email: entry?.email || '', store, desk, cookie: randomBytes(32).toString('base64url'), staySignedIn, cloud: null };
+    if (accounts) {
+      accounts.touch(entry.id);
+      if (staySignedIn) await accounts.remember(entry.id, vaultKey).catch(() => { session.staySignedIn = false; });
+      // Bring this computer up to date before anyone works: upload leftovers, then take the newest cloud copy.
+      const status = await store.cloud.open();
+      if (status.state === 'connected' && !store.fresh) session.cloud = await store.cloud.pullLatest().catch(error => ({ pulled: false, reason: error.message }));
+      else if (store.cloud.enabled) session.cloud = { pulled: false, reason: status.error || 'Cloud backup is offline; working from this computer’s copy.' };
+    } else void store.cloud.open();
+    notify(); return session;
+  }
+  async function closeSession({ forget = false } = {}) {
+    if (!session) return;
+    const { desk, store, id } = session; session = null;
+    if (forget) accounts?.forget(id);
+    await desk.shutdown(); await store.cloud.close(); store.close(); notify();
+  }
+  const role = () => accounts ? accounts.role(session?.email) : 'superadmin';
+  const cookieOf = request => /(?:^|;\s*)rex_session=([^;]+)/.exec(request.headers.cookie || '')?.[1];
+  const sessionCookie = value => `rex_session=${value}; HttpOnly; SameSite=Strict; Path=/`;
+  const signedIn = request => Boolean(session) && (!accounts || cookieOf(request) === session.cookie);
+  async function handleAuth(request, response, url) {
+    if (url.pathname === '/api/auth' && request.method === 'GET') {
+      // A session that chose to stay signed in on this computer hands its cookie to the local app window.
+      if (session && accounts && session.staySignedIn && !signedIn(request)) {
+        response.setHeader('Set-Cookie', sessionCookie(session.cookie));
+        return json(response, 200, { mode: 'accounts', workspaces: accounts.summary(), current: { id: session.id, email: session.email, role: role(), staySignedIn: true, cloud: session.cloud } });
+      }
+      return json(response, 200, { mode: accounts ? 'accounts' : 'single', workspaces: accounts?.summary() || [], current: signedIn(request) ? { id: session.id, email: session.email, role: role(), staySignedIn: session.staySignedIn, cloud: session.cloud } : null, occupied: Boolean(session && !signedIn(request)) && session?.email });
+    }
+    if (!accounts) return json(response, 400, { error: 'This Rex Desk opens a single data folder without accounts.' });
+    if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' });
+    const input = await body(request);
+    const describe = () => ({ id: session.id, email: session.email, role: role(), staySignedIn: session.staySignedIn, cloud: session.cloud });
+    // Open (or re-enter) the account, then answer with a fresh cookie for this window.
+    const activate = async ({ entry, vaultKey }) => {
+      if (session?.id === entry.id) {
+        session.cookie = randomBytes(32).toString('base64url');
+        if (input.staySignedIn && !session.staySignedIn) { await accounts.remember(entry.id, vaultKey).catch(() => {}); session.staySignedIn = true; }
+      } else { await closeSession(); await openSession(entry, vaultKey, { staySignedIn: Boolean(input.staySignedIn) }); }
+    };
+    const respond = () => { response.setHeader('Set-Cookie', sessionCookie(session.cookie)); return json(response, 200, { current: describe() }); };
+    const slow = async error => { await new Promise(resolve => setTimeout(resolve, 700)); throw error; };
+    if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); return respond(); }
+    if (url.pathname === '/api/auth/login') { await activate(await accounts.signIn(input.email, input.passphrase, { claimId: input.claimId }).catch(slow)); return respond(); }
+    if (url.pathname === '/api/auth/cloud') {
+      // A new computer: find the account in the person's own Turso database, unseal its key, then restore everything before answering.
+      const found = await findCloudWorkspace({ url: input.url, authToken: input.authToken, name: cleanEmail(input.email) }, cloudClientFactory);
+      let opened;
+      try { opened = accounts.workspaces.some(item => item.id === found.id) ? await accounts.signIn(found.name, input.passphrase) : accounts.create(found.name, input.passphrase, { id: found.id, sealed: found.sealed }); }
+      catch (error) { return slow(error); }
+      await activate(opened);
+      if (!session.store.cloud.enabled) { await session.store.cloud.connect({ url: input.url, authToken: input.authToken }); session.cloud = { pulled: !session.store.fresh, restored: true }; }
+      return respond();
+    }
+    if (url.pathname === '/api/auth/logout') {
+      if (!signedIn(request)) return json(response, 401, { error: 'Not signed in.' });
+      await closeSession({ forget: true });
+      response.setHeader('Set-Cookie', 'rex_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+      return json(response, 200, { signedOut: true });
+    }
+    return json(response, 404, { error: 'Unknown sign-in action.' });
+  }
+  if (!accounts) await openSession(null, null);
+  else { const remembered = await accounts.rememberedSession(); if (remembered) await openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true }).catch(() => { session = null; }); }
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
@@ -70,7 +145,8 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       const url = new URL(request.url, `http://${host}`);
       if (url.pathname === '/mcp') {
         const token = request.headers.authorization?.replace(/^Bearer /i, '');
-        const scope = desk.scope(token);
+        if (!session) return json(response, 401, { error: 'Rex Desk is locked. Sign in to the dashboard first.' });
+        const desk = session.desk, scope = desk.scope(token);
         if (!scope) return json(response, 401, { error: 'Supply the Rex Desk bearer token.' });
         if (!['POST', 'GET', 'DELETE'].includes(request.method)) return json(response, 405, { error: 'Use Streamable HTTP.' });
         await handleMcp(desk, scope, request, response, request.method === 'POST' ? await body(request) : undefined); return;
@@ -78,13 +154,19 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       const origin = request.headers.origin;
       if (origin && origin !== `http://${host}`) return json(response, 403, { error: 'Cross-origin dashboard requests are blocked.' });
       if (request.method !== 'GET' && request.headers['x-rex-desk'] !== '1') return json(response, 403, { error: 'Missing dashboard request header.' });
+      if (url.pathname === '/api/auth' || url.pathname.startsWith('/api/auth/')) return await handleAuth(request, response, url);
+      // Everything else that touches a workspace needs this window's sign-in.
+      if ((url.pathname.startsWith('/api/') || url.pathname.startsWith('/artifacts/')) && !signedIn(request)) return json(response, 401, { error: 'Sign in to Rex Desk.', signIn: true });
+      const store = session?.store, desk = session?.desk;
+      // The cloud database belongs to the superadmin; other accounts never see or change it.
+      if (url.pathname.startsWith('/api/database/') && role() !== 'superadmin') return json(response, 403, { error: 'Only a superadmin can manage the cloud database.' });
       if (url.pathname === '/api/events' && request.method === 'GET') {
         response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
         response.write('event: connected\ndata: {}\n\n'); clients.add(response);
         const heartbeat = setInterval(() => response.write(': keepalive\n\n'), 25000);
         request.on('close', () => { clients.delete(response); clearInterval(heartbeat); }); return;
       }
-      if (url.pathname === '/api/state') return json(response, 200, desk.snapshot());
+      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, account: { email: session.email, role: role() }, ...(role() === 'superadmin' ? {} : { database: null }) }); }
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
@@ -206,11 +288,13 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
     } catch (error) { if (!response.headersSent) json(response, 400, { error: error.message }); else response.end(); }
   });
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); }); }
-  catch (error) { store.close(); unlinkSync(lockPath); throw error; }
-  const address = `http://127.0.0.1:${server.address().port}`;
-  desk.mcpUrl = `${address}/mcp`;
+  catch (error) { await closeSession(); unlinkSync(lockPath); throw error; }
+  address = `http://127.0.0.1:${server.address().port}`;
+  if (session) session.desk.mcpUrl = `${address}/mcp`;
   let lastSync = Date.now();
   const timer = setInterval(() => {
+    if (!session) return;
+    const { store, desk } = session;
     const minutes = store.config().syncMinutes;
     if (minutes && Date.now() - lastSync >= minutes * 60000 && !desk.sources.syncing) {
       lastSync = Date.now(); void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
@@ -218,15 +302,15 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
     void desk.scheduleTick().catch(error => store.event('', 'schedule-error', { message: error.message }, true));
   }, 15000);
   timer.unref();
-  return { server, store, desk, address, async close() {
-    clearInterval(timer); await desk.shutdown(); for (const client of clients) client.end();
-    server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await store.cloud.close(); store.close(); unlinkSync(lockPath);
+  return { server, address, accounts, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
+    clearInterval(timer); await closeSession(); for (const client of clients) client.end();
+    server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); unlinkSync(lockPath);
   } };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const app = await createApp();
-  console.log(`Rex Desk: ${app.address}\nMCP: ${app.address}/mcp\nKeys and history stay in ${app.store.directory}`);
+  console.log(`Rex Desk: ${app.address}\nMCP: ${app.address}/mcp\n${app.store ? `Keys and history stay in ${app.store.directory}` : 'Locked: sign in from the dashboard.'}`);
   let closing = false;
   const shutdown = async () => { if (closing) return; closing = true; await app.close(); process.exit(0); };
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);

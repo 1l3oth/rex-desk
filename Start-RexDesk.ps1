@@ -1,11 +1,11 @@
-param([switch]$NoBrowser, [switch]$App)
+﻿param([switch]$NoBrowser, [switch]$App)
 # Agent sign-in profiles are saved in Rex Desk Settings, so this launcher needs no CLAUDE_CONFIG_DIR or CODEX_HOME.
 $ErrorActionPreference = 'Stop'
 $rexProject = $PSScriptRoot
 $rexAddress = 'http://127.0.0.1:4317'
 $rexRunning = $false
 try {
-    $rexResponse = Invoke-WebRequest -Uri "$rexAddress/api/state" -UseBasicParsing -TimeoutSec 2
+    $rexResponse = Invoke-WebRequest -Uri "$rexAddress/api/auth" -UseBasicParsing -TimeoutSec 2
     $rexRunning = $rexResponse.StatusCode -eq 200
 } catch {
     $rexRunning = $false
@@ -17,7 +17,7 @@ if (-not $rexRunning) {
     Start-Process -FilePath $rexNode -ArgumentList @('src/server.js') -WorkingDirectory $rexProject -WindowStyle Hidden -RedirectStandardOutput (Join-Path $rexLocal 'server.log') -RedirectStandardError (Join-Path $rexLocal 'server-error.log')
     for ($rexAttempt = 0; $rexAttempt -lt 20; $rexAttempt++) {
         try {
-            $rexResponse = Invoke-WebRequest -Uri "$rexAddress/api/state" -UseBasicParsing -TimeoutSec 1
+            $rexResponse = Invoke-WebRequest -Uri "$rexAddress/api/auth" -UseBasicParsing -TimeoutSec 1
             if ($rexResponse.StatusCode -eq 200) { $rexRunning = $true; break }
         } catch {
             Start-Sleep -Milliseconds 250

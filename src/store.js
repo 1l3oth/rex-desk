@@ -46,14 +46,19 @@ export function redact(value) {
 }
 
 export class Store extends EventEmitter {
-  constructor(directory) {
+  // A workspace opened through an account passes its unsealed key; a plain data folder keeps vault.key beside the database.
+  constructor(directory, { key, auth, cloud } = {}) {
     super();
     this.directory = path.resolve(directory);
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     mkdirSync(path.join(this.directory, 'artifacts'), { recursive: true });
-    const keyPath = path.join(this.directory, 'vault.key');
-    if (!existsSync(keyPath)) writeFileSync(keyPath, randomBytes(32), { mode: 0o600, flag: 'wx' });
-    this.key = readFileSync(keyPath);
+    if (key) this.key = Buffer.from(key);
+    else {
+      const keyPath = path.join(this.directory, 'vault.key');
+      if (!existsSync(keyPath)) writeFileSync(keyPath, randomBytes(32), { mode: 0o600, flag: 'wx' });
+      this.key = readFileSync(keyPath);
+    }
+    this.auth = auth;
     this.db = new DatabaseSync(path.join(this.directory, 'desk.sqlite'));
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, value TEXT NOT NULL, PRIMARY KEY(kind,id));
@@ -64,7 +69,7 @@ export class Store extends EventEmitter {
     let token = this.get('secret', 'mcp-token');
     if (!token) { token = this.encrypt(randomBytes(32).toString('base64url')); this.put('secret', 'mcp-token', token); }
     this.token = this.decrypt(token);
-    this.cloud = new TursoSync(this);
+    this.cloud = new TursoSync(this, cloud);
     // Running processes cannot be resurrected after a crash. Keep their history and make recovery explicit.
     for (const run of this.list('run')) {
       if (['running', 'queued', 'waiting', 'verifying', 'starting'].includes(run.state)) {

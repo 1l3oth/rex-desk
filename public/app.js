@@ -24,6 +24,7 @@ const pending = runId => ui.snapshot.interactions.filter(item => item.state === 
 async function api(endpoint, { method = 'GET', data } = {}) {
   const response = await fetch(`/api${endpoint}`, { method, headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) });
   const result = await response.json();
+  if (response.status === 401 && result.signIn && ui.snapshot) { location.reload(); throw new Error(result.error); }
   if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
   return result;
 }
@@ -94,10 +95,10 @@ function render() {
   const navButton = ([page, glyph, label]) => `<button class="activity-button ${ui.page === page || page === 'board' && board ? 'active' : ''}" data-page="${page}" ${ui.page === page ? 'aria-current="page"' : ''} aria-label="${label}" title="${label}">${icon(glyph)}${page === 'decisions' && waiting ? `<span class="count" aria-hidden="true">${waiting}</span>` : ''}${page === 'runs' && active ? `<span class="count quiet" aria-hidden="true">${active}</span>` : ''}${page === 'setup' && remaining ? `<span class="count quiet" aria-hidden="true">${remaining}</span>` : ''}</button>`;
   const database = state.database || {}, cloud = { connected: 'Turso synced', syncing: 'Turso uploading', connecting: 'Turso connecting', offline: 'Turso offline', error: 'Turso needs attention' }[database.state] || 'Local only';
   const synced = state.sync.length ? relative(state.sync.map(item => item.at).sort().at(-1)) : '';
-  app.innerHTML = `<div class="shell${side ? ' with-side' : ''}"><nav class="activity" aria-label="Workspace"><span class="brand-mark" title="Rex Desk" aria-hidden="true"><i></i><i></i><i></i><i></i></span>${pages.map(navButton).join('')}<span class="activity-spacer"></span>${[['setup', 'compass', 'Setup'], ['settings', 'settings', 'Settings']].map(navButton).join('')}${themeButton()}</nav>
+  app.innerHTML = `<div class="shell${side ? ' with-side' : ''}"><nav class="activity" aria-label="Workspace"><span class="brand-mark" title="Rex Desk" aria-hidden="true"><i></i><i></i><i></i><i></i></span>${pages.map(navButton).join('')}<span class="activity-spacer"></span>${[['setup', 'compass', 'Setup'], ['settings', 'settings', 'Settings']].map(navButton).join('')}${accountButton()}${themeButton()}</nav>
     ${side ? `<aside class="side" aria-label="${ui.page === 'runs' ? 'Agent runs' : 'Assigned issues'}">${side}</aside>` : ''}
     <main class="main page-${ui.page}${board ? ' page-board' : ''}" id="main" tabindex="-1">${ui.page === 'setup' ? renderSetup(steps) : ui.page === 'settings' ? renderSettings() : ui.page === 'decisions' ? renderDecisions() : ui.page === 'runs' ? renderWorkspace() : ui.page === 'evidence' ? renderEvidence() : board ? renderBoardPage() : renderInboxMain()}</main>
-    <footer class="statusbar"><span class="status-local"><span class="dot"></span>Running on this computer</span><span class="status-${esc(database.state || 'local')}">${cloud}${database.pending ? ` · ${Number(database.pending)} waiting` : ''}</span><span>${active} active · ${state.config.concurrency} worker${state.config.concurrency === 1 ? '' : 's'}</span>${waiting ? `<span class="status-need">${plural(waiting, 'decision')} waiting</span>` : ''}<span class="status-right">${providerName(state.config.provider)} default${synced ? ` · Synced ${synced}` : ''}</span></footer></div>`;
+    <footer class="statusbar"><span class="status-local"><span class="dot"></span>Running on this computer</span>${state.database ? `<span class="status-${esc(database.state || 'local')}">${cloud}${database.pending ? ` · ${Number(database.pending)} waiting` : ''}</span>` : ''}<span>${active} active · ${state.config.concurrency} worker${state.config.concurrency === 1 ? '' : 's'}</span>${waiting ? `<span class="status-need">${plural(waiting, 'decision')} waiting</span>` : ''}<span class="status-right">${providerName(state.config.provider)} default${synced ? ` · Synced ${synced}` : ''}</span></footer></div>`;
   if (ui.page === 'settings') for (const repository of ui.draft.repositories) previewBranch(repository.id);
   restoreTranscript();
   if (['setup', 'settings'].includes(ui.page) && !ui.agents && !ui.agentsLoading && !ui.agentsError) void loadAgents();
@@ -528,7 +529,7 @@ function providerSelect(name, value) { return `<select name="${name}"><option va
 function renderSettings() {
   const config = ui.draft || ui.snapshot.config;
   return `${heading('Settings', 'Connect your projects once. Change accounts, keys, repositories, and agent defaults here.')}
-    <div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><a href="#connections">Connections</a><a href="#qa">QA verification</a><a href="#schedule">Schedule</a><a href="#repositories">Repositories</a><a href="#github">GitHub</a><a href="#agents">Agents & workflow</a><a href="#agent-sign-in">Agent sign-in</a><a href="#cloud-backup">Cloud backup</a><a href="#appearance">Appearance</a><a href="#ai-connection">AI connection</a></nav>
+    <div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><a href="#connections">Connections</a><a href="#qa">QA verification</a><a href="#schedule">Schedule</a><a href="#repositories">Repositories</a><a href="#github">GitHub</a><a href="#agents">Agents & workflow</a><a href="#agent-sign-in">Agent sign-in</a>${ui.snapshot.account?.role === 'member' ? '' : '<a href="#cloud-backup">Cloud backup</a>'}<a href="#appearance">Appearance</a><a href="#ai-connection">AI connection</a></nav>
     <form id="settings-form"><section class="settings-section" id="connections"><h2>Flow & Morningmate</h2><p>Only issues assigned to your account in these project IDs are imported. API keys stay encrypted on this computer.</p>${config.sources.map((source, index) => renderSourceSettings(source, index)).join('')}${button(`${icon('plus')} Add connection`, 'add-source', '', 'type="button"')}</section>
     <section class="settings-section" id="qa"><h2>QA verification</h2><p>Re-test fixes developers marked complete. The agent opens this web test site in a recorded browser with your own sign-in, checks the expected behavior, and reports pass, fail, or blocked. It never changes code.</p><div class="settings-card">${inputField('Test site address', 'qa.url', config.qa?.url || '', 'The web app to test, for example your staging site.', 'url', 'https://')}<div class="actions">${button(`${icon('link')} Sign in to the test site`, 'qa-sign-in', 'small', 'type="button"')}<small class="muted" data-qa-session>${qaSessionText()}</small></div><small class="muted">A browser window opens. Sign in as you normally do, then close it; the session stays on this computer for QA checks only.</small></div></section>
     <section class="settings-section" id="schedule"><h2>Schedule</h2><p>Let Rex Desk start work on its own while this computer is on. At the set time it syncs, a main agent sorts new issues, and it starts up to your daily limit. Approvals and results wait in Needs you.</p><div class="settings-card"><label class="field check"><input type="checkbox" name="schedule.enabled" ${config.schedule?.enabled ? 'checked' : ''}><span>Start work automatically on a schedule</span></label><div class="field-row">${inputField('Time', 'schedule.time', config.schedule?.time || '09:00', '', 'time')}${inputField('Most runs per day', 'schedule.maxRuns', config.schedule?.maxRuns || 6, 'Caps agent cost. 1–20.', 'number')}</div><fieldset class="day-picker"><legend>Days</legend>${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => `<label><input type="checkbox" name="schedule.days" value="${index}" ${(config.schedule?.days || [1, 2, 3, 4, 5]).includes(index) ? 'checked' : ''}><span>${day}</span></label>`).join('')}</fieldset><label class="field check"><input type="checkbox" name="schedule.verify" ${config.schedule?.verify !== false ? 'checked' : ''}><span>QA checks for issues awaiting verification</span></label><label class="field check"><input type="checkbox" name="schedule.fix" ${config.schedule?.fix ? 'checked' : ''}><span>Code fixes for open bugs (needs a source repository)</span></label><div class="actions">${button('Run now', 'schedule-run', 'small', 'type="button"')}<small class="muted" data-schedule-status>${esc(scheduleText())}</small></div><label class="field check"><input type="checkbox" id="autostart"><span>Start Rex Desk when I sign in to Windows, so the schedule runs without opening the app</span></label></div></section>
@@ -536,7 +537,7 @@ function renderSettings() {
     <section class="settings-section" id="github"><h2>GitHub</h2><p>Draft PRs, pushes, and clones use the active account. Sign in as many accounts as you need; Rex Desk uses the GitHub CLI login and never stores a GitHub token.</p><div class="settings-card" data-github="full">${renderGithub()}</div></section>
     <section class="settings-section" id="agents"><h2>Agents & workflow</h2><p>Use your installed Claude Code and Codex sign-ins. You can override the provider for each run.</p><div class="settings-card"><div class="field-row">${inputField('Your name', 'name', config.name)}<label class="field"><span>Default agent</span>${providerSelect('provider', config.provider)}</label></div><label class="field"><span>Run workers in</span>${executionSelect(config.execution)}<small>Orca terminals show the agent live and keep tool approvals there. Questions, evidence, and PR approval stay in Rex Desk either way.</small></label><div class="field-row">${inputField('Parallel workers', 'concurrency', config.concurrency, 'Main agent runs separately. Start with 1 or 2 workers.', 'number')}${inputField('Sync interval (minutes)', 'syncMinutes', config.syncMinutes, 'Set 0 to sync manually.', 'number')}</div>${inputField('Branch prefix', 'branchPrefix', config.branchPrefix, 'For example: temp/rex. Git branch names cannot begin with /.')}<div class="field-row">${inputField('Claude model (optional)', 'model.claude', config.models?.claude || '', 'Leave blank to use the installed provider’s default.')}${inputField('Codex model (optional)', 'model.codex', config.models?.codex || '', 'Use a model available to your signed-in account.')}</div><label class="field check"><input type="checkbox" name="requireVideo" ${config.requireVideo ? 'checked' : ''}><span>Require a browser recording and passing browser assertion before review</span></label><label class="field check"><input type="checkbox" name="reportToOrbit" ${config.reportToOrbit ? 'checked' : ''}><span>Let verified agents send their final report through my installed Orbit MCP</span></label><label class="field check"><input type="checkbox" name="autoPrLowRisk" ${config.autoPrLowRisk ? 'checked' : ''}><span>Automatically push and create a draft PR for verified low-risk fixes (risk 1–2/10)</span></label><small class="muted">Automatic PRs require a small style, markup, documentation, or test-only change, passing tests, current evidence, and no human-review flag. Application code, sensitive changes, and higher scores require review. Tracker changes still require approval. Nothing is merged automatically.</small></div>${button('Check installed tools', 'diagnostics', '', 'type="button"')}<div id="diagnostics"></div></section>
     <section class="settings-section" id="agent-sign-in"><h2>Agent sign-in</h2><p>Rex Desk runs Claude Code and Codex with the profile folder you choose here. The choice is saved immediately and used for every new run.</p><div data-agent-profiles>${renderAgentProfiles()}</div></section>
-    <section class="settings-section" id="cloud-backup"><h2>Cloud backup</h2><p>Work history, settings, and evidence records are written locally first, then copied to your Turso database. If Turso is offline, changes wait in a local outbox and upload automatically.</p><div data-database>${renderDatabase()}</div></section>
+    ${ui.snapshot.account?.role === 'member' ? '' : `<section class="settings-section" id="cloud-backup"><h2>Cloud backup</h2><p>Work history, settings, and evidence records are written locally first, then copied to your Turso database. If Turso is offline, changes wait in a local outbox and upload automatically.</p><div data-database>${renderDatabase()}</div></section>`}
     <section class="settings-section" id="appearance"><h2>Appearance</h2><p>Choose a theme for this browser. Your choice takes effect immediately.</p><label class="field"><span>Color theme</span><select id="theme-preference">${[['system', 'Follow system'], ['light', 'Light'], ['dark', 'Dark']].map(([value, label]) => `<option value="${value}" ${window.rexTheme.preference === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label></section>
     <section class="settings-section" id="ai-connection"><h2>Connect an existing AI</h2><p>Rex-managed agents connect automatically. To let another Claude Code, Codex, or cloud AI read tasks and ask you questions, give it the setup prompt below. Local setup needs no key.</p>${renderMcpSetup()}<details class="manual-ids"><summary>Manual connection details</summary>${button(`${icon('link')} Show URL and access token`, 'mcp-setup', 'small', 'type="button"')}<div id="mcp-setup"></div></details></section>
     <div class="settings-save"><small id="settings-status">Changes are saved only when you choose Save settings.</small><button type="submit" class="button primary">Save settings</button></div></form></div>`;
@@ -895,6 +896,42 @@ document.addEventListener('input', event => {
   filterPicker(parts, event.target.value);
 }, true);
 
+// ---- Sign-in. Each account is its own workspace on this computer; Open from cloud brings an account from its own Turso database.
+const loginTabs = [['signin', 'Sign in'], ['create', 'Create account'], ['cloud', 'Open from cloud']];
+function renderLogin(auth, { tab, error = '' } = {}) {
+  const unclaimed = auth.workspaces.find(item => !item.claimed), known = auth.workspaces.filter(item => item.claimed);
+  const active = tab || (unclaimed || known.length ? 'signin' : 'create');
+  const stay = `<label class="field check"><input type="checkbox" name="staySignedIn" checked><span>Stay signed in on this computer</span></label>`;
+  const email = (value = '') => `<label class="field"><span>Email</span><input name="email" type="email" autocomplete="username" required value="${esc(value)}" ${value ? '' : 'autofocus'}></label>`;
+  const secret = (label, name = 'passphrase', complete = 'current-password') => `<label class="field"><span>${label}</span><input name="${name}" type="password" autocomplete="${complete}" minlength="8" required ${name === 'passphrase' && known.length === 1 && active === 'signin' ? 'autofocus' : ''}></label>`;
+  const forms = {
+    signin: `${unclaimed ? `<div class="setup-callout">${icon('alert')}<span>This computer has a workspace from before accounts. Sign in with your email and a new passphrase (8+ characters) to claim it. The first claim becomes this computer's superadmin.</span></div><input type="hidden" name="claimId" value="${esc(unclaimed.id)}">` : ''}
+      ${known.length ? `<div class="login-known">${known.map(item => `<button type="button" class="login-account" data-action="login-pick" data-email="${esc(item.email)}"><span class="login-avatar">${esc(item.email[0].toUpperCase())}</span><span><strong>${esc(item.email)}</strong><small>${item.role === 'superadmin' ? 'Superadmin' : 'Member'}${item.lastUsedAt ? ` · ${relative(item.lastUsedAt).toLowerCase()}` : ''}</small></span></button>`).join('')}</div>` : ''}
+      ${email(known.length === 1 ? known[0].email : '')}${secret('Passphrase')}${stay}<button class="button primary login-submit" type="submit">Sign in</button>`,
+    create: `${email()}${secret('Passphrase', 'passphrase', 'new-password')}${secret('Repeat passphrase', 'repeat', 'new-password')}${stay}<p class="login-note">${auth.workspaces.length ? 'Your account gets its own workspace: issues, keys, and history are separate from other accounts on this computer.' : 'The first account on this computer becomes its superadmin.'} Rex Desk cannot recover a forgotten passphrase.</p><button class="button primary login-submit" type="submit">Create account</button>`,
+    cloud: `<p class="login-note">Open your account on this computer from the Turso database connected under Cloud backup on your other computer.</p><label class="field"><span>Database URL</span><input name="url" placeholder="libsql://your-database.turso.io" autocomplete="off" spellcheck="false" required></label><label class="field"><span>Database token</span><input name="authToken" type="password" autocomplete="off" required></label>${email()}${secret('Passphrase')}${stay}<button class="button primary login-submit" type="submit">Open my account</button>`,
+  };
+  app.innerHTML = `<main class="login" id="main"><section class="login-card" aria-labelledby="login-title"><div class="login-brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><h1 id="login-title">Rex Desk</h1></div>
+    ${auth.occupied ? `<p class="login-occupied">${icon('alert')}<span>${esc(auth.occupied)} is signed in on this computer. Signing in to another account closes that workspace and stops its running agents.</span></p>` : ''}
+    <div class="view-switch login-tabs" role="tablist">${loginTabs.map(([key, label]) => `<button type="button" role="tab" aria-selected="${key === active}" class="${key === active ? 'active' : ''}" data-action="login-tab" data-tab-name="${key}">${label}</button>`).join('')}</div>
+    <form id="login-form" data-mode="${active}">${forms[active]}<p class="form-error" role="alert">${esc(error)}</p></form></section></main>`;
+  ui.auth = auth;
+  app.querySelector('[autofocus]')?.focus();
+}
+async function submitLogin(form) {
+  const data = Object.fromEntries(new FormData(form)), mode = form.dataset.mode, submit = form.querySelector('[type=submit]');
+  if (mode === 'create' && data.passphrase !== data.repeat) { form.querySelector('.form-error').textContent = 'The passphrases do not match.'; return; }
+  submit.disabled = true; submit.textContent = mode === 'cloud' ? 'Restoring your account…' : 'Signing in…';
+  try {
+    await api(mode === 'create' ? '/auth/create' : mode === 'cloud' ? '/auth/cloud' : '/auth/login', { method: 'POST', data: { ...data, staySignedIn: data.staySignedIn === 'on' } });
+    location.reload();
+  } catch (error) { renderLogin(ui.auth, { tab: mode, error: error.message }); const field = app.querySelector('[name=email]'); if (field) field.value = data.email || ''; }
+}
+function accountButton() {
+  const account = ui.snapshot.account;
+  if (!account?.email) return '';
+  return `<div class="account-anchor"><button class="activity-button account-button" data-action="account-menu" aria-label="Account: ${esc(account.email)}" title="${esc(account.email)}" aria-expanded="${Boolean(ui.accountMenu)}"><span class="login-avatar">${esc(account.email[0].toUpperCase())}</span></button>${ui.accountMenu ? `<div class="account-menu" role="menu"><strong>${esc(account.email)}</strong><small>${account.role === 'superadmin' ? 'Superadmin' : 'Member'} · this computer</small>${button(`${icon('close')} Sign out`, 'sign-out', 'small quiet', 'role="menuitem"')}</div>` : ''}</div>`;
+}
 async function loadMessages() {
   if (ui.page === 'inbox') await loadTaskDetail();
   const issueRun = ui.page === 'inbox' && ui.tab === 'messages' && selectedTask() ? taskRun(selectedTask()) : null;
@@ -990,6 +1027,10 @@ document.addEventListener('click', event => {
   }
   if (target.dataset.run) { navigate('runs', { runId: target.dataset.run }); return; }
   const name = target.dataset.action; if (!name) return;
+  if (name === 'login-tab') { renderLogin(ui.auth, { tab: target.dataset.tabName }); return; }
+  if (name === 'login-pick') { const form = document.querySelector('#login-form'); form.elements.email.value = target.dataset.email; form.elements.passphrase.focus(); return; }
+  if (name === 'account-menu') { ui.accountMenu = !ui.accountMenu; render(); return; }
+  if (name === 'sign-out') { void action(async () => { await api('/auth/logout', { method: 'POST' }); location.reload(); }); return; }
   // Run actions in a pane apply to that pane's run.
   const paneRun = target.closest('[data-pane-run]')?.dataset.paneRun; if (paneRun && name !== 'close-run') ui.selectedRun = paneRun;
   if (name === 'retry-task-detail') { taskErrors.delete(ui.selectedTask); render(); void loadTaskDetail(); return; }
@@ -1281,6 +1322,7 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('submit', event => {
   const form = event.target;
+  if (form.id === 'login-form') { event.preventDefault(); void submitLogin(form); return; }
   if (!['settings-form', 'launch-form', 'publish-form'].includes(form.id) && !form.dataset.interaction && !form.dataset.composer) return;
   event.preventDefault();
   void action(async () => {
@@ -1326,7 +1368,11 @@ document.addEventListener('submit', event => {
   });
 });
 
-try {
+// Account mode shows the sign-in screen until this window has a session; a single data folder opens directly.
+const auth = await api('/auth').catch(() => null);
+if (auth?.mode === 'accounts' && !auth.current) renderLogin(auth);
+else try {
+  if (auth?.current?.cloud?.reason) setTimeout(() => toast(auth.current.cloud.reason, true), 600);
   restoreWorkspace();
   await refresh({ force: true });
   if (!ui.snapshot.config.sources.length && !ui.snapshot.tasks.length) navigate('setup');
@@ -1354,4 +1400,8 @@ document.addEventListener('change', event => {
     try { const status = await api('/autostart', { method: 'POST', data: { enabled: box.checked } }); box.checked = status.enabled; toast(status.enabled ? 'Rex Desk will start in the background when you sign in to Windows.' : 'Rex Desk will no longer start at sign-in.'); }
     finally { box.disabled = false; }
   });
+});
+// The account menu closes when the click lands anywhere else.
+document.addEventListener('click', event => {
+  if (ui.accountMenu && !event.target.closest('.account-anchor')) { ui.accountMenu = false; render(); }
 });

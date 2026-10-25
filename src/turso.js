@@ -59,7 +59,11 @@ export class TursoSync {
       await this.client.batch([
         'CREATE TABLE IF NOT EXISTS rex_records (workspace TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(workspace,kind,id))',
         'CREATE TABLE IF NOT EXISTS rex_events (workspace TEXT NOT NULL, sequence INTEGER NOT NULL, run_id TEXT, kind TEXT, visible INTEGER, value TEXT, created_at TEXT, PRIMARY KEY(workspace,sequence))',
+        'CREATE TABLE IF NOT EXISTS rex_workspaces (workspace TEXT PRIMARY KEY, name TEXT NOT NULL, kdf TEXT NOT NULL, sealed_key TEXT NOT NULL, updated_at TEXT)',
       ], 'write');
+      // Another computer finds this workspace by name; only the passphrase unseals its key.
+      if (this.store.auth?.kdf) await this.client.batch([{ sql: 'INSERT INTO rex_workspaces(workspace,name,kdf,sealed_key,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace) DO UPDATE SET name=excluded.name,kdf=excluded.kdf,sealed_key=excluded.sealed_key,updated_at=excluded.updated_at',
+        args: [this.workspace, this.store.auth.name, JSON.stringify(this.store.auth.kdf), this.store.auth.sealedKey, new Date().toISOString()] }], 'write');
       if (this.store.fresh && !existsSync(this.marker)) await this.restoreIfAvailable();
       const marker = existsSync(this.marker) ? JSON.parse(readFileSync(this.marker, 'utf8')) : null;
       if (marker?.url !== this.connection.url || marker?.workspace !== this.workspace) this.seed();
@@ -76,6 +80,25 @@ export class TursoSync {
       for (const row of this.store.db.prepare('SELECT * FROM records').all()) this.record(row.kind, row.id, JSON.parse(row.value));
       for (const row of this.store.db.prepare('SELECT * FROM events ORDER BY sequence').all()) this.event(row);
     });
+  }
+  // Signing in on a computer that already has this workspace: upload anything left from its last session, then take the
+  // cloud copy, which holds whatever another computer did since. Sequential use is safe; simultaneous use keeps the last write.
+  async pullLatest() {
+    await this.flush();
+    if (this.state !== 'connected' || this.status().pending) return { pulled: false, reason: this.error || 'Local changes are still uploading.' };
+    const records = await this.client.execute({ sql: 'SELECT kind,id,value FROM rex_records WHERE workspace=?', args: [this.workspace] });
+    if (!records.rows.length) return { pulled: false, reason: 'The cloud copy is empty.' };
+    const events = await this.client.execute({ sql: 'SELECT * FROM rex_events WHERE workspace=? ORDER BY sequence', args: [this.workspace] });
+    this.store.transaction(() => {
+      this.store.db.exec('DELETE FROM records; DELETE FROM events;');
+      const insert = this.store.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?)');
+      for (const row of records.rows) insert.run(row.kind, row.id, row.value);
+      const event = this.store.db.prepare('INSERT INTO events(sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?)');
+      for (const row of events.rows) event.run(Number(row.sequence), row.run_id, row.kind, Number(row.visible), row.value, row.created_at);
+    });
+    this.store.token = this.store.decrypt(this.store.get('secret', 'mcp-token'));
+    for (const run of this.store.list('run')) if (['running', 'queued', 'waiting', 'starting', 'verifying'].includes(run.state)) this.store.put('run', run.id, { ...run, state: 'interrupted', error: 'Opened on another computer. Resume this run explicitly.' });
+    this.notify(); return { pulled: true, records: records.rows.length, events: events.rows.length };
   }
   async restoreIfAvailable() {
     const records = await this.client.execute({ sql: 'SELECT kind,id,value FROM rex_records WHERE workspace=?', args: [this.workspace] });
@@ -144,4 +167,19 @@ export class TursoSync {
     if (this.ready) await this.flush();
     this.closed = true; this.client?.close();
   }
+}
+
+// Sign-in from a new computer: find a published workspace by name in the person's own Turso database.
+export async function findCloudWorkspace({ url, authToken, name }, clientFactory = createClient) {
+  const parsed = new URL(url);
+  if (!['libsql:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('Use a libsql:// or HTTPS Turso database URL without credentials in the URL.');
+  const client = clientFactory({ url, authToken });
+  const hide = message => String(message).replaceAll(authToken || '\0', '[redacted]').replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]');
+  try {
+    const result = await client.execute({ sql: 'SELECT workspace,name,kdf,sealed_key FROM rex_workspaces WHERE lower(name)=lower(?)', args: [String(name || '').trim()] })
+      .catch(error => { if (/no such table/i.test(error.message)) return { rows: [] }; throw new Error(hide(error.message)); });
+    const row = result.rows[0];
+    if (!row) throw new Error('No workspace with that name is published in this database. On the first computer, sign in with a passphrase and connect Cloud backup.');
+    return { id: row.workspace, name: row.name, sealed: { kdf: JSON.parse(row.kdf), sealedKey: row.sealed_key } };
+  } finally { client.close(); }
 }

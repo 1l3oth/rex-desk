@@ -28,6 +28,16 @@ npm run build --prefix desktop
 
 On launch it starts `node src/server.js` from the checkout if nothing answers on port 4317, then shows the dashboard. It finds the checkout through `REX_DESK_HOME`, then the folder it was built from, then `F:\rex-desk`. Closing the window leaves the server running, so agent runs continue. The dashboard page gets no Tauri APIs. `Start-RexDesk.ps1 -App` opens the dashboard as an Edge app window instead.
 
+## Accounts
+
+Rex Desk opens to a sign-in screen. Each account is an email and passphrase with its own workspace (issues, keys, QA sign-in, history), separate from other accounts on the computer. The passphrase seals the workspace's vault key with scrypt and AES-256-GCM; Rex Desk keeps only the sealed key and cannot recover a forgotten passphrase. **Stay signed in on this computer** keeps the key protected by Windows for your Windows user only (DPAPI), so the workspace reopens after a restart and schedules keep running.
+
+The first account on a computer, or any email in its `superadmins` list in `accounts.json`, is a **superadmin**. Only superadmins see **Cloud backup**; the database token lives encrypted in that account's own workspace, so other accounts never hold it. Email addresses are not verified, so the superadmin role controls what this installation shows, while the passphrase-sealed key is what protects data.
+
+**Open from cloud** signs in on another computer: enter the Turso URL and token from Cloud backup plus your email and passphrase. Connecting Cloud backup publishes the account's sealed key and email to that database, never the passphrase. Signing in uploads anything left on this computer and then downloads the newest cloud copy; signing out uploads everything. Use one computer at a time: simultaneous changes keep the last write.
+
+A data folder from before accounts appears as an unclaimed workspace; the first sign-in with an email and new passphrase claims it and keeps its data. Starting with an explicit data folder (tests and scripts) opens it directly without accounts.
+
 ## Guided setup
 
 A new workspace opens **Setup**. Each step reads your real settings, so the page always shows the actual remaining work; the issue list shows the next step until required setup is done.

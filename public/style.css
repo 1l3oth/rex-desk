@@ -510,3 +510,21 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 .day-picker label{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border:1px solid var(--line);border-radius:5px;background:var(--sunken);cursor:pointer;font-size:11.5px}
 .day-picker input{accent-color:var(--accent);margin:0}
 .project-bulk{margin:0 0 6px;gap:4px}
+/* Sign-in */
+.login{min-height:100dvh;display:grid;place-items:center;padding:24px 16px;background:var(--bg)}
+.login-card{width:min(400px,100%);padding:22px 22px 18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.login-brand{display:flex;align-items:center;gap:10px;margin-bottom:14px}.login-brand .brand-mark{margin:0}.login-brand h1{font-size:16px}
+.login-tabs{display:flex;width:100%;margin-bottom:14px}.login-tabs button{flex:1;justify-content:center;height:24px}
+.login-known{display:grid;gap:4px;margin-bottom:12px}
+.login-account{display:flex;align-items:center;gap:10px;width:100%;padding:6px 8px;border:1px solid var(--line-soft);border-radius:6px;background:var(--raised);text-align:left}
+.login-account:hover{border-color:var(--control-hover)}.login-account strong{display:block;font-weight:500}.login-account small{color:var(--muted);font-size:11px}
+.login-avatar{display:inline-grid;place-items:center;width:24px;height:24px;flex-shrink:0;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:11px}
+.login-submit{width:100%;height:32px;margin-top:4px}
+.login-note{margin:0 0 10px;color:var(--muted);line-height:1.55}
+.login-occupied{display:flex;gap:8px;margin:0 0 12px;padding:7px 10px;border:1px solid var(--amber-line);border-radius:6px;background:var(--amber-soft)}.login-occupied .icon{color:var(--amber);width:14px;height:14px;margin-top:2px}
+.login .setup-callout{margin-bottom:12px}
+.account-anchor{position:relative}
+.account-button .login-avatar{width:22px;height:22px;font-size:10.5px}
+.account-menu{position:absolute;left:52px;bottom:4px;z-index:40;display:grid;gap:2px;min-width:220px;padding:10px 10px 6px;border:1px solid var(--line);border-radius:8px;background:var(--raised);box-shadow:var(--overlay)}
+.account-menu strong{font-weight:600;overflow-wrap:anywhere}.account-menu small{color:var(--muted);margin-bottom:6px}.account-menu .button{justify-content:flex-start}
+@media(max-width:700px){.account-menu{left:auto;right:8px;bottom:58px}}
