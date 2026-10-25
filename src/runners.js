@@ -131,11 +131,20 @@ export class CodexRunner {
 // desk_publish carry their own dashboard approval. Only desk_dispatch starts new work, so it alone keeps the permission prompt.
 const quietRexTool = name => name.startsWith('mcp__rex_desk__desk_') && name !== 'mcp__rex_desk__desk_dispatch';
 
+// Agents run on the Claude Code profile's claude.ai sign-in, so they use the person's Claude subscription. An API key
+// left in the environment would quietly switch every run to pay-per-token billing, so it is removed unless asked for.
+export const apiKeyVariables = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
+export function subscriptionEnv(env) {
+  const result = { ...env };
+  if (result.REX_AGENT_API_KEY !== '1') for (const name of apiKeyVariables) delete result[name];
+  return result;
+}
+
 export class ClaudeRunner {
   constructor(options) { Object.assign(this, options); }
   async start(prompt) {
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
-    const env = { ...(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
+    const env = { ...subscriptionEnv(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
     delete env.CLAUDECODE;
     const executable = resolveCommand('claude');
     const connections = existingMcpConnections(this.sourcePath, env.CLAUDE_CONFIG_DIR), allowedTools = new Set();
@@ -166,14 +175,14 @@ export class ClaudeRunner {
     };
     this.query = query({ prompt, options });
     for await (const message of this.query) {
-      if (message.type === 'system' && message.subtype === 'init') this.event('session', { sessionId: message.session_id });
+      if (message.type === 'system' && message.subtype === 'init') { this.apiKeySource = message.apiKeySource; this.event('session', { sessionId: message.session_id, apiKeySource: message.apiKeySource }); }
       if (message.type === 'assistant') {
         const content = message.message?.content?.filter(block => block.type !== 'thinking' && block.type !== 'redacted_thinking');
         this.event('agent-operation', { type: 'assistant', content });
       }
       if (message.type === 'user') this.event('agent-operation', { type: 'tool-result', content: message.message?.content });
       if (message.type === 'result') {
-        this.event('agent-result', { result: message.result, errors: message.errors, subtype: message.subtype, cost: message.total_cost_usd });
+        this.event('agent-result', { result: message.result, errors: message.errors, subtype: message.subtype, cost: message.total_cost_usd, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });
         // The CLI reports a signed-out profile as an ordinary result. Surface it as a setup problem, not agent output.
         if (/not logged in|please run \/login/i.test(String(message.result || ''))) throw new Error(`Claude Code profile ${env.CLAUDE_CONFIG_DIR || '~/.claude'} is not signed in. Open Setup, choose a signed-in Claude Code profile, then continue this run.`);
         if (message.is_error) throw new Error(message.errors?.join('\n') || message.result || `Claude ended with ${message.subtype}.`);

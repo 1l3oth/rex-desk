@@ -1,3 +1,4 @@
+import { apiKeyVariables } from './runners.js';
 import { execFile } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
@@ -58,7 +59,7 @@ export class OrcaRunner {
     const spec = path.join(directory, `agent-${Date.now()}.json`);
     const env = this.agentEnv || process.env, key = this.run.provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME';
     writeFileSync(spec, JSON.stringify({ runId: this.run.id, provider: this.run.provider, cwd: this.cwd, prompt, token: this.token, mcpUrl: this.mcpUrl, model: this.model,
-      executable: this.executable || resolveCommand(this.run.provider), env: env[key] ? { [key]: env[key] } : {}, unset: env[key] ? [] : [key] }), { mode: 0o600 });
+      executable: this.executable || resolveCommand(this.run.provider), env: env[key] ? { [key]: env[key] } : {}, unset: [...(env[key] ? [] : [key]), ...(this.run.provider === 'claude' && env.REX_AGENT_API_KEY !== '1' ? apiKeyVariables : [])] }), { mode: 0o600 });
     const command = `node "${launcher}" "${spec}"`;
     let terminal;
     try { terminal = await orcaJson(['terminal', 'create', '--worktree', `path:${this.cwd}`, '--title', `Rex · ${String(this.run.title).slice(0, 40)}`, '--command', command], this.orca); }
