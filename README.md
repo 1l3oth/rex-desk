@@ -17,16 +17,22 @@ npm start
 
 Open **http://127.0.0.1:4317**. On Windows, `Start-RexDesk.ps1` starts the server in the background and opens the dashboard; `-NoBrowser` skips opening it. It reuses a running server. The launcher needs no `CLAUDE_CONFIG_DIR` or `CODEX_HOME`: agent profiles are saved in Settings.
 
-### Desktop app
+### Desktop app and updates
 
-`desktop/` is a Tauri window around the same dashboard. Install it from the GitHub release (`Rex Desk_<version>_x64-setup.exe`, per-user, no admin) or build it with Rust and the MSVC build tools:
+The installer from [DaraBoth/rex-desk-releases](https://github.com/DaraBoth/rex-desk-releases/releases/latest) is self-contained: it carries Node.js and the Rex Desk server, keeps data in `%APPDATA%\Rex Desk`, clones repositories into `%USERPROFILE%\Rex Desk repositories`, and downloads Playwright's Chromium in the background on first launch. Claude Code, Codex, Git, and `gh` are still needed for agents, worktrees, and PRs; Setup shows what is missing.
+
+The installed app checks that repository 30 seconds after starting and every six hours, downloads a newer installer in the background, and verifies its SHA-256 and Ed25519 signature against the release key built into `src/updates.js`. **Update to x.y.z** in the status bar (or Settings → Updates → **Restart to update**) installs it once no agents are running and reopens Rex Desk. A source checkout never updates itself.
+
+To publish: raise `version` in `desktop/src-tauri/tauri.conf.json` and `desktop/src-tauri/Cargo.toml`, then run `node scripts/release-desktop.mjs --notes "What changed"`. It builds, signs with `%USERPROFILE%\.rex-desk\release-signing-key.pem`, refuses anything the app would reject, and uploads the installer and `latest.json` as the releases repository's owner. Keep that key file backed up and private: it is the only key installed apps accept.
+
+To build without publishing (Rust and the MSVC build tools required):
 
 ```powershell
 npm install --prefix desktop
 npm run build --prefix desktop
 ```
 
-On launch it starts `node src/server.js` from the checkout if nothing answers on port 4317, then shows the dashboard. It finds the checkout through `REX_DESK_HOME`, then the folder it was built from, then `F:\rex-desk`. Closing the window leaves the server running, so agent runs continue. The dashboard page gets no Tauri APIs. `Start-RexDesk.ps1 -App` opens the dashboard as an Edge app window instead.
+The build stages this Node runtime and the server into the installer (`desktop/stage.mjs`). On launch the window starts that bundled server if nothing answers on port 4317; a development build without the payload falls back to a checkout (`REX_DESK_HOME`, the folder it was built from, then `F:\rex-desk`) and the system Node. `rex-desk.exe --background` starts the server without a window, which Start Rex Desk when I sign in to Windows uses. Closing the window leaves the server running, so agent runs continue. The dashboard page gets no Tauri APIs. `Start-RexDesk.ps1 -App` opens the dashboard as an Edge app window instead.
 
 ## Accounts
 

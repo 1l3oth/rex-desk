@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, createR
 import { Store } from './store.js';
 import { Accounts, cleanEmail } from './accounts.js';
 import { findCloudWorkspace } from './turso.js';
+import { Updates } from './updates.js';
 import { randomBytes } from 'node:crypto';
 import { Desk } from './coordinator.js';
 import { handleMcp } from './mcp.js';
@@ -44,7 +45,7 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, cloudClientFactory } = {}) {
+export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, cloudClientFactory, updateOptions } = {}) {
   const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataRoot, 'runtime.lock');
@@ -58,6 +59,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   writeFileSync(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 });
   // One workspace is open at a time. A plain data folder (tests, scripts) opens immediately; account mode waits for sign-in.
   const accounts = dataDirectory ? null : new Accounts(dataRoot);
+  const updates = new Updates(dataRoot, updateOptions);
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
   let session = null, address = '';
@@ -166,20 +168,29 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         const heartbeat = setInterval(() => response.write(': keepalive\n\n'), 25000);
         request.on('close', () => { clients.delete(response); clearInterval(heartbeat); }); return;
       }
-      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, account: { email: session.email, role: role() }, ...(role() === 'superadmin' ? {} : { database: null }) }); }
+      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: updates.status(), account: { email: session.email, role: role() }, ...(role() === 'superadmin' ? {} : { database: null }) }); }
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
       if (url.pathname === '/api/repositories/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());
       if (url.pathname === '/api/qa/sign-in' && request.method === 'POST') return json(response, 200, await desk.evidence.openQaSignIn(store.config().qa?.url));
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
+      if (url.pathname === '/api/update/check' && request.method === 'POST') return json(response, 200, await updates.check());
+      if (url.pathname === '/api/update/install' && request.method === 'POST') {
+        const busy = store.list('run').filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state)).length;
+        if (busy) throw new Error(`${busy} agent run${busy === 1 ? ' is' : 's are'} still active. Stop or finish them before updating.`);
+        updates.install(process.pid);
+        json(response, 200, { restarting: true });
+        // The helper waits for this process to exit before the installer replaces its files.
+        setTimeout(() => void handle.close().finally(() => process.exit(0)), 300); return;
+      }
       if (url.pathname === '/api/autostart' && request.method === 'GET') return json(response, 200, autostartStatus());
       if (url.pathname === '/api/autostart' && request.method === 'POST') return json(response, 200, await setAutostart(Boolean((await body(request)).enabled), root));
       if (url.pathname === '/api/github' && request.method === 'GET') return json(response, 200, await githubAccounts());
       if (url.pathname === '/api/github/login' && request.method === 'POST') return json(response, 200, await startGithubLogin());
       if (url.pathname === '/api/github/login' && request.method === 'DELETE') return json(response, 200, cancelGithubLogin());
       if (url.pathname === '/api/github/switch' && request.method === 'POST') return json(response, 200, await switchGithubAccount((await body(request)).user));
-      if (url.pathname === '/api/repositories/clone' && request.method === 'POST') return json(response, 200, await cloneRepository((await body(request)).repository, path.dirname(root)));
+      if (url.pathname === '/api/repositories/clone' && request.method === 'POST') return json(response, 200, await cloneRepository((await body(request)).repository, process.env.REX_CLONE_DIR || path.dirname(root)));
       if (url.pathname === '/api/repositories/branch-preview' && request.method === 'POST') {
         const input = await body(request);
         return json(response, 200, { branch: issueBranch(input.pattern, { prefix: input.prefix || 'temp/rex' }) });
@@ -302,10 +313,15 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     void desk.scheduleTick().catch(error => store.event('', 'schedule-error', { message: error.message }, true));
   }, 15000);
   timer.unref();
-  return { server, address, accounts, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
-    clearInterval(timer); await closeSession(); for (const client of clients) client.end();
+  // The installed app looks for a signed update shortly after start and every six hours.
+  const updateTimer = updates.state.supported ? setInterval(() => void updates.check(), 6 * 3600000) : null;
+  const firstCheck = updates.state.supported ? setTimeout(() => void updates.check().then(notify), 30000) : null;
+  updateTimer?.unref(); firstCheck?.unref();
+  const handle = { server, address, accounts, updates, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
+    clearInterval(timer); clearInterval(updateTimer); clearTimeout(firstCheck); await closeSession(); for (const client of clients) client.end();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); unlinkSync(lockPath);
   } };
+  return handle;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

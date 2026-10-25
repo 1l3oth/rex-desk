@@ -528,3 +528,6 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 .account-menu{position:absolute;left:52px;bottom:4px;z-index:40;display:grid;gap:2px;min-width:220px;padding:10px 10px 6px;border:1px solid var(--line);border-radius:8px;background:var(--raised);box-shadow:var(--overlay)}
 .account-menu strong{font-weight:600;overflow-wrap:anywhere}.account-menu small{color:var(--muted);margin-bottom:6px}.account-menu .button{justify-content:flex-start}
 @media(max-width:700px){.account-menu{left:auto;right:8px;bottom:58px}}
+.status-update{height:18px;padding:0 8px;border:0;border-radius:9px;background:var(--status-need);color:#1a1300;font:600 11px var(--sans)}
+.status-update:hover{filter:brightness(1.05)}
+.update-notes{margin:0 0 10px;padding:8px 10px;border-radius:6px;background:var(--sunken)}

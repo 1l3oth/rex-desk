@@ -1,11 +1,12 @@
 {
   "name": "rex-desk-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Tauri window for the local Rex Desk dashboard",
+  "description": "Self-contained Rex Desk desktop app: Tauri window with bundled Node and server",
   "scripts": {
+    "stage": "node stage.mjs",
     "dev": "tauri dev",
-    "build": "tauri build",
+    "build": "node stage.mjs && tauri build",
     "icon": "tauri icon src-tauri/app-icon.png"
   },
   "devDependencies": {
