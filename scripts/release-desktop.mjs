@@ -13,7 +13,8 @@ const args = process.argv.slice(2), notes = args.includes('--notes') ? args[args
 const version = JSON.parse(readFileSync(path.join(project, 'desktop/src-tauri/tauri.conf.json'), 'utf8')).version;
 const cargo = readFileSync(path.join(project, 'desktop/src-tauri/Cargo.toml'), 'utf8').match(/^version = "([^"]+)"/m)?.[1];
 if (cargo !== version) throw new Error(`Set the same version in tauri.conf.json (${version}) and Cargo.toml (${cargo}).`);
-const run = (command, commandArgs, env = process.env) => execFileSync(command, commandArgs, { cwd: project, stdio: 'inherit', shell: process.platform === 'win32', env });
+// npm is a .cmd shim on Windows and needs a shell; gh runs directly so titles and notes with spaces stay single arguments.
+const run = (command, commandArgs, env = process.env) => execFileSync(command, commandArgs, { cwd: project, stdio: 'inherit', shell: command === 'npm' && process.platform === 'win32', env });
 // Publish as the releases repository's owner even when another GitHub account is active; the token is passed, never printed.
 const owner = releasesRepository.split('/')[0];
 let ownerEnv = process.env;

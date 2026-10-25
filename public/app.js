@@ -921,9 +921,18 @@ function renderLogin(auth, { tab, error = '' } = {}) {
   app.innerHTML = `<main class="login" id="main"><section class="login-card" aria-labelledby="login-title"><div class="login-brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><h1 id="login-title">Rex Desk</h1></div>
     ${auth.occupied ? `<p class="login-occupied">${icon('alert')}<span>${esc(auth.occupied)} is signed in on this computer. Signing in to another account closes that workspace and stops its running agents.</span></p>` : ''}
     <div class="view-switch login-tabs" role="tablist">${loginTabs.map(([key, label]) => `<button type="button" role="tab" aria-selected="${key === active}" class="${key === active ? 'active' : ''}" data-action="login-tab" data-tab-name="${key}">${label}</button>`).join('')}</div>
-    <form id="login-form" data-mode="${active}">${forms[active]}<p class="form-error" role="alert">${esc(error)}</p></form></section></main>`;
-  ui.auth = auth;
+    <form id="login-form" data-mode="${active}">${forms[active]}<p class="form-error" role="alert">${esc(error)}</p></form></section>
+    <p class="login-legend" aria-hidden="true">That is you at your desk. The little bots are your agents; the amber sign means something is waiting for you.</p></main>`;
+  ui.auth = auth; mountLoginScene();
   app.querySelector('[autofocus]')?.focus();
+}
+// The 3D workspace behind the sign-in card is mounted once and survives tab switches; without WebGL the page stays flat.
+function mountLoginScene() {
+  if (ui.loginScene !== undefined) return;
+  ui.loginScene = null;
+  const canvas = document.createElement('canvas'); canvas.className = 'login-scene'; canvas.setAttribute('aria-hidden', 'true');
+  document.body.prepend(canvas);
+  import('/login-scene.js').then(module => { ui.loginScene = module.mountLoginScene(canvas); }).catch(() => canvas.remove());
 }
 async function submitLogin(form) {
   const data = Object.fromEntries(new FormData(form)), mode = form.dataset.mode, submit = form.querySelector('[type=submit]');
@@ -931,6 +940,7 @@ async function submitLogin(form) {
   submit.disabled = true; submit.textContent = mode === 'cloud' ? 'Restoring your account…' : 'Signing in…';
   try {
     await api(mode === 'create' ? '/auth/create' : mode === 'cloud' ? '/auth/cloud' : '/auth/login', { method: 'POST', data: { ...data, staySignedIn: data.staySignedIn === 'on' } });
+    await ui.loginScene?.celebrate();
     location.reload();
   } catch (error) { renderLogin(ui.auth, { tab: mode, error: error.message }); const field = app.querySelector('[name=email]'); if (field) field.value = data.email || ''; }
 }

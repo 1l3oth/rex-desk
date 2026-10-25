@@ -511,7 +511,11 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 .day-picker input{accent-color:var(--accent);margin:0}
 .project-bulk{margin:0 0 6px;gap:4px}
 /* Sign-in */
-.login{min-height:100dvh;display:grid;place-items:center;padding:24px 16px;background:var(--bg)}
+.login{position:relative;z-index:1;min-height:100dvh;display:grid;place-items:center;padding:24px 16px}
+.login-scene{position:fixed;inset:0;z-index:0;width:100vw;height:100dvh;display:block;pointer-events:none}
+.login-legend{position:fixed;left:max(48px,9vw);bottom:24px;max-width:400px;margin:0;color:var(--faint);font-size:11px;line-height:1.5}
+@media(min-width:901px){.login{place-items:center start;padding-left:max(48px,9vw)}}
+@media(max-width:700px){.login-legend{display:none}.login{place-items:end center;padding-bottom:20px}}
 .login-card{width:min(400px,100%);padding:22px 22px 18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
 .login-brand{display:flex;align-items:center;gap:10px;margin-bottom:14px}.login-brand .brand-mark{margin:0}.login-brand h1{font-size:16px}
 .login-tabs{display:flex;width:100%;margin-bottom:14px}.login-tabs button{flex:1;justify-content:center;height:24px}

@@ -1,6 +1,6 @@
 {
   "name": "rex-desk-desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Self-contained Rex Desk desktop app: Tauri window with bundled Node and server",
   "scripts": {

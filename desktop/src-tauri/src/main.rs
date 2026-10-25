@@ -8,7 +8,19 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
+
+fn show_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
 
 const ADDRESS: &str = "127.0.0.1:4317";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -104,6 +116,8 @@ fn main() {
         return;
     }
     tauri::Builder::default()
+        // Opening Rex Desk again brings the existing window back instead of starting a second copy.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
         .setup(|app| {
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Rex Desk")
@@ -111,6 +125,35 @@ fn main() {
                 .min_inner_size(900.0, 600.0)
                 .maximized(true)
                 .build()?;
+            // Rex Desk lives in the system tray: closing the window hides it while the server keeps running agents.
+            let open = MenuItem::with_id(app, "open", "Open Rex Desk", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Rex Desk window", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open, &quit])?;
+            let mut tray = TrayIconBuilder::with_id("rex-desk")
+                .tooltip("Rex Desk")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open" => show_window(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                        show_window(tray.app_handle());
+                    }
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            tray.build(app)?;
+            let hide_on_close = window.clone();
+            window.on_window_event(move |event| {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = hide_on_close.hide();
+                }
+            });
             thread::spawn(move || {
                 let fail = |message: String| { let _ = window.eval(&format!("showError({message:?})")); };
                 let Some(runtime) = runtime() else {

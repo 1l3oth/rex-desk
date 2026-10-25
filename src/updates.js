@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 // Installers are published with an Ed25519 signature made by the release key that never leaves the publisher's computer.
 // The app trusts only this public key, so a changed manifest or installer is refused.
@@ -59,19 +59,33 @@ export class Updates {
     try { verifyInstaller(bytes, manifest, this.key); } catch (error) { rmSync(file, { force: true }); throw error; }
     writeFileSync(file, bytes); this.file = file; this.state.ready = true;
   }
-  // A detached helper waits for this server to exit, closes the app window, runs the installer silently, and reopens Rex Desk.
+  // A helper waits for this server to exit, closes the app window, runs the installer silently, and reopens Rex Desk.
+  // Windows creates it through WMI: a child of this server would be killed when the server exits, and a detached
+  // PowerShell has no console and never starts. A WMI-created process inherits no environment, so values go as arguments.
   install(serverPid) {
     if (!this.state.ready || !this.file) throw new Error('No verified update is ready yet.');
     const helper = path.join(this.directory, 'install-update.ps1');
+    writeFileSync(path.join(this.directory, 'install-update.json'), JSON.stringify({ serverPid: Number(serverPid), installer: this.file, app: this.executable, log: path.join(this.directory, 'install-update.log') }));
     writeFileSync(helper, [
-      '$ErrorActionPreference = "SilentlyContinue"',
-      'Wait-Process -Id ([int]$env:REX_SERVER_PID) -Timeout 60',
-      'Get-Process -Name "rex-desk" | Stop-Process -Force',
-      'Start-Process -FilePath $env:REX_INSTALLER -ArgumentList "/S" -Wait',
-      'Start-Process -FilePath $env:REX_DESK_EXE',
+      '$settings = Get-Content -Raw (Join-Path $PSScriptRoot "install-update.json") | ConvertFrom-Json',
+      '$ServerPid = [int]$settings.serverPid; $Installer = $settings.installer; $App = $settings.app; $Log = $settings.log',
+      'Start-Transcript -Path $Log -Force | Out-Null',
+      'Wait-Process -Id $ServerPid -Timeout 60 -ErrorAction SilentlyContinue',
+      // The window and any bundled Node still running from the install folder would lock files the installer replaces.
+      '$folder = Split-Path -Parent $App',
+      'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($folder, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue',
+      'Start-Sleep -Seconds 2',
+      '$setup = Start-Process -FilePath $Installer -ArgumentList "/S" -Wait -PassThru',
+      '"Installer exit code: $($setup.ExitCode)"',
+      'Start-Process -FilePath $App',
+      'schtasks.exe /Delete /TN "Rex Desk update" /F | Out-Null',
+      'Stop-Transcript | Out-Null',
     ].join('\r\n'));
-    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', helper], {
-      detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, REX_SERVER_PID: String(serverPid), REX_INSTALLER: this.file, REX_DESK_EXE: this.executable } });
-    child.unref();
+    // Task Scheduler runs the helper in this person's desktop session, outside this server's process tree and free of the
+    // memory limits a WMI-created process gets (which cut the installer off mid-copy). Settings travel in the JSON beside it.
+    const task = `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${helper}"`;
+    if (task.length > 260) throw new Error('The update folder path is too long for Windows Task Scheduler.');
+    execFileSync('schtasks.exe', ['/Create', '/TN', 'Rex Desk update', '/TR', task, '/SC', 'ONCE', '/ST', '00:00', '/RL', 'LIMITED', '/F'], { windowsHide: true, timeout: 30000, stdio: 'ignore' });
+    execFileSync('schtasks.exe', ['/Run', '/TN', 'Rex Desk update'], { windowsHide: true, timeout: 30000, stdio: 'ignore' });
   }
 }
