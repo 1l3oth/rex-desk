@@ -119,7 +119,7 @@ export function mountLoginScene(canvas) {
   let renderer;
   try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'low-power' }); }
   catch { canvas.hidden = true; return { celebrate: async () => {}, dispose() {} }; }
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
 
   const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(28, 1, 0.1, 100);
@@ -160,9 +160,12 @@ export function mountLoginScene(canvas) {
   };
   const observer = new ResizeObserver(resize); observer.observe(canvas); resize();
 
-  const timer = new THREE.Timer(); let tick = 0, lastTick = -1, celebrating = null;
+  const timer = new THREE.Timer(); let tick = 0, lastTick = -1, celebrating = null, lastFrame = 0;
   const position = new THREE.Vector3(), from = new THREE.Vector3(-2.1, 3.2, -0.15);
-  const frame = () => {
+  // A backdrop does not need 60 fps: 30 halves the CPU and GPU work. The sign-in fly-in still runs every frame.
+  const frame = now => {
+    if (now && !celebrating && now - lastFrame < 32) return;
+    lastFrame = now || 0;
     timer.update(); const time = timer.getElapsed();
     // You type, and your head turns toward the pointer.
     look.x += (pointer.y * 0.35 - look.x) * 0.06; look.y += (-pointer.x * 0.9 - look.y) * 0.06;
@@ -203,16 +206,16 @@ export function mountLoginScene(canvas) {
     }
     renderer.render(scene, camera);
   };
-  const run = () => renderer.setAnimationLoop(!reduced && !document.hidden ? frame : null);
+  const run = () => renderer.setAnimationLoop(celebrating || (!reduced && !document.hidden && document.hasFocus()) ? frame : null);
   const onVisibility = () => run();
-  document.addEventListener('visibilitychange', onVisibility);
+  document.addEventListener('visibilitychange', onVisibility); addEventListener('focus', onVisibility); addEventListener('blur', onVisibility);
   frame(); run();
 
   return {
     // After sign-in you wave, and the camera flies into your monitor as the workspace opens.
     celebrate: () => reduced ? Promise.resolve() : new Promise(done => { celebrating = { start: performance.now(), duration: 1100, done }; renderer.setAnimationLoop(frame); }),
     dispose() {
-      renderer.setAnimationLoop(null); observer.disconnect(); removeEventListener('pointermove', onPointer); document.removeEventListener('visibilitychange', onVisibility);
+      renderer.setAnimationLoop(null); observer.disconnect(); removeEventListener('pointermove', onPointer); document.removeEventListener('visibilitychange', onVisibility); removeEventListener('focus', onVisibility); removeEventListener('blur', onVisibility);
       scene.traverse(object => { object.geometry?.dispose(); [object.material].flat().forEach(material => { material?.map?.dispose(); material?.dispose(); }); });
       renderer.dispose();
     },
