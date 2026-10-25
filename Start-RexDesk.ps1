@@ -1,4 +1,4 @@
-param([switch]$NoBrowser)
+param([switch]$NoBrowser, [switch]$App)
 # Agent sign-in profiles are saved in Rex Desk Settings, so this launcher needs no CLAUDE_CONFIG_DIR or CODEX_HOME.
 $ErrorActionPreference = 'Stop'
 $rexProject = $PSScriptRoot
@@ -25,4 +25,9 @@ if (-not $rexRunning) {
     }
 }
 if (-not $rexRunning) { throw 'Rex Desk did not start. Check .local/server-error.log.' }
-if (-not $NoBrowser) { Start-Process $rexAddress }
+if ($App) {
+    # A separate Edge profile gives the dashboard its own window and taskbar entry, apart from normal browsing.
+    $rexEdge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $rexEdge) { throw 'Microsoft Edge was not found; run without -App to use the default browser.' }
+    Start-Process -FilePath $rexEdge -ArgumentList @("--app=$rexAddress", "--user-data-dir=$(Join-Path $rexProject '.local\app-window')", '--window-size=1440,900')
+} elseif (-not $NoBrowser) { Start-Process $rexAddress }

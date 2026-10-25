@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Rex Desk — Coupon Book</title>
+<style>
+:root{--g:#eef0f4;--w:#fff;--n:#14285a;--n2:#1f3874;--r:#c8102e;--p:#5b3a8c;--v:#2f7d4a;--ink:#1b2130;--mut:#6a7286;--hr:#d6dae3;--hr2:#e7e9ef;--cap:"Segoe UI","Malgun Gothic",system-ui,sans-serif;--mono:"Cascadia Mono",Consolas,"Malgun Gothic",monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1440px;height:900px;overflow:hidden;background:var(--g);color:var(--ink);font:12px/1.4 var(--cap)}
+.cap{font-weight:600;text-transform:uppercase;letter-spacing:.06em;font-size:10px}
+.num{color:var(--p);font-variant-numeric:tabular-nums;font-weight:600}
+.top{height:40px;background:var(--n);color:#fff;display:flex;align-items:center;padding:0 12px;gap:14px}
+.brand{font-weight:700;font-size:13px;letter-spacing:.02em;display:flex;align-items:center;gap:7px;width:256px}
+.brand i{width:18px;height:18px;border:1.5px solid #fff;border-radius:2px;display:grid;place-items:center;font:700 10px var(--cap);font-style:normal}
+.search{width:250px;height:26px;border:1px solid #3a4f86;background:#0e1e47;border-radius:3px;color:#aeb8d4;padding:0 8px;display:flex;align-items:center;justify-content:space-between;font-size:11px}
+.search kbd{font:10px var(--mono);border:1px solid #3a4f86;border-radius:2px;padding:0 4px}
+.tabs{display:flex;height:40px;margin-left:6px}
+.tabs a{display:flex;align-items:center;padding:0 13px;color:#aeb8d4;text-decoration:none;font:600 11px var(--cap);text-transform:uppercase;letter-spacing:.06em;border-bottom:2px solid transparent}
+.tabs a.on{color:#fff;border-bottom-color:#fff;background:var(--n2)}
+.tabs a b{font-weight:600;color:#c9b8ea;margin-left:5px}
+.right{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11px}
+.pill{background:var(--r);color:#fff;border-radius:10px;padding:2px 9px;font-weight:600}
+.pill b{background:#fff;color:var(--r);border-radius:8px;padding:0 5px;margin-left:5px}
+.wk{color:#c6cee3}.wk b{color:#fff}
+.av{width:24px;height:24px;border-radius:50%;background:#fff;color:var(--n);display:grid;place-items:center;font:700 10px var(--cap)}
+.main{display:grid;grid-template-columns:280px 1fr;height:836px}
+.side{background:var(--w);border-right:1px solid var(--hr);display:flex;flex-direction:column;min-height:0}
+.sh{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 10px;border-bottom:1px solid var(--hr);color:var(--n)}
+.seg{display:flex;border:1px solid var(--hr);border-radius:3px;overflow:hidden}
+.seg span{padding:1px 7px;font-size:11px;color:var(--mut);border-left:1px solid var(--hr)}.seg span:first-child{border:0;background:var(--n);color:#fff}
+.grp{height:22px;padding:0 10px;display:flex;align-items:center;justify-content:space-between;background:#f6f7fa;border-bottom:1px solid var(--hr2);color:var(--mut)}
+.row{height:40px;display:grid;grid-template-columns:14px 16px 46px 1fr;gap:6px;align-items:center;padding:0 10px;border-bottom:1px solid var(--hr2)}
+.row.sel{background:#f3f0f9;box-shadow:inset 2px 0 var(--p)}
+.cb{width:12px;height:12px;border:1px solid #9aa2b5;border-radius:2px}.cb.on{background:var(--n);border-color:var(--n);color:#fff;font-size:9px;line-height:11px;text-align:center}
+.m{width:16px;height:16px;border-radius:3px;background:#ffefe6;color:#d4561c;font:700 10px/16px var(--cap);text-align:center}
+.row .num{font-size:12px}
+.t{min-width:0}.t div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.t small{display:block;font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t small em{font-style:normal;font-weight:600}.e-run{color:var(--n)}.e-ask{color:var(--r)}.e-ok{color:var(--v)}
+.log{flex:1;padding:6px 10px;overflow:hidden;border-top:1px solid var(--hr)}
+.log p{display:grid;grid-template-columns:50px 1fr;font-size:11px;line-height:21px;border-bottom:1px dotted var(--hr);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#3d4458}
+.runs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:8px;min-height:0}
+.col{display:flex;flex-direction:column;min-height:0;min-width:0}
+.ct{background:var(--n);color:#fff;border-radius:4px 4px 0 0;padding:6px 9px 6px;display:grid;grid-template-columns:1fr auto;row-gap:1px}
+.ct h2{font:600 13px var(--cap);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ct .st{font:600 10px var(--cap);text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:2px;align-self:center}
+.st.ask{background:var(--r)}.st.run{background:#2f4b8f}.st.ok{background:var(--v)}
+.ct small{grid-column:1/-1;color:#aeb8d4;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fare{display:grid;grid-template-columns:repeat(4,1fr);background:var(--w);border:1px solid var(--hr);border-top:0}
+.fare div{padding:3px 7px;border-left:1px solid var(--hr)}.fare div:first-child{border:0}
+.fare label{display:block;font:600 9px var(--cap);letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.fare span{font-size:12px}
+.leg{position:relative;background:var(--w);border:1px solid var(--hr);border-top:1px dashed #b9bfcc;display:grid;grid-template-columns:62px 1fr auto;align-items:center;gap:6px;height:30px;padding:0 9px;margin-top:-1px}
+.leg .k{color:var(--n)}.leg .s{font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.leg .num{font-size:11px}
+.leg.done{background:#fbfbfd}
+.leg.void{background:repeating-linear-gradient(-45deg,#fff 0 6px,#fdf3f5 6px 7px)}.leg.void .s{text-decoration:line-through}
+.leg.fut{background:transparent;border-style:dashed;color:#9aa2b5}.leg.fut .k{color:#8b93a8}
+.stamp{position:absolute;right:66px;top:6px;font:700 9px var(--cap);letter-spacing:.12em;padding:1px 5px;border:1.5px solid currentColor;border-radius:2px;transform:rotate(-7deg);opacity:.88;background:rgba(255,255,255,.6)}
+.stamp.u{color:var(--n)}.stamp.x{color:var(--r);transform:rotate(5deg)}.stamp.ok{color:var(--v);transform:rotate(-4deg)}
+.open{flex:1;min-height:0;background:var(--w);border:1px solid var(--hr);border-top:1px dashed #b9bfcc;margin-top:-1px;box-shadow:inset 3px 0 var(--p);display:flex;flex-direction:column;overflow:hidden}
+.oh{display:grid;grid-template-columns:62px 1fr auto;gap:6px;align-items:center;height:28px;padding:0 9px 0 12px;border-bottom:1px solid var(--hr)}
+.oh .k{color:var(--p)}.oh .s{font-size:11px;color:var(--mut)}
+.live{display:inline-flex;align-items:center;gap:4px;font:600 10px var(--cap);color:var(--p);text-transform:uppercase;letter-spacing:.06em}.live:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--p);box-shadow:0 0 0 2px #e4dcf1}
+.bd{padding:6px 9px 6px 12px;display:flex;flex-direction:column;gap:4px;overflow:hidden;flex:1}
+.say{color:#2a3042}.say b{color:var(--n);font:600 10px var(--cap);text-transform:uppercase;letter-spacing:.06em;margin-right:4px}
+.tc{font:11px/18px var(--mono);display:flex;gap:6px;padding:0 6px;border:1px solid var(--hr2);border-radius:2px;background:#fafafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tc i{font-style:normal;width:10px}.tc .ok{color:var(--v)}.tc .w{color:var(--p)}.tc .x{color:var(--r)}.tc em{font-style:normal;color:var(--mut);margin-left:auto}
+.ask{border:1px solid var(--r);border-radius:3px;margin-top:2px}
+.ask h3{background:#fdf0f2;color:var(--r);padding:4px 8px;border-bottom:1px solid #f1c3cb;font:600 11px var(--cap);text-transform:uppercase;letter-spacing:.06em}
+.ask h3 code{font:600 11px var(--mono);text-transform:none;letter-spacing:0}
+.kv{display:grid;grid-template-columns:62px 1fr}.kv>*{padding:3px 8px;border-bottom:1px solid var(--hr2);font-size:11px}.kv dt{color:var(--mut);font:600 9px/15px var(--cap);text-transform:uppercase;letter-spacing:.06em;border-right:1px solid var(--hr2)}
+.btns{display:flex;gap:6px;padding:6px 8px;align-items:center}
+.btn{height:24px;padding:0 10px;border:1px solid #b7bdcb;border-radius:3px;background:#fff;font:600 11px var(--cap);color:var(--ink);display:inline-flex;align-items:center}
+.btn.pri{background:var(--n);border-color:var(--n);color:#fff}.btn.go{background:var(--v);border-color:var(--v);color:#fff}
+.btns small{margin-left:auto;font-size:11px;color:var(--mut)}
+.chk{border:1px solid var(--hr);border-radius:2px}.chk p{display:grid;grid-template-columns:14px 1fr auto;gap:6px;padding:3px 7px;border-bottom:1px solid var(--hr2);font-size:11px}.chk p:last-child{border:0}
+.chk .ok{color:var(--v);font-weight:700}.chk .w{color:var(--p);font-weight:700}
+.comp{margin-top:auto;border:1px solid var(--hr);border-radius:3px;height:26px;display:flex;align-items:center;padding:0 8px;color:#9aa2b5;font-size:11px;justify-content:space-between}
+.bar{height:24px;background:var(--w);border-top:1px solid var(--hr);display:flex;align-items:center;gap:14px;padding:0 12px;font-size:11px;color:var(--mut)}
+.bar .dot{width:7px;height:7px;border-radius:50%;background:var(--v);display:inline-block;margin-right:5px}.bar span:last-child{margin-left:auto}
+</style></head><body>
+<header class="top"><div class="brand"><i>R</i>Rex Desk</div>
+<div class="search">Search issues, runs, branches…<kbd>Ctrl K</kbd></div>
+<nav class="tabs"><a class="on">Runs<b>4</b></a><a>Issues<b>7</b></a><a>Board</a><a>Evidence</a><a>Settings</a></nav>
+<div class="right"><span class="pill">Needs you<b>3</b></span><span class="wk"><b>2/4</b> workers</span><span class="av">RE</span></div></header>
+<div class="main">
+<aside class="side">
+<div class="sh"><span class="cap">Issues · Morningmate</span><div class="seg"><span>All 7</span><span>Request</span><span>Done</span></div></div>
+<div class="grp cap"><span>Request</span><span class="num">4</span></div>
+<div class="row sel"><span class="cb on">✓</span><span class="m">M</span><span class="num">38464</span><div class="t"><div>설치형, 파일, 미리보기 - 다운로드 클릭 시 빈 화면</div><small><em class="e-run">Fix leg</em> · bug / file-preview</small></div></div>
+<div class="row"><span class="cb on">✓</span><span class="m">M</span><span class="num">48073</span><div class="t"><div>[오류] Safari &gt; 리스트 뷰 &gt; 더보기 메뉴 가려짐</div><small><em class="e-run">Verify leg</em> · Codex</small></div></div>
+<div class="row"><span class="cb"></span><span class="m">M</span><span class="num">34701</span><div class="t"><div>설치형 &gt; 앱 아이콘 배지가 표시되지 않음</div><small><em class="e-ask">Awaiting category</em> · main agent</small></div></div>
+<div class="row"><span class="cb"></span><span class="m">M</span><span class="num">803017</span><div class="t"><div>Basic plan smart-search 1-month limit not enforced</div><small>Queued · analyze</small></div></div>
+<div class="grp cap"><span>Development Completed</span><span class="num">3</span></div>
+<div class="row"><span class="cb on">✓</span><span class="m">M</span><span class="num">39349</span><div class="t"><div>조직도 일괄 등록 버튼명 변경 (영문)</div><small><em class="e-ok">Verified</em> · ready for draft PR</small></div></div>
+<div class="row"><span class="cb"></span><span class="m">M</span><span class="num">26717</span><div class="t"><div>다시 알림 취소 일본어 수정 요청</div><small>Imported · not started</small></div></div>
+<div class="row"><span class="cb"></span><span class="m">M</span><span class="num">6658</span><div class="t"><div>Incorrect Translation (Indonesian)</div><small>Imported · not started</small></div></div>
+<div class="log"><div class="cap" style="color:var(--n);margin-bottom:3px">Carbon copy · activity</div>
+<p><span class="num">14:32</span>#48073 evidence 3/4 attached</p><p><span class="num">14:31</span>Main agent asks: approve desk_categorize</p><p><span class="num">14:29</span>#38464 branch temp/rex/morningmate-38464</p><p><span class="num">14:27</span>#39349 Verify stamped VERIFIED</p><p><span class="num">14:24</span>#48073 Fix attempt 1 voided — wrong root</p><p><span class="num">14:22</span>#38464 Analyze stamped USED · 2m 14s</p><p><span class="num">14:18</span>Main agent claimed 20 issues</p><p><span class="num">14:15</span>Turso sync · 7 issues imported</p><p><span class="num">14:02</span>#39349 Fix stamped USED · 6m 40s</p><p><span class="num">13:58</span>Worker 2 started Codex 0.41</p><p><span class="num">13:51</span>Profile “QA triage” loaded</p></div>
+</aside>
+<section class="runs">
+<div class="col"><div class="ct"><h2>Main agent</h2><span class="st ask">Needs you</span><small>Claude Code · analyzing 20 issues</small></div>
+<div class="fare"><div><label>Issues</label><span class="num">20</span></div><div><label>Done</label><span class="num">12</span></div><div><label>Asks</label><span class="num">1</span></div><div><label>Elapsed</label><span class="num">17:04</span></div></div>
+<div class="leg done"><b class="cap k">01 Import</b><span class="s">7 new from Morningmate</span><i class="num">0:41</i><em class="stamp u">USED</em></div>
+<div class="open"><div class="oh"><b class="cap k">02 Analyze</b><span class="s">issue 13 of 20</span><span class="live">Waiting</span></div><div class="bd">
+<p class="say"><b>Agent</b>Reproduced on 설치형 build: preview loads, download click swaps the frame to a blank page.</p>
+<div class="tc"><i class="ok">✓</i>desk_task · 38464<em>0.4s</em></div>
+<div class="tc"><i class="ok">✓</i>desk_read_attachments · 2 images<em>1.1s</em></div>
+<div class="tc"><i class="w">◷</i>desk_categorize · bug / file-preview / download blank screen</div>
+<div class="ask"><h3>Approve <code>desk_categorize</code></h3><dl class="kv"><dt>Issue</dt><dd class="num">38464</dd><dt>Label</dt><dd>bug / file-preview / download blank screen</dd><dt>Risk</dt><dd>Writes label to Morningmate</dd></dl>
+<div class="btns"><span class="btn pri">Approve once</span><span class="btn">Decline</span><small>Always for run</small></div></div>
+<p class="say"><b>Next</b>34701 · 앱 아이콘 배지 — held until approved.</p>
+</div></div>
+<div class="leg fut"><b class="cap k">03 Dispatch</b><span class="s">Not valid before Analyze</span><i></i></div></div>
+<div class="col"><div class="ct"><h2>#38464 다운로드 빈 화면</h2><span class="st run">Fix</span><small>Claude Code · temp/rex/morningmate-38464/download-blank-a1b2c3</small></div>
+<div class="fare"><div><label>Issue</label><span class="num">38464</span></div><div><label>Files</label><span class="num">3</span></div><div><label>Tools</label><span class="num">27</span></div><div><label>Elapsed</label><span class="num">08:52</span></div></div>
+<div class="leg done"><b class="cap k">01 Analyze</b><span class="s">blob URL revoked early</span><i class="num">2:14</i><em class="stamp u">USED</em></div>
+<div class="open"><div class="oh"><b class="cap k">02 Fix</b><span class="s">editing PreviewModal.tsx</span><span class="live">Live</span></div><div class="bd">
+<p class="say"><b>Agent</b>Root cause: <code>URL.revokeObjectURL</code> runs before the download anchor resolves, so the iframe falls back to about:blank.</p>
+<div class="tc"><i class="ok">✓</i>grep revokeObjectURL src/preview<em>4 hits</em></div>
+<div class="tc"><i class="ok">✓</i>read PreviewModal.tsx:118-164<em>0.2s</em></div>
+<div class="tc"><i class="ok">✓</i>edit PreviewModal.tsx +9 −3<em>0.3s</em></div>
+<p class="say"><b>Agent</b>Deferring revoke to the anchor's click handler and keeping the preview frame mounted.</p>
+<div class="tc"><i class="ok">✓</i>edit useFileDownload.ts +14 −6<em>0.3s</em></div>
+<div class="tc"><i class="w">◷</i>pnpm test preview --run<em>12s</em></div>
+<p class="say" style="color:var(--mut)">› 18 passed · 1 running (download keeps frame)</p>
+<div class="comp"><span>Message the agent…</span><span class="cap">Enter</span></div></div></div>
+<div class="leg fut"><b class="cap k">03 Verify</b><span class="s">Not valid before Fix</span><i></i></div>
+<div class="leg fut"><b class="cap k">04 Review</b><span class="s">—</span><i></i></div>
+<div class="leg fut"><b class="cap k">05 PR</b><span class="s">Draft gate: risk ≤ medium</span><i></i></div></div>
+<div class="col"><div class="ct"><h2>#48073 Safari 더보기 메뉴</h2><span class="st run">Verify</span><small>Codex · temp/rex/morningmate-48073/more-menu-7f3e1d</small></div>
+<div class="fare"><div><label>Issue</label><span class="num">48073</span></div><div><label>Attempts</label><span class="num">2</span></div><div><label>Checks</label><span class="num">3/4</span></div><div><label>Elapsed</label><span class="num">21:37</span></div></div>
+<div class="leg done"><b class="cap k">01 Analyze</b><span class="s">stacking context on header</span><i class="num">3:02</i><em class="stamp u">USED</em></div>
+<div class="leg void"><b class="cap k">02 Fix</b><span class="s">z-index 999 on menu</span><i class="num">4:10</i><em class="stamp x">VOID</em></div>
+<div class="leg done"><b class="cap k">02 Fix · 2</b><span class="s">portal menu to body</span><i class="num">5:48</i><em class="stamp u">USED</em></div>
+<div class="open"><div class="oh"><b class="cap k">03 Verify</b><span class="s">evidence checks</span><span class="live">Live</span></div><div class="bd">
+<p class="say"><b>Codex</b>Running the list view in Safari 17 and WebKit to confirm the 더보기 menu clears the title area.</p>
+<div class="chk"><p><span class="ok">✓</span>Safari 17 · list view · menu above title<span class="num">png</span></p><p><span class="ok">✓</span>Chrome 129 regression · no shift<span class="num">png</span></p><p><span class="ok">✓</span>Unit · MoreMenu portal mounts<span class="num">14/14</span></p><p><span class="w">◷</span>iPad Safari · long title wrap<span class="num">…</span></p></div>
+<div class="tc"><i class="ok">✓</i>playwright webkit list-view.spec<em>9.8s</em></div>
+<div class="tc"><i class="w">◷</i>playwright webkit --device "iPad Pro"</div>
+<div class="tc"><i class="x">✗</i>attempt-1 screenshot · menu clipped<em>kept</em></div></div></div>
+<div class="leg fut"><b class="cap k">04 Review</b><span class="s">Not valid before Verify</span><i></i></div>
+<div class="leg fut"><b class="cap k">05 PR</b><span class="s">—</span><i></i></div></div>
+<div class="col"><div class="ct"><h2>#39349 조직도 버튼명 (영문)</h2><span class="st ok">Ready</span><small>Claude Code · temp/rex/morningmate-39349/org-bulk-label-c9d0e2</small></div>
+<div class="fare"><div><label>Issue</label><span class="num">39349</span></div><div><label>Diff</label><span class="num">+6 −6</span></div><div><label>Risk</label><span class="num">low</span></div><div><label>Elapsed</label><span class="num">31:15</span></div></div>
+<div class="leg done"><b class="cap k">01 Analyze</b><span class="s">i18n key org.bulkUpload</span><i class="num">1:48</i><em class="stamp u">USED</em></div>
+<div class="leg done"><b class="cap k">02 Fix</b><span class="s">en.json · 3 call sites</span><i class="num">6:40</i><em class="stamp u">USED</em></div>
+<div class="leg done"><b class="cap k">03 Verify</b><span class="s">4/4 checks · 2 screenshots</span><i class="num">4:22</i><em class="stamp ok">VERIFIED</em></div>
+<div class="open"><div class="oh"><b class="cap k">04 Review</b><span class="s">ready for draft PR</span><span class="live">Done</span></div><div class="bd">
+<p class="say"><b>Agent</b>Renamed “Batch Regist” to “Bulk Import” in the org chart toolbar, dialog title and toast. Korean and Japanese strings untouched.</p>
+<dl class="kv" style="border:1px solid var(--hr);border-bottom:0"><dt>Title</dt><dd>fix(org): rename bulk register button (EN)</dd><dt>Base</dt><dd>main ← org-bulk-label-c9d0e2</dd><dt>Files</dt><dd>en.json · OrgToolbar.tsx · BulkDialog.tsx</dd><dt>Gate</dt><dd style="color:var(--v);font-weight:600">Risk low · auto draft allowed</dd></dl>
+<div class="tc"><i class="ok">✓</i>pnpm lint &amp;&amp; pnpm test org<em>22/22</em></div>
+<div class="tc"><i class="ok">✓</i>desk_attach_evidence · 39349<em>2 files</em></div>
+<div class="btns" style="padding:4px 0"><span class="btn go">Create draft PR</span><span class="btn">View diff</span><small>Void run</small></div></div></div>
+<div class="leg fut"><b class="cap k">05 PR</b><span class="s">Draft on GitHub · not issued</span><i></i></div></div>
+</section></div>
+<footer class="bar"><span><i class="dot"></i>Running on this computer</span><span>Turso synced <b class="num">12s</b> ago</span><span>Claude Code <b class="num">2</b> · Codex <b class="num">1</b></span><span>Morningmate · QA workspace</span></footer>
+</body>

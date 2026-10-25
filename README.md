@@ -17,6 +17,17 @@ npm start
 
 Open **http://127.0.0.1:4317**. On Windows, `Start-RexDesk.ps1` starts the server in the background and opens the dashboard; `-NoBrowser` skips opening it. It reuses a running server. The launcher needs no `CLAUDE_CONFIG_DIR` or `CODEX_HOME`: agent profiles are saved in Settings.
 
+### Desktop app
+
+`desktop/` is a Tauri window around the same dashboard. Install it from the GitHub release (`Rex Desk_<version>_x64-setup.exe`, per-user, no admin) or build it with Rust and the MSVC build tools:
+
+```powershell
+npm install --prefix desktop
+npm run build --prefix desktop
+```
+
+On launch it starts `node src/server.js` from the checkout if nothing answers on port 4317, then shows the dashboard. It finds the checkout through `REX_DESK_HOME`, then the folder it was built from, then `F:\rex-desk`. Closing the window leaves the server running, so agent runs continue. The dashboard page gets no Tauri APIs. `Start-RexDesk.ps1 -App` opens the dashboard as an Edge app window instead.
+
 ## Guided setup
 
 A new workspace opens **Setup**. Each step reads your real settings, so the page always shows the actual remaining work; the issue list shows the next step until required setup is done.
@@ -40,6 +51,8 @@ Search matches title, number, status, fields, reporter, and description without 
 ## Execution and evidence
 
 The main agent receives the selected issue IDs and uses the Rex Desk MCP to read, categorize, and dispatch work. It keeps related changes sequential and parallelizes independent issues. Worker concurrency is enforced by the local queue.
+
+Each run page shows the agent's conversation live: its text, every tool call with input and result (expand a row), and pending approvals at the end. Raw command and preview output stays in the work journal.
 
 Each worker receives a new worktree and a unique branch from the repository's pattern (default `{prefix}/{source}-{taskId}/{title}-{runId}`):
 
@@ -71,9 +84,21 @@ Workers run headless in Rex Desk by default, with tool approvals in the dashboar
 
 Orca shows these worktrees only when the repository's external-worktree visibility is **show**; the run dialog checks this and offers a one-click fix. **Open in Orca** on any run opens a plain terminal in its worktree without starting a second agent.
 
+## QA verification
+
+Issues a developer marked complete (for example **Development Completed**) are QA work. **Verify fix** starts a run that needs no repository: the agent opens the web test site from Settings → **QA verification** in a recorded browser, follows the issue's steps, asserts the expected behavior, and reports **Fix works**, **Still broken**, or **Could not check**, with a drafted tracker comment to copy. A pass needs a recorded assertion. **Sign in to the test site** opens a browser where you log in once; the session is saved in `.local/qa-session.json` on this computer and used only by QA runs. **Mark done in tracker** / **Reopen in tracker** apply the mapped tracker status after you review the evidence. Desktop-app, Safari, macOS, iOS, and Android checks cannot run in the recorded Chromium browser and are reported as blocked.
+
+## Schedule
+
+Settings → **Schedule** starts work while the computer is on: at the set time on the chosen days Rex Desk syncs, and a main agent sorts new issues and starts at most the daily limit of runs: QA checks, code fixes, or both. Issues already settled or worked on in the last 20 hours are skipped. **Run now** does the same immediately. **Start Rex Desk when I sign in to Windows** adds a hidden launcher to the Startup folder so schedules run without opening the app.
+
+Setup marks the QA site, repository, and commands as optional: QA checks need only the tracker and a test site; code fixes need a repository. Inspecting a repository fills empty setup, test, and preview commands from `package.json` and applies the Flow / Morningmate Tomcat or Electron preset when detected.
+
 ## Source statuses and pull requests
 
 Sync reads each project's status definitions and makes them available to agents. Optional working/review/done mappings specify the tracker status values; unmapped phases leave the tracker unchanged, and every status change needs a dashboard approval. Local Kanban progress never rewrites tracker statuses.
+
+Settings → **GitHub** lists the GitHub CLI accounts on this computer, switches the active one, and signs in more with **Sign in another GitHub account**: Rex Desk runs GitHub's device flow, shows the one-time code, and opens github.com/login/device. Tokens stay in the GitHub CLI's keyring. The start dialog can clone `owner/name` with the active account when no repository is configured.
 
 **Create draft PR** shows the title, description, and editable target branch before publishing. It checks verified code, requires a clean committed branch, pushes it to `origin`, and creates a draft with `gh`. It never merges or deploys.
 
@@ -88,7 +113,7 @@ Settings → **Connect an existing AI** installs the local stdio proxy into the 
 
 An already running local or cloud AI can call `desk_connect` to obtain a conversation `runId`, then use `desk_message` and `desk_ask`. It can read tasks and delegate fixes with `desk_dispatch` (optionally `execution: "orca"` and a `runtimeProfile`). For clients with short tool timeouts, `desk_ask` accepts `wait=false` and `desk_question` polls for the answer.
 
-Managed Codex runs use the app-server protocol for native approvals and elicitation; managed Claude runs use Agent SDK `canUseTool` and `onElicitation`. Both route to the dashboard.
+Managed Codex runs use the app-server protocol for native approvals and elicitation; managed Claude runs use Agent SDK `canUseTool` and `onElicitation`. Both route to the dashboard. Rex Desk's own tools that read, label, message, or act inside the run's worktree run without a permission prompt; `desk_dispatch`, shell commands, and edits outside a worker still ask, and each approval offers **Always allow for this run**. Tracker status changes and draft PRs keep their own approval.
 
 ## Cloud access boundary
 

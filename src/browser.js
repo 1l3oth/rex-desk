@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { shellCommand, stopTree, fingerprint } from './processes.js';
 import { now } from './store.js';
@@ -18,6 +18,7 @@ export class Evidence {
   async start(runId) {
     if (this.sessions.has(runId)) return this.sessions.get(runId);
     const run = this.getRun(runId);
+    if (run.role === 'verifier') return this.startQa(runId, run);
     if (!run.worktree) throw new Error('This run has no worktree.');
     const repository = this.store.config().repositories.find(item => item.id === run.repositoryId);
     if (!repository?.devCommand && !repository?.flowRuntime && !repository?.electronRuntime) throw new Error('Set this repository’s dev command, Flow Tomcat preset, or Electron preset in Settings.');
@@ -50,6 +51,42 @@ export class Evidence {
     await page.goto(baseUrl + repository.browserPath, { waitUntil: 'domcontentloaded', timeout: 30000 });
     return session;
   }
+  qaSessionFile() { return path.join(this.store.directory, 'qa-session.json'); }
+  // QA checks browse the configured test site, signed in with the session the person saved from their own sign-in.
+  async startQa(runId, run) {
+    const directory = this.directory(runId), { chromium } = await import('playwright');
+    let browser;
+    try { browser = await chromium.launch({ headless: true }); }
+    catch (error) { throw new Error(`Browser could not start. Run "npx playwright install chromium". ${error.message}`); }
+    const state = this.qaSessionFile();
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, recordVideo: { dir: directory, size: { width: 1440, height: 900 } }, ...(existsSync(state) ? { storageState: state } : {}) });
+    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    const page = await context.newPage();
+    page.on('pageerror', error => this.emit(runId, 'browser-error', { message: error.message }));
+    page.on('console', message => { if (message.type() === 'error') this.emit(runId, 'browser-console', { text: message.text() }); });
+    const session = { browser, context, page, baseUrl: new URL(run.qaUrl).origin, assertions: [], actions: 0 };
+    this.sessions.set(runId, session);
+    await page.goto(run.qaUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    return session;
+  }
+  // A visible browser where the person signs in to the test site; its cookies are saved every few seconds and when the window closes.
+  async openQaSignIn(url) {
+    if (!url) throw new Error('Set the QA test site address first.');
+    if (this.qaLogin) { await this.qaLogin.page.bringToFront().catch(() => {}); return this.qaStatus(); }
+    const { chromium } = await import('playwright'), file = this.qaSessionFile();
+    const browser = await chromium.launch({ headless: false });
+    const context = await browser.newContext({ viewport: null, ...(existsSync(file) ? { storageState: file } : {}) });
+    const page = await context.newPage();
+    const save = () => context.storageState({ path: file }).catch(() => {});
+    const timer = setInterval(save, 3000);
+    this.qaLogin = { browser, page };
+    browser.on('disconnected', () => { clearInterval(timer); this.qaLogin = null; });
+    page.on('close', async () => { clearInterval(timer); await save(); await browser.close().catch(() => {}); });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    return this.qaStatus();
+  }
+  qaStatus() { const file = this.qaSessionFile(); return { open: Boolean(this.qaLogin), savedAt: existsSync(file) ? statSync(file).mtime.toISOString() : '' }; }
+  async proofPrint(runId) { const run = this.getRun(runId); return run.worktree ? fingerprint(run.worktree) : 'qa'; }
   // Desktop runs record the app's own window; its profile, logs, updater, and protocol handlers stay isolated per run.
   async startElectron(runId, run, repository, directory) {
     const { _electron } = await import('playwright');
@@ -86,11 +123,11 @@ export class Evidence {
       case 'assertText': {
         const actual = await page.locator(selector || 'body').innerText();
         if (!actual.includes(expected)) throw new Error(`Text assertion failed: expected ${JSON.stringify(expected)}.`);
-        session.assertions.push({ action, selector, expected, at: now(), fingerprint: await fingerprint(this.getRun(runId).worktree) }); break;
+        session.assertions.push({ action, selector, expected, at: now(), fingerprint: await this.proofPrint(runId) }); break;
       }
       case 'assertVisible': {
         if (!await page.locator(selector).isVisible()) throw new Error(`Visibility assertion failed: ${selector}.`);
-        session.assertions.push({ action, selector, at: now(), fingerprint: await fingerprint(this.getRun(runId).worktree) }); break;
+        session.assertions.push({ action, selector, at: now(), fingerprint: await this.proofPrint(runId) }); break;
       }
       case 'screenshot': {
         const file = path.join(this.directory(runId), `screen-${Date.now()}.png`);
@@ -119,11 +156,11 @@ export class Evidence {
       this.attach(runId, traceFile, 'Playwright trace', 'application/zip');
     } finally {
       if (session.electron) await session.electron.close().catch(() => {});
-      else { await session.browser.close(); stopTree(session.process.child); }
+      else { await session.browser.close(); if (session.process) stopTree(session.process.child); }
     }
     return { closed: true, assertions: session.assertions.length };
   }
-  report(runId, { summary, checks, risk }) {
+  report(runId, { summary, checks, risk, qa }) {
     const run = this.getRun(runId);
     const artifacts = this.store.list('artifact').filter(item => item.runId === runId);
     const events = this.store.events(runId, { limit: 200 });
@@ -131,7 +168,7 @@ export class Evidence {
       <style>body{font:16px/1.6 system-ui;max-width:960px;margin:48px auto;padding:0 24px;color:#183039}h1{line-height:1.2}pre{white-space:pre-wrap;background:#f1f5f5;padding:16px;overflow:auto}video,img{max-width:100%}a{color:#145b7c}small{color:#50646c}</style>
       <h1>${escape(run.title)}</h1><p>${escape(summary)}</p><small>${escape(run.branch || '')} · ${escape(now())}</small>
       <h2>Verification</h2><pre>${escape(JSON.stringify(checks, null, 2))}</pre>
-      <h2>Estimated code risk</h2><p>${escape(risk?.score ?? 'Unassessed')}/10 · ${escape(risk?.level || '')} · ${risk?.requiresHumanReview ? 'Human review required' : 'Low-risk draft PR eligible'}</p><p>${escape(risk?.reason || '')}</p><pre>${escape(JSON.stringify(risk, null, 2))}</pre>
+      ${qa ? `<h2>QA result: ${escape(qa.verdict)}</h2><p>Test site: ${escape(run.qaUrl || '')}</p><h3>Tracker comment</h3><pre>${escape(qa.comment || '')}</pre><pre>${escape(JSON.stringify(qa.steps || [], null, 2))}</pre>` : ''}${risk ? `<h2>Estimated code risk</h2><p>${escape(risk.score ?? 'Unassessed')}/10 · ${escape(risk.level || '')} · ${risk.requiresHumanReview ? 'Human review required' : 'Low-risk draft PR eligible'}</p><p>${escape(risk.reason || '')}</p><pre>${escape(JSON.stringify(risk, null, 2))}</pre>` : ''}
       <h2>Evidence</h2>${artifacts.map(item => item.type === 'video/webm'
         ? `<h3>${escape(item.title)}</h3><video controls src="${encodeURIComponent(item.file)}"></video>`
         : `<p><a href="${encodeURIComponent(item.file)}">${escape(item.title)}</a></p>`).join('')}
@@ -140,5 +177,5 @@ export class Evidence {
     writeFileSync(file, html);
     return this.attach(runId, file, 'Verification report', 'text/html');
   }
-  async stopAll() { await Promise.allSettled([...this.sessions.keys()].map(runId => this.close(runId))); }
+  async stopAll() { await this.qaLogin?.browser.close().catch(() => {}); await Promise.allSettled([...this.sessions.keys()].map(runId => this.close(runId))); }
 }

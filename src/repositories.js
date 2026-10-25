@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { defaultProfiles, seedProduct } from './flow-runtime.js';
@@ -63,7 +63,7 @@ export async function inspectRepository(directory, { execute = run } = {}) {
     })(),
   ]);
   const list = [...branches.values()].sort((a, b) => a.name.localeCompare(b.name));
-  const preferredBranch = branches.has('develop') ? 'develop' : currentBranch || github.repository?.defaultBranch || list[0]?.name || '';
+  const preferredBranch = branches.has('develop') ? 'develop' : list.find(branch => /(^|\/)develop$/.test(branch.name))?.name || currentBranch || github.repository?.defaultBranch || list[0]?.name || '';
   const flow = existsSync(path.join(root, 'src/WEB-INF'));
   const templateBase = path.join(path.dirname(root), 'flow-was-tomcat');
   return { path: path.resolve(root), name: github.repository?.name || path.basename(root), currentBranch,
@@ -71,7 +71,17 @@ export async function inspectRepository(directory, { execute = run } = {}) {
     gitAuthor: { name: authorName, email: authorEmail }, github, warnings,
     flow: flow ? { available: existsSync(path.join(templateBase, 'conf/server.xml')), templateBase,
       javaHome: 'C:\\Program Files\\Java\\jdk1.8.0_181', catalinaHome: 'C:\\Program Files\\Apache Software Foundation\\Tomcat 9.0', seedPath: root, maxHeapMb: 512,
-      profiles: defaultProfiles(), defaultProfile: seedProduct(root)?.product || 'flow', seed: seedProduct(root) } : null, electron: detectElectron(root) };
+      profiles: defaultProfiles(), defaultProfile: seedProduct(root)?.product || 'flow', seed: seedProduct(root) } : null, electron: detectElectron(root), suggested: suggestCommands(root) };
+}
+// Node projects: setup, test, and preview commands from the lockfile and package.json scripts. Other stacks are left for the person.
+function suggestCommands(root) {
+  try {
+    const scripts = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).scripts || {};
+    const tool = existsSync(path.join(root, 'pnpm-lock.yaml')) ? 'pnpm' : existsSync(path.join(root, 'yarn.lock')) ? 'yarn' : 'npm';
+    const setupCommand = { pnpm: 'pnpm install --frozen-lockfile', yarn: 'yarn install --frozen-lockfile', npm: existsSync(path.join(root, 'package-lock.json')) ? 'npm ci' : 'npm install' }[tool];
+    return { setupCommand, testCommand: scripts.test && !/no test specified/.test(scripts.test) ? `${tool} test` : '',
+      devCommand: scripts.dev ? `${tool} run dev -- --port {port}` : scripts.start ? `${tool} run start -- --port {port}` : '' };
+  } catch { return null; }
 }
 
 let picking = false;
@@ -82,9 +92,14 @@ export async function pickRepositoryFolder() {
   try {
     const script = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 $owner = New-Object System.Windows.Forms.Form
 $owner.TopMost = $true
 $owner.ShowInTaskbar = $false
+$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+$owner.Location = New-Object System.Drawing.Point(-32000, -32000)
+$owner.Size = New-Object System.Drawing.Size(1, 1)
+$owner.Show(); $owner.Activate()
 $picker = New-Object System.Windows.Forms.FolderBrowserDialog
 $picker.Description = 'Choose the source code Git repository for Rex Desk'
 $picker.ShowNewFolderButton = $false
@@ -93,4 +108,18 @@ finally { $picker.Dispose(); $owner.Dispose() }`;
     const { stdout } = await exec('powershell.exe', ['-NoProfile', '-STA', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 300000 });
     return { path: stdout.trim() };
   } finally { picking = false; }
+}
+
+// Clone owner/name with the signed-in GitHub CLI next to the Rex Desk folder. An existing folder is reused, never overwritten.
+export async function cloneRepository(spec, parent) {
+  const name = String(spec || '').trim().replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/$/, '');
+  if (!/^[\w.-]+\/[\w.-]+$/.test(name)) throw new Error('Enter a GitHub repository as owner/name, or a local folder path.');
+  const target = path.join(parent, name.split('/')[1]);
+  if (existsSync(target)) {
+    if (!existsSync(path.join(target, '.git'))) throw new Error(`${target} already exists and is not a Git checkout.`);
+    return { path: target, existed: true };
+  }
+  try { await exec('gh', ['repo', 'clone', name, target], { ...options, timeout: 1800000 }); }
+  catch (error) { throw new Error(`GitHub could not clone ${name}: ${String(error.stderr || error.message).trim().split('\n').at(-1)} Check that the active gh account can read it (gh auth switch).`); }
+  return { path: target, existed: false };
 }

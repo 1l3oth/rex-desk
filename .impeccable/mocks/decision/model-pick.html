@@ -1,0 +1,160 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Rex Desk · Strip Bay</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--g:#2b3036;--g2:#22262b;--g3:#33393f;--bay:#262a2f;--ln:#3f464e;--ln2:#4b535c;--buff:#f3e9c6;--blue:#cfe3f2;--pink:#f6d3d8;--ink:#111418;--red:#c8102e;--grn:#2f8f4e;--mut:#8f99a3;--txt:#dfe3e6;--amb:#e0a43a}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1440px;height:900px;overflow:hidden;background:var(--g);color:var(--txt);font:12px/1.35 Inter,"Malgun Gothic",system-ui,sans-serif}
+.c,.s,table,.lane,.lbl{font-family:"Barlow Condensed","Malgun Gothic",sans-serif}
+.m,code,time,var{font-family:"JetBrains Mono",Consolas,"Malgun Gothic",monospace;font-variant-numeric:tabular-nums;font-style:normal}
+header{height:40px;display:flex;align-items:center;gap:14px;padding:0 10px 0 12px;background:var(--g2);border-bottom:1px solid #1a1d21}
+.brand{display:flex;align-items:center;gap:7px;font-weight:600;font-size:14px;letter-spacing:-.01em;width:150px}
+.logo{display:grid;gap:2px;width:16px}.logo i{height:3px;background:var(--buff)}.logo i:nth-child(2){background:var(--blue);margin-left:4px}.logo i:nth-child(3){background:var(--pink)}
+.search{width:300px;height:26px;border:1px solid var(--ln);background:#1b1e22;border-radius:4px;display:flex;align-items:center;padding:0 8px;color:var(--mut);gap:6px;font-size:12px}
+.search kbd{margin-left:auto;font:10px "JetBrains Mono";border:1px solid var(--ln2);border-radius:3px;padding:0 4px}
+nav{display:flex;height:40px;margin-left:6px}nav a{display:flex;align-items:center;padding:0 12px;color:var(--mut);font-weight:500;border-bottom:2px solid transparent}
+nav a.on{color:#fff;border-color:var(--buff)}
+.right{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11px}
+.pill{background:var(--pink);color:var(--ink);font-weight:600;border-radius:11px;padding:3px 9px 3px 7px;display:flex;gap:6px;align-items:center}.pill b{background:var(--red);color:#fff;border-radius:8px;padding:0 5px;font:600 10px/15px "JetBrains Mono"}
+.wk{display:flex;gap:5px;align-items:center;color:var(--mut)}.wk i{width:6px;height:12px;border:1px solid var(--ln2)}.wk i.on{background:var(--blue);border-color:var(--blue)}
+.av{width:24px;height:24px;border-radius:50%;background:var(--buff);color:var(--ink);display:grid;place-items:center;font:600 10px Inter}
+main{display:grid;grid-template-columns:836px 1fr;height:836px}
+.left{padding:8px;display:flex;flex-direction:column;gap:8px;border-right:1px solid #1a1d21;min-width:0}
+.bays{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;height:252px}
+.bay{background:var(--bay);border:1px solid var(--ln);border-radius:3px;display:flex;flex-direction:column;gap:3px;padding:0 4px 4px;min-width:0}
+.bh,.ph{display:flex;align-items:center;gap:6px;height:24px;font:600 11px "Barlow Condensed";letter-spacing:.09em;text-transform:uppercase;color:#c3cad1}
+.bh i{width:8px;height:8px;border-radius:1px}.bh var{margin-left:auto;color:var(--mut);font-size:10px;letter-spacing:0}
+.s{display:grid;grid-template-columns:4px 42px 1fr 36px;grid-template-rows:19px 18px;background:var(--buff);color:var(--ink);border-radius:1px;box-shadow:0 1px 0 rgba(0,0,0,.45);flex:none;position:relative}
+.s>*{display:flex;align-items:center;padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-right:1px solid rgba(17,20,24,.2);text-decoration:none;font-style:normal;min-width:0}
+.s>:nth-child(-n+4){border-bottom:1px solid rgba(17,20,24,.14)}.s>u,.s>em{border-right:0;justify-content:center}
+.s>i{grid-row:1/3;padding:0;background:#b0954a;border:0}
+.s b{font:500 12.5px "JetBrains Mono";letter-spacing:-.03em}.s span{font-size:12.5px;font-weight:600;display:block;line-height:19px}
+.s u{font:600 10px "Barlow Condensed";letter-spacing:.05em;color:#4c4636}.s s{font:10.5px "JetBrains Mono";color:#4c4636}
+.s small{font-size:11px;color:#5d5641;display:block;line-height:18px}.s em{font-size:10px;font-weight:700;letter-spacing:.06em}
+.s.b{background:var(--blue)}.s.b>i{background:#3c7db0}.s.b u,.s.b s,.s.b small{color:#3a4a57}
+.s.p{background:var(--pink)}.s.p>i{background:var(--red)}.s.p u,.s.p s,.s.p small{color:#5e3f45}
+.s.k{transform:translateX(8px);box-shadow:0 3px 8px rgba(0,0,0,.55),-8px 0 0 -6px var(--buff);outline:1.5px solid var(--ink);z-index:2}
+.s .x{color:var(--red)}.s .x::after{content:"";position:absolute;inset:2px 1px;border:1.5px solid var(--red);border-radius:50%;transform:rotate(-6deg)}
+.s .ok{color:var(--grn)}.s .ok::before{content:"✓";margin-right:1px}
+.mark{position:absolute;right:38px;top:3px;width:14px;height:2px;background:var(--red);transform:rotate(-8deg)}
+.more{margin-top:auto;font:500 11px "Barlow Condensed";color:var(--mut);padding:2px 4px;border-top:1px dashed var(--ln)}
+.free{height:37px;border:1px dashed var(--ln2);border-radius:1px;display:flex;align-items:center;justify-content:center;font:500 11px "Barlow Condensed";color:var(--mut);letter-spacing:.03em}
+.card{background:var(--bay);border:1px solid var(--ln);border-radius:3px;padding:0 8px 6px}
+.ph .tabs{margin-left:auto;display:flex;gap:2px;letter-spacing:.02em;font-weight:500;text-transform:none}.ph .tabs a{padding:1px 7px;border-radius:3px;color:var(--mut)}.ph .tabs a.on{background:var(--g3);color:#fff}
+.lanes{height:136px}.lane{display:grid;grid-template-columns:62px 1fr;height:19px;align-items:center;font-size:11px;color:#b9c1c8}
+.trk{position:relative;height:13px;background:repeating-linear-gradient(90deg,transparent 0 calc(21.43% - 1px),#30353b calc(21.43% - 1px) 21.43%);border-bottom:1px solid #30353b}
+.bar{position:absolute;top:0;height:13px;font:600 10px/13px "Barlow Condensed";color:var(--ink);padding-left:4px;white-space:nowrap;overflow:hidden;border-left:3px solid #3c7db0;background:var(--blue)}
+.bar.bf{background:var(--buff);border-color:#b0954a}.bar.pk{background:var(--pink);border-color:var(--red)}
+.bar.end-ok::after,.bar.end-x::after{content:"✓";position:absolute;right:3px;color:var(--grn)}.bar.end-x::after{content:"✕";color:var(--red)}
+.now{position:absolute;top:-4px;bottom:-4px;left:88.6%;width:1.5px;background:var(--red)}
+.ruler{position:relative;height:14px;margin-left:62px;font:10px "JetBrains Mono";color:var(--mut)}.ruler span{position:absolute;transform:translateX(-50%)}
+.tbl{flex:1;min-height:0;overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}
+th{font:600 10px "Barlow Condensed";letter-spacing:.08em;text-transform:uppercase;color:var(--mut);text-align:left;height:20px;border-bottom:1px solid var(--ln)}
+td{height:22px;border-bottom:1px solid #30353b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:8px;color:#d3d8dc}
+td.m{font-size:11.5px;color:#fff}td.d{color:var(--mut);font-size:11.5px}tr.sel td{background:#323940}tr.sel td:first-child{box-shadow:inset 3px 0 var(--buff)}
+.tag{display:inline-block;padding:0 5px;border-radius:2px;font-size:11px;font-weight:600;color:var(--ink);line-height:15px}.tb{background:var(--blue)}.tf{background:var(--buff)}.tp{background:var(--pink)}
+.panes{display:flex;flex-direction:column;min-width:0}
+.pane{display:flex;flex-direction:column;background:#1e2125;min-height:0;overflow:hidden}
+.phd{display:grid;grid-template-columns:4px auto 1fr auto auto auto;align-items:center;gap:8px;height:30px;background:var(--g3);border-bottom:1px solid #1a1d21;padding-right:8px}
+.phd>i{height:30px}.phd b{font:600 12.5px "JetBrains Mono"}.phd .tt{font:600 13.5px "Barlow Condensed","Malgun Gothic";white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff}
+.chip{font:600 10.5px "Barlow Condensed";letter-spacing:.05em;text-transform:uppercase;padding:1px 6px;border-radius:2px;color:var(--ink);background:var(--blue)}.chip.g{background:transparent;color:#c3cad1;border:1px solid var(--ln2)}
+.ico{display:flex;gap:9px;color:var(--mut);font-size:12px}
+.meta{display:flex;gap:12px;padding:4px 10px;font-size:11px;color:var(--mut);border-bottom:1px solid #2b3036;white-space:nowrap}.meta code{color:#b9c9d6;font-size:10.5px}
+.bd{padding:6px 10px;display:flex;flex-direction:column;gap:3px;flex:1;min-height:0;overflow:hidden}
+.ln{display:grid;grid-template-columns:42px 1fr;gap:6px;align-items:baseline}.ln time{font-size:10px;color:#6f7983}.ln span{color:#e7eaec}.ln span.u{color:var(--buff)}
+.t{display:grid;grid-template-columns:42px 1fr auto;gap:6px;align-items:center;height:20px;background:#25292e;border-left:2px solid #3a4148;padding-right:6px}.t time{font-size:10px;color:#6f7983;padding-left:4px}
+.t code{font-size:11px;color:#c9d0d6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.t var{font-size:10px;color:var(--mut)}
+.t.ok{border-color:var(--grn)}.t.ok code::first-letter{color:#5fc27e}.t.run{border-color:var(--amb)}.t.run code::first-letter{color:var(--amb)}
+.ask{background:var(--pink);color:var(--ink);border-left:4px solid var(--red);padding:7px 9px;margin-top:3px;display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:center}
+.ask h4{font:700 13px "Barlow Condensed";letter-spacing:.02em}.ask p{font-size:11px;color:#5e3f45;grid-column:1}.ask .btns{grid-row:1/3;grid-column:2;display:flex;gap:6px}
+.btn{font:600 11.5px Inter;padding:5px 11px;border-radius:3px;border:1px solid var(--ink);background:var(--ink);color:#fff}.btn.o{background:transparent;color:var(--ink)}
+.ev{display:flex;gap:6px;margin:2px 0}.ev span{font:600 11.5px "Barlow Condensed";padding:3px 8px;border-radius:2px;background:#25292e;border:1px solid var(--ln)}.ev .y{color:#6fd08c;border-color:#2f6a43}.ev .w{color:var(--amb);border-color:#6b5524}
+.cmp{margin:0 10px 8px;height:28px;border:1px solid var(--ln);border-radius:3px;background:#181b1e;display:flex;align-items:center;padding:0 8px;color:#6f7983;font-size:11.5px;gap:8px}.cmp kbd{margin-left:auto;font:10px "JetBrains Mono";color:var(--mut)}
+.grip{height:6px;background:var(--g);border-top:1px solid #1a1d21;border-bottom:1px solid #1a1d21;display:flex;justify-content:center;align-items:center;flex:none}.grip::after{content:"";width:28px;height:2px;border-top:1px solid var(--ln2);border-bottom:1px solid var(--ln2)}
+.caret{display:inline-block;width:6px;height:11px;background:var(--blue);vertical-align:-1px;margin-left:2px}
+footer{height:24px;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--g2);border-top:1px solid #1a1d21;font-size:11px;color:var(--mut)}footer .dot{width:7px;height:7px;border-radius:50%;background:var(--grn);display:inline-block;margin-right:6px}footer .r{margin-left:auto;display:flex;gap:14px}
+</style></head><body>
+<header><div class="brand"><span class="logo"><i></i><i></i><i></i></span>Rex Desk</div>
+<div class="search">⌕ <span>Search issues, runs, branches</span><kbd>Ctrl K</kbd></div>
+<nav><a class="on">Board</a><a>Issues</a><a>Runs</a><a>Evidence</a><a>Settings</a></nav>
+<div class="right"><span class="pill">Needs you <b>3</b></span><span class="wk"><i class="on"></i><i class="on"></i><i></i><i></i>2/4 workers</span><span class="av">RE</span></div></header>
+<main><section class="left">
+<div class="bays">
+<div class="bay"><div class="bh"><i style="background:var(--buff)"></i>Inbox<var>12</var></div>
+<div class="s"><i></i><b>41207</b><span>모바일 &gt; 채팅 &gt; 이미지 전송 후 썸네일 깨짐</span><u>MM</u><s>12m</s><small>bug · chat · thumbnail</small><em>NEW</em></div>
+<div class="s"><i></i><b>40988</b><span>간트 뷰 &gt; 종료일 툴팁 하루 늦게 표시</span><u>MM</u><s>26m</s><small>bug · gantt · tooltip</small><em>NEW</em></div>
+<div class="s"><i></i><b>52114</b><span>Calendar invite email shows UTC time</span><u>MM</u><s>41m</s><small>bug · calendar · tz</small><em>NEW</em></div>
+<div class="s"><i></i><b>37290</b><span>설치형 &gt; 자동 로그인 해제됨</span><u>MM</u><s>1h</s><small>bug · login · session</small><em>NEW</em></div>
+<div class="more">+ 8 more · sorted by Morningmate priority</div></div>
+<div class="bay"><div class="bh"><i style="background:var(--blue)"></i>Analyzing<var>18</var></div>
+<div class="s b"><i></i><b>34701</b><span>설치형 &gt; 앱 아이콘 배지가 표시되지 않음</span><u>CC</u><s>2:10</s><small>bug · macOS badge missing</small><em>SCAN</em></div>
+<div class="s b"><i></i><b>26717</b><span>다시 알림 취소 일본어 수정 요청</span><u>CC</u><s>1:48</s><small>i18n · ja-JP · reminder</small><em>SCAN</em></div>
+<div class="s b"><i></i><b>39812</b><span>업무 &gt; 하위 업무 복사 시 담당자 누락</span><u>CC</u><s>0:37</s><small>bug · task · copy</small><em>SCAN</em></div>
+<div class="more">+ 15 queued for Main agent</div></div>
+<div class="bay"><div class="bh"><i style="background:var(--blue)"></i>Working<var>2</var></div>
+<div class="s b k"><i></i><b>38464</b><span>설치형, 파일, 미리보기 - 미리보기 화면에서 다운로드 버튼 클릭 시 빈 화면 표시</span><u>CC</u><s>31:04</s><small>bug · file-preview · download blank</small><em>WORK</em></div>
+<div class="s b"><i></i><b>48073</b><span>[오류] Safari &gt; 리스트 뷰 &gt; 더보기 메뉴 제목 영역에 가려짐</span><u>CX</u><s>43:17</s><small>bug · list-view · Safari overlap</small><em>VRFY</em></div>
+<div class="free">W3 free · drop a strip to assign</div><div class="free">W4 free</div></div>
+<div class="bay"><div class="bh"><i style="background:var(--pink)"></i>Needs you<var>3</var></div>
+<div class="s p"><i></i><b>MAIN</b><span>Main agent · analyzing 20 issues</span><u>CC</u><s>0:52</s><small>approve desk_categorize</small><em>ASK</em></div>
+<div class="s p"><i></i><b style="font-size:11.5px">803017</b><span>Basic plan smart-search 1-month limit not enforced</span><u>CC</u><s>4:20</s><small>confirm plan matrix</small><em>ASK</em></div>
+<div class="s p"><i></i><b>6658</b><span>Incorrect Translation (Indonesian)</span><u>CC</u><s>14:02</s><small>2 strings fail i18n test</small><em class="x">FAIL</em><span class="mark"></span></div>
+</div>
+<div class="bay"><div class="bh"><i style="background:var(--grn)"></i>Review<var>2</var></div>
+<div class="s b"><i></i><b>39349</b><span>조직도 일괄 등록 버튼명 변경 (영문)</span><u>CC</u><s>PR212</s><small>i18n · en · org chart</small><em class="ok">3/3</em></div>
+<div class="s b"><i></i><b>35880</b><span>게시물 &gt; 첨부파일 정렬 순서 오류</span><u>CX</u><s>PR209</s><small>bug · post · attachments</small><em class="ok">3/3</em></div>
+<div class="more">Draft PRs open after all checks pass</div></div>
+</div>
+<div class="card lanes"><div class="ph">Worker lanes<span class="tabs"><a>30m</a><a class="on">1h</a><a>Today</a></span></div>
+<div class="ruler"><span style="left:14.3%">14:00</span><span style="left:35.7%">14:15</span><span style="left:57.1%">14:30</span><span style="left:78.6%">14:45</span><span style="left:88.6%;color:var(--red)">14:52</span></div>
+<div class="lane"><span>Main · CC</span><div class="trk"><div class="bar" style="left:71.4%;width:15.7%">Main agent · import + triage 20</div><div class="bar pk" style="left:87.1%;width:1.5%;padding:0"></div><span class="now"></span></div></div>
+<div class="lane"><span>W1 · CC</span><div class="trk"><div class="bar end-ok" style="left:2.9%;width:38.5%">#39349 조직도 버튼명 (영문)</div><div class="bar" style="left:44.3%;width:44.3%">#38464 download blank screen</div><span class="now"></span></div></div>
+<div class="lane"><span>W2 · Codex</span><div class="trk"><div class="bar" style="left:27.1%;width:61.5%">#48073 Safari more-menu overlap · verifying</div><span class="now"></span></div></div>
+<div class="lane"><span>W3 · CC</span><div class="trk"><div class="bar pk end-x" style="left:57.1%;width:20%">#6658 Indonesian strings</div><span class="now"></span></div></div>
+<div class="lane"><span>W4 · —</span><div class="trk"><span class="now"></span></div></div></div>
+<div class="card tbl"><div class="ph">Morningmate · QA board<span class="tabs"><a class="on">All 34</a><a>Request 21</a><a>Dev completed 13</a></span></div>
+<table><colgroup><col style="width:62px"><col style="width:130px"><col><col style="width:170px"><col style="width:84px"><col style="width:58px"><col style="width:44px"></colgroup>
+<tr><th>#</th><th>Status</th><th>Title</th><th>Category</th><th>Bay</th><th>Agent</th><th>Age</th></tr>
+<tr class="sel"><td class="m">38464</td><td>Request</td><td>설치형, 파일, 미리보기 - 미리보기 화면에서 다운로드 버튼 클릭 시 빈 화면 표시</td><td>bug / file-preview</td><td><span class="tag tb">Working</span></td><td>Claude</td><td class="d m">2d</td></tr>
+<tr><td class="m">48073</td><td>Request</td><td>[오류] Safari &gt; 리스트 뷰 &gt; 더보기 메뉴 제목 영역에 가려짐</td><td>bug / list-view</td><td><span class="tag tb">Working</span></td><td>Codex</td><td class="d m">1d</td></tr>
+<tr><td class="m">803017</td><td>Request</td><td>Basic plan smart-search 1-month limit not enforced</td><td>bug / search</td><td><span class="tag tp">Needs you</span></td><td>Claude</td><td class="d m">5h</td></tr>
+<tr><td class="m">6658</td><td>Development Completed</td><td>Incorrect Translation (Indonesian)</td><td>i18n / id-ID</td><td><span class="tag tp">Needs you</span></td><td>Claude</td><td class="d m">6d</td></tr>
+<tr><td class="m">34701</td><td>Request</td><td>설치형 &gt; 앱 아이콘 배지가 표시되지 않음</td><td>bug / macOS badge missing</td><td><span class="tag tb">Analyzing</span></td><td>Claude</td><td class="d m">3d</td></tr>
+<tr><td class="m">26717</td><td>Development Completed</td><td>다시 알림 취소 일본어 수정 요청</td><td>i18n / ja-JP</td><td><span class="tag tb">Analyzing</span></td><td>Claude</td><td class="d m">8d</td></tr>
+<tr><td class="m">39349</td><td>Development Completed</td><td>조직도 일괄 등록 버튼명 변경 (영문)</td><td>i18n / en</td><td><span class="tag tb">Review</span></td><td>Claude</td><td class="d m">4d</td></tr>
+<tr><td class="m">35880</td><td>Request</td><td>게시물 &gt; 첨부파일 정렬 순서 오류</td><td>bug / post</td><td><span class="tag tb">Review</span></td><td>Codex</td><td class="d m">2d</td></tr>
+<tr><td class="m">39812</td><td>Request</td><td>업무 &gt; 하위 업무 복사 시 담당자 누락</td><td>bug / task</td><td><span class="tag tb">Analyzing</span></td><td>Claude</td><td class="d m">1d</td></tr>
+<tr><td class="m">41207</td><td>Request</td><td>모바일 &gt; 채팅 &gt; 이미지 전송 후 썸네일 깨짐</td><td>bug / chat</td><td><span class="tag tf">Inbox</span></td><td class="d">—</td><td class="d m">12m</td></tr>
+<tr><td class="m">40988</td><td>Request</td><td>간트 뷰 &gt; 종료일 툴팁 하루 늦게 표시</td><td>bug / gantt</td><td><span class="tag tf">Inbox</span></td><td class="d">—</td><td class="d m">26m</td></tr>
+<tr><td class="m">52114</td><td>Request</td><td>Calendar invite email shows UTC time instead of member time zone</td><td>bug / calendar</td><td><span class="tag tf">Inbox</span></td><td class="d">—</td><td class="d m">41m</td></tr>
+<tr><td class="m">37290</td><td>Request</td><td>설치형 &gt; 로그인 &gt; 앱 재시작 후 자동 로그인 해제됨</td><td>bug / login</td><td><span class="tag tf">Inbox</span></td><td class="d">—</td><td class="d m">1h</td></tr>
+<tr><td class="m">51960</td><td>Request</td><td>Admin &gt; export members CSV drops Korean names (encoding)</td><td>bug / admin export</td><td><span class="tag tf">Inbox</span></td><td class="d">—</td><td class="d m">2h</td></tr>
+</table></div></section>
+<section class="panes">
+<div class="pane" style="height:262px"><div class="phd"><i style="background:var(--red)"></i><b>MAIN</b><span class="tt">Main agent · analyzing 20 issues</span><span class="chip g">Claude Code</span><span class="chip" style="background:var(--pink)">Needs you</span><span class="ico">⧉ ✕</span></div>
+<div class="bd"><p class="ln"><time>14:47</time><span>Imported 20 issues from the Morningmate QA board. Grouping by product area before assigning workers.</span></p>
+<p class="t ok"><time>14:47</time><code>✓ desk_list_issues · 20 results</code><var>0.8s</var></p>
+<p class="t ok"><time>14:48</time><code>✓ desk_task · 38464 → W1</code><var>0.3s</var></p>
+<p class="t ok"><time>14:48</time><code>✓ desk_task · 48073 → W2 (Codex)</code><var>0.3s</var></p>
+<p class="t run"><time>14:51</time><code>◷ desk_categorize · bug / file-preview / download blank screen</code><var>waiting</var></p>
+<div class="ask"><h4>desk_categorize wants to write categories to 20 issues</h4><p>Writes labels in Morningmate · reversible · next: bug / list-view / Safari more-menu overlap</p><div class="btns"><span class="btn">Approve once</span><span class="btn o">Decline</span></div></div></div></div>
+<div class="grip"></div>
+<div class="pane" style="height:306px"><div class="phd"><i style="background:#3c7db0"></i><b>#38464</b><span class="tt">미리보기 화면에서 다운로드 버튼 클릭 시 빈 화면 표시</span><span class="chip g">Claude Code</span><span class="chip">Working 31:04</span><span class="ico">⧉ ✕</span></div>
+<div class="meta"><span>W1</span><code>temp/rex/morningmate-38464/download-blank-a1b2c3</code><span>+9 −3 · 1 file</span></div>
+<div class="bd"><p class="ln"><time>14:38</time><span>Reproduced: clicking 다운로드 in preview opens a blank tab — the blob URL is revoked before navigation completes.</span></p>
+<p class="t ok"><time>14:39</time><code>✓ Read src/preview/DownloadButton.tsx</code><var>142 lines</var></p>
+<p class="t ok"><time>14:40</time><code>✓ Grep "revokeObjectURL" · src/</code><var>3 matches</var></p>
+<p class="t ok"><time>14:44</time><code>✓ Edit src/preview/DownloadButton.tsx</code><var>+9 −3</var></p>
+<p class="t run"><time>14:51</time><code>◷ Bash pnpm test preview -- --run</code><var>0:41</var></p>
+<p class="ln"><time>14:52</time><span>Deferring revoke until the anchor's click handler fires, then re-running the preview suite<span class="caret"></span></span></p></div>
+<div class="cmp">Message #38464 — steer, ask, or pause this run<kbd>Enter</kbd></div></div>
+<div class="grip"></div>
+<div class="pane" style="flex:1"><div class="phd"><i style="background:#3c7db0"></i><b>#48073</b><span class="tt">Safari &gt; 리스트 뷰 &gt; 더보기 메뉴 제목 영역에 가려짐</span><span class="chip g">Codex</span><span class="chip">Verifying</span><span class="ico">⧉ ✕</span></div>
+<div class="bd"><p class="ln"><time>14:46</time><span>Raised the more-menu above the sticky title row; it no longer clips in Safari 17. Collecting evidence before the draft PR.</span></p>
+<div class="ev"><span class="y">✓ Tests pass 48/48</span><span class="y">✓ Recording saved 0:23</span><span class="w">◷ Browser assertion · Safari 17.4</span></div>
+<p class="t ok"><time>14:49</time><code>✓ desk_record · safari-list-more.webm</code><var>2.1 MB</var></p>
+<p class="t run"><time>14:52</time><code>◷ desk_assert · ".list-more-menu" fully visible over header</code><var>0:12</var></p>
+<p class="ln"><time></time><span class="u">Draft PR gate · opens automatically when 3/3 checks pass</span></p></div></div>
+</section></main>
+<footer><span><span class="dot"></span>Running on this computer</span><span>Turso synced 12s ago</span><div class="r"><span>Morningmate import 14:47</span><span>Claude Code 2 · Codex 1</span><span class="m">v0.9.0</span></div></footer>
+</body></html>

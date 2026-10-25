@@ -214,7 +214,7 @@ try {
   assert.ok(artifacts.some(artifact => artifact.type === 'text/html'));
   assert.ok(artifacts.some(artifact => artifact.type === 'text/plain'));
   await page.getByRole('button', { name: 'Agent runs', exact: true }).click();
-  await page.getByRole('button', { name: new RegExp(posts[0].title) }).click();
+  await page.getByRole('complementary', { name: 'Agent runs' }).getByRole('button', { name: new RegExp(posts[0].title) }).click();
   await page.getByRole('heading', { name: 'Worktree & proof', exact: true }).waitFor();
   await page.getByText('Ready for review', { exact: true }).first().waitFor();
   await page.locator('#toast').waitFor({ state: 'hidden' });

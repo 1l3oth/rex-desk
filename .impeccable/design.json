@@ -1,367 +1,186 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-23T11:25:07.703Z",
+  "generatedAt": "2026-10-24T00:00:00Z",
   "title": "Design System: Rex Desk",
   "extensions": {
     "colorMeta": {
-      "rail": {
-        "role": "primary",
-        "displayName": "Rail"
-      },
-      "rail-text": {
-        "role": "primary",
-        "displayName": "Rail Text"
-      },
-      "ground": {
-        "role": "neutral",
-        "displayName": "Ground"
-      },
-      "surface": {
-        "role": "neutral",
-        "displayName": "Surface"
-      },
-      "ink": {
-        "role": "neutral",
-        "displayName": "Ink"
-      },
-      "muted": {
-        "role": "neutral",
-        "displayName": "Muted"
-      },
-      "line": {
-        "role": "neutral",
-        "displayName": "Line"
-      },
-      "accent": {
-        "role": "primary",
-        "displayName": "Accent"
-      },
-      "accent-soft": {
-        "role": "primary",
-        "displayName": "Accent Soft"
-      },
-      "amber": {
-        "role": "secondary",
-        "displayName": "Amber"
-      },
-      "amber-soft": {
-        "role": "secondary",
-        "displayName": "Amber Soft"
-      },
-      "red": {
-        "role": "secondary",
-        "displayName": "Red"
-      },
-      "red-soft": {
-        "role": "secondary",
-        "displayName": "Red Soft"
-      },
-      "green": {
-        "role": "secondary",
-        "displayName": "Green"
-      },
-      "green-soft": {
-        "role": "secondary",
-        "displayName": "Green Soft"
-      },
-      "status-neutral": {
-        "role": "neutral",
-        "displayName": "Status Neutral"
-      },
-      "status-neutral-ink": {
-        "role": "neutral",
-        "displayName": "Status Neutral Ink"
-      },
-      "status-working-ink": {
-        "role": "neutral",
-        "displayName": "Status Working Ink"
-      },
-      "row-selected": {
-        "role": "neutral",
-        "displayName": "Row Selected"
-      },
-      "row-hover": {
-        "role": "neutral",
-        "displayName": "Row Hover"
-      },
-      "row-selected-hover": {
-        "role": "neutral",
-        "displayName": "Row Selected Hover"
-      },
-      "primary-hover": {
-        "role": "primary",
-        "displayName": "Primary Hover"
-      },
-      "navigation-hover": {
-        "role": "primary",
-        "displayName": "Navigation Hover"
-      },
-      "navigation-active": {
-        "role": "primary",
-        "displayName": "Navigation Active"
-      },
-      "dark-rail": {
-        "role": "primary",
-        "displayName": "Dark Rail"
-      },
-      "dark-ground": {
-        "role": "neutral",
-        "displayName": "Dark Ground"
-      },
-      "dark-surface": {
-        "role": "neutral",
-        "displayName": "Dark Surface"
-      },
-      "dark-ink": {
-        "role": "neutral",
-        "displayName": "Dark Ink"
-      },
-      "dark-muted": {
-        "role": "neutral",
-        "displayName": "Dark Muted"
-      },
-      "dark-line": {
-        "role": "neutral",
-        "displayName": "Dark Line"
-      },
-      "dark-accent": {
-        "role": "primary",
-        "displayName": "Dark Accent"
-      },
-      "dark-primary": {
-        "role": "primary",
-        "displayName": "Dark Primary"
-      },
-      "dark-primary-ink": {
-        "role": "primary",
-        "displayName": "Dark Primary Ink"
-      }
+      "accent": { "role": "primary", "displayName": "Signal Blue", "dark": "accent-dark", "tonalRamp": ["#0a1f40", "#0f3266", "#0b4ea2", "#0969da", "#4c8dff", "#80b3ff", "#b6e3ff", "#ddf4ff"] },
+      "amber": { "role": "secondary", "displayName": "Waiting Amber", "dark": "amber-dark", "tonalRamp": ["#3b2300", "#5c3a00", "#7d4e00", "#9a6700", "#e5a100", "#f2c14e", "#ffd166", "#fff8c5"] },
+      "green": { "role": "tertiary", "displayName": "Outcome Green", "dark": "green-dark", "tonalRamp": ["#0b2e17", "#0f4a22", "#116329", "#1a7f37", "#3fb950", "#6fdd8b", "#aceebb", "#dafbe1"] },
+      "red": { "role": "tertiary", "displayName": "Failure Red", "dark": "red-dark", "tonalRamp": ["#4c0a10", "#82071e", "#a40e26", "#cf222e", "#f85149", "#ff8182", "#ffcecb", "#ffebe9"] },
+      "violet": { "role": "tertiary", "displayName": "Source Violet", "dark": "violet-dark", "tonalRamp": ["#271052", "#3e1f79", "#6639ba", "#8250df", "#b392f0", "#d2b8ff", "#ecd8ff", "#fbefff"] },
+      "bg": { "role": "neutral", "displayName": "Shell", "dark": "bg-dark", "tonalRamp": ["#121418", "#16181d", "#1c1f25", "#23272e", "#2c313a", "#59636e", "#d0d7de", "#f6f8fa"] },
+      "panel": { "role": "neutral", "displayName": "Panel", "dark": "panel-dark" },
+      "raised": { "role": "neutral", "displayName": "Raised", "dark": "raised-dark" },
+      "sunken": { "role": "neutral", "displayName": "Sunken", "dark": "sunken-dark" },
+      "line": { "role": "neutral", "displayName": "Hairline", "dark": "line-dark" },
+      "line-soft": { "role": "neutral", "displayName": "Soft Hairline", "dark": "line-soft-dark" },
+      "ink": { "role": "neutral", "displayName": "Ink", "dark": "ink-dark", "tonalRamp": ["#1f2328", "#59636e", "#6e7781", "#7d8592", "#9aa3b1", "#c4ccd4", "#e6e8eb", "#f6f8fa"] },
+      "muted": { "role": "neutral", "displayName": "Muted", "dark": "muted-dark" },
+      "faint": { "role": "neutral", "displayName": "Faint", "dark": "faint-dark" },
+      "status-bg": { "role": "neutral", "displayName": "Status Band", "dark": "status-bg-dark" },
+      "status-need": { "role": "secondary", "displayName": "Status Needs-You", "dark": "status-need-dark" }
     },
     "typographyMeta": {
-      "headline": {
-        "displayName": "Headline",
-        "purpose": "Page headings; 24px at the 900px breakpoint."
-      },
-      "title": {
-        "displayName": "Title",
-        "purpose": "Selected issue title; 18px at 1150px, 20px at 700px."
-      },
-      "section-title": {
-        "displayName": "Section Title",
-        "purpose": "Section and empty-state headings."
-      },
-      "body": {
-        "displayName": "Body",
-        "purpose": "Application baseline."
-      },
-      "issue-title": {
-        "displayName": "Issue Title",
-        "purpose": "Compact semibold issue-list titles."
-      },
-      "label": {
-        "displayName": "Label",
-        "purpose": "Labeled form fields and compact controls."
-      },
-      "metadata": {
-        "displayName": "Metadata",
-        "purpose": "Supporting row metadata."
-      },
-      "state-label": {
-        "displayName": "State Label",
-        "purpose": "Tracker/Agent captions and decision provenance."
-      },
-      "code": {
-        "displayName": "Code",
-        "purpose": "Technical identifiers and preformatted evidence."
-      }
+      "title": { "displayName": "Title", "purpose": "Page titles and the issue detail heading; the largest text in the product." },
+      "headline": { "displayName": "Headline", "purpose": "Pane titles, decision headings, issue preview title, setup steps." },
+      "body": { "displayName": "Body", "purpose": "Rows, buttons, inputs, transcript text. Tabular numerals throughout." },
+      "meta": { "displayName": "Meta", "purpose": "Sublines, status bar, timestamps, secondary row lines, pane footers." },
+      "label": { "displayName": "Label", "purpose": "Uppercase sidebar, run-group, proof-column and board headings." },
+      "mono": { "displayName": "Mono", "purpose": "Issue numbers, branches, tool names, code and tool output only." }
     },
     "shadows": [
-      {
-        "name": "selected-view",
-        "value": "0 1px 2px #24414c12",
-        "purpose": "Selected List/Kanban segment."
-      },
-      {
-        "name": "toast",
-        "value": "0 6px 25px #152c3a22",
-        "purpose": "Temporary feedback overlay."
-      },
-      {
-        "name": "dialog",
-        "value": "0 20px 80px #173c4633",
-        "purpose": "Modal overlay."
-      }
+      { "name": "overlay", "value": "0 16px 48px rgba(31,35,40,.18)", "dark": "0 20px 60px rgba(0,0,0,.55)", "purpose": "Dialogs, picker popovers and the toast only." },
+      { "name": "focus-ring", "value": "0 0 0 2px var(--accent-soft)", "purpose": "Focused inputs and the pane composer, with an accent border." },
+      { "name": "active-inset", "value": "inset 0 2px 0 var(--accent)", "purpose": "Active run tab and focused pane header; amber variant marks a pane that needs you." },
+      { "name": "segment-ring", "value": "0 0 0 1px var(--line)", "purpose": "Active segment in segmented switches; quiet count badges." },
+      { "name": "live-pulse", "value": "0 0 0 4px var(--accent-soft)", "purpose": "Animated halo on the running state dot (1.8s)." }
     ],
     "motion": [
-      {
-        "name": "ease",
-        "value": "cubic-bezier(.16,1,.3,1)",
-        "purpose": "Page and toast entrance."
-      },
-      {
-        "name": "page-entry",
-        "value": ".25s",
-        "purpose": "Opacity .85 to 1 and translateY 3px to 0."
-      },
-      {
-        "name": "toast-entry",
-        "value": ".2s",
-        "purpose": "Opacity 0 to 1 and vertical displacement 8px to 0."
-      },
-      {
-        "name": "busy-spin",
-        "value": "1.4s linear infinite",
-        "purpose": "Busy icon rotation."
-      },
-      {
-        "name": "board-border",
-        "value": "border-color .15s",
-        "purpose": "Board task border hover transition."
-      }
+      { "name": "ease", "value": "cubic-bezier(.16,1,.3,1)", "purpose": "Default easing for state transitions, chevrons, pane head inset, toast entry." },
+      { "name": "control", "value": "120ms", "purpose": "Button and board-card background/border transitions." },
+      { "name": "chevron", "value": "150ms", "purpose": "Disclosure and picker chevron rotation." },
+      { "name": "pane-state", "value": "200ms", "purpose": "Pane header inset change on focus or needs-you." },
+      { "name": "toast-in", "value": "250ms", "purpose": "Toast rises 6px and fades in." },
+      { "name": "live", "value": "1.8s infinite", "purpose": "Running state dot pulse." },
+      { "name": "reduced-motion", "value": "prefers-reduced-motion: reduce", "purpose": "Disables all animation and transition." }
     ],
     "breakpoints": [
-      {
-        "name": "wide",
-        "value": "1600px",
-        "query": "(min-width:1600px)"
-      },
-      {
-        "name": "compact-desktop",
-        "value": "1150px",
-        "query": "(max-width:1150px)"
-      },
-      {
-        "name": "icon-rail",
-        "value": "900px",
-        "query": "(max-width:900px)"
-      },
-      {
-        "name": "bottom-navigation",
-        "value": "700px",
-        "query": "(max-width:700px)"
-      }
+      { "name": "narrow-sidebar", "value": "1100px", "purpose": "Sidebar narrows from 300px to 260px." },
+      { "name": "single-column", "value": "900px", "purpose": "Pane grids and the Needs you split collapse to one column." },
+      { "name": "mobile", "value": "700px", "purpose": "Activity bar moves to a fixed 52px bottom bar; status bar hides; page flows." },
+      { "name": "pane-proof-column", "value": "720px (container)", "purpose": "Pane container query: proof becomes a 260px right column." },
+      { "name": "pane-compact", "value": "420px (container)", "purpose": "Pane container query: provider label hides." }
     ],
-    "reducedMotion": {
-      "query": "(prefers-reduced-motion:reduce)",
-      "behavior": "All animations and transitions are disabled; scroll behavior becomes auto."
+    "shell": {
+      "activityBar": "48px",
+      "sidebar": "300px (260px at 1100px)",
+      "statusBar": "22px",
+      "tabStrip": "34px",
+      "paneHead": "34px",
+      "paneSub": "26px",
+      "paneFoot": "36px",
+      "issueRow": "30px",
+      "maxPanes": 4
     }
   },
   "components": [
     {
-      "name": "Primary button",
+      "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Petrol action with inherited keyboard focus and disabled treatment.",
-      "html": "<button class=\"ds-button ds-primary\">Analyze &amp; run</button>",
-      "css": ".ds-button{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 12px;min-height:36px;border:1px solid var(--line, #dbe4e6);border-radius:6px;background:white;color:var(--ink, #20353d);font-weight:550;text-decoration:none;white-space:nowrap}.ds-button:hover{background:#f1f6f6;border-color:#afc3c8}.ds-button.ds-primary{background:var(--rail, #173c46);border-color:var(--rail, #173c46);color:white}.ds-button.ds-primary:hover{background:#245663}.ds-button:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+      "description": "The single accent action in a region, such as Analyze & run.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Analyze &amp; run</button>",
+      "css": ".ds-btn { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border:1px solid var(--line,#2c313a); border-radius:6px; background:var(--raised,#23272e); color:var(--ink,#e6e8eb); font:500 12px/1 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; cursor:pointer; transition:background .12s, border-color .12s; } .ds-btn-primary { background:var(--accent,#4c8dff); border-color:var(--accent,#4c8dff); color:var(--accent-ink,#fff); } .ds-btn-primary:hover { filter:brightness(1.08); } .ds-btn:focus-visible { outline:2px solid var(--accent,#4c8dff); outline-offset:1px; }"
     },
     {
-      "name": "Secondary button",
+      "name": "Default Button",
       "kind": "button",
       "refersTo": "button",
-      "description": "Bordered white action with a tonal hover treatment.",
-      "html": "<button class=\"ds-button\">Sync tasks</button>",
-      "css": ".ds-button{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 12px;min-height:36px;border:1px solid var(--line, #dbe4e6);border-radius:6px;background:white;color:var(--ink, #20353d);font-weight:550;text-decoration:none;white-space:nowrap}.ds-button:hover{background:#f1f6f6;border-color:#afc3c8}.ds-button:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+      "description": "Raised, hairline-bordered secondary action.",
+      "html": "<button class=\"ds-btn-default\">Open evidence</button>",
+      "css": ".ds-btn-default { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border:1px solid var(--line,#2c313a); border-radius:6px; background:var(--raised,#23272e); color:var(--ink,#e6e8eb); font:500 12px/1 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; cursor:pointer; transition:background .12s, border-color .12s; } .ds-btn-default:hover { background:var(--hover,#252a32); border-color:var(--control-hover,#4a5260); } .ds-btn-default:focus-visible { outline:2px solid var(--accent,#4c8dff); outline-offset:1px; }"
     },
     {
-      "name": "Quiet button",
+      "name": "Quiet Button",
       "kind": "button",
       "refersTo": "button-quiet",
-      "description": "Transparent contextual action with a muted default.",
-      "html": "<button class=\"ds-button ds-quiet\">Cancel request</button>",
-      "css": ".ds-button{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 12px;min-height:36px;border:1px solid var(--line, #dbe4e6);border-radius:6px;background:white;color:var(--ink, #20353d);font-weight:550;text-decoration:none;white-space:nowrap}.ds-button:hover{background:#f1f6f6;border-color:#afc3c8}.ds-button.ds-quiet{background:transparent;border-color:transparent;color:var(--muted, #5d6e75)}.ds-button.ds-quiet:hover{background:#e7eeee;color:var(--ink, #20353d)}.ds-button:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+      "description": "Transparent tertiary action in toolbars and pane headers.",
+      "html": "<button class=\"ds-btn-quiet\">Close</button>",
+      "css": ".ds-btn-quiet { display:inline-flex; align-items:center; height:24px; padding:0 8px; border:1px solid transparent; border-radius:5px; background:transparent; color:var(--muted,#9aa3b1); font:500 11.5px/1 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; cursor:pointer; transition:background .12s; } .ds-btn-quiet:hover { background:var(--hover,#252a32); color:var(--ink,#e6e8eb); } .ds-btn-quiet:focus-visible { outline:2px solid var(--accent,#4c8dff); outline-offset:1px; }"
     },
     {
-      "name": "Labeled field",
+      "name": "Text Field",
       "kind": "input",
       "refersTo": "input",
-      "description": "Compact settings and decision field with helper text.",
-      "html": "<label class=\"ds-field\"><span>Repository name</span><input placeholder=\"Choose a name\"><small>Used to identify this repository.</small></label>",
-      "css": ".ds-field{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-field{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;min-width:0}.ds-field>span{font-size:12px;font-weight:600;color:var(--ink, #20353d)}.ds-field>label{font-size:12px;font-weight:600;color:var(--ink, #20353d)}.ds-field small{color:var(--muted, #5d6e75);font-size:11px;line-height:1.5}.ds-field input{width:100%;background:white;border:1px solid #cdd9dc;border-radius:5px;padding:9px 10px;min-height:38px;color:var(--ink, #20353d);font-size:13px}.ds-field select{width:100%;background:white;border:1px solid #cdd9dc;border-radius:5px;padding:9px 10px;min-height:38px;color:var(--ink, #20353d);font-size:13px}.ds-field textarea{width:100%;background:white;border:1px solid #cdd9dc;border-radius:5px;padding:9px 10px;min-height:38px;color:var(--ink, #20353d);font-size:13px}.ds-field textarea{resize:vertical;min-height:85px;line-height:1.6}.ds-field input::placeholder{color:#6f7d84}.ds-field textarea::placeholder{color:#6f7d84}.ds-field input[type=checkbox]{width:16px;min-height:16px;accent-color:var(--accent, #226b79)}.ds-field input:focus-visible,.ds-field textarea:focus-visible,.ds-field select:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+      "description": "Sunken 28px field with accent border and soft ring on focus.",
+      "html": "<input class=\"ds-input\" placeholder=\"Reply or steer this agent\">",
+      "css": ".ds-input { width:260px; min-height:28px; padding:4px 8px; border:1px solid var(--line,#2c313a); border-radius:6px; background:var(--sunken,#121418); color:var(--ink,#e6e8eb); font:12px/1.5 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; caret-color:var(--accent,#4c8dff); } .ds-input::placeholder { color:var(--faint,#7d8592); } .ds-input:focus { outline:0; border-color:var(--accent,#4c8dff); box-shadow:0 0 0 2px var(--accent-soft,rgba(76,141,255,.15)); }"
     },
     {
-      "name": "Active navigation",
+      "name": "Layout Switch",
       "kind": "nav",
-      "refersTo": "navigation-active",
-      "description": "Persistent filled navigation state; source rail color supplies the local context.",
-      "html": "<div style=\"background:var(--rail,#173c46);padding:14px\"><button class=\"ds-nav-button ds-active\" aria-current=\"page\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m4 4-2 10v6h20v-6L20 4H4Z M2 14h6l2 3h4l2-3h6\"/></svg><span>My issues</span></button></div>",
-      "css": ".ds-nav-button{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.ds-nav-button{width:100%;border:0;background:none;color:#cee0e3;padding:10px 12px;display:flex;align-items:center;gap:11px;border-radius:6px;text-align:left}.ds-nav-button:hover{background:#244c57;color:white}.ds-nav-button.ds-active{background:#315b66;color:white}.ds-nav-button:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+      "refersTo": "segmented-switch",
+      "description": "Single / Split / Grid pane layout segmented control with drawn glyphs.",
+      "html": "<div class=\"ds-seg\" role=\"group\" aria-label=\"Pane layout\"><button aria-pressed=\"false\"><span class=\"ds-glyph\"><i></i></span></button><button aria-pressed=\"true\" class=\"on\"><span class=\"ds-glyph two\"><i></i><i></i></span></button><button aria-pressed=\"false\"><span class=\"ds-glyph four\"><i></i><i></i><i></i><i></i></span></button></div>",
+      "css": ".ds-seg { display:inline-flex; gap:2px; padding:2px; border:1px solid var(--line,#2c313a); border-radius:6px; background:var(--sunken,#121418); } .ds-seg button { display:inline-flex; align-items:center; height:20px; padding:0 7px; border:0; border-radius:4px; background:transparent; color:var(--muted,#9aa3b1); cursor:pointer; } .ds-seg button:hover:not(.on) { color:var(--ink,#e6e8eb); } .ds-seg button.on { background:var(--raised,#23272e); color:var(--ink,#e6e8eb); box-shadow:0 0 0 1px var(--line,#2c313a); } .ds-seg button:focus-visible { outline:2px solid var(--accent,#4c8dff); outline-offset:1px; } .ds-glyph { display:grid; gap:1.5px; width:14px; height:11px; } .ds-glyph.two { grid-template-columns:1fr 1fr; } .ds-glyph.four { grid-template:1fr 1fr/1fr 1fr; } .ds-glyph i { border:1.3px solid currentColor; border-radius:1.5px; }"
     },
     {
-      "name": "Tracker and agent tags",
+      "name": "State Tags",
       "kind": "chip",
       "refersTo": "tag",
-      "description": "Separate state captions and neutral/semantic fills preserve the two state systems.",
-      "html": "<span class=\"ds-task-states\"><span class=\"ds-state-pair\"><span>Tracker:</span><span class=\"ds-tag\">REQUEST</span></span><span class=\"ds-state-pair\"><span>Agent:</span><span class=\"ds-tag ds-ready_for_review\">Ready for review</span></span></span>",
-      "css": ".ds-tag{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;background:#edf1f2;color:#50646c;border-radius:4px;padding:2px 7px;white-space:nowrap;line-height:1.6}.ds-tag.ds-running{background:var(--accent-soft, #e2eff0);color:#21606d}.ds-tag.ds-working{background:var(--accent-soft, #e2eff0);color:#21606d}.ds-tag.ds-waiting{background:var(--amber-soft, #fff2d8);color:var(--amber, #8b550b)}.ds-tag.ds-needs_evidence{background:var(--amber-soft, #fff2d8);color:var(--amber, #8b550b)}.ds-tag.ds-queued{background:var(--amber-soft, #fff2d8);color:var(--amber, #8b550b)}.ds-tag.ds-ready_for_review{background:var(--green-soft, #e7f2eb);color:var(--green, #28704a)}.ds-tag.ds-published{background:var(--green-soft, #e7f2eb);color:var(--green, #28704a)}.ds-tag.ds-finished{background:var(--green-soft, #e7f2eb);color:var(--green, #28704a)}.ds-tag.ds-failed{background:var(--red-soft, #fbe8e9);color:var(--red, #a33c41)}.ds-tag.ds-interrupted{background:var(--red-soft, #fbe8e9);color:var(--red, #a33c41)}\n.ds-task-states{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap}.ds-state-pair{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--muted, #5d6e75)}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+      "description": "18px pills: working blue, waiting amber, done green, failed red, with a pulsing live dot.",
+      "html": "<span class=\"ds-tag ds-working\"><span class=\"ds-dot\"></span>Running</span> <span class=\"ds-tag ds-waiting\">Waiting</span> <span class=\"ds-tag ds-done\">Ready for review</span> <span class=\"ds-tag ds-failed\">Failed</span>",
+      "css": ".ds-tag { display:inline-flex; align-items:center; gap:5px; height:18px; padding:0 7px; border-radius:9px; background:var(--line-soft,#252931); color:var(--muted,#9aa3b1); font:500 10.5px/1 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; } .ds-working { background:var(--accent-soft,rgba(76,141,255,.15)); color:var(--accent,#4c8dff); } .ds-waiting { background:var(--amber-soft,rgba(229,161,0,.12)); color:var(--amber,#e5a100); } .ds-done { background:var(--green-soft,rgba(63,185,80,.13)); color:var(--green,#3fb950); } .ds-failed { background:var(--red-soft,rgba(248,81,73,.13)); color:var(--red,#f85149); } .ds-dot { width:7px; height:7px; border-radius:50%; background:currentColor; animation:ds-live 1.8s cubic-bezier(.16,1,.3,1) infinite; } @keyframes ds-live { 0%,100% { box-shadow:0 0 0 0 var(--accent-soft,rgba(76,141,255,.15)); } 50% { box-shadow:0 0 0 4px var(--accent-soft,rgba(76,141,255,.15)); } } @media (prefers-reduced-motion:reduce) { .ds-dot { animation:none; } }"
     },
     {
-      "name": "Work panel",
+      "name": "Issue Row",
+      "kind": "custom",
+      "refersTo": "issue-row",
+      "description": "One-line 30px sidebar issue row; selected carries a 2px accent left border.",
+      "html": "<div class=\"ds-row\"><input type=\"checkbox\"><span class=\"ds-num\">#4812</span><span class=\"ds-title\">Checkout total ignores coupon on retry</span><span class=\"ds-sd\"></span></div><div class=\"ds-row sel\"><input type=\"checkbox\" checked><span class=\"ds-num\">#4807</span><span class=\"ds-title\">Session expires mid-upload</span><span class=\"ds-sd w\"></span></div>",
+      "css": ".ds-row { display:flex; align-items:center; gap:8px; width:300px; min-height:30px; padding:0 12px 0 10px; border-left:2px solid transparent; border-bottom:1px solid var(--line-soft,#252931); background:var(--panel,#1c1f25); color:var(--ink,#e6e8eb); font:12px/1.45 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; } .ds-row:hover { background:var(--hover,#252a32); } .ds-row.sel { background:var(--selected,#1f2b3d); border-left-color:var(--accent,#4c8dff); } .ds-row.sel .ds-title { font-weight:500; } .ds-row input { margin:0; width:13px; height:13px; accent-color:var(--accent,#4c8dff); } .ds-num { min-width:38px; font:11px 'Cascadia Code',Consolas,monospace; color:var(--faint,#7d8592); } .ds-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .ds-sd { width:7px; height:7px; border-radius:50%; background:var(--green,#3fb950); } .ds-sd.w { background:var(--amber,#e5a100); }"
+    },
+    {
+      "name": "Agent Run Pane",
       "kind": "card",
-      "refersTo": "panel",
-      "description": "Flat bordered panel with a compact section heading.",
-      "html": "<section class=\"ds-panel\"><h2>Worktree &amp; proof</h2><p style=\"margin:0\">Review the current verification evidence.</p></section>",
-      "css": ".ds-panel{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-panel{background:white;border:1px solid var(--line, #dbe4e6);border-radius:8px;padding:22px}.ds-panel h2{font-size:17px;margin-bottom:18px}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}.ds-panel h2{margin-top:0;}"
+      "refersTo": "pane-head",
+      "description": "Signature pane: header with focus inset, branch subline with progress, transcript with a tool-call row, composer footer.",
+      "html": "<section class=\"ds-pane\"><header class=\"ds-ph\"><span class=\"ds-sd2\"></span><h2>Main agent</h2><span class=\"ds-prov\">Claude</span></header><div class=\"ds-psub\"><code>rex/4812-coupon-retry</code><span class=\"ds-prog\">3 / 5 tool calls · 12m</span></div><div class=\"ds-tx\"><div class=\"ds-lbl\"><strong>Agent</strong><time>14:02</time></div><p>Reproduced the bug. Running the regression suite next.</p><div class=\"ds-tool\"><strong>Bash</strong><span>npm test -- checkout</span><time>2s</time></div></div><footer class=\"ds-pf\"><input placeholder=\"Reply or steer\"></footer></section>",
+      "css": ".ds-pane { display:flex; flex-direction:column; width:420px; background:var(--panel,#1c1f25); border:1px solid var(--line,#2c313a); color:var(--ink,#e6e8eb); font:12px/1.5 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; } .ds-ph { display:flex; align-items:center; gap:8px; height:34px; padding:0 6px 0 12px; border-bottom:1px solid var(--line-soft,#252931); box-shadow:inset 0 2px 0 var(--accent,#4c8dff); } .ds-ph h2 { margin:0; font-size:12.5px; font-weight:600; } .ds-prov { font-size:11px; color:var(--faint,#7d8592); } .ds-sd2 { width:7px; height:7px; border-radius:50%; background:var(--accent,#4c8dff); } .ds-psub { display:flex; align-items:center; gap:6px; min-height:26px; padding:0 12px; border-bottom:1px solid var(--line-soft,#252931); font-size:11px; color:var(--muted,#9aa3b1); } .ds-psub code { font:11px 'Cascadia Code',Consolas,monospace; color:var(--ink,#e6e8eb); } .ds-prog { margin-left:auto; color:var(--faint,#7d8592); } .ds-tx { padding:10px 12px 12px; } .ds-tx p { margin:0 0 10px; line-height:1.6; } .ds-lbl { display:flex; gap:6px; margin-bottom:2px; font-size:10.5px; color:var(--faint,#7d8592); } .ds-lbl strong { color:var(--muted,#9aa3b1); } .ds-lbl time { margin-left:auto; } .ds-tool { display:flex; align-items:center; gap:7px; height:24px; padding:0 8px; border:1px solid var(--line-soft,#252931); border-radius:5px; background:var(--sunken,#121418); font-size:11px; color:var(--muted,#9aa3b1); } .ds-tool strong { font:500 11px 'Cascadia Code',Consolas,monospace; color:var(--ink,#e6e8eb); } .ds-tool span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .ds-tool time { font-size:10px; color:var(--faint,#7d8592); } .ds-pf { display:flex; min-height:36px; align-items:center; padding:5px 8px 5px 12px; border-top:1px solid var(--line-soft,#252931); } .ds-pf input { flex:1; height:26px; padding:0 8px; border:1px solid var(--line,#2c313a); border-radius:5px; background:var(--sunken,#121418); color:inherit; font:inherit; } .ds-pf input:focus { outline:0; border-color:var(--accent,#4c8dff); box-shadow:0 0 0 2px var(--accent-soft,rgba(76,141,255,.15)); }"
     },
     {
-      "name": "Selected issue row",
-      "kind": "custom",
-      "refersTo": "issue-row-selected",
-      "description": "Selection remains visible alongside the row hover treatment.",
-      "html": "<div class=\"ds-task-row ds-selected\"><input type=\"checkbox\" aria-label=\"Select issue 4821\"><button class=\"ds-task-open\"><span class=\"ds-task-title\">File preview stays blank after switching projects</span><span class=\"ds-task-meta\"><span>4821</span><span>Frontend</span><span class=\"ds-state-pair\">Tracker: <span class=\"ds-tag\">REQUEST</span></span></span></button></div>",
-      "css": ".ds-task-row, .ds-tag{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-task-row{display:grid;grid-template-columns:16px 1fr;align-items:start;gap:11px;border-bottom:1px solid #e8eeee;padding:17px 17px 16px;position:relative}.ds-task-row.ds-selected{background:#edf5f6}.ds-task-row:hover{background:#f3f8f8}.ds-task-row.ds-selected:hover{background:#e7f1f3}.ds-task-row input[type=checkbox]{margin:4px 0 0;accent-color:var(--accent, #226b79);width:14px;height:14px}.ds-task-open{border:0;background:none;padding:0;text-align:left;color:var(--ink, #20353d);display:block;width:100%}.ds-task-title{font-size:13px;font-weight:600;line-height:1.5;display:block}.ds-task-meta{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted, #5d6e75);margin-top:9px;flex-wrap:wrap}.ds-task-meta .ds-tag{padding:1px 5px;font-size:10px}.ds-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;background:#edf1f2;color:#50646c;border-radius:4px;padding:2px 7px;white-space:nowrap;line-height:1.6}.ds-task-open:focus-visible,.ds-task-row input:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}.ds-state-pair{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--muted, #5d6e75)}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+      "name": "Approval Decision",
+      "kind": "card",
+      "refersTo": "decision-approval",
+      "description": "Inline approval answered inside the pane that asks; amber because it waits on the person.",
+      "html": "<div class=\"ds-dec\"><h3>Allow the agent to push branch rex/4812-coupon-retry?</h3><div class=\"ds-act\"><button class=\"ds-ok\">Approve</button><button class=\"ds-no\">Deny</button></div></div>",
+      "css": ".ds-dec { width:380px; padding:10px 12px; border:1px solid var(--amber-line,rgba(229,161,0,.45)); border-radius:7px; background:var(--amber-soft,rgba(229,161,0,.12)); color:var(--ink,#e6e8eb); font:12px/1.5 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; } .ds-dec h3 { margin:0 0 8px; font-size:12.5px; font-weight:600; line-height:1.45; } .ds-act { display:flex; gap:6px; } .ds-act button { height:24px; padding:0 8px; border-radius:5px; font:500 11.5px/1 inherit; cursor:pointer; } .ds-ok { border:1px solid var(--accent,#4c8dff); background:var(--accent,#4c8dff); color:#fff; } .ds-ok:hover { filter:brightness(1.08); } .ds-no { border:1px solid var(--line,#2c313a); background:var(--raised,#23272e); color:var(--ink,#e6e8eb); } .ds-no:hover { background:var(--hover,#252a32); } .ds-act button:focus-visible { outline:2px solid var(--accent,#4c8dff); outline-offset:1px; }"
     },
     {
-      "name": "Decision with provenance",
-      "kind": "custom",
-      "refersTo": "decision",
-      "description": "A request retains its origin link, run ID, and provider above the request.",
-      "html": "<form class=\"ds-decision ds-approval\"><div class=\"ds-decision-context\"><button class=\"ds-decision-run-link\" type=\"button\">Morningmate #4821 ? File preview stays blank</button><small>Run 8f7c2160 ? Claude Code</small></div><div class=\"ds-decision-heading\">Approval requested ? claude</div><h3>Create a draft pull request?</h3><div class=\"ds-actions\"><button class=\"ds-button ds-primary ds-small\" type=\"button\">Approve once</button><button class=\"ds-button ds-small\" type=\"button\">Decline</button></div></form>",
-      "css": ".ds-decision, .ds-button{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-actions{display:flex;align-items:center;gap:8px}.ds-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 12px;min-height:36px;border:1px solid var(--line, #dbe4e6);border-radius:6px;background:white;color:var(--ink, #20353d);font-weight:550;text-decoration:none;white-space:nowrap}.ds-button:hover{background:#f1f6f6;border-color:#afc3c8}.ds-button.ds-primary{background:var(--rail, #173c46);border-color:var(--rail, #173c46);color:white}.ds-button.ds-primary:hover{background:#245663}.ds-button.ds-small{min-height:29px;padding:4px 8px;font-size:12px}.ds-decision{border:1px solid #d5dfe1;border-radius:8px;background:#fbfdfd;margin:0 0 18px;padding:18px}.ds-decision.ds-approval{background:#fffcf5;border-color:#eadabc}.ds-decision-heading{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:11px;color:var(--accent, #226b79)}.ds-decision.ds-approval .ds-decision-heading{color:var(--amber, #8b550b)}.ds-decision h3{font-size:14px;line-height:1.5;margin-bottom:12px;overflow-wrap:anywhere}.ds-decision pre{max-height:180px;overflow:auto;background:#eef3f3;padding:10px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 14px}.ds-decision .ds-actions{margin-top:15px;flex-wrap:wrap}dialog .ds-actions{justify-content:flex-end;margin-top:23px}.ds-decision-run-link:focus-visible,.ds-button:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}.ds-decision-context{border-bottom:1px solid var(--line, #dbe4e6);padding-bottom:12px;margin-bottom:14px}.ds-decision-run-link{display:flex;gap:7px;align-items:flex-start;border:0;background:none;padding:0;color:var(--accent, #226b79);text-align:left;font-size:12px;line-height:1.5}.ds-decision-run-link:hover{text-decoration:underline;text-underline-offset:3px}.ds-decision-run-link span{overflow-wrap:anywhere}.ds-decision-context small{display:block;color:var(--muted, #5d6e75);margin-top:5px;font-size:10px}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}.ds-decision h3{font-weight:650;margin-top:0;}"
-    },
-    {
-      "name": "Active detail tab",
+      "name": "Status Bar",
       "kind": "nav",
-      "refersTo": "tab-active",
-      "description": "A text tab uses a thin accent underline and semibold selected label.",
-      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab ds-active\" role=\"tab\" aria-selected=\"true\">Issue brief</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Messages</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Evidence</button></div>",
-      "css": ".ds-tab{font-family:\"Segoe UI Variable\", \"Segoe UI\", -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:1.5;}.ds-tabs{display:flex;gap:20px;padding:0 23px;border-bottom:1px solid var(--line, #dbe4e6);flex-wrap:wrap}.ds-tab{border:0;border-bottom:2px solid transparent;background:none;padding:13px 0 11px;font-size:12px;color:var(--muted, #5d6e75);white-space:nowrap}.ds-tab.ds-active{color:var(--accent, #226b79);border-bottom-color:var(--accent, #226b79);font-weight:600}.ds-tab:focus-visible{outline:2px solid var(--accent, #226b79);outline-offset:3px;}button,input,select,textarea{font:inherit;}button{cursor:pointer;}button:disabled{cursor:not-allowed;opacity:.45;}"
+      "refersTo": "status-bar",
+      "description": "22px full-width band: machine, sync, workers, needs-you count.",
+      "html": "<footer class=\"ds-sb\"><span><i class=\"ds-on\"></i>Running on this computer</span><span>Synced</span><span>2 active · 3 workers</span><span class=\"ds-need\">1 needs you</span></footer>",
+      "css": ".ds-sb { display:flex; align-items:center; gap:14px; height:22px; padding:0 10px; background:var(--status-bg,#1b3260); color:var(--status-ink,#dbe7ff); font:11px 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; white-space:nowrap; } .ds-sb span { display:inline-flex; align-items:center; gap:6px; } .ds-on { width:6px; height:6px; border-radius:50%; background:#3fb950; box-shadow:0 0 0 2px rgba(63,185,80,.25); } .ds-need { margin-left:auto; color:var(--status-need,#ffd166); font-weight:600; }"
     }
   ],
   "narrative": {
-    "northStar": "The QA Acceptance Sheet",
-    "overview": "Rex Desk uses a familiar application shell to keep issues, human decisions, and verification evidence readable in one working space. Deep petrol navigation anchors a pale blue-gray ground; white work areas carry compact rows, restrained headings, and explicit state labels.\n\nThe visual language is code-led and utilitarian. Borders and small tonal shifts separate information, while semantic colors identify work, attention, review, and failure. Monospace is reserved for identifiers and technical evidence; application headings use the same workhorse sans family as the controls.",
+    "northStar": "The Conductor's Console",
+    "overview": "Rex Desk is an editor-shaped workspace, not a page-per-thing admin dashboard. One developer conducts many agents, so every live run can sit on screen at once: a 48px activity bar, a contextual 300px sidebar, a main area of side-by-side run panes, and a 22px status bar. It is the developer-tool category standard played straight, at the craft level of GitHub dark and Raycast: near-black shell, one-step-lighter panels, 1px hairlines, one blue accent, and state colors that mean exactly one thing each.\n\nDensity is the point. Body type is 12px, metadata 11px, rows are 30px, and controls are 24 to 28px tall. Depth comes from tonal steps and hairlines, never from cards floating on shadows. Dark is the first-class theme (the document `theme-color` is the dark shell); light mirrors it token for token, following the system preference unless the person chooses. Components read tokens and never branch on theme.\n\nThe previous \"QA Acceptance Sheet\" world (petrol rail, spacious 14px layout) is retired; nothing from it carries forward.",
     "keyCharacteristics": [
-      "Compact rows with a clear issue-title and metadata hierarchy.",
-      "Flat white work surfaces on a cool working ground.",
-      "Separately labeled tracker and agent states.",
-      "Decisions retain their originating issue and run.",
-      "Evidence is presented with its verification checklist."
+      "Four-zone shell: activity bar, contextual sidebar, main, status bar.",
+      "Several runs visible at once in Single, Split or Grid pane layouts.",
+      "12px body, 11px metadata, system UI sans with Cascadia/Consolas mono for machine text.",
+      "Tonal layering plus 1px hairlines; shadows only for floating overlays.",
+      "One blue accent; amber reserved for whatever waits on the person."
     ],
     "rules": [
-      {
-        "name": "The State Pair Rule",
-        "body": "Keep tracker status and local agent state separately labeled wherever both are shown. A finished agent is not a resolved tracker issue.",
-        "section": "colors"
-      },
-      {
-        "name": "The Flat Work Surface Rule",
-        "body": "Use borders and tonal separation for ordinary work surfaces. The small selected-view shadow and the toast and modal shadows have specific state and overlay roles.",
-        "section": "elevation"
-      }
+      { "name": "The Amber Is Owed Rule", "body": "Amber means \"waiting on you\" and nothing else. Never use it for decoration, warnings about the system, or emphasis.", "section": "colors" },
+      { "name": "The One Meaning Rule", "body": "Blue is working or interactive, green is done, red is failed. A color never carries two meanings on the same screen.", "section": "colors" },
+      { "name": "The Token Mirror Rule", "body": "Every color is a custom property defined twice, under `:root` (light) and `html[data-theme=dark]`. Components reference tokens only.", "section": "colors" },
+      { "name": "The Machine Text Rule", "body": "Mono is for IDs, branches, tool names and output only. Never set prose, labels or headings in mono.", "section": "typography" },
+      { "name": "The Fifteen Pixel Ceiling Rule", "body": "No text exceeds 15px. Hierarchy comes from weight and color (ink vs. muted vs. faint), not size.", "section": "typography" },
+      { "name": "The Flat Panel Rule", "body": "Panes, cards, rows and the sidebar never carry drop shadows. If it does not float, it does not cast.", "section": "elevation" }
     ],
     "dos": [
-      "Do pair compact metadata with the stronger issue-title hierarchy.",
-      "Do preserve visible Tracker and Agent labels when both states are present.",
-      "Do keep the issue/run link and provider context with a decision request.",
-      "Do retain the accent focus outline and the reduced-motion override.",
-      "Do let long branch names, descriptions, and request details wrap or scroll within their own content areas."
+      "**Do** keep body text at 12px and metadata at 11px; reach for weight and ink/muted/faint before size.",
+      "**Do** define every new color as a token in both `:root` and `html[data-theme=dark]`.",
+      "**Do** separate regions with 1px `line` hairlines and rows with `line-soft`.",
+      "**Do** mark the active or focused thing with a 2px accent bar (left edge for rows and activity items, top inset for tabs and panes).",
+      "**Do** use amber, and only amber, for anything waiting on the person: counts, approvals, the needs-you pane inset.",
+      "**Do** set IDs, branches, tool names and output in Cascadia/Consolas mono at 11px.",
+      "**Do** let panes and lists ellipsize single lines rather than wrap in dense rows.",
+      "**Do** use the `cubic-bezier(.16,1,.3,1)` ease for short state transitions (120 to 250ms) and honor reduced motion, which disables all animation and transition."
     ],
     "donts": [
-      "Don't represent tracker completion with an agent-only state.",
-      "Don't turn the overlay shadows into ordinary card elevation.",
-      "Don't remove origin context from approval or question forms.",
-      "Don't replace the horizontally scrolling Kanban board with compressed, unreadable columns."
+      "**Don't** put drop shadows on panes, cards, rows or the sidebar; shadows belong to dialogs, popovers and toasts only.",
+      "**Don't** use amber for decoration or system warnings, or blue for anything that is not interactive or working.",
+      "**Don't** set text larger than 15px or build spacious hero-style layouts; this is a dense tool.",
+      "**Don't** set prose or headings in mono.",
+      "**Don't** branch component styles on theme; read tokens.",
+      "**Don't** reintroduce the retired petrol rail or the spacious 14px acceptance-sheet layout."
     ]
   }
 }

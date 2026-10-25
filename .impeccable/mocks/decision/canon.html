@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Rex Desk</title>
+<style>
+:root{--shell:#16181d;--panel:#1f232a;--line:#2c313a;--text:#e6e8eb;--muted:#8b93a1;--blue:#4c8dff;--amber:#e5a100;--green:#3fb950;--red:#f85149;--hover:#262b33;
+--ui:"Segoe UI Variable Text","Segoe UI Variable","Segoe UI","Malgun Gothic",system-ui,sans-serif;--mono:"Cascadia Code","Cascadia Mono",Consolas,"Malgun Gothic",monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1440px;height:900px;overflow:hidden;background:var(--shell);color:var(--text);font:12px/1.45 var(--ui);-webkit-font-smoothing:antialiased}
+.app{display:grid;grid-template-columns:44px 280px 1116px;grid-template-rows:878px 22px;width:1440px;height:900px}
+.mono{font-family:var(--mono)}.mut{color:var(--muted)}.meta{font-size:11px;color:var(--muted)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+.d-a{background:var(--amber)}.d-b{background:var(--blue)}.d-g{background:var(--green)}.d-r{background:var(--red)}.d-m{background:#5a6270}
+/* activity bar */
+.act{background:var(--shell);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding-top:6px;gap:2px}
+.act a{width:44px;height:40px;display:grid;place-items:center;color:var(--muted);position:relative}
+.act a.on{color:var(--text)}.act a.on:before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:2px;background:var(--blue)}
+.act a .n{position:absolute;right:7px;top:7px;min-width:14px;height:14px;border-radius:7px;background:var(--amber);color:#16181d;font:600 9px/14px var(--ui);text-align:center;padding:0 3px}
+.act svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.act .sp{flex:1}
+/* sidebar */
+.side{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+.sh{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--line)}
+.sh b{color:var(--text);font-weight:600}
+.filt{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.sel{flex:1;height:24px;border:1px solid var(--line);border-radius:4px;background:var(--shell);display:flex;align-items:center;justify-content:space-between;padding:0 8px;font-size:11px}
+.sel:after{content:"";width:5px;height:5px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(45deg) translateY(-2px)}
+.grp{height:24px;display:flex;align-items:center;padding:0 12px;font-size:11px;color:var(--muted);gap:6px}
+.grp i{font-style:normal;font-family:var(--mono);font-size:10px;color:#6b7381}
+.row{height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;border-left:2px solid transparent}
+.row.cur{background:#262c36;border-left-color:var(--blue)}
+.cb{width:13px;height:13px;border:1px solid #4a515d;border-radius:3px;flex:none;position:relative}
+.cb.on{background:var(--blue);border-color:var(--blue)}.cb.on:after{content:"";position:absolute;left:3.5px;top:1px;width:3px;height:6px;border:solid #fff;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.src{width:15px;height:15px;border-radius:3px;background:#2d3b55;color:#8fb5ff;font:700 9px/15px var(--ui);text-align:center;flex:none}
+.num{font:11px var(--mono);color:var(--muted);width:44px;flex:none}
+.ttl{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.btn{height:26px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font:500 12px var(--ui);padding:0 12px;border:1px solid var(--line);background:#272c34;color:var(--text)}
+.btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}.btn.amb{background:var(--amber);border-color:var(--amber);color:#1a1300;font-weight:600}
+.sact{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;gap:6px}.sact .pri{flex:1}
+.prev{padding:10px 12px;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+.prev h4{font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--muted)}
+.prev .t{font-size:12px;line-height:1.5}
+.kv{display:grid;grid-template-columns:76px 1fr;row-gap:5px;font-size:11px}.kv dt{color:var(--muted)}.kv dd{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip{display:inline-block;font:10.5px/16px var(--mono);padding:0 5px;border-radius:3px;background:#2a303a;color:#c3c9d2;margin-right:3px}
+/* main */
+.main{display:flex;flex-direction:column;min-width:0}
+.tabs{height:34px;display:flex;background:var(--shell);border-bottom:1px solid var(--line)}
+.tab{display:flex;align-items:center;gap:7px;padding:0 10px 0 12px;border-right:1px solid var(--line);color:var(--muted);max-width:250px;white-space:nowrap}
+.tab.on{background:var(--panel);color:var(--text);box-shadow:inset 0 2px 0 var(--blue);margin-bottom:-1px}
+.tab .x{color:#6b7381;font-size:13px;margin-left:4px}
+.tabs .tools{margin-left:auto;display:flex;align-items:center;gap:12px;padding:0 12px;font-size:11px;color:var(--muted)}
+.grid{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:1px;background:var(--line);min-height:0}
+.pane{background:var(--panel);display:flex;flex-direction:column;min-height:0;min-width:0;position:relative}
+.pane.need{box-shadow:inset 0 0 0 1px var(--amber)}
+.ph{height:32px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line);flex:none}
+.ph .nm{font-weight:600;white-space:nowrap}.ph .pv{font-size:11px;color:var(--muted)}
+.badge{margin-left:auto;font:600 10.5px/18px var(--ui);padding:0 7px;border-radius:9px;display:inline-flex;align-items:center;gap:5px}
+.b-a{color:var(--amber);background:rgba(229,161,0,.12)}.b-b{color:var(--blue);background:rgba(76,141,255,.13)}.b-v{color:#b392f0;background:rgba(179,146,240,.13)}.b-g{color:var(--green);background:rgba(63,185,80,.12)}
+.sub{height:24px;display:flex;align-items:center;gap:12px;padding:0 12px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line);flex:none;white-space:nowrap;overflow:hidden}
+.pb{flex:1;padding:8px 12px;display:flex;flex-direction:column;gap:6px;overflow:hidden;min-height:0}
+.say{line-height:1.5}.say .who{font-size:11px;color:var(--muted);margin-right:6px}
+.tc{height:22px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:4px;background:#191c22;border:1px solid #272c34;font:11px var(--mono);white-space:nowrap;overflow:hidden}
+.tc .ic{width:12px;text-align:center}.tc .ok{color:var(--green)}.tc .run{color:var(--blue)}.tc .wait{color:var(--amber)}.tc .bad{color:var(--red)}
+.tc .ar{color:var(--muted);overflow:hidden;text-overflow:ellipsis}.tc .ms{margin-left:auto;color:#6b7381}
+.appr{margin-top:2px;border:1px solid var(--amber);border-radius:6px;background:rgba(229,161,0,.06);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.appr h5{font-size:12px;font-weight:600;display:flex;align-items:center;gap:8px}
+.appr pre{font:11px/1.55 var(--mono);color:#c3c9d2;background:#191c22;border:1px solid #2c313a;border-radius:4px;padding:6px 8px;white-space:pre-wrap}
+.appr .acts{display:flex;gap:6px;align-items:center}.appr .acts .meta{margin-left:auto}
+.ev{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.ec{border:1px solid var(--line);border-radius:5px;padding:7px 9px;background:#1b1e24;display:flex;flex-direction:column;gap:2px}
+.ec b{font-weight:600;display:flex;align-items:center;gap:6px}.ec .g{color:var(--green)}.ec .p{color:var(--blue)}
+.foot{height:30px;flex:none;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;padding:0 8px 0 12px}
+.inp{flex:1;height:22px;border:1px solid var(--line);border-radius:4px;background:var(--shell);color:#6b7381;font-size:11px;display:flex;align-items:center;padding:0 8px}
+.btn.s{height:22px;padding:0 9px;font-size:11px}
+.diff{font:11px/1.6 var(--mono);background:#191c22;border:1px solid #272c34;border-radius:4px;padding:5px 8px;color:#c3c9d2}
+.diff .rm{color:#f0857f}.diff .ad{color:#6fd283}
+/* status bar */
+.status{grid-column:1/-1;background:#1d3a6e;color:#dbe7ff;display:flex;align-items:center;gap:14px;padding:0 10px;font-size:11px;border-top:1px solid #2b5199}
+.status span{display:flex;align-items:center;gap:6px}.status .r{margin-left:auto}.status .nd{color:#ffd166;font-weight:600}
+</style></head><body><div class="app">
+<nav class="act">
+<a class="on" title="Issues"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/></svg></a>
+<a title="Runs"><svg viewBox="0 0 24 24"><path d="M7 5l11 7-11 7z"/></svg><span class="n">3</span></a>
+<a title="Board"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="16" rx="1"/><rect x="14" y="4" width="6" height="10" rx="1"/></svg></a>
+<a title="Evidence"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg></a>
+<span class="sp"></span>
+<a title="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg></a>
+</nav>
+<aside class="side">
+<div class="sh"><span>ASSIGNED · <b>20</b></span><span class="mono" style="font-weight:400;letter-spacing:0">3 selected</span></div>
+<div class="filt"><div class="sel">Morningmate · All open states</div><div class="sel" style="flex:0 0 78px">Newest</div></div>
+<div class="grp">Request <i>4</i></div>
+<div class="row cur"><span class="cb on"></span><span class="src">M</span><span class="num">38464</span><span class="ttl">설치형, 파일, 미리보기 - 미리보기 화면에서 다운로드 버튼 클릭 시 빈 화면 표시</span><span class="dot d-b"></span></div>
+<div class="row"><span class="cb on"></span><span class="src">M</span><span class="num">48073</span><span class="ttl">[오류] Safari &gt; 리스트 뷰 &gt; 더보기 메뉴 제목 영역에 가려짐</span><span class="dot d-b"></span></div>
+<div class="row"><span class="cb on"></span><span class="src">M</span><span class="num">34701</span><span class="ttl">설치형 &gt; 앱 아이콘 배지가 표시되지 않음</span><span class="dot d-m"></span></div>
+<div class="row"><span class="cb"></span><span class="src">M</span><span class="num">803017</span><span class="ttl">Basic plan smart-search 1-month limit not enforced</span><span class="dot d-m"></span></div>
+<div class="grp">Development Completed <i>3</i></div>
+<div class="row"><span class="cb"></span><span class="src">M</span><span class="num">39349</span><span class="ttl">조직도 일괄 등록 버튼명 변경 (영문)</span><span class="dot d-g"></span></div>
+<div class="row"><span class="cb"></span><span class="src">M</span><span class="num">26717</span><span class="ttl">다시 알림 취소 일본어 수정 요청</span><span class="dot d-m"></span></div>
+<div class="row"><span class="cb"></span><span class="src">M</span><span class="num">6658</span><span class="ttl">Incorrect Translation (Indonesian)</span><span class="dot d-m"></span></div>
+<div class="sact"><span class="btn pri">Analyze 3 selected</span><span class="btn">Clear</span></div>
+<div class="prev"><h4>PREVIEW · <span class="mono" style="letter-spacing:0">#38464</span></h4>
+<div class="t">설치형, 파일, 미리보기 - 미리보기 화면에서 다운로드 버튼 클릭 시 빈 화면 표시</div>
+<dl class="kv"><dt>Source</dt><dd>Morningmate · Request</dd><dt>Category</dt><dd><span class="chip">bug</span><span class="chip">file-preview</span></dd><dt>Symptom</dt><dd>download blank screen</dd><dt>Run</dt><dd><span class="dot d-b"></span> Working · Claude Code</dd><dt>Branch</dt><dd class="mono">temp/rex/morningmate-38464/download-blank-a1b2c3</dd><dt>Risk floor</dt><dd>Draft PR only</dd></dl></div>
+</aside>
+<main class="main">
+<div class="tabs">
+<div class="tab on"><span class="dot d-a"></span>Main agent<span class="x">×</span></div>
+<div class="tab"><span class="dot d-b"></span>#38464 download blank screen<span class="x">×</span></div>
+<div class="tab"><span class="dot" style="background:#b392f0"></span>#48073 Safari more-menu<span class="x">×</span></div>
+<div class="tab"><span class="dot d-g"></span>#39349 org-chart EN label<span class="x">×</span></div>
+<div class="tools"><span>Layout 2×2</span><span>4 open</span></div>
+</div>
+<div class="grid">
+<section class="pane need"><div class="ph"><span class="dot d-a"></span><span class="nm">Main agent</span><span class="pv">Claude Code</span><span class="badge b-a">Needs you</span></div>
+<div class="sub"><span>Analyzing 20 issues</span><span>8 / 20 categorized</span><span class="mono">2m 14s</span></div>
+<div class="pb">
+<div class="say"><span class="who">Agent</span>Fetched 20 assigned issues from Morningmate. Starting with the three you selected.</div>
+<div class="tc"><span class="ic ok">✓</span>desk_task<span class="ar">· 38464</span><span class="ms">0.4s</span></div>
+<div class="say"><span class="who">Agent</span>Preview → download opens an empty window on the installed client. Repro steps and screenshot are attached.</div>
+<div class="appr"><h5><span class="dot d-a"></span>Approve desk_categorize</h5>
+<pre>issue 38464 → bug / file-preview / download blank screen
+writes: category, labels · no code changes</pre>
+<div class="acts"><span class="btn amb s">Approve once</span><span class="btn s">Always for this run</span><span class="btn s">Decline</span><span class="meta">waiting 41s</span></div></div>
+</div>
+<div class="foot"><div class="inp">Reply to Main agent…</div><span class="btn s">Pause</span></div></section>
+<section class="pane"><div class="ph"><span class="dot d-b"></span><span class="nm">#38464 download blank screen</span><span class="pv">Claude Code</span><span class="badge b-b">Working</span></div>
+<div class="sub"><span class="mono">temp/rex/morningmate-38464/download-blank-a1b2c3</span><span>+18 −4</span></div>
+<div class="pb">
+<div class="tc"><span class="ic ok">✓</span>desk_task<span class="ar">· 38464</span><span class="ms">0.3s</span></div>
+<div class="tc"><span class="ic ok">✓</span>desk_categorize<span class="ar">· bug / file-preview / download blank screen</span><span class="ms">approved</span></div>
+<div class="say"><span class="who">Agent</span>The download handler calls <span class="mono">window.open()</span> before the signed URL resolves, so the new window loads <span class="mono">about:blank</span>.</div>
+<div class="tc"><span class="ic ok">✓</span>Read<span class="ar">src/preview/PreviewToolbar.tsx</span><span class="ms">1.1s</span></div>
+<div class="diff"><span class="rm">- const w = window.open(); w.location = await getSignedUrl(file)</span><br><span class="ad">+ const url = await getSignedUrl(file); window.open(url, '_blank')</span></div>
+<div class="tc"><span class="ic run">◷</span>Bash<span class="ar">pnpm test preview/download</span><span class="ms">running</span></div>
+</div>
+<div class="foot"><div class="inp">Steer this run…</div><span class="btn s">Open diff</span></div></section>
+<section class="pane"><div class="ph"><span class="dot" style="background:#b392f0"></span><span class="nm">#48073 Safari more-menu</span><span class="pv">Codex</span><span class="badge b-v">Verifying</span></div>
+<div class="sub"><span class="mono">temp/rex/morningmate-48073/safari-more-menu-9f2e1d</span><span>+6 −2</span></div>
+<div class="pb">
+<div class="say"><span class="who">Agent</span>Raised the more-menu above the sticky list header (<span class="mono">z-index</span> on <span class="mono">.list-view__header</span> created a new stacking context in Safari).</div>
+<div class="tc"><span class="ic ok">✓</span>desk_categorize<span class="ar">· bug / list-view / safari menu clipped</span><span class="ms">auto</span></div>
+<div class="tc"><span class="ic ok">✓</span>Bash<span class="ar">pnpm test list-view</span><span class="ms">42 passed</span></div>
+<div class="ev">
+<div class="ec"><b><span class="g">✓</span>Tests pass</b><span class="meta">42 / 42 · 18s</span></div>
+<div class="ec"><b><span class="g">✓</span>Recording saved</b><span class="meta">safari-17.mp4 · 0:23</span></div>
+<div class="ec"><b><span class="p">◷</span>Browser assertion</b><span class="meta">menu fully visible…</span></div></div>
+<div class="tc"><span class="ic run">◷</span>desk_evidence<span class="ar">· WebKit · list view → more menu → bounding box check</span><span class="ms">running</span></div>
+</div>
+<div class="foot"><div class="inp">Steer this run…</div><span class="btn s">Evidence</span></div></section>
+<section class="pane"><div class="ph"><span class="dot d-g"></span><span class="nm">#39349 org-chart EN label</span><span class="pv">Claude Code</span><span class="badge b-g">Review</span></div>
+<div class="sub"><span class="mono">temp/rex/morningmate-39349/org-chart-en-label-4c7a20</span><span>+1 −1</span></div>
+<div class="pb">
+<div class="say"><span class="who">Agent</span>Renamed the bulk-register button in the English locale. No other locales reference this key.</div>
+<div class="diff"><span class="rm">- "orgChart.bulkRegister": "Batch Registration"</span><br><span class="ad">+ "orgChart.bulkRegister": "Bulk import members"</span></div>
+<div class="tc"><span class="ic ok">✓</span>Grep<span class="ar">orgChart.bulkRegister · 3 files</span><span class="ms">0.2s</span></div>
+<div class="tc"><span class="ic ok">✓</span>Bash<span class="ar">pnpm test i18n</span><span class="ms">117 passed</span></div>
+<div class="tc"><span class="ic ok">✓</span>desk_evidence<span class="ar">· screenshot org-chart-en.png</span><span class="ms">saved</span></div>
+<div class="say"><span class="who">Agent</span>Risk is low. Ready to open a draft PR against <span class="mono">develop</span>.</div>
+</div>
+<div class="foot"><div class="inp">Leave review notes…</div><span class="btn s">Request changes</span><span class="btn pri s">Open draft PR</span></div></section>
+</div>
+</main>
+<footer class="status"><span>● Running on this computer</span><span>Turso synced 12s ago</span><span>2/4 workers</span><span class="nd">Needs you 3</span><span class="r mono">rex-desk 0.9 · main</span></footer>
+</div></body></html>

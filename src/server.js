@@ -8,7 +8,9 @@ import { handleMcp } from './mcp.js';
 import { git, resolveCommand } from './processes.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { inspectRepository, pickRepositoryFolder } from './repositories.js';
+import { inspectRepository, pickRepositoryFolder, cloneRepository } from './repositories.js';
+import { githubAccounts, startGithubLogin, cancelGithubLogin, switchGithubAccount } from './github.js';
+import { autostartStatus, setAutostart } from './autostart.js';
 import { issueBranch } from './branches.js';
 import { profileEnvironment } from './agents.js';
 import { setupPrompt } from './setup-prompt.js';
@@ -87,6 +89,15 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
       if (url.pathname === '/api/repositories/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());
+      if (url.pathname === '/api/qa/sign-in' && request.method === 'POST') return json(response, 200, await desk.evidence.openQaSignIn(store.config().qa?.url));
+      if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
+      if (url.pathname === '/api/autostart' && request.method === 'GET') return json(response, 200, autostartStatus());
+      if (url.pathname === '/api/autostart' && request.method === 'POST') return json(response, 200, await setAutostart(Boolean((await body(request)).enabled), root));
+      if (url.pathname === '/api/github' && request.method === 'GET') return json(response, 200, await githubAccounts());
+      if (url.pathname === '/api/github/login' && request.method === 'POST') return json(response, 200, await startGithubLogin());
+      if (url.pathname === '/api/github/login' && request.method === 'DELETE') return json(response, 200, cancelGithubLogin());
+      if (url.pathname === '/api/github/switch' && request.method === 'POST') return json(response, 200, await switchGithubAccount((await body(request)).user));
+      if (url.pathname === '/api/repositories/clone' && request.method === 'POST') return json(response, 200, await cloneRepository((await body(request)).repository, path.dirname(root)));
       if (url.pathname === '/api/repositories/branch-preview' && request.method === 'POST') {
         const input = await body(request);
         return json(response, 200, { branch: issueBranch(input.pattern, { prefix: input.prefix || 'temp/rex' }) });
@@ -162,7 +173,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         return serveFile(request, response, image, { cache: 'private, max-age=604800' });
       }
       if (interactionMatch && request.method === 'POST') return json(response, 200, desk.answer(interactionMatch[1], await body(request)));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish|orca))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish|orca|tracker))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         if (request.method === 'GET') {
@@ -174,6 +185,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));
           if (action === 'verify') return json(response, 200, await desk.verify(runId));
+          if (action === 'tracker') return json(response, 200, await desk.trackerFromQa(runId, input.phase));
           if (action === 'publish') return json(response, 200, await desk.publish(runId, { ...input, approved: true }));
           if (action === 'orca') { const run = desk.run(runId); if (!run.worktree) throw new Error('This run has no worktree to open.'); return json(response, 200, await openInOrca(run)); }
         }
@@ -203,6 +215,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
     if (minutes && Date.now() - lastSync >= minutes * 60000 && !desk.sources.syncing) {
       lastSync = Date.now(); void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
     }
+    void desk.scheduleTick().catch(error => store.event('', 'schedule-error', { message: error.message }, true));
   }, 15000);
   timer.unref();
   return { server, store, desk, address, async close() {

@@ -66,7 +66,7 @@ export class CodexRunner {
     try {
       await this.request('initialize', { clientInfo: { name: 'rex_desk', title: 'Rex Desk', version: '0.1.0' }, capabilities: { experimentalApi: true } });
       this.send({ method: 'initialized', params: {} });
-      const params = { cwd: this.cwd, approvalPolicy: 'on-request', sandbox: this.run.role === 'coordinator' ? 'read-only' : 'workspace-write',
+      const params = { cwd: this.cwd, approvalPolicy: 'on-request', sandbox: this.run.role === 'worker' ? 'workspace-write' : 'read-only',
         ...(this.model ? { model: this.model } : {}) };
       const response = this.run.sessionId
         ? await this.request('thread/resume', { ...params, threadId: this.run.sessionId })
@@ -127,6 +127,10 @@ export class CodexRunner {
   close() { if (!this.closed) { this.closed = true; stopTree(this.child); } }
 }
 
+// Rex Desk's own tools read tasks, label them, message the dashboard, or act inside the run's worktree. desk_status and
+// desk_publish carry their own dashboard approval. Only desk_dispatch starts new work, so it alone keeps the permission prompt.
+const quietRexTool = name => name.startsWith('mcp__rex_desk__desk_') && name !== 'mcp__rex_desk__desk_dispatch';
+
 export class ClaudeRunner {
   constructor(options) { Object.assign(this, options); }
   async start(prompt) {
@@ -134,10 +138,10 @@ export class ClaudeRunner {
     const env = { ...(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
     delete env.CLAUDECODE;
     const executable = resolveCommand('claude');
-    const connections = existingMcpConnections(this.sourcePath, env.CLAUDE_CONFIG_DIR);
+    const connections = existingMcpConnections(this.sourcePath, env.CLAUDE_CONFIG_DIR), allowedTools = new Set();
     delete connections.rex_desk;
     const options = { cwd: this.cwd, env, abortController: this.controller,
-      permissionMode: this.run.role === 'coordinator' ? 'default' : 'acceptEdits',
+      permissionMode: this.run.role === 'worker' ? 'acceptEdits' : 'default',
       settingSources: ['user', 'project', 'local'],
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
       ...(this.model ? { model: this.model } : {}), ...(this.run.sessionId ? { resume: this.run.sessionId } : {}),
@@ -153,7 +157,9 @@ export class ClaudeRunner {
           if (answer.action !== 'accept') return { behavior: 'deny', message: 'User declined the question.' };
           return { behavior: 'allow', updatedInput: { ...input, answers: answer.content || {} } };
         }
-        const answer = await this.ask({ kind: 'approval', title: `Approve ${name}`, request: { tool: name, input, suggestions: context.suggestions }, method: 'claude-permission' });
+        if (quietRexTool(name) || allowedTools.has(name)) return { behavior: 'allow', updatedInput: input };
+        const answer = await this.ask({ kind: 'approval', title: `Approve ${name}`, request: { tool: name, input, suggestions: context.suggestions, allowAlways: true }, method: 'claude-permission' });
+        if (answer.action === 'accept' && answer.content?.always) allowedTools.add(name);
         return answer.action === 'accept' ? { behavior: 'allow', updatedInput: input }
           : { behavior: 'deny', message: 'User declined this action.' };
       },

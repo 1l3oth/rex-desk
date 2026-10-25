@@ -6,3 +6,6 @@ coverage/
 *.log
 .impeccable/review/
 .impeccable/questions/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+.playwright-mcp/

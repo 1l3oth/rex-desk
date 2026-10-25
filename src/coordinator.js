@@ -15,7 +15,7 @@ import { assessRisk, automaticPrAllowed } from './risk.js';
 import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from './processes.js';
 
 const exec = promisify(execFile);
-const terminalStates = new Set(['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished']);
+const terminalStates = new Set(['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked']);
 
 export function validateAnswer(interaction, answer) {
   if (!['accept', 'decline', 'cancel'].includes(answer.action)) throw new Error('Choose accept, decline, or cancel.');
@@ -58,24 +58,54 @@ export class Desk {
       runs: this.store.list('run').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
       interactions: this.store.list('interaction').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
-      directories: this.store.list('directory'), database: this.store.cloud.status(), syncing: this.sources.syncing };
+      directories: this.store.list('directory'), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, qaSession: this.evidence.qaStatus() };
   }
   scopeToken(runId) { const token = randomBytes(32).toString('base64url'); this.tokens.set(token, runId); return token; }
   scope(token) { return this.store.authenticate(token) ? { role: 'external' } : this.tokens.has(token) ? { role: this.run(this.tokens.get(token)).role, runId: this.tokens.get(token) } : null; }
   authorize(scope, runId, { coordinator = false } = {}) {
     if (!scope) throw new Error('Authentication required.');
-    if (coordinator && scope.role === 'worker') throw new Error('Only the main agent can dispatch workers.');
-    if (runId && scope.role === 'worker' && scope.runId !== runId) throw new Error('Worker token is restricted to its own run.');
+    const scoped = scope.role === 'worker' || scope.role === 'verifier';
+    if (coordinator && scoped) throw new Error('Only the main agent can dispatch workers.');
+    if (runId && scoped && scope.runId !== runId) throw new Error('Worker token is restricted to its own run.');
   }
-  async startCoordinator({ taskIds = [], provider, prompt = '', baseBranch, targetBranch } = {}) {
+  async startCoordinator({ taskIds = [], provider, prompt = '', baseBranch, targetBranch, maxDispatch, allowedModes, title } = {}) {
     if (provider && !['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
     if (this.store.list('run').some(run => run.role === 'coordinator' && !terminalStates.has(run.state))) throw new Error('A main agent is already active.');
     const tasks = this.store.list('task').filter(task => task.active && !task.demo && (!taskIds.length || taskIds.includes(task.id)));
     if (!tasks.length) throw new Error('Sync and select assigned tasks before starting the main agent.');
     const config = this.store.config();
-    const run = { id: id(), role: 'coordinator', title: 'Main agent', provider: provider || config.provider,
-      state: 'queued', taskIds: tasks.map(task => task.id), createdAt: now(), baseBranch, targetBranch, prompt };
+    const run = { id: id(), role: 'coordinator', title: title || 'Main agent', provider: provider || config.provider,
+      state: 'queued', taskIds: tasks.map(task => task.id), createdAt: now(), baseBranch, targetBranch, prompt,
+      ...(maxDispatch ? { maxDispatch: Math.min(20, Math.max(1, Number(maxDispatch))), allowedModes: (allowedModes || ['fix', 'verify']).filter(mode => ['fix', 'verify'].includes(mode)) } : {}) };
     this.store.put('run', run.id, run); void this.drain(); return run;
+  }
+  // Autopilot: once on each scheduled day after the set local time, sync and let a main agent start a capped number of runs.
+  async scheduleTick(date = new Date()) {
+    const schedule = this.store.config().schedule;
+    if (!schedule?.enabled || !schedule.days.includes(date.getDay())) return null;
+    const [hour, minute] = schedule.time.split(':').map(Number);
+    if (date.getHours() * 60 + date.getMinutes() < hour * 60 + minute) return null;
+    const today = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    if (this.store.get('schedule', 'last')?.date === today) return null;
+    this.store.put('schedule', 'last', { date: today, at: now(), state: 'starting' });
+    return this.runSchedule({ date: today });
+  }
+  async runSchedule({ date = new Date().toISOString().slice(0, 10) } = {}) {
+    const schedule = this.store.config().schedule, record = result => { this.store.put('schedule', 'last', { date, at: now(), ...result }); return result; };
+    const modes = [...(schedule.verify ? ['verify'] : []), ...(schedule.fix ? ['fix'] : [])];
+    if (!modes.length) return record({ state: 'skipped', reason: 'Choose QA checks, fixes, or both.' });
+    try { if (!this.sources.syncing) await this.sources.sync(); }
+    catch (error) { this.store.event('', 'sync-error', { message: error.message }); }
+    // Skip issues already settled or touched in the last 20 hours, so each scheduled day picks up new work instead of repeating yesterday.
+    const recent = Date.now() - 20 * 3600000;
+    const settled = new Set(this.store.list('run').filter(run => run.taskId && (!terminalStates.has(run.state) || ['ready_for_review', 'published', 'qa_passed'].includes(run.state) || Date.parse(run.updatedAt || run.createdAt) > recent)).map(run => run.taskId));
+    const tasks = this.store.list('task').filter(task => task.active && !task.demo && !settled.has(task.id));
+    if (!tasks.length) return record({ state: 'skipped', reason: 'No new assigned issues to start.' });
+    try {
+      const run = await this.startCoordinator({ taskIds: tasks.map(task => task.id), title: `Scheduled run · ${date}`, maxDispatch: schedule.maxRuns, allowedModes: modes,
+        prompt: `Scheduled run. Start at most ${schedule.maxRuns} runs in mode ${modes.join(' or ')}. Skip what cannot be checked or fixed here, and summarize for the human.` });
+      return record({ state: 'started', runId: run.id, issues: tasks.length });
+    } catch (error) { return record({ state: 'skipped', reason: error.message }); }
   }
   async startConnectionAgent({ sourceId, provider }) {
     if (!['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
@@ -86,11 +116,27 @@ export class Desk {
       state: 'queued', taskIds: [], repositoryId: source.repositoryId || this.store.config().repositories[0]?.id, createdAt: now() };
     this.store.put('run', run.id, run); void this.drain(); return run;
   }
-  async startTask({ taskId, repositoryId, provider, baseBranch, targetBranch, instructions = '', category, parentRunId, runtimeProfile: profileId, execution }) {
+  async startTask({ taskId, repositoryId, provider, baseBranch, targetBranch, instructions = '', category, parentRunId, runtimeProfile: profileId, execution, mode = 'fix' }) {
     const task = this.task(taskId);
     if (task.demo) throw new Error('Demo tasks cannot launch agents or change a repository.');
     if (this.store.list('run').some(run => run.taskId === taskId && !terminalStates.has(run.state))) throw new Error('This task already has an active run.');
     const config = this.store.config();
+    if (parentRunId) {
+      const parent = this.run(parentRunId), started = this.store.list('run').filter(item => item.parentRunId === parentRunId).length;
+      if (parent.maxDispatch && started >= parent.maxDispatch) throw new Error(`This scheduled run may start at most ${parent.maxDispatch} runs. Report the rest to the human instead.`);
+      if (parent.allowedModes && !parent.allowedModes.includes(mode)) throw new Error(`This scheduled run may only start ${parent.allowedModes.join(' and ')} runs.`);
+    }
+    // QA verification re-tests a fix on the configured web test site: no repository, worktree, or code changes.
+    if (mode === 'verify') {
+      if (!config.qa?.url) throw new Error('Set the QA test site in Settings before verifying fixes.');
+      const run = { id: id(), role: 'verifier', mode: 'verify', taskId, title: task.title, provider: provider || config.provider, state: 'queued', phase: 'queued',
+        createdAt: now(), instructions, parentRunId, qaUrl: config.qa.url };
+      if (!['claude', 'codex'].includes(run.provider)) throw new Error('Unknown agent provider.');
+      this.store.put('run', run.id, run);
+      this.store.put('task', taskId, { ...task, category: category || task.category, runId: run.id });
+      void this.drain(); return run;
+    }
+    if (mode !== 'fix') throw new Error('Choose fix or verify.');
     const repository = config.repositories.find(item => item.id === (repositoryId || task.repositoryId));
     if (!repository) throw new Error('Select a repository for this task.');
     const parent = parentRunId ? this.run(parentRunId) : {};
@@ -111,8 +157,8 @@ export class Desk {
     try {
       const queued = this.store.list('run').filter(run => run.state === 'queued');
       for (const run of queued) {
-        const workers = [...this.live.keys()].map(runId => this.run(runId)).filter(item => item.role === 'worker').length;
-        if (run.role === 'worker' && workers >= this.store.config().concurrency) continue;
+        const workers = [...this.live.keys()].map(runId => this.run(runId)).filter(item => item.role === 'worker' || item.role === 'verifier').length;
+        if ((run.role === 'worker' || run.role === 'verifier') && workers >= this.store.config().concurrency) continue;
         const controller = new AbortController(); this.live.set(run.id, { controller });
         this.patchRun(run.id, { state: 'starting' });
         void this.execute(run.id, controller).catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
@@ -162,7 +208,8 @@ export class Desk {
       this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), error: '' });
       await runner.start(this.prompt(run));
       const current = this.run(runId);
-      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' ? 'finished' : 'needs_evidence', endedAt: now() });
+      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' ? 'finished' : run.role === 'verifier' ? 'qa_blocked' : 'needs_evidence', endedAt: now(),
+        ...(run.role === 'verifier' && !current.qa ? { error: 'The agent stopped without reporting a QA result.' } : {}) });
     } catch (error) {
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: error.message, endedAt: now() });
       this.store.event(runId, 'error', { message: error.message }, true);
@@ -181,8 +228,11 @@ export class Desk {
       const source = this.store.config().sources.find(item => item.id === run.setupSourceId);
       return `${common}\nYou are setting up the ${source.type} connection named ${source.name}. Use its installed MCP to list the signed-in user's projects and employee choices. Source ID: ${source.id}. Do not request or print API keys. Do not change tasks, source code, or source settings. Return real identifiers and human-readable names through desk_source_catalog with this sourceId, projects, employees, and accountId if known. The human selects projects and assignee in Settings afterward. Never guess IDs. If the service MCP is missing or its permissions are insufficient, explain the exact blocker using desk_message and desk_ask. Send a brief completion message telling the user to reopen Settings. No coding workers should be dispatched for connection setup.`;
     }
-    if (run.role === 'coordinator') return `${common}\nYou are the main coordinator. Read desk_tasks and desk_task for the selected IDs ${JSON.stringify(run.taskIds)}. Classify issues by affected module, severity, likely dependency, and reproduction path. Do not guess fixes. Use desk_categorize to label tasks and desk_dispatch to start workers. Respect dependencies: serialize related changes and parallelize independent tasks. You may choose Claude Code or Codex per worker. Do not modify source code yourself. Each dispatched worker gets its own branch, worktree, and port. Use desk_runs to track workers; report what you dispatched through desk_message. Never mark a source task complete without verified evidence. Base override: ${run.baseBranch || 'repository setting'}. PR target override: ${run.targetBranch || 'repository setting'}. User instruction: ${run.prompt || 'Analyze and dispatch these assigned QA issues.'}`;
+    const config = this.store.config(), qaReady = Boolean(config.qa?.url), repositories = config.repositories.length > 0;
+    const routing = `Two run modes exist. mode "fix": a coding worker in its own worktree${repositories ? '' : ' (unavailable: no source repository is configured, so do not dispatch fix runs; say which Request issues are waiting for one)'}. mode "verify": a QA check that re-tests a developer's fix on the web test site ${qaReady ? config.qa.url : '(unavailable: no QA test site is set in Settings)'} with a recorded browser and reports pass, fail, or blocked; it never changes code. Route issues whose tracker status means development is complete and the fix awaits QA (for example "Development Completed") to verify; route open bugs (for example "Request" or in progress) to fix. Issues that only happen on Safari, macOS, iOS, Android, or an installed desktop app cannot be reproduced in the recorded Chromium browser on this Windows computer: do not dispatch verify runs for them; list them for the human in desk_message.${run.maxDispatch ? ` This is a scheduled run: start at most ${run.maxDispatch} runs, only in mode ${(run.allowedModes || ['fix', 'verify']).join(' or ')}, prioritize by severity, and end with one desk_message summary for the human: what started, what was skipped and why.` : ''}`;
+    if (run.role === 'coordinator') return `${common}\n${routing}\nYou are the main coordinator. Read desk_tasks and desk_task for the selected IDs ${JSON.stringify(run.taskIds)}. Classify issues by affected module, severity, likely dependency, and reproduction path. Do not guess fixes. Use desk_categorize to label tasks and desk_dispatch (with mode) to start runs. Respect dependencies: serialize related changes and parallelize independent tasks. You may choose Claude Code or Codex per worker. Do not modify source code yourself. Each dispatched worker gets its own branch, worktree, and port. Use desk_runs to track workers; report what you dispatched through desk_message. Never mark a source task complete without verified evidence. Base override: ${run.baseBranch || 'repository setting'}. PR target override: ${run.targetBranch || 'repository setting'}. User instruction: ${run.prompt || 'Analyze and dispatch these assigned QA issues.'}`;
     const task = this.task(run.taskId);
+    if (run.role === 'verifier') return `${common}\nYou are a QA verifier for one issue whose fix a developer reports as done. You never change code, files, settings, or tracker data; you only test and report. The test site is ${run.qaUrl}, opened in a recorded browser that uses the session the human saved in Settings.\nWorkflow: read the full issue with desk_task, including comments, which often say what was changed and how to check it. Decide the exact steps and the expected result from the issue's reproduction steps and expected behavior. Use desk_browser: open, navigate within the test site, click, fill, and take screenshots of the key states. Prove the expected behavior with at least one assertText or assertVisible on the result itself, not on unrelated page chrome. If the issue concerns another language, switch the site or account language the way a user would, if the site allows it. If you land on a login page, the saved session expired: report blocked and ask the human to sign in to the test site again in Settings. If the behavior cannot be checked on this web site in Chromium (installed desktop app, Safari, macOS, iOS, Android, missing test data, or missing permissions), report blocked with the exact reason; never guess. Finish with desk_qa_result: verdict pass only when the expected behavior is visible and asserted; fail when the reported problem still happens, with what you saw; blocked when it cannot be checked. Include a short tracker comment in the human's working language that states the environment, the steps, the result, and that a recording is attached in Rex Desk. Do not change the tracker status yourself; the human decides after reviewing your evidence.\nIssue: ${JSON.stringify({ id: task.id, externalId: task.externalId, title: task.title, description: task.description, source: task.source, status: task.statusName || task.status, fields: task.fields })}\nAdditional instructions: ${run.instructions || 'Verify the reported fix and attach proof.'}`;
     return `${common}\nYou own one issue. Work only in ${run.worktree}, branch ${run.branch}, based on ${run.baseBranch}. Never switch or edit the original checkout. Do not bind shared ports; use PORT=${run.port}. Read repository AGENTS.md and CLAUDE.md. Do not install or start machine-wide services.\nWorkflow: inspect the full issue using desk_task; reproduce before editing; use desk_browser to record browser reproduction and verification; fix at the responsible layer; run desk_verify for the configured tests; make at least one relevant assertText or assertVisible browser assertion after the fix; self-review the complete diff and call desk_finish with a factual report and risk {score:1-10,requiresHumanReview,reason,factors}. Explain security, data, behavior, rollback, and verification risks. A low score needs concrete reasons; uncertainty requires human review. A worker stopping is not proof of success. For Flow/Morningmate, desk_browser starts isolated Java 8 Tomcat when its preset is configured. ${run.runtimeProfile ? `This run uses the ${run.runtimeProfile} runtime profile; do not edit jex.content.user.xml to switch products.` : ''} Read docs/claude/build.md before Java or frontend builds. Local JEX config is copied; build this branch's own frontend output and never link node_modules or reuse another branch's dist. Do not run the original fixed-port start.sh. For an Electron repository, desk_browser opens this worktree's app with its own user data; never launch the installed app, change protocol handlers, or trigger updates. If the app cannot run independently, use desk_ask and report the exact blocker. Never fabricate screenshots, videos, test passes, or reproduction. All browser actions through desk_browser are recorded into video and a Playwright trace. Other browser tools are not automatically recorded. Do not push, create PRs, merge, deploy, or change tracker status through another tool. desk_publish and desk_status apply dashboard approvals. PR target: ${run.targetBranch}.\nIssue: ${JSON.stringify({ id: task.id, externalId: task.externalId, title: task.title, description: task.description, source: task.source, projectId: task.projectId, status: task.status })}\nAdditional instructions: ${run.instructions || 'Fix the assigned issue and attach proof.'}`;
   }
   beginAsk(runId, request) {
@@ -277,6 +327,31 @@ export class Desk {
     }
     return { readyForReview: complete, checks, risk, report, publication };
   }
+  // A QA pass needs a recording with an assertion; otherwise the verdict stands but the evidence gap is stated.
+  async qaResult(runId, { verdict, summary, comment = '', steps = [] }) {
+    const run = this.run(runId);
+    if (run.role !== 'verifier') throw new Error('Only QA verification runs report a QA result.');
+    await this.evidence.close(runId);
+    const videos = this.store.list('artifact').filter(item => item.runId === runId && item.type === 'video/webm');
+    const checks = { recordedVideo: videos.length > 0, browserAssertionPassed: videos.some(item => (item.assertions || []).length > 0) };
+    const proven = verdict !== 'pass' || checks.recordedVideo && checks.browserAssertionPassed;
+    const qa = { verdict: proven ? verdict : 'blocked', summary, comment, steps, at: now(), ...(proven ? {} : { reason: 'Reported as passing without a recorded browser assertion.' }) };
+    const report = this.evidence.report(runId, { summary, checks, qa });
+    this.patchRun(runId, { state: `qa_${qa.verdict === 'pass' ? 'passed' : qa.verdict === 'fail' ? 'failed' : 'blocked'}`, qa, checks, reportId: report.id, endedAt: now() });
+    this.message(runId, `QA ${qa.verdict === 'pass' ? 'passed' : qa.verdict === 'fail' ? 'failed' : 'blocked'}: ${summary}${qa.reason ? `\n${qa.reason}` : ''}`);
+    return { state: this.run(runId).state, checks };
+  }
+  // A person reviewed the QA evidence in the dashboard and chose this tracker change; the click is the approval.
+  async trackerFromQa(runId, phase) {
+    const run = this.run(runId);
+    if (run.role !== 'verifier' || !run.qa) throw new Error('Only a finished QA check can update the tracker from here.');
+    if (!['done', 'working'].includes(phase)) throw new Error('Choose done or working.');
+    if (phase === 'done' && run.qa.verdict !== 'pass') throw new Error('Only a passed QA check can complete the issue.');
+    const result = await this.sources.updateStatus(this.task(run.taskId), phase);
+    this.store.event(runId, 'tracker-status', { phase, result }, true);
+    if (!result?.skipped) this.patchRun(runId, { trackerPhase: phase });
+    return result;
+  }
   async publish(runId, { title, body, targetBranch, approved = false } = {}) {
     const run = this.run(runId);
     if (!approved) throw new Error('Publishing requires explicit approval from the dashboard.');
@@ -306,10 +381,11 @@ export class Desk {
   async status(runId, phase) {
     const run = this.run(runId);
     if (!['working', 'review', 'done'].includes(phase)) throw new Error('Unknown workflow phase.');
-    if (phase === 'done' && !run.checks?.testsPassed) throw new Error('Verified evidence is required before completing a source task.');
+    const qaPassed = run.role === 'verifier' && run.qa?.verdict === 'pass';
+    if (phase === 'done' && !run.checks?.testsPassed && !qaPassed) throw new Error('Verified evidence is required before completing a source task.');
     const answer = await this.ask(runId, { kind: 'approval', method: 'status', title: `Update tracker status: ${phase}`, request: { phase, taskId: run.taskId } });
     if (answer.action !== 'accept') return { declined: true };
-    if (phase === 'done' && (!this.run(runId).verification?.passed || this.run(runId).verification.fingerprint !== await fingerprint(run.worktree))) throw new Error('Code changed after verification. Re-run tests before completing the source task.');
+    if (phase === 'done' && !qaPassed && (!this.run(runId).verification?.passed || this.run(runId).verification.fingerprint !== await fingerprint(run.worktree))) throw new Error('Code changed after verification. Re-run tests before completing the source task.');
     const result = await this.sources.updateStatus(this.task(run.taskId), phase);
     this.store.event(runId, 'tracker-status', { phase, result }, true); return result;
   }
