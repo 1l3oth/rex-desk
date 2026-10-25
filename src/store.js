@@ -14,7 +14,20 @@ export const defaults = {
   name: 'Rex', provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
   syncMinutes: 5, requireVideo: true, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
   models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false, execution: 'rex',
+  qa: { url: '' }, schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], verify: true, fix: false, maxRuns: 6 },
 };
+// The QA test site is any web origin the person can sign in to; Rex Desk stores only its address, never credentials.
+function qaSettings(input = {}) {
+  const url = String(input.url || '').trim();
+  if (url) { const parsed = new URL(url); if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error('The QA test site must be an http(s) address.'); }
+  return { url };
+}
+function scheduleSettings(input = {}) {
+  const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(input.time) ? input.time : defaults.schedule.time;
+  const days = [...new Set((Array.isArray(input.days) ? input.days : defaults.schedule.days).map(Number).filter(day => Number.isInteger(day) && day >= 0 && day <= 6))].sort();
+  const maxRuns = Number.isInteger(Number(input.maxRuns)) ? Math.min(20, Math.max(1, Number(input.maxRuns))) : defaults.schedule.maxRuns;
+  return { enabled: Boolean(input.enabled), time, days, verify: input.verify !== false, fix: Boolean(input.fix), maxRuns };
+}
 // null keeps the profile inherited from the launching terminal; '' selects the CLI's default home folder.
 function agentProfile(value, name) {
   if (value === undefined || value === null) return null;
@@ -152,7 +165,8 @@ export class Store extends EventEmitter {
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
       syncMinutes: input.syncMinutes, requireVideo: input.requireVideo !== false, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: input.models || defaults.models, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
-      tourDismissed: Boolean(input.tourDismissed), execution: input.execution === 'orca' ? 'orca' : 'rex' };
+      tourDismissed: Boolean(input.tourDismissed), execution: input.execution === 'orca' ? 'orca' : 'rex',
+      qa: qaSettings(input.qa), schedule: scheduleSettings(input.schedule) };
     for (const update of secretUpdates) {
       if (update.remove) this.delete('secret', `source:${update.id}`);
       else this.put('secret', `source:${update.id}`, update.value);
@@ -163,6 +177,12 @@ export class Store extends EventEmitter {
       this.delete('directory', source.id);
       this.delete('sync', source.id);
       for (const task of this.list('task').filter(task => task.sourceId === source.id)) this.put('task', task.id, { ...task, active: false });
+    }
+    // Turning the schedule on after today's time passed starts tomorrow, not immediately.
+    if (config.schedule.enabled && !this.config().schedule?.enabled) {
+      const date = new Date(), [hour, minute] = config.schedule.time.split(':').map(Number);
+      const today = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      if (date.getHours() * 60 + date.getMinutes() >= hour * 60 + minute) this.put('schedule', 'last', { date: today, at: now(), state: 'armed' });
     }
     this.put('config', 'main', config);
     return this.publicConfig();

@@ -66,7 +66,7 @@ export class CodexRunner {
     try {
       await this.request('initialize', { clientInfo: { name: 'rex_desk', title: 'Rex Desk', version: '0.1.0' }, capabilities: { experimentalApi: true } });
       this.send({ method: 'initialized', params: {} });
-      const params = { cwd: this.cwd, approvalPolicy: 'on-request', sandbox: this.run.role === 'coordinator' ? 'read-only' : 'workspace-write',
+      const params = { cwd: this.cwd, approvalPolicy: 'on-request', sandbox: this.run.role === 'worker' ? 'workspace-write' : 'read-only',
         ...(this.model ? { model: this.model } : {}) };
       const response = this.run.sessionId
         ? await this.request('thread/resume', { ...params, threadId: this.run.sessionId })
@@ -141,7 +141,7 @@ export class ClaudeRunner {
     const connections = existingMcpConnections(this.sourcePath, env.CLAUDE_CONFIG_DIR), allowedTools = new Set();
     delete connections.rex_desk;
     const options = { cwd: this.cwd, env, abortController: this.controller,
-      permissionMode: this.run.role === 'coordinator' ? 'default' : 'acceptEdits',
+      permissionMode: this.run.role === 'worker' ? 'acceptEdits' : 'default',
       settingSources: ['user', 'project', 'local'],
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
       ...(this.model ? { model: this.model } : {}), ...(this.run.sessionId ? { resume: this.run.sessionId } : {}),

@@ -84,6 +84,16 @@ Workers run headless in Rex Desk by default, with tool approvals in the dashboar
 
 Orca shows these worktrees only when the repository's external-worktree visibility is **show**; the run dialog checks this and offers a one-click fix. **Open in Orca** on any run opens a plain terminal in its worktree without starting a second agent.
 
+## QA verification
+
+Issues a developer marked complete (for example **Development Completed**) are QA work. **Verify fix** starts a run that needs no repository: the agent opens the web test site from Settings → **QA verification** in a recorded browser, follows the issue's steps, asserts the expected behavior, and reports **Fix works**, **Still broken**, or **Could not check**, with a drafted tracker comment to copy. A pass needs a recorded assertion. **Sign in to the test site** opens a browser where you log in once; the session is saved in `.local/qa-session.json` on this computer and used only by QA runs. **Mark done in tracker** / **Reopen in tracker** apply the mapped tracker status after you review the evidence. Desktop-app, Safari, macOS, iOS, and Android checks cannot run in the recorded Chromium browser and are reported as blocked.
+
+## Schedule
+
+Settings → **Schedule** starts work while the computer is on: at the set time on the chosen days Rex Desk syncs, and a main agent sorts new issues and starts at most the daily limit of runs: QA checks, code fixes, or both. Issues already settled or worked on in the last 20 hours are skipped. **Run now** does the same immediately. **Start Rex Desk when I sign in to Windows** adds a hidden launcher to the Startup folder so schedules run without opening the app.
+
+Setup marks the QA site, repository, and commands as optional: QA checks need only the tracker and a test site; code fixes need a repository. Inspecting a repository fills empty setup, test, and preview commands from `package.json` and applies the Flow / Morningmate Tomcat or Electron preset when detected.
+
 ## Source statuses and pull requests
 
 Sync reads each project's status definitions and makes them available to agents. Optional working/review/done mappings specify the tracker status values; unmapped phases leave the tracker unchanged, and every status change needs a dashboard approval. Local Kanban progress never rewrites tracker statuses.

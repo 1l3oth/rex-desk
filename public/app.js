@@ -5,7 +5,7 @@ const providerName = provider => provider === 'codex' ? 'Codex' : 'Claude Code';
 const samePath = (left, right) => String(left || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase() === String(right || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
 const taskImage = (task, address) => `/api/task-image?task=${encodeURIComponent(task.id)}&url=${encodeURIComponent(address)}`;
 const ui = { page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', checked: new Set(), search: '', source: '', category: '', snapshot: null, runEvents: new Map(), journals: new Map(), transcripts: new Map(), openOps: new Set(), openRuns: [], layout: 'grid', runSide: 'runs', selectedDecision: '', draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false };
-const labels = { queued: 'Queued', starting: 'Preparing', running: 'Working', waiting: 'Needs you', needs_evidence: 'Needs evidence', ready_for_review: 'Ready for review', published: 'PR created', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted', finished: 'Finished' };
+const labels = { queued: 'Queued', starting: 'Preparing', running: 'Working', waiting: 'Needs you', needs_evidence: 'Needs evidence', ready_for_review: 'Ready for review', published: 'PR created', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted', finished: 'Finished', qa_passed: 'QA passed', qa_failed: 'QA failed', qa_blocked: 'QA blocked' };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const icon = name => `<svg class="icon" aria-hidden="true"><use href="/icons.svg#${name}"></use></svg>`;
 const button = (label, action, style = '', extra = '') => `<button class="button ${style}" data-action="${action}" ${extra}>${label}</button>`;
@@ -102,6 +102,7 @@ function render() {
   restoreTranscript();
   if (['setup', 'settings'].includes(ui.page) && !ui.agents && !ui.agentsLoading && !ui.agentsError) void loadAgents();
   if (ui.page === 'settings' && !ui.github) void loadGithub();
+  if (ui.page === 'settings') void loadAutostart();
 }
 function heading(title, subtitle, controls = '') {
   return `<header class="titlebar"><div class="titlebar-text"><h1>${title}</h1><p>${subtitle}</p></div><div class="actions">${controls}</div></header>`;
@@ -162,7 +163,7 @@ function renderTaskDetail() {
   return `<section class="detail-pane" aria-label="Selected issue"><div class="detail-top"><div class="detail-reference">${sourceLogo(task.source)}<span>${esc(task.sourceName)} · #${esc(task.taskNumber || task.externalId)}</span>${task.demo ? '<span class="demo-label">Demo</span>' : ''}${renderTaskStates(task, run)}</div><h2>${esc(task.title)}</h2>${renderIssueProperties(task, run)}</div>
     <div class="tabs" role="tablist" aria-label="Issue details">${tabs.map(([key, label]) => `<button class="tab ${ui.tab === key ? 'active' : ''}" role="tab" aria-selected="${ui.tab === key}" data-tab="${key}">${label}</button>`).join('')}</div>
     <div class="detail-body" role="tabpanel">${ui.tab === 'brief' ? `${renderIssueBrief(task)}${run ? renderRunPath(run) : ''}${run?.error ? `<p class="error-text">${esc(run.error)}</p>` : ''}` : ui.tab === 'messages' ? (run ? `<div class="issue-conversation" id="messages-${run.id}">${renderMessages(run.id)}</div>` : '<p class="empty-small">Start an agent to begin the conversation.</p>') : renderProof(run?.id)}</div>
-    <div class="detail-bottom"><p>${run?.branch ? `${icon('branch')} <code>${esc(run.branch)}</code>` : link ? `<a href="${esc(link)}" target="_blank" rel="noopener">Open original issue</a>` : 'One issue. One isolated worktree.'}</p><div class="actions">${run ? button('Open run', 'open-task-run', 'small') : button(`${icon('play')} Run agent`, 'launch-task', 'primary small', task.demo ? 'disabled title="Connect real tasks to run an agent"' : '')}</div></div></section>`;
+    <div class="detail-bottom"><p>${run?.branch ? `${icon('branch')} <code>${esc(run.branch)}</code>` : link ? `<a href="${esc(link)}" target="_blank" rel="noopener">Open original issue</a>` : 'One issue. One isolated worktree.'}</p><div class="actions">${issueRunActions(task, run)}</div></div></section>`;
 }
 function renderIssueProperties(task, run) {
   const rows = [['Status', task.statusName || task.status], ['Project', task.projectName], task.parentTitle && ['Parent task', task.parentTitle], task.section && ['Group', task.section],
@@ -214,7 +215,8 @@ function renderRunPath(run) {
 function boardStage(task) {
   const run = taskRun(task);
   if (run?.state === 'published') return 4;
-  if (run?.state === 'ready_for_review') return 3;
+  if (run?.state === 'ready_for_review' || run?.state === 'qa_passed') return 3;
+  if (run && ['qa_failed', 'qa_blocked'].includes(run.state)) return 2;
   if (run && ['waiting', 'failed', 'interrupted', 'needs_evidence'].includes(run.state)) return 2;
   if (run && ['running', 'starting'].includes(run.state)) return 1;
   const mapping = ui.snapshot.config.sources.find(source => source.id === task.sourceId)?.statusMap || {};
@@ -357,11 +359,69 @@ function renderQuestionField(key, property, required) {
   else control = `<input ${extra} type="${['number', 'integer'].includes(property.type) ? 'number' : 'text'}" ${property.type === 'number' ? 'step="any"' : ''} placeholder="Your answer">`;
   return `<label class="field"><span>${esc(property.title || key)}</span>${control}${property.description ? `<small>${esc(property.description)}</small>` : ''}</label>`;
 }
+const doneStates = ['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked'];
+// Issues a developer marked complete are QA work, so verifying comes first; open bugs lead with a fix.
+const awaitsQa = task => /complet|done|resolved|verif|\bqa\b|feedback/i.test(String(task.statusName || task.status || ''));
+function issueRunActions(task, run, primaryClass = 'primary small') {
+  const live = run && !doneStates.includes(run.state), disabled = task.demo ? 'disabled title="Connect real tasks to run an agent"' : '';
+  if (live) return button('Open run', 'open-task-run', primaryClass);
+  const verifyFirst = awaitsQa(task);
+  return `${run ? button('Last run', 'open-task-run', 'small quiet') : ''}${button(`${icon('check')} Verify fix`, 'launch-verify', verifyFirst ? primaryClass : 'small', disabled)}${button(`${icon('play')} Fix with agent`, 'launch-task', verifyFirst ? 'small' : primaryClass, disabled)}`;
+}
+const verdictLabels = { pass: 'Fix works', fail: 'Still broken', blocked: 'Could not check' };
+function renderQa(run) {
+  const qa = run.qa;
+  if (!qa) return `<p class="muted">Testing on ${esc(run.qaUrl || 'the QA test site')} with your saved sign-in…</p>${renderProof(run.id)}`;
+  const done = run.trackerPhase === 'done', reopened = run.trackerPhase === 'working';
+  return `<div class="qa-verdict ${esc(qa.verdict)}"><strong>${verdictLabels[qa.verdict] || esc(qa.verdict)}</strong><div class="md">${renderMarkdown(qa.summary)}</div>${qa.reason ? `<small>${esc(qa.reason)}</small>` : ''}</div>
+    ${qa.comment ? `<div class="qa-comment"><div class="qa-comment-head"><span>Tracker comment</span>${button(`${icon('copy')} Copy`, 'copy-text', 'small quiet', `type="button" data-text="${esc(qa.comment)}"`)}</div><div class="md">${renderMarkdown(qa.comment)}</div></div>` : ''}
+    <div class="actions">${qa.verdict === 'pass' ? button(done ? `${icon('check')} Marked done` : 'Mark done in tracker', 'qa-tracker', 'small primary', `data-phase="done"${done ? ' disabled' : ''}`) : ''}${qa.verdict === 'fail' ? button(reopened ? `${icon('check')} Reopened` : 'Reopen in tracker', 'qa-tracker', 'small', `data-phase="working"${reopened ? ' disabled' : ''}`) : ''}</div>${renderProof(run.id)}`;
+}
+function qaSessionText() {
+  const session = ui.snapshot.qaSession;
+  return session?.open ? 'Sign-in window is open. Sign in, then close it.' : session?.savedAt ? `Sign-in saved ${relative(session.savedAt).toLowerCase()}.` : 'No sign-in saved yet.';
+}
+function scheduleText() {
+  const last = ui.snapshot.schedule;
+  if (!last) return 'Has not run yet.';
+  if (last.state === 'armed') return 'Starts at the next scheduled time.';
+  if (last.state === 'started') return `Last run ${last.date}: a main agent started for ${plural(last.issues || 0, 'new issue')}.`;
+  return `Last run ${last.date}: ${last.reason || last.state}`;
+}
+// While the test-site sign-in window is open, keep the saved-session line current.
+async function watchQaSession() {
+  clearTimeout(ui.qaTimer);
+  ui.snapshot.qaSession = (await api('/state')).qaSession;
+  for (const element of document.querySelectorAll('[data-qa-session]')) element.textContent = qaSessionText();
+  if (ui.snapshot.qaSession?.open) ui.qaTimer = setTimeout(watchQaSession, 3000);
+}
+async function loadAutostart() {
+  const box = document.querySelector('#autostart'); if (!box) return;
+  const status = await api('/autostart').catch(() => ({ supported: false }));
+  box.checked = Boolean(status.enabled); box.disabled = !status.supported;
+}
+// Fill what inspection detected without overwriting anything typed: Node scripts, then the Flow Tomcat or Electron preset when no preview is set.
+function applyDetected(repository, info, form) {
+  const filled = [];
+  for (const [key, label] of [['setupCommand', 'setup'], ['testCommand', 'test'], ['devCommand', 'preview']]) if (!repository[key] && info.suggested?.[key]) {
+    repository[key] = info.suggested[key]; filled.push(`${label} command`);
+    const input = form?.elements[`repository.${repository.id}.${key}`]; if (input) input.value = repository[key];
+  }
+  if (!repository.devCommand && !repository.flowRuntime && !repository.electronRuntime) {
+    if (info.flow?.available) { repository.flowRuntime = structuredClone(info.flow); filled.push('Flow / Morningmate Tomcat preset'); }
+    else if (info.electron) {
+      repository.electronRuntime = { appDir: info.electron.appDir, electronPath: info.electron.electronPath, args: info.electron.args };
+      if (!repository.setupCommand) repository.setupCommand = info.electron.nestedInstall ? `npm ci; npm ci --prefix ${info.electron.appDir}` : 'npm ci';
+      filled.push('Electron preset');
+    }
+  }
+  return filled;
+}
 function renderProof(runId) {
   if (!runId) return '<p class="empty-small">Recorded browser tests, screenshots, and reports appear here after an agent starts working.</p>';
   const run = ui.snapshot.runs.find(item => item.id === runId);
   const artifacts = ui.snapshot.artifacts.filter(item => item.runId === runId);
-  return `${renderRisk(run)}${run?.checks ? `<div class="check-list">${[['testsPassed', 'Tests pass for the current code'], ['recordedVideo', 'Browser recording saved'], ['browserAssertionPassed', 'Browser assertion matches current code']].map(([key, title]) => `<div class="check-row ${run.checks[key] ? '' : 'missing'}">${icon(run.checks[key] ? 'check' : 'clock')}<span>${title}</span></div>`).join('')}</div>` : ''}
+  return `${renderRisk(run)}${run?.checks ? `<div class="check-list">${(run.role === 'verifier' ? [['recordedVideo', 'Browser recording saved'], ['browserAssertionPassed', 'Expected behavior asserted']] : [['testsPassed', 'Tests pass for the current code'], ['recordedVideo', 'Browser recording saved'], ['browserAssertionPassed', 'Browser assertion matches current code']]).map(([key, title]) => `<div class="check-row ${run.checks[key] ? '' : 'missing'}">${icon(run.checks[key] ? 'check' : 'clock')}<span>${title}</span></div>`).join('')}</div>` : ''}
     ${artifacts.length ? artifacts.map(artifact => `<div class="proof-item"><a href="${artifactUrl(artifact)}" target="_blank" rel="noopener">${icon(artifact.type === 'video/webm' ? 'play' : 'file')}${esc(artifact.title)}</a><small>${relative(artifact.createdAt)}</small>${artifact.type === 'video/webm' ? `<video controls preload="metadata" src="${artifactUrl(artifact)}"></video>` : artifact.type === 'image/png' ? `<img src="${artifactUrl(artifact)}" alt="${esc(artifact.title)}" loading="lazy">` : ''}<a href="${artifactUrl(artifact)}?download" download>Download</a></div>`).join('') : '<p class="empty-small">No evidence yet. The agent must record its browser test and run verification.</p>'}`;
 }
 // An inbox of requests: every waiting decision in a list, the selected one answered beside it.
@@ -375,7 +435,7 @@ function renderDecisions() {
   }).join('')}</ul><div class="decision-detail">${renderDecision(current)}</div></div>`;
 }
 const activeStates = ['running', 'waiting', 'starting', 'queued'];
-const runGroups = [['Needs you', run => run.state === 'waiting' || pending(run.id).length], ['Working', run => activeStates.includes(run.state)], ['Review', run => ['ready_for_review', 'needs_evidence'].includes(run.state)], ['Done', () => true]];
+const runGroups = [['Needs you', run => run.state === 'waiting' || pending(run.id).length], ['Working', run => activeStates.includes(run.state)], ['Review', run => ['ready_for_review', 'needs_evidence', 'qa_passed', 'qa_failed', 'qa_blocked'].includes(run.state)], ['Done', () => true]];
 // Agent runs page: every run in the sidebar, the open ones side by side in the main area.
 function sideSwitch() {
   return `<div class="view-switch" role="group" aria-label="Sidebar">${[['runs', 'agents', 'Runs'], ['issues', 'inbox', 'Issues']].map(([value, glyph, label]) => `<button class="${ui.runSide === value ? 'active' : ''}" data-action="run-side" data-side="${value}" aria-pressed="${ui.runSide === value}">${icon(glyph)}${label}</button>`).join('')}</div>`;
@@ -385,7 +445,7 @@ function renderWorkspaceIssues() {
   const tasks = filteredTasks(), task = selectedTask(), run = task && taskRun(task);
   return `<div class="side-head"><h2>Issues <span class="count-label">${ui.snapshot.tasks.length}</span></h2>${sideSwitch()}</div><div class="side-actions">${issueActions()}</div>${toolbar()}
     <div id="task-list" class="task-list">${tasks.length ? tasks.map(renderTaskRow).join('') : emptyTasks()}</div>
-    ${task ? `<section class="issue-preview" aria-label="Selected issue"><div class="detail-reference">${sourceLogo(task.source)}<span class="mono">#${esc(task.taskNumber || task.externalId)}</span>${renderTaskStates(task, run)}</div><h3>${esc(task.title)}</h3><dl class="detail-properties"><dt>Project</dt><dd>${esc(task.projectName || '—')}</dd><dt>Category</dt><dd>${esc(task.category || 'Not analyzed yet')}</dd>${run?.branch ? `<dt>Branch</dt><dd><code>${esc(run.branch)}</code></dd>` : ''}</dl><div class="actions">${run ? button('Open run', 'open-task-run', 'small primary') : button(`${icon('play')} Run agent`, 'launch-task', 'small primary', task.demo ? 'disabled' : '')}${button('Full issue', 'open-issue', 'small quiet')}</div></section>` : ''}`;
+    ${task ? `<section class="issue-preview" aria-label="Selected issue"><div class="detail-reference">${sourceLogo(task.source)}<span class="mono">#${esc(task.taskNumber || task.externalId)}</span>${renderTaskStates(task, run)}</div><h3>${esc(task.title)}</h3><dl class="detail-properties"><dt>Project</dt><dd>${esc(task.projectName || '—')}</dd><dt>Category</dt><dd>${esc(task.category || 'Not analyzed yet')}</dd>${run?.branch ? `<dt>Branch</dt><dd><code>${esc(run.branch)}</code></dd>` : ''}</dl><div class="actions">${issueRunActions(task, run, 'small primary')}${button('Full issue', 'open-issue', 'small quiet')}</div></section>` : ''}`;
 }
 function renderRunSide() {
   if (ui.runSide === 'issues') return renderWorkspaceIssues();
@@ -408,10 +468,10 @@ function renderPane(run) {
   const waiting = pending(run.id).length, workers = ui.snapshot.runs.filter(item => item.parentRunId === run.id);
   const journal = `<details class="activity-link" data-journal="${run.id}"><summary>Work journal</summary><div class="journal" id="journal-${run.id}">${renderJournal(run.id)}</div></details>`;
   // The main agent only earns a side column once it has dispatched workers; otherwise the transcript keeps the width.
-  const proof = run.role === 'coordinator' && !workers.length ? '' : `<aside class="pane-proof"><h3>${run.role === 'coordinator' ? 'Dispatch' : 'Worktree & proof'}</h3>${run.role === 'coordinator' ? renderDispatch(workers) : renderRunFacts(run)}${run.prUrl ? `<p><a href="${esc(safeUrl(run.prUrl))}" target="_blank" rel="noopener">Open draft pull request</a></p>` : ''}${run.role === 'coordinator' ? '' : renderProof(run.id)}${journal}</aside>`;
+  const proof = run.role === 'coordinator' && !workers.length ? '' : `<aside class="pane-proof"><h3>${run.role === 'coordinator' ? 'Dispatch' : run.role === 'verifier' ? 'QA result' : 'Worktree & proof'}</h3>${run.role === 'coordinator' ? renderDispatch(workers) : run.role === 'verifier' ? renderQa(run) : renderRunFacts(run)}${run.prUrl ? `<p><a href="${esc(safeUrl(run.prUrl))}" target="_blank" rel="noopener">Open draft pull request</a></p>` : ''}${run.role === 'worker' ? renderProof(run.id) : ''}${journal}</aside>`;
   return `<section class="pane${run.id === ui.selectedRun ? ' focused' : ''}${waiting ? ' needs-you' : ''}" data-pane-run="${run.id}" aria-label="${esc(run.title)}">
     <header class="pane-head"><span class="state-dot ${esc(run.state)}"></span><h2>${esc(run.title)}</h2><span class="pane-provider">${providerName(run.provider)}</span>${tag(run.state)}<span class="pane-actions">${run.worktree ? button(icon('terminal'), 'open-orca', 'small quiet icon-only', 'aria-label="Open in Orca" title="Open a plain terminal in this worktree in Orca"') : ''}${button(icon('close'), 'close-run', 'small quiet icon-only', `data-id="${run.id}" aria-label="Close pane"`)}</span></header>
-    <div class="pane-sub">${run.branch ? `${icon('branch')}<code title="${esc(run.branch)}">${esc(run.branch)}</code>` : `<span>${run.role === 'coordinator' ? `Analyzing ${plural((run.taskIds || []).length, 'issue')}` : 'Worktree preparing'}</span>`}<span class="pane-progress">${esc(progressText(run))}</span></div>
+    <div class="pane-sub">${run.role === 'verifier' ? `${icon('link')}<code title="${esc(run.qaUrl || '')}">${esc(run.qaUrl || '')}</code>` : run.branch ? `${icon('branch')}<code title="${esc(run.branch)}">${esc(run.branch)}</code>` : `<span>${run.role === 'coordinator' ? `Analyzing ${plural((run.taskIds || []).length, 'issue')}` : 'Worktree preparing'}</span>`}<span class="pane-progress">${esc(progressText(run))}</span></div>
     ${run.execution === 'orca' ? `<div class="run-status-strip pane-notice">${icon('terminal')}<span>Runs in an Orca terminal. Tool approvals happen there; questions, evidence, and PR approval stay here.</span></div>` : ''}
     ${run.error ? `<div class="notice pane-notice">${icon('alert')}<span>${esc(run.error)}</span>${/not signed in|not logged in|\/login/i.test(run.error) ? button('Fix agent sign-in', 'setup', 'small') : ''}</div>` : ''}
     <div class="pane-body"><div class="pane-conversation" id="messages-${run.id}">${renderMessages(run.id)}${proof ? '' : journal}</div>${proof}</div>${renderPaneFooter(run)}</section>`;
@@ -468,8 +528,10 @@ function providerSelect(name, value) { return `<select name="${name}"><option va
 function renderSettings() {
   const config = ui.draft || ui.snapshot.config;
   return `${heading('Settings', 'Connect your projects once. Change accounts, keys, repositories, and agent defaults here.')}
-    <div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><a href="#connections">Connections</a><a href="#repositories">Repositories</a><a href="#github">GitHub</a><a href="#agents">Agents & workflow</a><a href="#agent-sign-in">Agent sign-in</a><a href="#cloud-backup">Cloud backup</a><a href="#appearance">Appearance</a><a href="#ai-connection">AI connection</a></nav>
+    <div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><a href="#connections">Connections</a><a href="#qa">QA verification</a><a href="#schedule">Schedule</a><a href="#repositories">Repositories</a><a href="#github">GitHub</a><a href="#agents">Agents & workflow</a><a href="#agent-sign-in">Agent sign-in</a><a href="#cloud-backup">Cloud backup</a><a href="#appearance">Appearance</a><a href="#ai-connection">AI connection</a></nav>
     <form id="settings-form"><section class="settings-section" id="connections"><h2>Flow & Morningmate</h2><p>Only issues assigned to your account in these project IDs are imported. API keys stay encrypted on this computer.</p>${config.sources.map((source, index) => renderSourceSettings(source, index)).join('')}${button(`${icon('plus')} Add connection`, 'add-source', '', 'type="button"')}</section>
+    <section class="settings-section" id="qa"><h2>QA verification</h2><p>Re-test fixes developers marked complete. The agent opens this web test site in a recorded browser with your own sign-in, checks the expected behavior, and reports pass, fail, or blocked. It never changes code.</p><div class="settings-card">${inputField('Test site address', 'qa.url', config.qa?.url || '', 'The web app to test, for example your staging site.', 'url', 'https://')}<div class="actions">${button(`${icon('link')} Sign in to the test site`, 'qa-sign-in', 'small', 'type="button"')}<small class="muted" data-qa-session>${qaSessionText()}</small></div><small class="muted">A browser window opens. Sign in as you normally do, then close it; the session stays on this computer for QA checks only.</small></div></section>
+    <section class="settings-section" id="schedule"><h2>Schedule</h2><p>Let Rex Desk start work on its own while this computer is on. At the set time it syncs, a main agent sorts new issues, and it starts up to your daily limit. Approvals and results wait in Needs you.</p><div class="settings-card"><label class="field check"><input type="checkbox" name="schedule.enabled" ${config.schedule?.enabled ? 'checked' : ''}><span>Start work automatically on a schedule</span></label><div class="field-row">${inputField('Time', 'schedule.time', config.schedule?.time || '09:00', '', 'time')}${inputField('Most runs per day', 'schedule.maxRuns', config.schedule?.maxRuns || 6, 'Caps agent cost. 1–20.', 'number')}</div><fieldset class="day-picker"><legend>Days</legend>${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => `<label><input type="checkbox" name="schedule.days" value="${index}" ${(config.schedule?.days || [1, 2, 3, 4, 5]).includes(index) ? 'checked' : ''}><span>${day}</span></label>`).join('')}</fieldset><label class="field check"><input type="checkbox" name="schedule.verify" ${config.schedule?.verify !== false ? 'checked' : ''}><span>QA checks for issues awaiting verification</span></label><label class="field check"><input type="checkbox" name="schedule.fix" ${config.schedule?.fix ? 'checked' : ''}><span>Code fixes for open bugs (needs a source repository)</span></label><div class="actions">${button('Run now', 'schedule-run', 'small', 'type="button"')}<small class="muted" data-schedule-status>${esc(scheduleText())}</small></div><label class="field check"><input type="checkbox" id="autostart"><span>Start Rex Desk when I sign in to Windows, so the schedule runs without opening the app</span></label></div></section>
     <section class="settings-section" id="repositories"><h2>Source repositories</h2><p>Each worker uses a new worktree. Commands run there; your current checkout stays where it is.</p>${config.repositories.map((repository, index) => renderRepositorySettings(repository, index)).join('')}${button(`${icon('plus')} Add repository`, 'add-repository', '', 'type="button"')}</section>
     <section class="settings-section" id="github"><h2>GitHub</h2><p>Draft PRs, pushes, and clones use the active account. Sign in as many accounts as you need; Rex Desk uses the GitHub CLI login and never stores a GitHub token.</p><div class="settings-card" data-github="full">${renderGithub()}</div></section>
     <section class="settings-section" id="agents"><h2>Agents & workflow</h2><p>Use your installed Claude Code and Codex sign-ins. You can override the provider for each run.</p><div class="settings-card"><div class="field-row">${inputField('Your name', 'name', config.name)}<label class="field"><span>Default agent</span>${providerSelect('provider', config.provider)}</label></div><label class="field"><span>Run workers in</span>${executionSelect(config.execution)}<small>Orca terminals show the agent live and keep tool approvals there. Questions, evidence, and PR approval stay in Rex Desk either way.</small></label><div class="field-row">${inputField('Parallel workers', 'concurrency', config.concurrency, 'Main agent runs separately. Start with 1 or 2 workers.', 'number')}${inputField('Sync interval (minutes)', 'syncMinutes', config.syncMinutes, 'Set 0 to sync manually.', 'number')}</div>${inputField('Branch prefix', 'branchPrefix', config.branchPrefix, 'For example: temp/rex. Git branch names cannot begin with /.')}<div class="field-row">${inputField('Claude model (optional)', 'model.claude', config.models?.claude || '', 'Leave blank to use the installed provider’s default.')}${inputField('Codex model (optional)', 'model.codex', config.models?.codex || '', 'Use a model available to your signed-in account.')}</div><label class="field check"><input type="checkbox" name="requireVideo" ${config.requireVideo ? 'checked' : ''}><span>Require a browser recording and passing browser assertion before review</span></label><label class="field check"><input type="checkbox" name="reportToOrbit" ${config.reportToOrbit ? 'checked' : ''}><span>Let verified agents send their final report through my installed Orbit MCP</span></label><label class="field check"><input type="checkbox" name="autoPrLowRisk" ${config.autoPrLowRisk ? 'checked' : ''}><span>Automatically push and create a draft PR for verified low-risk fixes (risk 1–2/10)</span></label><small class="muted">Automatic PRs require a small style, markup, documentation, or test-only change, passing tests, current evidence, and no human-review flag. Application code, sensitive changes, and higher scores require review. Tracker changes still require approval. Nothing is merged automatically.</small></div>${button('Check installed tools', 'diagnostics', '', 'type="button"')}<div id="diagnostics"></div></section>
@@ -499,7 +561,7 @@ function renderSourceCatalog(source) {
   const agents = `<div class="agent-lookup"><span>Find choices through your installed service MCP:</span>${button('Find with Claude Code', 'source-agent', 'small quiet', `type="button" data-id="${source.id}" data-provider="claude"`)}${button('Find with Codex', 'source-agent', 'small quiet', `type="button" data-id="${source.id}" data-provider="codex"`)}</div>`;
   if (!directory) return `<p class="discovery-status muted">Connect to load project names and employee accounts. Choose them before syncing.</p>${agents}`;
   const selected = new Set(source.projectIds), employeeId = source.userId || '', employees = directory.employees;
-  return `<div class="source-catalog"><p class="discovery-status muted">${directory.origin === 'mcp' ? 'Agent found these choices. Review them before saving.' : 'Connected. Select projects and the employee whose assigned tasks you want.'}</p>${Object.entries(directory.errors || {}).map(([kind, error]) => `<p class="error-text">${esc(kind)}: ${esc(error)}</p>`).join('')}<fieldset class="project-picker"><legend>Projects to sync</legend>${directory.projects.length ? `<input type="search" class="catalog-search" aria-label="Search projects for ${esc(source.name)}" placeholder="Search projects" data-catalog-search="${source.id}"><div class="project-options">${directory.projects.map(project => `<label class="project-choice"><input type="checkbox" data-source-project="${source.id}" value="${esc(project.id)}" ${selected.has(project.id) ? 'checked' : ''}><span>${esc(project.name)}<small>${esc(project.id)}</small></span></label>`).join('')}</div>` : '<p class="muted">No projects returned. Check access, reload, or use the MCP agent below.</p>'}</fieldset><div class="field"><span>Assigned employee</span>${picker({ value: employeeId, label: `Assigned employee for ${source.name}`, placeholder: 'Search name, email, or team', attrs: `data-source-employee="${source.id}"`, empty: 'No colleague matches. Reload the directory or use the API account.',
+  return `<div class="source-catalog"><p class="discovery-status muted">${directory.origin === 'mcp' ? 'Agent found these choices. Review them before saving.' : 'Connected. Select projects and the employee whose assigned tasks you want.'}</p>${Object.entries(directory.errors || {}).map(([kind, error]) => `<p class="error-text">${esc(kind)}: ${esc(error)}</p>`).join('')}<fieldset class="project-picker"><legend>Projects to sync</legend>${directory.projects.length > 1 ? `<div class="actions project-bulk">${button('Select all', 'select-projects', 'small quiet', `type="button" data-id="${source.id}" data-all="true"`)}${button('Clear', 'select-projects', 'small quiet', `type="button" data-id="${source.id}"`)}<small class="muted">Only issues assigned to you are imported from selected projects.</small></div>` : ''}${directory.projects.length ? `<input type="search" class="catalog-search" aria-label="Search projects for ${esc(source.name)}" placeholder="Search projects" data-catalog-search="${source.id}"><div class="project-options">${directory.projects.map(project => `<label class="project-choice"><input type="checkbox" data-source-project="${source.id}" value="${esc(project.id)}" ${selected.has(project.id) ? 'checked' : ''}><span>${esc(project.name)}<small>${esc(project.id)}</small></span></label>`).join('')}</div>` : '<p class="muted">No projects returned. Check access, reload, or use the MCP agent below.</p>'}</fieldset><div class="field"><span>Assigned employee</span>${picker({ value: employeeId, label: `Assigned employee for ${source.name}`, placeholder: 'Search name, email, or team', attrs: `data-source-employee="${source.id}"`, empty: 'No colleague matches. Reload the directory or use the API account.',
     options: [{ value: '', label: 'Use signed-in API account', detail: directory.accountId || '' }, ...employees.map(employee => ({ value: employee.id, label: `${employee.name}${employee.id === directory.accountId ? ' (me)' : ''}`, detail: [employee.email || employee.id, employee.department].filter(Boolean).join(' · ') })),
       ...(employeeId && !employees.some(employee => employee.id === employeeId) ? [{ value: employeeId, label: employeeId, detail: 'Saved account' }] : [])] })}<small>${employees.length} people loaded. Sync matches this task assignee, rather than the post author.</small></div>${agents}</div>`;
 }
@@ -521,6 +583,12 @@ async function connectSource(sourceId, provider) {
     ui.snapshot.config.sources = [...ui.snapshot.config.sources.filter(item => item.id !== sourceId), result.source];
     if (result.directory) ui.snapshot.directories = [...(ui.snapshot.directories || []).filter(item => item.sourceId !== sourceId), result.directory];
     toast(provider ? 'Connection agent queued. Check Agent runs for questions and results.' : 'Connection saved. Choose projects and an employee, then Save settings.');
+    // First connection with a single project: select it. With several, the picker offers Select all instead of guessing.
+    if (!provider && current && !current.projectIds.length && result.directory?.projects?.length === 1) {
+      current.projectIds = result.directory.projects.map(project => project.id);
+      const field = form?.elements[`source.${sourceId}.projectIds`]; if (field) field.value = current.projectIds.join(', ');
+      toast('Connected. Your only project is selected; choose the assignee, then Save settings.');
+    }
   } catch (error) { toast(error.message, true); }
   finally { connectingSources.delete(sourceId); if (ui.page === 'settings') { readSettings(); updateSourceCard(sourceId); } }
 }
@@ -604,6 +672,8 @@ async function inspectRepositorySettings(repositoryId) {
       current[key] = value;
       const input = form?.elements[`repository.${repositoryId}.${key}`]; if (input) input.value = value;
     }
+    const filled = applyDetected(current, info, form);
+    if (filled.length) { toast(`Detected and filled: ${filled.join(', ')}. Review them, then Save settings.`); if (current.flowRuntime || current.electronRuntime) render(); }
     const branches = document.querySelector(`[data-branches="${repositoryId}"]`); if (branches) branches.innerHTML = repositoryBranches(current);
   } catch (error) {
     const field = document.querySelector('#settings-form')?.elements[`repository.${repositoryId}.path`];
@@ -632,6 +702,8 @@ function readSettings() {
   draft.concurrency = Number(data.get('concurrency')); draft.syncMinutes = Number(data.get('syncMinutes'));
   draft.autoPrLowRisk = data.has('autoPrLowRisk'); draft.requireVideo = data.has('requireVideo'); draft.reportToOrbit = data.has('reportToOrbit');
   draft.models = { claude: data.get('model.claude'), codex: data.get('model.codex') };
+  draft.qa = { url: String(data.get('qa.url') || '').trim() };
+  draft.schedule = { enabled: data.has('schedule.enabled'), time: String(data.get('schedule.time') || '09:00'), days: data.getAll('schedule.days').map(Number), verify: data.has('schedule.verify'), fix: data.has('schedule.fix'), maxRuns: Number(data.get('schedule.maxRuns') || 6) };
   draft.agentProfiles = ui.snapshot.config.agentProfiles; draft.tourDismissed = ui.snapshot.config.tourDismissed;
   draft.sources = draft.sources.map(source => {
     const prefix = `source.${source.id}`, result = { ...source };
@@ -683,9 +755,11 @@ function setupSteps() {
       summary: keyed.length ? `${keyed.map(source => source.name).join(', ')} connected` : 'Save a user API key. It stays encrypted on this computer.' },
     { id: 'projects', title: 'Choose projects and assignee', done: keyed.length > 0 && keyed.every(source => source.projectIds.length),
       summary: keyed.length ? `${plural(keyed.reduce((sum, source) => sum + source.projectIds.length, 0), 'project')} selected · ${keyed.every(source => source.userId) ? 'assignee chosen' : 'API account is the assignee'}` : 'Available after connecting a tracker.' },
-    { id: 'repository', title: 'Add the source repository', done: repositories.length > 0 && repositories.every(repository => repository.path && repository.baseBranch) && sources.every(source => source.repositoryId),
+    { id: 'qa', title: 'Choose the QA test site', optional: true, done: Boolean(config.qa?.url),
+      summary: config.qa?.url ? `${config.qa.url} · ${ui.snapshot.qaSession?.savedAt ? 'sign-in saved' : 'no sign-in saved'}` : 'For QA checks of fixes developers marked complete. No source code needed.' },
+    { id: 'repository', title: 'Add the source repository', optional: true, done: repositories.length > 0 && repositories.every(repository => repository.path && repository.baseBranch) && sources.every(source => source.repositoryId),
       summary: repositories.length ? repositories.map(repository => `${repository.name} · ${repository.baseBranch || 'no base branch'}`).join(', ') : 'Choose the local Git folder. Branches and GitHub account load automatically.' },
-    { id: 'commands', title: 'Set preview and test commands', done: repositories.length > 0 && repositories.every(repository => repository.testCommand && (repository.devCommand || repository.flowRuntime || repository.electronRuntime)),
+    { id: 'commands', title: 'Set preview and test commands', optional: true, done: repositories.length > 0 && repositories.every(repository => repository.testCommand && (repository.devCommand || repository.flowRuntime || repository.electronRuntime)),
       summary: repositories.length ? repositories.map(repository => `${repository.name}: ${repository.testCommand ? 'tests set' : 'no test command'}, ${repository.flowRuntime ? 'Tomcat preset' : repository.electronRuntime ? 'Electron preset' : repository.devCommand ? 'preview set' : 'no preview'}`).join('; ') : 'Workers need a real test command and a preview command for recorded proof.' },
     { id: 'mcp', title: 'Connect your own AI tools', optional: true, done: Boolean(ui.agents?.claude?.mcp),
       summary: ui.agents ? ['claude', 'codex'].map(provider => `${providerName(provider)} ${ui.agents[provider]?.mcp ? 'connected' : 'not connected'}`).join(' · ') : 'Optional. Lets your everyday Claude Code or Codex read tasks and ask you questions.' },
@@ -716,6 +790,7 @@ function renderSetupBody(step) {
   if (step.id === 'projects') return `<p>Choose the projects to watch and whose assigned tasks to import. Only Request and In progress tasks sync by default.</p>${config.sources.length ? `<ul class="setup-facts">${config.sources.map(source => `<li>${sourceLogo(source.type)}<strong>${esc(source.name)}</strong><span>${source.projectIds.length} project${source.projectIds.length === 1 ? '' : 's'} · ${source.userId ? esc(source.userId) : 'API account'} · ${({ active: 'Request + In progress', unfinished: 'All unfinished', all: 'All statuses' })[source.statusFilter || 'active']}</span></li>`).join('')}</ul>` : ''}<div class="actions">${settingsLink('connections', 'Choose projects')}</div>`;
   if (step.id === 'repository') return `<p>Point Rex Desk at the local checkout. Each worker branches from it into its own worktree; your checkout is never switched.</p>${config.repositories.length ? `<ul class="setup-facts">${config.repositories.map(repository => `<li>${icon('branch')}<strong>${esc(repository.name)}</strong><span class="mono">${esc(repository.path)} · from ${esc(repository.baseBranch || '—')} · PR to ${esc(repository.targetBranch || '—')}</span></li>`).join('')}${config.sources.filter(source => !source.repositoryId).map(source => `<li>${icon('alert')}<strong>${esc(source.name)}</strong><span>Choose which repository its issues use.</span></li>`).join('')}</ul>` : ''}<div class="actions">${settingsLink('repositories', config.repositories.length ? 'Open repositories' : 'Add a repository')}</div>`;
   if (step.id === 'commands') return `<p>Verification runs the real test command in each worktree. Recorded browser proof needs a preview command that honors <code>{port}</code>, or the isolated Flow / Morningmate Tomcat preset.</p>${config.repositories.length ? `<ul class="setup-facts">${config.repositories.map(repository => `<li>${icon('terminal')}<strong>${esc(repository.name)}</strong><span class="mono">test: ${esc(repository.testCommand || 'not set')} · preview: ${esc(repository.flowRuntime ? 'Flow Tomcat preset' : repository.electronRuntime ? 'Isolated Electron app' : repository.devCommand || 'not set')}</span></li>`).join('')}</ul>` : ''}<div class="actions">${settingsLink('repositories', 'Set commands')}</div>`;
+  if (step.id === 'qa') return `<p>QA checks open this web site in a recorded browser with your own sign-in and re-test fixes developers marked complete. No source code is needed.</p><div class="actions">${settingsLink('qa', config.qa?.url ? 'Change the test site' : 'Set the test site')}</div>`;
   if (step.id === 'mcp') return `<p>Rex-managed agents connect automatically. This step adds the local Rex Desk tools to the Claude Code and Codex you use every day.</p>${renderMcpSetup()}`;
   if (step.id === 'verify') return `<p>Sync imports your assigned issues. Tool checks confirm Git, GitHub CLI, Claude Code, and Codex are installed.</p><div class="actions">${button(`${icon('sync')} Sync now`, 'sync', 'small primary', ui.busy ? 'disabled' : '')}${button('Check installed tools', 'diagnostics', 'small', 'type="button"')}${ui.snapshot.tasks.some(task => !task.demo) ? button('Open my issues', 'inbox', 'small') : ''}</div><div id="diagnostics"></div>`;
   return '';
@@ -860,12 +935,18 @@ function runtimeProfileField(repository) {
   if (!repository?.flowRuntime) return '';
   return `<label class="field"><span>Runtime profile</span><select name="runtimeProfile">${runtimeProfiles(repository).map(profile => `<option value="${esc(profile.id)}" ${profile.id === repository.flowRuntime.defaultProfile ? 'selected' : ''}>${esc(profile.name)} · ${esc(profile.overrides?.default_region || '')}</option>`).join('')}</select><small>Starts this branch as Flow or Morningmate in its own Tomcat. Change product profiles in Settings.</small></label>`;
 }
-async function launchDialog({ role = 'worker', resume = false, repositoryId: chosen } = {}) {
+async function launchDialog({ role = 'worker', resume = false, repositoryId: chosen, mode = 'fix' } = {}) {
   const task = selectedTask(), run = selectedRun();
   const repositoryId = chosen || task?.repositoryId || ui.snapshot.config.repositories[0]?.id;
   const repository = ui.snapshot.config.repositories.find(item => item.id === (resume ? run.repositoryId : repositoryId));
   const count = ui.checked.size || ui.snapshot.tasks.filter(item => !item.demo).length;
   const dialog = document.querySelector('#launch-dialog');
+  if (mode === 'verify') {
+    const qa = ui.snapshot.config.qa?.url, session = ui.snapshot.qaSession;
+    dialog.innerHTML = `<div class="dialog-heading"><h2 id="launch-title">Verify the fix</h2>${button(icon('close'), 'close-dialog', 'quiet icon-only', 'aria-label="Close dialog"')}</div><p>${esc(task?.title)}</p><form id="launch-form" data-role="worker" data-mode="verify">${qa ? `<p class="qa-note">Re-tests this issue on <code>${esc(qa)}</code> in a recorded browser${session?.savedAt ? ' with your saved sign-in' : ''}, then reports pass, fail, or blocked. It never changes code.${session?.savedAt ? '' : ' No sign-in is saved yet; if the site needs one, use Settings → QA verification first.'}</p>` : `<div class="setup-callout repo-setup">${icon('link')}<span>Which web site should the agent test? Use your staging or test address.</span><div class="field-inline"><input name="qaSite" type="url" aria-label="QA test site address" placeholder="https://" autocomplete="off">${button('Save', 'save-qa-inline', 'small primary', 'type="button"')}</div></div>`}<label class="field"><span>Agent</span>${providerSelect('provider', ui.snapshot.config.provider)}</label><label class="field"><span>What to check (optional)</span><textarea name="prompt" placeholder="For example: check the Indonesian label on the org chart page."></textarea></label><div class="form-error" id="launch-error" role="alert"></div><div class="actions">${button('Cancel', 'close-dialog', '', 'type="button"')}<button class="button primary" type="submit" ${qa ? '' : 'disabled'}>Start QA check</button></div></form>`;
+    if (!dialog.open) dialog.showModal();
+    return;
+  }
   const title = resume ? 'Continue this run' : role === 'coordinator' ? 'Start the main agent' : 'Start an issue agent';
   dialog.innerHTML = `<div class="dialog-heading"><h2 id="launch-title">${title}</h2>${button(icon('close'), 'close-dialog', 'quiet icon-only', 'aria-label="Close dialog"')}</div><p>${resume ? 'Continue with the same provider, or switch providers and pass the recorded issue context into a new session.' : role === 'coordinator' ? `Analyze ${count} assigned issue${count === 1 ? '' : 's'}, categorize them, and dispatch independent workers.` : esc(task?.title)}</p><form id="launch-form" data-role="${role}" data-resume="${resume}"><label class="field"><span>Agent</span>${providerSelect('provider', resume ? run.provider : ui.snapshot.config.provider)}</label>${role === 'worker' ? `<label class="field"><span>Run in</span>${executionSelect(resume ? run.execution : ui.snapshot.config.execution)}</label><div id="orca-readiness"></div>` : ''}${role === 'coordinator' && !resume && !ui.snapshot.config.repositories.length ? repositorySetup('No source repository yet, so the main agent can categorize but not dispatch fixes.') : ''}${role === 'worker' && !resume ? (ui.snapshot.config.repositories.length ? `<div class="field"><span>Source repository</span><div class="field-inline"><select name="repositoryId" required aria-label="Source repository"><option value="">Choose a repository…</option>${ui.snapshot.config.repositories.map(item => `<option value="${item.id}" ${item.id === repositoryId ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select>${button('Add folder…', 'browse-repo-inline', 'small', 'type="button" title="Choose another local Git checkout"')}</div></div>` : `${repositorySetup('No source repository yet. The agent needs the code to work on; branches load automatically.')}<input type="hidden" name="repositoryId" value="">`) : ''}<div id="runtime-profile-field">${role === 'worker' && !resume ? runtimeProfileField(repository) : ''}</div><details class="dialog-more"${resume ? ' open' : ''}><summary>Branches · ${repository?.baseBranch && role !== 'coordinator' ? `starts from ${esc(repository.baseBranch)}` : 'repository default'}; pick the PR target when you publish</summary><div class="field-row">${inputField('Start from branch', 'baseBranch', resume ? run.baseBranch : role === 'coordinator' ? '' : repository?.baseBranch || '', role === 'coordinator' ? 'Blank uses each repository’s default.' : '', 'text', 'Repository default')}${inputField('PR target branch', 'targetBranch', resume ? run.targetBranch : role === 'coordinator' ? '' : repository?.targetBranch || '', 'You can change this before publishing.', 'text', 'Repository default')}</div></details><label class="field"><span>${resume ? 'Follow-up instruction' : 'Additional instruction (optional)'}</span><textarea name="prompt" placeholder="For example: investigate critical issues first, and keep related fixes sequential."></textarea></label><div class="form-error" id="launch-error" role="alert"></div><div class="actions">${button('Cancel', 'close-dialog', '', 'type="button"')}<button class="button primary" type="submit">${resume ? 'Continue run' : role === 'coordinator' ? 'Analyze & run' : 'Start agent'}</button></div></form>`;
   if (resume) { dialog.querySelector('input[name=baseBranch]').readOnly = true; dialog.querySelector('input[name=baseBranch]').title = 'This worktree keeps its original base branch.'; }
@@ -1001,6 +1082,45 @@ document.addEventListener('click', event => {
   if (name === 'close-dialog') { target.closest('dialog').close(); return; }
   if (name === 'launch-main') { void launchDialog({ role: 'coordinator' }); return; }
   if (name === 'launch-task') { void launchDialog(); return; }
+  if (name === 'select-projects') {
+    const boxes = [...document.querySelectorAll('[data-source-project]')].filter(box => box.dataset.sourceProject === target.dataset.id && !box.closest('[hidden]'));
+    for (const box of boxes) box.checked = Boolean(target.dataset.all);
+    boxes[0]?.dispatchEvent(new Event('change', { bubbles: true })); return;
+  }
+  if (name === 'launch-verify') { void launchDialog({ mode: 'verify' }); return; }
+  if (name === 'save-qa-inline') {
+    const url = target.closest('form')?.elements.qaSite?.value.trim();
+    if (!url) { toast('Enter the test site address.', true); return; }
+    void action(async () => { ui.snapshot.config = await api('/config', { method: 'PUT', data: { ...ui.snapshot.config, qa: { url } } }); await launchDialog({ mode: 'verify' }); }); return;
+  }
+  if (name === 'qa-tracker') {
+    target.disabled = true;
+    void action(async () => {
+      try {
+        const result = await api(`/runs/${ui.selectedRun}/tracker`, { method: 'POST', data: { phase: target.dataset.phase } });
+        toast(result?.skipped ? `${result.reason} Set the status mapping under Settings → Connections → Tracker status mapping.` : target.dataset.phase === 'done' ? 'Tracker updated: done.' : 'Tracker updated: reopened for development.', Boolean(result?.skipped));
+        await refresh({ force: true });
+      } finally { if (target.isConnected) target.disabled = false; }
+    }); return;
+  }
+  if (name === 'qa-sign-in') {
+    void action(async () => {
+      const url = readSettings()?.qa?.url;
+      if (!url) { toast('Enter the test site address first.', true); return; }
+      if (url !== ui.snapshot.config.qa?.url) ui.snapshot.config = await api('/config', { method: 'PUT', data: { ...ui.snapshot.config, qa: { url } } });
+      ui.snapshot.qaSession = await api('/qa/sign-in', { method: 'POST' });
+      toast('A browser window opened. Sign in to the test site, then close it.');
+      await watchQaSession();
+    }); return;
+  }
+  if (name === 'schedule-run') {
+    target.disabled = true;
+    void action(async () => {
+      try { const result = await api('/schedule/run', { method: 'POST' }); toast(result.state === 'started' ? `Started a main agent for ${plural(result.issues, 'new issue')}.` : result.reason, result.state !== 'started'); await refresh({ force: true }); }
+      finally { if (target.isConnected) target.disabled = false; }
+    }); return;
+  }
+
   // From the start dialog: browse for a checkout, paste its path, or clone owner/name with the GitHub login; then save it and reopen with its branches.
   if (name === 'add-repo-inline' || name === 'browse-repo-inline') {
     const form = target.closest('form'), role = form?.dataset.role || 'worker', label = target.textContent, source = form?.elements.repositorySource?.value.trim() || '';
@@ -1016,6 +1136,7 @@ document.addEventListener('click', event => {
         let repository = config.repositories.find(item => samePath(item.path, info.path));
         if (!repository) {
           repository = { id: crypto.randomUUID(), name: info.name, path: info.path, baseBranch: info.preferredBranch, targetBranch: info.preferredBranch, branchPattern: '', setupCommand: '', devCommand: '', testCommand: '', browserPath: '/' };
+          applyDetected(repository, info);
           ui.snapshot.config = await api('/config', { method: 'PUT', data: { ...config, repositories: [...config.repositories, repository] } });
           toast(`Added ${info.name} · ${info.branches.length} branch${info.branches.length === 1 ? '' : 'es'}. Set its test and preview commands in Settings before verifying fixes.`);
         }
@@ -1181,7 +1302,7 @@ document.addEventListener('submit', event => {
         let run;
         if (form.dataset.resume === 'true') run = await api(`/runs/${ui.selectedRun}/resume`, { method: 'POST', data: input });
         else if (form.dataset.role === 'coordinator') run = await api('/coordinator', { method: 'POST', data: { ...input, taskIds: [...ui.checked].filter(taskId => ui.snapshot.tasks.some(task => task.id === taskId && !task.demo)) } });
-        else run = await api('/runs', { method: 'POST', data: { ...input, taskId: ui.selectedTask, instructions: input.prompt } });
+        else run = await api('/runs', { method: 'POST', data: { ...input, mode: form.dataset.mode || 'fix', taskId: ui.selectedTask, instructions: input.prompt } });
         document.querySelector('#launch-dialog').close(); await refresh(); navigate('runs', { runId: run.id }); toast('Agent run queued.');
       } catch (error) { document.querySelector('#launch-error').textContent = error.message; } return;
     }
@@ -1222,6 +1343,15 @@ try {
 }
 // Enter in the repository box adds the repository instead of submitting the start form without one.
 document.addEventListener('keydown', event => {
-  if (event.key !== 'Enter' || event.target.name !== 'repositorySource') return;
-  event.preventDefault(); event.target.closest('.repo-setup')?.querySelector('[data-action="add-repo-inline"]')?.click();
+  if (event.key !== 'Enter' || !['repositorySource', 'qaSite'].includes(event.target.name)) return;
+  event.preventDefault(); event.target.closest('.repo-setup')?.querySelector('[data-action="add-repo-inline"], [data-action="save-qa-inline"]')?.click();
+});
+// Starting at Windows sign-in is a machine setting, applied immediately rather than with Save settings.
+document.addEventListener('change', event => {
+  if (event.target.id !== 'autostart') return;
+  const box = event.target; box.disabled = true;
+  void action(async () => {
+    try { const status = await api('/autostart', { method: 'POST', data: { enabled: box.checked } }); box.checked = status.enabled; toast(status.enabled ? 'Rex Desk will start in the background when you sign in to Windows.' : 'Rex Desk will no longer start at sign-in.'); }
+    finally { box.disabled = false; }
+  });
 });

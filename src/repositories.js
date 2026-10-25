@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { defaultProfiles, seedProduct } from './flow-runtime.js';
@@ -63,7 +63,7 @@ export async function inspectRepository(directory, { execute = run } = {}) {
     })(),
   ]);
   const list = [...branches.values()].sort((a, b) => a.name.localeCompare(b.name));
-  const preferredBranch = branches.has('develop') ? 'develop' : currentBranch || github.repository?.defaultBranch || list[0]?.name || '';
+  const preferredBranch = branches.has('develop') ? 'develop' : list.find(branch => /(^|\/)develop$/.test(branch.name))?.name || currentBranch || github.repository?.defaultBranch || list[0]?.name || '';
   const flow = existsSync(path.join(root, 'src/WEB-INF'));
   const templateBase = path.join(path.dirname(root), 'flow-was-tomcat');
   return { path: path.resolve(root), name: github.repository?.name || path.basename(root), currentBranch,
@@ -71,7 +71,17 @@ export async function inspectRepository(directory, { execute = run } = {}) {
     gitAuthor: { name: authorName, email: authorEmail }, github, warnings,
     flow: flow ? { available: existsSync(path.join(templateBase, 'conf/server.xml')), templateBase,
       javaHome: 'C:\\Program Files\\Java\\jdk1.8.0_181', catalinaHome: 'C:\\Program Files\\Apache Software Foundation\\Tomcat 9.0', seedPath: root, maxHeapMb: 512,
-      profiles: defaultProfiles(), defaultProfile: seedProduct(root)?.product || 'flow', seed: seedProduct(root) } : null, electron: detectElectron(root) };
+      profiles: defaultProfiles(), defaultProfile: seedProduct(root)?.product || 'flow', seed: seedProduct(root) } : null, electron: detectElectron(root), suggested: suggestCommands(root) };
+}
+// Node projects: setup, test, and preview commands from the lockfile and package.json scripts. Other stacks are left for the person.
+function suggestCommands(root) {
+  try {
+    const scripts = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).scripts || {};
+    const tool = existsSync(path.join(root, 'pnpm-lock.yaml')) ? 'pnpm' : existsSync(path.join(root, 'yarn.lock')) ? 'yarn' : 'npm';
+    const setupCommand = { pnpm: 'pnpm install --frozen-lockfile', yarn: 'yarn install --frozen-lockfile', npm: existsSync(path.join(root, 'package-lock.json')) ? 'npm ci' : 'npm install' }[tool];
+    return { setupCommand, testCommand: scripts.test && !/no test specified/.test(scripts.test) ? `${tool} test` : '',
+      devCommand: scripts.dev ? `${tool} run dev -- --port {port}` : scripts.start ? `${tool} run start -- --port {port}` : '' };
+  } catch { return null; }
 }
 
 let picking = false;
