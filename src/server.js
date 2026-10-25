@@ -72,7 +72,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     session = { id: entry?.id, email: entry?.email || '', store, desk, cookie: randomBytes(32).toString('base64url'), staySignedIn, cloud: null };
     if (accounts) {
       accounts.touch(entry.id);
-      if (staySignedIn) await accounts.remember(entry.id, vaultKey).catch(() => { session.staySignedIn = false; });
+      if (staySignedIn) await accounts.remember(entry.id, vaultKey).catch(error => { session.staySignedIn = false; console.error(`Stay signed in failed: ${error.message}`); });
       // Bring this computer up to date before anyone works: upload leftovers, then take the newest cloud copy.
       const status = await store.cloud.open();
       if (status.state === 'connected' && !store.fresh) session.cloud = await store.cloud.pullLatest().catch(error => ({ pulled: false, reason: error.message }));
