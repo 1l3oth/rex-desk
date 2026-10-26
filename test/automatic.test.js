@@ -71,7 +71,7 @@ test('branches read as English summaries, never internal IDs, and a taken name g
   await assert.rejects(desk.renameBranch('run-1', { title: '다운로드 버튼' }), /English words/);
   store.put('run', 'run-1', { ...store.get('run', 'run-1'), prUrl: 'https://github.com/example/pull/1' });
   await assert.rejects(desk.renameBranch('run-1', { title: 'another name here' }), /already pushed/);
-  assert.match(desk.prompt({ id: 'worker', role: 'worker', taskId: 'task-1', worktree: 'x', branch: 'y', baseBranch: 'develop', port: 1 }), /desk_branch once with 2 to 8 English words/);
+  assert.match(desk.prompt({ id: 'worker', role: 'worker', taskId: 'task-1', worktree: 'x', branch: 'y', baseBranch: 'develop', port: 1 }), /call desk_branch with 3 to 6 English words/);
   store.close();
 });
 
@@ -141,4 +141,29 @@ test('workers start with the lessons earlier runs learned', async () => {
   assert.match(prompt, /Reminder: every desk_message, desk_ask, summary, and report to the human is in English\.$/);
   assert.doesNotMatch(prompt, /flow-was Java/, 'Flow lessons only for the Flow repository');
   store.close();
+});
+
+test('a new run gets an English branch name that describes the QA issue, or the tracker number without a key', async () => {
+  const { parseBranchName, branchName } = await import('../src/naming.js');
+  assert.deepEqual(parseBranchName('```json\n{"type":"fix","name":"project-view-names-ignore-language"}\n```'), { type: 'fix', title: 'project view names ignore language' });
+  assert.equal(parseBranchName('{"type":"fix","name":"fix issue"}'), null, 'Generic words are rejected');
+  assert.equal(parseBranchName('not json'), null);
+  let request;
+  const fetcher = async (url, options) => { request = { url, body: JSON.parse(options.body), auth: options.headers.Authorization };
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"type":"fix","name":"project view names ignore language"}' } }] })); };
+  assert.deepEqual(await branchName({ title: '업무 매니저 > 프로젝트 생성 > 업무 탭 뷰명 영어·한국어 표시' }, { apiKey: 'or-key', fetcher }), { type: 'fix', title: 'project view names ignore language' });
+  assert.equal(request.url, 'https://openrouter.ai/api/v1/chat/completions'); assert.equal(request.auth, 'Bearer or-key');
+  assert.match(request.body.messages[1].content, /업무 매니저/);
+
+  const { original } = await repository();
+  for (const [key, expected] of [['or-key', 'temp/rex/fix/project-view-names-ignore-language'], ['', 'temp/rex/fix/issue-38464']]) {
+    const store = new Store(path.join(temporary('naming'), 'data')); // its own worktrees folder beside it
+    store.saveConfig({ ...defaults, repositories: [{ id: 'repo', name: 'repo', path: original, baseBranch: 'develop', targetBranch: 'develop' }], jev: { apiKey: key } });
+    store.put('task', 'task-1', { id: 'task-1', title: '업무 매니저 > 프로젝트 생성 > 업무 탭 뷰명 영어·한국어 표시', taskNumber: '38464', externalId: '1076020', source: 'morningmate', active: true, createdAt: now() });
+    const desk = new Desk(store, { root: temporary('naming-root'), runnerFactory: idle, namingFetcher: fetcher });
+    const run = await desk.startTask({ taskId: 'task-1', repositoryId: 'repo' });
+    for (let attempt = 0; attempt < 100 && !store.get('run', run.id).branch; attempt++) await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(store.get('run', run.id).branch, expected);
+    await new Promise(resolve => setTimeout(resolve, 100)); store.close();
+  }
 });

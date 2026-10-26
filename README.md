@@ -66,10 +66,10 @@ Each run page shows the agent's conversation live: its text, every tool call wit
 
 On **My issues**, drag the sidebar edge (or focus it and use the arrow keys) to resize the list. Drag the **Issue brief**, **Messages**, or **Evidence** tab onto the issue to open it beside or below the current panel, or use the layout switch at the top right: one panel, side by side, or stacked. Each panel has its own tabs and scrolls on its own; drag the divider to resize. Sizes and layout are remembered per browser.
 
-Each worker receives a new worktree and a readable branch from the repository's pattern (default `{prefix}/{type}/{title}`). Once it has read the issue, the worker names the branch with `desk_branch`: a short English summary and a type (fix, feature, refactor, chore, docs). Until then, a Korean or Japanese title uses the tracker issue number. A taken name gets `-2`; a pushed branch keeps its name.
+Each worker receives a new worktree and a readable branch from the repository's pattern (default `{prefix}/{type}/{title}`). When the run starts, a small model (`~anthropic/claude-haiku-latest` through your OpenRouter key, about $0.0001 a name) reads the QA title and description, even in Korean or Japanese, and names the branch after the feature that breaks and how. Without a key, the tracker issue number is used until the worker renames the branch with `desk_branch`, which it also does if the real cause turns out different. A taken name gets `-2`; a pushed branch keeps its name.
 
 ```text
-temp/rex/fix/download-button-blank-preview
+temp/rex/fix/project-view-names-ignore-language
 ```
 
 Git forbids a leading `/` in branch names. The current checkout is not switched, reset, cleaned, or copied into workers; workers use committed content from the selected base branch. Worktrees live under `worktrees/` and remain available for inspection. Each worker gets its own preview port, `PORT` variable, browser context, video, and Playwright trace. A worktree isolates Git changes; it is **not** an OS security sandbox.
