@@ -194,3 +194,20 @@ test('Claude Code in an Orca terminal cannot use its own question prompt', () =>
   const result = spawnSync(process.execPath, [path.resolve('scripts/orca-agent.mjs'), spec], { encoding: 'utf8' });
   assert.match(result.stdout, /--disallowed-tools AskUserQuestion/, 'The native question prompt is turned off; desk_ask reaches the dashboard');
 });
+
+test('a follow-up reopens the provider session instead of starting an empty one', () => {
+  const directory = temporary('orca-resume'), spec = path.join(directory, 'agent.json');
+  const probe = 'console.log("args=" + process.argv.slice(1).join(" ")); process.exit(0)';
+  const write = (provider, resumeSessionId) => writeFileSync(spec, JSON.stringify({ runId: 'run-3', provider, cwd: directory, prompt: 'Continue', token: 't', mcpUrl: 'http://127.0.0.1:4317/mcp',
+    resumeSessionId, executable: { command: process.execPath, args: ['-e', probe, '--'] }, env: {}, unset: [] }));
+  const launch = () => spawnSync(process.execPath, [path.resolve('scripts/orca-agent.mjs'), spec], { encoding: 'utf8' }).stdout;
+
+  write('claude', '7c3a8d71-d78d-409a-9a84-91fb162c1be3');
+  assert.match(launch(), /--resume 7c3a8d71-d78d-409a-9a84-91fb162c1be3/);
+  write('codex', '7c3a8d71-d78d-409a-9a84-91fb162c1be3');
+  const codex = launch();
+  assert.match(codex, /args=resume /, 'codex takes resume as its subcommand');
+  assert.match(codex, /7c3a8d71-d78d-409a-9a84-91fb162c1be3 Continue/, 'the session id comes before the prompt');
+  write('claude', '');
+  assert.doesNotMatch(launch(), /--resume/, 'A first turn starts a new session');
+});

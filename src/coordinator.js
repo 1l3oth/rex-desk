@@ -86,6 +86,13 @@ export class Desk {
     return run ? { role: run.role, runId } : null;
   }
   // The conversation of an Orca run, read from the agent's own session log; a message sent from Rex Desk is shown at once, so its echo is skipped.
+  // The provider writes its own session log, and its name is the session id. A follow-up reopens that session so the
+  // agent keeps the conversation it already had, instead of starting an empty one in a new terminal.
+  agentSessionId(run) {
+    const file = run.mirror?.file;
+    if (!file || !existsSync(file)) return '';
+    return /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(path.basename(String(file)))?.[0] || '';
+  }
   mirror(run) {
     const key = run.provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME', echoes = this.echoes || (this.echoes = new Map());
     return new SessionMirror({ provider: run.provider, cwd: run.worktree, configDirectory: this.agents.environment(run.provider)[key], since: run.turnStartedAt || run.startedAt || run.createdAt, state: run.mirror,
@@ -286,8 +293,11 @@ export class Desk {
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
           this.store.event(runId, kind, data);
         } };
+      const resumeSessionId = this.agentSessionId(run);
       const runner = this.runnerFactory ? this.runnerFactory(options)
-        : new OrcaRunner({ ...options, ...(run.worktree ? {} : { cwd: await this.agentWorkspace(), sourcePath: await this.agentWorkspace() }), dataDirectory: this.store.directory, isDone: () => terminalStates.has(this.run(runId).state), mirror: this.mirror({ ...run, mirror: undefined, turnStartedAt: now() }) });
+        : new OrcaRunner({ ...options, ...(run.worktree ? {} : { cwd: await this.agentWorkspace(), sourcePath: await this.agentWorkspace() }), dataDirectory: this.store.directory,
+          resumeSessionId, isDone: () => terminalStates.has(this.run(runId).state),
+          mirror: this.mirror({ ...run, mirror: resumeSessionId ? run.mirror : undefined, turnStartedAt: now() }) });
       this.live.get(runId).runner = runner;
       // Each turn records its own start, so a resumed run shows time since it resumed, not since it was first created.
       this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), turnStartedAt: now(), endedAt: null, error: '' });
@@ -421,7 +431,8 @@ export class Desk {
     if (provider && !['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
     if (this.live.has(runId)) throw new Error('Stop the active run before resuming.');
     const sameProvider = !provider || provider === run.provider;
-    this.patchRun(runId, { state: 'queued', provider: provider || run.provider, sessionId: sameProvider ? run.sessionId : undefined,
+    // Switching provider abandons the recorded chat: the other CLI cannot reopen it, so a fresh session starts.
+    this.patchRun(runId, { state: 'queued', provider: provider || run.provider, sessionId: sameProvider ? run.sessionId : undefined, mirror: sameProvider ? run.mirror : undefined,
       instructions: `${run.instructions || ''}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
       execution: 'orca' });
     void this.drain(); return this.run(runId);

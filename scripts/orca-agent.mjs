@@ -11,6 +11,8 @@ rmSync(specFile, { force: true });
 const env = { ...process.env, ...spec.env, REX_AGENT_TOKEN: spec.token, REX_DESK_TOKEN: spec.token, REX_DESK_URL: spec.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
 for (const key of spec.unset || []) delete env[key];
 delete env.CLAUDECODE;
+// A follow-up on an earlier run reopens that provider session, so the agent keeps the conversation it already had.
+const resume = String(spec.resumeSessionId || '');
 let args, cleanup = () => {};
 if (spec.provider === 'claude') {
   const config = path.join(path.dirname(specFile), `mcp-${process.pid}.json`);
@@ -19,11 +21,12 @@ if (spec.provider === 'claude') {
   // Claude Code's own question prompt would appear only in this terminal, where the dashboard cannot show it or
   // record the answer, so it is turned off and the agent asks through desk_ask instead.
   args = [...spec.executable.args, '--mcp-config', config, '--disallowed-tools', 'AskUserQuestion',
-    ...(spec.addDir ? ['--add-dir', spec.addDir] : []), ...(spec.model ? ['--model', spec.model] : []), spec.prompt];
+    ...(resume ? ['--resume', resume] : []), ...(spec.addDir ? ['--add-dir', spec.addDir] : []), ...(spec.model ? ['--model', spec.model] : []), spec.prompt];
 } else {
-  args = [...spec.executable.args, '-c', 'mcp_servers.rex_desk.enabled=false', '-c', `mcp_servers.rex_desk_run.url=${JSON.stringify(spec.mcpUrl)}`,
+  args = [...spec.executable.args, ...(resume ? ['resume'] : []),
+    '-c', 'mcp_servers.rex_desk.enabled=false', '-c', `mcp_servers.rex_desk_run.url=${JSON.stringify(spec.mcpUrl)}`,
     '-c', 'mcp_servers.rex_desk_run.bearer_token_env_var="REX_AGENT_TOKEN"', '-c', 'mcp_servers.rex_desk_run.tool_timeout_sec=86400',
-    ...(spec.model ? ['-m', spec.model] : []), spec.prompt];
+    ...(spec.model ? ['-m', spec.model] : []), ...(resume ? [resume] : []), spec.prompt];
 }
 console.log(`Rex Desk run ${spec.runId}: starting ${spec.provider === 'claude' ? 'Claude Code' : 'Codex'} in ${spec.cwd}`);
 const child = spawn(spec.executable.command, args, { cwd: spec.cwd, env, stdio: 'inherit', windowsHide: false });

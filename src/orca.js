@@ -76,7 +76,7 @@ export class OrcaRunner {
     mkdirSync(directory, { recursive: true });
     const spec = path.join(directory, `agent-${Date.now()}.json`);
     const env = this.agentEnv || process.env, key = this.run.provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME';
-    writeFileSync(spec, JSON.stringify({ runId: this.run.id, provider: this.run.provider, cwd: this.cwd, prompt, token: this.token, mcpUrl: this.mcpUrl, model: this.model, addDir: this.artifactDirectory || '',
+    writeFileSync(spec, JSON.stringify({ runId: this.run.id, provider: this.run.provider, cwd: this.cwd, prompt, token: this.token, mcpUrl: this.mcpUrl, model: this.model, addDir: this.artifactDirectory || '', resumeSessionId: this.resumeSessionId || '',
       executable: this.executable || resolveCommand(this.run.provider), env: { ...(env[key] ? { [key]: env[key] } : {}), ...(this.javaEnv || {}) }, unset: env[key] ? [] : [key] }), { mode: 0o600 });
     const command = `node "${launcher}" "${spec}"`;
     let terminal;

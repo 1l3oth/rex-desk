@@ -14,6 +14,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
+const settle = () => new Promise(resolve => setTimeout(resolve, 80));
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const source = { id: 'source-1', name: 'Morningmate', type: 'morningmate', baseUrl: 'https://api.morningmate.com', projectIds: ['317938'], repositoryId: 'repository-1', userId: 'rex@example.com', statusMap: {} };
 const jsonResponse = data => new Response(JSON.stringify({ success: true, data }), { headers: { 'Content-Type': 'application/json' } });
@@ -254,4 +255,27 @@ test('a pull request is refused before the human is asked, not after they approv
   assert.equal(asked.length, 0);
 
   store.close();
+});
+
+test('the session a follow-up reopens comes from the provider log, and a provider switch drops it', async () => {
+  const store = new Store(temporary('resume')), directory = temporary('resume-logs');
+  const desk = new Desk(store, { root: temporary('resume-root'), runnerFactory: () => ({ start: async () => ({ status: 'completed' }), interrupt: async () => {}, close() {} }) });
+  const file = path.join(directory, '7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl');
+  writeFileSync(file, '{}\n');
+  const run = { id: 'r1', role: 'worker', provider: 'claude', state: 'needs_evidence', worktree: directory, mirror: { file, offset: 2 } };
+
+  assert.equal(desk.agentSessionId(run), '7c3a8d71-d78d-409a-9a84-91fb162c1be3');
+  assert.equal(desk.agentSessionId({ ...run, mirror: { file: path.join(directory, 'rollout-2026-10-26T07-12-33-7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl') } }), '', 'A log that is gone cannot be reopened');
+  writeFileSync(path.join(directory, 'rollout-2026-10-26T07-12-33-7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl'), '{}\n');
+  assert.equal(desk.agentSessionId({ ...run, provider: 'codex', mirror: { file: path.join(directory, 'rollout-2026-10-26T07-12-33-7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl') } }), '7c3a8d71-d78d-409a-9a84-91fb162c1be3');
+  assert.equal(desk.agentSessionId({ ...run, mirror: undefined }), '', 'A run with no recorded log starts fresh');
+
+  store.put('run', 'r1', run);
+  await desk.resume('r1', { prompt: 'try the dev server' });
+  assert.deepEqual(store.get('run', 'r1').mirror, { file, offset: 2 }, 'The same provider keeps its session');
+  await settle();
+  store.put('run', 'r1', { ...run, state: 'needs_evidence' });
+  await desk.resume('r1', { provider: 'codex', prompt: 'try again' });
+  assert.equal(store.get('run', 'r1').mirror, undefined, 'The other CLI cannot reopen it');
+  await settle(); await desk.shutdown(); store.close();
 });
