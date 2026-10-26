@@ -116,3 +116,40 @@ test('a reattached Orca run whose terminal closed during the restart is interrup
   assert.match(store.get('run', 'gone').error, /closed while Rex Desk restarted/);
   store.close();
 });
+
+test('an Orca agent’s own session log becomes the chat, and Rex Desk messages are typed into its terminal', async () => {
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const { SessionMirror, sessionEvents } = await import('../src/orca.js');
+  const { Store, now } = await import('../src/store.js');
+  const { Desk } = await import('../src/coordinator.js');
+  const line = value => JSON.stringify(value) + '\n';
+  assert.deepEqual(sessionEvents('claude', { type: 'user', message: { content: 'You are running inside Rex Desk. Use the rex_desk MCP tools.' } }), [['phase', { text: 'The agent received its instructions from Rex Desk' }]]);
+  assert.deepEqual(sessionEvents('claude', { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'x' }, { type: 'text', text: 'Found the cause.' }] } }), [['agent-operation', { type: 'assistant', content: [{ type: 'text', text: 'Found the cause.' }] }]]);
+  assert.deepEqual(sessionEvents('codex', { type: 'event_msg', payload: { type: 'agent_message', message: 'Done.' } })[0][1].content[0].text, 'Done.');
+
+  const config = fs.mkdtempSync(path.join(os.tmpdir(), 'rex-desk-mirror-')), worktree = path.join(config, 'trees', 'temp-rex-fix-views');
+  const folder = path.join(config, 'projects', worktree.replace(/[^a-zA-Z0-9]/g, '-')); fs.mkdirSync(folder, { recursive: true });
+  const log = path.join(folder, 'session.jsonl');
+  fs.writeFileSync(log, line({ type: 'user', message: { content: 'You are running inside Rex Desk.' } }) + line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Reading the issue.' }, { type: 'tool_use', id: 't1', name: 'mcp__rex_desk_run__desk_task', input: {} }] } }) + '{"type":"user","mess');
+  const seen = [];
+  const mirror = new SessionMirror({ provider: 'claude', cwd: worktree, configDirectory: config, since: new Date(Date.now() - 1000).toISOString(), emit: (kind, data) => seen.push([kind, data]) });
+  mirror.pump();
+  assert.deepEqual(seen.map(([kind]) => kind), ['phase', 'agent-operation'], 'A half-written line waits for the rest');
+  fs.appendFileSync(log, 'age":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}\n' + line({ type: 'user', message: { content: 'please also check Japanese' } }));
+  mirror.pump();
+  assert.deepEqual(seen.slice(2).map(([kind]) => kind), ['agent-operation', 'human-message']);
+  mirror.pump(); assert.equal(seen.length, 4, 'Nothing is read twice');
+
+  const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'rex-desk-say-')));
+  const sent = [];
+  const desk = new Desk(store, { root: config, runnerFactory: () => ({}), orcaOptions: { run: (command, args, options, callback) => { sent.push(args); callback(null, JSON.stringify({ ok: true, result: { accepted: true } })); } } });
+  store.put('run', 'r1', { id: 'r1', role: 'worker', provider: 'claude', execution: 'orca', sessionId: 'orca:term_1', worktree, state: 'running', createdAt: now() });
+  await assert.rejects(desk.say('r1', 'hello'), /Only a running Orca agent/);
+  desk.live.set('r1', { controller: new AbortController() });
+  await desk.say('r1', 'please also\ncheck Japanese');
+  assert.deepEqual(sent[0].slice(0, 7), ['terminal', 'send', '--terminal', 'term_1', '--text', 'please also check Japanese', '--enter']);
+  const echo = desk.mirror(store.get('run', 'r1'));
+  echo.emit('human-message', { text: 'please also check Japanese' });
+  assert.equal(store.events('r1').filter(event => event.kind === 'human-message').length, 1, 'The log’s echo of a Rex Desk message is not shown twice');
+  store.close();
+});
