@@ -10,7 +10,11 @@ import { effectiveRepository } from './project-detect.js';
 const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
 export class Evidence {
-  constructor(store, getRun, emit, deskUrl = () => '') { Object.assign(this, { store, getRun, emit, deskUrl }); this.sessions = new Map(); }
+  constructor(store, getRun, emit, deskUrl = () => '') {
+    Object.assign(this, { store, getRun, emit, deskUrl }); this.sessions = new Map();
+    // A paused recording keeps its preview server and its page and cookies, so the next action continues where it left off.
+    this.previews = new Map(); this.resumes = new Map(); this.idleTimers = new Map(); this.idleMs = 60000;
+  }
   directory(runId) { const directory = path.join(this.store.directory, 'artifacts', runId); mkdirSync(directory, { recursive: true }); return directory; }
   attach(runId, file, title, type, metadata = {}) {
     const artifact = { id: randomUUID(), runId, file: path.basename(file), title, type, createdAt: now(), ...metadata };
@@ -25,31 +29,37 @@ export class Evidence {
     if (!repository?.devCommand && !repository?.flowRuntime && !repository?.electronRuntime) throw new Error('Set this repository’s dev command, Flow Tomcat preset, or Electron preset in Settings.');
     const directory = this.directory(runId);
     if (repository.electronRuntime) return this.startElectron(runId, run, repository, directory);
-    const command = String(repository.devCommand || '').replaceAll('{port}', String(run.port)).replaceAll('{worktree}', run.worktree);
-    const onData = text => this.emit(runId, 'dev-output', { text });
-    const process = repository.flowRuntime ? flowPreview(repository, run, this.store.directory, onData)
-      : shellCommand(command, { cwd: run.worktree, env: { PORT: String(run.port), REX_RUN_ID: runId }, timeout: 0, onData });
-    process.done.then(result => this.emit(runId, 'dev-exit', { exitCode: result.exitCode })).catch(error => this.emit(runId, 'dev-error', { message: error.message }));
-    const baseUrl = `http://127.0.0.1:${run.port}`;
-    let ready = false;
-    const readySeconds = repository.flowRuntime ? 240 : 60;
-    for (let attempt = 0; attempt < readySeconds; attempt++) {
-      try { const response = await fetch(baseUrl + repository.browserPath, { signal: AbortSignal.timeout(1000), redirect: 'manual' }); if (response.status >= 200 && response.status < 400) { ready = true; break; } } catch {}
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    const kept = this.previews.get(runId), resume = this.resumes.get(runId);
+    let process, baseUrl;
+    if (kept) ({ process, baseUrl } = kept);
+    else {
+      const command = String(repository.devCommand || '').replaceAll('{port}', String(run.port)).replaceAll('{worktree}', run.worktree);
+      const onData = text => this.emit(runId, 'dev-output', { text });
+      process = repository.flowRuntime ? flowPreview(repository, run, this.store.directory, onData)
+        : shellCommand(command, { cwd: run.worktree, env: { PORT: String(run.port), REX_RUN_ID: runId }, timeout: 0, onData });
+      process.done.then(result => this.emit(runId, 'dev-exit', { exitCode: result.exitCode })).catch(error => this.emit(runId, 'dev-error', { message: error.message }));
+      baseUrl = `http://127.0.0.1:${run.port}`;
+      let ready = false;
+      const readySeconds = repository.flowRuntime ? 240 : 60;
+      for (let attempt = 0; attempt < readySeconds; attempt++) {
+        try { const response = await fetch(baseUrl + repository.browserPath, { signal: AbortSignal.timeout(1000), redirect: 'manual' }); if (response.status >= 200 && response.status < 400) { ready = true; break; } } catch {}
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      if (!ready) { stopTree(process.child); throw new Error(`Preview did not return a successful response within ${readySeconds} seconds. Check the runtime settings and journal.`); }
     }
-    if (!ready) { stopTree(process.child); throw new Error(`Preview did not return a successful response within ${readySeconds} seconds. Check the runtime settings and journal.`); }
+    this.previews.delete(runId);
     const { chromium } = await import('playwright');
     let browser;
     try { browser = await chromium.launch({ headless: true }); }
     catch (error) { stopTree(process.child); throw new Error(`Browser could not start. Run "npx playwright install chromium". ${error.message}`); }
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, recordVideo: { dir: directory, size: { width: 1440, height: 900 } } });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, recordVideo: { dir: directory, size: { width: 1440, height: 900 } }, ...(resume?.state ? { storageState: resume.state } : {}) });
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
     const page = await context.newPage();
     page.on('pageerror', error => this.emit(runId, 'browser-error', { message: error.message }));
     page.on('console', message => { if (message.type() === 'error') this.emit(runId, 'browser-console', { text: message.text() }); });
     const session = { browser, context, page, process, baseUrl, assertions: [], actions: 0 };
-    this.sessions.set(runId, session);
-    await page.goto(baseUrl + repository.browserPath, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    this.sessions.set(runId, session); this.resumes.delete(runId);
+    await page.goto(resume?.url && resume.url.startsWith(baseUrl) ? resume.url : baseUrl + repository.browserPath, { waitUntil: 'domcontentloaded', timeout: 30000 });
     return session;
   }
   qaSessionFile() { return path.join(this.store.directory, 'qa-session.json'); }
@@ -70,13 +80,14 @@ export class Evidence {
   }
   // QA checks browse the site the agent chose, signed in with the session the person saved from their own sign-in.
   async startQa(runId, run, address) {
-    const site = this.qaSite(address || run.qaUrl);
+    const resume = this.resumes.get(runId); this.resumes.delete(runId);
+    const site = this.qaSite(address || resume?.url || run.qaUrl);
     const directory = this.directory(runId), { chromium } = await import('playwright');
     let browser;
     try { browser = await chromium.launch({ headless: true }); }
     catch (error) { throw new Error(`Browser could not start. Run "npx playwright install chromium". ${error.message}`); }
     const state = this.qaSessionFile();
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, recordVideo: { dir: directory, size: { width: 1440, height: 900 } }, ...(existsSync(state) ? { storageState: state } : {}) });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, recordVideo: { dir: directory, size: { width: 1440, height: 900 } }, ...(resume?.state ? { storageState: resume.state } : existsSync(state) ? { storageState: state } : {}) });
     await context.route(url => this.isDesk(url.href), route => route.abort('blockedbyclient'));
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
     const page = await context.newPage();
@@ -149,7 +160,8 @@ export class Evidence {
       }
       case 'click': await page.locator(selector).click({ timeout: 15000 }); break;
       case 'fill': {
-        const typed = String(value || ''), account = this.store.config().testAccount || {}, password = this.store.testPassword();
+        const local = /^https?:\/\/(127\.|localhost|\[::1\])/.test(page.url()), saved = this.store.config().testAccount || {};
+        const account = { username: (local && saved.localUsername) || saved.username }, password = (local && saved.localUsername && this.store.testPassword('local')) || this.store.testPassword(), typed = String(value || '');
         if (typed.includes('{{test.password}}')) {
           if (!password) throw new Error('No test account password is saved in Settings → QA verification. Ask the human with desk_ask.');
           if (await page.locator(selector).getAttribute('type') !== 'password') throw new Error('{{test.password}} can only be typed into a password field.');
@@ -178,16 +190,29 @@ export class Evidence {
     }
     if (session.qa) await this.leaveDesk(page);
     session.actions++;
+    if (!session.electron) this.armIdle(runId);
     const controls = await page.locator('button,input,textarea,select,a,[role="button"]').evaluateAll(nodes => nodes.slice(0, 100).map(node =>
       ({ tag: node.tagName.toLowerCase(), id: node.id, name: node.getAttribute('name'), label: node.getAttribute('aria-label') || node.textContent?.trim().slice(0, 100), type: node.getAttribute('type') })));
     // The saved password never travels back to the agent, even if a page echoes it.
-    const password = this.store.testPassword(), hide = text => password ? String(text).replaceAll(password, '[test password]').replaceAll(encodeURIComponent(password), '[test password]') : text;
+    const secrets = [this.store.testPassword(), this.store.testPassword('local')].filter(Boolean);
+    const hide = text => secrets.reduce((value, secret) => value.replaceAll(secret, '[test password]').replaceAll(encodeURIComponent(secret), '[test password]'), String(text));
     return { url: hide(page.url()), title: hide(await page.title()), text: hide((await page.locator('body').innerText()).slice(0, 14000)), controls };
   }
-  async close(runId) {
+  // After a quiet minute, save the clip and close the browser; the next action reopens the same page in a new clip.
+  armIdle(runId) {
+    clearTimeout(this.idleTimers.get(runId));
+    this.idleTimers.set(runId, setTimeout(() => {
+      const session = this.sessions.get(runId);
+      if (session && !session.electron) void this.close(runId, { pause: true }).then(() => this.emit(runId, 'browser-paused', { note: 'No browser action for a minute: the clip was saved. The next action continues on the same page.' })).catch(() => {});
+    }, this.idleMs).unref());
+  }
+  stopPreview(runId) { const kept = this.previews.get(runId); if (kept) { stopTree(kept.process.child); this.previews.delete(runId); } }
+  async close(runId, { pause = false } = {}) {
+    clearTimeout(this.idleTimers.get(runId)); this.idleTimers.delete(runId);
     const session = this.sessions.get(runId);
-    if (!session) return { closed: true };
+    if (!session) { if (!pause) { this.stopPreview(runId); this.resumes.delete(runId); } return { closed: true }; }
     this.sessions.delete(runId);
+    if (pause) { try { this.resumes.set(runId, { state: await session.context.storageState(), url: session.page.url() }); } catch {} }
     const directory = this.directory(runId);
     const traceFile = path.join(directory, `trace-${Date.now()}.zip`);
     const video = session.page.video();
@@ -199,8 +224,9 @@ export class Evidence {
       this.attach(runId, traceFile, 'Playwright trace', 'application/zip');
     } finally {
       if (session.electron) await session.electron.close().catch(() => {});
-      else { await session.browser.close(); if (session.process) stopTree(session.process.child); }
+      else { await session.browser.close(); if (session.process) { if (pause) this.previews.set(runId, { process: session.process, baseUrl: session.baseUrl }); else stopTree(session.process.child); } }
     }
+    if (!pause) { this.stopPreview(runId); this.resumes.delete(runId); }
     return { closed: true, assertions: session.assertions.length };
   }
   report(runId, { summary, checks, risk, qa }) {
@@ -220,5 +246,5 @@ export class Evidence {
     writeFileSync(file, html);
     return this.attach(runId, file, 'Verification report', 'text/html');
   }
-  async stopAll() { await this.qaLogin?.browser.close().catch(() => {}); await Promise.allSettled([...this.sessions.keys()].map(runId => this.close(runId))); }
+  async stopAll() { await this.qaLogin?.browser.close().catch(() => {}); await Promise.allSettled([...this.sessions.keys()].map(runId => this.close(runId))); for (const runId of [...this.previews.keys()]) this.stopPreview(runId); }
 }

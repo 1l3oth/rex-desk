@@ -230,3 +230,14 @@ test('agents may not write the person’s Claude memory or settings, from any pr
   assert.match(desk.prompt({ id: 'w', role: 'worker', taskId: 't', worktree: 'w', branch: 'b', baseBranch: 'develop', port: 1 }), /Never write to Claude memory, CLAUDE\.md, agent settings/);
   store.close();
 });
+
+test('a pull request opened outside Rex Desk is found by the run branch and settles the run', async () => {
+  const { original } = await repository(), { store, desk } = workspace(original);
+  store.put('run', 'r', { id: 'r', role: 'worker', taskId: 'task-1', repositoryId: 'repo', branch: 'temp/rex/fix/views-keep-english-names', state: 'interrupted', createdAt: now() });
+  let asked;
+  await desk.findPullRequests({ run: async (command, args, options) => { asked = { command, args, cwd: options.cwd }; return { stdout: JSON.stringify([{ url: 'https://github.com/example/app/pull/2247', number: 2247, state: 'OPEN', baseRefName: 'global/release' }]) }; } });
+  assert.deepEqual(asked.args.slice(0, 4), ['pr', 'list', '--head', 'temp/rex/fix/views-keep-english-names']);
+  const run = store.get('run', 'r');
+  assert.equal(run.state, 'published'); assert.equal(run.prNumber, 2247); assert.equal(run.targetBranch, 'global/release');
+  store.close();
+});

@@ -613,3 +613,14 @@ dialog.viewer .viewer-head .actions{margin:0 0 0 auto;flex-wrap:nowrap;justify-c
 .proof-resizer:after{content:"";position:absolute;top:0;bottom:0;left:2px;width:2px;background:transparent;transition:background .15s var(--ease)}
 .proof-resizer:hover:after,.proof-resizer:focus-visible:after,.proof-resizer.active:after{background:var(--accent)}
 @container pane (min-width:720px){.proof-resizer{display:block}}
+
+/* Whose issues these are, and the exact statuses a connection syncs */
+.assigned-to{padding:6px 12px;border-bottom:1px solid var(--line-soft);flex-shrink:0}
+.assigned-to p{display:grid;grid-template-columns:14px minmax(0,1fr);gap:0 6px;align-items:start;font-size:11.5px;color:var(--muted)}
+.assigned-to .icon{width:13px;height:13px;margin-top:2px;color:var(--green)}.assigned-to strong{color:var(--ink);font-weight:600}
+.assigned-to small{grid-column:2;font-size:10.5px;color:var(--faint)}
+.status-picker{margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:6px}
+.status-picker legend{padding:0 4px;font-size:11.5px;font-weight:600}.status-picker>p{margin:0 0 8px;font-size:11.5px}
+.status-group{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;margin-top:6px}.status-group strong{flex-basis:100%;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.status-option{display:inline-flex;align-items:center;gap:6px;font-size:12px}
+.status-picker-empty{margin:0 0 12px;font-size:11.5px}

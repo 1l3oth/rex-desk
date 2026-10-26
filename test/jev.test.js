@@ -67,7 +67,7 @@ test('agents type the saved test account through placeholders and never read the
   await new Promise(resolve => site.listen(0, '127.0.0.1', resolve));
   const store = new Store(temporary('account'));
   store.saveConfig({ ...defaults, testAccount: { username: 'qa@example.invalid', password: 'S3cret-Test!' } });
-  assert.deepEqual(store.publicConfig().testAccount, { username: 'qa@example.invalid', hasPassword: true });
+  assert.deepEqual(store.publicConfig().testAccount, { username: 'qa@example.invalid', hasPassword: true, localUsername: '', hasLocalPassword: false });
   const desk = new Desk(store, { root: temporary('account-root'), runnerFactory: idle });
   store.put('task', 't', { id: 't', title: 'Login check', active: true });
   store.put('run', 'qa', { id: 'qa', role: 'verifier', taskId: 't', state: 'running', qaUrl: '', createdAt: now() });
@@ -80,5 +80,38 @@ test('agents type the saved test account through placeholders and never read the
     assert.equal(page.text.includes('S3cret-Test!'), false, 'An echoed password is masked');
     assert.match(page.text, /\[test password\]/);
     assert.equal(store.events('qa').some(event => JSON.stringify(event).includes('S3cret-Test!')), false, 'The journal never records it');
+  } finally { await desk.evidence.stopAll(); site.close(); store.close(); }
+});
+
+test('sync keeps "Development Completed" out by default, and exact statuses win when chosen', async () => {
+  const { matchesTaskStatus } = await import('../src/providers.js');
+  const task = (statusName, statusCategory) => ({ statusName, statusCategory });
+  assert.equal(matchesTaskStatus(task('Request', '0')), true);
+  assert.equal(matchesTaskStatus(task('Re-request', '0')), true);
+  assert.equal(matchesTaskStatus(task('In Development', '1')), true);
+  assert.equal(matchesTaskStatus(task('Development Completed', '1')), false, 'Done-sounding names in the In progress group wait for QA');
+  assert.equal(matchesTaskStatus(task('Development Completed', '1'), 'unfinished'), true, 'All unfinished still includes them');
+  assert.equal(matchesTaskStatus(task('In Development', '1'), 'active', ['Request', 'Re-request']), false, 'Exact statuses win');
+  assert.equal(matchesTaskStatus(task('re-request', '0'), 'active', ['Re-request']), true);
+});
+
+test('a quiet browser saves its clip and closes, and the next action continues on the same page', async () => {
+  const http = await import('node:http');
+  const site = http.createServer((request, response) => { response.writeHead(200, { 'Content-Type': 'text/html', 'Set-Cookie': 'seen=1' }); response.end(`<!doctype html><title>Page ${request.url}</title><p id="where">${request.url}</p><p id="cookie">${request.headers.cookie || 'none'}</p>`); });
+  await new Promise(resolve => site.listen(0, '127.0.0.1', resolve));
+  const store = new Store(temporary('idle')), desk = new Desk(store, { root: temporary('idle-root'), runnerFactory: idle });
+  desk.evidence.idleMs = 300;
+  store.put('task', 't', { id: 't', title: 'Idle', active: true });
+  store.put('run', 'qa', { id: 'qa', role: 'verifier', taskId: 't', state: 'running', qaUrl: '', createdAt: now() });
+  try {
+    await desk.evidence.action('qa', { action: 'open', url: `http://127.0.0.1:${site.address().port}/first` });
+    await desk.evidence.action('qa', { action: 'navigate', url: '/second' });
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    assert.equal(desk.evidence.sessions.has('qa'), false, 'The idle browser closed');
+    assert.equal(store.list('artifact').filter(item => item.runId === 'qa' && item.type === 'video/webm').length, 1, 'Its clip was saved');
+    const page = await desk.evidence.action('qa', { action: 'assertText', selector: '#where', expected: '/second' });
+    assert.match(page.text, /seen=1/, 'Cookies carried over');
+    await desk.evidence.close('qa');
+    assert.equal(store.list('artifact').filter(item => item.runId === 'qa' && item.type === 'video/webm').length, 2, 'The continued work is a second clip');
   } finally { await desk.evidence.stopAll(); site.close(); store.close(); }
 });

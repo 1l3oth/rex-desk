@@ -81,13 +81,16 @@ export function subtaskRecord(child, parent) {
   content: { description: [own.description, inherited.description && `Parent issue: ${text(parent.title)}\n${inherited.description}`].filter(Boolean).join('\n\n'),
     contentImages: uniqueImages(own.contentImages, inherited.contentImages), contentFiles: [...own.contentFiles, ...inherited.contentFiles] } };
 }
-export function matchesTaskStatus(task, filter = 'active') {
+export function matchesTaskStatus(task, filter = 'active', statuses = []) {
+  if (statuses?.length) return statuses.some(name => name.toLowerCase() === String(task.statusName || '').trim().toLowerCase());
   if (filter === 'all') return true;
   const category = String(task.statusCategory || '').toLowerCase();
   const status = String(task.statusName || task.status).trim().toLowerCase().replace(/[_-]+/g, ' ');
   const completed = ['2', 'complete', 'completed', 'done'].includes(category) || /^(complete|completed|done|closed|완료)$/.test(status);
   if (filter === 'unfinished') return !completed;
-  return !completed && (['0', '1', 'request', 'progress'].includes(category) || /^(0|1|request|requested|in progress|progress|working|todo|to do|open|요청|진행)$/.test(status));
+  // Trackers often file "Development Completed" or "Resolved" under In progress; by default those wait for QA, not for an agent.
+  const finishedName = /(^|\s)(complete|completed|done|closed|resolved|finished|fixed)(\s|$)|완료|完了|해결/.test(status);
+  return !completed && !finishedName && (['0', '1', 'request', 'progress'].includes(category) || /^(0|1|request|requested|in progress|progress|working|todo|to do|open|요청|진행)$/.test(status));
 }
 
 export async function apiRequest(source, key, endpoint, { method = 'GET', body, fetcher = fetch } = {}) {
@@ -246,12 +249,12 @@ export class Sources {
         const inspectPost = async post => {
           const detail = await this.request(source, `/user/posts/${encodeURIComponent(post.postId)}`);
           const task = normalizeTask(source, projectId, post, detail);
-          if (task.assignees.includes(identity(account)) && matchesTaskStatus(task, source.statusFilter)) fetched.push(task);
+          if (task.assignees.includes(identity(account)) && matchesTaskStatus(task, source.statusFilter, source.statuses)) fetched.push(task);
           const record = detail.post || detail;
           for (const subtask of record.subTasks || []) {
             const nested = subtaskRecord(subtask, { ...record, title: record.title || post.title, content: record.content || post.content || '' });
             const child = normalizeTask(source, projectId, { ...post, title: nested.record.title, taskId: nested.record.taskId }, nested.record, { content: nested.content });
-            if (child.assignees.includes(identity(account)) && matchesTaskStatus(child, source.statusFilter)) fetched.push({ ...child, parentPostId: String(post.postId) });
+            if (child.assignees.includes(identity(account)) && matchesTaskStatus(child, source.statusFilter, source.statuses)) fetched.push({ ...child, parentPostId: String(post.postId) });
           }
         };
         await Promise.all(Array.from({ length: Math.min(4, page.posts.length) }, async () => {
@@ -271,7 +274,9 @@ export class Sources {
       this.store.put('task', task.id, { ...task, ...detail, ...(reusable ? { detailLoaded: true, raw: { ...task.raw, post: previous.raw?.post } } : {}), category: previous?.category || '', runId: previous?.runId });
     }
     for (const set of statusSets) this.store.put('statuses', `${source.id}:${set.projectId}`, set);
-    const result = { sourceId: source.id, name: source.name, count: fetched.length, account, at: now() };
+    const employee = (this.store.get('directory', source.id)?.employees || []).find(item => identity(item.id) === identity(account) || identity(item.email) === identity(account));
+    const result = { sourceId: source.id, name: source.name, count: fetched.length, account, accountName: employee?.name || '', accountSource: source.userId ? 'chosen in Settings' : 'owner of the API key',
+      verified: fetched.filter(task => task.assignees.includes(identity(account))).length, at: now() };
     this.store.put('sync', source.id, result);
     return result;
   }
@@ -296,7 +301,7 @@ export class Sources {
         // Filter responses may include a parent only as context for an assigned subtask.
         if (!taskAssignees(row).includes(identity(account))) continue;
         const task = normalizeTask(source, projectId, row, { ...row, title: '', content: '' }, { names });
-        if (matchesTaskStatus(task, source.statusFilter)) tasks.push({ ...task, parentTaskId: row.upTaskId && row.upTaskId !== '-1' ? row.upTaskId : '', parentTitle: text(row.upTaskName), description: '', detailLoaded: false });
+        if (matchesTaskStatus(task, source.statusFilter, source.statuses)) tasks.push({ ...task, parentTaskId: row.upTaskId && row.upTaskId !== '-1' ? row.upTaskId : '', parentTitle: text(row.upTaskName), description: '', detailLoaded: false });
       }
       if (!page.hasNext) break;
       if (page.lastCursor === undefined || Number(page.lastCursor) < 0) throw new Error('Filtered task API omitted its next cursor.');

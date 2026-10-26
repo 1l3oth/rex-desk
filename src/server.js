@@ -216,13 +216,15 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
   const address = `http://127.0.0.1:${server.address().port}`;
   desk.mcpUrl = `${address}/mcp`;
   desk.reattachOrca();
-  let lastSync = Date.now();
+  let lastSync = Date.now(), ticks = 0;
+  void desk.findPullRequests();
   const timer = setInterval(() => {
     const minutes = store.config().syncMinutes;
     if (minutes && Date.now() - lastSync >= minutes * 60000 && !desk.sources.syncing) {
       lastSync = Date.now(); void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
     }
     void desk.scheduleTick().catch(error => store.event('', 'schedule-error', { message: error.message }, true));
+    if (++ticks % 8 === 0) void desk.findPullRequests();
   }, 15000);
   timer.unref();
   return { server, store, desk, address, async close() {

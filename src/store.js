@@ -126,7 +126,7 @@ export class Store extends EventEmitter {
     cipher.setAuthTag(tag);
     return Buffer.concat([cipher.update(data), cipher.final()]).toString('utf8');
   }
-  testPassword() { const saved = this.get('secret', 'test-account-password'); return saved ? this.decrypt(saved) : ''; }
+  testPassword(which = 'site') { const saved = this.get('secret', which === 'local' ? 'test-account-local-password' : 'test-account-password'); return saved ? this.decrypt(saved) : ''; }
   credential(sourceId) {
     const saved = this.get('secret', `source:${sourceId}`);
     return saved ? this.decrypt(saved) : '';
@@ -134,7 +134,7 @@ export class Store extends EventEmitter {
   config() { return { ...defaults, ...this.get('config', 'main') }; }
   publicConfig() {
     const config = this.config();
-    return { ...config, sources: config.sources.map(source => ({ ...source, hasKey: Boolean(this.credential(source.id)) })), jev: { ...defaults.jev, ...config.jev, hasKey: Boolean(this.get('secret', 'openrouter')) }, testAccount: { username: config.testAccount?.username || '', hasPassword: Boolean(this.get('secret', 'test-account-password')) } };
+    return { ...config, sources: config.sources.map(source => ({ ...source, hasKey: Boolean(this.credential(source.id)) })), jev: { ...defaults.jev, ...config.jev, hasKey: Boolean(this.get('secret', 'openrouter')) }, testAccount: { username: config.testAccount?.username || '', hasPassword: Boolean(this.get('secret', 'test-account-password')), localUsername: config.testAccount?.localUsername || '', hasLocalPassword: Boolean(this.get('secret', 'test-account-local-password')) } };
   }
   saveConnection(source) {
     const config = this.publicConfig();
@@ -156,7 +156,7 @@ export class Store extends EventEmitter {
       if (source.clearKey) secretUpdates.push({ id: sourceId, remove: true });
       return { id: sourceId, name: source.name || source.type, type: source.type, baseUrl: base.origin,
         userId: String(source.userId || '').trim(), projectIds: [...new Set((source.projectIds || []).map(String).filter(Boolean))],
-        repositoryId: source.repositoryId || (input.repositories.length === 1 ? input.repositories[0].id || '' : ''), statusFilter: ['active', 'unfinished', 'all'].includes(source.statusFilter) ? source.statusFilter : 'active', statusMap: source.statusMap || {} };
+        repositoryId: source.repositoryId || (input.repositories.length === 1 ? input.repositories[0].id || '' : ''), statusFilter: ['active', 'unfinished', 'all'].includes(source.statusFilter) ? source.statusFilter : 'active', statuses: [...new Set((Array.isArray(source.statuses) ? source.statuses : String(source.statuses || '').split('\n')).map(name => String(name).trim()).filter(Boolean))].slice(0, 100), statusMap: source.statusMap || {} };
     });
     const repositories = input.repositories.map(repository => {
       if (!path.isAbsolute(repository.path || '')) throw new Error('Repository path must be absolute.');
@@ -173,7 +173,8 @@ export class Store extends EventEmitter {
       syncMinutes: input.syncMinutes, requireVideo: input.requireVideo !== false, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
       tourDismissed: Boolean(input.tourDismissed), execution: input.execution === 'orca' ? 'orca' : 'rex',
-      schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false }, testAccount: { username: String(input.testAccount?.username || '').trim().slice(0, 200) } };
+      schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false }, testAccount: { username: String(input.testAccount?.username || '').trim().slice(0, 200), localUsername: String(input.testAccount?.localUsername || '').trim().slice(0, 200) } };
+    if (String(input.testAccount?.localPassword || '')) this.put('secret', 'test-account-local-password', this.encrypt(String(input.testAccount.localPassword)));
     if (String(input.testAccount?.password || '')) this.put('secret', 'test-account-password', this.encrypt(String(input.testAccount.password)));
     // The OpenRouter key for Jev is write-only from the dashboard: a new value replaces it, clearKey removes it.
     if (String(input.jev?.apiKey || '').trim()) this.put('secret', 'openrouter', this.encrypt(String(input.jev.apiKey).trim()));

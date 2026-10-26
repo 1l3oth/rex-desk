@@ -31,7 +31,7 @@ The repository is private. Ask the owner for access before cloning or forking.
    cd rex-desk
    ```
 
-2. **Install it.** `npm ci` also turns on the repository's Git hook, which keeps direct pushes out of `master`.
+2. **Install it.**
 
    ```powershell
    npm ci
@@ -122,7 +122,7 @@ Then:
 1. Push your branch: `git push -u origin HEAD`.
 2. Open the pull request: `gh pr create --fill`, and fill in the template.
 3. Wait for **CI** to pass. It runs both test suites on Windows.
-4. The owner reviews and merges. Changes reach `master` only through pull requests.
+4. The owner reviews and merges. Only the owner's two accounts push to `master` directly; everyone else's changes arrive as pull requests.
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rules.
 
@@ -134,4 +134,4 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rules.
 | "Not signed in" | **Setup → Sign in your coding agent**, and choose a profile that shows Signed in. |
 | "Browser could not start" | Run `npx playwright install chromium`. |
 | Orca does not show the run | In the run dialog, choose **Show Rex worktrees in Orca**. |
-| "Direct pushes to master are blocked" | Working as intended. Push a branch and open a pull request. |
+| A push to `master` is rejected | Only the owner's accounts push to `master`. Push a branch to your fork and open a pull request. |

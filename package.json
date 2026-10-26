@@ -13,8 +13,7 @@
     "test": "node --test \"test/*.test.js\"",
     "mcp": "node src/stdio.js",
     "verify": "node scripts/verify.js",
-    "test:browser": "node scripts/browser-test.js",
-    "prepare": "node scripts/install-hooks.mjs"
+    "test:browser": "node scripts/browser-test.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.0",
