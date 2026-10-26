@@ -216,3 +216,17 @@ test('a QA check signs in with the saved test account instead of stopping at the
   assert.doesNotMatch(prompt, /the human has no saved sign-in for this site/);
   store.close();
 });
+
+test('agents may not write the person’s Claude memory or settings, from any profile folder', async () => {
+  const { writesClaudeHome } = await import('../src/runners.js');
+  const orcaMemory = 'C:/Users/flow/AppData/Roaming/orca/claude-profiles/6090b7ff/home/projects/F--flow-was/memory/feedback.md';
+  assert.equal(writesClaudeHome('Write', { file_path: 'C:\\Users\\flow\\.claude\\projects\\F--flow-was\\memory\\note.md' }), true);
+  assert.equal(writesClaudeHome('Edit', { file_path: 'C:/Users/flow/.claude-third-profile/CLAUDE.md' }), true);
+  assert.equal(writesClaudeHome('Bash', { command: `M="${orcaMemory.replace('/feedback.md', '')}"; cat > "$M/feedback.md" <<'EOF'` }), true);
+  assert.equal(writesClaudeHome('Bash', { command: 'cat C:/Users/flow/.claude/settings.json' }), false, 'Reading is fine');
+  assert.equal(writesClaudeHome('Write', { file_path: 'F:/rex-desk/worktrees/temp-rex-fix-views/src/app.js' }), false, 'The worktree is fine');
+  const store = new Store(temporary('memory-guard')), desk = new Desk(store, { root: temporary('memory-guard-root'), runnerFactory: idle });
+  store.put('task', 't', { id: 't', title: 'Views', active: true });
+  assert.match(desk.prompt({ id: 'w', role: 'worker', taskId: 't', worktree: 'w', branch: 'b', baseBranch: 'develop', port: 1 }), /Never write to Claude memory, CLAUDE\.md, agent settings/);
+  store.close();
+});

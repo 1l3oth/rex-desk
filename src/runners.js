@@ -133,6 +133,13 @@ export class CodexRunner {
 // Rex Desk's own tools read tasks, label them, message the dashboard, or act inside the run's worktree. desk_status,
 // desk_publish, and desk_dispatch carry their own dashboard approval, so none needs the agent's permission prompt too.
 const quietRexTool = name => name.startsWith('mcp__rex_desk__desk_');
+// The person's Claude memory, instructions, settings, agents, skills, and hooks, in any profile folder (~/.claude*, Orca's claude-profiles/<id>/home).
+const claudeHome = /(?:[\\/]\.claude[^\\/]*|claude-profiles[\\/][^\\/]+[\\/]home)[\\/](?:projects[\\/][^\\/]+[\\/]memory|settings(?:\.local)?\.json|CLAUDE\.md|agents|skills|hooks|commands)\b/i;
+export function writesClaudeHome(name, input = {}) {
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(name)) return claudeHome.test(String(input.file_path || input.notebook_path || ''));
+  if (name === 'Bash' || name === 'PowerShell') { const command = String(input.command || ''); return claudeHome.test(command) && /(>|\btee\b|\bcp\b|\bmv\b|\brm\b|sed\s+-i|Set-Content|Out-File|Add-Content|New-Item|Remove-Item|Copy-Item|Move-Item)/i.test(command); }
+  return false;
+}
 
 export class ClaudeRunner {
   constructor(options) { Object.assign(this, options); }
@@ -162,6 +169,7 @@ export class ClaudeRunner {
           if (answer.action !== 'accept') return { behavior: 'deny', message: 'User declined the question.' };
           return { behavior: 'allow', updatedInput: { ...input, answers: answer.content || {} } };
         }
+        if (this.run.role !== 'coordinator' && writesClaudeHome(name, input)) return { behavior: 'deny', message: 'Rex Desk agents do not write Claude memory, instructions, or settings. Say what you learned in desk_message instead, and continue the task.' };
         if (quietRexTool(name) || allowedTools.has(name)) return { behavior: 'allow', updatedInput: input };
         const answer = await this.ask({ kind: 'approval', title: `Approve ${name}`, request: { tool: name, input, suggestions: context.suggestions, allowAlways: true }, method: 'claude-permission' });
         if (answer.action === 'accept' && answer.content?.always) allowedTools.add(name);
