@@ -130,9 +130,9 @@ export class CodexRunner {
   close() { if (!this.closed) { this.closed = true; stopTree(this.child); } }
 }
 
-// Rex Desk's own tools read tasks, label them, message the dashboard, or act inside the run's worktree. desk_status and
-// desk_publish carry their own dashboard approval. Only desk_dispatch starts new work, so it alone keeps the permission prompt.
-const quietRexTool = name => name.startsWith('mcp__rex_desk__desk_') && name !== 'mcp__rex_desk__desk_dispatch';
+// Rex Desk's own tools read tasks, label them, message the dashboard, or act inside the run's worktree. desk_status,
+// desk_publish, and desk_dispatch carry their own dashboard approval, so none needs the agent's permission prompt too.
+const quietRexTool = name => name.startsWith('mcp__rex_desk__desk_');
 
 export class ClaudeRunner {
   constructor(options) { Object.assign(this, options); }

@@ -56,7 +56,9 @@ Rex Desk ranks from those answers and the due date: severity counts most, then a
 
 ## Execution and evidence
 
-Each run is one issue you start: **Fix with agent** or **Verify fix**, from Next up or the issue page. Worker concurrency is enforced by the local queue.
+Each run is one issue you start: **Fix with agent** or **Verify fix**, from Next up or the issue page. Worker concurrency is enforced by the local queue. Nothing starts on an issue you did not choose: when an agent asks to start one (`desk_dispatch`), Rex Desk shows an approval card naming the issue, and the run starts only if you approve it. **Agent runs** shows one run at a time; the layout switch adds side-by-side or grid panes, and that choice is remembered.
+
+Screenshots, image and video attachments, comment images, and evidence recordings open in a viewer inside Rex Desk: arrows (or ←/→) move between the files of the same issue or run, images switch between fit and actual size, and Download and Original are in the header. Tracker attachments are fetched only if they belong to the issue, checked by their real file type, cached under `.local/cache/media`, and streamed so videos can seek; formats the window cannot play say so and offer the download.
 
 Agents sign in with the test account from Settings → **QA verification**. They type `{{test.username}}` and `{{test.password}}` with `desk_browser fill`; Rex Desk substitutes the saved account, types the password only into password fields, and masks it in anything returned to the agent or written to the journal.
 

@@ -4,6 +4,10 @@ const loadingTasks = new Set(), taskErrors = new Map();
 const providerName = provider => provider === 'codex' ? 'Codex' : 'Claude Code';
 const samePath = (left, right) => String(left || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase() === String(right || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
 const taskImage = (task, address) => `/api/task-image?task=${encodeURIComponent(task.id)}&url=${encodeURIComponent(address)}`;
+const taskFile = (task, address) => `/api/task-file?task=${encodeURIComponent(task.id)}&url=${encodeURIComponent(address)}`;
+// Attachments the viewer can show, judged by name; the server checks the real bytes before serving.
+const mediaKind = name => /\.(png|jpe?g|gif|webp|bmp)$/i.test(name) ? 'image' : /\.(mp4|webm|mov|m4v)$/i.test(name) ? 'video' : '';
+const viewable = (kind, src, name, original = '') => `data-view="${kind}" data-view-src="${esc(src)}" data-view-name="${esc(name)}"${original ? ` data-view-original="${esc(original)}"` : ''}`;
 const ui = { page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', search: '', source: '', category: '', snapshot: null, runEvents: new Map(), journals: new Map(), transcripts: new Map(), openOps: new Set(), openRuns: [], layout: 'grid', runSide: 'runs', selectedDecision: '', draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false,
   sort: 'priority', orcaScreens: new Map(), orcaClosed: new Set(), detailLayout: 'tabs', tabSecond: 'messages', splitRatio: 0.5, sideWidth: 0, dragging: false, missedRender: false };
 const labels = { queued: 'Queued', starting: 'Preparing', running: 'Working', waiting: 'Needs you', needs_evidence: 'Needs evidence', ready_for_review: 'Ready for review', published: 'PR created', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted', finished: 'Finished', qa_passed: 'QA passed', qa_failed: 'QA failed', qa_blocked: 'QA blocked' };
@@ -56,11 +60,11 @@ function navigate(page, { runId, taskId } = {}) {
 // Open runs and the pane layout are a per-browser convenience, so they live in localStorage.
 const paneLimits = { single: 1, split: 2, grid: 4 };
 function saveWorkspace() {
-  try { localStorage.setItem('rex-desk-workspace', JSON.stringify({ openRuns: ui.openRuns, layout: ui.layout, selectedRun: ui.selectedRun, sort: ui.sort, sideWidth: ui.sideWidth, detailLayout: ui.detailLayout, tabSecond: ui.tabSecond, splitRatio: ui.splitRatio })); } catch {}
+  try { localStorage.setItem('rex-desk-workspace', JSON.stringify({ openRuns: ui.openRuns, layout: ui.layout, layoutChosen: ui.layoutChosen, selectedRun: ui.selectedRun, sort: ui.sort, sideWidth: ui.sideWidth, detailLayout: ui.detailLayout, tabSecond: ui.tabSecond, splitRatio: ui.splitRatio })); } catch {}
 }
 function restoreWorkspace() {
   try {
-    const saved = JSON.parse(localStorage.getItem('rex-desk-workspace') || '{}'); ui.openRuns = Array.isArray(saved.openRuns) ? saved.openRuns : []; ui.layout = paneLimits[saved.layout] ? saved.layout : 'grid'; ui.selectedRun = saved.selectedRun || '';
+    const saved = JSON.parse(localStorage.getItem('rex-desk-workspace') || '{}'); ui.openRuns = Array.isArray(saved.openRuns) ? saved.openRuns : []; ui.layoutChosen = Boolean(saved.layoutChosen); ui.layout = ui.layoutChosen && paneLimits[saved.layout] ? saved.layout : 'single'; ui.selectedRun = saved.selectedRun || '';
     ui.sort = saved.sort === 'tracker' ? 'tracker' : 'priority'; ui.sideWidth = Number(saved.sideWidth) || 0; ui.detailLayout = detailLayouts.includes(saved.detailLayout) ? saved.detailLayout : 'tabs';
     ui.tabSecond = detailTabNames[saved.tabSecond] ? saved.tabSecond : 'messages'; ui.splitRatio = Math.min(0.8, Math.max(0.2, Number(saved.splitRatio) || 0.5));
   } catch {}
@@ -97,7 +101,7 @@ function setSplitRatio(ratio) {
 }
 function openRun(runId) {
   if (!ui.openRuns.includes(runId)) ui.openRuns.push(runId);
-  ui.selectedRun = runId; saveWorkspace();
+  ui.selectedRun = runId; ui.flashRun = runId; saveWorkspace();
 }
 function closeRun(runId) {
   ui.openRuns = ui.openRuns.filter(id => id !== runId); ui.runEvents.delete(runId); ui.transcripts.delete(runId);
@@ -139,6 +143,7 @@ function render() {
     <footer class="statusbar"><span class="status-local"><span class="dot"></span>Running on this computer</span><span class="status-${esc(database.state || 'local')}">${cloud}${database.pending ? ` · ${Number(database.pending)} waiting` : ''}</span><span>${active} active · ${state.config.concurrency} worker${state.config.concurrency === 1 ? '' : 's'}</span>${waiting ? `<span class="status-need">${plural(waiting, 'decision')} waiting</span>` : ''}<span class="status-right">${providerName(state.config.provider)} default${synced ? ` · Synced ${synced}` : ''}</span></footer></div>`;
   if (ui.page === 'settings') for (const repository of ui.draft.repositories) previewBranch(repository.id);
   restoreTranscript();
+  if (ui.flashRun) { const flashed = ui.flashRun; setTimeout(() => { if (ui.flashRun === flashed) ui.flashRun = ''; document.querySelector(`[data-pane-run="${flashed}"]`)?.classList.remove('flash'); }, 900); }
   if (['setup', 'settings'].includes(ui.page) && !ui.agents && !ui.agentsLoading && !ui.agentsError) void loadAgents();
   if (ui.page === 'settings' && !ui.github) void loadGithub();
   if (ui.page === 'settings') void loadAutostart();
@@ -282,14 +287,16 @@ function renderIssueProperties(task, run) {
 function renderIssueImages(task, images, label) {
   const shown = images.map(item => ({ ...item, url: safeUrl(item.url), thumbnail: safeUrl(item.thumbnail) })).filter(item => item.url);
   if (!shown.length) return '';
-  return `<div class="issue-images" aria-label="${esc(label)}">${shown.map(item => `<figure><a href="${esc(taskImage(task, item.url))}" target="_blank" rel="noopener" data-original="${esc(item.url)}"><img loading="lazy" decoding="async" src="${esc(taskImage(task, item.thumbnail || item.url))}" alt="${esc(item.name)}" ${item.width && item.height ? `width="${item.width}" height="${item.height}"` : ''}></a><figcaption>${esc(item.name)}${item.width ? ` · ${item.width}×${item.height}` : ''}</figcaption></figure>`).join('')}</div>`;
+  return `<div class="issue-images" aria-label="${esc(label)}">${shown.map(item => `<figure><a href="${esc(taskImage(task, item.url))}" target="_blank" rel="noopener" data-original="${esc(item.url)}" ${viewable('image', taskImage(task, item.url), item.name, item.url)}><img loading="lazy" decoding="async" src="${esc(taskImage(task, item.thumbnail || item.url))}" alt="${esc(item.name)}" ${item.width && item.height ? `width="${item.width}" height="${item.height}"` : ''}></a><figcaption>${esc(item.name)}${item.width ? ` · ${item.width}×${item.height}` : ''}</figcaption></figure>`).join('')}</div>`;
 }
-function renderIssueFiles(files) {
+function renderIssueFiles(task, files) {
   const shown = files.map(item => ({ ...item, url: safeUrl(item.url) })).filter(item => item.url);
-  return shown.length ? `<ul class="issue-files">${shown.map(item => `<li><a href="${esc(item.url)}" target="_blank" rel="noopener">${icon('file')}${esc(item.name)}</a></li>`).join('')}</ul>` : '';
+  return shown.length ? `<ul class="issue-files">${shown.map(item => { const kind = mediaKind(item.name);
+    return kind ? `<li><button type="button" class="file-view" ${viewable(kind, taskFile(task, item.url), item.name, item.url)}>${icon(kind === 'video' ? 'play' : 'image')}${esc(item.name)}</button><a class="file-original" href="${esc(item.url)}" target="_blank" rel="noopener">Original</a></li>`
+      : `<li><a href="${esc(item.url)}" target="_blank" rel="noopener">${icon('file')}${esc(item.name)}</a></li>`; }).join('')}</ul>` : '';
 }
 function renderComment(task, comment) {
-  return `<article class="comment${comment.system ? ' system' : ''}"><header><strong>${esc(comment.author || 'Tracker')}</strong><time>${esc(comment.at)}</time></header>${comment.text ? `<p>${esc(comment.text)}</p>` : ''}${renderIssueImages(task, comment.images || [], 'Comment images')}${renderIssueFiles(comment.files || [])}</article>`;
+  return `<article class="comment${comment.system ? ' system' : ''}"><header><strong>${esc(comment.author || 'Tracker')}</strong><time>${esc(comment.at)}</time></header>${comment.text ? `<p>${esc(comment.text)}</p>` : ''}${renderIssueImages(task, comment.images || [], 'Comment images')}${renderIssueFiles(task, comment.files || [])}</article>`;
 }
 function renderIssueBrief(task) {
   if (task.detailLoaded === false) return taskErrors.has(task.id)
@@ -300,7 +307,7 @@ function renderIssueBrief(task) {
   return `<section class="issue-section" aria-labelledby="issue-description"><div class="issue-section-heading"><h3 id="issue-description">Description</h3>${task.demo ? '' : button(`${icon('sync')} Refresh`, 'refresh-task-detail', 'quiet small', loadingTasks.has(task.id) ? 'disabled' : 'title="Reload this issue from the tracker"')}</div>
     <div class="description">${task.description ? esc(task.description) : '<span class="muted">No written description. Check the screenshots or open the original issue.</span>'}</div></section>
     ${images.length ? `<section class="issue-section"><h3>Screenshots <span class="count-label">${images.length}</span></h3>${renderIssueImages(task, images, 'Issue screenshots')}</section>` : ''}
-    ${files.length ? `<section class="issue-section"><h3>Attachments <span class="count-label">${files.length}</span></h3>${renderIssueFiles(files)}</section>` : ''}
+    ${files.length ? `<section class="issue-section"><h3>Attachments <span class="count-label">${files.length}</span></h3>${renderIssueFiles(task, files)}</section>` : ''}
     ${comments.length || activity.length ? `<section class="issue-section"><h3>Comments <span class="count-label">${comments.length}</span></h3>${comments.length ? comments.map(comment => renderComment(task, comment)).join('') : '<p class="muted">No comments yet.</p>'}${activity.length ? `<details class="tracker-activity"><summary>${activity.length} tracker update${activity.length === 1 ? '' : 's'}</summary>${activity.map(comment => renderComment(task, comment)).join('')}</details>` : ''}</section>` : ''}`;
 }
 async function loadTaskDetail() {
@@ -541,7 +548,7 @@ function renderProof(runId) {
   const run = ui.snapshot.runs.find(item => item.id === runId);
   const artifacts = ui.snapshot.artifacts.filter(item => item.runId === runId);
   return `${renderRisk(run)}${run?.checks ? `<div class="check-list">${(run.role === 'verifier' ? [['recordedVideo', 'Browser recording saved'], ['browserAssertionPassed', 'Expected behavior asserted']] : [['testsPassed', 'Tests pass for the current code'], ['recordedVideo', 'Browser recording saved'], ['browserAssertionPassed', 'Browser assertion matches current code']]).map(([key, title]) => `<div class="check-row ${run.checks[key] ? '' : 'missing'}">${icon(run.checks[key] ? 'check' : 'clock')}<span>${title}</span></div>`).join('')}</div>` : ''}
-    ${artifacts.length ? artifacts.map(artifact => `<div class="proof-item"><a href="${artifactUrl(artifact)}" target="_blank" rel="noopener">${icon(artifact.type === 'video/webm' ? 'play' : 'file')}${esc(artifact.title)}</a><small>${relative(artifact.createdAt)}</small>${artifact.type === 'video/webm' ? `<video controls preload="metadata" src="${artifactUrl(artifact)}"></video>` : artifact.type === 'image/png' ? `<img src="${artifactUrl(artifact)}" alt="${esc(artifact.title)}" loading="lazy">` : ''}<a href="${artifactUrl(artifact)}?download" download>Download</a></div>`).join('') : '<p class="empty-small">No evidence yet. The agent must record its browser test and run verification.</p>'}`;
+    ${artifacts.length ? artifacts.map(artifact => `<div class="proof-item"><a href="${artifactUrl(artifact)}" target="_blank" rel="noopener">${icon(artifact.type === 'video/webm' ? 'play' : 'file')}${esc(artifact.title)}</a><small>${relative(artifact.createdAt)}</small>${artifact.type === 'video/webm' ? `<video controls preload="metadata" src="${artifactUrl(artifact)}"></video>` : artifact.type === 'image/png' ? `<img src="${artifactUrl(artifact)}" alt="${esc(artifact.title)}" loading="lazy" ${viewable('image', artifactUrl(artifact), artifact.title)}>` : ''}<div class="proof-links">${artifact.type === 'video/webm' ? `<button type="button" class="link-button" ${viewable('video', artifactUrl(artifact), artifact.title)}>View larger</button>` : ''}<a href="${artifactUrl(artifact)}?download" download>Download</a></div></div>`).join('') : '<p class="empty-small">No evidence yet. The agent must record its browser test and run verification.</p>'}`;
 }
 // An inbox of requests: every waiting decision in a list, the selected one answered beside it.
 function renderDecisions() {
@@ -588,7 +595,7 @@ function renderPane(run) {
   const journal = `<details class="activity-link" data-journal="${run.id}"><summary>Work journal</summary><div class="journal" id="journal-${run.id}">${renderJournal(run.id)}</div></details>`;
   // The main agent only earns a side column once it has dispatched workers; otherwise the transcript keeps the width.
   const proof = run.role === 'coordinator' && !workers.length ? '' : `<aside class="pane-proof"><h3>${run.role === 'coordinator' ? 'Dispatch' : run.role === 'verifier' ? 'QA result' : 'Worktree & proof'}</h3>${run.role === 'coordinator' ? renderDispatch(workers) : run.role === 'verifier' ? renderQa(run) : renderRunFacts(run)}${run.prUrl ? `<p><a href="${esc(safeUrl(run.prUrl))}" target="_blank" rel="noopener">Open draft pull request</a></p>` : ''}${run.role === 'worker' ? renderProof(run.id) : ''}${journal}</aside>`;
-  return `<section class="pane${run.id === ui.selectedRun ? ' focused' : ''}${waiting ? ' needs-you' : ''}" data-pane-run="${run.id}" aria-label="${esc(run.title)}">
+  return `<section class="pane${run.id === ui.selectedRun ? ' focused' : ''}${run.id === ui.flashRun ? ' flash' : ''}${waiting ? ' needs-you' : ''}" data-pane-run="${run.id}" aria-label="${esc(run.title)}">
     <header class="pane-head"><span class="state-dot ${esc(run.state)}"></span><h2>${esc(run.title)}</h2><span class="pane-provider">${providerName(run.provider)}</span>${tag(run.state)}<span class="pane-actions">${run.worktree ? button(icon('terminal'), 'open-orca', 'small quiet icon-only', 'aria-label="Open in Orca" title="Open a plain terminal in this worktree in Orca"') : ''}${button(icon('close'), 'close-run', 'small quiet icon-only', `data-id="${run.id}" aria-label="Close pane"`)}</span></header>
     <div class="pane-sub">${run.role === 'verifier' ? (run.qaUrl ? `${icon('link')}<code title="${esc(run.qaUrl)}">${esc(run.qaUrl)}</code>` : '<span>Finding the test site</span>') : run.branch ? `${icon('branch')}<code title="${esc(run.branch)}">${esc(run.branch)}</code>` : `<span>${run.role === 'coordinator' ? `Analyzing ${plural((run.taskIds || []).length, 'issue')}` : 'Worktree preparing'}</span>`}<span class="pane-progress">${esc(progressText(run))}</span></div>
     ${run.execution === 'orca' ? `<div class="run-status-strip pane-notice">${icon('terminal')}<span>Runs in an Orca terminal. Tool approvals happen there; questions, evidence, and PR approval stay here.</span></div>` : ''}
@@ -1291,8 +1298,8 @@ document.addEventListener('click', event => {
   if (name === 'detail-layout') { setDetailLayout(target.dataset.layout); return; }
   if (name === 'focus-run') { ui.selectedRun = target.dataset.id; saveWorkspace(); render(); void loadMessages(); return; }
   if (name === 'close-run') { closeRun(target.dataset.id); render(); void loadMessages(); return; }
-  if (name === 'set-layout') { ui.layout = target.dataset.layout; saveWorkspace(); render(); void loadMessages(); return; }
-  if (name === 'open-live') { for (const run of ui.snapshot.runs.filter(run => activeStates.includes(run.state) || pending(run.id).length).slice(0, 4).reverse()) openRun(run.id); ui.layout = 'grid'; saveWorkspace(); render(); void loadMessages(); return; }
+  if (name === 'set-layout') { ui.layout = target.dataset.layout; ui.layoutChosen = true; saveWorkspace(); render(); void loadMessages(); return; }
+  if (name === 'open-live') { for (const run of ui.snapshot.runs.filter(run => activeStates.includes(run.state) || pending(run.id).length).slice(0, 4).reverse()) openRun(run.id); ui.layout = 'grid'; ui.layoutChosen = true; saveWorkspace(); render(); void loadMessages(); return; }
   if (name === 'open-task-run') { navigate('runs', { runId: taskRun(selectedTask()).id }); return; }
   if (name === 'open-evidence-run') { navigate('runs', { runId: target.dataset.id }); return; }
   if (name === 'add-source') {
@@ -1418,7 +1425,50 @@ document.addEventListener('error', event => {
   const link = image.closest('a'), figure = image.closest('figure');
   figure.classList.add('unavailable');
   image.replaceWith(Object.assign(document.createElement('span'), { className: 'image-missing', textContent: 'Preview unavailable' }));
-  if (link?.dataset.original) { link.href = link.dataset.original; link.title = 'Open the original tracker image'; }
+  if (link?.dataset.original) { link.href = link.dataset.original; link.title = 'Open the original tracker image'; link.removeAttribute('data-view'); }
+}, true);
+// Attachment viewer: images and videos from the issue or the evidence open here, with the others in the same view one arrow away.
+const viewer = { items: [], index: 0, actual: false };
+function openViewer(items, index) {
+  Object.assign(viewer, { items, index, actual: false });
+  const dialog = document.querySelector('#viewer'); renderViewer();
+  if (!dialog.open) dialog.showModal();
+}
+function renderViewer() {
+  const dialog = document.querySelector('#viewer'), item = viewer.items[viewer.index], count = viewer.items.length;
+  if (!item) return;
+  const nav = count > 1 ? `<button type="button" class="viewer-nav prev" data-viewer-step="-1" aria-label="Previous">${icon('chevron')}</button><button type="button" class="viewer-nav next" data-viewer-step="1" aria-label="Next">${icon('chevron')}</button>` : '';
+  dialog.innerHTML = `<div class="viewer-head"><span class="viewer-kind">${icon(item.kind === 'video' ? 'play' : 'image')}</span><strong title="${esc(item.name)}">${esc(item.name)}</strong>${count > 1 ? `<span class="viewer-count">${viewer.index + 1} of ${count}</span>` : ''}<div class="actions">${item.kind === 'image' ? `<button type="button" class="button small quiet" data-viewer-zoom>${viewer.actual ? 'Fit to window' : 'Actual size'}</button>` : ''}<a class="button small quiet" href="${esc(item.src)}" download="${esc(item.name)}">Download</a>${item.original ? `<a class="button small quiet" href="${esc(item.original)}" target="_blank" rel="noopener">Original</a>` : ''}<button type="button" class="button quiet icon-only" data-viewer-close aria-label="Close viewer">${icon('close')}</button></div></div>
+    <div class="viewer-stage${viewer.actual ? ' actual' : ''}"><p class="viewer-note" role="status">${item.kind === 'video' ? 'Loading the video…' : 'Loading…'}</p>${item.kind === 'video' ? `<video controls autoplay playsinline src="${esc(item.src)}"></video>` : `<img src="${esc(item.src)}" alt="${esc(item.name)}" data-viewer-zoom>`}${nav}</div>`;
+}
+function stepViewer(step) { if (viewer.items.length > 1) { viewer.index = (viewer.index + step + viewer.items.length) % viewer.items.length; viewer.actual = false; renderViewer(); } }
+document.addEventListener('click', event => {
+  const trigger = event.target.closest?.('[data-view]');
+  if (!trigger || trigger.closest('#viewer')) return;
+  event.preventDefault(); event.stopPropagation();
+  const scope = trigger.closest('.detail-pane, .pane, .main') || document;
+  const triggers = [...scope.querySelectorAll('[data-view]')];
+  openViewer(triggers.map(element => ({ kind: element.dataset.view, src: element.dataset.viewSrc, name: element.dataset.viewName, original: element.dataset.viewOriginal || '' })), Math.max(0, triggers.indexOf(trigger)));
+}, true);
+document.querySelector('#viewer').addEventListener('click', event => {
+  const dialog = event.currentTarget;
+  if (event.target === dialog || event.target.closest('[data-viewer-close]')) { dialog.close(); return; }
+  const step = event.target.closest('[data-viewer-step]'); if (step) { stepViewer(Number(step.dataset.viewerStep)); return; }
+  if (event.target.closest('[data-viewer-zoom]')) { viewer.actual = !viewer.actual; renderViewer(); }
+});
+// Arrow keys move between attachments wherever focus is, except inside a playing video, where they seek.
+document.addEventListener('keydown', event => {
+  if (!document.querySelector('#viewer')?.open || !['ArrowLeft', 'ArrowRight'].includes(event.key) || event.target.tagName === 'VIDEO') return;
+  event.preventDefault(); stepViewer(event.key === 'ArrowLeft' ? -1 : 1);
+});
+document.querySelector('#viewer').addEventListener('close', event => { event.currentTarget.innerHTML = ''; });
+// The stage shows a note until the media is ready, and says plainly when a format cannot play here.
+['load', 'loadeddata'].forEach(type => document.querySelector('#viewer').addEventListener(type, event => { if (event.target.closest?.('.viewer-stage')) event.target.closest('.viewer-stage').querySelector('.viewer-note')?.remove(); }, true));
+document.querySelector('#viewer').addEventListener('error', event => {
+  const stage = event.target.closest?.('.viewer-stage'); if (!stage) return;
+  const note = stage.querySelector('.viewer-note') || stage.appendChild(Object.assign(document.createElement('p'), { className: 'viewer-note' }));
+  note.textContent = event.target.tagName === 'VIDEO' ? 'This video cannot play here. It may be too large, unavailable, or in a format the window cannot play. Use Download or Original.' : 'This image could not be loaded. Use Original to open it in the tracker.';
+  event.target.remove();
 }, true);
 window.addEventListener('rex-theme', () => {
   const control = document.querySelector('[data-action="toggle-theme"]');

@@ -29,7 +29,7 @@ const posts = [
 ];
 // Synthetic tracker responses follow the live Morningmate shapes: filtered task rows, task columns, and COMPS rich text.
 const keys = new Set(['synthetic-key-for-test-only', 'synthetic-key-typed-during-discovery']);
-const image = 'https://morningmate.invalid/flowImg/preview.png';
+const image = 'https://morningmate.invalid/flowImg/preview.png', clip = 'https://morningmate.invalid/flowFile/repro.webm';
 const employees = [{ userId: 'rex@example.invalid', fullname: 'Rex Tester', email: 'rex@example.invalid', divisionName: 'QA' },
   ...Array.from({ length: 60 }, (_, index) => ({ userId: `person${index}@example.invalid`, fullname: `Synthetic Person ${index}`, email: `person${index}@example.invalid`, divisionName: index % 2 ? 'Platform' : 'Design' })),
   { userId: 'mina@example.invalid', fullname: 'Mina Park', email: 'mina@example.invalid', divisionName: 'Mobile' }];
@@ -57,7 +57,7 @@ const fetcher = async (value, options = {}) => {
     data = { post: { postId: post.postId, projectId: '317938', title: post.title, connectUrl: 'https://morningmate.invalid/l/synthetic',
       content: JSON.stringify({ COMPS: [{ COMP_TYPE: 'TEXT', COMP_DETAIL: { CONTENTS: 'Synthetic acceptance-test issue.\nReproduce the blank preview, fix its content, and verify the result.' } },
         { COMP_TYPE: 'IMAGE', COMP_DETAIL: { ATCH_URL: image, ORCP_FILE_NM: 'preview.png', WIDTH: '2', HEIGHT: '2' } }] }),
-      imageAttachments: [{ ATCH_URL: image, ORCP_FILE_NM: 'preview.png' }],
+      imageAttachments: [{ ATCH_URL: image, ORCP_FILE_NM: 'preview.png' }], attachments: [{ ATCH_URL: clip, ORCP_FILE_NM: 'repro.webm' }],
       remarks: [{ RGSR_NM: 'QA Lead', RGSN_DTTM: '20261020093000', SYSTEM_REMARK_YN: 'N', CNTN: 'Keep the selected project after switching.' },
         { RGSR_NM: 'QA Lead', RGSN_DTTM: '20261020090000', SYSTEM_REMARK_YN: 'Y', REMARK_CNTN: "'Team' → 'Rex Tester' Assignee has been updated." }],
       tasks: [{ TASK_SRNO: post.taskId, TASK_NM: post.title, STTS: status[post.taskStatus][1], TASK_COLUMN_REC: [] }] } };
@@ -65,7 +65,9 @@ const fetcher = async (value, options = {}) => {
   return new Response(JSON.stringify({ success: true, data }), { headers: { 'Content-Type': 'application/json' } });
 };
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGNgYGD4z8DAwMDAAAAEBQEAr8Q+0wAAAABJRU5ErkJggg==', 'base64');
-const imageFetcher = async value => String(value) === image ? new Response(png) : new Response('', { status: 404 });
+// A WebM container header is enough for the server's type check; the viewer then reports that it cannot play the clip.
+const webm = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81, 0x01, 0x42, 0xf2, 0x81, 0x04]);
+const imageFetcher = async value => String(value) === image ? new Response(png) : String(value) === clip ? new Response(webm) : new Response('', { status: 404 });
 const agentCommand = async () => ({ code: 0, stderr: '', stdout: JSON.stringify({ loggedIn: true, authMethod: 'synthetic', email: 'agent@example.invalid' }) });
 
 const jevRequests = [];
@@ -194,6 +196,22 @@ try {
   assert.equal(await page.locator('.issue-images img').evaluate(element => element.complete && element.naturalWidth), 2, 'Issue screenshot loads through the local cache');
   assert.equal(/COMP_TYPE|COMPS/.test(await page.locator('.detail-pane').innerText()), false);
   assert.ok((await page.locator('.issue-properties').innerText()).includes('Issue Type'));
+  // Screenshots and video attachments open in the viewer inside Rex Desk; arrows move between them.
+  await page.locator('.issue-images a').first().click();
+  const viewerDialog = page.locator('#viewer');
+  await viewerDialog.locator('.viewer-stage img').waitFor();
+  assert.equal(await viewerDialog.locator('.viewer-head strong').innerText(), 'preview.png');
+  assert.match(await viewerDialog.locator('.viewer-count').innerText(), /^1 of \d+$/);
+  await page.keyboard.press('ArrowRight');
+  await viewerDialog.locator('.viewer-head strong', { hasText: 'repro.webm' }).waitFor();
+  const clipResponse = await page.request.get(new URL(await page.locator('.file-view').getAttribute('data-view-src'), page.url()).href);
+  assert.equal(clipResponse.status(), 200); assert.equal(clipResponse.headers()['content-type'], 'video/webm');
+  await viewerDialog.locator('.viewer-note', { hasText: 'cannot play here' }).waitFor({ timeout: 10000 });
+  await page.keyboard.press('Escape');
+  assert.equal(await viewerDialog.evaluate(dialog => dialog.open), false);
+  await page.getByRole('button', { name: 'repro.webm', exact: true }).click();
+  assert.equal(await viewerDialog.evaluate(dialog => dialog.open), true, 'A video attachment opens the viewer directly');
+  await page.locator('#viewer [data-viewer-close]').click();
   assert.match(await page.locator('.jev-priority').innerText(), /#1 of 2 to run/);
   await page.locator('#task-search').fill('due date overseas');
   assert.equal(await page.locator('.task-row').count(), 0, 'Feedback task is filtered out by default');
@@ -247,6 +265,11 @@ try {
     await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
   });
   await page.screenshot({ path: path.join(screenshots, 'proof-desktop.png'), fullPage: true });
+  // The recorded proof opens larger in the same viewer and plays there.
+  await page.getByRole('button', { name: 'View larger', exact: true }).first().click();
+  await page.locator('#viewer .viewer-stage video').evaluate(video => new Promise((resolve, reject) => { if (video.readyState >= 2) resolve(); video.addEventListener('loadeddata', resolve, { once: true }); video.addEventListener('error', () => reject(new Error('Evidence video did not play in the viewer.')), { once: true }); setTimeout(() => reject(new Error('Evidence video did not load in the viewer.')), 8000); }));
+  await page.screenshot({ path: path.join(screenshots, 'viewer-desktop.png') });
+  await page.keyboard.press('Escape');
   // The sidebar resizes by dragging its edge or with the arrow keys, and the width survives a reload.
   await page.getByRole('button', { name: 'My issues', exact: true }).click();
   const side = page.locator('.side'), sideHandle = page.getByRole('separator', { name: 'Resize sidebar' });

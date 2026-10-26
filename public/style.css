@@ -575,3 +575,31 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 /* Inside a run pane the terminal sits on the pane's gutter and leaves most of the height to the conversation. */
 .pane-conversation>.orca-terminal{margin:8px 12px 0}
 .pane-conversation .orca-screen{max-height:30vh}
+
+/* Attachment viewer: one large dialog for issue images, image and video attachments, and evidence */
+dialog.viewer{width:min(1400px,calc(100vw - 32px));height:min(920px,calc(100dvh - 32px));max-width:none;max-height:none;padding:0;flex-direction:column;overflow:hidden}
+dialog.viewer[open]{display:flex}
+dialog.viewer::backdrop{background:rgba(5,7,10,.78)}
+.viewer-head{display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 8px 6px 14px;border-bottom:1px solid var(--line);flex-shrink:0}
+.viewer-head strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.viewer-kind{display:inline-flex;color:var(--muted)}.viewer-count{flex-shrink:0;font-size:11.5px;color:var(--faint)}
+dialog.viewer .viewer-head .actions{margin:0 0 0 auto;flex-wrap:nowrap;justify-content:flex-end}
+.viewer-stage{position:relative;flex:1;min-height:0;display:grid;place-items:center;overflow:hidden;background:#0b0d10}
+.viewer-stage img,.viewer-stage video{grid-area:1/1;display:block;max-width:100%;max-height:100%}
+.viewer-stage img{cursor:zoom-in}
+.viewer-stage.actual{place-items:start center;overflow:auto}.viewer-stage.actual img{max-width:none;max-height:none;cursor:zoom-out}
+.viewer-note{grid-area:1/1;max-width:46ch;padding:20px;color:#c9d1d9;font-size:12.5px;text-align:center}
+.viewer-nav{position:absolute;top:50%;z-index:1;display:grid;place-items:center;width:40px;height:56px;margin-top:-28px;border:0;border-radius:6px;background:rgba(0,0,0,.5);color:#fff}
+.viewer-nav:hover{background:rgba(0,0,0,.72)}.viewer-nav .icon{width:20px;height:20px}
+.viewer-nav.prev{left:10px}.viewer-nav.prev .icon{transform:rotate(180deg)}.viewer-nav.next{right:10px}
+.issue-files li{display:flex;align-items:center;gap:10px;min-width:0}
+.file-view{display:inline-flex;align-items:center;gap:6px;min-width:0;padding:0;border:0;background:none;color:var(--accent);font:inherit;text-align:left;overflow-wrap:anywhere}
+.file-view:hover{text-decoration:underline}.file-view .icon{width:13px;height:13px;flex-shrink:0}
+.file-original{flex-shrink:0;font-size:11px;color:var(--faint)}
+.proof-item img[data-view]{cursor:zoom-in}
+.proof-links{display:flex;align-items:center;gap:12px}.link-button{padding:0;border:0;background:none;color:var(--accent);font:inherit;font-size:12px}.link-button:hover{text-decoration:underline}
+@media(max-width:700px){dialog.viewer{width:100vw;height:100dvh;border-radius:0}.viewer-head .button.small{padding:0 6px}}
+
+/* The run just chosen in the list flashes its outline once, so in split or grid it is obvious which pane it is. */
+.pane.flash{animation:pane-flash .9s var(--ease)}
+@keyframes pane-flash{0%{box-shadow:inset 0 0 0 2px var(--accent)}100%{box-shadow:inset 0 0 0 2px transparent}}

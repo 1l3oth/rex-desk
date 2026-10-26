@@ -115,6 +115,14 @@ export class Desk {
     }
     return record({ state: started.length ? 'started' : 'skipped', runIds: started, issues: tasks.length, skipped: skipped.slice(0, 20), ...(started.length ? {} : { reason: skipped[0]?.reason || 'No issue was ready to start.' }) });
   }
+  // An agent may suggest starting work on an issue, but nothing starts until the human approves the card that names it.
+  async dispatch(parentRunId, input) {
+    const task = this.task(input.taskId), mode = input.mode === 'verify' ? 'verify' : 'fix';
+    const answer = await this.ask(parentRunId, { kind: 'approval', title: `Start ${mode === 'verify' ? 'a QA check' : 'a fix'} on “${task.title}”?`,
+      request: { taskId: task.id, issue: task.title, mode, provider: input.provider || this.store.config().provider, note: 'An agent asked to start this run. It starts only if you approve.' }, method: 'dispatch' });
+    if (answer.action !== 'accept') throw new Error('The human did not approve starting this run. Do not start it another way.');
+    return this.startTask({ ...input, parentRunId });
+  }
   async startConnectionAgent({ sourceId, provider }) {
     if (!['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
     const source = this.store.config().sources.find(item => item.id === sourceId);

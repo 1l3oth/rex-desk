@@ -40,7 +40,7 @@ test('typed model shorthand becomes a real Claude model ID, and family names sta
   assert.equal(store.config().models.claude, 'claude-opus-5-5'); store.close();
 });
 
-test('Codex runs Rex Desk tools without a prompt, except starting new work and other servers', async () => {
+test('Codex runs Rex Desk tools without its own prompt, while other servers still ask', async () => {
   const sent = [], asked = [];
   const runner = new CodexRunner({ run: { role: 'coordinator' }, ask: async request => { asked.push(request); return { action: 'accept' }; }, event() {}, signal: new AbortController().signal });
   runner.send = value => sent.push(value);
@@ -50,9 +50,9 @@ test('Codex runs Rex Desk tools without a prompt, except starting new work and o
   assert.deepEqual(sent.at(-1), { id: 7, result: { action: 'accept', content: {}, _meta: null } });
   assert.equal(asked.length, 0);
   await runner.serverRequest(approval('desk_dispatch'));
-  assert.equal(asked.length, 1, 'Starting new work still asks');
+  assert.equal(asked.length, 0, 'Rex Desk asks about dispatches itself, with the issue named');
   await runner.serverRequest(approval('desk_message', 'another_server'));
-  assert.equal(asked.length, 2, 'Another server’s tools still ask');
+  assert.equal(asked.length, 1, 'Another server’s tools still ask');
 });
 
 test('branches read as English summaries, never internal IDs, and a taken name gets a suffix', async () => {
@@ -166,4 +166,18 @@ test('a new run gets an English branch name that describes the QA issue, or the 
     assert.equal(store.get('run', run.id).branch, expected);
     await new Promise(resolve => setTimeout(resolve, 100)); store.close();
   }
+});
+
+test('an agent cannot start a run on an issue until the human approves the card that names it', async () => {
+  const { original } = await repository(), { store, desk } = workspace(original);
+  store.put('run', 'agent', { id: 'agent', role: 'coordinator', title: 'External AI', state: 'running', createdAt: now() });
+  const pending = desk.dispatch('agent', { taskId: 'task-1', repositoryId: 'repo' });
+  let card;
+  for (let attempt = 0; attempt < 50 && !card; attempt++) { card = store.list('interaction').find(item => item.state === 'pending' && item.method === 'dispatch'); if (!card) await new Promise(resolve => setTimeout(resolve, 20)); }
+  assert.match(card.title, /Start a fix on “파일 미리보기/);
+  assert.equal(store.list('run').filter(run => run.role === 'worker').length, 0, 'Nothing starts while the card waits');
+  desk.answer(card.id, { action: 'decline' });
+  await assert.rejects(pending, /did not approve/);
+  assert.equal(store.list('run').filter(run => run.role === 'worker').length, 0);
+  store.close();
 });
