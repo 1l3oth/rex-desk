@@ -214,3 +214,24 @@ test('a handoff carries the issue, the working rules, and what the last run did,
   assert.match(first, /Ask the human which checkout to work in/);
   assert.throws(() => handoffPrompt({}), /Choose an issue/);
 });
+
+test('MCP coverage is reported for every profile, not only the one runs use', async () => {
+  const { AgentProfiles: Profiles } = await import('../src/agents.js');
+  const store = new Store(temporary('mcp-coverage'));
+  const home = temporary('mcp-home');
+  const withEntry = path.join(home, 'has'), without = path.join(home, 'missing');
+  mkdirSync(withEntry, { recursive: true }); mkdirSync(without, { recursive: true });
+  writeFileSync(path.join(withEntry, '.claude.json'), JSON.stringify({ mcpServers: { rex_desk: { command: 'node' } } }));
+  writeFileSync(path.join(without, '.claude.json'), JSON.stringify({ mcpServers: {} }));
+
+  const agents = new Profiles(store);
+  assert.equal(agents.mcpInstalled('claude', withEntry), true);
+  assert.equal(agents.mcpInstalled('claude', without), false, 'A profile without the entry cannot reach Rex Desk');
+
+  const codexHome = path.join(home, 'codex');
+  mkdirSync(codexHome, { recursive: true });
+  writeFileSync(path.join(codexHome, 'config.toml'), '[mcp_servers.rex_desk]\ncommand = "node"\n');
+  assert.equal(agents.mcpInstalled('codex', codexHome), true);
+  assert.equal(agents.mcpInstalled('codex', path.join(home, 'nothing')), false);
+  store.close();
+});

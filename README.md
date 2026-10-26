@@ -110,6 +110,8 @@ Issues a developer marked complete (for example **Development Completed**) are Q
 
 ## Handing an issue to any session
 
+Settings → **Connect an existing AI** reports the `rex_desk` entry per profile, for example “rex_desk in 2 of 4 profiles · missing from ~/.claude”, and **Install in every profile** adds it to each Claude Code and Codex profile on this computer. A session started from a profile without it has no Rex Desk tools, whatever folder it runs in. With it, any session anywhere can call `desk_tasks` and `desk_task` to read the issues, and `desk_message`/`desk_ask` to reach you.
+
 **Copy handoff** on an issue, or beside a run’s follow-up box, copies one block of text: the Rex Desk working rules, the issue with its status, link and description, and what the last run did (its branch, worktree, repository, summary and last messages). Paste it into any Claude Code or Codex session, in any folder: the `rex_desk` MCP server is installed in each CLI’s user scope from Settings → **Connect an existing AI**, so that session already has the tools and only needs the context. The text tells it to call `desk_connect` first, then `desk_task`, and to say what it understands the remaining work to be before changing anything. No token, password or key is ever part of it.
 
 ## Schedule

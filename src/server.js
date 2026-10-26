@@ -12,7 +12,7 @@ import { inspectRepository, pickRepositoryFolder, cloneRepository, discoverRepos
 import { githubAccounts, startGithubLogin, cancelGithubLogin, switchGithubAccount } from './github.js';
 import { autostartStatus, setAutostart } from './autostart.js';
 import { issueBranch } from './branches.js';
-import { profileEnvironment } from './agents.js';
+import { profileEnvironment, discoverProfiles } from './agents.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
@@ -121,13 +121,22 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       if (url.pathname === '/api/agents/mcp' && request.method === 'POST') {
         const { provider } = await body(request);
         if (!['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
-        if (desk.agents.mcpInstalled(provider)) return json(response, 200, { installed: true, already: true });
         const command = resolveCommand(provider), proxy = path.join(root, 'src', 'stdio.js');
         const args = provider === 'claude' ? [...command.args, 'mcp', 'add', '--scope', 'user', 'rex_desk', '--', process.execPath, proxy]
           : [...command.args, 'mcp', 'add', 'rex_desk', '--', process.execPath, proxy];
-        // Profile environment decides which signed-in CLI configuration receives the local stdio entry.
-        await exec(command.command, args, { env: profileEnvironment(provider, desk.agents.selected(provider)), windowsHide: true, timeout: 30000 });
-        return json(response, 200, { installed: desk.agents.mcpInstalled(provider) });
+        // An agent started from any profile folder, in any directory, must be able to read tasks, so every profile
+        // this computer has gets the entry, not only the one Rex Desk's own runs use.
+        const profiles = discoverProfiles(provider, { configured: desk.agents.selected(provider) });
+        const results = [];
+        for (const item of profiles) {
+          if (desk.agents.mcpInstalled(provider, item.profile)) { results.push({ label: item.label, installed: true, already: true }); continue; }
+          try {
+            await exec(command.command, args, { env: profileEnvironment(provider, item.profile), windowsHide: true, timeout: 30000 });
+            results.push({ label: item.label, installed: desk.agents.mcpInstalled(provider, item.profile) });
+          } catch (error) { results.push({ label: item.label, installed: false, error: String(error.stderr || error.message).trim().split('\n').at(-1) }); }
+        }
+        desk.agents.invalidate(provider);
+        return json(response, 200, { installed: desk.agents.mcpInstalled(provider), everywhere: results.every(item => item.installed), profiles: results });
       }
       if (url.pathname === '/api/orca' && ['GET', 'POST'].includes(request.method)) {
         const repository = store.config().repositories.find(item => item.id === url.searchParams.get('repositoryId'));

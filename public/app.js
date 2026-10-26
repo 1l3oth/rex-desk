@@ -997,9 +997,21 @@ function renderAgentProfiles() {
       ${current?.error && current.installed && current.loggedIn === false && signed.length ? '' : current?.error ? `<p class="muted">${esc(current.error)}</p>` : ''}</div>`;
   }).join('') + `<div class="actions">${button(`${icon('sync')} Recheck sign-in`, 'recheck-setup', 'small quiet', `type="button" ${ui.agentsLoading ? 'disabled' : ''}`)}</div>`;
 }
+// An agent can only read tasks from a profile that has the entry, so coverage is shown per profile, not just the
+// one Rex Desk's own runs use: a session started from any other profile would otherwise have no Rex Desk tools.
+function mcpProviderRow(provider, agents) {
+  if (!agents) return `<div><strong>${providerName(provider)}</strong><span>Checking…</span></div>`;
+  const profiles = agents[provider]?.profiles || [];
+  const done = profiles.filter(item => item.mcp);
+  const missing = profiles.filter(item => !item.mcp);
+  const label = profiles.length
+    ? (missing.length ? `rex_desk in ${done.length} of ${profiles.length} profiles · missing from ${missing.map(item => esc(item.label)).join(', ')}` : `${icon('check')} rex_desk in every profile (${profiles.length})`)
+    : 'No profile found';
+  return `<div><strong>${providerName(provider)}</strong><span>${label}</span>${missing.length ? button('Install in every profile', 'install-mcp', 'small', `type="button" data-provider="${provider}"`) : ''}</div>`;
+}
 function renderMcpSetup() {
   const agents = ui.agents;
-  return `<div class="mcp-setup"><div class="mcp-install">${['claude', 'codex'].map(provider => `<div><strong>${providerName(provider)}</strong><span>${agents ? agents[provider]?.mcp ? `${icon('check')} rex_desk installed in ${esc(selectedProfile(provider)?.label || 'selected profile')}` : `Not installed in ${esc(selectedProfile(provider)?.label || 'the selected profile')}` : 'Checking…'}</span>${agents && !agents[provider]?.mcp ? button('Install local MCP', 'install-mcp', 'small', `type="button" data-provider="${provider}"`) : ''}</div>`).join('')}</div>
+  return `<div class="mcp-setup"><div class="mcp-install">${['claude', 'codex'].map(provider => mcpProviderRow(provider, agents)).join('')}</div>
     <div class="prompt-choice"><span>Or give your AI a setup prompt:</span>${button(`${icon('copy')} Copy local setup prompt`, 'copy-setup-prompt', 'small', 'type="button" data-target="local"')}${button(`${icon('copy')} Copy cloud setup prompt`, 'copy-setup-prompt', 'small quiet', 'type="button" data-target="remote"')}</div>
     <small class="muted">The local prompt contains no key. The cloud prompt uses a <code>REX_DESK_TOKEN</code> placeholder; give your AI the token separately only when you choose to.</small>${ui.setupPrompt ? `<pre class="setup-prompt" tabindex="0">${esc(ui.setupPrompt)}</pre>` : ''}</div>`;
 }
@@ -1226,7 +1238,7 @@ document.addEventListener('click', event => {
   if (name === 'install-mcp') {
     target.disabled = true; target.textContent = 'Installing…';
     void action(async () => {
-      try { const result = await api('/agents/mcp', { method: 'POST', data: { provider: target.dataset.provider } }); toast(result.installed ? `Rex Desk MCP is available in ${providerName(target.dataset.provider)}. Restart open sessions to load it.` : 'The CLI finished, but the MCP entry was not found. Use the setup prompt instead.', !result.installed); }
+      try { const result = await api('/agents/mcp', { method: 'POST', data: { provider: target.dataset.provider } }); const failed = (result.profiles || []).filter(item => !item.installed); toast(failed.length ? `Added to ${(result.profiles || []).length - failed.length} profile(s); ${failed.map(item => item.label).join(', ')} failed. Use the setup prompt for those.` : `Rex Desk MCP is in every ${providerName(target.dataset.provider)} profile. Restart open sessions to load it.`, failed.length > 0); }
       finally { await loadAgents(); }
     }); return;
   }
