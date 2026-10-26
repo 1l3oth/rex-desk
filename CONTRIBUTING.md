@@ -2,11 +2,11 @@
 
 New to the project? Start with [docs/ONBOARDING.md](docs/ONBOARDING.md).
 
-## How changes reach main
+## How changes reach master
 
 - Only the owner's two accounts, `1l3oth` and `DaraBoth`, have push access. Everyone else forks the repository and opens pull requests from the fork.
-- Nobody pushes to `main` directly. Every change goes through a pull request.
-- `npm ci` (or `npm install`) installs a Git hook that refuses pushes to `main`. Do not bypass it with `--no-verify`.
+- Nobody pushes to `master`, the default branch, directly. Every change goes through a pull request.
+- `npm ci` (or `npm install`) installs a Git hook that refuses pushes to `master`. Do not bypass it with `--no-verify`.
 - CI runs `npm test` and `npm run test:browser` on Windows for every pull request. It must pass before merging.
 - The repository owner reviews and merges.
 

@@ -7,7 +7,7 @@ import { now, id, modelName } from './store.js';
 import { CodexRunner, ClaudeRunner } from './runners.js';
 import { Sources } from './providers.js';
 import { AgentProfiles } from './agents.js';
-import { OrcaRunner } from './orca.js';
+import { OrcaRunner, SessionMirror, sendToOrca } from './orca.js';
 import { Evidence } from './browser.js';
 import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
@@ -43,8 +43,8 @@ export function validateAnswer(interaction, answer) {
 }
 
 export class Desk {
-  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, imageFetcher = fetch } = {}) {
-    this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
+  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, imageFetcher = fetch, orcaOptions } = {}) {
+    this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher; this.orcaOptions = orcaOptions;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
@@ -85,10 +85,30 @@ export class Desk {
     const run = runId && this.store.get('run', runId);
     return run ? { role: run.role, runId } : null;
   }
+  // The conversation of an Orca run, read from the agent's own session log; a message sent from Rex Desk is shown at once, so its echo is skipped.
+  mirror(run) {
+    const key = run.provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME', echoes = this.echoes || (this.echoes = new Map());
+    return new SessionMirror({ provider: run.provider, cwd: run.worktree, configDirectory: this.agents.environment(run.provider)[key], since: run.turnStartedAt || run.startedAt || run.createdAt, state: run.mirror,
+      persist: state => this.store.put('run', run.id, { ...this.run(run.id), mirror: state }),
+      emit: (kind, data) => {
+        const pending = echoes.get(run.id) || [], match = kind === 'human-message' && pending.findIndex(text => text === data.text.replace(/\s+/g, ' ').trim());
+        if (kind === 'human-message' && match >= 0) { pending.splice(match, 1); return; }
+        this.store.event(run.id, kind, data, kind === 'human-message' || kind === 'phase');
+      } });
+  }
+  async say(runId, text) {
+    const run = this.run(runId);
+    if (run.execution !== 'orca' || !this.live.has(runId)) throw new Error('Only a running Orca agent can be messaged while it works. Use the follow-up box when the run has ended.');
+    await sendToOrca(run, text, this.orcaOptions);
+    const line = String(text).replace(/\s+/g, ' ').trim(), echoes = this.echoes || (this.echoes = new Map());
+    echoes.set(runId, [...(echoes.get(runId) || []), line].slice(-20));
+    this.store.event(runId, 'human-message', { text: line, via: 'rex' }, true);
+    return { sent: true };
+  }
   // Watch Orca runs that survived a restart until their terminal ends, then settle them like any finished run.
   reattachOrca(options = {}) {
     for (const run of this.store.list('run').filter(item => item.reattach)) {
-      const controller = new AbortController(), watcher = new OrcaRunner({ run, signal: controller.signal, orcaOptions: options.orcaOptions, pollMs: options.pollMs, isDone: () => terminalStates.has(this.run(run.id).state) });
+      const controller = new AbortController(), watcher = new OrcaRunner({ run, signal: controller.signal, orcaOptions: options.orcaOptions, pollMs: options.pollMs, isDone: () => terminalStates.has(this.run(run.id).state), mirror: run.worktree ? this.mirror(run) : null, event: (kind, data) => this.store.event(run.id, kind, data) });
       this.live.set(run.id, { controller, runner: watcher }); this.patchRun(run.id, { reattach: false });
       this.store.event(run.id, 'phase', { text: 'Rex Desk restarted; still watching the Orca terminal' }, true);
       void watcher.watch(run.sessionId.slice(5), { reattached: true })
@@ -252,7 +272,7 @@ export class Desk {
           this.store.event(runId, kind, data);
         } };
       const runner = this.runnerFactory ? this.runnerFactory(options)
-        : run.execution === 'orca' && run.role === 'worker' ? new OrcaRunner({ ...options, dataDirectory: this.store.directory, isDone: () => terminalStates.has(this.run(runId).state) })
+        : run.execution === 'orca' && run.role === 'worker' ? new OrcaRunner({ ...options, dataDirectory: this.store.directory, isDone: () => terminalStates.has(this.run(runId).state), mirror: this.mirror({ ...run, mirror: undefined, turnStartedAt: now() }) })
         : run.provider === 'codex' ? new CodexRunner(options) : new ClaudeRunner(options);
       this.live.get(runId).runner = runner;
       // Each turn records its own start, so a resumed run shows time since it resumed, not since it was first created.

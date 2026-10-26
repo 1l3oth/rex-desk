@@ -9,7 +9,7 @@ const taskFile = (task, address) => `/api/task-file?task=${encodeURIComponent(ta
 const mediaKind = name => /\.(png|jpe?g|gif|webp|bmp)$/i.test(name) ? 'image' : /\.(mp4|webm|mov|m4v)$/i.test(name) ? 'video' : '';
 const viewable = (kind, src, name, original = '') => `data-view="${kind}" data-view-src="${esc(src)}" data-view-name="${esc(name)}"${original ? ` data-view-original="${esc(original)}"` : ''}`;
 const ui = { page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', search: '', source: '', category: '', snapshot: null, runEvents: new Map(), journals: new Map(), transcripts: new Map(), openOps: new Set(), openRuns: [], layout: 'grid', runSide: 'runs', selectedDecision: '', draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false,
-  sort: 'priority', orcaScreens: new Map(), orcaClosed: new Set(), detailLayout: 'tabs', tabSecond: 'messages', splitRatio: 0.5, sideWidth: 0, dragging: false, missedRender: false };
+  sort: 'priority', orcaScreens: new Map(), orcaOpen: new Set(), detailLayout: 'tabs', tabSecond: 'messages', splitRatio: 0.5, sideWidth: 0, dragging: false, missedRender: false };
 const labels = { queued: 'Queued', starting: 'Preparing', running: 'Working', waiting: 'Needs you', needs_evidence: 'Needs evidence', ready_for_review: 'Ready for review', published: 'PR created', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted', finished: 'Finished', qa_passed: 'QA passed', qa_failed: 'QA failed', qa_blocked: 'QA blocked' };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const icon = name => `<svg class="icon" aria-hidden="true"><use href="/icons.svg#${name}"></use></svg>`;
@@ -427,13 +427,15 @@ function transcript(events) {
       const call = known || { role: 'tool', key: item.id, name: item.type === 'mcpToolCall' ? toolName(item.tool) : item.type === 'commandExecution' ? 'command' : item.type, input: item.arguments || (item.command ? { command: item.command } : item.changes ? { files: item.changes.map(change => change.path) } : {}), at: event.createdAt };
       if (event.method === 'item/completed') { call.result = item.aggregatedOutput ?? item.result ?? item.error ?? item.status; call.error = item.status === 'failed'; }
       if (!known) { calls.set(item.id, call); items.push(call); }
-    } else if (event.kind === 'turn-start') items.push({ role: 'status', text: `${event.resumed ? 'Resumed' : 'Started'} with ${providerName(event.provider)}`, at: event.createdAt });
+    } else if (event.kind === 'human-message') items.push({ role: 'human', text: event.text, at: event.createdAt });
+    else if (event.kind === 'turn-start') items.push({ role: 'status', text: `${event.resumed ? 'Resumed' : 'Started'} with ${providerName(event.provider)}`, at: event.createdAt });
     else if (event.kind === 'agent-result') items.push({ role: 'status', text: `Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${event.cost ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
     else if (event.visible || event.kind === 'error') items.push({ role: 'message', event });
   }
   return items;
 }
 function renderTranscriptItem(item) {
+  if (item.role === 'human') return `<article class="message human-text"><div class="message-label"><strong>You</strong><time>${time(item.at)}</time></div><div class="md">${renderMarkdown(item.text)}</div></article>`;
   if (item.role === 'agent') return `<article class="message agent-text"><div class="message-label">${icon('agents')}<strong>Agent</strong><time>${time(item.at)}</time></div><div class="md">${renderMarkdown(item.text)}</div></article>`;
   if (item.role === 'tool') return `<details class="tool-call${item.error ? ' failed' : ''}" data-op="${esc(item.key)}" ${ui.openOps.has(item.key) ? 'open' : ''}><summary>${icon(item.result === undefined ? 'clock' : item.error ? 'alert' : 'check')}<strong>${esc(item.name)}</strong><span>${esc(toolSummary(item.input))}</span><time>${time(item.at)}</time></summary><pre>${esc(clip(item.input, 4000))}</pre>${item.result !== undefined ? `<pre class="tool-result">${esc(clip(item.result, 6000))}</pre>` : ''}</details>`;
   if (item.role === 'status') return `<p class="transcript-status">${esc(item.text)} · ${time(item.at)}</p>`;
@@ -451,12 +453,12 @@ function renderMessages(runId) {
 }
 function orcaTerminal(run) {
   const screen = ui.orcaScreens.get(run.id);
-  return `<details class="orca-terminal" data-orca-panel="${run.id}" ${ui.orcaClosed.has(run.id) ? '' : 'open'}><summary>${icon('terminal')}<strong>Orca terminal</strong><span data-orca-status="${run.id}">${esc(screen?.error || (screen ? (screen.status === 'running' ? 'Live' : screen.status || 'Ended') : 'Connecting…'))}</span></summary><pre class="orca-screen" data-orca-screen="${run.id}" tabindex="0" aria-label="Orca terminal output">${esc((screen?.lines || []).join('\n'))}</pre></details>`;
+  return `<details class="orca-terminal" data-orca-panel="${run.id}" ${ui.orcaOpen.has(run.id) ? 'open' : ''}><summary>${icon('terminal')}<strong>Terminal</strong><span data-orca-status="${run.id}">${esc(screen?.error || (screen ? (screen.status === 'running' ? 'Live' : screen.status || 'Ended') : 'Connecting…'))}</span></summary><pre class="orca-screen" data-orca-screen="${run.id}" tabindex="0" aria-label="Orca terminal output">${esc((screen?.lines || []).join('\n'))}</pre></details>`;
 }
 async function pollOrcaScreens() {
   for (const element of document.querySelectorAll('[data-orca-screen]')) {
     const runId = element.dataset.orcaScreen, run = ui.snapshot?.runs.find(item => item.id === runId);
-    if (!run || ui.orcaClosed.has(runId) || (ui.orcaScreens.has(runId) && doneStates.includes(run.state))) continue;
+    if (!run || !ui.orcaOpen.has(runId) || (ui.orcaScreens.has(runId) && doneStates.includes(run.state))) continue;
     try { const screen = await api(`/runs/${runId}/terminal`); ui.orcaScreens.set(runId, screen); }
     catch (error) { ui.orcaScreens.set(runId, { ...(ui.orcaScreens.get(runId) || { lines: [] }), error: error.message }); }
     const screen = ui.orcaScreens.get(runId), target = document.querySelector(`[data-orca-screen="${runId}"]`);
@@ -605,6 +607,7 @@ function renderPane(run) {
 // A live run can only be stopped; a finished one takes a follow-up in place, continuing with the same agent.
 function renderPaneFooter(run) {
   if (run.external) return '';
+  if (run.execution === 'orca' && run.sessionId?.startsWith('orca:') && ['running', 'waiting'].includes(run.state)) return `<form class="pane-foot composer" data-say="${run.id}"><input name="text" required aria-label="Message to ${esc(run.title)}" placeholder="Message the agent…" autocomplete="off"><button class="button small primary" type="submit">Send</button>${button('Stop', 'stop-run', 'small quiet danger', 'type="button"')}</form>`;
   if (activeStates.includes(run.state)) return `<footer class="pane-foot"><span>${run.state === 'waiting' ? 'Waiting for your answer above' : 'Working. Follow-ups open when this turn ends.'}</span>${button('Stop', 'stop-run', 'small quiet danger')}</footer>`;
   const review = run.state === 'ready_for_review';
   return `<form class="pane-foot composer" data-composer="${run.id}"><input name="prompt" required aria-label="Follow-up for ${esc(run.title)}" placeholder="${review ? 'Request changes…' : 'Continue with a follow-up…'}" autocomplete="off"><button class="button small" type="submit">${review ? 'Request changes' : 'Send'}</button>${button('Switch agent', 'resume-run', 'small quiet', 'type="button" title="Continue with another provider or execution"')}${review ? button('Create draft PR', 'publish-run', 'small primary', 'type="button"') : ''}</form>`;
@@ -1531,7 +1534,7 @@ document.addEventListener('scroll', event => {
 }, true);
 document.addEventListener('toggle', event => {
   const op = event.target.dataset?.op; if (op) { if (event.target.open) ui.openOps.add(op); else ui.openOps.delete(op); }
-  const panel = event.target.dataset?.orcaPanel; if (panel) { if (event.target.open) ui.orcaClosed.delete(panel); else ui.orcaClosed.add(panel); }
+  const panel = event.target.dataset?.orcaPanel; if (panel) { if (event.target.open) ui.orcaOpen.add(panel); else ui.orcaOpen.delete(panel); }
   const runId = event.target.dataset?.journal;
   if (runId && event.target.open) void action(async () => {
     ui.journals.set(runId, await api(`/runs/${runId}/journal`)); const target = document.getElementById(`journal-${runId}`); if (target) target.innerHTML = renderJournal(runId);
@@ -1553,9 +1556,15 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('submit', event => {
   const form = event.target;
-  if (!['settings-form', 'launch-form', 'publish-form'].includes(form.id) && !form.dataset.interaction && !form.dataset.composer) return;
+  if (!['settings-form', 'launch-form', 'publish-form'].includes(form.id) && !form.dataset.interaction && !form.dataset.composer && !form.dataset.say) return;
   event.preventDefault();
   void action(async () => {
+    if (form.dataset.say) {
+      const input = form.elements.text, submit = form.querySelector('[type=submit]'); submit.disabled = true;
+      try { await api(`/runs/${form.dataset.say}/say`, { method: 'POST', data: { text: input.value } }); input.value = ''; }
+      finally { submit.disabled = false; }
+      await refresh({ force: true }); document.querySelector(`[data-say="${form.dataset.say}"] input`)?.focus(); return;
+    }
     if (form.dataset.composer) {
       const run = ui.snapshot.runs.find(item => item.id === form.dataset.composer), submit = form.querySelector('[type=submit]'); submit.disabled = true;
       try { await api(`/runs/${run.id}/resume`, { method: 'POST', data: { provider: run.provider, prompt: form.elements.prompt.value } }); form.reset(); toast(`Follow-up sent. ${providerName(run.provider)} continues this run.`); }

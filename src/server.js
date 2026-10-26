@@ -177,7 +177,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         return serveFile(request, response, image, { cache: 'private, max-age=604800' });
       }
       if (interactionMatch && request.method === 'POST') return json(response, 200, desk.answer(interactionMatch[1], await body(request)));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish|orca|tracker|terminal))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish|orca|tracker|terminal|say))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         if (request.method === 'GET') {
@@ -188,6 +188,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         if (request.method === 'POST') {
           const input = await body(request);
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
+          if (action === 'say') return json(response, 200, await desk.say(runId, input.text));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));
           if (action === 'verify') return json(response, 200, await desk.verify(runId));
           if (action === 'tracker') return json(response, 200, await desk.trackerFromQa(runId, input.phase));

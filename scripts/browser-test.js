@@ -272,16 +272,18 @@ try {
   await page.keyboard.press('Escape');
   // The sidebar resizes by dragging its edge or with the arrow keys, and the width survives a reload.
   await page.getByRole('button', { name: 'My issues', exact: true }).click();
+  // A live refresh can redraw the page mid-measurement; measure again until the sidebar is on screen.
+  const sideWidth = async () => { for (let attempt = 0; attempt < 50; attempt++) { const box = await page.locator('.side').boundingBox().catch(() => null); if (box) return Math.round(box.width); await page.waitForTimeout(100); } throw new Error('The sidebar did not appear.'); };
   const side = page.locator('.side'), sideHandle = page.getByRole('separator', { name: 'Resize sidebar' });
-  const narrow = (await side.boundingBox()).width, grip = await sideHandle.boundingBox();
+  const narrow = await sideWidth(), grip = await sideHandle.boundingBox();
   await page.mouse.move(grip.x + grip.width / 2, grip.y + 300); await page.mouse.down();
   await page.mouse.move(grip.x + 180, grip.y + 300, { steps: 6 }); await page.mouse.up();
-  const wide = Math.round((await side.boundingBox()).width);
+  const wide = await sideWidth();
   assert.ok(wide > narrow + 150, `Sidebar grows when dragged (${narrow} to ${wide})`);
   await sideHandle.focus(); await page.keyboard.press('ArrowLeft');
-  assert.equal(Math.round((await side.boundingBox()).width), wide - 16);
+  assert.equal(await sideWidth(), wide - 16);
   await page.reload(); await page.locator('.task-row').first().waitFor();
-  assert.equal(Math.round((await page.locator('.side').boundingBox()).width), wide - 16, 'Sidebar width is remembered');
+  assert.equal(await sideWidth(), wide - 16, 'Sidebar width is remembered');
   // Dragging the Evidence tab onto the right half of the issue shows it beside the brief.
   await page.locator('.task-open', { hasText: posts[0].title }).click();
   const evidenceTab = page.getByRole('tab', { name: 'Evidence', exact: true }), tabBox = await evidenceTab.boundingBox(), body = await page.locator('.detail-body').boundingBox();
