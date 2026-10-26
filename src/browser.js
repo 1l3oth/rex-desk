@@ -6,6 +6,7 @@ import { now } from './store.js';
 import { flowPreview } from './flow-runtime.js';
 import { electronLaunch } from './electron-runtime.js';
 import { effectiveRepository } from './project-detect.js';
+import { siteEnvironment, releasedToProduction, testSites } from './sites.js';
 
 const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
@@ -71,17 +72,30 @@ export class Evidence {
     } catch { return false; }
   }
   // The QA agent chooses the test site for each issue: wherever the project runs with the developer's fix.
-  qaSite(address) {
+  qaSite(address, run) {
     let url;
     try { url = new URL(String(address || '')); } catch { throw new Error('Choose the test site: call open with url set to the address where this project runs for this issue, for example its dev or QA server.'); }
     if (!['https:', 'http:'].includes(url.protocol)) throw new Error('The test site must be an http(s) address.');
     if (this.isDesk(url.href)) throw new Error('Rex Desk itself cannot be the test site.');
+    if (run) this.refuseProduction(url, run);
     return url;
+  }
+  // A fix that is only development-complete has not reached production, so a QA check there would test the old code
+  // on real customers' data. The human still decides: naming the site in an answer to this run's question allows it.
+  refuseProduction(url, run) {
+    const site = siteEnvironment(url.href);
+    if (site.environment !== 'production') return;
+    const task = run.taskId ? this.store.get('task', run.taskId) : null;
+    const status = String(task?.statusName || task?.status || '');
+    if (releasedToProduction(status)) return;
+    if (this.store.list('interaction').some(item => item.runId === run.id && item.state === 'answered'
+      && JSON.stringify(item.answer || '').toLowerCase().includes(site.host))) return;
+    throw new Error(`${site.host} is the live ${site.product} service, and this issue's status is ${status ? JSON.stringify(status) : 'unknown'}, which does not say the fix is released. Test it where the fix runs now: ${testSites(site.product).join(', ')}. If production really is the right site, ask the human with desk_ask and have their answer name ${site.host}.`);
   }
   // QA checks browse the site the agent chose, signed in with the session the person saved from their own sign-in.
   async startQa(runId, run, address) {
     const resume = this.resumes.get(runId); this.resumes.delete(runId);
-    const site = this.qaSite(address || resume?.url || run.qaUrl);
+    const site = this.qaSite(address || resume?.url || run.qaUrl, run);
     const directory = this.directory(runId), { chromium } = await import('playwright');
     let browser;
     try { browser = await chromium.launch({ headless: true }); }
@@ -152,7 +166,7 @@ export class Evidence {
     this.emit(runId, 'browser-action', { action, selector, url, value: action === 'fill' ? '[input hidden from journal]' : value });
     switch (action) {
       // A QA run may move to another site it chose, for example a second region; the recording continues.
-      case 'open': if (session.qa && url && !opening) await this.openQaSite(runId, session, this.qaSite(url)); break;
+      case 'open': if (session.qa && url && !opening) await this.openQaSite(runId, session, this.qaSite(url, this.getRun(runId))); break;
       case 'navigate': {
         const target = new URL(url || '/', session.electron ? page.url() : session.baseUrl);
         if (target.origin !== (session.electron ? new URL(page.url()).origin : session.baseUrl)) throw new Error(session.qa ? 'Recorded browser navigation must stay on the test site origin. Use open with url to switch to another site.' : 'Recorded browser navigation must stay on this run’s preview origin.');
@@ -162,6 +176,11 @@ export class Evidence {
       case 'fill': {
         const local = /^https?:\/\/(127\.|localhost|\[::1\])/.test(page.url()), saved = this.store.config().testAccount || {};
         const account = { username: (local && saved.localUsername) || saved.username }, password = (local && saved.localUsername && this.store.testPassword('local')) || this.store.testPassword(), typed = String(value || '');
+        // The saved test account exists on the test servers. Typing it into the live service signs real customers' site
+        // in with it, and it fails anyway, so Rex Desk refuses instead of sending those credentials to production.
+        const site = siteEnvironment(page.url());
+        if (site.environment === 'production' && /\{\{test\.(username|password)\}\}/.test(typed))
+          throw new Error(`Rex Desk does not type the saved test account into ${site.host}, the live ${site.product} service: that account belongs to the test servers. Open the site where this fix runs (${testSites(site.product).join(', ')}), or ask the human with desk_ask to sign in to ${site.host} themselves from Settings → QA verification.`);
         if (typed.includes('{{test.password}}')) {
           if (!password) throw new Error('No test account password is saved in Settings → QA verification. Ask the human with desk_ask.');
           if (await page.locator(selector).getAttribute('type') !== 'password') throw new Error('{{test.password}} can only be typed into a password field.');

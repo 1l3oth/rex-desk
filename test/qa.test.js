@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store, defaults, now } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
+import { siteEnvironment, releasedToProduction } from '../src/sites.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const idle = () => ({ start: async () => ({ status: 'completed' }), interrupt: async () => {}, close() {} });
@@ -101,4 +102,55 @@ test('the schedule runs once per scheduled day and starts the top-ranked issues 
   assert.ok(first.skipped.some(item => item.taskId === 'bug-1' && /fix runs are off/.test(item.reason)));
   assert.equal(store.list('run').some(item => item.role === 'coordinator'), false, 'No main agent is started');
   await settle(); store.close();
+});
+
+test('a site is production only when the product itself calls it production', () => {
+  assert.equal(siteEnvironment('https://morningmate.com/l/cJDj').environment, 'production');
+  assert.equal(siteEnvironment('https://morningmate.com/l/cJDj').product, 'Morningmate');
+  assert.equal(siteEnvironment('https://www.flow.team').environment, 'production');
+  assert.equal(siteEnvironment('https://seco.flow.team').environment, 'production', 'A customer subdomain is still the live service');
+  for (const site of ['https://develop.morningmate.com', 'https://staging.morningmate.com', 'https://release.flow.team', 'https://morningmate.info', 'http://127.0.0.1:3000', 'https://qa.example.com'])
+    assert.equal(siteEnvironment(site).environment, 'test', site);
+  assert.equal(siteEnvironment('https://example.com').environment, 'unknown', 'An unknown host is not assumed to be production');
+  assert.equal(releasedToProduction('Development Completed'), false);
+  assert.ok(releasedToProduction('배포완료') && releasedToProduction('Released'));
+});
+
+test('a QA check on an unreleased fix is kept off production, and the human can still allow it', () => {
+  const { store, desk } = workspace();
+  store.put('run', 'qa-prod', { id: 'qa-prod', role: 'verifier', taskId: 'done-1', state: 'running', createdAt: now() });
+  const run = store.get('run', 'qa-prod');
+  assert.throws(() => desk.evidence.qaSite('https://morningmate.com/l/cJDj', run),
+    /live Morningmate service.*Development Completed.*develop\.morningmate\.com/s);
+  assert.doesNotThrow(() => desk.evidence.qaSite('https://develop.morningmate.com', run));
+
+  store.put('task', 'shipped', { id: 'shipped', title: 'Shipped fix', statusName: 'Released', createdAt: now() });
+  assert.doesNotThrow(() => desk.evidence.qaSite('https://morningmate.com', { ...run, taskId: 'shipped' }), 'A released fix is on production');
+
+  store.put('interaction', 'ask-1', { id: 'ask-1', runId: 'qa-prod', state: 'answered', answer: { action: 'accept', content: { answer: 'Use https://morningmate.com, it is live there' } } });
+  assert.doesNotThrow(() => desk.evidence.qaSite('https://morningmate.com/l/cJDj', run), 'The human named the site in their answer');
+  store.close();
+});
+
+test('the saved test account is never typed into production', async () => {
+  const { store, desk } = workspace();
+  store.saveConfig({ ...store.publicConfig(), testAccount: { username: 'qa@example.com', password: 'secret' } });
+  const page = { url: () => 'https://morningmate.com/signin.act', locator: () => { throw new Error('the field must never be filled'); } };
+  desk.evidence.sessions.set('qa-fill', { page, qa: true, baseUrl: 'https://morningmate.com', assertions: [], actions: 0 });
+  store.put('run', 'qa-fill', { id: 'qa-fill', role: 'verifier', taskId: 'done-1', state: 'running', createdAt: now() });
+  await assert.rejects(desk.evidence.action('qa-fill', { action: 'fill', selector: '#id', value: '{{test.username}}' }),
+    /does not type the saved test account into morningmate\.com/);
+  await assert.rejects(desk.evidence.action('qa-fill', { action: 'fill', selector: '#pw', value: '{{test.password}}' }),
+    /belongs to the test servers/);
+  desk.evidence.sessions.delete('qa-fill');
+  store.close();
+});
+
+test('the QA prompt names each environment and the status rule instead of only production', () => {
+  const { store, desk } = workspace();
+  const prompt = desk.prompt({ id: 'p-1', role: 'verifier', taskId: 'done-1', instructions: '' });
+  assert.match(prompt, /https:\/\/develop\.morningmate\.com/);
+  assert.match(prompt, /refuses a production site for any other status/);
+  assert.match(prompt, /never typed into production/);
+  store.close();
 });
