@@ -520,10 +520,18 @@ export class Desk {
     return result;
   }
   // The team never opens pull requests into master; develop (or release, when asked) is the target.
-  async publish(runId, { title, body, targetBranch, approved = false } = {}) {
-    const run = this.run(runId);
-    if (!approved) throw new Error('Publishing requires explicit approval from the dashboard.');
-    if (run.state !== 'ready_for_review') throw new Error('Finish verified work before creating a PR.');
+  // What desk_finish recorded as missing, so a refusal names the step to repeat instead of only the run's state.
+  missingEvidence(run) {
+    const missing = [!run.checks?.testsPassed && 'the repository tests have not passed for the files as they are now',
+      !run.checks?.recordedVideo && 'no browser recording was made',
+      !run.checks?.browserAssertionPassed && 'no browser assertion matches the current files'].filter(Boolean);
+    return missing.length ? missing.join(', ') : 'its evidence is incomplete';
+  }
+  // The same preconditions run before the human is asked and again after they approve, so nobody approves a pull
+  // request that is then refused, and nothing that changed in between slips through.
+  async publishChecks(run, targetBranch) {
+    if (run.state === 'needs_evidence') throw new Error(`This run cannot open a pull request yet: ${this.missingEvidence(run)}. Put that right, then run desk_verify and desk_finish again before desk_publish.`);
+    if (run.state !== 'ready_for_review') throw new Error(`Finish verified work before creating a PR. This run is ${run.state}; commit the fix, run desk_verify, then desk_finish, and publish once it is ready for review.`);
     if (run.verification?.fingerprint !== await fingerprint(run.worktree)) throw new Error('Files changed after verification. Run verification again.');
     const target = targetBranch || run.targetBranch;
     if (/(^|\/)(real-)?master$/.test(target)) throw new Error(`Rex Desk never opens a pull request into ${target}. Choose the develop branch, or release when that is intended.`);
@@ -531,6 +539,12 @@ export class Desk {
     if (await git(run.worktree, ['status', '--porcelain'])) throw new Error('Commit the verified changes first. Resume the agent and ask it to commit.');
     const behind = await git(run.worktree, ['rev-list', '--count', `${run.baseCommit}..HEAD`]);
     if (Number(behind) === 0) throw new Error('No commits to publish.');
+    return target;
+  }
+  async publish(runId, { title, body, targetBranch, approved = false } = {}) {
+    const run = this.run(runId);
+    if (!approved) throw new Error('Publishing requires explicit approval from the dashboard.');
+    const target = await this.publishChecks(run, targetBranch);
     await git(run.worktree, ['push', '-u', 'origin', run.branch]);
     const file = path.join(this.evidence.directory(runId), 'pull-request.md');
     writeFileSync(file, `${body || run.summary || ''}\n\nVerification: ${run.verification.command}\nResult: passed\nTask: ${this.task(run.taskId).sourceName} ${this.task(run.taskId).externalId}\n\nRecordings and test output are available in Rex Desk on this computer.\n`);
@@ -539,8 +553,9 @@ export class Desk {
     this.patchRun(runId, { state: 'published', prUrl: stdout.trim(), targetBranch: target });
     this.message(runId, `Draft pull request created: ${stdout.trim()}`); return { url: stdout.trim() };
   }
-  async requestPublish(runId, options) {
+  async requestPublish(runId, options = {}) {
     const run = this.run(runId);
+    await this.publishChecks(run, options.targetBranch);
     if (automaticPrAllowed(this.store.config(), run, await fingerprint(run.worktree))) return this.publish(runId, { ...options, approved: true });
     const answer = await this.ask(runId, { kind: 'approval', method: 'publish', title: 'Create a draft pull request',
       request: { branch: this.run(runId).branch, targetBranch: options.targetBranch || this.run(runId).targetBranch, title: options.title, body: options.body } });

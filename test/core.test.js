@@ -159,7 +159,7 @@ test('restart expires questions and marks active runs interrupted rather than cl
 test('a worker cannot finish or publish without test proof', async () => {
   const store = new Store(temporary('proof')); const desk = new Desk(store, { root: temporary('root') });
   store.put('run', 'run-1', { id: 'run-1', state: 'needs_evidence', title: 'Unverified task' });
-  await assert.rejects(desk.publish('run-1', { approved: true }), /verified work/);
+  await assert.rejects(desk.publish('run-1', { approved: true }), /cannot open a pull request yet/);
   await assert.rejects(desk.publish('run-1', { approved: false }), /approval/); store.close();
 });
 
@@ -236,4 +236,22 @@ test('native elicitation survives HTTP sessions and the installed stdio proxy', 
       assert.deepEqual(JSON.parse(result.content[0].text), { action: 'accept', content: { answer: 'develop' } });
     }
   } finally { for (const client of clients) await client.close(); await app.close(); }
+});
+
+test('a pull request is refused before the human is asked, not after they approve', async () => {
+  const store = new Store(temporary('publish')), asked = [];
+  const desk = new Desk(store, { root: temporary('publish-root') });
+  store.put('task', 'task-1', { id: 'task-1', title: 'Search limit', active: true, sourceName: 'Morningmate', externalId: '32099' });
+  const base = { id: 'pub-1', role: 'worker', taskId: 'task-1', branch: 'temp/rex/fix/search', worktree: temporary('publish-tree'), targetBranch: 'global/develop', baseCommit: 'abc', createdAt: now() };
+  desk.ask = async request => { asked.push(request); return { action: 'accept' }; };
+
+  store.put('run', 'pub-1', { ...base, state: 'needs_evidence', checks: { testsPassed: true, recordedVideo: false, browserAssertionPassed: false } });
+  await assert.rejects(desk.requestPublish('pub-1', {}), /no browser recording was made, no browser assertion matches the current files/);
+  assert.equal(asked.length, 0, 'The human is never asked to approve a pull request that would then be refused');
+
+  store.put('run', 'pub-1', { ...base, state: 'running' });
+  await assert.rejects(desk.requestPublish('pub-1', {}), /This run is running; commit the fix, run desk_verify/);
+  assert.equal(asked.length, 0);
+
+  store.close();
 });
