@@ -178,7 +178,7 @@ test('the older single test account becomes the first entry of the sign-in list'
   const directory = temporary('migrate');
   const first = new Store(directory);
   first.saveConfig({ ...defaults, testAccounts: [] });
-  first.put('config', 'main', { ...first.config(), testAccounts: undefined, testAccount: { username: 'qa@example.com', localUsername: 'local@example.com' } });
+  first.put('config', 'main', { ...first.config(), execution: 'rex', testAccounts: undefined, testAccount: { username: 'qa@example.com', localUsername: 'local@example.com' } });
   first.put('secret', 'test-account-password', first.encrypt('site-pass'));
   first.put('secret', 'test-account-local-password', first.encrypt('local-pass'));
   first.close();
@@ -188,6 +188,7 @@ test('the older single test account becomes the first entry of the sign-in list'
     { id: 'site', site: '', username: 'qa@example.com', password: 'site-pass' },
     { id: 'local', site: '127.0.0.1', username: 'local@example.com', password: 'local-pass' }]);
   assert.equal(store.config().testAccount, undefined, 'The old field is gone once it has been carried over');
+  assert.equal(store.config().execution, 'orca', 'A saved headless choice is dropped');
   store.close();
 });
 

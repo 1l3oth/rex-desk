@@ -67,7 +67,7 @@ export class Store extends EventEmitter {
     let token = this.get('secret', 'mcp-token');
     if (!token) { token = this.encrypt(randomBytes(32).toString('base64url')); this.put('secret', 'mcp-token', token); }
     this.token = this.decrypt(token);
-    this.migrateTestAccounts();
+    this.migrateConfig();
     this.cloud = new TursoSync(this);
     // Running processes cannot be resurrected after a crash. Keep their history and make recovery explicit.
     // An agent in an Orca terminal keeps running through a restart, so its run is reattached instead of interrupted.
@@ -134,15 +134,18 @@ export class Store extends EventEmitter {
       return { ...account, password: saved ? this.decrypt(saved) : '' };
     });
   }
-  // Settings once held one test account and one local-preview account; they become the first two entries of the list.
-  migrateTestAccounts() {
+  // Settings once held one test account and one local-preview account, and a choice between headless and Orca runs.
+  // The accounts become the first entries of the sign-in list, and nothing runs headless any more.
+  migrateConfig() {
     const config = this.get('config', 'main');
-    if (!config || Array.isArray(config.testAccounts)) return;
+    if (!config) return;
+    if (config.execution !== 'orca') this.put('config', 'main', { ...config, execution: 'orca' });
+    if (Array.isArray(config.testAccounts)) return;
     const legacy = config.testAccount || {}, accounts = [];
     const carry = (from, to) => { const saved = this.get('secret', from); if (saved) this.put('secret', `test-account:${to}`, saved); };
     if (legacy.username) { accounts.push({ id: 'site', site: '', username: legacy.username }); carry('test-account-password', 'site'); }
     if (legacy.localUsername) { accounts.push({ id: 'local', site: '127.0.0.1', username: legacy.localUsername }); carry('test-account-local-password', 'local'); }
-    const { testAccount, ...rest } = config;
+    const { testAccount, ...rest } = this.get('config', 'main');
     this.put('config', 'main', { ...rest, testAccounts: accounts });
   }
   credential(sourceId) {
