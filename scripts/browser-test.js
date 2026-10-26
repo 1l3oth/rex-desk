@@ -265,6 +265,14 @@ try {
     await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
   });
   await page.screenshot({ path: path.join(screenshots, 'proof-desktop.png'), fullPage: true });
+  // The proof column beside the conversation resizes by dragging its divider or with the arrow keys.
+  const proofColumn = page.locator('.pane-proof').first(), proofHandle = page.getByRole('separator', { name: 'Resize the proof column' });
+  const proofBefore = Math.round((await proofColumn.boundingBox()).width), proofGrip = await proofHandle.boundingBox();
+  await page.mouse.move(proofGrip.x + 3, proofGrip.y + 200); await page.mouse.down(); await page.mouse.move(proofGrip.x - 160, proofGrip.y + 200, { steps: 6 }); await page.mouse.up();
+  const proofWide = Math.round((await proofColumn.boundingBox()).width);
+  assert.ok(proofWide > proofBefore + 120, `The proof column widens when its divider is dragged left (${proofBefore} to ${proofWide})`);
+  await proofHandle.focus(); await page.keyboard.press('ArrowRight');
+  assert.equal(Math.round((await proofColumn.boundingBox()).width), proofWide - 16);
   // The recorded proof opens larger in the same viewer and plays there.
   await page.getByRole('button', { name: 'View larger', exact: true }).first().click();
   await page.locator('#viewer .viewer-stage video').evaluate(video => new Promise((resolve, reject) => { if (video.readyState >= 2) resolve(); video.addEventListener('loadeddata', resolve, { once: true }); video.addEventListener('error', () => reject(new Error('Evidence video did not play in the viewer.')), { once: true }); setTimeout(() => reject(new Error('Evidence video did not load in the viewer.')), 8000); }));

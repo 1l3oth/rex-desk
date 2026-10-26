@@ -204,3 +204,15 @@ test('desk_attachment saves an issue screenshot into the run folder for the agen
     } finally { await client.close(); }
   } finally { await app.close(); }
 });
+
+test('a QA check signs in with the saved test account instead of stopping at the login page', () => {
+  const store = new Store(temporary('qa-login')), desk = new Desk(store, { root: temporary('qa-login-root'), runnerFactory: idle });
+  store.put('task', 't', { id: 't', title: 'Task form fields', active: true });
+  const verifier = { id: 'v', role: 'verifier', taskId: 't' };
+  assert.match(desk.prompt(verifier), /no test account is saved .* report blocked/);
+  store.saveConfig({ ...defaults, testAccount: { username: 'qa@example.invalid', password: 'secret-for-test' } });
+  const prompt = desk.prompt(verifier);
+  assert.match(prompt, /If you land on a login page, sign in with desk_browser fill using \{\{test\.username\}\} and \{\{test\.password\}\} and continue/);
+  assert.doesNotMatch(prompt, /the human has no saved sign-in for this site/);
+  store.close();
+});
