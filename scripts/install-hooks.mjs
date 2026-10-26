@@ -1,4 +1,4 @@
-// npm install points Git at the repository's own hooks (.githooks), so a push to main is refused before it leaves the computer.
+// npm install points Git at the repository's own hooks (.githooks), so a push to master is refused before it leaves the computer.
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 

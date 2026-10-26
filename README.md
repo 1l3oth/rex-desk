@@ -2,7 +2,7 @@
 
 A local QA issue workspace for Flow and Morningmate. It imports tasks assigned to you, has Jev rank them so you know what to run first, and keeps questions, approvals, worktrees, and test evidence together.
 
-**New here?** [docs/ONBOARDING.md](docs/ONBOARDING.md) walks you through using Rex Desk or building on it from a fork or branch. Changes reach `main` only through pull requests; see [CONTRIBUTING.md](CONTRIBUTING.md).
+**New here?** [docs/ONBOARDING.md](docs/ONBOARDING.md) walks you through using Rex Desk or building on it from a fork or branch. Changes reach `master` only through pull requests; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The application is independent of your product repositories. It uses one Node.js process, SQLite with an optional Turso copy, and a buildless browser interface. Browsers, Tomcat, Electron, and coding agents start only when a run needs them.
 

@@ -31,7 +31,7 @@ The repository is private. Ask the owner for access before cloning or forking.
    cd rex-desk
    ```
 
-2. **Install it.** `npm ci` also turns on the repository's Git hook, which keeps direct pushes out of `main`.
+2. **Install it.** `npm ci` also turns on the repository's Git hook, which keeps direct pushes out of `master`.
 
    ```powershell
    npm ci
@@ -77,7 +77,7 @@ Your data stays in the `.local/` folder of your copy: the database, encrypted ke
   npm ci
   ```
 
-  Keep your fork current with `git fetch upstream` and `git rebase upstream/main`.
+  Keep your fork current with `git fetch upstream` and `git rebase upstream/master`.
 
 Name branches after the change: `feature/<short-name>`, `fix/<short-name>`, `docs/<short-name>`, or `chore/<short-name>`.
 
@@ -122,7 +122,7 @@ Then:
 1. Push your branch: `git push -u origin HEAD`.
 2. Open the pull request: `gh pr create --fill`, and fill in the template.
 3. Wait for **CI** to pass. It runs both test suites on Windows.
-4. The owner reviews and merges. Changes reach `main` only through pull requests.
+4. The owner reviews and merges. Changes reach `master` only through pull requests.
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rules.
 
@@ -134,4 +134,4 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rules.
 | "Not signed in" | **Setup → Sign in your coding agent**, and choose a profile that shows Signed in. |
 | "Browser could not start" | Run `npx playwright install chromium`. |
 | Orca does not show the run | In the run dialog, choose **Show Rex worktrees in Orca**. |
-| "Direct pushes to main are blocked" | Working as intended. Push a branch and open a pull request. |
+| "Direct pushes to master are blocked" | Working as intended. Push a branch and open a pull request. |
