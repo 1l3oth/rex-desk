@@ -185,3 +185,12 @@ test('a blocked terminal message is sent again with the request ID Orca gave, ne
   await assert.rejects(sendToOrca(run, 'hello', other.options), /terminal closed/);
   assert.equal(other.calls.length, 1, 'A failure without an ID is never typed twice');
 });
+
+test('Claude Code in an Orca terminal cannot use its own question prompt', () => {
+  const directory = temporary('orca-ask'), spec = path.join(directory, 'agent.json');
+  const probe = 'console.log("args=" + process.argv.slice(2).join(" ")); process.exit(0)';
+  writeFileSync(spec, JSON.stringify({ runId: 'run-2', provider: 'claude', cwd: directory, prompt: 'Fix it', token: 'run-scoped-token', mcpUrl: 'http://127.0.0.1:4317/mcp',
+    executable: { command: process.execPath, args: ['-e', probe, '--'] }, env: {}, unset: [] }));
+  const result = spawnSync(process.execPath, [path.resolve('scripts/orca-agent.mjs'), spec], { encoding: 'utf8' });
+  assert.match(result.stdout, /--disallowed-tools AskUserQuestion/, 'The native question prompt is turned off; desk_ask reaches the dashboard');
+});

@@ -16,7 +16,10 @@ if (spec.provider === 'claude') {
   const config = path.join(path.dirname(specFile), `mcp-${process.pid}.json`);
   writeFileSync(config, JSON.stringify({ mcpServers: { rex_desk_run: { type: 'http', url: spec.mcpUrl, headers: { Authorization: `Bearer ${spec.token}` } } } }), { mode: 0o600 });
   cleanup = () => rmSync(config, { force: true });
-  args = [...spec.executable.args, '--mcp-config', config, ...(spec.addDir ? ['--add-dir', spec.addDir] : []), ...(spec.model ? ['--model', spec.model] : []), spec.prompt];
+  // Claude Code's own question prompt would appear only in this terminal, where the dashboard cannot show it or
+  // record the answer, so it is turned off and the agent asks through desk_ask instead.
+  args = [...spec.executable.args, '--mcp-config', config, '--disallowed-tools', 'AskUserQuestion',
+    ...(spec.addDir ? ['--add-dir', spec.addDir] : []), ...(spec.model ? ['--model', spec.model] : []), spec.prompt];
 } else {
   args = [...spec.executable.args, '-c', 'mcp_servers.rex_desk.enabled=false', '-c', `mcp_servers.rex_desk_run.url=${JSON.stringify(spec.mcpUrl)}`,
     '-c', 'mcp_servers.rex_desk_run.bearer_token_env_var="REX_AGENT_TOKEN"', '-c', 'mcp_servers.rex_desk_run.tool_timeout_sec=86400',
