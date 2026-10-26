@@ -189,3 +189,28 @@ test('a repository remote never carries a password into the dashboard', () => {
   assert.equal(found.remote, 'https://example.invalid/secret.git');
   assert.equal(found.remote.includes('hunter2'), false);
 });
+
+test('a handoff carries the issue, the working rules, and what the last run did, but never a secret', async () => {
+  const { handoffPrompt } = await import('../src/handoff.js');
+  const task = { id: 't-1', externalId: '32099', title: 'Smart search ignores the plan limit', source: 'morningmate', sourceName: 'Morningmate',
+    statusName: 'Development Completed', projectName: 'Search', url: 'https://morningmate.com/l/crzI', description: 'Basic plan shows posts older than one month.' };
+  const run = { id: 'r-1', provider: 'claude', state: 'needs_evidence', branch: 'temp/rex/fix/search', worktree: 'F:/rex-desk/worktrees/temp-rex-fix-search',
+    baseBranch: 'global/develop', targetBranch: 'global/release', summary: 'Server now clamps the start date for limited plans.', prUrl: 'https://github.com/x/y/pull/1' };
+  const prompt = handoffPrompt({ task, run, repository: { name: 'flow-was', path: 'F:/flow-was' }, messages: [{ text: 'Tests pass; the browser assertion is missing.' }] });
+
+  assert.match(prompt, /desk_connect/);
+  assert.match(prompt, /Smart search ignores the plan limit/);
+  assert.match(prompt, /Basic plan shows posts older than one month/);
+  assert.match(prompt, /Rex Desk task id: t-1/);
+  assert.match(prompt, /temp\/rex\/fix\/search/);
+  assert.match(prompt, /flow-was \(F:\/flow-was\)/);
+  assert.match(prompt, /Server now clamps the start date/);
+  assert.match(prompt, /Tests pass; the browser assertion is missing/);
+  assert.match(prompt, /never use your own question or choice prompt/);
+  assert.equal(/token|password|api.?key/i.test(prompt.replace(/never put a password, token or api key[^\n]*/i, '')), false, 'No credential is ever part of a handoff');
+
+  const first = handoffPrompt({ task });
+  assert.match(first, /No earlier Rex Desk run exists/);
+  assert.match(first, /Ask the human which checkout to work in/);
+  assert.throws(() => handoffPrompt({}), /Choose an issue/);
+});

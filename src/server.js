@@ -14,6 +14,7 @@ import { autostartStatus, setAutostart } from './autostart.js';
 import { issueBranch } from './branches.js';
 import { profileEnvironment } from './agents.js';
 import { setupPrompt } from './setup-prompt.js';
+import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
 import { orcaStatus, showWorktreesInOrca, openInOrca, readOrcaTerminal } from './orca.js';
 
@@ -133,6 +134,16 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         if (url.searchParams.get('repositoryId') && !repository) return json(response, 404, { error: 'Repository not found.' });
         if (request.method === 'POST') { if (!repository) throw new Error('Choose a repository.'); await showWorktreesInOrca(repository.path); }
         return json(response, 200, await orcaStatus(repository?.path));
+      }
+      // The text a person pastes into any agent session so it can take the issue over with its full context.
+      if (url.pathname === '/api/handoff' && request.method === 'POST') {
+        const input = await body(request);
+        const run = input.runId ? store.get('run', input.runId) : store.list('run').filter(item => item.taskId === input.taskId && item.role === 'worker').sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
+        const task = store.get('task', input.taskId || run?.taskId);
+        if (!task) return json(response, 404, { error: 'Issue not found.' });
+        const repository = store.config().repositories.find(item => item.id === run?.repositoryId);
+        const messages = run ? store.events(run.id, { visible: true }).filter(event => event.kind === 'message') : [];
+        return json(response, 200, { prompt: handoffPrompt({ task, run, repository, messages }) });
       }
       if (url.pathname === '/api/setup-prompt' && request.method === 'POST') {
         const input = await body(request);

@@ -536,7 +536,7 @@ function issueRunActions(task, run, primaryClass = 'primary small') {
   const live = run && !doneStates.includes(run.state), disabled = task.demo ? 'disabled title="Connect real tasks to run an agent"' : '';
   if (live) return button('Open run', 'open-task-run', primaryClass);
   const verifyFirst = awaitsQa(task);
-  return `${run ? button('Last run', 'open-task-run', 'small quiet') : ''}${button(`${icon('check')} Verify fix`, 'launch-verify', verifyFirst ? primaryClass : 'small', disabled)}${button(`${icon('play')} Fix with agent`, 'launch-task', verifyFirst ? 'small' : primaryClass, disabled)}`;
+  return `${button(`${icon('copy')} Copy handoff`, 'copy-handoff', 'small quiet', `type="button" data-task-id="${esc(task.id)}" title="Copy this issue and the Rex Desk working rules, to paste into any agent session"`)}${run ? button('Last run', 'open-task-run', 'small quiet') : ''}${button(`${icon('check')} Verify fix`, 'launch-verify', verifyFirst ? primaryClass : 'small', disabled)}${button(`${icon('play')} Fix with agent`, 'launch-task', verifyFirst ? 'small' : primaryClass, disabled)}`;
 }
 const verdictLabels = { pass: 'Fix works', fail: 'Still broken', blocked: 'Could not check' };
 function renderQa(run) {
@@ -654,7 +654,7 @@ function renderPaneFooter(run) {
   if (run.execution === 'orca' && run.sessionId?.startsWith('orca:') && ['running', 'waiting'].includes(run.state)) return `<form class="pane-foot composer" data-say="${run.id}"><input name="text" required aria-label="Message to ${esc(run.title)}" placeholder="Message the agent…" autocomplete="off"><button class="button small primary" type="submit">Send</button>${button('Stop', 'stop-run', 'small quiet danger', 'type="button"')}</form>`;
   if (activeStates.includes(run.state)) return `<footer class="pane-foot"><span>${run.state === 'waiting' ? 'Waiting for your answer above' : 'Working. Follow-ups open when this turn ends.'}</span>${button('Stop', 'stop-run', 'small quiet danger')}</footer>`;
   const review = run.state === 'ready_for_review';
-  return `<form class="pane-foot composer" data-composer="${run.id}"><input name="prompt" required aria-label="Follow-up for ${esc(run.title)}" placeholder="${review ? 'Request changes…' : 'Continue with a follow-up…'}" autocomplete="off"><button class="button small" type="submit">${review ? 'Request changes' : 'Send'}</button>${button('Switch agent', 'resume-run', 'small quiet', 'type="button" title="Continue with another provider or execution"')}${review ? button('Create draft PR', 'publish-run', 'small primary', 'type="button"') : ''}</form>`;
+  return `<form class="pane-foot composer" data-composer="${run.id}"><input name="prompt" required aria-label="Follow-up for ${esc(run.title)}" placeholder="${review ? 'Request changes…' : 'Continue with a follow-up…'}" autocomplete="off"><button class="button small" type="submit">${review ? 'Request changes' : 'Send'}</button>${button('Switch agent', 'resume-run', 'small quiet', 'type="button" title="Continue with another provider or execution"')}${button('Copy handoff', 'copy-handoff', 'small quiet', `type="button" data-run-id="${run.id}" title="Copy this run's context and the Rex Desk working rules, to paste into any agent session"`)}${review ? button('Create draft PR', 'publish-run', 'small primary', 'type="button"') : ''}</form>`;
 }
 function renderDispatch(workers) {
   return `<ul class="dispatch-list">${workers.map(worker => `<li><button data-run="${worker.id}"><span class="state-dot ${esc(worker.state)}"></span><span>${esc(worker.title)}</span></button></li>`).join('')}</ul>`;
@@ -1229,6 +1229,13 @@ document.addEventListener('click', event => {
       try { const result = await api('/agents/mcp', { method: 'POST', data: { provider: target.dataset.provider } }); toast(result.installed ? `Rex Desk MCP is available in ${providerName(target.dataset.provider)}. Restart open sessions to load it.` : 'The CLI finished, but the MCP entry was not found. Use the setup prompt instead.', !result.installed); }
       finally { await loadAgents(); }
     }); return;
+  }
+  if (name === 'copy-handoff') {
+    void action(async () => {
+      const { prompt } = await api('/handoff', { method: 'POST', data: { taskId: target.dataset.taskId || selectedTask()?.id, runId: target.dataset.runId || '' } });
+      await copyText(prompt, 'Handoff copied. Paste it into any Claude Code or Codex session; it already has the rex_desk tools.');
+    });
+    return;
   }
   if (name === 'copy-setup-prompt') {
     void action(async () => { const { prompt } = await api('/setup-prompt', { method: 'POST', data: { target: target.dataset.target } }); ui.setupPrompt = prompt; for (const element of document.querySelectorAll('.mcp-setup')) element.outerHTML = renderMcpSetup(); await copyText(prompt, target.dataset.target === 'remote' ? 'Cloud setup prompt copied. Add the token in your AI client separately.' : 'Local setup prompt copied. Paste it into Claude Code or Codex.'); });
