@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { orcaStatus, OrcaRunner, showWorktreesInOrca } from '../src/orca.js';
+import { orcaStatus, OrcaRunner, showWorktreesInOrca, ensureOrcaRunning } from '../src/orca.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 // A scripted Orca CLI: each call receives argv and returns the JSON envelope the real CLI prints.
@@ -152,4 +152,17 @@ test('an Orca agent’s own session log becomes the chat, and Rex Desk messages 
   echo.emit('human-message', { text: 'please also check Japanese' });
   assert.equal(store.events('r1').filter(event => event.kind === 'human-message').length, 1, 'The log’s echo of a Rex Desk message is not shown twice');
   store.close();
+});
+
+test('a closed Orca is opened rather than letting a run go headless', async () => {
+  const running = fakeOrca({ 'status --json': { ok: true, result: { app: { running: true }, runtime: { reachable: true } } } });
+  await ensureOrcaRunning(running.options);
+  assert.deepEqual(running.calls.map(args => args[0]), ['status'], 'A reachable Orca is left alone');
+
+  const closed = fakeOrca({
+    'status --json': { ok: true, result: { app: { running: false }, runtime: { reachable: false } } },
+    'open --json': { ok: true, result: {} },
+  });
+  await ensureOrcaRunning(closed.options);
+  assert.deepEqual(closed.calls.map(args => args[0]), ['status', 'open'], 'A closed Orca is started first');
 });

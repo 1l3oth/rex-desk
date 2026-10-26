@@ -18,12 +18,25 @@ export function siteEnvironment(address) {
   // A customer's own subdomain such as seco.flow.team is still the live service holding that customer's real data.
   return { ...site, environment: match ? 'production' : 'unknown' };
 }
+// The sign-in saved for a site: the closest host match, then the entry saved for any site.
+export function accountForSite(accounts, address) {
+  let host = '';
+  try { host = new URL(String(address || '')).hostname.toLowerCase(); } catch {}
+  const matches = site => { const value = String(site || '').trim(); return value && (host === value || host.endsWith(`.${value}`)); };
+  return (accounts || []).find(account => matches(account.site))
+    || (accounts || []).find(account => !String(account.site || '').trim()) || null;
+}
 export const isProductionSite = address => siteEnvironment(address).environment === 'production';
 // Only a status that says the fix shipped puts it on production; "Development Completed" means it is on a test server.
 export const releasedToProduction = status => /releas|deploy|shipped|live|production|배포|출시|운영/i.test(String(status || ''));
-// Where each product's fixes run before release, named so an agent kept off production knows where to go instead.
-export const testSites = product => (product === 'Flow'
-  ? ['https://develop.flow.team', 'https://staging.flow.team', 'https://release.flow.team', 'https://hotfix.flow.team']
-  : ['https://develop.morningmate.com', 'https://staging.morningmate.com', 'https://release.morningmate.com', 'https://hotfix.morningmate.com']);
-export const environmentMap = `Flow runs at ${['production https://flow.team', ...testSites('Flow').map(site => `${new URL(site).hostname.split('.')[0]} ${site}`)].join(', ')}. `
-  + `Morningmate runs at ${['production https://morningmate.com', ...testSites('Morningmate').map(site => `${new URL(site).hostname.split('.')[0]} ${site}`)].join(', ')}.`;
+// The servers each product runs on, in the order a QA check should try them. The development server comes first
+// because the saved test account is an account there; a server that does not load is skipped for the next one.
+const environments = {
+  Flow: [['development', 'https://flowdev.info'], ['development', 'https://develop.flow.team'], ['staging', 'https://staging.flow.team'],
+    ['release', 'https://release.flow.team'], ['hotfix', 'https://hotfix.flow.team'], ['production', 'https://flow.team']],
+  Morningmate: [['development', 'https://morningmate.info'], ['development', 'https://develop.morningmate.com'], ['staging', 'https://staging.morningmate.com'],
+    ['release', 'https://release.morningmate.com'], ['hotfix', 'https://hotfix.morningmate.com'], ['production', 'https://morningmate.com']],
+};
+export const testSites = product => (environments[product] || environments.Morningmate).filter(([name]) => name !== 'production').map(([, url]) => url);
+export const environmentMap = Object.entries(environments)
+  .map(([product, list]) => `${product} runs at ${list.map(([name, url]) => `${name} ${url}`).join(', ')}`).join('. ') + '.';

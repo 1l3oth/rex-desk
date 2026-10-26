@@ -36,6 +36,15 @@ export async function orcaRepository(repositoryPath, options) {
   const shown = detail.repo || detail;
   return { registered: true, id: repo.id, name: repo.displayName || repo.name, visibility: shown.externalWorktreeVisibility || 'inherit' };
 }
+// A run must never fall back to an invisible agent, so a closed Orca is opened and waited for instead.
+// A CLI that is missing altogether raises its own error; any other unreadable status is left to the call that follows.
+export async function ensureOrcaRunning(options = {}) {
+  let status;
+  try { status = await orcaJson(['status'], { ...options, timeout: 30000 }); }
+  catch (error) { if (/not installed or not on PATH/i.test(error.message)) throw error; return; }
+  if (status?.app?.running !== false && status?.runtime?.reachable !== false) return;
+  await orcaJson(['open'], { ...options, timeout: 180000 });
+}
 export async function orcaStatus(repositoryPath, options) {
   try {
     const repository = repositoryPath ? await orcaRepository(repositoryPath, options) : null;
@@ -59,6 +68,7 @@ export async function openInOrca(run, options) {
 export class OrcaRunner {
   constructor(options) { Object.assign(this, options); this.orca = options.orcaOptions || {}; }
   async start(prompt) {
+    await ensureOrcaRunning(this.orca);
     const status = await orcaStatus(this.sourcePath, this.orca);
     if (!status.available) throw new Error(`Orca is unavailable: ${status.error}`);
     if (!status.ready) throw new Error('Orca does not show Rex Desk worktrees for this repository yet. Choose "Show Rex worktrees in Orca" in the run dialog or Settings, then continue this run.');

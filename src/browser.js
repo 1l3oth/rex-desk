@@ -6,7 +6,7 @@ import { now } from './store.js';
 import { flowPreview } from './flow-runtime.js';
 import { electronLaunch } from './electron-runtime.js';
 import { effectiveRepository } from './project-detect.js';
-import { siteEnvironment, releasedToProduction, testSites } from './sites.js';
+import { siteEnvironment, releasedToProduction, testSites, accountForSite } from './sites.js';
 
 const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
@@ -174,19 +174,20 @@ export class Evidence {
       }
       case 'click': await page.locator(selector).click({ timeout: 15000 }); break;
       case 'fill': {
-        const local = /^https?:\/\/(127\.|localhost|\[::1\])/.test(page.url()), saved = this.store.config().testAccount || {};
-        const account = { username: (local && saved.localUsername) || saved.username }, password = (local && saved.localUsername && this.store.testPassword('local')) || this.store.testPassword(), typed = String(value || '');
-        // The saved test account exists on the test servers. Typing it into the live service signs real customers' site
-        // in with it, and it fails anyway, so Rex Desk refuses instead of sending those credentials to production.
+        const accounts = this.store.testAccounts(), account = accountForSite(accounts, page.url()), typed = String(value || '');
+        // A saved sign-in belongs to one test server. Typing it into the live service signs real customers' site in with
+        // it, and it fails there anyway, so Rex Desk refuses instead of sending those credentials to production.
         const site = siteEnvironment(page.url());
-        if (site.environment === 'production' && /\{\{test\.(username|password)\}\}/.test(typed))
-          throw new Error(`Rex Desk does not type the saved test account into ${site.host}, the live ${site.product} service: that account belongs to the test servers. Open the site where this fix runs (${testSites(site.product).join(', ')}), or ask the human with desk_ask to sign in to ${site.host} themselves from Settings → QA verification.`);
+        const placeholder = /\{\{test\.(username|password)\}\}/.test(typed);
+        if (site.environment === 'production' && placeholder)
+          throw new Error(`Rex Desk does not type a saved test sign-in into ${site.host}, the live ${site.product} service: those accounts belong to the test servers. Open the server where this fix runs (${testSites(site.product).join(', ')}), or ask the human with desk_ask to sign in to ${site.host} themselves from Settings → QA verification.`);
+        if (placeholder && !account)
+          throw new Error(`No sign-in is saved for ${site.host || 'this site'} in Settings → QA verification${accounts.length ? `; sign-ins are saved for ${accounts.map(item => item.site || 'any site').join(', ')}` : ''}. Ask the human with desk_ask.`);
         if (typed.includes('{{test.password}}')) {
-          if (!password) throw new Error('No test account password is saved in Settings → QA verification. Ask the human with desk_ask.');
+          if (!account.password) throw new Error(`The sign-in saved for ${account.site || 'any site'} has no password in Settings → QA verification. Ask the human with desk_ask.`);
           if (await page.locator(selector).getAttribute('type') !== 'password') throw new Error('{{test.password}} can only be typed into a password field.');
         }
-        if (typed.includes('{{test.username}}') && !account.username) throw new Error('No test account is saved in Settings → QA verification. Ask the human with desk_ask.');
-        await page.locator(selector).fill(typed.replaceAll('{{test.username}}', account.username || '').replaceAll('{{test.password}}', password)); break;
+        await page.locator(selector).fill(typed.replaceAll('{{test.username}}', account?.username || '').replaceAll('{{test.password}}', account?.password || '')); break;
       }
       case 'press': await page.locator(selector).press(value); break;
       case 'select': await page.locator(selector).selectOption(value); break;
@@ -213,7 +214,7 @@ export class Evidence {
     const controls = await page.locator('button,input,textarea,select,a,[role="button"]').evaluateAll(nodes => nodes.slice(0, 100).map(node =>
       ({ tag: node.tagName.toLowerCase(), id: node.id, name: node.getAttribute('name'), label: node.getAttribute('aria-label') || node.textContent?.trim().slice(0, 100), type: node.getAttribute('type') })));
     // The saved password never travels back to the agent, even if a page echoes it.
-    const secrets = [this.store.testPassword(), this.store.testPassword('local')].filter(Boolean);
+    const secrets = this.store.testAccounts().map(account => account.password).filter(Boolean);
     const hide = text => secrets.reduce((value, secret) => value.replaceAll(secret, '[test password]').replaceAll(encodeURIComponent(secret), '[test password]'), String(text));
     return { url: hide(page.url()), title: hide(await page.title()), text: hide((await page.locator('body').innerText()).slice(0, 14000)), controls };
   }

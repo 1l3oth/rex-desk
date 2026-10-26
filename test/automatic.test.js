@@ -210,9 +210,9 @@ test('a QA check signs in with the saved test account on test servers, never on 
   store.put('task', 't', { id: 't', title: 'Task form fields', active: true });
   const verifier = { id: 'v', role: 'verifier', taskId: 't' };
   assert.match(desk.prompt(verifier), /no test account is saved .* report blocked/);
-  store.saveConfig({ ...defaults, testAccount: { username: 'qa@example.invalid', password: 'secret-for-test' } });
+  store.saveConfig({ ...defaults, testAccounts: [{ id: 'any', site: '', username: 'qa@example.invalid', password: 'secret-for-test' }] });
   const prompt = desk.prompt(verifier);
-  assert.match(prompt, /If you land on a login page on a test server, sign in with desk_browser fill using \{\{test\.username\}\} and \{\{test\.password\}\} and continue/);
+  assert.match(prompt, /If you land on a login page on a test server, sign in with desk_browser fill: the Flow and Morningmate sign-in form/);
   assert.match(prompt, /On production that account does not apply/);
   assert.doesNotMatch(prompt, /the human has no saved sign-in for this site/);
   store.close();

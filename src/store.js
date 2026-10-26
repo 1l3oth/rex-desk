@@ -13,8 +13,8 @@ export const id = () => randomUUID();
 export const defaults = {
   name: 'Rex', provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
   syncMinutes: 5, requireVideo: true, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
-  models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false, execution: 'rex',
-  schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], verify: true, fix: false, maxRuns: 6 }, jev: { model: '', auto: true }, testAccount: { username: '' },
+  models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false, execution: 'orca',
+  schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], verify: true, fix: false, maxRuns: 6 }, jev: { model: '', auto: true }, testAccounts: [],
 };
 // Claude Code accepts family aliases (opus, sonnet, haiku, fable) or full IDs such as claude-opus-5-5. Typed shorthand is normalized.
 export function modelName(provider, value) {
@@ -67,6 +67,7 @@ export class Store extends EventEmitter {
     let token = this.get('secret', 'mcp-token');
     if (!token) { token = this.encrypt(randomBytes(32).toString('base64url')); this.put('secret', 'mcp-token', token); }
     this.token = this.decrypt(token);
+    this.migrateTestAccounts();
     this.cloud = new TursoSync(this);
     // Running processes cannot be resurrected after a crash. Keep their history and make recovery explicit.
     // An agent in an Orca terminal keeps running through a restart, so its run is reattached instead of interrupted.
@@ -126,7 +127,24 @@ export class Store extends EventEmitter {
     cipher.setAuthTag(tag);
     return Buffer.concat([cipher.update(data), cipher.final()]).toString('utf8');
   }
-  testPassword(which = 'site') { const saved = this.get('secret', which === 'local' ? 'test-account-local-password' : 'test-account-password'); return saved ? this.decrypt(saved) : ''; }
+  // Every saved sign-in with its password. Only the recorded browser calls this; the dashboard sees publicConfig.
+  testAccounts() {
+    return (this.config().testAccounts || []).map(account => {
+      const saved = this.get('secret', `test-account:${account.id}`);
+      return { ...account, password: saved ? this.decrypt(saved) : '' };
+    });
+  }
+  // Settings once held one test account and one local-preview account; they become the first two entries of the list.
+  migrateTestAccounts() {
+    const config = this.get('config', 'main');
+    if (!config || Array.isArray(config.testAccounts)) return;
+    const legacy = config.testAccount || {}, accounts = [];
+    const carry = (from, to) => { const saved = this.get('secret', from); if (saved) this.put('secret', `test-account:${to}`, saved); };
+    if (legacy.username) { accounts.push({ id: 'site', site: '', username: legacy.username }); carry('test-account-password', 'site'); }
+    if (legacy.localUsername) { accounts.push({ id: 'local', site: '127.0.0.1', username: legacy.localUsername }); carry('test-account-local-password', 'local'); }
+    const { testAccount, ...rest } = config;
+    this.put('config', 'main', { ...rest, testAccounts: accounts });
+  }
   credential(sourceId) {
     const saved = this.get('secret', `source:${sourceId}`);
     return saved ? this.decrypt(saved) : '';
@@ -134,7 +152,7 @@ export class Store extends EventEmitter {
   config() { return { ...defaults, ...this.get('config', 'main') }; }
   publicConfig() {
     const config = this.config();
-    return { ...config, sources: config.sources.map(source => ({ ...source, hasKey: Boolean(this.credential(source.id)) })), jev: { ...defaults.jev, ...config.jev, hasKey: Boolean(this.get('secret', 'openrouter')) }, testAccount: { username: config.testAccount?.username || '', hasPassword: Boolean(this.get('secret', 'test-account-password')), localUsername: config.testAccount?.localUsername || '', hasLocalPassword: Boolean(this.get('secret', 'test-account-local-password')) } };
+    return { ...config, sources: config.sources.map(source => ({ ...source, hasKey: Boolean(this.credential(source.id)) })), jev: { ...defaults.jev, ...config.jev, hasKey: Boolean(this.get('secret', 'openrouter')) }, testAccounts: (config.testAccounts || []).map(account => ({ ...account, hasPassword: Boolean(this.get('secret', `test-account:${account.id}`)) })) };
   }
   saveConnection(source) {
     const config = this.publicConfig();
@@ -168,14 +186,23 @@ export class Store extends EventEmitter {
         baseBranch: repository.baseBranch || 'develop', targetBranch: repository.targetBranch || repository.baseBranch || 'develop',
         branchPattern, flowRuntime: validateFlowRuntime(repository.flowRuntime), electronRuntime: validateElectronRuntime(repository.electronRuntime), ...commands, browserPath: repository.browserPath || '/' };
     });
+    // One sign-in per site. A blank site is the fallback used wherever no site matches.
+    const accounts = (Array.isArray(input.testAccounts) ? input.testAccounts : []).map(account => ({
+      id: String(account.id || id()), site: String(account.site || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').slice(0, 200),
+      username: String(account.username || '').trim().slice(0, 200) })).filter(account => account.username);
     const config = { ...defaults, name: String(input.name || 'Rex'), provider: input.provider,
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
       syncMinutes: input.syncMinutes, requireVideo: input.requireVideo !== false, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
-      tourDismissed: Boolean(input.tourDismissed), execution: input.execution === 'orca' ? 'orca' : 'rex',
-      schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false }, testAccount: { username: String(input.testAccount?.username || '').trim().slice(0, 200), localUsername: String(input.testAccount?.localUsername || '').trim().slice(0, 200) } };
-    if (String(input.testAccount?.localPassword || '')) this.put('secret', 'test-account-local-password', this.encrypt(String(input.testAccount.localPassword)));
-    if (String(input.testAccount?.password || '')) this.put('secret', 'test-account-password', this.encrypt(String(input.testAccount.password)));
+      tourDismissed: Boolean(input.tourDismissed), execution: 'orca', testAccounts: accounts,
+      schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false } };
+    for (const account of accounts) {
+      const password = String((input.testAccounts || []).find(item => item.id === account.id)?.password || '');
+      if (password) this.put('secret', `test-account:${account.id}`, this.encrypt(password));
+    }
+    // A sign-in removed in Settings takes its password with it; secrets are stored as plain strings, so ids come from the table.
+    for (const row of this.db.prepare("SELECT id FROM records WHERE kind='secret' AND id LIKE 'test-account:%'").all())
+      if (!accounts.some(account => `test-account:${account.id}` === row.id)) this.delete('secret', row.id);
     // The OpenRouter key for Jev is write-only from the dashboard: a new value replaces it, clearKey removes it.
     if (String(input.jev?.apiKey || '').trim()) this.put('secret', 'openrouter', this.encrypt(String(input.jev.apiKey).trim()));
     else if (input.jev?.clearKey) this.delete('secret', 'openrouter');

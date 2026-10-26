@@ -66,8 +66,8 @@ test('agents type the saved test account through placeholders and never read the
     response.end('<!doctype html><title>Sign in</title><input id="user"><input id="pass" type="password" oninput="document.getElementById(\'echo\').textContent=this.value"><p id="echo"></p>'); });
   await new Promise(resolve => site.listen(0, '127.0.0.1', resolve));
   const store = new Store(temporary('account'));
-  store.saveConfig({ ...defaults, testAccount: { username: 'qa@example.invalid', password: 'S3cret-Test!' } });
-  assert.deepEqual(store.publicConfig().testAccount, { username: 'qa@example.invalid', hasPassword: true, localUsername: '', hasLocalPassword: false });
+  store.saveConfig({ ...defaults, testAccounts: [{ id: 'local', site: '127.0.0.1', username: 'qa@example.invalid', password: 'S3cret-Test!' }] });
+  assert.deepEqual(store.publicConfig().testAccounts, [{ id: 'local', site: '127.0.0.1', username: 'qa@example.invalid', hasPassword: true }]);
   const desk = new Desk(store, { root: temporary('account-root'), runnerFactory: idle });
   store.put('task', 't', { id: 't', title: 'Login check', active: true });
   store.put('run', 'qa', { id: 'qa', role: 'verifier', taskId: 't', state: 'running', qaUrl: '', createdAt: now() });

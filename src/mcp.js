@@ -66,7 +66,6 @@ export function createMcp(desk, scope) {
   });
   tool('desk_dispatch', 'Ask the human to start a run for one task; it starts only after they approve it in the dashboard. mode fix (default) queues an isolated coding worker with its own worktree, branch, and preview port. mode verify queues a QA check that re-tests a completed fix, without changing code, on the site where the project runs for that issue; the verifier finds the site itself. Respect task dependencies.',
     { taskId: z.string(), repositoryId: z.string().optional(), provider: z.enum(['claude', 'codex']).optional(), baseBranch: z.string().optional(), targetBranch: z.string().optional(), instructions: z.string().optional(), category: z.string().optional(), mode: z.enum(['fix', 'verify']).default('fix'),
-      execution: z.enum(['rex', 'orca']).optional().describe('rex runs headless with dashboard approvals; orca opens a visible Orca terminal where tool approvals happen. Omit for the Settings default.'),
       runtimeProfile: z.string().optional().describe('Flow/Morningmate Tomcat profile ID from desk_repositories, for example flow or morningmate. Omit for the repository default.') },
     input => { desk.authorize(scope, null, { coordinator: true }); return desk.dispatch(scope.runId, input); });
   tool('desk_runs', 'Read task execution states and evidence checks without internal reasoning.', {}, () =>
