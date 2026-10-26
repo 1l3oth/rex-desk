@@ -9,6 +9,7 @@ import { AgentProfiles, discoverProfiles, parseClaudeStatus, parseCodexStatus, p
 import { normalizeTask, subtaskRecord, taskComments, uniqueImages, Sources } from '../src/providers.js';
 import { cachedTaskImage } from '../src/images.js';
 import { setupPrompt } from '../src/setup-prompt.js';
+import { discoverRepositories } from '../src/repositories.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const signedIn = folder => async (command, args, env) => ({ code: 0, stderr: '',
@@ -153,4 +154,38 @@ test('AI setup prompts configure local stdio without credentials and use a place
   const remote = setupPrompt({ target: 'remote', root: 'F:\\rex-desk', dataDirectory: 'F:\\rex-desk\\.local', mcpUrl: 'http://127.0.0.1:4317/mcp' });
   assert.match(remote, /Bearer \$\{REX_DESK_TOKEN\}/);
   assert.doesNotMatch(remote + local, /[A-Za-z0-9_-]{43}/);
+});
+
+test('other Git checkouts on this computer are found beside the configured ones', () => {
+  const root = temporary('discover');
+  const make = (name, head, config) => {
+    const directory = path.join(root, name);
+    mkdirSync(path.join(directory, '.git'), { recursive: true });
+    writeFileSync(path.join(directory, '.git', 'HEAD'), head);
+    if (config) writeFileSync(path.join(directory, '.git', 'config'), config);
+    return directory;
+  };
+  const configured = make('flow-was', 'ref: refs/heads/global/develop\n', '[remote "origin"]\n\turl = https://user:pass@example.invalid/flow-was.git\n');
+  make('flow-push-middleware', 'ref: refs/heads/main\n', '[remote "origin"]\n\turl = https://example.invalid/middleware.git\n');
+  make('polyglot', 'ref: refs/heads/master\n', '');
+  mkdirSync(path.join(root, 'node_modules', '.git'), { recursive: true });
+  mkdirSync(path.join(root, 'not-a-repo'), { recursive: true });
+  writeFileSync(path.join(root, 'linked-worktree.git'), 'gitdir: elsewhere');
+
+  const found = discoverRepositories([root], [configured]);
+  assert.deepEqual(found.map(item => item.name), ['flow-push-middleware', 'polyglot'], 'The configured one, node_modules, and a plain folder are left out');
+  assert.equal(found[0].branch, 'main');
+  assert.equal(found[0].remote, 'https://example.invalid/middleware.git');
+  assert.equal(found[1].remote, '', 'A checkout with no remote is still offered');
+  assert.deepEqual(discoverRepositories([root], [configured, found[0].path]).map(item => item.name), ['polyglot']);
+});
+
+test('a repository remote never carries a password into the dashboard', () => {
+  const root = temporary('discover-secret');
+  mkdirSync(path.join(root, 'secret-repo', '.git'), { recursive: true });
+  writeFileSync(path.join(root, 'secret-repo', '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  writeFileSync(path.join(root, 'secret-repo', '.git', 'config'), '[remote "origin"]\n\turl = https://rex:hunter2@example.invalid/secret.git\n');
+  const [found] = discoverRepositories([root], []);
+  assert.equal(found.remote, 'https://example.invalid/secret.git');
+  assert.equal(found.remote.includes('hunter2'), false);
 });

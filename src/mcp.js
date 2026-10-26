@@ -50,7 +50,7 @@ export function createMcp(desk, scope) {
     const task = await desk.sources.taskDetail(taskId);
     return { task, statuses: desk.store.get('statuses', `${task.sourceId}:${task.projectId}`) };
   }, true);
-  tool('desk_repositories', 'List configured source repositories, branch defaults, and run commands. Empty settings are filled from what the repository files say (detected).', {}, () => desk.store.config().repositories.map(repository => { const { detected, ...effective } = effectiveRepository(repository); return { ...effective, detectedFrom: detected.from }; }), true);
+  tool('desk_repositories', 'List configured source repositories, branch defaults, and run commands. Empty settings are filled from what the repository files say (detected). Read it before dispatching so each issue goes to the project whose code holds the reported behaviour; only these repositories exist, so say so if the right one is missing.', {}, () => desk.store.config().repositories.map(repository => { const { detected, ...effective } = effectiveRepository(repository); return { ...effective, detectedFrom: detected.from }; }), true);
   tool('desk_sync', 'Refresh assigned tasks from configured source projects.', {}, () => { desk.authorize(scope, null, { coordinator: true }); return desk.sources.sync(); });
   tool('desk_source_catalog', 'Return project and employee choices found through the installed Flow or Morningmate MCP. The user reviews and selects these in Settings. Does not change filters or sync tasks.',
     { sourceId: z.string(), projects: z.array(z.object({ id: z.string().min(1), name: z.string().min(1) })).max(10000),
@@ -65,7 +65,7 @@ export function createMcp(desk, scope) {
     desk.store.put('task', taskId, { ...task, category }); return { updated: true };
   });
   tool('desk_dispatch', 'Ask the human to start a run for one task; it starts only after they approve it in the dashboard. mode fix (default) queues an isolated coding worker with its own worktree, branch, and preview port. mode verify queues a QA check that re-tests a completed fix, without changing code, on the site where the project runs for that issue; the verifier finds the site itself. Respect task dependencies.',
-    { taskId: z.string(), repositoryId: z.string().optional(), provider: z.enum(['claude', 'codex']).optional(), baseBranch: z.string().optional(), targetBranch: z.string().optional(), instructions: z.string().optional(), category: z.string().optional(), mode: z.enum(['fix', 'verify']).default('fix'),
+    { taskId: z.string(), repositoryId: z.string().optional().describe('The repository whose code holds this issue, from desk_repositories. Always set it; omitting it falls back to the connection default, which is right only by chance.'), provider: z.enum(['claude', 'codex']).optional(), baseBranch: z.string().optional(), targetBranch: z.string().optional(), instructions: z.string().optional(), category: z.string().optional(), mode: z.enum(['fix', 'verify']).default('fix'),
       runtimeProfile: z.string().optional().describe('Flow/Morningmate Tomcat profile ID from desk_repositories, for example flow or morningmate. Omit for the repository default.') },
     input => { desk.authorize(scope, null, { coordinator: true }); return desk.dispatch(scope.runId, input); });
   tool('desk_runs', 'Read task execution states and evidence checks without internal reasoning.', {}, () =>

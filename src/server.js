@@ -8,7 +8,7 @@ import { handleMcp } from './mcp.js';
 import { git, resolveCommand } from './processes.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { inspectRepository, pickRepositoryFolder, cloneRepository } from './repositories.js';
+import { inspectRepository, pickRepositoryFolder, cloneRepository, discoverRepositories } from './repositories.js';
 import { githubAccounts, startGithubLogin, cancelGithubLogin, switchGithubAccount } from './github.js';
 import { autostartStatus, setAutostart } from './autostart.js';
 import { issueBranch } from './branches.js';
@@ -89,6 +89,11 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
       if (url.pathname === '/api/repositories/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());
+      // Checkouts beside the ones already configured, and beside Rex Desk itself, so other projects are one click away.
+      if (url.pathname === '/api/repositories/discover' && request.method === 'GET') {
+        const configured = store.config().repositories.map(item => item.path).filter(Boolean);
+        return json(response, 200, { repositories: discoverRepositories([...configured.map(item => path.dirname(item)), path.dirname(root)], configured) });
+      }
       if (url.pathname === '/api/qa/sign-in' && request.method === 'POST') return json(response, 200, await desk.evidence.openQaSignIn((await body(request)).url));
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
       if (url.pathname === '/api/autostart' && request.method === 'GET') return json(response, 200, autostartStatus());

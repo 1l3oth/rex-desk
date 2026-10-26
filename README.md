@@ -114,6 +114,8 @@ Settings → **Schedule** starts work while the computer is on: at the set time 
 
 Setup marks the test-site sign-in, repository, and commands as optional: QA checks need only the tracker; code fixes need a repository, whose commands are read from its files.
 
+Settings → **Source repositories** holds every project an agent may work in. **Find repositories on this computer** lists the Git checkouts sitting beside the ones already configured (and beside the Rex Desk folder) with their branch and remote, so another project is one click away instead of a typed path; a checkout already configured, a linked worktree, and folders such as  are left out, and a remote URL never carries its password into the dashboard. The main agent then picks the repository for each issue from  and passes it as , matching the issue’s product, module, screen and file names to the project whose code holds the behaviour, instead of falling back to the connection default; if several fit or none does, it asks you once.
+
 ## Source statuses and pull requests
 
 Sync reads each project's status definitions and makes them available to agents. Optional working/review/done mappings specify the tracker status values; unmapped phases leave the tracker unchanged, and every status change needs a dashboard approval. Local Kanban progress never rewrites tracker statuses.

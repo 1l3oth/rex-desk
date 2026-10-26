@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { detectElectron } from './electron-runtime.js';
@@ -110,3 +110,38 @@ export async function cloneRepository(spec, parent) {
   catch (error) { throw new Error(`GitHub could not clone ${name}: ${String(error.stderr || error.message).trim().split('\n').at(-1)} Check that the active gh account can read it (gh auth switch).`); }
   return { path: target, existed: false };
 }
+
+// Git checkouts sitting beside the ones already configured, so the folders on this computer do not have to be typed in.
+// Only a real checkout counts: a .git directory, not the .git file a linked worktree carries.
+const skipped = new Set(['node_modules', 'worktrees', '.local', '.git', '$RECYCLE.BIN', 'System Volume Information']);
+function checkoutDetails(directory) {
+  try {
+    const head = readFileSync(path.join(directory, '.git', 'HEAD'), 'utf8').trim();
+    const branch = head.startsWith('ref: refs/heads/') ? head.slice(16) : head.slice(0, 8);
+    let remote = '';
+    try {
+      const config = readFileSync(path.join(directory, '.git', 'config'), 'utf8');
+      const section = config.split(/\[/).find(part => /^remote "origin"/.test(part)) || config.split(/\[/).find(part => /^remote /.test(part)) || '';
+      remote = safeRemote((/^\s*url\s*=\s*(.+)$/m.exec(section)?.[1] || '').trim());
+    } catch {}
+    return { name: path.basename(directory), path: directory, branch, remote };
+  } catch { return null; }
+}
+export function discoverRepositories(roots, configured = []) {
+  const taken = new Set(configured.map(item => path.resolve(item).toLowerCase()));
+  const found = new Map();
+  for (const root of new Set(roots.filter(Boolean).map(item => path.resolve(item)))) {
+    let entries;
+    try { entries = readdirSync(root, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || skipped.has(entry.name) || entry.name.startsWith('.')) continue;
+      const directory = path.join(root, entry.name);
+      if (taken.has(directory.toLowerCase()) || found.has(directory.toLowerCase())) continue;
+      if (!statSafe(path.join(directory, '.git'))?.isDirectory()) continue;
+      const details = checkoutDetails(directory);
+      if (details) found.set(directory.toLowerCase(), details);
+    }
+  }
+  return [...found.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+const statSafe = target => { try { return statSync(target); } catch { return null; } };
