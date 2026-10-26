@@ -333,7 +333,7 @@ export class Desk {
     if (run.role === 'coordinator') return `${common}\n${routing}\nYou are the main coordinator. Read desk_tasks and desk_task for the selected IDs ${JSON.stringify(run.taskIds)}. Classify issues by affected module, severity, likely dependency, and reproduction path. Do not guess fixes. Use desk_categorize to label tasks and desk_dispatch (with mode) to start runs. Respect dependencies: serialize related changes and parallelize independent tasks. You may choose Claude Code or Codex per worker. Do not modify source code yourself. Each dispatched worker gets its own branch, worktree, and port. Choose the repository for every issue yourself and pass it as repositoryId: read desk_repositories, and match the issue to the project whose code holds the reported behaviour, by its product, module, screen, platform and the file or class names in its description and comments. Do not fall back to the connection default because it is there, and never send an issue to a repository that cannot contain the cause. If more than one could fit, or the right one is not listed, ask the human once with desk_ask, naming the candidates you found and saying the repository may need adding in Settings. Use desk_runs to track workers; report what you dispatched through desk_message. Never mark a source task complete without verified evidence. Base override: ${run.baseBranch || 'repository setting'}. PR target override: ${run.targetBranch || 'repository setting'}. User instruction: ${run.prompt || 'Analyze and dispatch these assigned QA issues.'}`;
     const task = this.task(run.taskId);
     if (run.role === 'verifier') return `${common}\nYou are a QA verifier for one issue whose fix a developer reports as done. You never change code, files, settings, or tracker data; you only test and report.\n${this.qaSitePrompt(run, task)}\nWorkflow: read the full issue with desk_task, including comments, which often say what was changed and how to check it. Decide the test site, the exact steps, and the expected result from the issue's reproduction steps and expected behavior. Use desk_browser: open with url set to the test site, navigate within it, click, fill, and take screenshots of the key states. Prove the expected behavior with at least one assertText or assertVisible on the result itself, not on unrelated page chrome. If the issue concerns another language, switch the site or account language the way a user would, if the site allows it. If you land on a login page${accounts.length ? ' on a test server, sign in with desk_browser fill: the Flow and Morningmate sign-in form has a text field named userId and a password field named password, so fill input[name="userId"] with {{test.username}} and input[name="password"] with {{test.password}}, then press Enter on the password field and wait for the page to settle. The sign-in worked when the address leaves signin.act; the message 아이디 또는 비밀번호가 올바르지 않습니다 means the account does not exist on that server, so try the next server for this product before doing anything else. Report blocked only after every server for this product has been tried, naming which were down and which rejected the account. On production that account does not apply: switch to the server where this fix runs, or ask the human once with desk_ask' : ': no test account is saved and the human has no saved sign-in for this site, so report blocked and say which site needs a sign-in; the dashboard offers the human a sign-in button for it'}. If the behavior cannot be checked on this web site in Chromium (installed desktop app, Safari, macOS, iOS, Android, missing test data, or missing permissions), report blocked with the exact reason; never guess. Finish with desk_qa_result: verdict pass only when the expected behavior is visible and asserted; fail when the reported problem still happens, with what you saw; blocked when it cannot be checked. Include a short tracker comment in English that states the environment, the steps, the result, and that a recording is attached in Rex Desk. Do not change the tracker status yourself; the human decides after reviewing your evidence.\nIssue: ${JSON.stringify({ id: task.id, externalId: task.externalId, title: task.title, description: task.description, source: task.source, status: task.statusName || task.status, fields: task.fields })}\nAdditional instructions: ${run.instructions || 'Verify the reported fix and attach proof.'}`;
-    return `${common}\nYou own one issue. Work only in ${run.worktree}, branch ${run.branch}, based on ${run.baseBranch}. Never switch or edit the original checkout. Do not bind shared ports; use PORT=${run.port}. Read repository AGENTS.md and CLAUDE.md. Do not install or start machine-wide services.\nWorkflow: inspect the full issue using desk_task; if your branch name is generic (issue-<number>) or no longer describes the real cause, call desk_branch with 3 to 6 English words that say which feature breaks and how, and its type (fix, feature, refactor, chore, or docs), so the branch reads like temp/rex/fix/project-view-names-ignore-language; reproduce before editing; use desk_browser to record browser reproduction and verification; fix at the responsible layer; run desk_verify for the repository's tests (if it reports that no test command is set or detected, read the repository docs and call desk_verify with command; the human approves it once and it is saved); make at least one relevant assertText or assertVisible browser assertion after the fix; self-review the complete diff and call desk_finish with a factual report and risk {score:1-10,requiresHumanReview,reason,factors}. Explain security, data, behavior, rollback, and verification risks. A low score needs concrete reasons; uncertainty requires human review. A worker stopping is not proof of success. For Flow/Morningmate, desk_browser starts isolated Java 8 Tomcat when its preset is configured. ${run.runtimeProfile ? `This run uses the ${run.runtimeProfile} runtime profile; do not edit jex.content.user.xml to switch products.` : ''} Read docs/claude/build.md before Java or frontend builds. Local JEX config is copied; build this branch's own frontend output and never link node_modules or reuse another branch's dist. Do not run the original fixed-port start.sh. For an Electron repository, desk_browser opens this worktree's app with its own user data; never launch the installed app, change protocol handlers, or trigger updates. If the app cannot run independently, use desk_ask and report the exact blocker. Never fabricate screenshots, videos, test passes, or reproduction. All browser actions through desk_browser are recorded into video and a Playwright trace. Other browser tools are not automatically recorded. Commit only the files your fix needs: never commit unrelated files, or files a build rewrote that you did not change on purpose. ${task.url ? `End the commit message with the issue's QA link ${task.url}. ` : ''}Do not push, create PRs, merge, deploy, or change tracker status through another tool. desk_publish and desk_status apply dashboard approvals. PR target: ${run.targetBranch}.\n${lessons}\nIssue: ${JSON.stringify({ id: task.id, externalId: task.externalId, title: task.title, description: task.description, source: task.source, projectId: task.projectId, status: task.status })}\nAdditional instructions: ${run.instructions || 'Fix the assigned issue and attach proof.'}\nReminder: every desk_message, desk_ask, summary, and report to the human is in English.`;
+    return `${common}\nYou own one issue. Work only in ${run.worktree}, branch ${run.branch}, based on ${run.baseBranch}. Never switch or edit the original checkout. Do not bind shared ports; use PORT=${run.port}. Read repository AGENTS.md and CLAUDE.md. Do not install or start machine-wide services.\nWorkflow: inspect the full issue using desk_task; if your branch name is generic (issue-<number>) or no longer describes the real cause, call desk_branch with 3 to 6 English words that say which feature breaks and how, and its type (fix, feature, refactor, chore, or docs), so the branch reads like temp/rex/fix/project-view-names-ignore-language; reproduce before editing; use desk_browser to record browser reproduction and verification; fix at the responsible layer; run desk_verify for the repository's tests (if it reports that no test command is set or detected, read the repository docs and call desk_verify with command; the human approves it once and it is saved); make at least one relevant assertText or assertVisible browser assertion after the fix; self-review the complete diff and call desk_finish with a factual report and risk {score:1-10,requiresHumanReview,reason,factors}. Explain security, data, behavior, rollback, and verification risks. A low score needs concrete reasons; uncertainty requires human review. A worker stopping is not proof of success. For Flow/Morningmate, desk_browser starts isolated Java 8 Tomcat when its preset is configured. ${run.runtimeProfile ? `This run uses the ${run.runtimeProfile} runtime profile; do not edit jex.content.user.xml to switch products.` : ''} Read docs/claude/build.md before Java or frontend builds. Local JEX config is copied; build this branch's own frontend output and never link node_modules or reuse another branch's dist. Do not run the original fixed-port start.sh. For an Electron repository, desk_browser opens this worktree's app with its own user data; never launch the installed app, change protocol handlers, or trigger updates. If the app cannot run independently, use desk_ask and report the exact blocker. Never fabricate screenshots, videos, test passes, or reproduction. All browser actions through desk_browser are recorded into video and a Playwright trace. Other browser tools are not automatically recorded. Commit only the files your fix needs: never commit unrelated files, or files a build rewrote that you did not change on purpose. ${task.url ? `End the commit message with the issue's QA link ${task.url}. ` : ''}Do not push, create PRs, merge, deploy, or change tracker status through another tool. desk_publish and desk_status apply dashboard approvals. When the human asks you in chat to push, to open a pull request, or to open one into another branch such as a release branch, do it with desk_publish and set targetBranch to the branch they name; Rex Desk pushes the branch and opens the draft pull request as soon as they approve the card. A run may open one pull request per target branch, so a second one into another branch is normal, and when that target does not hold this branch's base commit Rex Desk cuts a branch from the target and cherry-picks only this run's commits onto it. Never reply that you cannot do it, and never hand the human git or gh commands to run instead. PR target: ${run.targetBranch}.\n${lessons}\nIssue: ${JSON.stringify({ id: task.id, externalId: task.externalId, title: task.title, description: task.description, source: task.source, projectId: task.projectId, status: task.status })}\nAdditional instructions: ${run.instructions || 'Fix the assigned issue and attach proof.'}\nReminder: every desk_message, desk_ask, summary, and report to the human is in English.`;
   }
   // A main agent or QA verifier has no worktree, but an Orca terminal needs a folder Orca knows. This small repository
   // inside Rex Desk's data folder is that place; it holds no project code, so nothing an agent does there touches a checkout.
@@ -538,38 +538,94 @@ export class Desk {
       !run.checks?.browserAssertionPassed && 'no browser assertion matches the current files'].filter(Boolean);
     return missing.length ? missing.join(', ') : 'its evidence is incomplete';
   }
+  // Every pull request this run has opened. Older runs kept only one, in prUrl, so that one still counts.
+  pullRequests(run) {
+    const list = Array.isArray(run.pullRequests) ? run.pullRequests : [];
+    return run.prUrl && !list.some(item => item.url === run.prUrl)
+      ? [{ url: run.prUrl, target: run.targetBranch, head: run.branch }, ...list] : list;
+  }
+  repositoryFor(run) {
+    const repository = this.store.config().repositories.find(item => item.id === run.repositoryId);
+    if (!repository?.path) throw new Error('This run has no source repository, so nothing can be pushed.');
+    return repository;
+  }
+  gh(args, options = {}) { return exec('gh', args, { windowsHide: true, timeout: 120000, ...options }); }
+  // Whether a target branch already holds this run's base commit. A branch cut from develop sits on top of develop, so a
+  // pull request straight into release would carry every other develop commit with it; Rex Desk rebuilds it in that case.
+  async targetHolder(run, target) {
+    try { await git(run.worktree, ['fetch', 'origin', '+refs/heads/' + target + ':refs/remotes/origin/' + target]); }
+    catch { throw new Error('origin has no branch named ' + target + '. Check the name, or ask the human with desk_ask which branch this should go into.'); }
+    try { await git(run.worktree, ['merge-base', '--is-ancestor', run.baseCommit, 'refs/remotes/origin/' + target]); return true; }
+    catch { return false; }
+  }
   // The same preconditions run before the human is asked and again after they approve, so nobody approves a pull
   // request that is then refused, and nothing that changed in between slips through.
   async publishChecks(run, targetBranch) {
-    if (run.state === 'needs_evidence') throw new Error(`This run cannot open a pull request yet: ${this.missingEvidence(run)}. Put that right, then run desk_verify and desk_finish again before desk_publish.`);
-    if (run.state !== 'ready_for_review') throw new Error(`Finish verified work before creating a PR. This run is ${run.state}; commit the fix, run desk_verify, then desk_finish, and publish once it is ready for review.`);
-    if (run.verification?.fingerprint !== await fingerprint(run.worktree)) throw new Error('Files changed after verification. Run verification again.');
     const target = targetBranch || run.targetBranch;
+    const already = this.pullRequests(run).find(item => item.target === target);
+    if (already) throw new Error(`A pull request from this run into ${target} is already open: ${already.url}. For one into another branch, call desk_publish again with targetBranch set to that branch.`);
+    if (run.state === 'needs_evidence') throw new Error(`This run cannot open a pull request yet: ${this.missingEvidence(run)}. Put that right, then run desk_verify and desk_finish again before desk_publish.`);
+    if (!['ready_for_review', 'published'].includes(run.state)) throw new Error(`Finish verified work before creating a PR. This run is ${run.state}; commit the fix, run desk_verify, then desk_finish, and publish once it is ready for review.`);
+    if (run.verification?.fingerprint !== await fingerprint(run.worktree)) throw new Error('Files changed after verification. Run verification again.');
     if (/(^|\/)(real-)?master$/.test(target)) throw new Error(`Rex Desk never opens a pull request into ${target}. Choose the develop branch, or release when that is intended.`);
     await git(run.worktree, ['check-ref-format', '--branch', target]);
     if (await git(run.worktree, ['status', '--porcelain'])) throw new Error('Commit the verified changes first. Resume the agent and ask it to commit.');
-    const behind = await git(run.worktree, ['rev-list', '--count', `${run.baseCommit}..HEAD`]);
-    if (Number(behind) === 0) throw new Error('No commits to publish.');
-    return target;
+    const commits = (await git(run.worktree, ['rev-list', '--reverse', `${run.baseCommit}..HEAD`])).split('\n').filter(Boolean);
+    if (!commits.length) throw new Error('No commits to publish.');
+    return { target, commits, additional: this.pullRequests(run).length > 0, rebuild: !await this.targetHolder(run, target) };
+  }
+  // A pull request into a branch that does not hold this run's base is opened from a branch made for it: Rex Desk cuts
+  // one from the target itself and cherry-picks this run's own commits onto it, so the pull request carries nothing else.
+  async rebuildForTarget(run, plan) {
+    const repository = this.repositoryFor(run);
+    const branch = `${run.branch}-for-${slug(plan.target.split('/').pop(), 24)}`;
+    const directory = path.join(this.store.directory, 'publish', slug(branch, 120));
+    await git(repository.path, ['worktree', 'prune']);
+    await this.removeWorktree(run, directory);
+    try { await git(repository.path, ['branch', '-D', branch]); } catch {}
+    mkdirSync(path.dirname(directory), { recursive: true });
+    await git(repository.path, ['worktree', 'add', '-b', branch, directory, `refs/remotes/origin/${plan.target}`]);
+    for (const commit of plan.commits) {
+      try { await git(directory, ['cherry-pick', '-x', commit]); }
+      catch {
+        const conflicts = await git(directory, ['diff', '--name-only', '--diff-filter=U']).catch(() => '');
+        try { await git(directory, ['cherry-pick', '--abort']); } catch {}
+        await this.removeWorktree(run, directory);
+        throw new Error(`Commit ${commit.slice(0, 8)} of this run does not apply to ${plan.target}${conflicts ? ` (conflicts in ${conflicts.split('\n').join(', ')})` : ''}. That branch needs a change written for it. Tell the human with desk_ask.`);
+      }
+    }
+    this.store.event(run.id, 'branch-rebuilt', { branch, target: plan.target, commits: plan.commits.length }, true);
+    return { branch, worktree: directory, temporary: true };
+  }
+  async removeWorktree(run, directory) {
+    try { await git(this.repositoryFor(run).path, ['worktree', 'remove', '--force', directory]); } catch {}
   }
   async publish(runId, { title, body, targetBranch, approved = false } = {}) {
     const run = this.run(runId);
     if (!approved) throw new Error('Publishing requires explicit approval from the dashboard.');
-    const target = await this.publishChecks(run, targetBranch);
-    await git(run.worktree, ['push', '-u', 'origin', run.branch]);
-    const file = path.join(this.evidence.directory(runId), 'pull-request.md');
-    writeFileSync(file, `${body || run.summary || ''}\n\nVerification: ${run.verification.command}\nResult: passed\nTask: ${this.task(run.taskId).sourceName} ${this.task(run.taskId).externalId}\n\nRecordings and test output are available in Rex Desk on this computer.\n`);
-    const { stdout } = await exec('gh', ['pr', 'create', '--draft', '--base', target, '--head', run.branch,
-      '--title', title || run.title, '--body-file', file], { cwd: run.worktree, windowsHide: true, timeout: 120000 });
-    this.patchRun(runId, { state: 'published', prUrl: stdout.trim(), targetBranch: target });
-    this.message(runId, `Draft pull request created: ${stdout.trim()}`); return { url: stdout.trim() };
+    const plan = await this.publishChecks(run, targetBranch);
+    const head = plan.rebuild ? await this.rebuildForTarget(run, plan) : { branch: run.branch, worktree: run.worktree };
+    try {
+      await git(head.worktree, ['push', '-u', 'origin', head.branch]);
+      const task = this.task(run.taskId);
+      const file = path.join(this.evidence.directory(runId), `pull-request-${slug(plan.target, 40)}.md`);
+      writeFileSync(file, `${body || run.summary || ''}\n\nVerification: ${run.verification.command}\nResult: passed\nTask: ${task.sourceName} ${task.externalId}\n${head.branch === run.branch ? '' : `\nThis branch was cut from ${plan.target} and holds only this run's ${plan.commits.length} commit${plan.commits.length === 1 ? '' : 's'}.\n`}\nRecordings and test output are available in Rex Desk on this computer.\n`);
+      const { stdout } = await this.gh(['pr', 'create', '--draft', '--base', plan.target, '--head', head.branch,
+        '--title', title || run.title, '--body-file', file], { cwd: head.worktree });
+      const url = String(stdout).trim();
+      const pullRequests = [...this.pullRequests(run), { url, target: plan.target, head: head.branch, createdAt: now() }];
+      this.patchRun(runId, { state: 'published', prUrl: url, targetBranch: plan.target, pullRequests });
+      this.message(runId, `Draft pull request created: ${url} (${head.branch} into ${plan.target})`); return { url };
+    } finally { if (head.temporary) await this.removeWorktree(run, head.worktree); }
   }
   async requestPublish(runId, options = {}) {
     const run = this.run(runId);
-    await this.publishChecks(run, options.targetBranch);
-    if (automaticPrAllowed(this.store.config(), run, await fingerprint(run.worktree))) return this.publish(runId, { ...options, approved: true });
-    const answer = await this.ask(runId, { kind: 'approval', method: 'publish', title: 'Create a draft pull request',
-      request: { branch: this.run(runId).branch, targetBranch: options.targetBranch || this.run(runId).targetBranch, title: options.title, body: options.body } });
+    const plan = await this.publishChecks(run, options.targetBranch);
+    if (!plan.additional && automaticPrAllowed(this.store.config(), run, await fingerprint(run.worktree))) return this.publish(runId, { ...options, approved: true });
+    const answer = await this.ask(runId, { kind: 'approval', method: 'publish',
+      title: plan.additional ? `Create another draft pull request, into ${plan.target}` : 'Create a draft pull request',
+      request: { branch: run.branch, targetBranch: plan.target, title: options.title, body: options.body,
+        ...(plan.rebuild ? { note: `${plan.target} does not hold this branch's base commit, so Rex Desk cuts ${run.branch}-for-${slug(plan.target.split('/').pop(), 24)} from origin/${plan.target} and cherry-picks this run's ${plan.commits.length} commit${plan.commits.length === 1 ? '' : 's'} onto it. Only those commits reach ${plan.target}.` } : {}) } });
     if (answer.action !== 'accept') return { declined: true };
     return this.publish(runId, { ...options, approved: true });
   }

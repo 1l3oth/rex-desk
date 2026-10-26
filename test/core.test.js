@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store, defaults, now } from '../src/store.js';
 import { Sources, normalizeTask, taskAssignees, postContent, matchesTaskStatus } from '../src/providers.js';
 import { Desk, validateAnswer } from '../src/coordinator.js';
 import { codexAnswer } from '../src/runners.js';
-import { git, createWorktree, slug } from '../src/processes.js';
+import { git, createWorktree, slug, fingerprint } from '../src/processes.js';
 import { createApp } from '../src/server.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -278,4 +278,45 @@ test('the session a follow-up reopens comes from the provider log, and a provide
   await desk.resume('r1', { provider: 'codex', prompt: 'try again' });
   assert.equal(store.get('run', 'r1').mirror, undefined, 'The other CLI cannot reopen it');
   await settle(); await desk.shutdown(); store.close();
+});
+
+test('a run opens a pull request into a second branch, built from that branch', async () => {
+  const directory = temporary('release'), origin = path.join(directory, 'origin.git'), repository = path.join(directory, 'repo'), tree = path.join(directory, 'tree');
+  mkdirSync(repository); mkdirSync(origin);
+  await git(repository, ['init', '-b', 'global/develop']);
+  await git(repository, ['config', 'user.name', 'Test']); await git(repository, ['config', 'user.email', 'test@example.invalid']);
+  writeFileSync(path.join(repository, 'app.txt'), 'first\n'); await git(repository, ['add', '.']); await git(repository, ['commit', '-m', 'First']);
+  await git(repository, ['branch', 'global/release']);
+  writeFileSync(path.join(repository, 'app.txt'), 'second\n'); await git(repository, ['add', '.']); await git(repository, ['commit', '-m', 'Second']);
+  await git(origin, ['init', '--bare', '-b', 'global/develop']);
+  await git(repository, ['remote', 'add', 'origin', origin]);
+  await git(repository, ['push', '-q', 'origin', 'global/develop', 'global/release']);
+  await git(repository, ['worktree', 'add', '-q', '-b', 'temp/rex/fix/search', tree, 'HEAD']);
+  const baseCommit = await git(tree, ['rev-parse', 'HEAD']);
+  writeFileSync(path.join(tree, 'fix.txt'), 'the fix\n'); await git(tree, ['add', '.']); await git(tree, ['commit', '-m', 'fix(search): limit the period']);
+
+  const store = new Store(temporary('release-store'));
+  store.saveConfig({ ...defaults, repositories: [{ id: 'repository-1', name: 'flow-was', path: repository, baseBranch: 'global/develop', targetBranch: 'global/develop' }] });
+  const desk = new Desk(store, { root: temporary('release-root') }), created = [];
+  desk.gh = async args => { created.push(args); return { stdout: `https://github.com/x/y/pull/${created.length}\n` }; };
+  store.put('task', 'task-1', { id: 'task-1', title: 'Search limit', active: true, sourceName: 'Morningmate', externalId: '32099' });
+  store.put('run', 'run-1', { id: 'run-1', role: 'worker', state: 'ready_for_review', taskId: 'task-1', repositoryId: 'repository-1',
+    branch: 'temp/rex/fix/search', worktree: tree, baseCommit, targetBranch: 'global/develop', title: 'fix(search): limit the period',
+    verification: { passed: true, command: 'npm test', fingerprint: await fingerprint(tree) }, createdAt: now() });
+
+  const develop = await desk.publish('run-1', { approved: true });
+  assert.equal(develop.url, 'https://github.com/x/y/pull/1');
+  assert.equal(created[0][created[0].indexOf('--head') + 1], 'temp/rex/fix/search', 'a pull request into develop comes straight from the run branch');
+
+  // Rex asks in chat for a release pull request. develop sits ahead of release, so the branch is rebuilt on release itself.
+  const release = await desk.publish('run-1', { approved: true, targetBranch: 'global/release' });
+  const head = created[1][created[1].indexOf('--head') + 1];
+  assert.equal(head, 'temp/rex/fix/search-for-release');
+  assert.equal(created[1][created[1].indexOf('--base') + 1], 'global/release');
+  assert.equal(await git(origin, ['rev-list', '--count', `global/release..${head}`]), '1', 'only the commit of this run reaches release');
+  assert.deepEqual(store.get('run', 'run-1').pullRequests.map(item => item.target), ['global/develop', 'global/release']);
+  assert.equal(store.get('run', 'run-1').prUrl, release.url);
+  assert.ok(!existsSync(path.join(store.directory, 'publish', slug(head, 120))), 'the branch Rex Desk built is removed once the pull request exists');
+  await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/release' }), /already open/);
+  store.close();
 });

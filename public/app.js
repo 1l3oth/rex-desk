@@ -589,6 +589,12 @@ async function loadAutostart() {
   const status = await api('/autostart').catch(() => ({ supported: false }));
   box.checked = Boolean(status.enabled); box.disabled = !status.supported;
 }
+// A run can open a pull request into more than one branch, for example develop and then release, so each one is listed.
+function renderPullRequests(run) {
+  const list = Array.isArray(run.pullRequests) && run.pullRequests.length ? run.pullRequests
+    : run.prUrl ? [{ url: run.prUrl, target: run.targetBranch }] : [];
+  return list.map(item => `<p><a href="${esc(safeUrl(item.url))}" target="_blank" rel="noopener">Open draft pull request${item.target ? ` into ${esc(item.target)}` : ''}</a></p>`).join('');
+}
 function renderProof(runId) {
   if (!runId) return '<p class="empty-small">Recorded browser tests, screenshots, and reports appear here after an agent starts working.</p>';
   const run = ui.snapshot.runs.find(item => item.id === runId);
@@ -640,7 +646,7 @@ function renderPane(run) {
   const waiting = pending(run.id).length, workers = ui.snapshot.runs.filter(item => item.parentRunId === run.id);
   const journal = `<details class="activity-link" data-journal="${run.id}"><summary>Work journal</summary><div class="journal" id="journal-${run.id}">${renderJournal(run.id)}</div></details>`;
   // The main agent only earns a side column once it has dispatched workers; otherwise the transcript keeps the width.
-  const proof = run.role === 'coordinator' && !workers.length ? '' : `<aside class="pane-proof"><h3>${run.role === 'coordinator' ? 'Dispatch' : run.role === 'verifier' ? 'QA result' : 'Worktree & proof'}</h3>${run.role === 'coordinator' ? renderDispatch(workers) : run.role === 'verifier' ? renderQa(run) : renderRunFacts(run)}${run.prUrl ? `<p><a href="${esc(safeUrl(run.prUrl))}" target="_blank" rel="noopener">Open draft pull request</a></p>` : ''}${run.role === 'worker' ? renderProof(run.id) : ''}${journal}</aside>`;
+  const proof = run.role === 'coordinator' && !workers.length ? '' : `<aside class="pane-proof"><h3>${run.role === 'coordinator' ? 'Dispatch' : run.role === 'verifier' ? 'QA result' : 'Worktree & proof'}</h3>${run.role === 'coordinator' ? renderDispatch(workers) : run.role === 'verifier' ? renderQa(run) : renderRunFacts(run)}${renderPullRequests(run)}${run.role === 'worker' ? renderProof(run.id) : ''}${journal}</aside>`;
   return `<section class="pane${run.id === ui.selectedRun ? ' focused' : ''}${run.id === ui.flashRun ? ' flash' : ''}${waiting ? ' needs-you' : ''}" data-pane-run="${run.id}" aria-label="${esc(run.title)}">
     <header class="pane-head"><span class="state-dot ${esc(run.state)}"></span><h2>${esc(run.title)}</h2><span class="pane-provider">${providerName(run.provider)}</span>${tag(run.state)}<span class="pane-actions">${run.worktree ? button(icon('terminal'), 'open-orca', 'small quiet icon-only', 'aria-label="Open in Orca" title="Open a plain terminal in this worktree in Orca"') : ''}${button(icon('close'), 'close-run', 'small quiet icon-only', `data-id="${run.id}" aria-label="Close pane"`)}</span></header>
     <div class="pane-sub">${run.role === 'verifier' ? (run.qaUrl ? `${icon('link')}<code title="${esc(run.qaUrl)}">${esc(run.qaUrl)}</code>` : '<span>Finding the test site</span>') : run.branch ? `${icon('branch')}<code title="${esc(run.branch)}">${esc(run.branch)}</code>` : `<span>${run.role === 'coordinator' ? `Analyzing ${plural((run.taskIds || []).length, 'issue')}` : 'Worktree preparing'}</span>`}<span class="pane-progress">${esc(progressText(run))}</span></div>

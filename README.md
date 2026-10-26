@@ -130,6 +130,8 @@ Settings → **GitHub** lists the GitHub CLI accounts on this computer, switches
 
 **Create draft PR** shows the title, description, and editable target branch before publishing. It checks verified code, requires a clean committed branch, pushes it to `origin`, and creates a draft with `gh`. It never merges or deploys.
 
+A run can open one pull request per target branch, so asking an agent in chat for a release pull request after the develop one works: it calls `desk_publish` again with `targetBranch`, and you approve a second card. When the target branch does not hold the base commit of the run's branch, a pull request straight from it would carry every other commit the target is missing, so Rex Desk cuts `<branch>-for-<target>` from `origin/<target>` in a temporary worktree, cherry-picks only that run's own commits onto it, and opens the pull request from there; the worktree is removed afterwards and the branch stays on `origin`. A commit that does not apply is reported with the conflicting files instead of being forced. Agents have no other route: pushing and `gh` writes are blocked inside run worktrees, so a request to push or open a pull request always becomes a `desk_publish` card for you.
+
 Orbit reporting is optional in Settings. Managed Claude workers also load MCP servers from your Claude configuration and the source repository's `.mcp.json`.
 
 ## Connect an existing AI
