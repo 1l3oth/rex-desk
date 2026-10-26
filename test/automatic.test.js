@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Store, defaults, now, modelName } from '../src/store.js';
+import { Store, defaults, now, modelName, redact } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
 import { CodexRunner } from '../src/runners.js';
 import { issueBranch, provisionalTitle, defaultBranchPattern } from '../src/branches.js';
@@ -241,4 +241,13 @@ test('a pull request opened outside Rex Desk is found by the run branch and sett
   const run = store.get('run', 'r');
   assert.equal(run.state, 'published'); assert.equal(run.prNumber, 2247); assert.equal(run.targetBranch, 'global/release');
   store.close();
+});
+
+test('a token count is a size, not a credential, and stays readable in the journal', () => {
+  assert.deepEqual(redact({ max_tokens: 2048, token_count: 12, input_tokens: 9, tokens_used: 3, cell_id: '2' }),
+    { max_tokens: 2048, token_count: 12, input_tokens: 9, tokens_used: 3, cell_id: '2' });
+  assert.deepEqual(redact({ apiKey: 'k', api_key: 'k', accessToken: 't', refresh_token: 't', token: 't', password: 'p', authorization: 'Bearer x', secretValue: 's' }),
+    { apiKey: '[redacted]', api_key: '[redacted]', accessToken: '[redacted]', refresh_token: '[redacted]', token: '[redacted]', password: '[redacted]', authorization: '[redacted]', secretValue: '[redacted]' });
+  assert.deepEqual(redact({ nested: { settings: { openrouterToken: 'k' }, limits: [{ max_tokens: 1 }] } }),
+    { nested: { settings: { openrouterToken: '[redacted]' }, limits: [{ max_tokens: 1 }] } });
 });

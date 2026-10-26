@@ -383,11 +383,15 @@ function messageText(message) {
 }
 const toolName = name => String(name || 'tool').replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '');
 const clip = (value, size) => { const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? ''; return text.length > size ? `${text.slice(0, size)}\n… ${text.length - size} more characters` : text; };
-// Prefer the field that says what the call does over the IDs it targets.
+// Prefer the field that says what the call does over the IDs it targets. An agent may pass a plain script or an
+// argument list instead of an object, so that text is the summary itself rather than its first character.
+const summaryText = value => typeof value === 'string' ? value
+  : Array.isArray(value) && value.every(item => typeof item === 'string') ? value.join(' ') : '';
 const toolSummary = input => {
-  const fields = Object.entries(input || {}).filter(([, value]) => typeof value === 'string' && value.trim());
+  const direct = summaryText(input);
+  const fields = direct ? [] : Object.entries(input || {}).map(([key, value]) => [key, summaryText(value)]).filter(([, value]) => value.trim());
   const preferred = fields.find(([key]) => ['category', 'command', 'message', 'text', 'question', 'title', 'url', 'query', 'instructions', 'description'].includes(key)) || fields.find(([key]) => !/id$/i.test(key)) || fields[0];
-  const line = preferred ? preferred[1].replace(/\s+/g, ' ').trim() : '';
+  const line = (direct || (preferred ? preferred[1] : '')).replace(/\s+/g, ' ').trim();
   const plain = line.replace(/\*\*|`/g, '');
   return plain.length > 90 ? `${plain.slice(0, 89)}…` : plain;
 };

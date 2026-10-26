@@ -41,11 +41,16 @@ function agentProfile(value, name) {
   return path.resolve(folder);
 }
 
+// A counted or limited token is a size, not a credential, so a name such as max_tokens or token_count keeps its value.
+const sizeWords = new Set(['max', 'min', 'num', 'count', 'total', 'used', 'usage', 'budget', 'limit', 'remaining', 'input', 'output', 'cache', 'per', 'size', 'length']);
+const keyWords = key => String(key).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+const secretKey = key => /api.?key|secret|password|passphrase|authorization|credential|token/i.test(key)
+  && !keyWords(key).some(word => sizeWords.has(word));
 export function redact(value) {
   if (Array.isArray(value)) return value.map(redact);
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value).map(([key, item]) =>
-    [key, /api.?key|token|secret|password|authorization/i.test(key) ? '[redacted]' : redact(item)]));
+    [key, secretKey(key) ? '[redacted]' : redact(item)]));
 }
 
 export class Store extends EventEmitter {
