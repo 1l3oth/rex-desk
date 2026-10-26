@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { orcaStatus, OrcaRunner, showWorktreesInOrca, ensureOrcaRunning } from '../src/orca.js';
+import { orcaStatus, OrcaRunner, showWorktreesInOrca, ensureOrcaRunning, sendToOrca } from '../src/orca.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 // A scripted Orca CLI: each call receives argv and returns the JSON envelope the real CLI prints.
@@ -165,4 +165,23 @@ test('a closed Orca is opened rather than letting a run go headless', async () =
   });
   await ensureOrcaRunning(closed.options);
   assert.deepEqual(closed.calls.map(args => args[0]), ['status', 'open'], 'A closed Orca is started first');
+});
+
+test('a blocked terminal message is sent again with the request ID Orca gave, never as a plain retry', async () => {
+  const run = { sessionId: 'orca:term_7' };
+  const blocked = {
+    ok: false,
+    error: { code: 'agent_prompt_blocked', message: 'agent_prompt_blocked Terminal prompt request ID: 7c3a8d71-d78d-409a-9a84-91fb162c1be3.',
+      data: { nextSteps: ['Re-issue the exact command with --retry-request 7c3a8d71-d78d-409a-9a84-91fb162c1be3 --wait-submit <seconds>; do not retry it without that ID.'] } },
+  };
+  let attempt = 0;
+  const orca = fakeOrca({ 'terminal send': () => (++attempt === 1 ? blocked : { ok: true, result: { submitted: true } }) });
+  assert.deepEqual(await sendToOrca(run, 'try the dev server', orca.options), { submitted: true });
+  assert.equal(orca.calls.length, 2);
+  assert.deepEqual(orca.calls[1].slice(-5, -1), ['--retry-request', '7c3a8d71-d78d-409a-9a84-91fb162c1be3', '--wait-submit', '10']);
+  assert.deepEqual(orca.calls[1].slice(0, 7), orca.calls[0].slice(0, 7), 'The retry repeats the exact command');
+
+  const other = fakeOrca({ 'terminal send': { ok: false, error: { code: 'not_found', message: 'terminal closed' } } });
+  await assert.rejects(sendToOrca(run, 'hello', other.options), /terminal closed/);
+  assert.equal(other.calls.length, 1, 'A failure without an ID is never typed twice');
 });

@@ -14,7 +14,7 @@ export function orcaJson(args, { run = execFile, timeout = 30000 } = {}) {
     let data;
     try { data = JSON.parse(String(stdout || '')); }
     catch { reject(new Error(error?.code === 'ENOENT' ? 'Orca CLI is not installed or not on PATH.' : `Orca CLI returned no JSON: ${String(error?.message || stdout).slice(0, 300)}`)); return; }
-    if (data.ok === false) { const failure = new Error(data.error?.data?.nextSteps?.[0] || data.error?.message || 'Orca command failed.'); failure.code = data.error?.code; reject(failure); return; }
+    if (data.ok === false) { const failure = new Error(data.error?.data?.nextSteps?.[0] || data.error?.message || 'Orca command failed.'); failure.code = data.error?.code; failure.data = data.error?.data; reject(failure); return; }
     resolve(data.result ?? data);
   }));
 }
@@ -184,5 +184,20 @@ export async function sendToOrca(run, text, options) {
   if (!handle) throw new Error('This run has no Orca terminal to message.');
   const line = String(text || '').replace(/\s*\n\s*/g, ' ').trim();
   if (!line) throw new Error('Write a message first.');
-  return orcaJson(['terminal', 'send', '--terminal', handle, '--text', line, '--enter'], options);
+  const args = ['terminal', 'send', '--terminal', handle, '--text', line, '--enter'];
+  try { return await orcaJson(args, options); }
+  catch (error) {
+    // Orca answers an ambiguous send with a request ID bound to this exact text. Only that ID may be sent again:
+    // a plain retry would type the message twice, so without an ID the failure is passed on unchanged.
+    const id = requestId(error);
+    if (!id) throw error;
+    return orcaJson([...args, '--retry-request', id, '--wait-submit', '10'], options);
+  }
+}
+const requestPattern = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+function requestId(error) {
+  const data = error?.data || {};
+  const named = data.requestId || data.retryRequestId || data.promptRequestId || data.request?.id;
+  if (typeof named === 'string' && requestPattern.test(named)) return named;
+  return requestPattern.exec(`${error?.message || ''} ${JSON.stringify(data)}`)?.[0] || '';
 }
