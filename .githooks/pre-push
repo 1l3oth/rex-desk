@@ -1,13 +1,14 @@
 #!/bin/sh
-# main changes only through pull requests. GitHub cannot enforce this on a private repository
-# without a paid plan, so this hook refuses the push before it leaves the computer.
+# master (the default branch, formerly main) changes only through pull requests.
+# This hook refuses the push before it leaves the computer, in addition to any rule on GitHub.
 while read -r local_ref local_sha remote_ref remote_sha; do
-  if [ "$remote_ref" = "refs/heads/main" ]; then
-    echo "Direct pushes to main are blocked. Push a branch and open a pull request:" >&2
-    echo "  git switch -c feature/<short-name>" >&2
-    echo "  git push -u origin HEAD" >&2
-    echo "  gh pr create --fill" >&2
-    exit 1
-  fi
+  case "$remote_ref" in
+    refs/heads/master|refs/heads/main)
+      echo "Direct pushes to ${remote_ref#refs/heads/} are blocked. Push a branch and open a pull request:" >&2
+      echo "  git switch -c feature/<short-name>" >&2
+      echo "  git push -u origin HEAD" >&2
+      echo "  gh pr create --fill" >&2
+      exit 1 ;;
+  esac
 done
 exit 0
