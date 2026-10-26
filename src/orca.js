@@ -65,8 +65,8 @@ export class OrcaRunner {
     mkdirSync(directory, { recursive: true });
     const spec = path.join(directory, `agent-${Date.now()}.json`);
     const env = this.agentEnv || process.env, key = this.run.provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME';
-    writeFileSync(spec, JSON.stringify({ runId: this.run.id, provider: this.run.provider, cwd: this.cwd, prompt, token: this.token, mcpUrl: this.mcpUrl, model: this.model,
-      executable: this.executable || resolveCommand(this.run.provider), env: env[key] ? { [key]: env[key] } : {}, unset: env[key] ? [] : [key] }), { mode: 0o600 });
+    writeFileSync(spec, JSON.stringify({ runId: this.run.id, provider: this.run.provider, cwd: this.cwd, prompt, token: this.token, mcpUrl: this.mcpUrl, model: this.model, addDir: this.artifactDirectory || '',
+      executable: this.executable || resolveCommand(this.run.provider), env: { ...(env[key] ? { [key]: env[key] } : {}), ...(this.javaEnv || {}) }, unset: env[key] ? [] : [key] }), { mode: 0o600 });
     const command = `node "${launcher}" "${spec}"`;
     let terminal;
     try { terminal = await orcaJson(['terminal', 'create', '--worktree', `path:${this.cwd}`, '--title', `Rex · ${String(this.run.title).slice(0, 40)}`, '--command', command], this.orca); }
@@ -74,7 +74,16 @@ export class OrcaRunner {
     this.handle = terminal.terminal?.handle || terminal.handle;
     this.event('orca-terminal', { handle: this.handle, worktree: this.cwd, note: 'Tool approvals appear in the Orca terminal. Questions sent with desk_ask appear in Rex Desk.' });
     this.event('session', { sessionId: `orca:${this.handle}` });
-    // The agent stays open after its turn; the run ends when it finishes through MCP, the terminal closes, or the user stops it.
+    return this.watch(this.handle);
+  }
+  // The agent stays open after its turn; the run ends when it finishes through MCP, the terminal closes, or the user stops it.
+  // After a Rex Desk restart the same watch resumes; a terminal that is already gone means the run was interrupted.
+  async watch(handle, { reattached = false } = {}) {
+    this.handle = handle;
+    if (reattached) {
+      const shown = await orcaJson(['terminal', 'show', '--terminal', handle], this.orca).catch(() => null);
+      if (!shown || (shown.terminal || shown).connected === false) throw new Error('The Orca terminal closed while Rex Desk restarted. Resume this run to continue.');
+    }
     while (!this.signal.aborted) {
       await new Promise(resolve => setTimeout(resolve, this.pollMs || 5000));
       if (this.isDone?.()) return { status: 'completed' };

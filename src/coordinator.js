@@ -12,7 +12,7 @@ import { Evidence } from './browser.js';
 import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
 import { Jev } from './jev.js';
-import { branchName } from './naming.js';
+import { branchName, branchNameFromCli } from './naming.js';
 import { seedFlowWorktree, runtimeProfile } from './flow-runtime.js';
 import { assessRisk, automaticPrAllowed } from './risk.js';
 import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from './processes.js';
@@ -43,8 +43,8 @@ export function validateAnswer(interaction, answer) {
 }
 
 export class Desk {
-  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher } = {}) {
-    this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher;
+  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, imageFetcher = fetch } = {}) {
+    this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
@@ -72,8 +72,35 @@ export class Desk {
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
       directories: this.store.list('directory'), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, qaSession: this.evidence.qaStatus() };
   }
-  scopeToken(runId) { const token = randomBytes(32).toString('base64url'); this.tokens.set(token, runId); return token; }
-  scope(token) { return this.store.authenticate(token) ? { role: 'external' } : this.tokens.has(token) ? { role: this.run(this.tokens.get(token)).role, runId: this.tokens.get(token) } : null; }
+  // Run keys are kept as hashes in the database, so an agent still working in an Orca terminal keeps its connection through a restart.
+  scopeToken(runId) {
+    const token = randomBytes(32).toString('base64url');
+    this.tokens.set(token, runId); this.store.put('token', createHash('sha256').update(token).digest('hex'), { id: createHash('sha256').update(token).digest('hex'), runId, createdAt: now() });
+    return token;
+  }
+  forgetToken(token) { this.tokens.delete(token); this.store.delete('token', createHash('sha256').update(token).digest('hex')); }
+  scope(token) {
+    if (this.store.authenticate(token)) return { role: 'external' };
+    const runId = this.tokens.get(token) || this.store.get('token', createHash('sha256').update(String(token || '')).digest('hex'))?.runId;
+    const run = runId && this.store.get('run', runId);
+    return run ? { role: run.role, runId } : null;
+  }
+  // Watch Orca runs that survived a restart until their terminal ends, then settle them like any finished run.
+  reattachOrca(options = {}) {
+    for (const run of this.store.list('run').filter(item => item.reattach)) {
+      const controller = new AbortController(), watcher = new OrcaRunner({ run, signal: controller.signal, orcaOptions: options.orcaOptions, pollMs: options.pollMs, isDone: () => terminalStates.has(this.run(run.id).state) });
+      this.live.set(run.id, { controller, runner: watcher }); this.patchRun(run.id, { reattach: false });
+      this.store.event(run.id, 'phase', { text: 'Rex Desk restarted; still watching the Orca terminal' }, true);
+      void watcher.watch(run.sessionId.slice(5), { reattached: true })
+        .then(() => { if (!terminalStates.has(this.run(run.id).state)) this.patchRun(run.id, { state: 'needs_evidence', endedAt: now() }); })
+        .catch(error => { if (!terminalStates.has(this.run(run.id).state)) this.patchRun(run.id, { state: controller.signal.aborted ? 'stopped' : 'interrupted', error: error.message, endedAt: now() }); })
+        .finally(async () => {
+          await this.evidence.close(run.id).catch(() => {});
+          for (const key of this.store.list('token').filter(item => item.runId === run.id)) this.store.delete('token', key.id);
+          this.live.delete(run.id); void this.drain();
+        });
+    }
+  }
   authorize(scope, runId, { coordinator = false } = {}) {
     if (!scope) throw new Error('Authentication required.');
     const scoped = scope.role === 'worker' || scope.role === 'verifier';
@@ -192,7 +219,9 @@ export class Desk {
         const repository = { ...effectiveRepository(config.repositories.find(item => item.id === run.repositoryId)), baseBranch: run.baseBranch };
         const task = this.task(run.taskId);
         // An English name from the QA issue itself, written by a small model through the OpenRouter key; without one, the tracker number until the worker names it.
-        const named = await branchName(task, { apiKey: this.jev.apiKey(), fetcher: this.namingFetcher }).catch(error => { this.store.event(runId, 'branch-naming-error', { message: error.message }); return null; });
+        // OpenRouter first; without a key, the signed-in Claude Code (tests inject their own command instead of calling it).
+        const named = await branchName(task, { apiKey: this.jev.apiKey(), fetcher: this.namingFetcher }).catch(error => { this.store.event(runId, 'branch-naming-error', { message: error.message }); return null; })
+          || (this.namingCommand || !this.runnerFactory ? await branchNameFromCli(task, { env: this.agents.environment('claude'), cwd: path.join(this.store.directory, 'coordinator'), run: this.namingCommand }) : null);
         const branch = await uniqueBranch(repository.path, issueBranch(repository.branchPattern, { prefix: config.branchPrefix, type: named?.type, title: named?.title || provisionalTitle(task), number: task.taskNumber || task.externalId, source: task.source, taskId: task.externalId, runId }),
           { worktreeRoot: this.worktreeRoot, taken: this.store.list('run').map(item => item.branch).filter(Boolean) });
         const worktree = await createWorktree(repository, this.worktreeRoot, branch);
@@ -215,7 +244,8 @@ export class Desk {
       token = this.scopeToken(runId);
       const options = { run, cwd: run.worktree || path.join(this.store.directory, 'coordinator'), token,
         sourcePath: this.store.config().repositories.find(item => item.id === (run.repositoryId || run.docsRepositoryId))?.path,
-        mcpUrl: this.mcpUrl, model: modelName(run.provider, this.store.config().models[run.provider]), controller, signal: controller.signal, agentEnv: this.agents.environment(run.provider),
+        mcpUrl: this.mcpUrl, model: modelName(run.provider, this.store.config().models[run.provider]), controller, signal: controller.signal, agentEnv: { ...this.agents.environment(run.provider), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
+        artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
@@ -237,7 +267,7 @@ export class Desk {
       this.store.event(runId, 'error', { message: error.message }, true);
     } finally {
       await this.evidence.close(runId).catch(error => this.store.event(runId, 'evidence-error', { message: error.message }, true));
-      if (token) this.tokens.delete(token);
+      if (token) this.forgetToken(token);
       await this.closeMcpSessions(runId);
       this.cancelQuestions(runId);
       this.live.delete(runId); void this.drain();
@@ -258,6 +288,13 @@ export class Desk {
     if (run.role === 'verifier') return `${common}\nYou are a QA verifier for one issue whose fix a developer reports as done. You never change code, files, settings, or tracker data; you only test and report.\n${this.qaSitePrompt(run, task)}\nWorkflow: read the full issue with desk_task, including comments, which often say what was changed and how to check it. Decide the test site, the exact steps, and the expected result from the issue's reproduction steps and expected behavior. Use desk_browser: open with url set to the test site, navigate within it, click, fill, and take screenshots of the key states. Prove the expected behavior with at least one assertText or assertVisible on the result itself, not on unrelated page chrome. If the issue concerns another language, switch the site or account language the way a user would, if the site allows it. If you land on a login page, the human has no saved sign-in for this site: report blocked and say which site needs a sign-in; the dashboard offers the human a sign-in button for it. If the behavior cannot be checked on this web site in Chromium (installed desktop app, Safari, macOS, iOS, Android, missing test data, or missing permissions), report blocked with the exact reason; never guess. Finish with desk_qa_result: verdict pass only when the expected behavior is visible and asserted; fail when the reported problem still happens, with what you saw; blocked when it cannot be checked. Include a short tracker comment in English that states the environment, the steps, the result, and that a recording is attached in Rex Desk. Do not change the tracker status yourself; the human decides after reviewing your evidence.\nIssue: ${JSON.stringify({ id: task.id, externalId: task.externalId, title: task.title, description: task.description, source: task.source, status: task.statusName || task.status, fields: task.fields })}\nAdditional instructions: ${run.instructions || 'Verify the reported fix and attach proof.'}`;
     return `${common}\nYou own one issue. Work only in ${run.worktree}, branch ${run.branch}, based on ${run.baseBranch}. Never switch or edit the original checkout. Do not bind shared ports; use PORT=${run.port}. Read repository AGENTS.md and CLAUDE.md. Do not install or start machine-wide services.\nWorkflow: inspect the full issue using desk_task; if your branch name is generic (issue-<number>) or no longer describes the real cause, call desk_branch with 3 to 6 English words that say which feature breaks and how, and its type (fix, feature, refactor, chore, or docs), so the branch reads like temp/rex/fix/project-view-names-ignore-language; reproduce before editing; use desk_browser to record browser reproduction and verification; fix at the responsible layer; run desk_verify for the repository's tests (if it reports that no test command is set or detected, read the repository docs and call desk_verify with command; the human approves it once and it is saved); make at least one relevant assertText or assertVisible browser assertion after the fix; self-review the complete diff and call desk_finish with a factual report and risk {score:1-10,requiresHumanReview,reason,factors}. Explain security, data, behavior, rollback, and verification risks. A low score needs concrete reasons; uncertainty requires human review. A worker stopping is not proof of success. For Flow/Morningmate, desk_browser starts isolated Java 8 Tomcat when its preset is configured. ${run.runtimeProfile ? `This run uses the ${run.runtimeProfile} runtime profile; do not edit jex.content.user.xml to switch products.` : ''} Read docs/claude/build.md before Java or frontend builds. Local JEX config is copied; build this branch's own frontend output and never link node_modules or reuse another branch's dist. Do not run the original fixed-port start.sh. For an Electron repository, desk_browser opens this worktree's app with its own user data; never launch the installed app, change protocol handlers, or trigger updates. If the app cannot run independently, use desk_ask and report the exact blocker. Never fabricate screenshots, videos, test passes, or reproduction. All browser actions through desk_browser are recorded into video and a Playwright trace. Other browser tools are not automatically recorded. Commit only the files your fix needs: never commit unrelated files, or files a build rewrote that you did not change on purpose. ${task.url ? `End the commit message with the issue's QA link ${task.url}. ` : ''}Do not push, create PRs, merge, deploy, or change tracker status through another tool. desk_publish and desk_status apply dashboard approvals. PR target: ${run.targetBranch}.\n${lessons}\nIssue: ${JSON.stringify({ id: task.id, externalId: task.externalId, title: task.title, description: task.description, source: task.source, projectId: task.projectId, status: task.status })}\nAdditional instructions: ${run.instructions || 'Fix the assigned issue and attach proof.'}\nReminder: every desk_message, desk_ask, summary, and report to the human is in English.`;
   }
+  // A Java WAR project's worker finds JDK 8 first, so a plain java or javac never builds classes the server cannot load.
+  javaEnv(run) {
+    const javaHome = run.role === 'worker' && effectiveRepository(this.store.config().repositories.find(item => item.id === run.repositoryId))?.flowRuntime?.javaHome;
+    if (!javaHome) return {};
+    const key = Object.keys(process.env).find(name => name.toUpperCase() === 'PATH') || 'PATH';
+    return { JAVA_HOME: javaHome, [key]: `${path.join(javaHome, 'bin')}${path.delimiter}${process.env[key] || ''}` };
+  }
   // Mistakes earlier workers made on this machine, written down so later workers start from them.
   lessons(run) {
     const repository = effectiveRepository(this.store.config().repositories.find(item => item.id === run.repositoryId));
@@ -266,9 +303,13 @@ export class Desk {
       '- Never change the working directory of your shell session. Repository hooks run by paths relative to the worktree root and silently stop working after a cd, including the bash safety guard. Use npm --prefix <dir>, git -C <dir>, or a subshell such as (cd <dir> && <command>).',
       '- Reports are for a non-developer. Start with the problem and what you changed in two or three plain English sentences, without class or file names; add technical detail after, only if it helps. Answer in the dashboard message itself, not in a separate HTML file unless asked.',
       '- Use desk_browser for reproduction and proof; do not start servers yourself. If it reports a missing preview, say so once with desk_ask instead of building your own server.',
+      '- If the human names a different base branch than the one this worktree started from (for example "from global/hotfix") and you have no commits yet, reset your branch onto origin/<that branch> before editing, and say so in desk_message.',
+      '- Issue screenshots and attachments: call desk_attachment with the image or file URL from desk_task. It saves the file in this run’s folder and returns a path you can read; do not download tracker files yourself.',
+      '- A zero-byte .git index.lock with no git process running is stale: confirm no git process holds it, then remove it. Never remove it while git is running.',
       ...(flow ? [
         '- flow-was: desk_browser starts an isolated Tomcat for this worktree, and setup already built the src/flow-renewal frontend bundles. If pages are unstyled, rebuild once with npm run build --prefix src/flow-renewal. Never run npm run dev or other gulp watchers, and never link node_modules from another checkout: its locked versions differ.',
         '- flow-was Java: compile exactly like compile.sh, with JDK 8 and -g -source 1.8 -target 1.8 -encoding UTF-8 -cp "src/WEB-INF/classes;src/WEB-INF/lib/*" -d src/WEB-INF/classes for the changed files only. Check that the class major version is 52. A class file that shrinks noticeably means your flags differ from the project\'s.',
+        '- flow-was preview: Tomcat does not reload changed classes. After recompiling Java, call desk_browser close and then open again so the preview runs the new code.',
         '- flow-was sign-in: use the saved test account placeholders with desk_browser; local config files under src/WEB-INF/jex/config are already copied into this worktree, so never copy or print them.'] : []),
     ].join('\n');
   }

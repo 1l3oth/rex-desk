@@ -69,11 +69,14 @@ export class Store extends EventEmitter {
     this.token = this.decrypt(token);
     this.cloud = new TursoSync(this);
     // Running processes cannot be resurrected after a crash. Keep their history and make recovery explicit.
+    // An agent in an Orca terminal keeps running through a restart, so its run is reattached instead of interrupted.
+    const reattached = new Set();
     for (const run of this.list('run')) {
-      if (['running', 'queued', 'waiting', 'verifying', 'starting'].includes(run.state)) {
-        this.put('run', run.id, { ...run, state: 'interrupted', endedAt: now(), error: 'Server restarted. Resume this run to continue.' });
-      }
+      if (!['running', 'queued', 'waiting', 'verifying', 'starting'].includes(run.state)) continue;
+      if (run.execution === 'orca' && String(run.sessionId || '').startsWith('orca:') && ['running', 'waiting'].includes(run.state)) { this.put('run', run.id, { ...run, state: 'running', reattach: true }); reattached.add(run.id); }
+      else this.put('run', run.id, { ...run, state: 'interrupted', endedAt: now(), error: 'Server restarted. Resume this run to continue.' });
     }
+    for (const key of this.list('token')) if (!reattached.has(key.runId)) this.delete('token', key.id);
     for (const prompt of this.list('interaction')) {
       if (prompt.state === 'pending') this.put('interaction', prompt.id, { ...prompt, state: 'expired' });
     }

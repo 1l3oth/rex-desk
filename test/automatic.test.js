@@ -156,11 +156,13 @@ test('a new run gets an English branch name that describes the QA issue, or the 
   assert.match(request.body.messages[1].content, /업무 매니저/);
 
   const { original } = await repository();
-  for (const [key, expected] of [['or-key', 'temp/rex/fix/project-view-names-ignore-language'], ['', 'temp/rex/fix/issue-38464']]) {
+  // Without a key the signed-in Claude Code names it; when that fails too, the tracker number.
+  const cli = answer => (command, args, options, callback) => { assert.ok(args.includes('haiku') && args.at(-1).includes('업무 매니저')); callback(answer ? null : new Error('not signed in'), answer); };
+  for (const [key, expected, namingCommand] of [['or-key', 'temp/rex/fix/project-view-names-ignore-language'], ['', 'temp/rex/fix/views-keep-english-names', cli('{"type":"fix","name":"views keep english names"}')], ['', 'temp/rex/fix/issue-38464', cli('')]]) {
     const store = new Store(path.join(temporary('naming'), 'data')); // its own worktrees folder beside it
     store.saveConfig({ ...defaults, repositories: [{ id: 'repo', name: 'repo', path: original, baseBranch: 'develop', targetBranch: 'develop' }], jev: { apiKey: key } });
     store.put('task', 'task-1', { id: 'task-1', title: '업무 매니저 > 프로젝트 생성 > 업무 탭 뷰명 영어·한국어 표시', taskNumber: '38464', externalId: '1076020', source: 'morningmate', active: true, createdAt: now() });
-    const desk = new Desk(store, { root: temporary('naming-root'), runnerFactory: idle, namingFetcher: fetcher });
+    const desk = new Desk(store, { root: temporary('naming-root'), runnerFactory: idle, namingFetcher: fetcher, namingCommand });
     const run = await desk.startTask({ taskId: 'task-1', repositoryId: 'repo' });
     for (let attempt = 0; attempt < 100 && !store.get('run', run.id).branch; attempt++) await new Promise(resolve => setTimeout(resolve, 30));
     assert.equal(store.get('run', run.id).branch, expected);
@@ -180,4 +182,25 @@ test('an agent cannot start a run on an issue until the human approves the card 
   await assert.rejects(pending, /did not approve/);
   assert.equal(store.list('run').filter(run => run.role === 'worker').length, 0);
   store.close();
+});
+
+test('desk_attachment saves an issue screenshot into the run folder for the agent to read', async () => {
+  const { createApp } = await import('../src/server.js');
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const { existsSync } = await import('node:fs');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGNgYGD4z8DAwMDAAAAEBQEAr8Q+0wAAAABJRU5ErkJggg==', 'base64');
+  const shot = 'https://morningmate.invalid/flowImg/shot.png';
+  const app = await createApp({ dataDirectory: temporary('attachment'), port: 0, imageFetcher: async url => String(url) === shot ? new Response(png) : new Response('', { status: 404 }) });
+  try {
+    app.store.put('task', 'task-a', { id: 'task-a', title: 'Blank preview', active: true, images: [{ url: shot, name: 'shot.png' }] });
+    app.store.put('run', 'worker-a', { id: 'worker-a', role: 'worker', taskId: 'task-a', state: 'running', createdAt: now() });
+    const client = new Client({ name: 'attachment-test', version: '1' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(app.address + '/mcp'), { requestInit: { headers: { Authorization: `Bearer ${app.desk.scopeToken('worker-a')}` } } }));
+    try {
+      const saved = JSON.parse((await client.callTool({ name: 'desk_attachment', arguments: { url: shot } })).content[0].text);
+      assert.equal(saved.type, 'png'); assert.ok(existsSync(saved.path)); assert.match(saved.path, /worker-a[\\/]attachments/);
+      assert.equal((await client.callTool({ name: 'desk_attachment', arguments: { url: 'https://example.invalid/other.png' } })).isError, true, 'Only files of the run’s own issue');
+    } finally { await client.close(); }
+  } finally { await app.close(); }
 });

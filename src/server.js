@@ -52,7 +52,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
     unlinkSync(lockPath);
   }
   writeFileSync(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 });
-  const store = new Store(dataDirectory), desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher });
+  const store = new Store(dataDirectory), desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher });
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
   store.on('change', notify);
@@ -214,6 +214,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
   catch (error) { store.close(); unlinkSync(lockPath); throw error; }
   const address = `http://127.0.0.1:${server.address().port}`;
   desk.mcpUrl = `${address}/mcp`;
+  desk.reattachOrca();
   let lastSync = Date.now();
   const timer = setInterval(() => {
     const minutes = store.config().syncMinutes;

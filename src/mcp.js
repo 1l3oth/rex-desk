@@ -4,6 +4,9 @@ import { z } from 'zod';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import { effectiveRepository } from './project-detect.js';
+import { cachedTaskMedia } from './images.js';
+import { copyFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
 
 const runId = z.string().optional().describe('Run ID. Omit when using a run-scoped agent connection.');
 const reply = value => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] });
@@ -85,6 +88,15 @@ export function createMcp(desk, scope) {
       const alive = token === undefined ? null : setInterval(() => void extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: ++ticks, message: 'Waiting for the human in Rex Desk' } }).catch(() => {}), 25000);
       try { return await interaction.promise; } finally { clearInterval(alive); }
     });
+  tool('desk_attachment', 'Save an image or video attached to your issue (a screenshot, comment image, or attachment URL from desk_task) into this run’s folder, and return the local path to read it from.',
+    { runId, url: z.string().min(8) }, async input => {
+      const id = resolveRun(input.runId), run = desk.run(id);
+      if (!run.taskId) throw new Error('This run has no issue.');
+      const cached = await cachedTaskMedia(desk.store, run.taskId, input.url, { fetcher: desk.imageFetcher });
+      const folder = path.join(desk.evidence.directory(id), 'attachments'); mkdirSync(folder, { recursive: true });
+      const target = path.join(folder, path.basename(cached)); copyFileSync(cached, target);
+      return { path: target, type: path.extname(target).slice(1) };
+    }, true);
   tool('desk_question', 'Poll a dashboard question created with desk_ask wait=false.', { questionId: z.string() }, ({ questionId }) => {
     const interaction = desk.store.get('interaction', questionId);
     if (!interaction) throw new Error('Question not found.'); desk.authorize(scope, interaction.runId);

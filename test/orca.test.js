@@ -71,3 +71,48 @@ test('the Orca launcher deletes its spec, passes the token only to the agent, an
   assert.match(result.stdout, /Rex Desk agent exited \(code 3\)\. Run run-1\./);
   assert.equal(existsSync(spec), false);
 });
+
+test('an Orca run survives a Rex Desk restart: its key still works and its terminal is watched again', async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const os = await import('node:os'), path = await import('node:path');
+  const { Store, now } = await import('../src/store.js');
+  const { Desk } = await import('../src/coordinator.js');
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'rex-desk-reattach-'));
+  let store = new Store(directory), desk = new Desk(store, { root: directory, runnerFactory: () => ({}) });
+  store.put('run', 'orca-run', { id: 'orca-run', role: 'worker', title: 'Live in Orca', state: 'running', execution: 'orca', sessionId: 'orca:term_live', createdAt: now() });
+  store.put('run', 'headless', { id: 'headless', role: 'worker', title: 'Headless', state: 'running', createdAt: now() });
+  const orcaKey = desk.scopeToken('orca-run'), headlessKey = desk.scopeToken('headless');
+  store.close();
+  store = new Store(directory); desk = new Desk(store, { root: directory, runnerFactory: () => ({}) });
+  assert.equal(store.get('run', 'orca-run').state, 'running', 'The agent still works in its Orca terminal');
+  assert.equal(store.get('run', 'headless').state, 'interrupted');
+  assert.deepEqual(desk.scope(orcaKey), { role: 'worker', runId: 'orca-run' }, 'Its MCP key survives the restart');
+  assert.equal(desk.scope(headlessKey), null, 'An interrupted run’s key is dropped');
+  let open = true;
+  desk.reattachOrca({ pollMs: 10, orcaOptions: { run: (command, args, options, callback) => callback(null, JSON.stringify(open ? { ok: true, result: { terminal: { connected: true, preview: '' } } } : { ok: false, error: { code: 'terminal_not_found', message: 'not found' } })) } });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(store.get('run', 'orca-run').state, 'running');
+  open = false;
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(store.get('run', 'orca-run').state, 'needs_evidence', 'When the terminal ends, the run settles as usual');
+  assert.equal(desk.scope(orcaKey), null, 'and its key is removed');
+  for (const live of desk.live.values()) live.controller.abort();
+  store.close();
+});
+
+test('a reattached Orca run whose terminal closed during the restart is interrupted', async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const os = await import('node:os'), path = await import('node:path');
+  const { Store, now } = await import('../src/store.js');
+  const { Desk } = await import('../src/coordinator.js');
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'rex-desk-reattach-closed-'));
+  let store = new Store(directory);
+  store.put('run', 'gone', { id: 'gone', role: 'worker', title: 'Gone', state: 'running', execution: 'orca', sessionId: 'orca:term_gone', createdAt: now() });
+  store.close(); store = new Store(directory);
+  const desk = new Desk(store, { root: directory, runnerFactory: () => ({}) });
+  desk.reattachOrca({ pollMs: 10, orcaOptions: { run: (command, args, options, callback) => callback(null, JSON.stringify({ ok: false, error: { code: 'terminal_not_found', message: 'not found' } })) } });
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(store.get('run', 'gone').state, 'interrupted');
+  assert.match(store.get('run', 'gone').error, /closed while Rex Desk restarted/);
+  store.close();
+});
