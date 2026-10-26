@@ -559,20 +559,30 @@ export class Desk {
     catch { return false; }
   }
   // The same preconditions run before the human is asked and again after they approve, so nobody approves a pull
-  // request that is then refused, and nothing that changed in between slips through.
+  // request that is then refused, and nothing that changed in between slips through. A run that already has an approved
+  // pull request is judged against that one: the human took these commits once, so the proof is not asked for twice.
   async publishChecks(run, targetBranch) {
     const target = targetBranch || run.targetBranch;
-    const already = this.pullRequests(run).find(item => item.target === target);
+    const opened = this.pullRequests(run), already = opened.find(item => item.target === target);
     if (already) throw new Error(`A pull request from this run into ${target} is already open: ${already.url}. For one into another branch, call desk_publish again with targetBranch set to that branch.`);
-    if (run.state === 'needs_evidence') throw new Error(`This run cannot open a pull request yet: ${this.missingEvidence(run)}. Put that right, then run desk_verify and desk_finish again before desk_publish.`);
-    if (!['ready_for_review', 'published'].includes(run.state)) throw new Error(`Finish verified work before creating a PR. This run is ${run.state}; commit the fix, run desk_verify, then desk_finish, and publish once it is ready for review.`);
-    if (run.verification?.fingerprint !== await fingerprint(run.worktree)) throw new Error('Files changed after verification. Run verification again.');
+    // The files are hashed only once, and only when a check needs them: a run with no worktree is refused before that.
+    let hashed; const files = async () => (hashed ??= await fingerprint(run.worktree));
+    const published = opened.at(-1);
+    if (!published) {
+      if (run.state === 'needs_evidence') throw new Error(`This run cannot open a pull request yet: ${this.missingEvidence(run)}. Put that right, then run desk_verify and desk_finish again before desk_publish.`);
+      if (run.state !== 'ready_for_review') throw new Error(`Finish verified work before creating a PR. This run is ${run.state}; commit the fix, run desk_verify, then desk_finish, and publish once it is ready for review.`);
+      if (run.verification?.fingerprint !== await files()) throw new Error('Files changed after verification. Run verification again.');
+    } else {
+      const stamp = published.fingerprint || run.verification?.fingerprint;
+      if (!stamp) throw new Error(`Rex Desk cannot tell whether the files still match the pull request into ${published.target}. Run desk_verify and desk_finish, then publish into ${target}.`);
+      if (stamp !== await files()) throw new Error(`The files changed after the pull request into ${published.target} was approved. Run desk_verify and desk_finish again, then publish into ${target}.`);
+    }
     if (/(^|\/)(real-)?master$/.test(target)) throw new Error(`Rex Desk never opens a pull request into ${target}. Choose the develop branch, or release when that is intended.`);
     await git(run.worktree, ['check-ref-format', '--branch', target]);
     if (await git(run.worktree, ['status', '--porcelain'])) throw new Error('Commit the verified changes first. Resume the agent and ask it to commit.');
     const commits = (await git(run.worktree, ['rev-list', '--reverse', `${run.baseCommit}..HEAD`])).split('\n').filter(Boolean);
     if (!commits.length) throw new Error('No commits to publish.');
-    return { target, commits, additional: this.pullRequests(run).length > 0, rebuild: !await this.targetHolder(run, target) };
+    return { target, commits, fingerprint: await files(), additional: opened.length > 0, rebuild: !await this.targetHolder(run, target) };
   }
   // A pull request into a branch that does not hold this run's base is opened from a branch made for it: Rex Desk cuts
   // one from the target itself and cherry-picks this run's own commits onto it, so the pull request carries nothing else.
@@ -609,11 +619,11 @@ export class Desk {
       await git(head.worktree, ['push', '-u', 'origin', head.branch]);
       const task = this.task(run.taskId);
       const file = path.join(this.evidence.directory(runId), `pull-request-${slug(plan.target, 40)}.md`);
-      writeFileSync(file, `${body || run.summary || ''}\n\nVerification: ${run.verification.command}\nResult: passed\nTask: ${task.sourceName} ${task.externalId}\n${head.branch === run.branch ? '' : `\nThis branch was cut from ${plan.target} and holds only this run's ${plan.commits.length} commit${plan.commits.length === 1 ? '' : 's'}.\n`}\nRecordings and test output are available in Rex Desk on this computer.\n`);
+      writeFileSync(file, `${body || run.summary || ''}\n${run.verification?.command ? `\nVerification: ${run.verification.command}\nResult: passed` : ''}\nTask: ${task.sourceName} ${task.externalId}\n${head.branch === run.branch ? '' : `\nThis branch was cut from ${plan.target} and holds only this run's ${plan.commits.length} commit${plan.commits.length === 1 ? '' : 's'}.\n`}\nRecordings and test output are available in Rex Desk on this computer.\n`);
       const { stdout } = await this.gh(['pr', 'create', '--draft', '--base', plan.target, '--head', head.branch,
         '--title', title || run.title, '--body-file', file], { cwd: head.worktree });
       const url = String(stdout).trim();
-      const pullRequests = [...this.pullRequests(run), { url, target: plan.target, head: head.branch, createdAt: now() }];
+      const pullRequests = [...this.pullRequests(run), { url, target: plan.target, head: head.branch, fingerprint: plan.fingerprint, createdAt: now() }];
       this.patchRun(runId, { state: 'published', prUrl: url, targetBranch: plan.target, pullRequests });
       this.message(runId, `Draft pull request created: ${url} (${head.branch} into ${plan.target})`); return { url };
     } finally { if (head.temporary) await this.removeWorktree(run, head.worktree); }

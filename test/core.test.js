@@ -308,7 +308,9 @@ test('a run opens a pull request into a second branch, built from that branch', 
   assert.equal(develop.url, 'https://github.com/x/y/pull/1');
   assert.equal(created[0][created[0].indexOf('--head') + 1], 'temp/rex/fix/search', 'a pull request into develop comes straight from the run branch');
 
-  // Rex asks in chat for a release pull request. develop sits ahead of release, so the branch is rebuilt on release itself.
+  // Rex asks in chat for a release pull request. The browser proof is incomplete, but he already approved these exact
+  // commits into develop, so the second pull request is not refused. develop is ahead of release, so the branch is rebuilt.
+  store.put('run', 'run-1', { ...store.get('run', 'run-1'), state: 'needs_evidence', checks: { testsPassed: true, recordedVideo: false, browserAssertionPassed: false } });
   const release = await desk.publish('run-1', { approved: true, targetBranch: 'global/release' });
   const head = created[1][created[1].indexOf('--head') + 1];
   assert.equal(head, 'temp/rex/fix/search-for-release');
@@ -318,5 +320,7 @@ test('a run opens a pull request into a second branch, built from that branch', 
   assert.equal(store.get('run', 'run-1').prUrl, release.url);
   assert.ok(!existsSync(path.join(store.directory, 'publish', slug(head, 120))), 'the branch Rex Desk built is removed once the pull request exists');
   await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/release' }), /already open/);
+  writeFileSync(path.join(tree, 'fix.txt'), 'edited after the pull requests\n');
+  await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/hotfix' }), /files changed after the pull request into global\/release/i);
   store.close();
 });
