@@ -68,6 +68,14 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR
 const imageFetcher = async value => String(value) === image ? new Response(png) : new Response('', { status: 404 });
 const agentCommand = async () => ({ code: 0, stderr: '', stdout: JSON.stringify({ loggedIn: true, authMethod: 'synthetic', email: 'agent@example.invalid' }) });
 
+const jevRequests = [];
+const jevFetcher = async (url, options) => {
+  const request = JSON.parse(options.body); jevRequests.push({ url, authorization: options.headers.Authorization, title: request.state.title });
+  const top = /File preview/.test(request.state.title), waiting = /Duplicate notifications/.test(request.state.title);
+  const score = value => ({ type: 'score', score: value, probabilities: {}, confidence: 0.8 });
+  return new Response(JSON.stringify({ model: 'typesafe/jev-1.13', answers: { severity: score(top ? 4 : 1), effort: score(top ? 0 : 1), web: { type: 'noul', noul: 0.95 },
+    action: { type: 'choice', choice: waiting ? 'wait' : 'fix', probabilities: {}, confidence: 0.8 } } }), { headers: { 'Content-Type': 'application/json' } });
+};
 let app;
 const failures = [];
 const runnerFactory = options => ({
@@ -80,13 +88,6 @@ const runnerFactory = options => ({
       if (result.isError) throw new Error(data.error); return data;
     };
     try {
-      if (options.run.role === 'coordinator') {
-        const tasks = await call('desk_tasks');
-        await call('desk_categorize', { taskId: tasks[0].id, category: 'Frontend' });
-        await call('desk_message', { text: 'Synthetic acceptance run: grouped the preview issue under Frontend and queued an isolated Claude worker.' });
-        await call('desk_dispatch', { taskId: tasks[0].id, provider: 'claude' });
-        return;
-      }
       const task = (await call('desk_task', { taskId: options.run.taskId })).task;
       await call('desk_message', { text: 'Synthetic acceptance run: the preview issue is reproducible. I need one detail before changing the fixture.' });
       const question = await call('desk_ask', { message: 'Which behavior should this preview preserve?', fields: { answer: { type: 'string', title: 'Expected behavior' } }, required: ['answer'], wait: false });
@@ -116,7 +117,7 @@ const runnerFactory = options => ({
 
 let browser, context;
 try {
-  app = await createApp({ dataDirectory: path.join(workspace, 'data'), port: 0, fetcher, runnerFactory, agentCommand, imageFetcher });
+  app = await createApp({ dataDirectory: path.join(workspace, 'data'), port: 0, fetcher, runnerFactory, agentCommand, imageFetcher, jevFetcher });
   browser = await chromium.launch({ headless: true });
   context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, recordVideo: { dir: qa, size: { width: 1440, height: 1000 } } });
   const page = await context.newPage();
@@ -152,7 +153,7 @@ try {
   await page.getByRole('textbox', { name: 'Repository name', exact: true }).focus();
   releaseDirectory?.();
   await page.getByRole('checkbox', { name: /Synthetic QA acceptance project/ }).waitFor({ timeout: 15000 });
-  assert.equal(await page.locator('input[name$=".apiKey"]').inputValue(), 'synthetic-key-typed-during-discovery');
+  assert.equal(await page.locator('input[name^="source."][name$=".apiKey"]').inputValue(), 'synthetic-key-typed-during-discovery');
   assert.equal(await page.getByRole('textbox', { name: 'Repository name', exact: true }).evaluate(element => element === document.activeElement), true, 'Discovery must not steal focus');
   await page.getByRole('checkbox', { name: /Synthetic QA acceptance project/ }).check();
   await page.locator('[data-catalog-search]').fill('unrelated');
@@ -165,9 +166,14 @@ try {
   assert.equal(await page.locator('input[name$=".userId"]').inputValue(), 'mina@example.invalid');
   await employee.click(); await employee.fill('rex tester'); await employee.press('Enter');
   assert.equal(await page.locator('input[name$=".userId"]').inputValue(), 'rex@example.invalid');
+  await page.locator('input[name="jev.apiKey"]').fill('synthetic-openrouter-key');
+  await page.locator('input[name="testAccount.username"]').fill('qa@example.invalid');
+  await page.locator('input[name="testAccount.password"]').fill('synthetic-test-password');
   await page.getByRole('button', { name: 'Save settings', exact: true }).click();
   await page.getByText('Settings saved.', { exact: true }).waitFor();
   assert.ok(!(await page.content()).includes('synthetic-key-'));
+  assert.ok(!/synthetic-openrouter-key|synthetic-test-password/.test(await page.content()), 'Saved secrets never return to the page');
+  assert.equal(app.store.testPassword(), 'synthetic-test-password');
   assert.equal(app.store.credential(app.store.config().sources[0].id), 'synthetic-key-typed-during-discovery');
   assert.equal(app.store.config().sources[0].repositoryId, app.store.config().repositories[0].id, 'A single repository becomes the source default');
   await page.locator('#toast').waitFor({ state: 'hidden' });
@@ -176,11 +182,19 @@ try {
   await page.getByRole('button', { name: 'Sync tasks', exact: true }).first().click();
   await page.getByText(posts[0].title, { exact: true }).first().waitFor();
   assert.equal(await page.locator('.task-row').count(), 3, 'Feedback tasks stay out of the default Request + In progress sync');
+  // After the sync, Jev rates every issue; the list follows the ranking and Next up names the first one.
+  await page.locator('.next-up-title', { hasText: posts[0].title }).waitFor({ timeout: 15000 });
+  assert.ok(jevRequests.length >= 3 && jevRequests.every(item => item.url === 'https://openrouter.ai/api/v1/systemone' && item.authorization === 'Bearer synthetic-openrouter-key'));
+  assert.equal(await page.locator('.task-row').first().locator('.task-title').innerText(), posts[0].title);
+  assert.equal(await page.locator('.task-row').first().locator('.rank-chip').innerText(), '1');
+  assert.equal(await page.locator('.task-row.later').count(), 1, 'The issue waiting on others sinks to the end');
+  assert.match(await page.locator('.next-up p').innerText(), /Critical severity · Fix · small effort/);
   await page.getByRole('button', { name: new RegExp(posts[0].title) }).first().click();
   await page.getByText('Keep the selected project after switching.', { exact: true }).waitFor({ timeout: 15000 });
   assert.equal(await page.locator('.issue-images img').evaluate(element => element.complete && element.naturalWidth), 2, 'Issue screenshot loads through the local cache');
   assert.equal(/COMP_TYPE|COMPS/.test(await page.locator('.detail-pane').innerText()), false);
   assert.ok((await page.locator('.issue-properties').innerText()).includes('Issue Type'));
+  assert.match(await page.locator('.jev-priority').innerText(), /#1 of 2 to run/);
   await page.locator('#task-search').fill('due date overseas');
   assert.equal(await page.locator('.task-row').count(), 0, 'Feedback task is filtered out by default');
   await page.locator('#task-search').fill('notifications');
@@ -194,9 +208,9 @@ try {
   await page.screenshot({ path: path.join(screenshots, 'board-desktop.png'), fullPage: true });
   await page.getByRole('button', { name: 'My issues', exact: true }).click();
   await page.getByRole('button', { name: 'List', exact: true }).click();
-  await page.getByRole('button', { name: 'Analyze & run', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Analyze & run', exact: true }).click();
-  await page.getByRole('heading', { name: 'Main agent', exact: true }).waitFor();
+  // You choose what runs: Next up starts the top-ranked fix.
+  await page.locator('.next-up [data-action="run-next"]').click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Start agent', exact: true }).click();
   await page.getByRole('button', { name: /Needs you/ }).click();
   await page.getByRole('heading', { name: 'Which behavior should this preview preserve?', exact: true }).waitFor({ timeout: 30000 });
   await page.locator('#toast').waitFor({ state: 'hidden' });

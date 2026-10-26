@@ -4,8 +4,8 @@ const loadingTasks = new Set(), taskErrors = new Map();
 const providerName = provider => provider === 'codex' ? 'Codex' : 'Claude Code';
 const samePath = (left, right) => String(left || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase() === String(right || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
 const taskImage = (task, address) => `/api/task-image?task=${encodeURIComponent(task.id)}&url=${encodeURIComponent(address)}`;
-const ui = { page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', checked: new Set(), search: '', source: '', category: '', snapshot: null, runEvents: new Map(), journals: new Map(), transcripts: new Map(), openOps: new Set(), openRuns: [], layout: 'grid', runSide: 'runs', selectedDecision: '', draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false,
-  orcaScreens: new Map(), orcaClosed: new Set(), detailLayout: 'tabs', tabSecond: 'messages', splitRatio: 0.5, sideWidth: 0, dragging: false, missedRender: false };
+const ui = { page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', search: '', source: '', category: '', snapshot: null, runEvents: new Map(), journals: new Map(), transcripts: new Map(), openOps: new Set(), openRuns: [], layout: 'grid', runSide: 'runs', selectedDecision: '', draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false,
+  sort: 'priority', orcaScreens: new Map(), orcaClosed: new Set(), detailLayout: 'tabs', tabSecond: 'messages', splitRatio: 0.5, sideWidth: 0, dragging: false, missedRender: false };
 const labels = { queued: 'Queued', starting: 'Preparing', running: 'Working', waiting: 'Needs you', needs_evidence: 'Needs evidence', ready_for_review: 'Ready for review', published: 'PR created', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted', finished: 'Finished', qa_passed: 'QA passed', qa_failed: 'QA failed', qa_blocked: 'QA blocked' };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const icon = name => `<svg class="icon" aria-hidden="true"><use href="/icons.svg#${name}"></use></svg>`;
@@ -56,12 +56,12 @@ function navigate(page, { runId, taskId } = {}) {
 // Open runs and the pane layout are a per-browser convenience, so they live in localStorage.
 const paneLimits = { single: 1, split: 2, grid: 4 };
 function saveWorkspace() {
-  try { localStorage.setItem('rex-desk-workspace', JSON.stringify({ openRuns: ui.openRuns, layout: ui.layout, selectedRun: ui.selectedRun, sideWidth: ui.sideWidth, detailLayout: ui.detailLayout, tabSecond: ui.tabSecond, splitRatio: ui.splitRatio })); } catch {}
+  try { localStorage.setItem('rex-desk-workspace', JSON.stringify({ openRuns: ui.openRuns, layout: ui.layout, selectedRun: ui.selectedRun, sort: ui.sort, sideWidth: ui.sideWidth, detailLayout: ui.detailLayout, tabSecond: ui.tabSecond, splitRatio: ui.splitRatio })); } catch {}
 }
 function restoreWorkspace() {
   try {
     const saved = JSON.parse(localStorage.getItem('rex-desk-workspace') || '{}'); ui.openRuns = Array.isArray(saved.openRuns) ? saved.openRuns : []; ui.layout = paneLimits[saved.layout] ? saved.layout : 'grid'; ui.selectedRun = saved.selectedRun || '';
-    ui.sideWidth = Number(saved.sideWidth) || 0; ui.detailLayout = detailLayouts.includes(saved.detailLayout) ? saved.detailLayout : 'tabs';
+    ui.sort = saved.sort === 'tracker' ? 'tracker' : 'priority'; ui.sideWidth = Number(saved.sideWidth) || 0; ui.detailLayout = detailLayouts.includes(saved.detailLayout) ? saved.detailLayout : 'tabs';
     ui.tabSecond = detailTabNames[saved.tabSecond] ? saved.tabSecond : 'messages'; ui.splitRatio = Math.min(0.8, Math.max(0.2, Number(saved.splitRatio) || 0.5));
   } catch {}
   applySizes();
@@ -150,25 +150,51 @@ function viewSwitch(board) {
   return `<div class="view-switch" aria-label="Task view"><button data-action="view-list" class="${!board ? 'active' : ''}">${icon('inbox')}List</button><button data-action="view-board" class="${board ? 'active' : ''}">${icon('board')}Kanban</button></div>`;
 }
 function issueActions() {
-  const realTasks = ui.snapshot.tasks.filter(task => !task.demo);
-  return `${button(`${icon('sync')} Sync tasks`, 'sync', `small${ui.busy ? ' busy' : ''}`, ui.busy ? 'disabled' : '')}${button(`${icon('agents')} Analyze & run`, 'launch-main', 'primary small', !realTasks.length ? 'disabled' : '')}`;
+  const jev = ui.snapshot.jev || {}, running = jev.running, realTasks = ui.snapshot.tasks.filter(task => !task.demo);
+  return `${button(`${icon('sync')} Sync tasks`, 'sync', `small${ui.busy ? ' busy' : ''}`, ui.busy ? 'disabled' : '')}${button(`${icon('agents')} ${running ? `Ranking ${jev.done || 0} / ${jev.total || 0}` : 'Prioritize'}`, 'prioritize', `primary small${running ? ' busy' : ''}`, running || !realTasks.length ? 'disabled' : 'title="Jev rates each issue; Rex Desk ranks them. Shift-click to re-check all."')}`;
+}
+// Jev's ranking for every assigned issue, by task ID.
+const priorityMap = () => new Map((ui.snapshot.priorities || []).map(item => [item.taskId, item]));
+function orderedTasks() {
+  const tasks = filteredTasks(), ranking = priorityMap();
+  if (ui.sort !== 'priority' || !ranking.size) return tasks;
+  const position = new Map((ui.snapshot.priorities || []).map((item, index) => [item.taskId, index]));
+  return [...tasks].sort((left, right) => (position.get(left.id) ?? 1e9) - (position.get(right.id) ?? 1e9));
+}
+// The one issue to run next, or what is needed before Jev can say.
+function nextUp() {
+  const jev = ui.snapshot.jev || {}, real = ui.snapshot.tasks.filter(task => !task.demo);
+  if (!real.length) return '';
+  if (!jev.configured) return `<div class="next-up empty">${icon('agents')}<span>Let Jev rank your issues so you know what to run first.</span>${settingsLink('jev', 'Add OpenRouter key')}</div>`;
+  const top = (ui.snapshot.priorities || []).find(item => item.group === 'next' && item.analyzed);
+  if (!top) return `<div class="next-up empty">${icon('agents')}<span>${jev.running ? 'Jev is ranking your issues…' : 'No ranking yet.'}</span>${jev.running ? '' : button('Prioritize', 'prioritize', 'small')}</div>`;
+  const task = ui.snapshot.tasks.find(item => item.id === top.taskId);
+  if (!task) return '';
+  return `<div class="next-up"><div class="next-up-head"><span>Next up</span><span class="rank-chip sev-${Math.round(top.severity ?? 0)}">1</span></div><button class="next-up-title" data-task="${esc(task.id)}">${sourceLogo(task.source)}<span>${esc(task.title)}</span></button><p>${esc(top.reasons.join(' · '))}</p>${button(`${icon(top.action === 'verify' ? 'check' : 'play')} ${top.action === 'verify' ? 'Verify fix' : 'Fix with agent'}`, 'run-next', 'small primary', `data-task-id="${esc(task.id)}" data-mode="${top.action === 'verify' ? 'verify' : 'fix'}"`)}</div>`;
+}
+function renderPriority(task) {
+  const item = priorityMap().get(task.id), jev = ui.snapshot.jev || {};
+  if (!item?.analyzed) return item?.error ? `<section class="issue-section"><h3>Priority</h3><p class="error-text">Jev could not rate this issue: ${esc(item.error)}</p></section>` : '';
+  const total = (ui.snapshot.priorities || []).filter(entry => entry.group === 'next').length;
+  const place = item.rank ? `#${item.rank} of ${total} to run` : { running: 'Agent working', done: 'Agent finished', later: 'Later' }[item.group] || '';
+  return `<section class="issue-section jev-priority"><div class="issue-section-heading"><h3>Priority</h3>${button(`${icon('sync')} Re-check`, 'prioritize-one', 'small quiet', `data-task-id="${esc(task.id)}"${jev.running ? ' disabled' : ''}`)}</div><p><strong>${esc(place)}</strong> · ${esc(item.reasons.join(' · '))}${item.web !== null ? ` · checkable in a browser ${Math.round(item.web * 100)}%` : ''}</p><small class="muted">Rated by Jev${item.model ? ` (${esc(item.model)})` : ''}${item.at ? ` · ${esc(relative(item.at).toLowerCase())}` : ''}</small></section>`;
 }
 function sourceCounts() {
   return `<div class="connection-strip">${['morningmate', 'flow'].map(source => `<span class="source-word">${sourceLogo(source)}<strong>${source === 'flow' ? 'Flow' : 'Morningmate'}</strong><span>${ui.snapshot.tasks.filter(task => task.source === source).length}</span></span>`).join('')}<span class="muted">${ui.snapshot.sync.length ? `Synced ${relative(ui.snapshot.sync.map(item => item.at).sort().at(-1))}` : 'Not synced yet'}</span></div>`;
 }
 function workspaceNotices() {
   const demo = ui.snapshot.tasks.some(task => task.demo);
-  const coordinator = ui.snapshot.runs.find(run => run.role === 'coordinator' && ['running', 'waiting', 'starting', 'queued'].includes(run.state));
+  const jev = ui.snapshot.jev || {};
   return `${renderSetupBanner()}${demo ? `<div class="notice">${icon('question')}<span>Demo workspace. These issues are synthetic. Connect your projects to run real agents.</span>${button('Remove demo', 'remove-demo', 'small quiet')}</div>` : ''}
     ${ui.snapshot.sync.filter(item => item.error).map(item => `<div class="notice">${icon('question')}<span><strong>${esc(item.name)} sync failed.</strong> ${esc(item.error)}</span>${button('Settings', 'settings', 'small quiet')}</div>`).join('')}
-    ${coordinator ? `<div class="run-status-strip">${icon('agents')}<strong>Main agent · ${esc(labels[coordinator.state] || coordinator.state)}</strong><span>It categorizes issues and dispatches workers.</span>${button('Open in workspace', 'open-main', 'small')}</div>` : ''}`;
+    ${jev.state === 'error' && jev.error ? `<div class="notice">${icon('question')}<span><strong>Jev could not rate ${plural(jev.failed || 1, 'issue')}.</strong> ${esc(jev.error)}</span>${settingsLink('jev', 'Jev settings')}</div>` : ''}`;
 }
 // Issues page: the list lives in the sidebar, the selected issue fills the main area.
 function renderIssueSide() {
-  const tasks = filteredTasks();
+  const tasks = orderedTasks(), ranked = (ui.snapshot.priorities || []).some(item => item.analyzed);
   return `<div class="side-head"><h2>Assigned <span class="count-label">${ui.snapshot.tasks.length}</span></h2>${viewSwitch(false)}</div>
-    <div class="side-actions">${issueActions()}</div>${toolbar()}
-    <div class="task-section-title"><span>${ui.checked.size ? `${ui.checked.size} selected · Analyze uses these` : 'Select issues to run a smaller batch'}</span><span id="task-count">${tasks.length}</span>${ui.checked.size ? button('Clear', 'clear-selection', 'small quiet') : ''}</div>
+    <div class="side-actions">${issueActions()}</div>${nextUp()}${toolbar()}
+    <div class="task-section-title"><label class="sort-control"><span>Order</span><select id="task-sort" class="filter-select" aria-label="Order issues"><option value="priority" ${ui.sort === 'priority' ? 'selected' : ''}>By priority${ranked ? '' : ' (not ranked yet)'}</option><option value="tracker" ${ui.sort === 'tracker' ? 'selected' : ''}>As in tracker</option></select></label><span id="task-count">${tasks.length}</span></div>
     <div id="task-list" class="task-list">${tasks.length ? tasks.map(renderTaskRow).join('') : emptyTasks()}</div>${sourceCounts()}`;
 }
 function renderInboxMain() {
@@ -192,7 +218,8 @@ function renderTaskStates(task, run = taskRun(task)) {
 // One line per issue: number, title, and the agent's state as a dot. Tracker status and category live in the preview.
 function renderTaskRow(task) {
   const run = taskRun(task), hint = [task.statusName || task.status, task.category, run && `Agent: ${labels[run.state] || run.state}`].filter(Boolean).join(' · ');
-  return `<div class="task-row ${task.id === ui.selectedTask ? 'selected' : ''}"><input type="checkbox" aria-label="Select issue ${esc(task.externalId)}" data-select-task="${esc(task.id)}" ${ui.checked.has(task.id) ? 'checked' : ''}><button class="task-open" data-task="${esc(task.id)}" title="${esc(hint)}">${sourceLogo(task.source)}<span class="task-number">${esc(task.taskNumber || task.externalId)}</span><span class="task-title">${esc(task.title)}</span>${task.demo ? '<span class="demo-label">Demo</span>' : ''}<span class="state-dot ${run ? esc(run.state) : 'none'}" aria-hidden="true"></span>${run ? `<span class="sr-only">Agent ${esc(labels[run.state] || run.state)}</span>` : ''}</button></div>`;
+  const item = priorityMap().get(task.id), chip = item?.rank ? `<span class="rank-chip sev-${Math.round(item.severity ?? 0)}" title="${esc(`Priority ${item.rank}: ${item.reasons.join(' · ')}`)}">${item.rank}</span>` : item?.group === 'later' ? '<span class="rank-chip later" title="Waiting or not actionable">–</span>' : '<span class="rank-chip none" aria-hidden="true"></span>';
+  return `<div class="task-row ${task.id === ui.selectedTask ? 'selected' : ''}${item?.group === 'later' ? ' later' : ''}">${chip}<button class="task-open" data-task="${esc(task.id)}" title="${esc(hint)}">${sourceLogo(task.source)}<span class="task-number">${esc(task.taskNumber || task.externalId)}</span><span class="task-title">${esc(task.title)}</span>${task.demo ? '<span class="demo-label">Demo</span>' : ''}<span class="state-dot ${run ? esc(run.state) : 'none'}" aria-hidden="true"></span>${run ? `<span class="sr-only">Agent ${esc(labels[run.state] || run.state)}</span>` : ''}</button></div>`;
 }
 function renderTaskDetail() {
   const task = selectedTask();
@@ -206,7 +233,7 @@ function renderTaskDetail() {
     <div class="detail-bottom"><p>${run?.branch ? `${icon('branch')} <code>${esc(run.branch)}</code>` : link ? `<a href="${esc(link)}" target="_blank" rel="noopener">Open original issue</a>` : 'One issue. One isolated worktree.'}</p><div class="actions">${issueRunActions(task, run)}</div></div></section>`;
 }
 function renderDetailContent(key, task, run) {
-  if (key === 'brief') return `${renderIssueBrief(task)}${run ? renderRunPath(run) : ''}${run?.error ? `<p class="error-text">${esc(run.error)}</p>` : ''}`;
+  if (key === 'brief') return `${renderPriority(task)}${renderIssueBrief(task)}${run ? renderRunPath(run) : ''}${run?.error ? `<p class="error-text">${esc(run.error)}</p>` : ''}`;
   if (key === 'messages') return run ? `<div class="issue-conversation" id="messages-${run.id}">${renderMessages(run.id)}</div>` : '<p class="empty-small">Start an agent to begin the conversation.</p>';
   return renderProof(run?.id);
 }
@@ -249,7 +276,7 @@ function dropTab(key, zone) {
 function renderIssueProperties(task, run) {
   const rows = [['Status', task.statusName || task.status], ['Project', task.projectName], task.parentTitle && ['Parent task', task.parentTitle], task.section && ['Group', task.section],
     ['Reporter', task.reporter], ['Created', task.createdAt], task.dueDate && ['Due', task.dueDate], ...(task.fields || []).map(field => [field.name, field.value]),
-    ['Category', task.category || 'Not analyzed yet'], run && ['Agent', providerName(run.provider)]].filter(row => row && row[1]);
+    task.category && ['Category', task.category], run && ['Agent', providerName(run.provider)]].filter(row => row && row[1]);
   return `<dl class="issue-properties">${rows.map(([name, value]) => `<div><dt>${esc(name)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>`;
 }
 function renderIssueImages(task, images, label) {
@@ -620,9 +647,10 @@ function providerSelect(name, value) { return `<select name="${name}"><option va
 function renderSettings() {
   const config = ui.draft || ui.snapshot.config;
   return `${heading('Settings', 'Connect your projects once. Change accounts, keys, repositories, and agent defaults here.')}
-    <div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><a href="#connections">Connections</a><a href="#qa">QA verification</a><a href="#schedule">Schedule</a><a href="#repositories">Repositories</a><a href="#github">GitHub</a><a href="#agents">Agents & workflow</a><a href="#agent-sign-in">Agent sign-in</a><a href="#cloud-backup">Cloud backup</a><a href="#appearance">Appearance</a><a href="#ai-connection">AI connection</a></nav>
+    <div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><a href="#connections">Connections</a><a href="#jev">Jev priority</a><a href="#qa">QA verification</a><a href="#schedule">Schedule</a><a href="#repositories">Repositories</a><a href="#github">GitHub</a><a href="#agents">Agents & workflow</a><a href="#agent-sign-in">Agent sign-in</a><a href="#cloud-backup">Cloud backup</a><a href="#appearance">Appearance</a><a href="#ai-connection">AI connection</a></nav>
     <form id="settings-form"><section class="settings-section" id="connections"><h2>Flow & Morningmate</h2><p>Only issues assigned to your account in these project IDs are imported. API keys stay encrypted on this computer.</p>${config.sources.map((source, index) => renderSourceSettings(source, index)).join('')}${button(`${icon('plus')} Add connection`, 'add-source', '', 'type="button"')}</section>
-    <section class="settings-section" id="qa"><h2>QA verification</h2><p>Re-test fixes developers marked complete. For each issue the agent finds where the project runs, such as the dev or QA server for its product and region, opens it in a recorded browser with your sign-in, checks the expected behavior, and reports pass, fail, or blocked. It never changes code.</p><div class="settings-card">${qaSitesList()}<div class="actions">${button(`${icon('link')} Open sign-in browser`, 'qa-sign-in', 'small', 'type="button"')}<small class="muted" data-qa-session>${qaSessionText()}</small></div><small class="muted">Sign in to the test sites you use, then close the window. The session stays on this computer and is used only by QA checks.</small></div></section>
+    <section class="settings-section" id="jev"><h2>Jev priority</h2><p>Jev, TypeSafe AI's decision model, rates each assigned issue through your OpenRouter key: severity, next step (fix, verify, or wait), effort, and whether it can be checked in a browser. Rex Desk ranks the issues from those answers and the due date. You choose what to run.</p><div class="settings-card"><label class="field"><span>OpenRouter API key</span><input type="password" name="jev.apiKey" autocomplete="off" spellcheck="false" placeholder="${config.jev?.hasKey ? 'Saved · type a new key to replace it' : ui.snapshot.jev?.keySource === 'environment' ? 'Using OPENROUTER_API_KEY from the environment' : 'sk-or-…'}"><small>Stored encrypted on this computer and sent only to OpenRouter.</small></label>${config.jev?.hasKey ? '<label class="field check"><input type="checkbox" name="jev.clearKey"><span>Remove the saved key</span></label>' : ''}${inputField('Jev model', 'jev.model', config.jev?.model || '', 'Blank uses the newest Jev release.', 'text', '~typesafe/jev-latest')}<label class="field check"><input type="checkbox" name="jev.auto" ${config.jev?.auto !== false ? 'checked' : ''}><span>Rate new and changed issues after each sync</span></label></div></section>
+    <section class="settings-section" id="qa"><h2>QA verification</h2><p>Re-test fixes developers marked complete. For each issue the agent finds where the project runs, such as the dev or QA server for its product and region, opens it in a recorded browser with your sign-in, checks the expected behavior, and reports pass, fail, or blocked. It never changes code.</p><div class="settings-card">${qaSitesList()}<div class="field-row">${inputField('Test account sign-in', 'testAccount.username', config.testAccount?.username || '', 'Agents sign in with this account on test sites and local previews.', 'text', 'name@example.com')}<label class="field"><span>Test account password</span><input type="password" name="testAccount.password" autocomplete="new-password" placeholder="${config.testAccount?.hasPassword ? 'Saved · type to replace' : 'Password'}"><small>Encrypted. Agents type it with a placeholder and never see it.</small></label></div><div class="actions">${button(`${icon('link')} Open sign-in browser`, 'qa-sign-in', 'small', 'type="button"')}<small class="muted" data-qa-session>${qaSessionText()}</small></div><small class="muted">Sign in to the test sites you use, then close the window. The session stays on this computer and is used only by QA checks.</small></div></section>
     <section class="settings-section" id="schedule"><h2>Schedule</h2><p>Let Rex Desk start work on its own while this computer is on. At the set time it syncs, a main agent sorts new issues, and it starts up to your daily limit. Approvals and results wait in Needs you.</p><div class="settings-card"><label class="field check"><input type="checkbox" name="schedule.enabled" ${config.schedule?.enabled ? 'checked' : ''}><span>Start work automatically on a schedule</span></label><div class="field-row">${inputField('Time', 'schedule.time', config.schedule?.time || '09:00', '', 'time')}${inputField('Most runs per day', 'schedule.maxRuns', config.schedule?.maxRuns || 6, 'Caps agent cost. 1–20.', 'number')}</div><fieldset class="day-picker"><legend>Days</legend>${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => `<label><input type="checkbox" name="schedule.days" value="${index}" ${(config.schedule?.days || [1, 2, 3, 4, 5]).includes(index) ? 'checked' : ''}><span>${day}</span></label>`).join('')}</fieldset><label class="field check"><input type="checkbox" name="schedule.verify" ${config.schedule?.verify !== false ? 'checked' : ''}><span>QA checks for issues awaiting verification</span></label><label class="field check"><input type="checkbox" name="schedule.fix" ${config.schedule?.fix ? 'checked' : ''}><span>Code fixes for open bugs (needs a source repository)</span></label><div class="actions">${button('Run now', 'schedule-run', 'small', 'type="button"')}<small class="muted" data-schedule-status>${esc(scheduleText())}</small></div><label class="field check"><input type="checkbox" id="autostart"><span>Start Rex Desk when I sign in to Windows, so the schedule runs without opening the app</span></label></div></section>
     <section class="settings-section" id="repositories"><h2>Source repositories</h2><p>Each worker uses a new worktree. Commands run there; your current checkout stays where it is.</p>${config.repositories.map((repository, index) => renderRepositorySettings(repository, index)).join('')}${button(`${icon('plus')} Add repository`, 'add-repository', '', 'type="button"')}</section>
     <section class="settings-section" id="github"><h2>GitHub</h2><p>Draft PRs, pushes, and clones use the active account. Sign in as many accounts as you need; Rex Desk uses the GitHub CLI login and never stores a GitHub token.</p><div class="settings-card" data-github="full">${renderGithub()}</div></section>
@@ -806,6 +834,8 @@ function readSettings() {
   draft.concurrency = Number(data.get('concurrency')); draft.syncMinutes = Number(data.get('syncMinutes'));
   draft.autoPrLowRisk = data.has('autoPrLowRisk'); draft.requireVideo = data.has('requireVideo'); draft.reportToOrbit = data.has('reportToOrbit');
   draft.models = { claude: data.get('model.claude'), codex: data.get('model.codex') };
+  draft.jev = { model: String(data.get('jev.model') || ''), auto: data.has('jev.auto'), apiKey: String(data.get('jev.apiKey') || ''), clearKey: data.has('jev.clearKey') };
+  draft.testAccount = { username: String(data.get('testAccount.username') || '').trim(), password: String(data.get('testAccount.password') || '') };
   draft.schedule = { enabled: data.has('schedule.enabled'), time: String(data.get('schedule.time') || '09:00'), days: data.getAll('schedule.days').map(Number), verify: data.has('schedule.verify'), fix: data.has('schedule.fix'), maxRuns: Number(data.get('schedule.maxRuns') || 6) };
   draft.agentProfiles = ui.snapshot.config.agentProfiles; draft.tourDismissed = ui.snapshot.config.tourDismissed;
   draft.sources = draft.sources.map(source => {
@@ -858,6 +888,8 @@ function setupSteps() {
       summary: keyed.length ? `${keyed.map(source => source.name).join(', ')} connected` : 'Save a user API key. It stays encrypted on this computer.' },
     { id: 'projects', title: 'Choose projects and assignee', done: keyed.length > 0 && keyed.every(source => source.projectIds.length),
       summary: keyed.length ? `${plural(keyed.reduce((sum, source) => sum + source.projectIds.length, 0), 'project')} selected · ${keyed.every(source => source.userId) ? 'assignee chosen' : 'API account is the assignee'}` : 'Available after connecting a tracker.' },
+    { id: 'jev', title: 'Let Jev rank your issues', optional: true, done: Boolean(ui.snapshot.jev?.configured),
+      summary: ui.snapshot.jev?.configured ? 'Jev rates new and changed issues after each sync.' : 'Add your OpenRouter key; Jev rates severity, next step, and effort so the list shows what to run first.' },
     { id: 'qa', title: 'Sign in to your test sites', optional: true, done: Boolean(ui.snapshot.qaSession?.savedAt),
       summary: ui.snapshot.qaSession?.savedAt ? 'Sign-in saved. QA checks find each issue’s test site themselves.' : 'For QA checks of fixes developers marked complete. The agent finds each test site.' },
     { id: 'repository', title: 'Add the source repository', optional: true, done: repositories.length > 0 && repositories.every(repository => repository.path && repository.baseBranch) && sources.every(source => source.repositoryId),
@@ -893,6 +925,7 @@ function renderSetupBody(step) {
   if (step.id === 'projects') return `<p>Choose the projects to watch and whose assigned tasks to import. Only Request and In progress tasks sync by default.</p>${config.sources.length ? `<ul class="setup-facts">${config.sources.map(source => `<li>${sourceLogo(source.type)}<strong>${esc(source.name)}</strong><span>${source.projectIds.length} project${source.projectIds.length === 1 ? '' : 's'} · ${source.userId ? esc(source.userId) : 'API account'} · ${({ active: 'Request + In progress', unfinished: 'All unfinished', all: 'All statuses' })[source.statusFilter || 'active']}</span></li>`).join('')}</ul>` : ''}<div class="actions">${settingsLink('connections', 'Choose projects')}</div>`;
   if (step.id === 'repository') return `<p>Point Rex Desk at the local checkout. Each worker branches from it into its own worktree; your checkout is never switched.</p>${config.repositories.length ? `<ul class="setup-facts">${config.repositories.map(repository => `<li>${icon('branch')}<strong>${esc(repository.name)}</strong><span class="mono">${esc(repository.path)} · from ${esc(repository.baseBranch || '—')} · PR to ${esc(repository.targetBranch || '—')}</span></li>`).join('')}${config.sources.filter(source => !source.repositoryId).map(source => `<li>${icon('alert')}<strong>${esc(source.name)}</strong><span>Choose which repository its issues use.</span></li>`).join('')}</ul>` : ''}<div class="actions">${settingsLink('repositories', config.repositories.length ? 'Open repositories' : 'Add a repository')}</div>`;
   if (step.id === 'commands') return `<p>Rex Desk reads how to install, preview, and test each project from its own files, such as package.json or the Flow WAR layout. When no test command is found, the worker proposes one and you approve it once; it is saved for later runs.</p>${config.repositories.map(repositoryAutomatic).join('')}<div class="actions">${settingsLink('repositories', 'Override commands')}</div>`;
+  if (step.id === 'jev') return `<p>Jev, TypeSafe AI's decision model, answers typed questions about each issue through your OpenRouter key. Rex Desk turns the answers into a ranked list with a Next up card; you start the runs.</p><div class="actions">${settingsLink('jev', ui.snapshot.jev?.configured ? 'Jev settings' : 'Add OpenRouter key')}</div>`;
   if (step.id === 'qa') return `<p>QA checks re-test fixes developers marked complete. The agent finds where the project runs for each issue, such as its dev or QA server, and tests it in a recorded browser. Sign in once to the sites you use so it can open signed-in pages. No source code is needed.</p><div class="actions">${button(`${icon('link')} Open sign-in browser`, 'qa-sign-in', 'small', 'type="button"')}<small class="muted" data-qa-session>${qaSessionText()}</small></div>`;
   if (step.id === 'mcp') return `<p>Rex-managed agents connect automatically. This step adds the local Rex Desk tools to the Claude Code and Codex you use every day.</p>${renderMcpSetup()}`;
   if (step.id === 'verify') return `<p>Sync imports your assigned issues. Tool checks confirm Git, GitHub CLI, Claude Code, and Codex are installed.</p><div class="actions">${button(`${icon('sync')} Sync now`, 'sync', 'small primary', ui.busy ? 'disabled' : '')}${button('Check installed tools', 'diagnostics', 'small', 'type="button"')}${ui.snapshot.tasks.some(task => !task.demo) ? button('Open my issues', 'inbox', 'small') : ''}</div><div id="diagnostics"></div>`;
@@ -924,7 +957,7 @@ async function copyText(text, message) {
 }
 function renderTaskResults() {
   const tasks = filteredTasks(), list = document.querySelector('#task-list'), board = document.querySelector('#task-board'), count = document.querySelector('#task-count');
-  if (list) list.innerHTML = tasks.length ? tasks.map(renderTaskRow).join('') : emptyTasks();
+  if (list) { const ordered = orderedTasks(); list.innerHTML = ordered.length ? ordered.map(renderTaskRow).join('') : emptyTasks(); }
   if (board) board.innerHTML = renderBoard(tasks);
   if (count) count.textContent = tasks.length;
   return Boolean(list || board);
@@ -1042,7 +1075,6 @@ async function launchDialog({ role = 'worker', resume = false, repositoryId: cho
   const task = selectedTask(), run = selectedRun();
   const repositoryId = chosen || task?.repositoryId || ui.snapshot.config.repositories[0]?.id;
   const repository = ui.snapshot.config.repositories.find(item => item.id === (resume ? run.repositoryId : repositoryId));
-  const count = ui.checked.size || ui.snapshot.tasks.filter(item => !item.demo).length;
   const dialog = document.querySelector('#launch-dialog');
   if (mode === 'verify') {
     const session = ui.snapshot.qaSession;
@@ -1050,8 +1082,8 @@ async function launchDialog({ role = 'worker', resume = false, repositoryId: cho
     if (!dialog.open) dialog.showModal();
     return;
   }
-  const title = resume ? 'Continue this run' : role === 'coordinator' ? 'Start the main agent' : 'Start an issue agent';
-  dialog.innerHTML = `<div class="dialog-heading"><h2 id="launch-title">${title}</h2>${button(icon('close'), 'close-dialog', 'quiet icon-only', 'aria-label="Close dialog"')}</div><p>${resume ? 'Continue with the same provider, or switch providers and pass the recorded issue context into a new session.' : role === 'coordinator' ? `Analyze ${count} assigned issue${count === 1 ? '' : 's'}, categorize them, and dispatch independent workers.` : esc(task?.title)}</p><form id="launch-form" data-role="${role}" data-resume="${resume}"><label class="field"><span>Agent</span>${providerSelect('provider', resume ? run.provider : ui.snapshot.config.provider)}</label>${role === 'worker' ? `<label class="field"><span>Run in</span>${executionSelect(resume ? run.execution : ui.snapshot.config.execution)}</label><div id="orca-readiness"></div>` : ''}${role === 'coordinator' && !resume && !ui.snapshot.config.repositories.length ? repositorySetup('No source repository yet, so the main agent can categorize but not dispatch fixes.') : ''}${role === 'worker' && !resume ? (ui.snapshot.config.repositories.length ? `<div class="field"><span>Source repository</span><div class="field-inline"><select name="repositoryId" required aria-label="Source repository"><option value="">Choose a repository…</option>${ui.snapshot.config.repositories.map(item => `<option value="${item.id}" ${item.id === repositoryId ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select>${button('Add folder…', 'browse-repo-inline', 'small', 'type="button" title="Choose another local Git checkout"')}</div></div>` : `${repositorySetup('No source repository yet. The agent needs the code to work on; branches load automatically.')}<input type="hidden" name="repositoryId" value="">`) : ''}<div id="runtime-profile-field">${role === 'worker' && !resume ? runtimeProfileField(repository) : ''}</div><details class="dialog-more"${resume ? ' open' : ''}><summary>Branches · ${repository?.baseBranch && role !== 'coordinator' ? `starts from ${esc(repository.baseBranch)}` : 'repository default'}; pick the PR target when you publish</summary><div class="field-row">${inputField('Start from branch', 'baseBranch', resume ? run.baseBranch : role === 'coordinator' ? '' : repository?.baseBranch || '', role === 'coordinator' ? 'Blank uses each repository’s default.' : '', 'text', 'Repository default')}${inputField('PR target branch', 'targetBranch', resume ? run.targetBranch : role === 'coordinator' ? '' : repository?.targetBranch || '', 'You can change this before publishing.', 'text', 'Repository default')}</div></details><label class="field"><span>${resume ? 'Follow-up instruction' : 'Additional instruction (optional)'}</span><textarea name="prompt" placeholder="For example: investigate critical issues first, and keep related fixes sequential."></textarea></label><div class="form-error" id="launch-error" role="alert"></div><div class="actions">${button('Cancel', 'close-dialog', '', 'type="button"')}<button class="button primary" type="submit">${resume ? 'Continue run' : role === 'coordinator' ? 'Analyze & run' : 'Start agent'}</button></div></form>`;
+  const title = resume ? 'Continue this run' : 'Start an issue agent';
+  dialog.innerHTML = `<div class="dialog-heading"><h2 id="launch-title">${title}</h2>${button(icon('close'), 'close-dialog', 'quiet icon-only', 'aria-label="Close dialog"')}</div><p>${resume ? 'Continue with the same provider, or switch providers and pass the recorded issue context into a new session.' : esc(task?.title)}</p><form id="launch-form" data-role="${role}" data-resume="${resume}"><label class="field"><span>Agent</span>${providerSelect('provider', resume ? run.provider : ui.snapshot.config.provider)}</label>${role === 'worker' ? `<label class="field"><span>Run in</span>${executionSelect(resume ? run.execution : ui.snapshot.config.execution)}</label><div id="orca-readiness"></div>` : ''}${role === 'worker' && !resume ? (ui.snapshot.config.repositories.length ? `<div class="field"><span>Source repository</span><div class="field-inline"><select name="repositoryId" required aria-label="Source repository"><option value="">Choose a repository…</option>${ui.snapshot.config.repositories.map(item => `<option value="${item.id}" ${item.id === repositoryId ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select>${button('Add folder…', 'browse-repo-inline', 'small', 'type="button" title="Choose another local Git checkout"')}</div></div>` : `${repositorySetup('No source repository yet. The agent needs the code to work on; branches load automatically.')}<input type="hidden" name="repositoryId" value="">`) : ''}<div id="runtime-profile-field">${role === 'worker' && !resume ? runtimeProfileField(repository) : ''}</div><details class="dialog-more"${resume ? ' open' : ''}><summary>Branches · ${repository?.baseBranch && role !== 'coordinator' ? `starts from ${esc(repository.baseBranch)}` : 'repository default'}; pick the PR target when you publish</summary><div class="field-row">${inputField('Start from branch', 'baseBranch', resume ? run.baseBranch : role === 'coordinator' ? '' : repository?.baseBranch || '', role === 'coordinator' ? 'Blank uses each repository’s default.' : '', 'text', 'Repository default')}${inputField('PR target branch', 'targetBranch', resume ? run.targetBranch : role === 'coordinator' ? '' : repository?.targetBranch || '', 'You can change this before publishing.', 'text', 'Repository default')}</div></details><label class="field"><span>${resume ? 'Follow-up instruction' : 'Additional instruction (optional)'}</span><textarea name="prompt" placeholder="For example: investigate critical issues first, and keep related fixes sequential."></textarea></label><div class="form-error" id="launch-error" role="alert"></div><div class="actions">${button('Cancel', 'close-dialog', '', 'type="button"')}<button class="button primary" type="submit">${resume ? 'Continue run' : 'Start agent'}</button></div></form>`;
   if (resume) { dialog.querySelector('input[name=baseBranch]').readOnly = true; dialog.querySelector('input[name=baseBranch]').title = 'This worktree keeps its original base branch.'; }
   if (!dialog.open) dialog.showModal();
   if (dialog.querySelector('[data-github]')) void loadGithub();
@@ -1181,9 +1213,18 @@ document.addEventListener('click', event => {
   if (name === 'settings' || name === 'inbox') { navigate(name); return; }
   if (name === 'view-list') { ui.view = 'list'; ui.page = 'inbox'; render(); void loadMessages(); return; }
   if (name === 'view-board') { ui.view = 'board'; render(); return; }
-  if (name === 'clear-selection') { ui.checked.clear(); render(); return; }
   if (name === 'close-dialog') { target.closest('dialog').close(); return; }
-  if (name === 'launch-main') { void launchDialog({ role: 'coordinator' }); return; }
+  if (name === 'prioritize' || name === 'prioritize-one') {
+    if (!ui.snapshot.jev?.configured) { navigate('settings'); document.querySelector('#jev')?.scrollIntoView(); return; }
+    const force = name === 'prioritize' && event.shiftKey;
+    void action(async () => {
+      if (name === 'prioritize-one') await api('/jev/prioritize', { method: 'POST', data: { taskId: target.dataset.taskId } });
+      const result = name === 'prioritize-one' ? null : await api('/jev/prioritize', { method: 'POST', data: { force } });
+      await refresh({ force: true });
+      if (result) toast(result.failed ? `Jev rated ${result.done - result.failed} of ${result.total}; ${result.failed} failed: ${result.error}` : result.total ? `Jev rated ${plural(result.total, 'issue')}. The list is in priority order.` : 'Every issue is already rated. Shift-click Prioritize to re-check all.', Boolean(result?.failed));
+    }); return;
+  }
+  if (name === 'run-next') { ui.selectedTask = target.dataset.taskId; resetDetailTab(); render(); void launchDialog({ mode: target.dataset.mode }); return; }
   if (name === 'launch-task') { void launchDialog(); return; }
   if (name === 'select-projects') {
     const boxes = [...document.querySelectorAll('[data-source-project]')].filter(box => box.dataset.sourceProject === target.dataset.id && !box.closest('[hidden]'));
@@ -1254,7 +1295,6 @@ document.addEventListener('click', event => {
   if (name === 'open-live') { for (const run of ui.snapshot.runs.filter(run => activeStates.includes(run.state) || pending(run.id).length).slice(0, 4).reverse()) openRun(run.id); ui.layout = 'grid'; saveWorkspace(); render(); void loadMessages(); return; }
   if (name === 'open-task-run') { navigate('runs', { runId: taskRun(selectedTask()).id }); return; }
   if (name === 'open-evidence-run') { navigate('runs', { runId: target.dataset.id }); return; }
-  if (name === 'open-main') { navigate('runs', { runId: ui.snapshot.runs.find(run => run.role === 'coordinator').id }); return; }
   if (name === 'add-source') {
     readSettings(); ui.draft.sources.push({ id: crypto.randomUUID(), name: 'Morningmate', type: 'morningmate', baseUrl: 'https://api.morningmate.com', projectIds: [], userId: '', repositoryId: '', statusMap: {} }); render(); return;
   }
@@ -1421,7 +1461,7 @@ document.addEventListener('change', event => {
   if (target.id === 'theme-preference') { window.rexTheme.set(target.value); return; }
   const repositoryId = target.closest('[data-repository]')?.dataset.repository;
   if (repositoryId && target.name.endsWith('.path')) { repositoryInfo.delete(repositoryId); void inspectRepositorySettings(repositoryId); return; }
-  if (target.dataset.selectTask) { if (target.checked) ui.checked.add(target.dataset.selectTask); else ui.checked.delete(target.dataset.selectTask); render(); return; }
+  if (target.id === 'task-sort') { ui.sort = target.value; saveWorkspace(); if (!renderTaskResults()) render(); return; }
   if (target.id === 'source-filter' || target.id === 'category-filter') { ui[target.id === 'source-filter' ? 'source' : 'category'] = target.value; if (!renderTaskResults()) render(); return; }
   if (target.closest('#settings-form') && target.name.endsWith('.type')) {
     const card = target.closest('.settings-card'); const base = card.querySelector('input[name$=".baseUrl"]');
@@ -1483,7 +1523,6 @@ document.addEventListener('submit', event => {
       try {
         let run;
         if (form.dataset.resume === 'true') run = await api(`/runs/${ui.selectedRun}/resume`, { method: 'POST', data: input });
-        else if (form.dataset.role === 'coordinator') run = await api('/coordinator', { method: 'POST', data: { ...input, taskIds: [...ui.checked].filter(taskId => ui.snapshot.tasks.some(task => task.id === taskId && !task.demo)) } });
         else run = await api('/runs', { method: 'POST', data: { ...input, mode: form.dataset.mode || 'fix', taskId: ui.selectedTask, instructions: input.prompt } });
         document.querySelector('#launch-dialog').close(); await refresh(); navigate('runs', { runId: run.id }); toast('Agent run queued.');
       } catch (error) { document.querySelector('#launch-error').textContent = error.message; } return;

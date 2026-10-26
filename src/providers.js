@@ -158,7 +158,7 @@ export function normalizeTask(source, projectId, post, detail = {}, { names, con
 }
 
 export class Sources {
-  constructor(store, { fetcher = fetch } = {}) { this.store = store; this.fetcher = fetcher; this.syncing = false; }
+  constructor(store, { fetcher = fetch, onSynced = () => {} } = {}) { this.store = store; this.fetcher = fetcher; this.onSynced = onSynced; this.syncing = false; }
   async request(source, endpoint, options = {}) {
     const key = this.store.credential(source.id);
     if (!key) throw new Error(`Add an API key for ${source.name} in Settings.`);
@@ -178,7 +178,7 @@ export class Sources {
         }
       }
       return results;
-    } finally { this.syncing = false; }
+    } finally { this.syncing = false; this.onSynced(); }
   }
   async directory(sourceId) {
     const source = this.store.config().sources.find(item => item.id === sourceId);

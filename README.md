@@ -1,6 +1,6 @@
 # Rex Desk
 
-A local QA issue workspace for Flow and Morningmate. It imports tasks assigned to you, lets a main agent classify and dispatch them, and keeps questions, approvals, worktrees, and test evidence together.
+A local QA issue workspace for Flow and Morningmate. It imports tasks assigned to you, has Jev rank them so you know what to run first, and keeps questions, approvals, worktrees, and test evidence together.
 
 The application is independent of your product repositories. It uses one Node.js process, SQLite with an optional Turso copy, and a buildless browser interface. Browsers, Tomcat, Electron, and coding agents start only when a run needs them.
 
@@ -48,9 +48,19 @@ The list and Kanban are two views of the same issues. Titles, numbers, status, r
 
 Search matches title, number, status, fields, reporter, and description without moving focus.
 
+## Priority with Jev
+
+Jev, TypeSafe AI's decision model, rates each assigned issue through your OpenRouter key (Settings → **Jev priority**, stored encrypted; `OPENROUTER_API_KEY` in the environment also works). Rex Desk sends the issue's title, status, fields, description, and recent comments to `POST https://openrouter.ai/api/v1/systemone` (model `~typesafe/jev-latest` unless set) with four typed questions: severity (a 5-level score), next step (fix, verify, wait, or skip), effort (a 3-level score), and whether it can be checked in a desktop Chromium browser (a probability). No generated text is parsed.
+
+Rex Desk ranks from those answers and the due date: severity counts most, then an overdue or near due date and browser-checkability; large effort lowers the rank, and waiting or not-actionable issues go to the end, after running and finished work. The issue list follows this order (switch **Order** to *As in tracker* to turn it off), each row shows its rank, a **Next up** card at the top starts the first issue with one click, and the issue's **Priority** section explains the rank. Only new or changed issues are rated again after each sync; **Prioritize** runs it now, Shift-click re-rates everything, and **Re-check** re-rates one issue. You decide what runs; nothing starts on its own except the schedule.
+
 ## Execution and evidence
 
-The main agent receives the selected issue IDs and uses the Rex Desk MCP to read, categorize, and dispatch work. It keeps related changes sequential and parallelizes independent issues. Worker concurrency is enforced by the local queue.
+Each run is one issue you start: **Fix with agent** or **Verify fix**, from Next up or the issue page. Worker concurrency is enforced by the local queue.
+
+Agents sign in with the test account from Settings → **QA verification**. They type `{{test.username}}` and `{{test.password}}` with `desk_browser fill`; Rex Desk substitutes the saved account, types the password only into password fields, and masks it in anything returned to the agent or written to the journal.
+
+For a Java WAR repository such as flow-was, the automatic test command compiles the branch's changed Java files with JDK 8 (Amazon Corretto 8 first) against the checked-in classes and libraries, checks for Java 8 bytecode, and syntax-checks changed JavaScript, because the repository has no runnable test suite; this matches how its developers verify. The automatic setup command installs and builds the `src/flow-renewal` frontend, whose gitignored `dist/` bundles the pages need, then restores the tracked files the build rewrote. Commit messages and PR text follow the repository's own convention (for flow-was `<type>(<domain>): <Korean summary>` with a Korean body and the issue's QA link at the end); messages to you stay in English. Rex Desk never opens a pull request into `master` or `real-master`.
 
 Each run page shows the agent's conversation live: its text, every tool call with input and result (expand a row), and pending approvals at the end, followed by a working line with the time of the last activity. A resumed turn is marked, and the timer counts from the current turn. Raw command and preview output stays in the work journal. Every agent writes to you in English, including reports, PR text, and tracker comment drafts, whatever language the issue uses.
 
@@ -92,7 +102,7 @@ Issues a developer marked complete (for example **Development Completed**) are Q
 
 ## Schedule
 
-Settings → **Schedule** starts work while the computer is on: at the set time on the chosen days Rex Desk syncs, and a main agent sorts new issues and starts at most the daily limit of runs: QA checks, code fixes, or both. Issues already settled or worked on in the last 20 hours are skipped. **Run now** does the same immediately. **Start Rex Desk when I sign in to Windows** adds a hidden launcher to the Startup folder so schedules run without opening the app.
+Settings → **Schedule** starts work while the computer is on: at the set time on the chosen days Rex Desk syncs, Jev rates new issues, and Rex Desk starts the top-ranked ones up to the daily limit: QA checks, code fixes, or both. Without a Jev key, issues a developer marked complete become QA checks and the rest fixes. Issues already settled or worked on in the last 20 hours are skipped. **Run now** does the same immediately. **Start Rex Desk when I sign in to Windows** adds a hidden launcher to the Startup folder so schedules run without opening the app.
 
 Setup marks the test-site sign-in, repository, and commands as optional: QA checks need only the tracker; code fixes need a repository, whose commands are read from its files.
 

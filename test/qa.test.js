@@ -85,7 +85,7 @@ test('verification runs cannot dispatch or read other runs', () => {
   store.close();
 });
 
-test('the schedule runs once per scheduled day and caps what its main agent may start', async () => {
+test('the schedule runs once per scheduled day and starts the top-ranked issues in its allowed modes', async () => {
   const { store, desk } = workspace({ schedule: { enabled: false, time: '00:00', days: [0, 1, 2, 3, 4, 5, 6], verify: true, fix: false, maxRuns: 1 } });
   store.saveConfig({ ...store.publicConfig(), schedule: { ...store.config().schedule, enabled: true } });
   assert.equal(store.get('schedule', 'last').state, 'armed', 'Turning it on after today’s time waits until tomorrow');
@@ -95,10 +95,10 @@ test('the schedule runs once per scheduled day and caps what its main agent may 
   const first = await desk.scheduleTick();
   assert.equal(first.state, 'started');
   assert.equal(await desk.scheduleTick(), null, 'A second tick on the same day does nothing');
-  const coordinator = store.get('run', first.runId);
-  assert.equal(coordinator.maxDispatch, 1); assert.deepEqual(coordinator.allowedModes, ['verify']);
-  await assert.rejects(desk.startTask({ taskId: 'bug-1', mode: 'fix', parentRunId: coordinator.id }), /only start verify/);
-  await desk.startTask({ taskId: 'done-1', mode: 'verify', parentRunId: coordinator.id });
-  await assert.rejects(desk.startTask({ taskId: 'bug-1', mode: 'verify', parentRunId: coordinator.id }), /at most 1/);
+  assert.equal(first.runIds.length, 1, 'Capped by the daily limit');
+  const run = store.get('run', first.runIds[0]);
+  assert.equal(run.role, 'verifier'); assert.equal(run.taskId, 'done-1', 'Without Jev, a completed issue is a QA check; fixes are off');
+  assert.ok(first.skipped.some(item => item.taskId === 'bug-1' && /fix runs are off/.test(item.reason)));
+  assert.equal(store.list('run').some(item => item.role === 'coordinator'), false, 'No main agent is started');
   await settle(); store.close();
 });

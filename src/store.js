@@ -14,7 +14,7 @@ export const defaults = {
   name: 'Rex', provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
   syncMinutes: 5, requireVideo: true, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
   models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false, execution: 'rex',
-  schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], verify: true, fix: false, maxRuns: 6 },
+  schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], verify: true, fix: false, maxRuns: 6 }, jev: { model: '', auto: true }, testAccount: { username: '' },
 };
 // Claude Code accepts family aliases (opus, sonnet, haiku, fable) or full IDs such as claude-opus-5-5. Typed shorthand is normalized.
 export function modelName(provider, value) {
@@ -123,6 +123,7 @@ export class Store extends EventEmitter {
     cipher.setAuthTag(tag);
     return Buffer.concat([cipher.update(data), cipher.final()]).toString('utf8');
   }
+  testPassword() { const saved = this.get('secret', 'test-account-password'); return saved ? this.decrypt(saved) : ''; }
   credential(sourceId) {
     const saved = this.get('secret', `source:${sourceId}`);
     return saved ? this.decrypt(saved) : '';
@@ -130,7 +131,7 @@ export class Store extends EventEmitter {
   config() { return { ...defaults, ...this.get('config', 'main') }; }
   publicConfig() {
     const config = this.config();
-    return { ...config, sources: config.sources.map(source => ({ ...source, hasKey: Boolean(this.credential(source.id)) })) };
+    return { ...config, sources: config.sources.map(source => ({ ...source, hasKey: Boolean(this.credential(source.id)) })), jev: { ...defaults.jev, ...config.jev, hasKey: Boolean(this.get('secret', 'openrouter')) }, testAccount: { username: config.testAccount?.username || '', hasPassword: Boolean(this.get('secret', 'test-account-password')) } };
   }
   saveConnection(source) {
     const config = this.publicConfig();
@@ -169,7 +170,11 @@ export class Store extends EventEmitter {
       syncMinutes: input.syncMinutes, requireVideo: input.requireVideo !== false, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
       tourDismissed: Boolean(input.tourDismissed), execution: input.execution === 'orca' ? 'orca' : 'rex',
-      schedule: scheduleSettings(input.schedule) };
+      schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false }, testAccount: { username: String(input.testAccount?.username || '').trim().slice(0, 200) } };
+    if (String(input.testAccount?.password || '')) this.put('secret', 'test-account-password', this.encrypt(String(input.testAccount.password)));
+    // The OpenRouter key for Jev is write-only from the dashboard: a new value replaces it, clearKey removes it.
+    if (String(input.jev?.apiKey || '').trim()) this.put('secret', 'openrouter', this.encrypt(String(input.jev.apiKey).trim()));
+    else if (input.jev?.clearKey) this.delete('secret', 'openrouter');
     for (const update of secretUpdates) {
       if (update.remove) this.delete('secret', `source:${update.id}`);
       else this.put('secret', `source:${update.id}`, update.value);

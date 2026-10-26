@@ -7,7 +7,7 @@ import { Store, defaults, now, modelName } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
 import { CodexRunner } from '../src/runners.js';
 import { issueBranch, provisionalTitle, defaultBranchPattern } from '../src/branches.js';
-import { detectProject, effectiveRepository } from '../src/project-detect.js';
+import { detectProject, effectiveRepository, findJava8 } from '../src/project-detect.js';
 import { readOrcaTerminal } from '../src/orca.js';
 import { git, createWorktree } from '../src/processes.js';
 
@@ -88,7 +88,8 @@ test('commands come from the project files, and Settings values override them', 
   const war = temporary('war'); mkdirSync(path.join(war, 'src', 'WEB-INF'), { recursive: true }); writeFileSync(path.join(war, 'run-tests.sh'), '#!/bin/bash\n');
   const flow = detectProject(war);
   assert.equal(flow.flowRuntime, null, 'No Tomcat template beside the checkout, so no preset');
-  if (process.platform === 'win32') assert.equal(flow.testCommand, '', 'Shell test scripts are not guessed on Windows');
+  if (findJava8()) assert.match(flow.testCommand, /war-check.mjs/, 'A WAR layout is verified by compiling its changed classes with JDK 8, not by its shell scripts');
+  else if (process.platform === 'win32') assert.equal(flow.testCommand, '', 'Shell test scripts are not guessed on Windows');
 });
 
 test('with nothing set or detected, the worker proposes a test command that the human approves once', async () => {

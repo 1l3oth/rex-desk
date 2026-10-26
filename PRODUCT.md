@@ -22,7 +22,7 @@ Replace checking issue trackers, copying issue details into terminals, and coord
 
 ## Operating Context
 
-Fetch assigned issues; analyze and categorize them with a main agent; dispatch work into separate Git worktrees; ask the user questions and seek approval in the dashboard; review test recordings and proposed pull requests. Codex and Claude Code are installed. Orbit is configured in Claude Code.
+Fetch assigned issues; have Jev rank them so the user picks what to run first; run each chosen issue in its own Git worktree; ask the user questions and seek approval in the dashboard; review test recordings and proposed pull requests. Codex and Claude Code are installed. Orbit is configured in Claude Code.
 
 ## Capabilities and Constraints
 

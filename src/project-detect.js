@@ -3,6 +3,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { defaultProfiles, seedProduct } from './flow-runtime.js';
 import { detectElectron } from './electron-runtime.js';
 
+const rexScript = name => path.resolve(import.meta.dirname, '..', 'scripts', name);
+
 const windows = process.platform === 'win32';
 const has = (...parts) => existsSync(path.join(...parts));
 const quote = value => `'${String(value).replaceAll("'", `'\\''`)}'`;
@@ -13,8 +15,8 @@ const programFolders = () => [process.env.ProgramFiles, process.env.ProgramW6432
 export function findJava8() {
   const javac = directory => existsSync(path.join(directory, 'bin', windows ? 'javac.exe' : 'javac'));
   const eight = directory => /(^|[^0-9])(1\.8|8)([^0-9]|$)/.test(path.basename(directory));
-  const vendors = ['Java', 'Amazon Corretto', 'Eclipse Adoptium', 'Zulu', 'AdoptOpenJDK', 'Microsoft'];
-  const candidates = [process.env.JAVA_HOME, ...programFolders().flatMap(folder => vendors.flatMap(vendor => children(path.join(folder, vendor))))].filter(Boolean);
+  const vendors = ['Amazon Corretto', 'Eclipse Adoptium', 'Zulu', 'AdoptOpenJDK', 'Microsoft', 'Java'];
+  const candidates = [process.env.JAVA_HOME, ...programFolders().flatMap(folder => vendors.flatMap(vendor => children(path.join(folder, vendor)).sort().reverse()))].filter(Boolean);
   return candidates.find(directory => eight(directory) && javac(directory)) || '';
 }
 export function findTomcat() {
@@ -22,6 +24,11 @@ export function findTomcat() {
   const candidates = [process.env.CATALINA_HOME, ...programFolders().flatMap(folder => children(path.join(folder, 'Apache Software Foundation')).filter(directory => /tomcat/i.test(path.basename(directory))).sort().reverse())].filter(Boolean);
   return candidates.find(catalina) || '';
 }
+// Run one of Rex Desk's own scripts in the worktree, with JDK 8 when the project needs it.
+const rexNode = (name, javaHome) => windows
+  ? `${javaHome ? `$env:JAVA_HOME=${powershell(javaHome)}; ` : ''}node ${powershell(rexScript(name))}`
+  : `${javaHome ? `JAVA_HOME=${quote(javaHome)} ` : ''}node ${quote(rexScript(name))}`;
+const powershell = value => `'${String(value).replaceAll("'", "''")}'`;
 // POSIX only. On Windows, repository .sh scripts assume Unix paths and tools (flow-was's javac argfile breaks in Git Bash),
 // so the worker proposes a command there and the human approves it once.
 const shellScript = (script, javaHome) => `${javaHome ? `JAVA_HOME=${quote(javaHome)} PATH=${quote(path.join(javaHome, 'bin'))}:"$PATH" ` : ''}bash ${quote(script)}`;
@@ -58,6 +65,10 @@ function scan(root) {
       found.flowRuntime = { templateBase, javaHome, catalinaHome, seedPath: root, maxHeapMb: 512, profiles: defaultProfiles(), defaultProfile: seed?.product || 'flow', seed };
       found.from.flowRuntime = `src/WEB-INF and ${templateBase}`;
     }
+    // flow-was has no runnable test suite; its developers compile the changed classes with JDK 8, so verification does the same.
+    if (javaHome) set('testCommand', rexNode('war-check.mjs', javaHome), 'a Java 8 compile of the changed classes and a syntax check of changed scripts (no test suite in the repository)');
+    // Pages load gitignored dist/ bundles, so a new worktree builds the gulp frontend before its preview can work.
+    if (has(root, 'src', 'flow-renewal', 'package.json')) set('setupCommand', rexNode('war-setup.mjs'), 'src/flow-renewal (installs and builds the frontend bundles the pages load)');
   }
   const script = ['run-tests.sh', 'test.sh', path.join('scripts', 'test.sh')].find(name => has(root, name));
   if (script && !windows) set('testCommand', shellScript(script, javaHome), script);

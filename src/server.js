@@ -41,7 +41,7 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || path.join(root, '.local'), port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch } = {}) {
+export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || path.join(root, '.local'), port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher } = {}) {
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataDirectory, 'runtime.lock');
   if (existsSync(lockPath)) {
@@ -52,7 +52,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
     unlinkSync(lockPath);
   }
   writeFileSync(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 });
-  const store = new Store(dataDirectory), desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand });
+  const store = new Store(dataDirectory), desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher });
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
   store.on('change', notify);
@@ -142,7 +142,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         return json(response, 200, { source, run: await desk.startConnectionAgent({ sourceId: source.id, provider: input.provider }) });
       }
       if (url.pathname === '/api/sync' && request.method === 'POST') return json(response, 200, await desk.sources.sync());
-      if (url.pathname === '/api/coordinator' && request.method === 'POST') return json(response, 200, await desk.startCoordinator(await body(request)));
+      if (url.pathname === '/api/jev/prioritize' && request.method === 'POST') return json(response, 200, await (async () => { const input = await body(request); return desk.jev.prioritize({ force: Boolean(input.force), taskId: String(input.taskId || '') }); })());
       if (url.pathname === '/api/runs' && request.method === 'POST') return json(response, 200, await desk.startTask(await body(request)));
       if (url.pathname === '/api/demo' && request.method === 'POST') return json(response, 200, desk.demo());
       if (url.pathname === '/api/demo' && request.method === 'DELETE') { for (const task of store.list('task')) if (task.demo) store.delete('task', task.id); return json(response, 200, { removed: true }); }

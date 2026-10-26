@@ -148,7 +148,15 @@ export class Evidence {
         await page.goto(target.href, { waitUntil: 'domcontentloaded' }); break;
       }
       case 'click': await page.locator(selector).click({ timeout: 15000 }); break;
-      case 'fill': await page.locator(selector).fill(value || ''); break;
+      case 'fill': {
+        const typed = String(value || ''), account = this.store.config().testAccount || {}, password = this.store.testPassword();
+        if (typed.includes('{{test.password}}')) {
+          if (!password) throw new Error('No test account password is saved in Settings → QA verification. Ask the human with desk_ask.');
+          if (await page.locator(selector).getAttribute('type') !== 'password') throw new Error('{{test.password}} can only be typed into a password field.');
+        }
+        if (typed.includes('{{test.username}}') && !account.username) throw new Error('No test account is saved in Settings → QA verification. Ask the human with desk_ask.');
+        await page.locator(selector).fill(typed.replaceAll('{{test.username}}', account.username || '').replaceAll('{{test.password}}', password)); break;
+      }
       case 'press': await page.locator(selector).press(value); break;
       case 'select': await page.locator(selector).selectOption(value); break;
       case 'check': await page.locator(selector).setChecked(value !== 'false'); break;
@@ -172,7 +180,9 @@ export class Evidence {
     session.actions++;
     const controls = await page.locator('button,input,textarea,select,a,[role="button"]').evaluateAll(nodes => nodes.slice(0, 100).map(node =>
       ({ tag: node.tagName.toLowerCase(), id: node.id, name: node.getAttribute('name'), label: node.getAttribute('aria-label') || node.textContent?.trim().slice(0, 100), type: node.getAttribute('type') })));
-    return { url: page.url(), title: await page.title(), text: (await page.locator('body').innerText()).slice(0, 14000), controls };
+    // The saved password never travels back to the agent, even if a page echoes it.
+    const password = this.store.testPassword(), hide = text => password ? String(text).replaceAll(password, '[test password]').replaceAll(encodeURIComponent(password), '[test password]') : text;
+    return { url: hide(page.url()), title: hide(await page.title()), text: hide((await page.locator('body').innerText()).slice(0, 14000)), controls };
   }
   async close(runId) {
     const session = this.sessions.get(runId);
