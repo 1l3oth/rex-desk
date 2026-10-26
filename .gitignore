@@ -9,3 +9,4 @@ coverage/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 .playwright-mcp/
+.local-dev/

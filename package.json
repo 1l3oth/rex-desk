@@ -10,10 +10,11 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test test/",
+    "test": "node --test \"test/*.test.js\"",
     "mcp": "node src/stdio.js",
     "verify": "node scripts/verify.js",
-    "test:browser": "node scripts/browser-test.js"
+    "test:browser": "node scripts/browser-test.js",
+    "prepare": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.0",
