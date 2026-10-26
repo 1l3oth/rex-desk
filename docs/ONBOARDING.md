@@ -68,8 +68,8 @@ Your data stays in the `.local/` folder of your copy: the database, encrypted ke
 
 ### Fork or branch
 
-- **You have write access:** work on a branch in this repository.
-- **You do not, or you want your own version:** fork it.
+- **You are the owner (`1l3oth` or `DaraBoth`):** work on a branch in this repository. These are the only two accounts that can push.
+- **Everyone else, or anyone who wants their own version:** fork it, and open pull requests from your fork.
 
   ```powershell
   gh repo fork 1l3oth/rex-desk --clone
