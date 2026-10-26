@@ -7,6 +7,14 @@ import { effectiveRepository } from './project-detect.js';
 
 const runId = z.string().optional().describe('Run ID. Omit when using a run-scoped agent connection.');
 const reply = value => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] });
+// The human reads English. Text that is mostly Korean, Japanese, or Chinese goes back to the agent to rewrite; a quoted title inside English is fine.
+export function requireEnglish(text, what) {
+  const unquoted = String(text || '').replace(/“[^”]*”|"[^"]*"|「[^」]*」|『[^』]*』|`[^`]*`/g, ' ');
+  // Japanese and Chinese have no spaces, so their characters count at about two per word; English counts by words.
+  const foreign = (unquoted.match(/[\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/gu) || []).length / 2;
+  const english = unquoted.split(/\s+/).filter(word => /\p{Script=Latin}/u.test(word) && !/[\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(word)).length;
+  if (foreign + english >= 4 && foreign / (foreign + english) > 0.4) throw new Error(`Rewrite ${what} in English: the human reads English. Quote Korean or Japanese tracker text only where its exact wording matters.`);
+}
 
 export function createMcp(desk, scope) {
   const server = new McpServer({ name: 'rex-desk', version: '0.1.0' });
@@ -61,16 +69,21 @@ export function createMcp(desk, scope) {
   tool('desk_runs', 'Read task execution states and evidence checks without internal reasoning.', {}, () =>
     desk.store.list('run').filter(run => !['worker', 'verifier'].includes(scope.role) || run.id === scope.runId), true);
   tool('desk_message', 'Send a deliberate message to the human in the dashboard. Use for meaningful findings, blockers, and reports.',
-    { runId, text: z.string().min(1).max(50000) }, input => desk.message(resolveRun(input.runId), input.text));
+    { runId, text: z.string().min(1).max(50000) }, input => { requireEnglish(input.text, 'this message'); return desk.message(resolveRun(input.runId), input.text); });
   tool('desk_ask', 'Ask the human a question or request approval in the dashboard. Blocks until answered. For clients with short timeouts, use wait=false and poll desk_question.',
     { runId, message: z.string().min(1), kind: z.enum(['question', 'approval']).default('question'),
       fields: z.record(z.string(), z.object({ type: z.enum(['string', 'boolean', 'number', 'integer']), title: z.string().optional(), enum: z.array(z.string()).optional() })).optional(),
-      required: z.array(z.string()).optional(), wait: z.boolean().default(true) }, async input => {
+      required: z.array(z.string()).optional(), wait: z.boolean().default(true) }, async (input, extra) => {
+      requireEnglish(input.message, 'this question');
       const request = { requestedSchema: { type: 'object', properties: input.fields || { answer: { type: 'string', title: 'Your answer' } },
         required: input.required || (input.kind === 'question' ? ['answer'] : []) } };
       const interaction = desk.beginAsk(resolveRun(input.runId), { kind: input.kind, title: input.message, request, method: 'desk' });
       if (!input.wait) return { questionId: interaction.id, state: 'pending' };
-      return await interaction.promise;
+      // Clients that sent a progress token get a keep-alive every 25 seconds, so a question can wait for the human as long as it takes.
+      const token = extra?._meta?.progressToken;
+      let ticks = 0;
+      const alive = token === undefined ? null : setInterval(() => void extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: ++ticks, message: 'Waiting for the human in Rex Desk' } }).catch(() => {}), 25000);
+      try { return await interaction.promise; } finally { clearInterval(alive); }
     });
   tool('desk_question', 'Poll a dashboard question created with desk_ask wait=false.', { questionId: z.string() }, ({ questionId }) => {
     const interaction = desk.store.get('interaction', questionId);
@@ -90,10 +103,10 @@ export function createMcp(desk, scope) {
     { runId, title: z.string().min(3).max(120), type: z.enum(['fix', 'feature', 'refactor', 'chore', 'docs']).default('fix') }, input => desk.renameBranch(resolveRun(input.runId), input));
   tool('desk_verify', 'Run the repository’s test command and save actual exit status and output. Uses the Settings command, else the one detected from the repository files. If neither exists, pass command: the human approves it once and it is saved. Commit the fix before this step; later changes invalidate proof.', { runId, command: z.string().max(2000).optional() }, input => desk.verify(resolveRun(input.runId)));
   tool('desk_finish', 'Close the recording, check current test evidence, and write a portable HTML report. Only verified fixes become ready for review.',
-    { runId, summary: z.string().min(1).max(50000), risk: z.object({ score: z.number().int().min(1).max(10), requiresHumanReview: z.boolean(), reason: z.string().min(1).max(5000), factors: z.array(z.string()).max(20).optional() }).describe('Agent self-review: estimated code risk 1 (small) to 10 (high), concrete reasons, and whether a human must review before a PR.') }, input => desk.finish(resolveRun(input.runId), input.summary, input.risk));
+    { runId, summary: z.string().min(1).max(50000), risk: z.object({ score: z.number().int().min(1).max(10), requiresHumanReview: z.boolean(), reason: z.string().min(1).max(5000), factors: z.array(z.string()).max(20).optional() }).describe('Agent self-review: estimated code risk 1 (small) to 10 (high), concrete reasons, and whether a human must review before a PR.') }, input => (requireEnglish(input.summary, 'the summary'), requireEnglish(input.risk.reason, 'the risk reason'), 0) || desk.finish(resolveRun(input.runId), input.summary, input.risk));
   tool('desk_qa_result', 'Finish a QA verification run: close the recording, save the verdict and a draft tracker comment. pass needs a recorded browser assertion of the expected behavior.',
     { runId, verdict: z.enum(['pass', 'fail', 'blocked']), summary: z.string().min(1).max(20000), comment: z.string().max(20000).describe('Short tracker comment for the human to post: environment, steps, result, recording in Rex Desk.'), steps: z.array(z.string().max(2000)).max(40).optional() },
-    input => desk.qaResult(resolveRun(input.runId), input));
+    input => { requireEnglish(input.summary, 'the summary'); requireEnglish(input.comment, 'the tracker comment'); return desk.qaResult(resolveRun(input.runId), input); });
   tool('desk_status', 'Request dashboard approval to change the source tracker to a configured workflow status.', { runId, phase: z.enum(['working', 'review', 'done']) }, input => desk.status(resolveRun(input.runId), input.phase));
   tool('desk_publish', 'Request dashboard approval to push the verified branch and create a draft GitHub PR. Does not merge.',
     { runId, title: z.string().optional(), body: z.string().optional(), targetBranch: z.string().optional() },

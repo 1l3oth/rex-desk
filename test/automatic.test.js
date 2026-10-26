@@ -124,3 +124,21 @@ test('every agent writes to the human in English', () => {
   }
   store.close();
 });
+
+test('messages to the human that are mostly Korean or Japanese go back to the agent, quoted titles do not', async () => {
+  const { requireEnglish } = await import('../src/mcp.js');
+  for (const text of ['debugging-investigate-first 절차를 적용합니다. AGENTS.md는 없고 CLAUDE.md와 빌드 지침을 읽었습니다.', 'ビューの名前を修正しました。新しいプロジェクトで正しく表示されます。'])
+    assert.throws(() => requireEnglish(text, 'this message'), /Rewrite this message in English/);
+  for (const text of ['Issue #38464 “설치형, 파일, 미리보기 - 미리보기 화면에서 다운로드 버튼 클릭 시 빈 화면” is fixed and verified in the recorded browser.', 'The 全体タスク view now shows the right name in Japanese projects.', '확인'])
+    assert.doesNotThrow(() => requireEnglish(text, 'this message'));
+});
+
+test('workers start with the lessons earlier runs learned', async () => {
+  const { original } = await repository(), { store, desk } = workspace(original);
+  const prompt = desk.prompt({ id: 'w', role: 'worker', taskId: 'task-1', repositoryId: 'repo', worktree: original, branch: 'b', baseBranch: 'develop', port: 1 });
+  assert.match(prompt, /Never change the working directory of your shell session/);
+  assert.match(prompt, /two or three plain English sentences/);
+  assert.match(prompt, /Reminder: every desk_message, desk_ask, summary, and report to the human is in English\.$/);
+  assert.doesNotMatch(prompt, /flow-was Java/, 'Flow lessons only for the Flow repository');
+  store.close();
+});

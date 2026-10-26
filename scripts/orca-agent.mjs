@@ -8,7 +8,7 @@ const specFile = process.argv[2];
 if (!specFile) { console.error('Rex Desk agent spec is missing.'); process.exit(2); }
 const spec = JSON.parse(readFileSync(specFile, 'utf8'));
 rmSync(specFile, { force: true });
-const env = { ...process.env, ...spec.env, REX_AGENT_TOKEN: spec.token, REX_DESK_TOKEN: spec.token, REX_DESK_URL: spec.mcpUrl };
+const env = { ...process.env, ...spec.env, REX_AGENT_TOKEN: spec.token, REX_DESK_TOKEN: spec.token, REX_DESK_URL: spec.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
 for (const key of spec.unset || []) delete env[key];
 delete env.CLAUDECODE;
 let args, cleanup = () => {};
