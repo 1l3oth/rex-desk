@@ -9,7 +9,7 @@ const taskFile = (task, address) => `/api/task-file?task=${encodeURIComponent(ta
 const mediaKind = name => /\.(png|jpe?g|gif|webp|bmp)$/i.test(name) ? 'image' : /\.(mp4|webm|mov|m4v)$/i.test(name) ? 'video' : '';
 const viewable = (kind, src, name, original = '') => `data-view="${kind}" data-view-src="${esc(src)}" data-view-name="${esc(name)}"${original ? ` data-view-original="${esc(original)}"` : ''}`;
 const ui = { page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', search: '', source: '', category: '', snapshot: null, runEvents: new Map(), journals: new Map(), transcripts: new Map(), openOps: new Set(), openRuns: [], layout: 'grid', runSide: 'runs', selectedDecision: '', draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false,
-  sort: 'priority', orcaScreens: new Map(), orcaOpen: new Set(), detailLayout: 'tabs', tabSecond: 'messages', splitRatio: 0.5, sideWidth: 0, dragging: false, missedRender: false };
+  sort: 'priority', orcaScreens: new Map(), orcaOpen: new Set(), detailLayout: 'tabs', tabSecond: 'messages', splitRatio: 0.5, sideWidth: 0, proofWidth: 0, dragging: false, missedRender: false };
 const labels = { queued: 'Queued', starting: 'Preparing', running: 'Working', waiting: 'Needs you', needs_evidence: 'Needs evidence', ready_for_review: 'Ready for review', published: 'PR created', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted', finished: 'Finished', qa_passed: 'QA passed', qa_failed: 'QA failed', qa_blocked: 'QA blocked' };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const icon = name => `<svg class="icon" aria-hidden="true"><use href="/icons.svg#${name}"></use></svg>`;
@@ -60,12 +60,12 @@ function navigate(page, { runId, taskId } = {}) {
 // Open runs and the pane layout are a per-browser convenience, so they live in localStorage.
 const paneLimits = { single: 1, split: 2, grid: 4 };
 function saveWorkspace() {
-  try { localStorage.setItem('rex-desk-workspace', JSON.stringify({ openRuns: ui.openRuns, layout: ui.layout, layoutChosen: ui.layoutChosen, selectedRun: ui.selectedRun, sort: ui.sort, sideWidth: ui.sideWidth, detailLayout: ui.detailLayout, tabSecond: ui.tabSecond, splitRatio: ui.splitRatio })); } catch {}
+  try { localStorage.setItem('rex-desk-workspace', JSON.stringify({ openRuns: ui.openRuns, layout: ui.layout, layoutChosen: ui.layoutChosen, selectedRun: ui.selectedRun, sort: ui.sort, sideWidth: ui.sideWidth, proofWidth: ui.proofWidth, detailLayout: ui.detailLayout, tabSecond: ui.tabSecond, splitRatio: ui.splitRatio })); } catch {}
 }
 function restoreWorkspace() {
   try {
     const saved = JSON.parse(localStorage.getItem('rex-desk-workspace') || '{}'); ui.openRuns = Array.isArray(saved.openRuns) ? saved.openRuns : []; ui.layoutChosen = Boolean(saved.layoutChosen); ui.layout = ui.layoutChosen && paneLimits[saved.layout] ? saved.layout : 'single'; ui.selectedRun = saved.selectedRun || '';
-    ui.sort = saved.sort === 'tracker' ? 'tracker' : 'priority'; ui.sideWidth = Number(saved.sideWidth) || 0; ui.detailLayout = detailLayouts.includes(saved.detailLayout) ? saved.detailLayout : 'tabs';
+    ui.sort = saved.sort === 'tracker' ? 'tracker' : 'priority'; ui.sideWidth = Number(saved.sideWidth) || 0; ui.proofWidth = Number(saved.proofWidth) || 0; ui.detailLayout = detailLayouts.includes(saved.detailLayout) ? saved.detailLayout : 'tabs';
     ui.tabSecond = detailTabNames[saved.tabSecond] ? saved.tabSecond : 'messages'; ui.splitRatio = Math.min(0.8, Math.max(0.2, Number(saved.splitRatio) || 0.5));
   } catch {}
   applySizes();
@@ -85,12 +85,19 @@ const sideLimits = () => [220, Math.max(220, innerWidth - 408)];
 function applySizes() {
   const root = document.documentElement.style;
   if (ui.sideWidth) root.setProperty('--side-width', `${ui.sideWidth}px`); else root.removeProperty('--side-width');
+  if (ui.proofWidth) root.setProperty('--proof-width', `${ui.proofWidth}px`); else root.removeProperty('--proof-width');
   root.setProperty('--split-first', `${Math.round(ui.splitRatio * 1000) / 10}%`);
 }
 function setSideWidth(width) {
   const [min, max] = sideLimits();
   ui.sideWidth = width ? Math.round(Math.min(max, Math.max(min, width))) : 0; applySizes();
   document.querySelector('.side-resizer')?.setAttribute('aria-valuenow', String(Math.round(document.querySelector('.side')?.getBoundingClientRect().width || ui.sideWidth)));
+}
+// The proof column keeps at least 200px, and the conversation beside it at least 320px.
+function setProofWidth(width, pane) {
+  const box = (pane || document.querySelector('.pane'))?.getBoundingClientRect(), max = box ? Math.max(200, box.width - 320) : 900;
+  ui.proofWidth = width ? Math.round(Math.min(max, Math.max(200, width))) : 0; applySizes();
+  for (const handle of document.querySelectorAll('[data-resize="proof"]')) handle.setAttribute('aria-valuenow', String(ui.proofWidth || 260));
 }
 // Each panel keeps at least 220px across (120px stacked) when the issue area allows it.
 function setSplitRatio(ratio) {
@@ -602,7 +609,7 @@ function renderPane(run) {
     <div class="pane-sub">${run.role === 'verifier' ? (run.qaUrl ? `${icon('link')}<code title="${esc(run.qaUrl)}">${esc(run.qaUrl)}</code>` : '<span>Finding the test site</span>') : run.branch ? `${icon('branch')}<code title="${esc(run.branch)}">${esc(run.branch)}</code>` : `<span>${run.role === 'coordinator' ? `Analyzing ${plural((run.taskIds || []).length, 'issue')}` : 'Worktree preparing'}</span>`}<span class="pane-progress">${esc(progressText(run))}</span></div>
     ${run.execution === 'orca' ? `<div class="run-status-strip pane-notice">${icon('terminal')}<span>Runs in an Orca terminal. Tool approvals happen there; questions, evidence, and PR approval stay here.</span></div>` : ''}
     ${run.error ? `<div class="notice pane-notice">${icon('alert')}<span>${esc(run.error)}</span>${/not signed in|not logged in|\/login/i.test(run.error) ? button('Fix agent sign-in', 'setup', 'small') : ''}</div>` : ''}
-    <div class="pane-body"><div class="pane-conversation" id="messages-${run.id}">${renderMessages(run.id)}${proof ? '' : journal}</div>${proof}</div>${renderPaneFooter(run)}</section>`;
+    <div class="pane-body"><div class="pane-conversation" id="messages-${run.id}">${renderMessages(run.id)}${proof ? '' : journal}</div>${proof ? `<div class="proof-resizer" role="separator" tabindex="0" data-resize="proof" aria-orientation="vertical" aria-label="Resize the ${run.role === 'verifier' ? 'QA result' : 'proof'} column" aria-valuemin="200" aria-valuenow="${ui.proofWidth || 260}" title="Drag to resize · double-click to reset"></div>` : ''}${proof}</div>${renderPaneFooter(run)}</section>`;
 }
 // A live run can only be stopped; a finished one takes a follow-up in place, continuing with the same agent.
 function renderPaneFooter(run) {
@@ -1342,7 +1349,7 @@ document.addEventListener('click', event => {
 // Dividers drag with the pointer or move with the arrow keys; Enter or a double-click restores the default size.
 let resizing = null, tabDrag = null, tabDragEnded = false;
 function layoutSettled() { ui.dragging = false; if (ui.missedRender) { ui.missedRender = false; render(); void loadMessages(); } }
-function resetSize(kind) { if (kind === 'side') setSideWidth(0); else setSplitRatio(0.5); saveWorkspace(); }
+function resetSize(kind) { if (kind === 'side') setSideWidth(0); else if (kind === 'proof') setProofWidth(0); else setSplitRatio(0.5); saveWorkspace(); }
 document.addEventListener('pointerdown', event => {
   if (event.button !== 0) return;
   const handle = event.target.closest?.('[data-resize]');
@@ -1388,6 +1395,7 @@ function endTabDrag(drop) {
 document.addEventListener('pointermove', event => {
   if (resizing) {
     if (resizing.kind === 'side') setSideWidth(event.clientX - (document.querySelector('.side')?.getBoundingClientRect().left || 48));
+    else if (resizing.kind === 'proof') { const pane = resizing.handle.closest('.pane'); setProofWidth(pane.getBoundingClientRect().right - event.clientX, pane); }
     else { const box = document.querySelector('.detail-split')?.getBoundingClientRect(); if (box) setSplitRatio(ui.detailLayout === 'rows' ? (event.clientY - box.top) / box.height : (event.clientX - box.left) / box.width); }
     return;
   }
@@ -1412,12 +1420,14 @@ document.addEventListener('dblclick', event => { const handle = event.target.clo
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && tabDrag?.active) { tabDrag.zone = null; endTabDrag(false); return; }
   const handle = event.target.closest?.('[data-resize]'); if (!handle) return;
-  const side = handle.dataset.resize === 'side', rows = !side && ui.detailLayout === 'rows';
+  const side = handle.dataset.resize === 'side', rows = handle.dataset.resize === 'split' && ui.detailLayout === 'rows';
   const step = { [rows ? 'ArrowUp' : 'ArrowLeft']: -1, [rows ? 'ArrowDown' : 'ArrowRight']: 1 }[event.key];
   if (!step && !['Home', 'End', 'Enter'].includes(event.key)) return;
   event.preventDefault();
   if (event.key === 'Enter') { resetSize(handle.dataset.resize); return; }
   if (side) { const [min, max] = sideLimits(), width = document.querySelector('.side')?.getBoundingClientRect().width || min; setSideWidth(event.key === 'Home' ? min : event.key === 'End' ? max : width + step * (event.shiftKey ? 64 : 16)); }
+  // The proof column sits on the right, so moving its divider left widens it.
+  else if (handle.dataset.resize === 'proof') { const pane = handle.closest('.pane'), width = pane.querySelector('.pane-proof')?.getBoundingClientRect().width || 260; setProofWidth(event.key === 'Home' ? 200 : event.key === 'End' ? 10000 : width - step * (event.shiftKey ? 64 : 16), pane); }
   else setSplitRatio(event.key === 'Home' ? 0 : event.key === 'End' ? 1 : ui.splitRatio + step * (event.shiftKey ? 0.1 : 0.05));
   saveWorkspace();
 });
