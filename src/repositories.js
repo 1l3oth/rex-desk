@@ -1,9 +1,9 @@
 import path from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { defaultProfiles, seedProduct } from './flow-runtime.js';
 import { detectElectron } from './electron-runtime.js';
+import { detectProject } from './project-detect.js';
 
 const exec = promisify(execFile);
 const options = { windowsHide: true, timeout: 20000, maxBuffer: 4 * 1024 * 1024,
@@ -64,26 +64,13 @@ export async function inspectRepository(directory, { execute = run } = {}) {
   ]);
   const list = [...branches.values()].sort((a, b) => a.name.localeCompare(b.name));
   const preferredBranch = branches.has('develop') ? 'develop' : list.find(branch => /(^|\/)develop$/.test(branch.name))?.name || currentBranch || github.repository?.defaultBranch || list[0]?.name || '';
-  const flow = existsSync(path.join(root, 'src/WEB-INF'));
-  const templateBase = path.join(path.dirname(root), 'flow-was-tomcat');
+  const found = detectProject(root);
   return { path: path.resolve(root), name: github.repository?.name || path.basename(root), currentBranch,
     remote: remote || '', remoteUrl: safeRemote(remoteUrl), branches: list, preferredBranch,
     gitAuthor: { name: authorName, email: authorEmail }, github, warnings,
-    flow: flow ? { available: existsSync(path.join(templateBase, 'conf/server.xml')), templateBase,
-      javaHome: 'C:\\Program Files\\Java\\jdk1.8.0_181', catalinaHome: 'C:\\Program Files\\Apache Software Foundation\\Tomcat 9.0', seedPath: root, maxHeapMb: 512,
-      profiles: defaultProfiles(), defaultProfile: seedProduct(root)?.product || 'flow', seed: seedProduct(root) } : null, electron: detectElectron(root), suggested: suggestCommands(root) };
+    flow: found.flowRuntime ? { available: true, ...found.flowRuntime } : null, electron: detectElectron(root),
+    suggested: { setupCommand: found.setupCommand, testCommand: found.testCommand, devCommand: found.devCommand, from: found.from } };
 }
-// Node projects: setup, test, and preview commands from the lockfile and package.json scripts. Other stacks are left for the person.
-function suggestCommands(root) {
-  try {
-    const scripts = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).scripts || {};
-    const tool = existsSync(path.join(root, 'pnpm-lock.yaml')) ? 'pnpm' : existsSync(path.join(root, 'yarn.lock')) ? 'yarn' : 'npm';
-    const setupCommand = { pnpm: 'pnpm install --frozen-lockfile', yarn: 'yarn install --frozen-lockfile', npm: existsSync(path.join(root, 'package-lock.json')) ? 'npm ci' : 'npm install' }[tool];
-    return { setupCommand, testCommand: scripts.test && !/no test specified/.test(scripts.test) ? `${tool} test` : '',
-      devCommand: scripts.dev ? `${tool} run dev -- --port {port}` : scripts.start ? `${tool} run start -- --port {port}` : '' };
-  } catch { return null; }
-}
-
 let picking = false;
 export async function pickRepositoryFolder() {
   if (process.platform !== 'win32') throw new Error('Paste the absolute repository path on this platform.');
@@ -123,3 +110,38 @@ export async function cloneRepository(spec, parent) {
   catch (error) { throw new Error(`GitHub could not clone ${name}: ${String(error.stderr || error.message).trim().split('\n').at(-1)} Check that the active gh account can read it (gh auth switch).`); }
   return { path: target, existed: false };
 }
+
+// Git checkouts sitting beside the ones already configured, so the folders on this computer do not have to be typed in.
+// Only a real checkout counts: a .git directory, not the .git file a linked worktree carries.
+const skipped = new Set(['node_modules', 'worktrees', '.local', '.git', '$RECYCLE.BIN', 'System Volume Information']);
+function checkoutDetails(directory) {
+  try {
+    const head = readFileSync(path.join(directory, '.git', 'HEAD'), 'utf8').trim();
+    const branch = head.startsWith('ref: refs/heads/') ? head.slice(16) : head.slice(0, 8);
+    let remote = '';
+    try {
+      const config = readFileSync(path.join(directory, '.git', 'config'), 'utf8');
+      const section = config.split(/\[/).find(part => /^remote "origin"/.test(part)) || config.split(/\[/).find(part => /^remote /.test(part)) || '';
+      remote = safeRemote((/^\s*url\s*=\s*(.+)$/m.exec(section)?.[1] || '').trim());
+    } catch {}
+    return { name: path.basename(directory), path: directory, branch, remote };
+  } catch { return null; }
+}
+export function discoverRepositories(roots, configured = []) {
+  const taken = new Set(configured.map(item => path.resolve(item).toLowerCase()));
+  const found = new Map();
+  for (const root of new Set(roots.filter(Boolean).map(item => path.resolve(item)))) {
+    let entries;
+    try { entries = readdirSync(root, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || skipped.has(entry.name) || entry.name.startsWith('.')) continue;
+      const directory = path.join(root, entry.name);
+      if (taken.has(directory.toLowerCase()) || found.has(directory.toLowerCase())) continue;
+      if (!statSafe(path.join(directory, '.git'))?.isDirectory()) continue;
+      const details = checkoutDetails(directory);
+      if (details) found.set(directory.toLowerCase(), details);
+    }
+  }
+  return [...found.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+const statSafe = target => { try { return statSync(target); } catch { return null; } };

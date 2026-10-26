@@ -113,6 +113,9 @@ export class CodexRunner {
     const recognized = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval',
       'item/tool/requestUserInput', 'tool/requestUserInput', 'mcpServer/elicitation/request'];
     if (!recognized.includes(method)) { this.send({ id: requestId, error: { code: -32601, message: `Rex Desk does not handle ${method}.` } }); return; }
+    const tool = method === 'mcpServer/elicitation/request' && params._meta?.codex_approval_kind === 'mcp_tool_call' && params.serverName === 'rex_desk_run'
+      ? String(params.message || '').match(/tool "([^"]+)"/)?.[1] : '';
+    if (tool && quietRexTool(`mcp__rex_desk__${tool}`)) { this.send({ id: requestId, result: codexAnswer(method, params, { action: 'accept' }) }); return; }
     try {
       const answer = await this.ask({ kind: /Approval/.test(method) ? 'approval' : 'question',
         title: params.message || params.reason || (params.command ? 'Approve command' : 'Agent needs your input'),
@@ -127,9 +130,16 @@ export class CodexRunner {
   close() { if (!this.closed) { this.closed = true; stopTree(this.child); } }
 }
 
-// Rex Desk's own tools read tasks, label them, message the dashboard, or act inside the run's worktree. desk_status and
-// desk_publish carry their own dashboard approval. Only desk_dispatch starts new work, so it alone keeps the permission prompt.
-const quietRexTool = name => name.startsWith('mcp__rex_desk__desk_') && name !== 'mcp__rex_desk__desk_dispatch';
+// Rex Desk's own tools read tasks, label them, message the dashboard, or act inside the run's worktree. desk_status,
+// desk_publish, and desk_dispatch carry their own dashboard approval, so none needs the agent's permission prompt too.
+const quietRexTool = name => name.startsWith('mcp__rex_desk__desk_');
+// The person's Claude memory, instructions, settings, agents, skills, and hooks, in any profile folder (~/.claude*, Orca's claude-profiles/<id>/home).
+const claudeHome = /(?:[\\/]\.claude[^\\/]*|claude-profiles[\\/][^\\/]+[\\/]home)[\\/](?:projects[\\/][^\\/]+[\\/]memory|settings(?:\.local)?\.json|CLAUDE\.md|agents|skills|hooks|commands)\b/i;
+export function writesClaudeHome(name, input = {}) {
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(name)) return claudeHome.test(String(input.file_path || input.notebook_path || ''));
+  if (name === 'Bash' || name === 'PowerShell') { const command = String(input.command || ''); return claudeHome.test(command) && /(>|\btee\b|\bcp\b|\bmv\b|\brm\b|sed\s+-i|Set-Content|Out-File|Add-Content|New-Item|Remove-Item|Copy-Item|Move-Item)/i.test(command); }
+  return false;
+}
 
 // Agents run on the Claude Code profile's claude.ai sign-in, so they use the person's Claude subscription. An API key
 // left in the environment would quietly switch every run to pay-per-token billing, so it is removed unless asked for.
@@ -151,6 +161,8 @@ export class ClaudeRunner {
     delete connections.rex_desk;
     const options = { cwd: this.cwd, env, abortController: this.controller,
       permissionMode: this.run.role === 'worker' ? 'acceptEdits' : 'default',
+      // A QA verifier may read the repository's documentation to find where the project runs.
+      ...(this.run.role === 'verifier' && this.sourcePath ? { additionalDirectories: [this.sourcePath, ...(this.artifactDirectory ? [this.artifactDirectory] : [])] } : this.artifactDirectory ? { additionalDirectories: [this.artifactDirectory] } : {}),
       settingSources: ['user', 'project', 'local'],
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
       ...(this.model ? { model: this.model } : {}), ...(this.run.sessionId ? { resume: this.run.sessionId } : {}),
@@ -166,6 +178,7 @@ export class ClaudeRunner {
           if (answer.action !== 'accept') return { behavior: 'deny', message: 'User declined the question.' };
           return { behavior: 'allow', updatedInput: { ...input, answers: answer.content || {} } };
         }
+        if (this.run.role !== 'coordinator' && writesClaudeHome(name, input)) return { behavior: 'deny', message: 'Rex Desk agents do not write Claude memory, instructions, or settings. Say what you learned in desk_message instead, and continue the task.' };
         if (quietRexTool(name) || allowedTools.has(name)) return { behavior: 'allow', updatedInput: input };
         const answer = await this.ask({ kind: 'approval', title: `Approve ${name}`, request: { tool: name, input, suggestions: context.suggestions, allowAlways: true }, method: 'claude-permission' });
         if (answer.action === 'accept' && answer.content?.always) allowedTools.add(name);

@@ -12,18 +12,19 @@ import { handleMcp } from './mcp.js';
 import { git, resolveCommand } from './processes.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { inspectRepository, pickRepositoryFolder, cloneRepository } from './repositories.js';
+import { inspectRepository, pickRepositoryFolder, cloneRepository, discoverRepositories } from './repositories.js';
 import { githubAccounts, startGithubLogin, cancelGithubLogin, switchGithubAccount } from './github.js';
 import { autostartStatus, setAutostart } from './autostart.js';
 import { issueBranch } from './branches.js';
-import { profileEnvironment } from './agents.js';
+import { profileEnvironment, discoverProfiles } from './agents.js';
 import { setupPrompt } from './setup-prompt.js';
-import { cachedTaskImage } from './images.js';
-import { orcaStatus, showWorktreesInOrca, openInOrca } from './orca.js';
+import { handoffPrompt } from './handoff.js';
+import { cachedTaskImage, cachedTaskMedia } from './images.js';
+import { orcaStatus, showWorktreesInOrca, openInOrca, readOrcaTerminal } from './orca.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 const json = (response, code, data) => { response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(data)); };
 async function body(request) {
   let input = '';
@@ -45,7 +46,7 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, cloudClientFactory, updateOptions } = {}) {
+export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, updateOptions } = {}) {
   const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataRoot, 'runtime.lock');
@@ -66,8 +67,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   const cloud = cloudClientFactory ? { clientFactory: cloudClientFactory, retryMs: 50 } : undefined;
   async function openSession(entry, vaultKey, { staySignedIn = false } = {}) {
     const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
-    const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand });
-    if (address) desk.mcpUrl = `${address}/mcp`;
+    const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher });
+    if (address) { desk.mcpUrl = `${address}/mcp`; desk.reattachOrca(); void desk.findPullRequests(); }
     store.on('change', notify);
     session = { id: entry?.id, email: entry?.email || '', store, desk, cookie: randomBytes(32).toString('base64url'), staySignedIn, cloud: null };
     if (accounts) {
@@ -173,7 +174,12 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
       if (url.pathname === '/api/repositories/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());
-      if (url.pathname === '/api/qa/sign-in' && request.method === 'POST') return json(response, 200, await desk.evidence.openQaSignIn(store.config().qa?.url));
+      // Checkouts beside the ones already configured, and beside Rex Desk itself, so other projects are one click away.
+      if (url.pathname === '/api/repositories/discover' && request.method === 'GET') {
+        const configured = store.config().repositories.map(item => item.path).filter(Boolean);
+        return json(response, 200, { repositories: discoverRepositories([...configured.map(item => path.dirname(item)), path.dirname(root)], configured) });
+      }
+      if (url.pathname === '/api/qa/sign-in' && request.method === 'POST') return json(response, 200, await desk.evidence.openQaSignIn((await body(request)).url));
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
       if (url.pathname === '/api/update/check' && request.method === 'POST') return json(response, 200, await updates.check());
       if (url.pathname === '/api/update/install' && request.method === 'POST') {
@@ -208,19 +214,38 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/agents/mcp' && request.method === 'POST') {
         const { provider } = await body(request);
         if (!['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
-        if (desk.agents.mcpInstalled(provider)) return json(response, 200, { installed: true, already: true });
         const command = resolveCommand(provider), proxy = path.join(root, 'src', 'stdio.js');
         const args = provider === 'claude' ? [...command.args, 'mcp', 'add', '--scope', 'user', 'rex_desk', '--', process.execPath, proxy]
           : [...command.args, 'mcp', 'add', 'rex_desk', '--', process.execPath, proxy];
-        // Profile environment decides which signed-in CLI configuration receives the local stdio entry.
-        await exec(command.command, args, { env: profileEnvironment(provider, desk.agents.selected(provider)), windowsHide: true, timeout: 30000 });
-        return json(response, 200, { installed: desk.agents.mcpInstalled(provider) });
+        // An agent started from any profile folder, in any directory, must be able to read tasks, so every profile
+        // this computer has gets the entry, not only the one Rex Desk's own runs use.
+        const profiles = discoverProfiles(provider, { configured: desk.agents.selected(provider) });
+        const results = [];
+        for (const item of profiles) {
+          if (desk.agents.mcpInstalled(provider, item.profile)) { results.push({ label: item.label, installed: true, already: true }); continue; }
+          try {
+            await exec(command.command, args, { env: profileEnvironment(provider, item.profile), windowsHide: true, timeout: 30000 });
+            results.push({ label: item.label, installed: desk.agents.mcpInstalled(provider, item.profile) });
+          } catch (error) { results.push({ label: item.label, installed: false, error: String(error.stderr || error.message).trim().split('\n').at(-1) }); }
+        }
+        desk.agents.invalidate(provider);
+        return json(response, 200, { installed: desk.agents.mcpInstalled(provider), everywhere: results.every(item => item.installed), profiles: results });
       }
       if (url.pathname === '/api/orca' && ['GET', 'POST'].includes(request.method)) {
         const repository = store.config().repositories.find(item => item.id === url.searchParams.get('repositoryId'));
         if (url.searchParams.get('repositoryId') && !repository) return json(response, 404, { error: 'Repository not found.' });
         if (request.method === 'POST') { if (!repository) throw new Error('Choose a repository.'); await showWorktreesInOrca(repository.path); }
         return json(response, 200, await orcaStatus(repository?.path));
+      }
+      // The text a person pastes into any agent session so it can take the issue over with its full context.
+      if (url.pathname === '/api/handoff' && request.method === 'POST') {
+        const input = await body(request);
+        const run = input.runId ? store.get('run', input.runId) : store.list('run').filter(item => item.taskId === input.taskId && item.role === 'worker').sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
+        const task = store.get('task', input.taskId || run?.taskId);
+        if (!task) return json(response, 404, { error: 'Issue not found.' });
+        const repository = store.config().repositories.find(item => item.id === run?.repositoryId);
+        const messages = run ? store.events(run.id, { visible: true }).filter(event => event.kind === 'message') : [];
+        return json(response, 200, { prompt: handoffPrompt({ task, run, repository, messages }) });
       }
       if (url.pathname === '/api/setup-prompt' && request.method === 'POST') {
         const input = await body(request);
@@ -235,7 +260,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return json(response, 200, { source, run: await desk.startConnectionAgent({ sourceId: source.id, provider: input.provider }) });
       }
       if (url.pathname === '/api/sync' && request.method === 'POST') return json(response, 200, await desk.sources.sync());
-      if (url.pathname === '/api/coordinator' && request.method === 'POST') return json(response, 200, await desk.startCoordinator(await body(request)));
+      if (url.pathname === '/api/jev/prioritize' && request.method === 'POST') return json(response, 200, await (async () => { const input = await body(request); return desk.jev.prioritize({ force: Boolean(input.force), taskId: String(input.taskId || '') }); })());
       if (url.pathname === '/api/runs' && request.method === 'POST') return json(response, 200, await desk.startTask(await body(request)));
       if (url.pathname === '/api/demo' && request.method === 'POST') return json(response, 200, desk.demo());
       if (url.pathname === '/api/demo' && request.method === 'DELETE') { for (const task of store.list('task')) if (task.demo) store.delete('task', task.id); return json(response, 200, { removed: true }); }
@@ -261,21 +286,27 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       const interactionMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/answer$/);
       const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
       if (taskMatch && request.method === 'GET') return json(response, 200, await desk.sources.taskDetail(decodeURIComponent(taskMatch[1]), { refresh: url.searchParams.has('refresh') }));
+      if (url.pathname === '/api/task-file' && request.method === 'GET') {
+        const media = await cachedTaskMedia(store, url.searchParams.get('task') || '', url.searchParams.get('url') || '', { fetcher: imageFetcher });
+        return serveFile(request, response, media, { cache: 'private, max-age=604800' });
+      }
       if (url.pathname === '/api/task-image' && request.method === 'GET') {
         const image = await cachedTaskImage(store, url.searchParams.get('task') || '', url.searchParams.get('url') || '', { fetcher: imageFetcher });
         return serveFile(request, response, image, { cache: 'private, max-age=604800' });
       }
       if (interactionMatch && request.method === 'POST') return json(response, 200, desk.answer(interactionMatch[1], await body(request)));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish|orca|tracker))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish|orca|tracker|terminal|say))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         if (request.method === 'GET') {
           if (action === 'messages' || action === 'journal') return json(response, 200, store.events(runId, { visible: action === 'messages' }));
+          if (action === 'terminal') return json(response, 200, await readOrcaTerminal(desk.run(runId)));
           return json(response, 200, desk.run(runId));
         }
         if (request.method === 'POST') {
           const input = await body(request);
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
+          if (action === 'say') return json(response, 200, await desk.say(runId, input.text));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));
           if (action === 'verify') return json(response, 200, await desk.verify(runId));
           if (action === 'tracker') return json(response, 200, await desk.trackerFromQa(runId, input.phase));
@@ -304,8 +335,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); }); }
   catch (error) { await closeSession(); unlinkSync(lockPath); throw error; }
   address = `http://127.0.0.1:${server.address().port}`;
-  if (session) session.desk.mcpUrl = `${address}/mcp`;
-  let lastSync = Date.now();
+  if (session) { session.desk.mcpUrl = `${address}/mcp`; session.desk.reattachOrca(); void session.desk.findPullRequests(); }
+  let lastSync = Date.now(), ticks = 0;
   const timer = setInterval(() => {
     if (!session) return;
     const { store, desk } = session;
@@ -314,6 +345,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       lastSync = Date.now(); void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
     }
     void desk.scheduleTick().catch(error => store.event('', 'schedule-error', { message: error.message }, true));
+    if (++ticks % 8 === 0) void desk.findPullRequests();
   }, 15000);
   timer.unref();
   // The installed app looks for a signed update shortly after start and every six hours.

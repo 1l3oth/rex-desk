@@ -1,19 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store, defaults, now } from '../src/store.js';
 import { Sources, normalizeTask, taskAssignees, postContent, matchesTaskStatus } from '../src/providers.js';
 import { Desk, validateAnswer } from '../src/coordinator.js';
 import { codexAnswer } from '../src/runners.js';
-import { git, createWorktree, slug } from '../src/processes.js';
+import { git, createWorktree, slug, fingerprint } from '../src/processes.js';
 import { createApp } from '../src/server.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
+const settle = () => new Promise(resolve => setTimeout(resolve, 80));
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const source = { id: 'source-1', name: 'Morningmate', type: 'morningmate', baseUrl: 'https://api.morningmate.com', projectIds: ['317938'], repositoryId: 'repository-1', userId: 'rex@example.com', statusMap: {} };
 const jsonResponse = data => new Response(JSON.stringify({ success: true, data }), { headers: { 'Content-Type': 'application/json' } });
@@ -159,7 +160,7 @@ test('restart expires questions and marks active runs interrupted rather than cl
 test('a worker cannot finish or publish without test proof', async () => {
   const store = new Store(temporary('proof')); const desk = new Desk(store, { root: temporary('root') });
   store.put('run', 'run-1', { id: 'run-1', state: 'needs_evidence', title: 'Unverified task' });
-  await assert.rejects(desk.publish('run-1', { approved: true }), /verified work/);
+  await assert.rejects(desk.publish('run-1', { approved: true }), /cannot open a pull request yet/);
   await assert.rejects(desk.publish('run-1', { approved: false }), /approval/); store.close();
 });
 
@@ -236,4 +237,90 @@ test('native elicitation survives HTTP sessions and the installed stdio proxy', 
       assert.deepEqual(JSON.parse(result.content[0].text), { action: 'accept', content: { answer: 'develop' } });
     }
   } finally { for (const client of clients) await client.close(); await app.close(); }
+});
+
+test('a pull request is refused before the human is asked, not after they approve', async () => {
+  const store = new Store(temporary('publish')), asked = [];
+  const desk = new Desk(store, { root: temporary('publish-root') });
+  store.put('task', 'task-1', { id: 'task-1', title: 'Search limit', active: true, sourceName: 'Morningmate', externalId: '32099' });
+  const base = { id: 'pub-1', role: 'worker', taskId: 'task-1', branch: 'temp/rex/fix/search', worktree: temporary('publish-tree'), targetBranch: 'global/develop', baseCommit: 'abc', createdAt: now() };
+  desk.ask = async request => { asked.push(request); return { action: 'accept' }; };
+
+  store.put('run', 'pub-1', { ...base, state: 'needs_evidence', checks: { testsPassed: true, recordedVideo: false, browserAssertionPassed: false } });
+  await assert.rejects(desk.requestPublish('pub-1', {}), /no browser recording was made, no browser assertion matches the current files/);
+  assert.equal(asked.length, 0, 'The human is never asked to approve a pull request that would then be refused');
+
+  store.put('run', 'pub-1', { ...base, state: 'running' });
+  await assert.rejects(desk.requestPublish('pub-1', {}), /This run is running; commit the fix, run desk_verify/);
+  assert.equal(asked.length, 0);
+
+  store.close();
+});
+
+test('the session a follow-up reopens comes from the provider log, and a provider switch drops it', async () => {
+  const store = new Store(temporary('resume')), directory = temporary('resume-logs');
+  const desk = new Desk(store, { root: temporary('resume-root'), runnerFactory: () => ({ start: async () => ({ status: 'completed' }), interrupt: async () => {}, close() {} }) });
+  const file = path.join(directory, '7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl');
+  writeFileSync(file, '{}\n');
+  const run = { id: 'r1', role: 'worker', provider: 'claude', state: 'needs_evidence', worktree: directory, mirror: { file, offset: 2 } };
+
+  assert.equal(desk.agentSessionId(run), '7c3a8d71-d78d-409a-9a84-91fb162c1be3');
+  assert.equal(desk.agentSessionId({ ...run, mirror: { file: path.join(directory, 'rollout-2026-10-26T07-12-33-7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl') } }), '', 'A log that is gone cannot be reopened');
+  writeFileSync(path.join(directory, 'rollout-2026-10-26T07-12-33-7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl'), '{}\n');
+  assert.equal(desk.agentSessionId({ ...run, provider: 'codex', mirror: { file: path.join(directory, 'rollout-2026-10-26T07-12-33-7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl') } }), '7c3a8d71-d78d-409a-9a84-91fb162c1be3');
+  assert.equal(desk.agentSessionId({ ...run, mirror: undefined }), '', 'A run with no recorded log starts fresh');
+
+  store.put('run', 'r1', run);
+  await desk.resume('r1', { prompt: 'try the dev server' });
+  assert.deepEqual(store.get('run', 'r1').mirror, { file, offset: 2 }, 'The same provider keeps its session');
+  await settle();
+  store.put('run', 'r1', { ...run, state: 'needs_evidence' });
+  await desk.resume('r1', { provider: 'codex', prompt: 'try again' });
+  assert.equal(store.get('run', 'r1').mirror, undefined, 'The other CLI cannot reopen it');
+  await settle(); await desk.shutdown(); store.close();
+});
+
+test('a run opens a pull request into a second branch, built from that branch', async () => {
+  const directory = temporary('release'), origin = path.join(directory, 'origin.git'), repository = path.join(directory, 'repo'), tree = path.join(directory, 'tree');
+  mkdirSync(repository); mkdirSync(origin);
+  await git(repository, ['init', '-b', 'global/develop']);
+  await git(repository, ['config', 'user.name', 'Test']); await git(repository, ['config', 'user.email', 'test@example.invalid']);
+  writeFileSync(path.join(repository, 'app.txt'), 'first\n'); await git(repository, ['add', '.']); await git(repository, ['commit', '-m', 'First']);
+  await git(repository, ['branch', 'global/release']);
+  writeFileSync(path.join(repository, 'app.txt'), 'second\n'); await git(repository, ['add', '.']); await git(repository, ['commit', '-m', 'Second']);
+  await git(origin, ['init', '--bare', '-b', 'global/develop']);
+  await git(repository, ['remote', 'add', 'origin', origin]);
+  await git(repository, ['push', '-q', 'origin', 'global/develop', 'global/release']);
+  await git(repository, ['worktree', 'add', '-q', '-b', 'temp/rex/fix/search', tree, 'HEAD']);
+  const baseCommit = await git(tree, ['rev-parse', 'HEAD']);
+  writeFileSync(path.join(tree, 'fix.txt'), 'the fix\n'); await git(tree, ['add', '.']); await git(tree, ['commit', '-m', 'fix(search): limit the period']);
+
+  const store = new Store(temporary('release-store'));
+  store.saveConfig({ ...defaults, repositories: [{ id: 'repository-1', name: 'flow-was', path: repository, baseBranch: 'global/develop', targetBranch: 'global/develop' }] });
+  const desk = new Desk(store, { root: temporary('release-root') }), created = [];
+  desk.gh = async args => { created.push(args); return { stdout: `https://github.com/x/y/pull/${created.length}\n` }; };
+  store.put('task', 'task-1', { id: 'task-1', title: 'Search limit', active: true, sourceName: 'Morningmate', externalId: '32099' });
+  store.put('run', 'run-1', { id: 'run-1', role: 'worker', state: 'ready_for_review', taskId: 'task-1', repositoryId: 'repository-1',
+    branch: 'temp/rex/fix/search', worktree: tree, baseCommit, targetBranch: 'global/develop', title: 'fix(search): limit the period',
+    verification: { passed: true, command: 'npm test', fingerprint: await fingerprint(tree) }, createdAt: now() });
+
+  const develop = await desk.publish('run-1', { approved: true });
+  assert.equal(develop.url, 'https://github.com/x/y/pull/1');
+  assert.equal(created[0][created[0].indexOf('--head') + 1], 'temp/rex/fix/search', 'a pull request into develop comes straight from the run branch');
+
+  // Rex asks in chat for a release pull request. The browser proof is incomplete, but he already approved these exact
+  // commits into develop, so the second pull request is not refused. develop is ahead of release, so the branch is rebuilt.
+  store.put('run', 'run-1', { ...store.get('run', 'run-1'), state: 'needs_evidence', checks: { testsPassed: true, recordedVideo: false, browserAssertionPassed: false } });
+  const release = await desk.publish('run-1', { approved: true, targetBranch: 'global/release' });
+  const head = created[1][created[1].indexOf('--head') + 1];
+  assert.equal(head, 'temp/rex/fix/search-for-release');
+  assert.equal(created[1][created[1].indexOf('--base') + 1], 'global/release');
+  assert.equal(await git(origin, ['rev-list', '--count', `global/release..${head}`]), '1', 'only the commit of this run reaches release');
+  assert.deepEqual(store.get('run', 'run-1').pullRequests.map(item => item.target), ['global/develop', 'global/release']);
+  assert.equal(store.get('run', 'run-1').prUrl, release.url);
+  assert.ok(!existsSync(path.join(store.directory, 'publish', slug(head, 120))), 'the branch Rex Desk built is removed once the pull request exists');
+  await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/release' }), /already open/);
+  writeFileSync(path.join(tree, 'fix.txt'), 'edited after the pull requests\n');
+  await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/hotfix' }), /files changed after the pull request into global\/release/i);
+  store.close();
 });

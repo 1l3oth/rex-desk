@@ -20,8 +20,13 @@ code,pre,.mono{font-family:var(--mono);font-size:11px}code{overflow-wrap:anywher
 .loading{padding:40px;color:var(--muted)}
 
 /* Shell: activity bar, optional sidebar, main, status bar */
-.shell{display:grid;grid-template-columns:48px minmax(0,1fr);grid-template-rows:minmax(0,1fr) 22px;height:100dvh;overflow:hidden}
-.shell.with-side{grid-template-columns:48px 300px minmax(0,1fr)}
+.shell{position:relative;display:grid;grid-template-columns:48px minmax(0,1fr);grid-template-rows:minmax(0,1fr) 22px;height:100dvh;overflow:hidden}
+/* --side-width is the dragged width; the main area always keeps 360px. */
+.shell.with-side{--side-size:clamp(220px,var(--side-width,300px),calc(100vw - 408px));grid-template-columns:48px var(--side-size) minmax(0,1fr)}
+.side-resizer{position:absolute;top:0;bottom:22px;left:calc(48px + var(--side-size) - 3px);width:6px;cursor:col-resize;z-index:6;touch-action:none;outline:none}
+.side-resizer:after{content:"";position:absolute;top:0;bottom:0;left:2px;width:2px;background:transparent;transition:background .15s var(--ease)}
+.side-resizer:hover:after,.side-resizer:focus-visible:after,.side-resizer.active:after{background:var(--accent)}
+body.resizing{user-select:none}body.resizing-columns,body.resizing-columns *{cursor:col-resize!important}body.resizing-rows,body.resizing-rows *{cursor:row-resize!important}
 .activity{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 0 8px;background:var(--bg);border-right:1px solid var(--line);min-height:0}
 .brand-mark{width:22px;height:22px;display:grid;grid-template-columns:repeat(2,6px);grid-template-rows:repeat(2,6px);gap:3px;place-content:center;background:var(--accent);border-radius:6px;margin-bottom:10px}
 .brand-mark i{background:var(--accent-ink);border-radius:1px}.brand-mark i:last-child{opacity:.45}
@@ -69,6 +74,7 @@ code,pre,.mono{font-family:var(--mono);font-size:11px}code{overflow-wrap:anywher
 .layout-glyph i{border:1.3px solid currentColor;border-radius:1.5px}
 .layout-glyph.single i:nth-child(n+2),.layout-glyph.split i:nth-child(n+3){display:none}
 .layout-glyph.split{grid-template-columns:1fr 1fr}.layout-glyph.grid{grid-template:1fr 1fr/1fr 1fr}
+.layout-glyph.rows{grid-template-rows:1fr 1fr}.layout-glyph.rows i:nth-child(n+3){display:none}
 
 /* Fields */
 .field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;min-width:0}
@@ -202,6 +208,32 @@ code,pre,.mono{font-family:var(--mono);font-size:11px}code{overflow-wrap:anywher
 .run-path li:before{content:"";position:absolute;left:0;right:0;top:2px;height:2px;background:var(--line)}
 .run-path li.done{color:var(--muted)}.run-path li.done:before{background:var(--accent)}
 .issue-conversation .transcript{max-height:62vh}
+.detail-layout{flex-shrink:0}
+.detail-pane .tab{user-select:none;-webkit-user-select:none}.tab.elsewhere{color:var(--faint)}
+
+/* Split issue view: two panels, each with its own tabs, scrolling on their own */
+.detail-pane.split{overflow:hidden}
+.detail-split{flex:1;min-height:0;display:grid}
+.detail-split.columns{grid-template-columns:minmax(0,var(--split-first,50%)) 5px minmax(0,1fr)}
+.detail-split.rows{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,var(--split-first,50%)) 5px minmax(0,1fr)}
+.split-pane{display:flex;flex-direction:column;min-width:0;min-height:0}
+.split-pane>.tabs{padding:0 14px;gap:14px;overflow-x:auto;scrollbar-width:none}
+.split-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:12px 16px 16px;overflow-wrap:anywhere}
+.split-body.show-messages{display:flex;flex-direction:column;overflow:hidden;padding-bottom:0}
+.split-body .issue-conversation{flex:1;min-height:0;display:flex;flex-direction:column}
+.split-body .issue-conversation .transcript{flex:1;min-height:0;max-height:none;padding-bottom:14px}
+.split-divider{position:relative;cursor:col-resize;touch-action:none;z-index:2;outline:none}
+.detail-split.rows .split-divider{cursor:row-resize}
+.split-divider:before,.split-divider:after{content:"";position:absolute}
+.split-divider:before{background:var(--line)}
+.split-divider:after{background:transparent;transition:background .15s var(--ease)}
+.detail-split.columns .split-divider:before{top:0;bottom:0;left:2px;width:1px}.detail-split.columns .split-divider:after{top:0;bottom:0;left:1px;width:3px}
+.detail-split.rows .split-divider:before{left:0;right:0;top:2px;height:1px}.detail-split.rows .split-divider:after{left:0;right:0;top:1px;height:3px}
+.split-divider:hover:after,.split-divider:focus-visible:after,.split-divider.active:after{background:var(--accent)}
+.drop-zone{position:fixed;z-index:45;pointer-events:none;display:grid;place-items:center;border:2px dashed var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent) 12%,transparent);transition:left .12s var(--ease),top .12s var(--ease),width .12s var(--ease),height .12s var(--ease)}
+.drop-zone span{padding:4px 10px;border-radius:5px;background:var(--panel);color:var(--ink);font-size:12px;font-weight:600;box-shadow:var(--overlay)}
+.drag-chip{position:fixed;z-index:46;pointer-events:none;padding:3px 9px;border:1px solid var(--line);border-radius:5px;background:var(--raised);color:var(--ink);font-size:11.5px;font-weight:600;box-shadow:var(--overlay)}
+body.dragging-tab,body.dragging-tab *{cursor:grabbing!important;user-select:none}
 
 /* Workspace: open runs side by side */
 .tabstrip{display:flex;align-items:stretch;height:34px;flex-shrink:0;background:var(--bg);border-bottom:1px solid var(--line)}
@@ -237,11 +269,12 @@ code,pre,.mono{font-family:var(--mono);font-size:11px}code{overflow-wrap:anywher
 .pane-conversation>.activity-link{margin:0 12px 10px}
 .pane-notice{margin:8px 12px 0}
 .pane-body{flex:1;min-height:0;display:flex;flex-direction:column}
-.pane-conversation{flex:1 1 60%;min-height:0;display:flex;flex-direction:column}
+/* min-width:0 lets a long tool line or terminal row shrink inside the column instead of pushing the proof column out of the pane. */
+.pane-conversation{flex:1 1 60%;min-height:0;min-width:0;display:flex;flex-direction:column}
 .pane-conversation .transcript{flex:1;min-height:0;max-height:none;padding:10px 12px 12px}
 .pane-proof{flex:0 1 auto;max-height:42%;min-height:0;overflow:auto;padding:10px 12px 22px;-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 20px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 20px),transparent);border-top:1px solid var(--line-soft);background:var(--raised)}
 .pane-proof h3{margin-bottom:8px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
-@container pane (min-width:720px){.pane-body{flex-direction:row}.pane-proof{flex:0 0 260px;max-height:none;border-top:0;border-left:1px solid var(--line-soft)}}
+@container pane (min-width:720px){.pane-body{flex-direction:row}.pane-proof{flex:0 0 var(--proof-width,260px);max-width:calc(100% - 320px);max-height:none;border-top:0;border-left:1px solid var(--line-soft)}}
 @container pane (max-width:420px){.pane-provider{display:none}}
 .workspace-empty{margin:auto;padding:40px 20px}
 .dispatch-list{list-style:none;margin:0 0 8px;padding:0}
@@ -277,6 +310,7 @@ code,pre,.mono{font-family:var(--mono);font-size:11px}code{overflow-wrap:anywher
 .tool-call pre.tool-result{color:var(--muted);background:var(--panel)}
 .transcript-status{display:flex;align-items:center;gap:8px;margin:8px 0 12px;font-size:10.5px;color:var(--faint)}
 .transcript-status:before,.transcript-status:after{content:"";flex:1;height:1px;background:var(--line-soft)}
+.transcript-status.live{color:var(--muted)}.transcript-status.live .spinner{width:11px;height:11px;order:0}.transcript-status.live:before{order:-1}
 .empty-small{padding:14px 0;color:var(--muted)}
 
 /* Decisions */
@@ -346,6 +380,7 @@ code,pre,.mono{font-family:var(--mono);font-size:11px}code{overflow-wrap:anywher
 .settings-section h2{font-size:13px}.settings-section>p{max-width:72ch;margin:3px 0 10px;color:var(--muted)}
 .settings-card{margin:0 0 10px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
 .settings-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.settings-card-header strong{font-size:12px}
+.found-repositories{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}.found-repositories li{display:flex;align-items:center;justify-content:space-between;gap:10px}.found-repositories span{display:flex;flex-direction:column;gap:2px;min-width:0}.found-repositories code{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.found-repositories small{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .settings-card .field:last-child{margin-bottom:0}
 .settings-save{position:sticky;bottom:-24px;display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:10px 0 12px;background:var(--bg);border-top:1px solid var(--line)}
 .settings-save small{color:var(--muted)}
@@ -446,7 +481,7 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 @keyframes live{0%,100%{box-shadow:0 0 0 0 var(--accent-soft)}50%{box-shadow:0 0 0 4px var(--accent-soft)}}
 
 /* Responsive */
-@media(max-width:1100px){.shell.with-side{grid-template-columns:48px 260px minmax(0,1fr)}.settings-layout{grid-template-columns:120px minmax(0,1fr);gap:16px}}
+@media(max-width:1100px){.shell.with-side{--side-size:clamp(220px,var(--side-width,260px),calc(100vw - 408px))}.settings-layout{grid-template-columns:120px minmax(0,1fr);gap:16px}}
 @media(max-width:900px){
   .panes.count-2,.panes.count-3,.panes.count-4{grid-template-columns:1fr;grid-template-rows:none;grid-auto-rows:minmax(420px,auto)}
   .panes.count-3>.pane:first-child{grid-row:auto}
@@ -458,7 +493,7 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 @media(max-width:700px){
   .shell,.shell.with-side{display:block;height:auto;overflow:visible;padding-bottom:52px}
   .activity{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:20;flex-direction:row;justify-content:space-around;gap:0;height:52px;padding:0 4px;border-right:0;border-top:1px solid var(--line)}
-  .brand-mark,.activity-spacer{display:none}
+  .brand-mark,.activity-spacer,.side-resizer,.detail-layout{display:none}
   .activity-button,.activity>.button{flex:1;min-width:0;height:52px;width:auto}
   .activity-button.active:before{left:25%;right:25%;top:0;bottom:auto;width:auto;height:2px;border-radius:0 0 2px 2px}
   .side{border-right:0;border-bottom:1px solid var(--line);overflow:visible}
@@ -535,3 +570,83 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 .status-update{height:18px;padding:0 8px;border:0;border-radius:9px;background:var(--status-need);color:#1a1300;font:600 11px var(--sans)}
 .status-update:hover{filter:brightness(1.05)}
 .update-notes{margin:0 0 10px;padding:8px 10px;border-radius:6px;background:var(--sunken)}
+
+/* Orca runs: the terminal's rendered screen, read through the Orca CLI */
+.orca-terminal{margin:0 0 10px;border:1px solid var(--line);border-radius:6px;background:var(--sunken);flex-shrink:0}
+.orca-terminal summary{padding:6px 10px;font-size:11.5px;color:var(--muted)}.orca-terminal summary strong{color:var(--ink);font-weight:600}.orca-terminal summary .icon{width:13px;height:13px}
+.orca-terminal summary span{margin-left:auto;font-size:10.5px}
+.orca-screen{margin:0;padding:8px 10px;max-height:46vh;overflow:auto;border-top:1px solid var(--line-soft);font-size:11px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
+
+/* Repository commands: the automatic values runs use, with optional overrides */
+.repository-automatic{margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--sunken)}
+.repository-automatic>span{display:block;margin-bottom:6px;font-size:11px;font-weight:600;color:var(--muted)}
+.repository-automatic dl{display:grid;grid-template-columns:72px minmax(0,1fr);gap:6px 12px;margin:0}
+.repository-automatic dt{font-size:11.5px;color:var(--muted)}.repository-automatic dd{margin:0;min-width:0}
+.repository-automatic code{overflow-wrap:anywhere}.repository-automatic small{display:block;margin-top:1px;font-size:10.5px;color:var(--faint)}
+.command-overrides{margin-bottom:12px}.command-overrides>summary{padding:4px 0;font-size:12px;font-weight:600}.command-overrides>p{margin:4px 0 10px;font-size:11.5px}
+
+/* Jev priority: rank chips, the Next up card, and the order control */
+.rank-chip{flex-shrink:0;display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 4px;margin-left:8px;border-radius:9px;background:var(--raised);color:var(--muted);font:600 10.5px/1 var(--sans);box-shadow:inset 0 0 0 1px var(--line)}
+.rank-chip.none{visibility:hidden}.rank-chip.later{color:var(--faint)}
+.rank-chip.sev-3,.rank-chip.sev-4{background:var(--red-soft);color:var(--red);box-shadow:inset 0 0 0 1px var(--red)}
+.rank-chip.sev-2{background:var(--amber-soft);color:var(--amber);box-shadow:inset 0 0 0 1px var(--amber-line)}
+.task-row.later .task-title{color:var(--muted)}
+.next-up{margin:8px 12px 0;padding:9px 10px;border:1px solid var(--line);border-radius:7px;background:var(--raised);display:grid;gap:5px;flex-shrink:0}
+.next-up.empty{display:flex;align-items:center;gap:8px;color:var(--muted)}.next-up.empty>span{flex:1;min-width:0}.next-up.empty .icon{color:var(--accent)}
+.next-up-head{display:flex;align-items:center;justify-content:space-between;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}.next-up-head .rank-chip{margin:0}
+.next-up-title{display:flex;align-items:flex-start;gap:6px;padding:0;border:0;background:none;color:var(--ink);font-weight:600;text-align:left}.next-up-title span:last-child{overflow-wrap:anywhere}
+.next-up p{font-size:11px;color:var(--muted)}.next-up .button{justify-self:start}
+.sort-control{display:inline-flex;align-items:center;gap:6px}.sort-control>span{color:var(--faint)}
+.jev-priority p{font-size:12px}.jev-priority p strong{font-weight:600}
+/* Inside a run pane the terminal sits on the pane's gutter and leaves most of the height to the conversation. */
+.pane-conversation>.orca-terminal{margin:8px 12px 0}
+.pane-conversation .orca-screen{max-height:30vh}
+
+/* Attachment viewer: one large dialog for issue images, image and video attachments, and evidence */
+dialog.viewer{width:min(1400px,calc(100vw - 32px));height:min(920px,calc(100dvh - 32px));max-width:none;max-height:none;padding:0;flex-direction:column;overflow:hidden}
+dialog.viewer[open]{display:flex}
+dialog.viewer::backdrop{background:rgba(5,7,10,.78)}
+.viewer-head{display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 8px 6px 14px;border-bottom:1px solid var(--line);flex-shrink:0}
+.viewer-head strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.viewer-kind{display:inline-flex;color:var(--muted)}.viewer-count{flex-shrink:0;font-size:11.5px;color:var(--faint)}
+dialog.viewer .viewer-head .actions{margin:0 0 0 auto;flex-wrap:nowrap;justify-content:flex-end}
+.viewer-stage{position:relative;flex:1;min-height:0;display:grid;place-items:center;overflow:hidden;background:#0b0d10}
+.viewer-stage img,.viewer-stage video{grid-area:1/1;display:block;max-width:100%;max-height:100%}
+.viewer-stage img{cursor:zoom-in}
+.viewer-stage.actual{place-items:start center;overflow:auto}.viewer-stage.actual img{max-width:none;max-height:none;cursor:zoom-out}
+.viewer-note{grid-area:1/1;max-width:46ch;padding:20px;color:#c9d1d9;font-size:12.5px;text-align:center}
+.viewer-nav{position:absolute;top:50%;z-index:1;display:grid;place-items:center;width:40px;height:56px;margin-top:-28px;border:0;border-radius:6px;background:rgba(0,0,0,.5);color:#fff}
+.viewer-nav:hover{background:rgba(0,0,0,.72)}.viewer-nav .icon{width:20px;height:20px}
+.viewer-nav.prev{left:10px}.viewer-nav.prev .icon{transform:rotate(180deg)}.viewer-nav.next{right:10px}
+.issue-files li{display:flex;align-items:center;gap:10px;min-width:0}
+.file-view{display:inline-flex;align-items:center;gap:6px;min-width:0;padding:0;border:0;background:none;color:var(--accent);font:inherit;text-align:left;overflow-wrap:anywhere}
+.file-view:hover{text-decoration:underline}.file-view .icon{width:13px;height:13px;flex-shrink:0}
+.file-original{flex-shrink:0;font-size:11px;color:var(--faint)}
+.proof-item img[data-view]{cursor:zoom-in}
+.proof-links{display:flex;align-items:center;gap:12px}.link-button{padding:0;border:0;background:none;color:var(--accent);font:inherit;font-size:12px}.link-button:hover{text-decoration:underline}
+@media(max-width:700px){dialog.viewer{width:100vw;height:100dvh;border-radius:0}.viewer-head .button.small{padding:0 6px}}
+
+/* The run just chosen in the list flashes its outline once, so in split or grid it is obvious which pane it is. */
+.pane.flash{animation:pane-flash .9s var(--ease)}
+@keyframes pane-flash{0%{box-shadow:inset 0 0 0 2px var(--accent)}100%{box-shadow:inset 0 0 0 2px transparent}}
+
+/* Your own messages in an agent conversation sit on the right in the accent tint, like any chat. */
+.message.human-text{margin-left:auto;max-width:82%;padding:8px 11px;border-radius:10px 10px 2px 10px;background:var(--accent-soft);border:1px solid var(--line)}
+.message.human-text .message-label{justify-content:flex-end}
+
+/* The divider between a run's conversation and its proof column; shown only when they sit side by side. */
+.proof-resizer{display:none;position:relative;flex:0 0 6px;margin-right:-6px;z-index:2;cursor:col-resize;touch-action:none;outline:none}
+.proof-resizer:after{content:"";position:absolute;top:0;bottom:0;left:2px;width:2px;background:transparent;transition:background .15s var(--ease)}
+.proof-resizer:hover:after,.proof-resizer:focus-visible:after,.proof-resizer.active:after{background:var(--accent)}
+@container pane (min-width:720px){.proof-resizer{display:block}}
+
+/* Whose issues these are, and the exact statuses a connection syncs */
+.assigned-to{padding:6px 12px;border-bottom:1px solid var(--line-soft);flex-shrink:0}
+.assigned-to p{display:grid;grid-template-columns:14px minmax(0,1fr);gap:0 6px;align-items:start;font-size:11.5px;color:var(--muted)}
+.assigned-to .icon{width:13px;height:13px;margin-top:2px;color:var(--green)}.assigned-to strong{color:var(--ink);font-weight:600}
+.assigned-to small{grid-column:2;font-size:10.5px;color:var(--faint)}
+.status-picker{margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:6px}
+.status-picker legend{padding:0 4px;font-size:11.5px;font-weight:600}.status-picker>p{margin:0 0 8px;font-size:11.5px}
+.status-group{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;margin-top:6px}.status-group strong{flex-basis:100%;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.status-option{display:inline-flex;align-items:center;gap:6px;font-size:12px}
+.status-picker-empty{margin:0 0 12px;font-size:11.5px}

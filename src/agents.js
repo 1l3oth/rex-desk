@@ -97,7 +97,8 @@ export class AgentProfiles {
       const selected = this.selected(provider), profiles = discoverProfiles(provider, { configured: selected });
       const statuses = await Promise.all(profiles.map(item => this.status(provider, item.profile, { refresh })));
       return [provider, { selected, saved: this.store.config().agentProfiles?.[provider] ?? null, inherited: inheritedProfile(provider), mcp: this.mcpInstalled(provider, selected),
-        profiles: profiles.map((item, index) => ({ ...item, ...publicStatus(statuses[index]) })) }];
+        mcpEverywhere: profiles.every(item => this.mcpInstalled(provider, item.profile)),
+        profiles: profiles.map((item, index) => ({ ...item, ...publicStatus(statuses[index]), mcp: this.mcpInstalled(provider, item.profile) })) }];
     }));
     return Object.fromEntries(providers);
   }
