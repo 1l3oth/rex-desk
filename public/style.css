@@ -20,8 +20,13 @@ code,pre,.mono{font-family:var(--mono);font-size:11px}code{overflow-wrap:anywher
 .loading{padding:40px;color:var(--muted)}
 
 /* Shell: activity bar, optional sidebar, main, status bar */
-.shell{display:grid;grid-template-columns:48px minmax(0,1fr);grid-template-rows:minmax(0,1fr) 22px;height:100dvh;overflow:hidden}
-.shell.with-side{grid-template-columns:48px 300px minmax(0,1fr)}
+.shell{position:relative;display:grid;grid-template-columns:48px minmax(0,1fr);grid-template-rows:minmax(0,1fr) 22px;height:100dvh;overflow:hidden}
+/* --side-width is the dragged width; the main area always keeps 360px. */
+.shell.with-side{--side-size:clamp(220px,var(--side-width,300px),calc(100vw - 408px));grid-template-columns:48px var(--side-size) minmax(0,1fr)}
+.side-resizer{position:absolute;top:0;bottom:22px;left:calc(48px + var(--side-size) - 3px);width:6px;cursor:col-resize;z-index:6;touch-action:none;outline:none}
+.side-resizer:after{content:"";position:absolute;top:0;bottom:0;left:2px;width:2px;background:transparent;transition:background .15s var(--ease)}
+.side-resizer:hover:after,.side-resizer:focus-visible:after,.side-resizer.active:after{background:var(--accent)}
+body.resizing{user-select:none}body.resizing-columns,body.resizing-columns *{cursor:col-resize!important}body.resizing-rows,body.resizing-rows *{cursor:row-resize!important}
 .activity{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 0 8px;background:var(--bg);border-right:1px solid var(--line);min-height:0}
 .brand-mark{width:22px;height:22px;display:grid;grid-template-columns:repeat(2,6px);grid-template-rows:repeat(2,6px);gap:3px;place-content:center;background:var(--accent);border-radius:6px;margin-bottom:10px}
 .brand-mark i{background:var(--accent-ink);border-radius:1px}.brand-mark i:last-child{opacity:.45}
@@ -69,6 +74,7 @@ code,pre,.mono{font-family:var(--mono);font-size:11px}code{overflow-wrap:anywher
 .layout-glyph i{border:1.3px solid currentColor;border-radius:1.5px}
 .layout-glyph.single i:nth-child(n+2),.layout-glyph.split i:nth-child(n+3){display:none}
 .layout-glyph.split{grid-template-columns:1fr 1fr}.layout-glyph.grid{grid-template:1fr 1fr/1fr 1fr}
+.layout-glyph.rows{grid-template-rows:1fr 1fr}.layout-glyph.rows i:nth-child(n+3){display:none}
 
 /* Fields */
 .field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;min-width:0}
@@ -202,6 +208,32 @@ code,pre,.mono{font-family:var(--mono);font-size:11px}code{overflow-wrap:anywher
 .run-path li:before{content:"";position:absolute;left:0;right:0;top:2px;height:2px;background:var(--line)}
 .run-path li.done{color:var(--muted)}.run-path li.done:before{background:var(--accent)}
 .issue-conversation .transcript{max-height:62vh}
+.detail-layout{flex-shrink:0}
+.detail-pane .tab{user-select:none;-webkit-user-select:none}.tab.elsewhere{color:var(--faint)}
+
+/* Split issue view: two panels, each with its own tabs, scrolling on their own */
+.detail-pane.split{overflow:hidden}
+.detail-split{flex:1;min-height:0;display:grid}
+.detail-split.columns{grid-template-columns:minmax(0,var(--split-first,50%)) 5px minmax(0,1fr)}
+.detail-split.rows{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,var(--split-first,50%)) 5px minmax(0,1fr)}
+.split-pane{display:flex;flex-direction:column;min-width:0;min-height:0}
+.split-pane>.tabs{padding:0 14px;gap:14px;overflow-x:auto;scrollbar-width:none}
+.split-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:12px 16px 16px;overflow-wrap:anywhere}
+.split-body.show-messages{display:flex;flex-direction:column;overflow:hidden;padding-bottom:0}
+.split-body .issue-conversation{flex:1;min-height:0;display:flex;flex-direction:column}
+.split-body .issue-conversation .transcript{flex:1;min-height:0;max-height:none;padding-bottom:14px}
+.split-divider{position:relative;cursor:col-resize;touch-action:none;z-index:2;outline:none}
+.detail-split.rows .split-divider{cursor:row-resize}
+.split-divider:before,.split-divider:after{content:"";position:absolute}
+.split-divider:before{background:var(--line)}
+.split-divider:after{background:transparent;transition:background .15s var(--ease)}
+.detail-split.columns .split-divider:before{top:0;bottom:0;left:2px;width:1px}.detail-split.columns .split-divider:after{top:0;bottom:0;left:1px;width:3px}
+.detail-split.rows .split-divider:before{left:0;right:0;top:2px;height:1px}.detail-split.rows .split-divider:after{left:0;right:0;top:1px;height:3px}
+.split-divider:hover:after,.split-divider:focus-visible:after,.split-divider.active:after{background:var(--accent)}
+.drop-zone{position:fixed;z-index:45;pointer-events:none;display:grid;place-items:center;border:2px dashed var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent) 12%,transparent);transition:left .12s var(--ease),top .12s var(--ease),width .12s var(--ease),height .12s var(--ease)}
+.drop-zone span{padding:4px 10px;border-radius:5px;background:var(--panel);color:var(--ink);font-size:12px;font-weight:600;box-shadow:var(--overlay)}
+.drag-chip{position:fixed;z-index:46;pointer-events:none;padding:3px 9px;border:1px solid var(--line);border-radius:5px;background:var(--raised);color:var(--ink);font-size:11.5px;font-weight:600;box-shadow:var(--overlay)}
+body.dragging-tab,body.dragging-tab *{cursor:grabbing!important;user-select:none}
 
 /* Workspace: open runs side by side */
 .tabstrip{display:flex;align-items:stretch;height:34px;flex-shrink:0;background:var(--bg);border-bottom:1px solid var(--line)}
@@ -277,6 +309,7 @@ code,pre,.mono{font-family:var(--mono);font-size:11px}code{overflow-wrap:anywher
 .tool-call pre.tool-result{color:var(--muted);background:var(--panel)}
 .transcript-status{display:flex;align-items:center;gap:8px;margin:8px 0 12px;font-size:10.5px;color:var(--faint)}
 .transcript-status:before,.transcript-status:after{content:"";flex:1;height:1px;background:var(--line-soft)}
+.transcript-status.live{color:var(--muted)}.transcript-status.live .spinner{width:11px;height:11px;order:0}.transcript-status.live:before{order:-1}
 .empty-small{padding:14px 0;color:var(--muted)}
 
 /* Decisions */
@@ -446,7 +479,7 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 @keyframes live{0%,100%{box-shadow:0 0 0 0 var(--accent-soft)}50%{box-shadow:0 0 0 4px var(--accent-soft)}}
 
 /* Responsive */
-@media(max-width:1100px){.shell.with-side{grid-template-columns:48px 260px minmax(0,1fr)}.settings-layout{grid-template-columns:120px minmax(0,1fr);gap:16px}}
+@media(max-width:1100px){.shell.with-side{--side-size:clamp(220px,var(--side-width,260px),calc(100vw - 408px))}.settings-layout{grid-template-columns:120px minmax(0,1fr);gap:16px}}
 @media(max-width:900px){
   .panes.count-2,.panes.count-3,.panes.count-4{grid-template-columns:1fr;grid-template-rows:none;grid-auto-rows:minmax(420px,auto)}
   .panes.count-3>.pane:first-child{grid-row:auto}
@@ -458,7 +491,7 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 @media(max-width:700px){
   .shell,.shell.with-side{display:block;height:auto;overflow:visible;padding-bottom:52px}
   .activity{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:20;flex-direction:row;justify-content:space-around;gap:0;height:52px;padding:0 4px;border-right:0;border-top:1px solid var(--line)}
-  .brand-mark,.activity-spacer{display:none}
+  .brand-mark,.activity-spacer,.side-resizer,.detail-layout{display:none}
   .activity-button,.activity>.button{flex:1;min-width:0;height:52px;width:auto}
   .activity-button.active:before{left:25%;right:25%;top:0;bottom:auto;width:auto;height:2px;border-radius:0 0 2px 2px}
   .side{border-right:0;border-bottom:1px solid var(--line);overflow:visible}
@@ -510,3 +543,17 @@ dialog .actions{justify-content:flex-end;margin-top:14px}
 .day-picker label{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border:1px solid var(--line);border-radius:5px;background:var(--sunken);cursor:pointer;font-size:11.5px}
 .day-picker input{accent-color:var(--accent);margin:0}
 .project-bulk{margin:0 0 6px;gap:4px}
+
+/* Orca runs: the terminal's rendered screen, read through the Orca CLI */
+.orca-terminal{margin:0 0 10px;border:1px solid var(--line);border-radius:6px;background:var(--sunken);flex-shrink:0}
+.orca-terminal summary{padding:6px 10px;font-size:11.5px;color:var(--muted)}.orca-terminal summary strong{color:var(--ink);font-weight:600}.orca-terminal summary .icon{width:13px;height:13px}
+.orca-terminal summary span{margin-left:auto;font-size:10.5px}
+.orca-screen{margin:0;padding:8px 10px;max-height:46vh;overflow:auto;border-top:1px solid var(--line-soft);font-size:11px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
+
+/* Repository commands: the automatic values runs use, with optional overrides */
+.repository-automatic{margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--sunken)}
+.repository-automatic>span{display:block;margin-bottom:6px;font-size:11px;font-weight:600;color:var(--muted)}
+.repository-automatic dl{display:grid;grid-template-columns:72px minmax(0,1fr);gap:6px 12px;margin:0}
+.repository-automatic dt{font-size:11.5px;color:var(--muted)}.repository-automatic dd{margin:0;min-width:0}
+.repository-automatic code{overflow-wrap:anywhere}.repository-automatic small{display:block;margin-top:1px;font-size:10.5px;color:var(--faint)}
+.command-overrides{margin-bottom:12px}.command-overrides>summary{padding:4px 0;font-size:12px;font-weight:600}.command-overrides>p{margin:4px 0 10px;font-size:11.5px}

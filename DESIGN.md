@@ -285,7 +285,7 @@ A cool neutral ramp (GitHub-family grays) carrying one blue accent and three out
 
 ## Layout
 
-**Shell.** A CSS grid of `48px | minmax(0,1fr)` columns, or `48px | 300px | minmax(0,1fr)` when a sidebar is present, over `minmax(0,1fr) | 22px` rows at full `100dvh`. Only inner regions scroll.
+**Shell.** A CSS grid of `48px | minmax(0,1fr)` columns, or `48px | --side-size | minmax(0,1fr)` when a sidebar is present (300px by default, dragged between 220px and the width that leaves the main area 360px), over `minmax(0,1fr) | 22px` rows at full `100dvh`. Only inner regions scroll.
 
 **Activity bar.** 48px wide, 40px-tall icon buttons (19px icons), a 22px brand mark, a flexible spacer pushing Setup and Settings to the bottom, and count badges (amber for needs-you, quiet raised for plain counts).
 
@@ -300,7 +300,7 @@ A cool neutral ramp (GitHub-family grays) carrying one blue accent and three out
 **Spacing rhythm.** Small steps of 2, 4, 6, 8, 10, 12, 16 and 20px. Rows and toolbars use 12px horizontal gutters; content pages use 14 to 20px; gaps between controls are 6px.
 
 **Responsive.**
-- At 1100px the sidebar narrows to 260px.
+- At 1100px the default sidebar narrows to 260px; a dragged width is kept.
 - At 900px multi-pane grids collapse to one column with panes at a 420px minimum height and the workspace scrolls; the Needs you split stacks list above detail.
 - At 700px the shell becomes a normal flowing page: the activity bar moves to a fixed 52px bottom bar with a top accent indicator, the status bar hides, panes get 70vh minimum height, and the toast clears the bottom bar.
 
@@ -354,6 +354,15 @@ One line, 30px: checkbox, mono number (38px minimum), ellipsized 12px title, sta
 
 ### Agent run pane (signature)
 The pane is the product's signature: several update live side by side. Square panel surface; header title is muted until the pane is focused (accent top inset) or needs you (amber top inset, 200ms transition). The transcript shows labeled messages (10.5px faint label, muted author, right-aligned time), a safe markdown subset (escaped first, then fenced code, inline code, bold, headings rendered as bold, and bullets as "•"), and tool-call rows: 24px sunken disclosures with a status icon (green done, amber pending, red failed), the tool name in mono ink, an ellipsized argument summary and a time; expanded results are mono, capped at 220px. Status lines are centered 10.5px text between hairlines. The proof column sits on the raised surface with an uppercase label heading. The footer composer is a 26px sunken input with accent focus.
+
+### Resizer and split panels
+A 6px invisible grip sits on the sidebar's right border; hover, focus, or dragging shows a 2px accent line, and the whole page takes the col-resize cursor while dragging. It is a focusable separator: arrows move 16px (64px with Shift), Home and End jump to the limits, Enter or a double-click restores the default. The issue detail switches between one tabbed panel, two side-by-side panels, and two stacked panels with a three-button segmented switch at the right of the reference row. Each split panel has its own 32px tab strip and scrolls on its own; a tab that is shown in the other panel is faint and swaps the panels when chosen. Panels are separated by a 5px divider column that draws a 1px `line` stroke and a 3px accent stroke on hover or focus; arrows move it 5%, and each panel keeps at least 220px across or 120px stacked. Dragging a tab more than 6px shows a raised chip with its name and a dashed accent drop zone on the half (single panel) or panel (split) it would land in, labelled with the result.
+
+### Repository commands
+A sunken box headed *Runs use* lists setup, preview, and tests as a 72px label column beside mono values, each with a faint *from …* source line (Settings, a file name, or the detected Tomcat template). Overrides sit in a collapsed disclosure whose empty fields show the automatic value as placeholder text.
+
+### Orca terminal
+Orca runs show the terminal's rendered screen above the transcript in a sunken disclosure: a terminal icon, *Orca terminal*, and a right-aligned Live or Ended state; the screen is 11px mono, wraps, scrolls after 46vh, and stays pinned to the bottom unless the reader scrolls up.
 
 ### Decisions
 Inline in the pane that asks: raised box, hairline border, 7px radius, 10px 12px padding. Approvals switch to amber-soft fill with an amber-line border and amber icon. The context row links back to its run in accent text.

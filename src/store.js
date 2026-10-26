@@ -14,13 +14,16 @@ export const defaults = {
   name: 'Rex', provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
   syncMinutes: 5, requireVideo: true, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
   models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false, execution: 'rex',
-  qa: { url: '' }, schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], verify: true, fix: false, maxRuns: 6 },
+  schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], verify: true, fix: false, maxRuns: 6 },
 };
-// The QA test site is any web origin the person can sign in to; Rex Desk stores only its address, never credentials.
-function qaSettings(input = {}) {
-  const url = String(input.url || '').trim();
-  if (url) { const parsed = new URL(url); if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error('The QA test site must be an http(s) address.'); }
-  return { url };
+// Claude Code accepts family aliases (opus, sonnet, haiku, fable) or full IDs such as claude-opus-5-5. Typed shorthand is normalized.
+export function modelName(provider, value) {
+  const text = String(value || '').trim();
+  if (!text || provider !== 'claude') return text;
+  const shorthand = text.toLowerCase().match(/^(?:claude[\s-]*)?(opus|sonnet|haiku|fable)(?:[\s-]*(\d+)(?:[.\s-]+(\d+))?)?$/);
+  if (!shorthand) return text;
+  const [, family, major, minor] = shorthand;
+  return major ? `claude-${family}-${major}${minor ? `-${minor}` : ''}` : family;
 }
 function scheduleSettings(input = {}) {
   const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(input.time) ? input.time : defaults.schedule.time;
@@ -163,10 +166,10 @@ export class Store extends EventEmitter {
     });
     const config = { ...defaults, name: String(input.name || 'Rex'), provider: input.provider,
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
-      syncMinutes: input.syncMinutes, requireVideo: input.requireVideo !== false, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: input.models || defaults.models, sources, repositories,
+      syncMinutes: input.syncMinutes, requireVideo: input.requireVideo !== false, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
       tourDismissed: Boolean(input.tourDismissed), execution: input.execution === 'orca' ? 'orca' : 'rex',
-      qa: qaSettings(input.qa), schedule: scheduleSettings(input.schedule) };
+      schedule: scheduleSettings(input.schedule) };
     for (const update of secretUpdates) {
       if (update.remove) this.delete('secret', `source:${update.id}`);
       else this.put('secret', `source:${update.id}`, update.value);

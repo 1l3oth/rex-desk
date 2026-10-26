@@ -9,23 +9,21 @@ import { Desk } from '../src/coordinator.js';
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const idle = () => ({ start: async () => ({ status: 'completed' }), interrupt: async () => {}, close() {} });
 const settle = () => new Promise(resolve => setTimeout(resolve, 60));
-function workspace({ qaUrl = 'https://staging.example.invalid', schedule } = {}) {
+function workspace({ schedule } = {}) {
   const store = new Store(temporary('qa'));
-  store.saveConfig({ ...defaults, qa: { url: qaUrl }, ...(schedule ? { schedule } : {}) });
+  store.saveConfig({ ...defaults, ...(schedule ? { schedule } : {}) });
   const desk = new Desk(store, { root: temporary('root'), runnerFactory: idle });
   store.put('task', 'done-1', { id: 'done-1', title: 'Indonesian label fixed', active: true, statusName: 'Development Completed', createdAt: now() });
   store.put('task', 'bug-1', { id: 'bug-1', title: 'Gmail button missing', active: true, statusName: 'Request', createdAt: now() });
   return { store, desk };
 }
 
-test('a QA verification run needs a test site, not a repository, and never gets a worktree', async () => {
-  const empty = workspace({ qaUrl: '' });
-  await assert.rejects(empty.desk.startTask({ taskId: 'done-1', mode: 'verify' }), /QA test site/);
-  empty.store.close();
+test('a QA verification run needs no configured site or repository, and never gets a worktree', async () => {
   const { store, desk } = workspace();
   await assert.rejects(desk.startTask({ taskId: 'bug-1' }), /repository/);
   const run = await desk.startTask({ taskId: 'done-1', mode: 'verify' });
-  assert.equal(run.role, 'verifier'); assert.equal(run.repositoryId, undefined);
+  assert.equal(run.role, 'verifier'); assert.equal(run.repositoryId, undefined); assert.equal(run.qaUrl, '', 'The agent chooses the site');
+  assert.match(desk.prompt(run), /Choose the test site yourself/);
   await settle();
   const ended = store.get('run', run.id);
   assert.equal(ended.worktree, undefined);
@@ -49,23 +47,35 @@ test('a QA pass needs a recorded assertion, and only a pass may complete the tra
   store.close();
 });
 
-test('a QA run records the real test site, asserts the expected text, and passes with video proof', async () => {
+test('a QA run opens the site the agent chose, records it, asserts the expected text, and passes with video proof', async () => {
   const http = await import('node:http');
-  const site = http.createServer((request, response) => { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end('<!doctype html><title>Org chart</title><button id="bulk">Terang</button>'); });
-  await new Promise(resolve => site.listen(0, '127.0.0.1', resolve));
-  const url = `http://127.0.0.1:${site.address().port}/org-chart`;
-  const { store, desk } = workspace({ qaUrl: url });
+  const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
+  const deskServer = http.createServer((request, response) => { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end('<!doctype html><title>Rex Desk</title>Approve'); });
+  const deskPort = await listen(deskServer);
+  const site = http.createServer((request, response) => {
+    if (request.url === '/to-desk') { response.writeHead(302, { Location: `http://localhost:${deskPort}/` }); response.end(); return; }
+    response.writeHead(200, { 'Content-Type': 'text/html' }); response.end('<!doctype html><title>Org chart</title><button id="bulk">Terang</button>');
+  });
+  const url = `http://127.0.0.1:${await listen(site)}/org-chart`;
+  const { store, desk } = workspace();
+  desk.mcpUrl = `http://127.0.0.1:${deskPort}/mcp`;
   try {
-    store.put('run', 'qa-live', { id: 'qa-live', role: 'verifier', taskId: 'done-1', title: 'Indonesian label fixed', state: 'running', qaUrl: url, createdAt: now() });
-    const page = await desk.evidence.action('qa-live', { action: 'open' });
+    store.put('run', 'qa-live', { id: 'qa-live', role: 'verifier', taskId: 'done-1', title: 'Indonesian label fixed', state: 'running', qaUrl: '', createdAt: now() });
+    await assert.rejects(desk.evidence.action('qa-live', { action: 'open' }), /Choose the test site/);
+    await assert.rejects(desk.evidence.action('qa-live', { action: 'open', url: `http://localhost:${deskPort}/` }), /Rex Desk itself/);
+    const page = await desk.evidence.action('qa-live', { action: 'open', url });
     assert.match(page.text, /Terang/);
-    await assert.rejects(desk.evidence.action('qa-live', { action: 'navigate', url: 'https://example.invalid/' }), /preview origin/);
+    assert.equal(store.get('run', 'qa-live').qaUrl, url, 'The chosen site is recorded on the run');
+    assert.match(desk.prompt({ id: 'qa-next', role: 'verifier', taskId: 'done-1', qaUrl: '' }), /Test sites earlier QA checks used: .*org-chart/, 'Later checks see it as a hint');
+    await assert.rejects(desk.evidence.action('qa-live', { action: 'navigate', url: 'https://example.invalid/' }), /test site origin/);
+    await assert.rejects(desk.evidence.action('qa-live', { action: 'open', url: url.replace('/org-chart', '/to-desk') }), /Rex Desk itself/, 'A redirect cannot reach the dashboard');
+    await desk.evidence.action('qa-live', { action: 'open', url });
     await desk.evidence.action('qa-live', { action: 'assertText', selector: '#bulk', expected: 'Terang' });
     const result = await desk.qaResult('qa-live', { verdict: 'pass', summary: 'The button reads Terang.', comment: 'Verified on the test site; recording in Rex Desk.' });
     assert.equal(result.state, 'qa_passed');
     assert.ok(store.list('artifact').some(item => item.runId === 'qa-live' && item.type === 'video/webm'));
     assert.ok(store.list('artifact').some(item => item.runId === 'qa-live' && item.type === 'text/html'));
-  } finally { await desk.evidence.stopAll(); site.close(); store.close(); }
+  } finally { await desk.evidence.stopAll(); site.close(); deskServer.close(); store.close(); }
 });
 
 test('verification runs cannot dispatch or read other runs', () => {

@@ -5,22 +5,23 @@ import { shellCommand, stopTree, fingerprint } from './processes.js';
 import { now } from './store.js';
 import { flowPreview } from './flow-runtime.js';
 import { electronLaunch } from './electron-runtime.js';
+import { effectiveRepository } from './project-detect.js';
 
 const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
 export class Evidence {
-  constructor(store, getRun, emit) { Object.assign(this, { store, getRun, emit }); this.sessions = new Map(); }
+  constructor(store, getRun, emit, deskUrl = () => '') { Object.assign(this, { store, getRun, emit, deskUrl }); this.sessions = new Map(); }
   directory(runId) { const directory = path.join(this.store.directory, 'artifacts', runId); mkdirSync(directory, { recursive: true }); return directory; }
   attach(runId, file, title, type, metadata = {}) {
     const artifact = { id: randomUUID(), runId, file: path.basename(file), title, type, createdAt: now(), ...metadata };
     this.store.put('artifact', artifact.id, artifact); return artifact;
   }
-  async start(runId) {
+  async start(runId, { url } = {}) {
     if (this.sessions.has(runId)) return this.sessions.get(runId);
     const run = this.getRun(runId);
-    if (run.role === 'verifier') return this.startQa(runId, run);
+    if (run.role === 'verifier') return this.startQa(runId, run, url);
     if (!run.worktree) throw new Error('This run has no worktree.');
-    const repository = this.store.config().repositories.find(item => item.id === run.repositoryId);
+    const repository = effectiveRepository(this.store.config().repositories.find(item => item.id === run.repositoryId));
     if (!repository?.devCommand && !repository?.flowRuntime && !repository?.electronRuntime) throw new Error('Set this repository’s dev command, Flow Tomcat preset, or Electron preset in Settings.');
     const directory = this.directory(runId);
     if (repository.electronRuntime) return this.startElectron(runId, run, repository, directory);
@@ -52,27 +53,57 @@ export class Evidence {
     return session;
   }
   qaSessionFile() { return path.join(this.store.directory, 'qa-session.json'); }
-  // QA checks browse the configured test site, signed in with the session the person saved from their own sign-in.
-  async startQa(runId, run) {
+  // Rex Desk's own dashboard answers approvals, so a recorded browser never loads it.
+  isDesk(address) {
+    try {
+      const own = new URL(this.deskUrl()), target = new URL(address), port = url => url.port || (url.protocol === 'https:' ? '443' : '80');
+      return port(target) === port(own) && (['localhost', '[::1]', '0.0.0.0'].includes(target.hostname) || target.hostname.startsWith('127.'));
+    } catch { return false; }
+  }
+  // The QA agent chooses the test site for each issue: wherever the project runs with the developer's fix.
+  qaSite(address) {
+    let url;
+    try { url = new URL(String(address || '')); } catch { throw new Error('Choose the test site: call open with url set to the address where this project runs for this issue, for example its dev or QA server.'); }
+    if (!['https:', 'http:'].includes(url.protocol)) throw new Error('The test site must be an http(s) address.');
+    if (this.isDesk(url.href)) throw new Error('Rex Desk itself cannot be the test site.');
+    return url;
+  }
+  // QA checks browse the site the agent chose, signed in with the session the person saved from their own sign-in.
+  async startQa(runId, run, address) {
+    const site = this.qaSite(address || run.qaUrl);
     const directory = this.directory(runId), { chromium } = await import('playwright');
     let browser;
     try { browser = await chromium.launch({ headless: true }); }
     catch (error) { throw new Error(`Browser could not start. Run "npx playwright install chromium". ${error.message}`); }
     const state = this.qaSessionFile();
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, recordVideo: { dir: directory, size: { width: 1440, height: 900 } }, ...(existsSync(state) ? { storageState: state } : {}) });
+    await context.route(url => this.isDesk(url.href), route => route.abort('blockedbyclient'));
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
     const page = await context.newPage();
     page.on('pageerror', error => this.emit(runId, 'browser-error', { message: error.message }));
     page.on('console', message => { if (message.type() === 'error') this.emit(runId, 'browser-console', { text: message.text() }); });
-    const session = { browser, context, page, baseUrl: new URL(run.qaUrl).origin, assertions: [], actions: 0 };
+    const session = { browser, context, page, baseUrl: site.origin, qa: true, assertions: [], actions: 0 };
     this.sessions.set(runId, session);
-    await page.goto(run.qaUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await this.openQaSite(runId, session, site);
     return session;
   }
+  // Playwright routes miss redirects, so after every navigation a page that reached Rex Desk is sent away.
+  async leaveDesk(page) {
+    if (!this.isDesk(page.url())) return;
+    await page.goto('about:blank').catch(() => {});
+    throw new Error('Rex Desk itself cannot be the test site.');
+  }
+  async openQaSite(runId, session, site) {
+    session.baseUrl = site.origin;
+    this.emit(runId, 'qa-site', { url: site.href });
+    await session.page.goto(site.href, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await this.leaveDesk(session.page);
+  }
   // A visible browser where the person signs in to the test site; its cookies are saved every few seconds and when the window closes.
-  async openQaSignIn(url) {
-    if (!url) throw new Error('Set the QA test site address first.');
-    if (this.qaLogin) { await this.qaLogin.page.bringToFront().catch(() => {}); return this.qaStatus(); }
+  // Without an address the window opens blank, and the person goes to each site they want QA checks to use.
+  async openQaSignIn(address) {
+    const site = address ? this.qaSite(address) : null;
+    if (this.qaLogin) { if (site) await this.qaLogin.page.goto(site.href, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {}); await this.qaLogin.page.bringToFront().catch(() => {}); return this.qaStatus(); }
     const { chromium } = await import('playwright'), file = this.qaSessionFile();
     const browser = await chromium.launch({ headless: false });
     const context = await browser.newContext({ viewport: null, ...(existsSync(file) ? { storageState: file } : {}) });
@@ -82,7 +113,7 @@ export class Evidence {
     this.qaLogin = { browser, page };
     browser.on('disconnected', () => { clearInterval(timer); this.qaLogin = null; });
     page.on('close', async () => { clearInterval(timer); await save(); await browser.close().catch(() => {}); });
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    if (site) await page.goto(site.href, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
     return this.qaStatus();
   }
   qaStatus() { const file = this.qaSessionFile(); return { open: Boolean(this.qaLogin), savedAt: existsSync(file) ? statSync(file).mtime.toISOString() : '' }; }
@@ -105,14 +136,15 @@ export class Evidence {
   }
   async action(runId, { action, selector, value, url, expected }) {
     if (action === 'close') return this.close(runId);
-    const session = await this.start(runId);
+    const opening = !this.sessions.has(runId), session = await this.start(runId, { url: action === 'open' ? url : undefined });
     const { page } = session;
     this.emit(runId, 'browser-action', { action, selector, url, value: action === 'fill' ? '[input hidden from journal]' : value });
     switch (action) {
-      case 'open': break;
+      // A QA run may move to another site it chose, for example a second region; the recording continues.
+      case 'open': if (session.qa && url && !opening) await this.openQaSite(runId, session, this.qaSite(url)); break;
       case 'navigate': {
         const target = new URL(url || '/', session.electron ? page.url() : session.baseUrl);
-        if (target.origin !== (session.electron ? new URL(page.url()).origin : session.baseUrl)) throw new Error('Recorded browser navigation must stay on this run’s preview origin.');
+        if (target.origin !== (session.electron ? new URL(page.url()).origin : session.baseUrl)) throw new Error(session.qa ? 'Recorded browser navigation must stay on the test site origin. Use open with url to switch to another site.' : 'Recorded browser navigation must stay on this run’s preview origin.');
         await page.goto(target.href, { waitUntil: 'domcontentloaded' }); break;
       }
       case 'click': await page.locator(selector).click({ timeout: 15000 }); break;
@@ -136,6 +168,7 @@ export class Evidence {
       }
       default: throw new Error(`Unknown browser action: ${action}`);
     }
+    if (session.qa) await this.leaveDesk(page);
     session.actions++;
     const controls = await page.locator('button,input,textarea,select,a,[role="button"]').evaluateAll(nodes => nodes.slice(0, 100).map(node =>
       ({ tag: node.tagName.toLowerCase(), id: node.id, name: node.getAttribute('name'), label: node.getAttribute('aria-label') || node.textContent?.trim().slice(0, 100), type: node.getAttribute('type') })));

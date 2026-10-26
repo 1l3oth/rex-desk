@@ -113,6 +113,9 @@ export class CodexRunner {
     const recognized = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval',
       'item/tool/requestUserInput', 'tool/requestUserInput', 'mcpServer/elicitation/request'];
     if (!recognized.includes(method)) { this.send({ id: requestId, error: { code: -32601, message: `Rex Desk does not handle ${method}.` } }); return; }
+    const tool = method === 'mcpServer/elicitation/request' && params._meta?.codex_approval_kind === 'mcp_tool_call' && params.serverName === 'rex_desk_run'
+      ? String(params.message || '').match(/tool "([^"]+)"/)?.[1] : '';
+    if (tool && quietRexTool(`mcp__rex_desk__${tool}`)) { this.send({ id: requestId, result: codexAnswer(method, params, { action: 'accept' }) }); return; }
     try {
       const answer = await this.ask({ kind: /Approval/.test(method) ? 'approval' : 'question',
         title: params.message || params.reason || (params.command ? 'Approve command' : 'Agent needs your input'),
@@ -142,6 +145,8 @@ export class ClaudeRunner {
     delete connections.rex_desk;
     const options = { cwd: this.cwd, env, abortController: this.controller,
       permissionMode: this.run.role === 'worker' ? 'acceptEdits' : 'default',
+      // A QA verifier may read the repository's documentation to find where the project runs.
+      ...(this.run.role === 'verifier' && this.sourcePath ? { additionalDirectories: [this.sourcePath] } : {}),
       settingSources: ['user', 'project', 'local'],
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
       ...(this.model ? { model: this.model } : {}), ...(this.run.sessionId ? { resume: this.run.sessionId } : {}),

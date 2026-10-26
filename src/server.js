@@ -15,7 +15,7 @@ import { issueBranch } from './branches.js';
 import { profileEnvironment } from './agents.js';
 import { setupPrompt } from './setup-prompt.js';
 import { cachedTaskImage } from './images.js';
-import { orcaStatus, showWorktreesInOrca, openInOrca } from './orca.js';
+import { orcaStatus, showWorktreesInOrca, openInOrca, readOrcaTerminal } from './orca.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -89,7 +89,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
       if (url.pathname === '/api/repositories/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());
-      if (url.pathname === '/api/qa/sign-in' && request.method === 'POST') return json(response, 200, await desk.evidence.openQaSignIn(store.config().qa?.url));
+      if (url.pathname === '/api/qa/sign-in' && request.method === 'POST') return json(response, 200, await desk.evidence.openQaSignIn((await body(request)).url));
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
       if (url.pathname === '/api/autostart' && request.method === 'GET') return json(response, 200, autostartStatus());
       if (url.pathname === '/api/autostart' && request.method === 'POST') return json(response, 200, await setAutostart(Boolean((await body(request)).enabled), root));
@@ -173,11 +173,12 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         return serveFile(request, response, image, { cache: 'private, max-age=604800' });
       }
       if (interactionMatch && request.method === 'POST') return json(response, 200, desk.answer(interactionMatch[1], await body(request)));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish|orca|tracker))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish|orca|tracker|terminal))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         if (request.method === 'GET') {
           if (action === 'messages' || action === 'journal') return json(response, 200, store.events(runId, { visible: action === 'messages' }));
+          if (action === 'terminal') return json(response, 200, await readOrcaTerminal(desk.run(runId)));
           return json(response, 200, desk.run(runId));
         }
         if (request.method === 'POST') {

@@ -3,6 +3,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
+import { effectiveRepository } from './project-detect.js';
 
 const runId = z.string().optional().describe('Run ID. Omit when using a run-scoped agent connection.');
 const reply = value => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] });
@@ -38,7 +39,7 @@ export function createMcp(desk, scope) {
     const task = await desk.sources.taskDetail(taskId);
     return { task, statuses: desk.store.get('statuses', `${task.sourceId}:${task.projectId}`) };
   }, true);
-  tool('desk_repositories', 'List configured source repositories, branch defaults, and run commands.', {}, () => desk.store.config().repositories, true);
+  tool('desk_repositories', 'List configured source repositories, branch defaults, and run commands. Empty settings are filled from what the repository files say (detected).', {}, () => desk.store.config().repositories.map(repository => { const { detected, ...effective } = effectiveRepository(repository); return { ...effective, detectedFrom: detected.from }; }), true);
   tool('desk_sync', 'Refresh assigned tasks from configured source projects.', {}, () => { desk.authorize(scope, null, { coordinator: true }); return desk.sources.sync(); });
   tool('desk_source_catalog', 'Return project and employee choices found through the installed Flow or Morningmate MCP. The user reviews and selects these in Settings. Does not change filters or sync tasks.',
     { sourceId: z.string(), projects: z.array(z.object({ id: z.string().min(1), name: z.string().min(1) })).max(10000),
@@ -52,7 +53,7 @@ export function createMcp(desk, scope) {
     desk.authorize(scope, null, { coordinator: true }); const task = desk.task(taskId);
     desk.store.put('task', taskId, { ...task, category }); return { updated: true };
   });
-  tool('desk_dispatch', 'Start a run for one task. mode fix (default) queues an isolated coding worker with its own worktree, branch, and preview port. mode verify queues a QA check that re-tests a completed fix on the configured web test site without changing code. Respect task dependencies.',
+  tool('desk_dispatch', 'Start a run for one task. mode fix (default) queues an isolated coding worker with its own worktree, branch, and preview port. mode verify queues a QA check that re-tests a completed fix, without changing code, on the site where the project runs for that issue; the verifier finds the site itself. Respect task dependencies.',
     { taskId: z.string(), repositoryId: z.string().optional(), provider: z.enum(['claude', 'codex']).optional(), baseBranch: z.string().optional(), targetBranch: z.string().optional(), instructions: z.string().optional(), category: z.string().optional(), mode: z.enum(['fix', 'verify']).default('fix'),
       execution: z.enum(['rex', 'orca']).optional().describe('rex runs headless with dashboard approvals; orca opens a visible Orca terminal where tool approvals happen. Omit for the Settings default.'),
       runtimeProfile: z.string().optional().describe('Flow/Morningmate Tomcat profile ID from desk_repositories, for example flow or morningmate. Omit for the repository default.') },
@@ -81,11 +82,13 @@ export function createMcp(desk, scope) {
       if (!server.server.getClientCapabilities()?.elicitation) throw new Error('This MCP client does not advertise elicitation. Use desk_ask instead.');
       return server.server.elicitInput({ mode: 'form', message, requestedSchema: { type: 'object', properties: { [field]: { type: 'string', title: 'Your answer' } }, required: [field] } }, { timeout: 86400000, relatedRequestId: extra.requestId });
     });
-  tool('desk_browser', 'Use this browser for recorded reproduction and proof. It starts only this run’s isolated preview. CSS selectors identify controls; open returns page text and controls. Assertions must test the reported fix.',
+  tool('desk_browser', 'Use this browser for recorded reproduction and proof. A worker gets only its own isolated preview. A QA verifier passes url with open: the test site it chose for this issue. CSS selectors identify controls; open returns page text and controls. Assertions must test the reported fix.',
     { runId, action: z.enum(['open', 'navigate', 'click', 'fill', 'press', 'select', 'check', 'assertText', 'assertVisible', 'screenshot', 'close']),
       selector: z.string().optional(), value: z.string().optional(), url: z.string().optional(), expected: z.string().optional() },
     input => desk.evidence.action(resolveRun(input.runId), input));
-  tool('desk_verify', 'Run the repository’s configured test command and save actual exit status and output. Commit the fix before this step; later changes invalidate proof.', { runId }, input => desk.verify(resolveRun(input.runId)));
+  tool('desk_branch', 'Name this worker branch in English once you understand the issue: 2 to 8 words that summarize the change, and its type. Only the local, unpushed branch is renamed; keep working in the same folder.',
+    { runId, title: z.string().min(3).max(120), type: z.enum(['fix', 'feature', 'refactor', 'chore', 'docs']).default('fix') }, input => desk.renameBranch(resolveRun(input.runId), input));
+  tool('desk_verify', 'Run the repository’s test command and save actual exit status and output. Uses the Settings command, else the one detected from the repository files. If neither exists, pass command: the human approves it once and it is saved. Commit the fix before this step; later changes invalidate proof.', { runId, command: z.string().max(2000).optional() }, input => desk.verify(resolveRun(input.runId)));
   tool('desk_finish', 'Close the recording, check current test evidence, and write a portable HTML report. Only verified fixes become ready for review.',
     { runId, summary: z.string().min(1).max(50000), risk: z.object({ score: z.number().int().min(1).max(10), requiresHumanReview: z.boolean(), reason: z.string().min(1).max(5000), factors: z.array(z.string()).max(20).optional() }).describe('Agent self-review: estimated code risk 1 (small) to 10 (high), concrete reasons, and whether a human must review before a PR.') }, input => desk.finish(resolveRun(input.runId), input.summary, input.risk));
   tool('desk_qa_result', 'Finish a QA verification run: close the recording, save the verdict and a draft tracker comment. pass needs a recorded browser assertion of the expected behavior.',

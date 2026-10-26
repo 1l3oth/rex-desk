@@ -13,7 +13,9 @@ const repository = path.join(workspace, 'source'); mkdirSync(repository);
 const screenshots = path.resolve('.impeccable/review'); mkdirSync(screenshots, { recursive: true });
 const qa = path.resolve('.local/qa'); mkdirSync(qa, { recursive: true });
 writeFileSync(path.join(repository, 'page.html'), '<!doctype html><html><title>QA fixture</title><h1>Preview is blank</h1><p id="result">Not fixed</p></html>');
-writeFileSync(path.join(repository, 'preview.cjs'), `const http=require('http'),fs=require('fs');http.createServer((q,s)=>{s.setHeader('Content-Type','text/html');s.end(fs.readFileSync('page.html'))}).listen(Number(process.argv[2]),'127.0.0.1');`);
+writeFileSync(path.join(repository, 'preview.cjs'), `const http=require('http'),fs=require('fs');http.createServer((q,s)=>{s.setHeader('Content-Type','text/html');s.end(fs.readFileSync('page.html'))}).listen(Number(process.argv[process.argv.indexOf('--port')+1]||process.env.PORT),'127.0.0.1');`);
+writeFileSync(path.join(repository, 'package.json'), JSON.stringify({ name: 'qa-fixture', private: true, scripts: { dev: 'node preview.cjs', test: 'node verify.cjs' } }));
+writeFileSync(path.join(repository, 'package-lock.json'), JSON.stringify({ name: 'qa-fixture', lockfileVersion: 3, requires: true, packages: { '': { name: 'qa-fixture' } } }));
 writeFileSync(path.join(repository, 'verify.cjs'), `const assert=require('assert/strict'),fs=require('fs');assert.ok(fs.readFileSync('page.html','utf8').includes('Preview works'));console.log('Regression assertion passed: preview content is visible.');`);
 await git(repository, ['init', '-b', 'develop']);
 await git(repository, ['config', 'user.name', 'Rex Desk Test']); await git(repository, ['config', 'user.email', 'qa@example.invalid']);
@@ -137,8 +139,10 @@ try {
   await base.waitFor({ timeout: 30000 });
   await base.click(); await base.fill('dev'); await base.press('ArrowDown'); await base.press('Enter');
   assert.equal(await page.locator('input[type=hidden][name$=".baseBranch"]').inputValue(), 'develop');
-  await page.getByRole('textbox', { name: 'Dev server command', exact: true }).fill('node preview.cjs {port}');
-  await page.getByRole('textbox', { name: 'Verification command', exact: true }).fill('node verify.cjs');
+  // Commands come from the project's own package.json; nothing is typed.
+  await page.locator('.repository-automatic code', { hasText: 'npm run dev -- --port {port}' }).waitFor({ timeout: 30000 });
+  await page.locator('.repository-automatic code', { hasText: 'npm test' }).waitFor();
+  assert.equal(await page.locator('input[name$=".testCommand"]').inputValue(), '', 'Detected values stay automatic, not copied into Settings');
   await page.getByRole('button', { name: 'Add connection', exact: true }).click();
   await page.getByRole('textbox', { name: 'Connection name', exact: true }).fill('Morningmate · synthetic QA');
   await page.getByRole('textbox', { name: 'API key', exact: true }).fill('synthetic-key-for-test-only');
@@ -229,6 +233,40 @@ try {
     await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
   });
   await page.screenshot({ path: path.join(screenshots, 'proof-desktop.png'), fullPage: true });
+  // The sidebar resizes by dragging its edge or with the arrow keys, and the width survives a reload.
+  await page.getByRole('button', { name: 'My issues', exact: true }).click();
+  const side = page.locator('.side'), sideHandle = page.getByRole('separator', { name: 'Resize sidebar' });
+  const narrow = (await side.boundingBox()).width, grip = await sideHandle.boundingBox();
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + 300); await page.mouse.down();
+  await page.mouse.move(grip.x + 180, grip.y + 300, { steps: 6 }); await page.mouse.up();
+  const wide = Math.round((await side.boundingBox()).width);
+  assert.ok(wide > narrow + 150, `Sidebar grows when dragged (${narrow} to ${wide})`);
+  await sideHandle.focus(); await page.keyboard.press('ArrowLeft');
+  assert.equal(Math.round((await side.boundingBox()).width), wide - 16);
+  await page.reload(); await page.locator('.task-row').first().waitFor();
+  assert.equal(Math.round((await page.locator('.side').boundingBox()).width), wide - 16, 'Sidebar width is remembered');
+  // Dragging the Evidence tab onto the right half of the issue shows it beside the brief.
+  await page.locator('.task-open', { hasText: posts[0].title }).click();
+  const evidenceTab = page.getByRole('tab', { name: 'Evidence', exact: true }), tabBox = await evidenceTab.boundingBox(), body = await page.locator('.detail-body').boundingBox();
+  await page.mouse.move(tabBox.x + 10, tabBox.y + 10); await page.mouse.down();
+  await page.mouse.move(body.x + body.width * 0.85, body.y + 150, { steps: 8 });
+  assert.equal(await page.locator('#drop-zone span').innerText(), 'Open on the right');
+  await page.mouse.up();
+  await page.locator('.detail-split.columns').waitFor();
+  assert.equal(await page.locator('.split-pane[data-slot="first"] [role=tab][aria-selected=true]').innerText(), 'Issue brief');
+  assert.equal(await page.locator('.split-pane[data-slot="second"] [role=tab][aria-selected=true]').innerText(), 'Evidence');
+  assert.ok(await page.locator('.split-pane[data-slot="second"] video').count(), 'Evidence shows the recording beside the brief');
+  const divider = page.getByRole('separator', { name: 'Resize panels' });
+  await divider.focus(); await page.keyboard.press('ArrowRight');
+  assert.equal(await divider.getAttribute('aria-valuenow'), '55');
+  // Choosing the other panel's tab swaps the panels; the switch stacks them.
+  await page.locator('.split-pane[data-slot="first"] [role=tab]', { hasText: 'Evidence' }).click();
+  assert.equal(await page.locator('.split-pane[data-slot="second"] [role=tab][aria-selected=true]').innerText(), 'Issue brief');
+  await page.getByRole('button', { name: 'Two panels stacked', exact: true }).click();
+  await page.locator('.detail-split.rows').waitFor();
+  await page.screenshot({ path: path.join(screenshots, 'split-desktop.png') });
+  await page.getByRole('button', { name: 'One panel with tabs', exact: true }).click();
+  await page.locator('.detail-body').waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'My issues', exact: true }).click();
   await page.screenshot({ path: path.join(screenshots, 'mobile.png'), fullPage: true });

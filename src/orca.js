@@ -17,6 +17,14 @@ export function orcaJson(args, { run = execFile, timeout = 30000 } = {}) {
     resolve(data.result ?? data);
   }));
 }
+// What the run's Orca terminal shows right now, read through the Orca CLI. Nothing is stored; the dashboard polls while the run is open.
+export async function readOrcaTerminal(run, options) {
+  const handle = String(run.sessionId || '').startsWith('orca:') ? run.sessionId.slice(5) : '';
+  if (!handle) throw new Error('This run has no Orca terminal.');
+  const result = await orcaJson(['terminal', 'read', '--terminal', handle, '--screen', '--limit', '400'], options);
+  const terminal = result.terminal || result;
+  return { handle, status: terminal.status || '', source: terminal.source || '', lines: Array.isArray(terminal.tail) ? terminal.tail : String(terminal.tail || '').split('\n') };
+}
 // Rex Desk creates its own worktrees (branch pattern, port, runtime seed). Orca shows them only when the repo shows external worktrees.
 export async function orcaRepository(repositoryPath, options) {
   const result = await orcaJson(['repo', 'list'], options);
