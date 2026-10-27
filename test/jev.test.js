@@ -5,12 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store, defaults, now } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
-import { askJev, rankTasks, Jev, jevEndpoint, jevQuestions, taskFingerprint } from '../src/jev.js';
+import { askJev, rankTasks, Jev, jevEndpoint, jevQuestions, taskFingerprint, jevState } from '../src/jev.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const idle = () => ({ start: async () => ({ status: 'completed' }), interrupt: async () => {}, close() {} });
-const answers = ({ severity = 1, action = 'fix', effort = 1, web = 0.9 } = {}) => ({ severity: { type: 'score', score: severity, probabilities: {}, confidence: 0.8 },
-  action: { type: 'choice', choice: action, probabilities: {}, confidence: 0.8 }, effort: { type: 'score', score: effort, probabilities: {}, confidence: 0.7 }, web: { type: 'noul', noul: web } });
+const answers = ({ severity = 1, action = 'fix', effort = 1, web = 0.9, platform = 'web', outdated = 0.05 } = {}) => ({ severity: { type: 'score', score: severity, probabilities: {}, confidence: 0.8 },
+  action: { type: 'choice', choice: action, probabilities: {}, confidence: 0.8 }, effort: { type: 'score', score: effort, probabilities: {}, confidence: 0.7 }, web: { type: 'noul', noul: web },
+  platform: { type: 'choice', choice: platform, probabilities: {}, confidence: 0.7 }, outdated: { type: 'noul', noul: outdated } });
 const reply = body => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
 test('Jev is asked through OpenRouter System One with typed questions and the OpenRouter key', async () => {
@@ -34,7 +35,7 @@ test('ranking puts severe, overdue, browser-checkable work first and waiting or 
   const ranked = rankTasks(tasks, analyses, [{ taskId: 'busy', state: 'running', createdAt: now() }], today);
   assert.deepEqual(ranked.map(item => item.taskId), ['critical', 'unrated', 'minor', 'busy', 'blocked']);
   assert.deepEqual(ranked.map(item => item.rank), [1, 2, 3, null, null]);
-  assert.deepEqual(ranked[0].reasons, ['Critical severity', 'Fix', 'large effort', 'overdue 1d']);
+  assert.deepEqual(ranked[0].reasons, ['Critical severity', 'Fix', 'hard to fix', 'Web', 'overdue 1d']);
   assert.equal(ranked.find(item => item.taskId === 'blocked').group, 'later');
 });
 
@@ -114,4 +115,26 @@ test('a quiet browser saves its clip and closes, and the next action continues o
     await desk.evidence.close('qa');
     assert.equal(store.list('artifact').filter(item => item.runId === 'qa' && item.type === 'video/webm').length, 2, 'The continued work is a second clip');
   } finally { await desk.evidence.stopAll(); site.close(); store.close(); }
+});
+
+test('Jev says where an issue happens, how hard it is, and whether the current release already fixed it', () => {
+  const today = new Date('2026-10-27T00:00:00Z');
+  const tasks = [{ id: 'web', title: 'Search ignores the plan limit' }, { id: 'phone', title: 'Android push is late' }, { id: 'old', title: 'Desktop app 1.9 crashes on login' }];
+  const analyses = new Map([
+    ['web', { answers: answers({ severity: 3, effort: 0, platform: 'web' }) }],
+    ['phone', { answers: answers({ severity: 3, effort: 0, platform: 'mobile', web: 0.1 }) }],
+    ['old', { answers: answers({ severity: 3, effort: 2, platform: 'desktop', outdated: 0.82 }) }]]);
+  const ranked = rankTasks(tasks, analyses, [], today);
+  const by = id => ranked.find(item => item.taskId === id);
+  assert.equal(ranked[0].taskId, 'web', 'Work that can be done here comes first');
+  assert.ok(by('phone').value < by('web').value && by('old').value < by('web').value, 'A phone-only issue and one the release already fixed both sink below it');
+  assert.equal(by('phone').platform, 'mobile');
+  assert.ok(by('phone').reasons.includes('Mobile'), 'The badge text comes from the reasons Jev gave');
+  assert.equal(by('old').outdated, 0.82);
+  assert.ok(by('old').reasons.includes('may already be fixed'));
+  assert.ok(by('web').reasons.includes('easy to fix'));
+  assert.ok(!by('web').reasons.includes('may already be fixed'));
+  assert.equal(jevState({ title: 'Desktop app 1.9 crashes' }, today, ' Morningmate desktop app 2.0.1 ').currentVersions, 'Morningmate desktop app 2.0.1');
+  assert.equal(jevState({ title: 'x' }, today).currentVersions, undefined, 'Nothing is claimed about versions when none are set');
+  assert.ok(jevQuestions.platform.criteria.mobile.includes('iOS'));
 });

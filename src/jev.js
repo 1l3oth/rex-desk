@@ -5,7 +5,10 @@ import { now } from './store.js';
 export const jevEndpoint = 'https://openrouter.ai/api/v1/systemone';
 export const defaultJevModel = '~typesafe/jev-latest';
 export const severityLabels = ['Cosmetic', 'Minor', 'Moderate', 'Major', 'Critical'];
-export const effortLabels = ['Small', 'Medium', 'Large'];
+export const effortLabels = ['Easy', 'Medium', 'Hard'];
+export const platformLabels = { web: 'Web', desktop: 'Desktop app', mobile: 'Mobile', unclear: 'Any surface' };
+// An issue about a version older than the one running is often already fixed, so anything this likely is called out.
+export const outdatedThreshold = 0.6;
 export const actionLabels = { fix: 'Fix', verify: 'Verify', wait: 'Waiting', skip: 'Skip' };
 export const jevQuestions = {
   severity: { type: 'score', instructions: 'How severe is the problem in this issue for the product’s users?', criteria: [
@@ -19,17 +22,23 @@ export const jevQuestions = {
     verify: 'A developer reports it fixed or development is complete; it needs a QA re-test',
     wait: 'Blocked: waiting for information, a decision, another team, or a release',
     skip: 'Not actionable: a duplicate, already confirmed resolved, or not a product problem' } },
-  effort: { type: 'score', instructions: 'How much work would a skilled developer need to fix this issue?', criteria: [
-    'Small: text, translation, style, or one obvious code change',
+  effort: { type: 'score', instructions: 'How hard is this issue for a skilled developer to fix?', criteria: [
+    'Easy: text, translation, style, or one obvious code change',
     'Medium: a contained change across a few files with a clear reproduction',
-    'Large: an unclear cause, many modules, a migration, or design decisions'] },
+    'Hard: an unclear cause, many modules, a migration, or design decisions'] },
+  platform: { type: 'choice', instructions: 'Which product surface does this issue happen on, judging by its description, screenshots, fields, and comments?', criteria: {
+    web: 'The web site opened in a browser on a computer',
+    desktop: 'The installed desktop application on Windows or macOS',
+    mobile: 'The phone or tablet app on iOS or Android, or a mobile browser',
+    unclear: 'It does not say, or the problem is on every surface' } },
+  outdated: { type: 'noul', instructions: 'Is this issue likely already fixed or no longer worth working on? Say yes when it reports a problem in a version older than the ones under currentVersions, when the discussion says it was fixed or shipped, or when it has sat untouched while the product moved on.' },
   web: { type: 'noul', instructions: 'Can this issue be reproduced and checked in a desktop Chromium web browser, rather than only in a mobile app, Safari, macOS, iOS, Android, or an installed desktop app?' },
 };
 
 const clip = (value, size) => { const text = String(value ?? ''); return text.length > size ? `${text.slice(0, size)}…` : text; };
 // The issue as Jev sees it: tracker facts and the latest discussion, without images or internal IDs.
-export function jevState(task, today = new Date()) {
-  return { today: today.toISOString().slice(0, 10), title: task.title, product: task.source, project: task.projectName, status: task.statusName || task.status,
+export function jevState(task, today = new Date(), currentVersions = '') {
+  return { today: today.toISOString().slice(0, 10), currentVersions: String(currentVersions || '').trim() || undefined, title: task.title, product: task.source, project: task.projectName, status: task.statusName || task.status,
     category: task.category || undefined, reporter: task.reporter, created: task.createdAt, updated: task.updatedAt, due: task.dueDate || undefined,
     fields: Object.fromEntries((task.fields || []).map(field => [field.name, field.value])), description: clip(task.description, 6000),
     comments: (task.comments || []).filter(comment => !comment.system).slice(-8).map(comment => ({ author: comment.author, at: comment.at, text: clip(comment.text, 800) })),
@@ -58,13 +67,18 @@ const activeStates = new Set(['queued', 'starting', 'running', 'waiting']);
 export function priorityOf(task, analysis, run, today = new Date()) {
   const answers = analysis?.answers || {}, days = dueDays(task.dueDate, today);
   const severity = answers.severity?.score ?? null, effort = answers.effort?.score ?? null, action = answers.action?.choice || null, web = answers.web?.noul ?? null;
+  const platform = answers.platform?.choice || null, outdated = answers.outdated?.noul ?? null;
   let value = (severity ?? 1.5) * 2 - (effort ?? 1) * 0.6 + ((web ?? 0.5) - 0.5) * 2;
+  // Work that cannot be done here sinks: a phone-only issue, and one the current release has probably already fixed.
+  if (platform === 'mobile') value -= 2;
+  if (outdated !== null && outdated >= outdatedThreshold) value -= 2;
   if (days !== null) value += days < 0 ? 3 : days <= 1 ? 2.5 : days <= 3 ? 1.5 : days <= 7 ? 0.5 : 0;
   if (action === 'verify') value += 0.5;
   const group = run && activeStates.has(run.state) ? 'running' : run && doneStates.has(run.state) ? 'done' : action === 'wait' || action === 'skip' ? 'later' : 'next';
-  const reasons = [severity !== null && `${severityLabels[Math.round(severity)]} severity`, action && actionLabels[action], effort !== null && `${effortLabels[Math.round(effort)].toLowerCase()} effort`,
+  const reasons = [severity !== null && `${severityLabels[Math.round(severity)]} severity`, action && actionLabels[action], effort !== null && `${effortLabels[Math.round(effort)].toLowerCase()} to fix`,
+    platform && platform !== 'unclear' && platformLabels[platform], outdated !== null && outdated >= outdatedThreshold && 'may already be fixed',
     days !== null && (days < 0 ? `overdue ${-days}d` : days === 0 ? 'due today' : `due in ${days}d`), web !== null && web < 0.4 && 'hard to check in a browser'].filter(Boolean);
-  return { taskId: task.id, value: Math.round(value * 100) / 100, group, action: action || null, severity, effort, web, days, reasons, analyzed: Boolean(analysis?.answers), at: analysis?.at || '', model: analysis?.model || '', error: analysis?.error || '' };
+  return { taskId: task.id, value: Math.round(value * 100) / 100, group, action: action || null, severity, effort, platform, outdated, web, days, reasons, analyzed: Boolean(analysis?.answers), at: analysis?.at || '', model: analysis?.model || '', error: analysis?.error || '' };
 }
 // Issues to start now come first, by value; running and finished work follow, then issues that are waiting or not actionable.
 export function rankTasks(tasks, analyses, runs, today = new Date()) {
@@ -108,7 +122,7 @@ export class Jev {
     const worker = async () => {
       for (let task = queue.shift(); task; task = queue.shift()) {
         try {
-          const result = await askJev({ apiKey, model, state: jevState(task), fetcher: this.fetcher });
+          const result = await askJev({ apiKey, model, state: jevState(task, new Date(), this.store.config().jev?.versions), fetcher: this.fetcher });
           this.store.put('priority', task.id, { taskId: task.id, fingerprint: taskFingerprint(task), model: result.model || model, answers: result.answers, at: now() });
         } catch (error) {
           status.failed++; status.error = error.message;

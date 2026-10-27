@@ -401,6 +401,14 @@ body.dragging-tab,body.dragging-tab *{cursor:grabbing!important;user-select:none
 .project-options{display:grid;gap:1px;max-height:220px;overflow:auto}
 .project-choice{display:flex;align-items:flex-start;gap:8px;padding:4px;border-radius:4px;cursor:pointer}.project-choice:hover{background:var(--hover)}
 .project-choice input{margin-top:2px;accent-color:var(--accent)}.project-choice span{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}.project-choice small{font:10.5px var(--mono);color:var(--faint)}
+.jev-badge{display:inline-flex;align-items:center;flex:none;padding:1px 6px;border-radius:999px;border:1px solid var(--line-soft);font-size:10px;line-height:16px;color:var(--muted);white-space:nowrap}
+.jev-badge.platform-mobile{border-color:var(--amber);color:var(--amber)}
+.jev-badge.platform-desktop,.jev-badge.platform-web{color:var(--muted)}
+.jev-badge.effort-easy{color:var(--green)}.jev-badge.effort-hard{color:var(--red)}
+.jev-badge.outdated{border-style:dashed}
+.jev-badges{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 6px}
+.filter-check{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:11.5px;white-space:nowrap}
+.filter-check input{accent-color:var(--accent)}
 .chosen-accounts{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
 .chosen-accounts li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 8px;border:1px solid var(--line-soft);border-radius:4px}
 .chosen-accounts span{min-width:0;overflow-wrap:anywhere}
