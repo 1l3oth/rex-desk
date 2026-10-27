@@ -47,6 +47,7 @@ async function action(callback) {
 // answered, never what it has not seen yet.
 const effortWords = ['Easy', 'Medium', 'Hard'];
 const platformWords = { web: 'Web', desktop: 'Desktop app', mobile: 'Mobile', unclear: '' };
+const compactPlatformWords = { web: 'Web', desktop: 'Desktop', mobile: 'Mobile', unclear: '' };
 const outdatedThreshold = 0.6;
 const jevOf = task => priorityMap().get(task.id);
 const difficultyOf = item => item?.effort === null || item?.effort === undefined ? '' : effortWords[Math.round(item.effort)].toLowerCase();
@@ -258,20 +259,22 @@ function assignedTo() {
 }
 // What Jev answered about an issue, as badges: where it happens, how hard it is, and whether the current release
 // has probably fixed it already.
-function jevBadges(item) {
+function jevBadges(item, { compact = false } = {}) {
   if (!item?.analyzed) return '';
-  const platform = platformWords[item.platform] || '';
+  // In the list a web issue needs no surface badge: the interesting answers there are mobile, desktop, and outdated.
+  const platform = compact && item.platform === 'web' ? '' : (compact ? compactPlatformWords : platformWords)[item.platform] || '';
   const difficulty = difficultyOf(item);
-  return [platform && `<span class="jev-badge platform-${esc(item.platform)}">${esc(platform)}</span>`,
+  const list = [platform && `<span class="jev-badge platform-${esc(item.platform)}">${esc(platform)}</span>`,
     difficulty && `<span class="jev-badge effort-${esc(difficulty)}">${esc(effortWords[Math.round(item.effort)])}</span>`,
-    isOutdated(item) && `<span class="jev-badge outdated" title="Jev puts this at ${Math.round(item.outdated * 100)}% already fixed or out of date for the versions in Settings">Maybe outdated</span>`,
-  ].filter(Boolean).join('');
+    isOutdated(item) && `<span class="jev-badge outdated" title="Jev puts this at ${Math.round(item.outdated * 100)}% already fixed or out of date for the versions in Settings">${compact ? 'Outdated' : 'Maybe outdated'}</span>`,
+  ].filter(Boolean);
+  return list.length ? `<span class="row-badges">${list.join('')}</span>` : '';
 }
 // One line per issue: number, title, and the agent's state as a dot. Tracker status and category live in the preview.
 function renderTaskRow(task) {
   const run = taskRun(task), hint = [task.statusName || task.status, task.category, run && `Agent: ${labels[run.state] || run.state}`].filter(Boolean).join(' · ');
   const item = priorityMap().get(task.id), chip = item?.rank ? `<span class="rank-chip sev-${Math.round(item.severity ?? 0)}" title="${esc(`Priority ${item.rank}: ${item.reasons.join(' · ')}`)}">${item.rank}</span>` : item?.group === 'later' ? '<span class="rank-chip later" title="Waiting or not actionable">–</span>' : '<span class="rank-chip none" aria-hidden="true"></span>';
-  return `<div class="task-row ${task.id === ui.selectedTask ? 'selected' : ''}${item?.group === 'later' ? ' later' : ''}">${chip}<button class="task-open" data-task="${esc(task.id)}" title="${esc(hint)}">${sourceLogo(task.source)}<span class="task-number">${esc(task.taskNumber || task.externalId)}</span><span class="task-title">${esc(task.title)}</span>${jevBadges(item)}${task.demo ? '<span class="demo-label">Demo</span>' : ''}<span class="state-dot ${run ? esc(run.state) : 'none'}" aria-hidden="true"></span>${run ? `<span class="sr-only">Agent ${esc(labels[run.state] || run.state)}</span>` : ''}</button></div>`;
+  return `<div class="task-row ${task.id === ui.selectedTask ? 'selected' : ''}${item?.group === 'later' ? ' later' : ''}">${chip}<button class="task-open" data-task="${esc(task.id)}" title="${esc(hint)}">${sourceLogo(task.source)}<span class="task-number">${esc(task.taskNumber || task.externalId)}</span><span class="task-title">${esc(task.title)}</span>${task.demo ? '<span class="demo-label">Demo</span>' : ''}<span class="state-dot ${run ? esc(run.state) : 'none'}" aria-hidden="true"></span>${run ? `<span class="sr-only">Agent ${esc(labels[run.state] || run.state)}</span>` : ''}${jevBadges(item, { compact: true })}</button></div>`;
 }
 function renderTaskDetail() {
   const task = selectedTask();
@@ -405,7 +408,7 @@ function boardStage(task) {
 function renderBoard(tasks) {
   return `<div class="board" aria-label="Task progress board">${['Inbox', 'Working', 'Needs attention', 'Review', 'PR / completed'].map((name, position) => {
     const column = tasks.filter(task => boardStage(task) === position);
-    return `<section class="board-column"><h2 class="board-heading">${name}<span>${column.length}</span></h2>${column.length ? column.map(task => `<button class="board-task" data-task="${esc(task.id)}" data-from-board="1"><strong>${esc(task.title)}</strong><span class="task-meta">${sourceLogo(task.source)}<span class="mono">#${esc(task.taskNumber || task.externalId)}</span><span>${esc(task.category || 'Unsorted')}</span></span><span class="task-meta">${renderTaskStates(task)}${jevBadges(priorityMap().get(task.id))}${task.demo ? '<span class="demo-label">Demo</span>' : ''}</span></button>`).join('') : '<p class="board-empty">No issues</p>'}</section>`;
+    return `<section class="board-column"><h2 class="board-heading">${name}<span>${column.length}</span></h2>${column.length ? column.map(task => `<button class="board-task" data-task="${esc(task.id)}" data-from-board="1"><strong>${esc(task.title)}</strong><span class="task-meta">${sourceLogo(task.source)}<span class="mono">#${esc(task.taskNumber || task.externalId)}</span><span>${esc(task.category || 'Unsorted')}</span></span><span class="task-meta">${renderTaskStates(task)}${jevBadges(priorityMap().get(task.id), { compact: true })}${task.demo ? '<span class="demo-label">Demo</span>' : ''}</span></button>`).join('') : '<p class="board-empty">No issues</p>'}</section>`;
   }).join('')}</div>`;
 }
 function messageText(message) {

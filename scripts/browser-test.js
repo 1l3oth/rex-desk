@@ -205,7 +205,7 @@ try {
   // Jev's answers become badges on each row, and the toolbar filters by them.
   const rowFor = title => page.locator('.task-row').filter({ hasText: title });
   assert.equal(await rowFor('Assignee filter').locator('.jev-badge.platform-mobile').innerText(), 'Mobile');
-  assert.equal(await rowFor('Duplicate notifications').locator('.jev-badge.outdated').innerText(), 'Maybe outdated');
+  assert.equal(await rowFor('Duplicate notifications').locator('.jev-badge.outdated').innerText(), 'Outdated', 'The list keeps the short label; the issue page spells it out');
   await page.locator('#platform-filter').selectOption('not-mobile');
   assert.equal(await rowFor('Assignee filter').count(), 0, 'Hide mobile drops the phone-only issue');
   assert.ok(await rowFor('File preview').count() > 0, 'and keeps the rest');
