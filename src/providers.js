@@ -2,6 +2,18 @@ import { now } from './store.js';
 
 const text = value => String(value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 const identity = value => String(value ?? '').trim().toLowerCase();
+// A connection can watch more than one tracker account: one person with two logins, or a shared queue. The setting
+// holds them separated by commas, and an issue is assigned when any of them is on it.
+// The tracker may treat its user ids as case sensitive, so each account keeps the spelling it was given here and
+// only the comparison is case insensitive.
+export const accountList = value => {
+  const seen = new Set(), list = [];
+  for (const item of String(value ?? '').split(/[,;\n]/).map(part => part.trim()).filter(Boolean)) {
+    if (seen.has(identity(item))) continue;
+    seen.add(identity(item)); list.push(item);
+  }
+  return list;
+};
 
 const readable = value => String(value || '').replace(/<br\s*\/?\s*>/gi, '\n').replace(/<\/(?:p|div|li|h[1-6])>/gi, '\n')
   .replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&amp;/gi, '&')
@@ -231,11 +243,13 @@ export class Sources {
       account = (me.employee || me).userId;
     }
     if (!account) throw new Error('Could not identify your user ID. Enter it in Settings.');
+    const accounts = accountList(account), keys = accounts.map(identity);
+    const assigned = task => task.assignees.some(item => keys.includes(item));
     const fetched = [], statusSets = [];
     for (const projectId of source.projectIds) {
       const statuses = await this.request(source, `/user/projects/${encodeURIComponent(projectId)}/columns/status`);
       statusSets.push({ projectId, data: statuses });
-      const filtered = await this.filteredProject(source, projectId, account);
+      const filtered = await this.filteredAccounts(source, projectId, accounts);
       if (filtered !== null) { fetched.push(...filtered); continue; }
       let cursor = 0;
       const cursors = new Set();
@@ -249,12 +263,12 @@ export class Sources {
         const inspectPost = async post => {
           const detail = await this.request(source, `/user/posts/${encodeURIComponent(post.postId)}`);
           const task = normalizeTask(source, projectId, post, detail);
-          if (task.assignees.includes(identity(account)) && matchesTaskStatus(task, source.statusFilter, source.statuses)) fetched.push(task);
+          if (assigned(task) && matchesTaskStatus(task, source.statusFilter, source.statuses)) fetched.push(task);
           const record = detail.post || detail;
           for (const subtask of record.subTasks || []) {
             const nested = subtaskRecord(subtask, { ...record, title: record.title || post.title, content: record.content || post.content || '' });
             const child = normalizeTask(source, projectId, { ...post, title: nested.record.title, taskId: nested.record.taskId }, nested.record, { content: nested.content });
-            if (child.assignees.includes(identity(account)) && matchesTaskStatus(child, source.statusFilter, source.statuses)) fetched.push({ ...child, parentPostId: String(post.postId) });
+            if (assigned(child) && matchesTaskStatus(child, source.statusFilter, source.statuses)) fetched.push({ ...child, parentPostId: String(post.postId) });
           }
         };
         await Promise.all(Array.from({ length: Math.min(4, page.posts.length) }, async () => {
@@ -274,11 +288,23 @@ export class Sources {
       this.store.put('task', task.id, { ...task, ...detail, ...(reusable ? { detailLoaded: true, raw: { ...task.raw, post: previous.raw?.post } } : {}), category: previous?.category || '', runId: previous?.runId });
     }
     for (const set of statusSets) this.store.put('statuses', `${source.id}:${set.projectId}`, set);
-    const employee = (this.store.get('directory', source.id)?.employees || []).find(item => identity(item.id) === identity(account) || identity(item.email) === identity(account));
-    const result = { sourceId: source.id, name: source.name, count: fetched.length, account, accountName: employee?.name || '', accountSource: source.userId ? 'chosen in Settings' : 'owner of the API key',
-      verified: fetched.filter(task => task.assignees.includes(identity(account))).length, at: now() };
+    const people = this.store.get('directory', source.id)?.employees || [];
+    const names = keys.map(item => people.find(entry => identity(entry.id) === item || identity(entry.email) === item)?.name).filter(Boolean);
+    const result = { sourceId: source.id, name: source.name, count: fetched.length, account: accounts.join(', '), accounts,
+      accountName: names.length === accounts.length ? names.join(', ') : '', accountSource: source.userId ? 'chosen in Settings' : 'owner of the API key',
+      verified: fetched.filter(assigned).length, at: now() };
     this.store.put('sync', source.id, result);
     return result;
+  }
+  // Each account is filtered for on its own, because the tracker's IN filter takes one value, and the results are merged.
+  async filteredAccounts(source, projectId, accounts) {
+    const merged = new Map();
+    for (const account of accounts) {
+      const rows = await this.filteredProject(source, projectId, account);
+      if (rows === null) return null;
+      for (const task of rows) merged.set(task.id, task);
+    }
+    return [...merged.values()];
   }
   async filteredProject(source, projectId, account) {
     let definitions;

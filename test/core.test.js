@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 
 import os from 'node:os';
 import path from 'node:path';
 import { Store, defaults, now } from '../src/store.js';
-import { Sources, normalizeTask, taskAssignees, postContent, matchesTaskStatus } from '../src/providers.js';
+import { Sources, normalizeTask, taskAssignees, postContent, matchesTaskStatus, accountList } from '../src/providers.js';
 import { Desk, validateAnswer } from '../src/coordinator.js';
 import { codexAnswer } from '../src/runners.js';
 import { git, createWorktree, slug, fingerprint } from '../src/processes.js';
@@ -322,5 +322,34 @@ test('a run opens a pull request into a second branch, built from that branch', 
   await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/release' }), /already open/);
   writeFileSync(path.join(tree, 'fix.txt'), 'edited after the pull requests\n');
   await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/hotfix' }), /files changed after the pull request into global\/release/i);
+  store.close();
+});
+
+test('a connection syncs the issues of every account it watches, not only the first', async () => {
+  const store = new Store(temporary('accounts')), filters = [];
+  store.saveConfig({ ...defaults, repositories: [], sources: [{ ...source, apiKey: 'fixture-key', userId: ' 1l3oth@flow.team , globalDev@flow.team ,1l3oth@flow.team ' }] });
+  assert.equal(store.config().sources[0].userId, '1l3oth@flow.team, globalDev@flow.team', 'the saved list is trimmed and deduplicated');
+  assert.deepEqual(accountList('A@flow.team, b@flow.team;a@flow.team'), ['A@flow.team', 'b@flow.team'], 'the tracker spelling is kept; only the comparison ignores case');
+
+  const assignees = { 10: '1l3oth@flow.team', 11: 'globalDev@flow.team', 12: 'someone@flow.team' };
+  const fetcher = async value => {
+    const url = new URL(value);
+    if (url.pathname.endsWith('/columns/status')) return jsonResponse({ options: [{ id: '1', name: 'In progress' }] });
+    if (url.pathname.endsWith('/columns')) return jsonResponse({ columns: [{ columnSrno: '7', defaultColumnType: 'WORKER', columnName: 'Assignee' }] });
+    if (url.pathname.endsWith('/tasks/filter')) {
+      const wanted = JSON.parse(url.searchParams.get('filterRecords'))[0].FILTER_DATA;
+      filters.push(wanted);
+      const posts = Object.entries(assignees).filter(([, owner]) => owner === wanted)
+        .map(([postId]) => ({ postId, taskId: `10${postId}`, taskStatus: 'REQUEST', title: `Issue ${postId}`, workers: [{ workerId: assignees[postId] }] }));
+      return jsonResponse({ tasks: posts, hasNext: false, lastCursor: -1 });
+    }
+    return jsonResponse({});
+  };
+  const result = await new Sources(store, { fetcher }).sync();
+  assert.deepEqual(filters, ['1l3oth@flow.team', 'globalDev@flow.team'], 'each account is filtered for on its own');
+  assert.equal(result[0].count, 2, 'both accounts bring in their issues');
+  assert.equal(result[0].verified, 2);
+  assert.equal(result[0].account, '1l3oth@flow.team, globalDev@flow.team');
+  assert.deepEqual(store.list('task').map(task => task.title).sort(), ['Issue 10', 'Issue 11']);
   store.close();
 });

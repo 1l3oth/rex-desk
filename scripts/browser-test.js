@@ -161,13 +161,15 @@ try {
   await page.locator('[data-catalog-search]').fill('unrelated');
   assert.equal(await page.locator('.project-choice:visible').count(), 1, 'Project search hides non-matching projects');
   await page.locator('[data-catalog-search]').fill('');
-  const employee = page.getByRole('combobox', { name: 'Assigned employee for Morningmate · synthetic QA' });
+  const employee = page.getByRole('combobox', { name: 'Assigned accounts for Morningmate · synthetic QA' });
   await employee.click(); await employee.fill('mina mobile');
   assert.equal(await page.locator('.picker.open [role=option]:visible').count(), 1, 'Employee search shows only the match for name and team');
   await employee.press('Enter');
   assert.equal(await page.locator('input[name$=".userId"]').inputValue(), 'mina@example.invalid');
   await employee.click(); await employee.fill('rex tester'); await employee.press('Enter');
-  assert.equal(await page.locator('input[name$=".userId"]').inputValue(), 'rex@example.invalid');
+  assert.equal(await page.locator('input[name$=".userId"]').inputValue(), 'mina@example.invalid, rex@example.invalid', 'A second person is added to the watched accounts, not put in place of the first');
+  await page.locator('.chosen-accounts li').filter({ hasText: 'mina@example.invalid' }).getByRole('button', { name: 'Remove' }).click();
+  assert.equal(await page.locator('input[name$=".userId"]').inputValue(), 'rex@example.invalid', 'Remove drops one watched account and keeps the rest');
   await page.getByRole('button', { name: 'Add a sign-in' }).click();
   await page.locator('input[name="testAccounts.0.site"]').fill('127.0.0.1');
   await page.locator('input[name="testAccounts.0.username"]').fill('qa@example.invalid');
