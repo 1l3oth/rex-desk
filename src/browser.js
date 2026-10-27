@@ -24,7 +24,6 @@ export class Evidence {
   async start(runId, { url } = {}) {
     if (this.sessions.has(runId)) return this.sessions.get(runId);
     const run = this.getRun(runId);
-    if (run.role === 'verifier') return this.startQa(runId, run, url);
     if (!run.worktree) throw new Error('This run has no worktree.');
     const repository = effectiveRepository(this.store.config().repositories.find(item => item.id === run.repositoryId));
     if (!repository?.devCommand && !repository?.flowRuntime && !repository?.electronRuntime) throw new Error('Set this repository’s dev command, Flow Tomcat preset, or Electron preset in Settings.');
@@ -63,86 +62,7 @@ export class Evidence {
     await page.goto(resume?.url && resume.url.startsWith(baseUrl) ? resume.url : baseUrl + repository.browserPath, { waitUntil: 'domcontentloaded', timeout: 30000 });
     return session;
   }
-  qaSessionFile() { return path.join(this.store.directory, 'qa-session.json'); }
-  // Rex Desk's own dashboard answers approvals, so a recorded browser never loads it.
-  isDesk(address) {
-    try {
-      const own = new URL(this.deskUrl()), target = new URL(address), port = url => url.port || (url.protocol === 'https:' ? '443' : '80');
-      return port(target) === port(own) && (['localhost', '[::1]', '0.0.0.0'].includes(target.hostname) || target.hostname.startsWith('127.'));
-    } catch { return false; }
-  }
-  // The QA agent chooses the test site for each issue: wherever the project runs with the developer's fix.
-  qaSite(address, run) {
-    let url;
-    try { url = new URL(String(address || '')); } catch { throw new Error('Choose the test site: call open with url set to the address where this project runs for this issue, for example its dev or QA server.'); }
-    if (!['https:', 'http:'].includes(url.protocol)) throw new Error('The test site must be an http(s) address.');
-    if (this.isDesk(url.href)) throw new Error('Rex Desk itself cannot be the test site.');
-    if (run) this.refuseProduction(url, run);
-    return url;
-  }
-  // A fix that is only development-complete has not reached production, so a QA check there would test the old code
-  // on real customers' data. The human still decides: naming the site in an answer to this run's question allows it.
-  refuseProduction(url, run) {
-    const site = siteEnvironment(url.href);
-    if (site.environment !== 'production') return;
-    const task = run.taskId ? this.store.get('task', run.taskId) : null;
-    const status = String(task?.statusName || task?.status || '');
-    if (releasedToProduction(status)) return;
-    if (this.store.list('interaction').some(item => item.runId === run.id && item.state === 'answered'
-      && JSON.stringify(item.answer || '').toLowerCase().includes(site.host))) return;
-    throw new Error(`${site.host} is the live ${site.product} service, and this issue's status is ${status ? JSON.stringify(status) : 'unknown'}, which does not say the fix is released. Test it where the fix runs now: ${testSites(site.product).join(', ')}. If production really is the right site, ask the human with desk_ask and have their answer name ${site.host}.`);
-  }
-  // QA checks browse the site the agent chose, signed in with the session the person saved from their own sign-in.
-  async startQa(runId, run, address) {
-    const resume = this.resumes.get(runId); this.resumes.delete(runId);
-    const site = this.qaSite(address || resume?.url || run.qaUrl, run);
-    const directory = this.directory(runId), { chromium } = await import('playwright');
-    let browser;
-    try { browser = await chromium.launch({ headless: true }); }
-    catch (error) { throw new Error(`Browser could not start. Run "npx playwright install chromium". ${error.message}`); }
-    const state = this.qaSessionFile();
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, recordVideo: { dir: directory, size: { width: 1440, height: 900 } }, ...(resume?.state ? { storageState: resume.state } : existsSync(state) ? { storageState: state } : {}) });
-    await context.route(url => this.isDesk(url.href), route => route.abort('blockedbyclient'));
-    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
-    const page = await context.newPage();
-    page.on('pageerror', error => this.emit(runId, 'browser-error', { message: error.message }));
-    page.on('console', message => { if (message.type() === 'error') this.emit(runId, 'browser-console', { text: message.text() }); });
-    const session = { browser, context, page, baseUrl: site.origin, qa: true, assertions: [], actions: 0 };
-    this.sessions.set(runId, session);
-    await this.openQaSite(runId, session, site);
-    return session;
-  }
-  // Playwright routes miss redirects, so after every navigation a page that reached Rex Desk is sent away.
-  async leaveDesk(page) {
-    if (!this.isDesk(page.url())) return;
-    await page.goto('about:blank').catch(() => {});
-    throw new Error('Rex Desk itself cannot be the test site.');
-  }
-  async openQaSite(runId, session, site) {
-    session.baseUrl = site.origin;
-    this.emit(runId, 'qa-site', { url: site.href });
-    await session.page.goto(site.href, { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await this.leaveDesk(session.page);
-  }
-  // A visible browser where the person signs in to the test site; its cookies are saved every few seconds and when the window closes.
-  // Without an address the window opens blank, and the person goes to each site they want QA checks to use.
-  async openQaSignIn(address) {
-    const site = address ? this.qaSite(address) : null;
-    if (this.qaLogin) { if (site) await this.qaLogin.page.goto(site.href, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {}); await this.qaLogin.page.bringToFront().catch(() => {}); return this.qaStatus(); }
-    const { chromium } = await import('playwright'), file = this.qaSessionFile();
-    const browser = await chromium.launch({ headless: false });
-    const context = await browser.newContext({ viewport: null, ...(existsSync(file) ? { storageState: file } : {}) });
-    const page = await context.newPage();
-    const save = () => context.storageState({ path: file }).catch(() => {});
-    const timer = setInterval(save, 3000);
-    this.qaLogin = { browser, page };
-    browser.on('disconnected', () => { clearInterval(timer); this.qaLogin = null; });
-    page.on('close', async () => { clearInterval(timer); await save(); await browser.close().catch(() => {}); });
-    if (site) await page.goto(site.href, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
-    return this.qaStatus();
-  }
-  qaStatus() { const file = this.qaSessionFile(); return { open: Boolean(this.qaLogin), savedAt: existsSync(file) ? statSync(file).mtime.toISOString() : '' }; }
-  async proofPrint(runId) { const run = this.getRun(runId); return run.worktree ? fingerprint(run.worktree) : 'qa'; }
+  async proofPrint(runId) { const run = this.getRun(runId); return run.worktree ? fingerprint(run.worktree) : ''; }
   // Desktop runs record the app's own window; its profile, logs, updater, and protocol handlers stay isolated per run.
   async startElectron(runId, run, repository, directory) {
     const { _electron } = await import('playwright');
@@ -165,11 +85,11 @@ export class Evidence {
     const { page } = session;
     this.emit(runId, 'browser-action', { action, selector, url, value: action === 'fill' ? '[input hidden from journal]' : value });
     switch (action) {
-      // A QA run may move to another site it chose, for example a second region; the recording continues.
-      case 'open': if (session.qa && url && !opening) await this.openQaSite(runId, session, this.qaSite(url, this.getRun(runId))); break;
+      // open starts the run own preview and lands on it; there is nothing left to do here.
+      case 'open': break;
       case 'navigate': {
         const target = new URL(url || '/', session.electron ? page.url() : session.baseUrl);
-        if (target.origin !== (session.electron ? new URL(page.url()).origin : session.baseUrl)) throw new Error(session.qa ? 'Recorded browser navigation must stay on the test site origin. Use open with url to switch to another site.' : 'Recorded browser navigation must stay on this run’s preview origin.');
+        if (target.origin !== (session.electron ? new URL(page.url()).origin : session.baseUrl)) throw new Error('Recorded browser navigation must stay on this run’s preview origin.');
         await page.goto(target.href, { waitUntil: 'domcontentloaded' }); break;
       }
       case 'click': await page.locator(selector).click({ timeout: 15000 }); break;
@@ -208,7 +128,6 @@ export class Evidence {
       }
       default: throw new Error(`Unknown browser action: ${action}`);
     }
-    if (session.qa) await this.leaveDesk(page);
     session.actions++;
     if (!session.electron) this.armIdle(runId);
     const controls = await page.locator('button,input,textarea,select,a,[role="button"]').evaluateAll(nodes => nodes.slice(0, 100).map(node =>
@@ -249,7 +168,7 @@ export class Evidence {
     if (!pause) { this.stopPreview(runId); this.resumes.delete(runId); }
     return { closed: true, assertions: session.assertions.length };
   }
-  report(runId, { summary, checks, risk, qa }) {
+  report(runId, { summary, checks, risk }) {
     const run = this.getRun(runId);
     const artifacts = this.store.list('artifact').filter(item => item.runId === runId);
     const events = this.store.events(runId, { limit: 200 });
@@ -257,7 +176,6 @@ export class Evidence {
       <style>body{font:16px/1.6 system-ui;max-width:960px;margin:48px auto;padding:0 24px;color:#183039}h1{line-height:1.2}pre{white-space:pre-wrap;background:#f1f5f5;padding:16px;overflow:auto}video,img{max-width:100%}a{color:#145b7c}small{color:#50646c}</style>
       <h1>${escape(run.title)}</h1><p>${escape(summary)}</p><small>${escape(run.branch || '')} · ${escape(now())}</small>
       <h2>Verification</h2><pre>${escape(JSON.stringify(checks, null, 2))}</pre>
-      ${qa ? `<h2>QA result: ${escape(qa.verdict)}</h2><p>Test site: ${escape(run.qaUrl || '')}</p><h3>Tracker comment</h3><pre>${escape(qa.comment || '')}</pre><pre>${escape(JSON.stringify(qa.steps || [], null, 2))}</pre>` : ''}${risk ? `<h2>Estimated code risk</h2><p>${escape(risk.score ?? 'Unassessed')}/10 · ${escape(risk.level || '')} · ${risk.requiresHumanReview ? 'Human review required' : 'Low-risk draft PR eligible'}</p><p>${escape(risk.reason || '')}</p><pre>${escape(JSON.stringify(risk, null, 2))}</pre>` : ''}
       <h2>Evidence</h2>${artifacts.map(item => item.type === 'video/webm'
         ? `<h3>${escape(item.title)}</h3><video controls src="${encodeURIComponent(item.file)}"></video>`
         : `<p><a href="${encodeURIComponent(item.file)}">${escape(item.title)}</a></p>`).join('')}
@@ -266,5 +184,5 @@ export class Evidence {
     writeFileSync(file, html);
     return this.attach(runId, file, 'Verification report', 'text/html');
   }
-  async stopAll() { await this.qaLogin?.browser.close().catch(() => {}); await Promise.allSettled([...this.sessions.keys()].map(runId => this.close(runId))); for (const runId of [...this.previews.keys()]) this.stopPreview(runId); }
+  async stopAll() { await Promise.allSettled([...this.sessions.keys()].map(runId => this.close(runId))); for (const runId of [...this.previews.keys()]) this.stopPreview(runId); }
 }

@@ -8,7 +8,6 @@ import { Desk } from '../src/coordinator.js';
 import { CodexRunner } from '../src/runners.js';
 import { issueBranch, provisionalTitle, defaultBranchPattern } from '../src/branches.js';
 import { detectProject, effectiveRepository, findJava8 } from '../src/project-detect.js';
-import { readOrcaTerminal } from '../src/orca.js';
 import { git, createWorktree } from '../src/processes.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
@@ -108,14 +107,6 @@ test('with nothing set or detected, the worker proposes a test command that the 
   store.close();
 });
 
-test('the Orca terminal screen is read through the CLI for a run that owns one', async () => {
-  let args;
-  const fake = (command, input, options, callback) => { args = input; callback(null, JSON.stringify({ ok: true, result: { terminal: { handle: 'term_1', status: 'running', source: 'screen', tail: ['❯ go', '● Working'] } } })); };
-  assert.deepEqual(await readOrcaTerminal({ sessionId: 'orca:term_1' }, { run: fake }), { handle: 'term_1', status: 'running', source: 'screen', lines: ['❯ go', '● Working'] });
-  assert.ok(args.includes('--screen') && args.includes('term_1'));
-  await assert.rejects(readOrcaTerminal({ sessionId: 'session-1' }, { run: fake }), /no Orca terminal/);
-});
-
 test('every agent writes to the human in English', () => {
   const store = new Store(temporary('english')), desk = new Desk(store, { root: temporary('english-root'), runnerFactory: idle });
   store.put('task', 'task-1', { id: 'task-1', title: '빈 화면', active: true });
@@ -138,7 +129,7 @@ test('workers start with the lessons earlier runs learned', async () => {
   const prompt = desk.prompt({ id: 'w', role: 'worker', taskId: 'task-1', repositoryId: 'repo', worktree: original, branch: 'b', baseBranch: 'develop', port: 1 });
   assert.match(prompt, /Never change the working directory of your shell session/);
   assert.match(prompt, /two or three plain English sentences/);
-  assert.match(prompt, /Reminder: every desk_message, desk_ask, summary, and report to the human is in English\.$/);
+  assert.match(prompt, /Reminder: every desk_message, desk_ask and report to the human is in English\.$/);
   assert.doesNotMatch(prompt, /flow-was Java/, 'Flow lessons only for the Flow repository');
   store.close();
 });
@@ -176,7 +167,7 @@ test('an agent cannot start a run on an issue until the human approves the card 
   const pending = desk.dispatch('agent', { taskId: 'task-1', repositoryId: 'repo' });
   let card;
   for (let attempt = 0; attempt < 50 && !card; attempt++) { card = store.list('interaction').find(item => item.state === 'pending' && item.method === 'dispatch'); if (!card) await new Promise(resolve => setTimeout(resolve, 20)); }
-  assert.match(card.title, /Start a fix on “파일 미리보기/);
+  assert.match(card.title, /Start work on “파일 미리보기/);
   assert.equal(store.list('run').filter(run => run.role === 'worker').length, 0, 'Nothing starts while the card waits');
   desk.answer(card.id, { action: 'decline' });
   await assert.rejects(pending, /did not approve/);
@@ -203,19 +194,6 @@ test('desk_attachment saves an issue screenshot into the run folder for the agen
       assert.equal((await client.callTool({ name: 'desk_attachment', arguments: { url: 'https://example.invalid/other.png' } })).isError, true, 'Only files of the run’s own issue');
     } finally { await client.close(); }
   } finally { await app.close(); }
-});
-
-test('a QA check signs in with the saved test account on test servers, never on production', () => {
-  const store = new Store(temporary('qa-login')), desk = new Desk(store, { root: temporary('qa-login-root'), runnerFactory: idle });
-  store.put('task', 't', { id: 't', title: 'Task form fields', active: true });
-  const verifier = { id: 'v', role: 'verifier', taskId: 't' };
-  assert.match(desk.prompt(verifier), /no test account is saved .* report blocked/);
-  store.saveConfig({ ...defaults, testAccounts: [{ id: 'any', site: '', username: 'qa@example.invalid', password: 'secret-for-test' }] });
-  const prompt = desk.prompt(verifier);
-  assert.match(prompt, /If you land on a login page on a test server, sign in with desk_browser fill: the Flow and Morningmate sign-in form/);
-  assert.match(prompt, /On production that account does not apply/);
-  assert.doesNotMatch(prompt, /the human has no saved sign-in for this site/);
-  store.close();
 });
 
 test('agents may not write the person’s Claude memory or settings, from any profile folder', async () => {

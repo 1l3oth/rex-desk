@@ -407,8 +407,14 @@ body.dragging-tab,body.dragging-tab *{cursor:grabbing!important;user-select:none
 .jev-badge.effort-easy{color:var(--green)}.jev-badge.effort-hard{color:var(--red)}
 .jev-badge.outdated{border-style:dashed}
 .jev-badges{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 6px}
+.desk-status{display:inline-flex;align-items:center;flex:none;padding:1px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:10px;line-height:16px;font-weight:500;white-space:nowrap}
+.desk-status.done{background:var(--green-soft);color:var(--green)}.desk-status.parked,.desk-status.waiting{background:var(--amber-soft);color:var(--amber)}
+.desk-status-picker{display:inline-flex;margin-left:auto}
+.desk-status-picker .filter-select{max-width:170px}
+.row-footer{display:flex;align-items:center;gap:6px;flex:0 0 100%;min-width:0;margin:1px 0 1px 25px;flex-wrap:wrap}
+.row-people{color:var(--faint);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
 .row-badges{display:flex;gap:4px;flex-wrap:wrap;min-width:0}
-.task-open .row-badges{flex:0 0 100%;margin:1px 0 1px 25px}
+.task-open .row-badges{min-width:0}
 .filter-check{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:11.5px;white-space:nowrap}
 .filter-check input{accent-color:var(--accent)}
 .chosen-accounts{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}

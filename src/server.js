@@ -16,7 +16,7 @@ import { profileEnvironment, discoverProfiles } from './agents.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
-import { orcaStatus, showWorktreesInOrca, openInOrca, readOrcaTerminal } from './orca.js';
+import { orcaStatus, showWorktreesInOrca, openInOrca } from './orca.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -95,7 +95,6 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         const configured = store.config().repositories.map(item => item.path).filter(Boolean);
         return json(response, 200, { repositories: discoverRepositories([...configured.map(item => path.dirname(item)), path.dirname(root)], configured) });
       }
-      if (url.pathname === '/api/qa/sign-in' && request.method === 'POST') return json(response, 200, await desk.evidence.openQaSignIn((await body(request)).url));
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
       if (url.pathname === '/api/autostart' && request.method === 'GET') return json(response, 200, autostartStatus());
       if (url.pathname === '/api/autostart' && request.method === 'POST') return json(response, 200, await setAutostart(Boolean((await body(request)).enabled), root));
@@ -193,6 +192,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       const interactionMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/answer$/);
       const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
       if (taskMatch && request.method === 'GET') return json(response, 200, await desk.sources.taskDetail(decodeURIComponent(taskMatch[1]), { refresh: url.searchParams.has('refresh') }));
+      if (taskMatch && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.setDeskStatus(decodeURIComponent(taskMatch[1]), { status: input.deskStatus, note: input.deskNote, by: 'you' })); }
       if (url.pathname === '/api/task-file' && request.method === 'GET') {
         const media = await cachedTaskMedia(store, url.searchParams.get('task') || '', url.searchParams.get('url') || '', { fetcher: imageFetcher });
         return serveFile(request, response, media, { cache: 'private, max-age=604800' });
@@ -202,12 +202,11 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         return serveFile(request, response, image, { cache: 'private, max-age=604800' });
       }
       if (interactionMatch && request.method === 'POST') return json(response, 200, desk.answer(interactionMatch[1], await body(request)));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish|orca|tracker|terminal|say))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|orca|say))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         if (request.method === 'GET') {
-          if (action === 'messages' || action === 'journal') return json(response, 200, store.events(runId, { visible: action === 'messages' }));
-          if (action === 'terminal') return json(response, 200, await readOrcaTerminal(desk.run(runId)));
+          if (action === 'messages') return json(response, 200, store.events(runId, { visible: true }));
           return json(response, 200, desk.run(runId));
         }
         if (request.method === 'POST') {
@@ -216,7 +215,6 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
           if (action === 'say') return json(response, 200, await desk.say(runId, input.text));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));
           if (action === 'verify') return json(response, 200, await desk.verify(runId));
-          if (action === 'tracker') return json(response, 200, await desk.trackerFromQa(runId, input.phase));
           if (action === 'publish') return json(response, 200, await desk.publish(runId, { ...input, approved: true }));
           if (action === 'orca') { const run = desk.run(runId); if (!run.worktree) throw new Error('This run has no worktree to open.'); return json(response, 200, await openInOrca(run)); }
         }

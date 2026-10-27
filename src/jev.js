@@ -9,7 +9,7 @@ export const effortLabels = ['Easy', 'Medium', 'Hard'];
 export const platformLabels = { web: 'Web', desktop: 'Desktop app', mobile: 'Mobile', unclear: 'Any surface' };
 // An issue about a version older than the one running is often already fixed, so anything this likely is called out.
 export const outdatedThreshold = 0.6;
-export const actionLabels = { fix: 'Fix', verify: 'Verify', wait: 'Waiting', skip: 'Skip' };
+export const actionLabels = { fix: 'Fix', shipped: 'Already fixed', wait: 'Waiting', skip: 'Skip' };
 export const jevQuestions = {
   severity: { type: 'score', instructions: 'How severe is the problem in this issue for the product’s users?', criteria: [
     'Cosmetic: wording, spacing, or a visual detail; users are not blocked',
@@ -19,7 +19,7 @@ export const jevQuestions = {
     'Critical: data loss, a security or privacy exposure, payments, or the app is unusable'] },
   action: { type: 'choice', instructions: 'Judging by the tracker status, description, and comments, what should happen next with this issue?', criteria: {
     fix: 'An open bug or request that still needs a code change',
-    verify: 'A developer reports it fixed or development is complete; it needs a QA re-test',
+    shipped: 'A developer reports it fixed, or development is complete, so nothing is left to change',
     wait: 'Blocked: waiting for information, a decision, another team, or a release',
     skip: 'Not actionable: a duplicate, already confirmed resolved, or not a product problem' } },
   effort: { type: 'score', instructions: 'How hard is this issue for a skilled developer to fix?', criteria: [
@@ -73,8 +73,7 @@ export function priorityOf(task, analysis, run, today = new Date()) {
   if (platform === 'mobile') value -= 2;
   if (outdated !== null && outdated >= outdatedThreshold) value -= 2;
   if (days !== null) value += days < 0 ? 3 : days <= 1 ? 2.5 : days <= 3 ? 1.5 : days <= 7 ? 0.5 : 0;
-  if (action === 'verify') value += 0.5;
-  const group = run && activeStates.has(run.state) ? 'running' : run && doneStates.has(run.state) ? 'done' : action === 'wait' || action === 'skip' ? 'later' : 'next';
+  const group = run && activeStates.has(run.state) ? 'running' : run && doneStates.has(run.state) ? 'done' : ['wait', 'skip', 'shipped'].includes(action) ? 'later' : 'next';
   const reasons = [severity !== null && `${severityLabels[Math.round(severity)]} severity`, action && actionLabels[action], effort !== null && `${effortLabels[Math.round(effort)].toLowerCase()} to fix`,
     platform && platform !== 'unclear' && platformLabels[platform], outdated !== null && outdated >= outdatedThreshold && 'may already be fixed',
     days !== null && (days < 0 ? `overdue ${-days}d` : days === 0 ? 'due today' : `due in ${days}d`), web !== null && web < 0.4 && 'hard to check in a browser'].filter(Boolean);

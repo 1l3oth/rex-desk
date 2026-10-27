@@ -18,14 +18,6 @@ export function orcaJson(args, { run = execFile, timeout = 30000 } = {}) {
     resolve(data.result ?? data);
   }));
 }
-// What the run's Orca terminal shows right now, read through the Orca CLI. Nothing is stored; the dashboard polls while the run is open.
-export async function readOrcaTerminal(run, options) {
-  const handle = String(run.sessionId || '').startsWith('orca:') ? run.sessionId.slice(5) : '';
-  if (!handle) throw new Error('This run has no Orca terminal.');
-  const result = await orcaJson(['terminal', 'read', '--terminal', handle, '--screen', '--limit', '400'], options);
-  const terminal = result.terminal || result;
-  return { handle, status: terminal.status || '', source: terminal.source || '', lines: Array.isArray(terminal.tail) ? terminal.tail : String(terminal.tail || '').split('\n') };
-}
 // Rex Desk creates its own worktrees (branch pattern, port, runtime seed). Orca shows them only when the repo shows external worktrees.
 export async function orcaRepository(repositoryPath, options) {
   const result = await orcaJson(['repo', 'list'], options);
@@ -97,7 +89,7 @@ export class OrcaRunner {
     }
     while (!this.signal.aborted) {
       await new Promise(resolve => setTimeout(resolve, this.pollMs || 2500));
-      try { this.mirror?.pump(); } catch (error) { this.event?.('mirror-error', { message: error.message }); }
+      try { this.session?.track(); } catch { /* the session file appears a moment after the terminal starts */ }
       if (this.isDone?.()) return { status: 'completed' };
       let shown;
       try { shown = await orcaJson(['terminal', 'show', '--terminal', this.handle], this.orca); }
@@ -111,12 +103,12 @@ export class OrcaRunner {
   close() {}
 }
 
-// Reads the session log an Orca agent writes (Claude Code: <config>/projects/<cwd>/<id>.jsonl; Codex: <home>/sessions/.../rollout-*.jsonl)
-// and turns each new line into the same events a headless run produces, so the run page shows a chat instead of a terminal.
-export class SessionMirror {
-  constructor({ provider, cwd, configDirectory, since, state = {}, emit, persist = () => {} }) {
-    Object.assign(this, { provider, cwd, configDirectory, since: Date.parse(since || 0) || 0, emit, persist });
-    this.file = state.file || ''; this.offset = state.offset || 0; this.rest = '';
+// Finds the session log an Orca agent writes (Claude Code: <config>/projects/<cwd>/<id>.jsonl; Codex: <home>/sessions/.../rollout-*.jsonl).
+// Rex Desk does not read what is in it: the file name carries the session id, which is what reopens that session for a follow-up.
+export class AgentSession {
+  constructor({ provider, cwd, configDirectory, since, state = {}, persist = () => {} }) {
+    Object.assign(this, { provider, cwd, configDirectory, since: Date.parse(since || 0) || 0, persist });
+    this.file = state.file || '';
   }
   locate() {
     const recent = file => { try { return statSync(file).mtimeMs >= this.since - 60000; } catch { return false; } };
@@ -135,48 +127,17 @@ export class SessionMirror {
     }
     return '';
   }
-  pump() {
-    if (!this.file) { this.file = this.locate(); this.offset = 0; if (!this.file) return; }
-    let size; try { size = statSync(this.file).size; } catch { return; }
-    if (size <= this.offset) return;
-    const handle = openSync(this.file, 'r'), buffer = Buffer.alloc(Math.min(size - this.offset, 8 * 1024 * 1024));
-    try { readSync(handle, buffer, 0, buffer.length, this.offset); } finally { closeSync(handle); }
-    this.offset += buffer.length;
-    const lines = (this.rest + buffer.toString('utf8')).split('\n'); this.rest = lines.pop();
-    for (const line of lines) { let entry; try { entry = JSON.parse(line); } catch { continue; } for (const [kind, data] of sessionEvents(this.provider, entry)) this.emit(kind, data); }
-    this.persist({ file: this.file, offset: this.offset - Buffer.byteLength(this.rest) });
+  // Called while the run is alive: the log appears a moment after the terminal starts.
+  track() {
+    if (this.file && existsSync(this.file)) return this.file;
+    const found = this.locate();
+    if (found && found !== this.file) { this.file = found; this.persist({ file: found }); }
+    return this.file;
   }
 }
 function readFirstLine(file) {
   const handle = openSync(file, 'r'), buffer = Buffer.alloc(64 * 1024);
   try { const read = readSync(handle, buffer, 0, buffer.length, 0); return buffer.subarray(0, read).toString('utf8').split('\n')[0]; } finally { closeSync(handle); }
-}
-const rexInstructions = text => /^You are running inside Rex Desk/.test(String(text).trim());
-// One session line becomes zero or more Rex events: the human's words, the agent's text and tool calls, and tool results.
-export function sessionEvents(provider, entry) {
-  if (provider === 'claude') {
-    const content = entry.message?.content;
-    if (entry.type === 'assistant') { const blocks = (content || []).filter(block => block.type === 'text' || block.type === 'tool_use'); return blocks.length ? [['agent-operation', { type: 'assistant', content: blocks }]] : []; }
-    if (entry.type !== 'user' || entry.isMeta) return [];
-    if (typeof content === 'string') return content.trim() && !content.startsWith('<') ? [rexInstructions(content) ? ['phase', { text: 'The agent received its instructions from Rex Desk' }] : ['human-message', { text: content }]] : [];
-    const results = (content || []).filter(block => block.type === 'tool_result'), text = (content || []).filter(block => block.type === 'text' && !block.text.startsWith('<')).map(block => block.text).join('\n');
-    return [...(results.length ? [['agent-operation', { type: 'tool-result', content: results }]] : []), ...(text.trim() ? [rexInstructions(text) ? ['phase', { text: 'The agent received its instructions from Rex Desk' }] : ['human-message', { text }]] : [])];
-  }
-  const payload = entry.payload || {};
-  if (entry.type === 'event_msg' && payload.type === 'agent_message' && payload.message) return [['agent-operation', { type: 'assistant', content: [{ type: 'text', text: payload.message }] }]];
-  if (entry.type === 'response_item' && payload.type === 'message' && payload.role === 'user') {
-    const text = (payload.content || []).map(item => item.text || '').join('\n');
-    return text.trim() && !text.trim().startsWith('<') ? [rexInstructions(text) ? ['phase', { text: 'The agent received its instructions from Rex Desk' }] : ['human-message', { text }]] : [];
-  }
-  if (entry.type === 'response_item' && ['function_call', 'custom_tool_call'].includes(payload.type)) {
-    let input = payload.arguments ?? payload.input; try { input = JSON.parse(input); } catch {}
-    return [['agent-operation', { type: 'assistant', content: [{ type: 'tool_use', id: payload.call_id, name: payload.name, input }] }]];
-  }
-  if (entry.type === 'response_item' && ['function_call_output', 'custom_tool_call_output'].includes(payload.type)) {
-    let output = payload.output; try { output = JSON.parse(output).output ?? output; } catch {}
-    return [['agent-operation', { type: 'tool-result', content: [{ tool_use_id: payload.call_id, content: typeof output === 'string' ? output : JSON.stringify(output) }] }]];
-  }
-  return [];
 }
 // A message typed in Rex Desk goes into the agent's terminal as if typed there; Enter submits it, and a busy agent queues it.
 export async function sendToOrca(run, text, options) {

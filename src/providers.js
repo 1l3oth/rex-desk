@@ -285,7 +285,8 @@ export class Sources {
       const previous = this.store.get('task', task.id);
       const reusable = previous?.detailLoaded && task.detailLoaded === false && previous.postId === task.postId && (!task.updatedAt || previous.updatedAt === task.updatedAt);
       const detail = reusable ? Object.fromEntries(['description', 'contentImages', 'contentFiles', 'images', 'files', 'comments', 'url', 'detailLoadedAt'].map(key => [key, previous[key]])) : {};
-      this.store.put('task', task.id, { ...task, ...detail, ...(reusable ? { detailLoaded: true, raw: { ...task.raw, post: previous.raw?.post } } : {}), category: previous?.category || '', runId: previous?.runId });
+      this.store.put('task', task.id, { ...task, ...detail, ...(reusable ? { detailLoaded: true, raw: { ...task.raw, post: previous.raw?.post } } : {}), category: previous?.category || '', runId: previous?.runId,
+        deskStatus: previous?.deskStatus || '', deskNote: previous?.deskNote || '', deskStatusAt: previous?.deskStatusAt || '', deskStatusBy: previous?.deskStatusBy || '' });
     }
     for (const set of statusSets) this.store.put('statuses', `${source.id}:${set.projectId}`, set);
     const people = this.store.get('directory', source.id)?.employees || [];

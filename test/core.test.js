@@ -246,8 +246,8 @@ test('a pull request is refused before the human is asked, not after they approv
   const base = { id: 'pub-1', role: 'worker', taskId: 'task-1', branch: 'temp/rex/fix/search', worktree: temporary('publish-tree'), targetBranch: 'global/develop', baseCommit: 'abc', createdAt: now() };
   desk.ask = async request => { asked.push(request); return { action: 'accept' }; };
 
-  store.put('run', 'pub-1', { ...base, state: 'needs_evidence', checks: { testsPassed: true, recordedVideo: false, browserAssertionPassed: false } });
-  await assert.rejects(desk.requestPublish('pub-1', {}), /no browser recording was made, no browser assertion matches the current files/);
+  store.put('run', 'pub-1', { ...base, state: 'needs_evidence', checks: { testsPassed: false } });
+  await assert.rejects(desk.requestPublish('pub-1', {}), /the repository tests have not passed for the files as they are now/);
   assert.equal(asked.length, 0, 'The human is never asked to approve a pull request that would then be refused');
 
   store.put('run', 'pub-1', { ...base, state: 'running' });

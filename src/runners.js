@@ -152,8 +152,7 @@ export class ClaudeRunner {
     delete connections.rex_desk;
     const options = { cwd: this.cwd, env, abortController: this.controller,
       permissionMode: this.run.role === 'worker' ? 'acceptEdits' : 'default',
-      // A QA verifier may read the repository's documentation to find where the project runs.
-      ...(this.run.role === 'verifier' && this.sourcePath ? { additionalDirectories: [this.sourcePath, ...(this.artifactDirectory ? [this.artifactDirectory] : [])] } : this.artifactDirectory ? { additionalDirectories: [this.artifactDirectory] } : {}),
+      ...(this.artifactDirectory ? { additionalDirectories: [this.artifactDirectory] } : {}),
       settingSources: ['user', 'project', 'local'],
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
       ...(this.model ? { model: this.model } : {}), ...(this.run.sessionId ? { resume: this.run.sessionId } : {}),

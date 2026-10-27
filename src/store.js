@@ -8,13 +8,19 @@ import { validateFlowRuntime } from './flow-runtime.js';
 import { validateElectronRuntime } from './electron-runtime.js';
 import { TursoSync } from './turso.js';
 
+// Where an issue stands in Rex Desk itself. The tracker keeps its own status; this one is for the people and agents
+// working here, and anyone may change it.
+export const deskStatuses = [['new', 'New'], ['investigating', 'Investigating'], ['waiting', 'Waiting'], ['ready', 'Ready to fix'],
+  ['fixing', 'Fixing'], ['review', 'In review'], ['done', 'Done here'], ['parked', 'Parked']];
+export const deskStatusLabels = Object.fromEntries(deskStatuses);
+export const deskStatus = value => (deskStatusLabels[String(value || '').trim().toLowerCase()] ? String(value).trim().toLowerCase() : '');
 export const now = () => new Date().toISOString();
 export const id = () => randomUUID();
 export const defaults = {
   name: 'Rex', provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
-  syncMinutes: 5, requireVideo: true, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
+  syncMinutes: 5, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
   models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false, execution: 'orca',
-  schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], verify: true, fix: false, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
+  schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], fix: true, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
 };
 // Claude Code accepts family aliases (opus, sonnet, haiku, fable) or full IDs such as claude-opus-5-5. Typed shorthand is normalized.
 export function modelName(provider, value) {
@@ -29,7 +35,7 @@ function scheduleSettings(input = {}) {
   const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(input.time) ? input.time : defaults.schedule.time;
   const days = [...new Set((Array.isArray(input.days) ? input.days : defaults.schedule.days).map(Number).filter(day => Number.isInteger(day) && day >= 0 && day <= 6))].sort();
   const maxRuns = Number.isInteger(Number(input.maxRuns)) ? Math.min(20, Math.max(1, Number(input.maxRuns))) : defaults.schedule.maxRuns;
-  return { enabled: Boolean(input.enabled), time, days, verify: input.verify !== false, fix: Boolean(input.fix), maxRuns };
+  return { enabled: Boolean(input.enabled), time, days, fix: input.fix !== false, maxRuns };
 }
 // null keeps the profile inherited from the launching terminal; '' selects the CLI's default home folder.
 function agentProfile(value, name) {
@@ -200,7 +206,7 @@ export class Store extends EventEmitter {
       username: String(account.username || '').trim().slice(0, 200) })).filter(account => account.username);
     const config = { ...defaults, name: String(input.name || 'Rex'), provider: input.provider,
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
-      syncMinutes: input.syncMinutes, requireVideo: input.requireVideo !== false, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex) }, sources, repositories,
+      syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
       tourDismissed: Boolean(input.tourDismissed), execution: 'orca', testAccounts: accounts,
       schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false, versions: String(input.jev?.versions || '').trim().slice(0, 300) } };

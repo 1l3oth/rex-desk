@@ -37,15 +37,14 @@ test('risk floors override an optimistic agent score for application, sensitive,
 });
 
 test('automatic draft PRs need the setting, verified current evidence, a 1–2 score, and no review flag', () => {
-  const run = { state: 'ready_for_review', checks: { testsPassed: true, recordedVideo: true, browserAssertionPassed: true },
+  const run = { state: 'ready_for_review', checks: { testsPassed: true },
     risk: { score: 2, requiresHumanReview: false, fingerprint: 'current' }, verification: { fingerprint: 'current' } };
-  const config = { autoPrLowRisk: true, requireVideo: true };
+  const config = { autoPrLowRisk: true };
   assert.equal(automaticPrAllowed(config, run, 'current'), true);
   assert.equal(automaticPrAllowed({ ...config, autoPrLowRisk: false }, run, 'current'), false, 'Off by default');
   assert.equal(automaticPrAllowed(config, run, 'changed'), false, 'Code changed after verification');
   assert.equal(automaticPrAllowed(config, { ...run, risk: { ...run.risk, score: 3 } }, 'current'), false);
   assert.equal(automaticPrAllowed(config, { ...run, risk: { ...run.risk, requiresHumanReview: true } }, 'current'), false);
-  assert.equal(automaticPrAllowed(config, { ...run, checks: { ...run.checks, recordedVideo: false } }, 'current'), false);
-  assert.equal(automaticPrAllowed({ ...config, requireVideo: false }, { ...run, checks: { ...run.checks, recordedVideo: false } }, 'current'), true);
+  assert.equal(automaticPrAllowed(config, { ...run, checks: { testsPassed: false } }, 'current'), false, 'The repository tests still have to pass');
   assert.equal(automaticPrAllowed(config, { ...run, state: 'needs_evidence' }, 'current'), false);
 });
