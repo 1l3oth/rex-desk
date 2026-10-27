@@ -216,7 +216,7 @@ function nextUp() {
   if (!top) return `<div class="next-up empty">${icon('agents')}<span>${jev.running ? 'Jev is ranking your issues…' : 'No ranking yet.'}</span>${jev.running ? '' : button('Prioritize', 'prioritize', 'small')}</div>`;
   const task = ui.snapshot.tasks.find(item => item.id === top.taskId);
   if (!task) return '';
-  return `<div class="next-up"><div class="next-up-head"><span>Next up</span><span class="rank-chip sev-${Math.round(top.severity ?? 0)}">1</span></div><button class="next-up-title" data-task="${esc(task.id)}">${sourceLogo(task.source)}<span>${esc(task.title)}</span></button><p>${esc(top.reasons.join(' · '))}</p>${button(`${icon(top.action === 'verify' ? 'check' : 'play')} ${top.action === 'verify' ? 'Verify fix' : 'Fix with agent'}`, 'run-next', 'small primary', `data-task-id="${esc(task.id)}" data-mode="${top.action === 'verify' ? 'verify' : 'fix'}"`)}</div>`;
+  return `<div class="next-up"><div class="next-up-head"><span>Next up</span><span class="rank-chip sev-${Math.round(top.severity ?? 0)}">1</span></div><button class="next-up-title" data-task="${esc(task.id)}">${sourceLogo(task.source)}<span>${esc(task.title)}</span></button><p>${esc(top.reasons.join(' · '))}</p>${button(`${icon('play')} Investigate with agent`, 'run-next', 'small primary', `data-task-id="${esc(task.id)}" `)}</div>`;
 }
 function renderPriority(task) {
   const item = priorityMap().get(task.id), jev = ui.snapshot.jev || {};
@@ -1272,7 +1272,7 @@ document.addEventListener('click', event => {
       if (result) toast(result.failed ? `Jev rated ${result.done - result.failed} of ${result.total}; ${result.failed} failed: ${result.error}` : result.total ? `Jev rated ${plural(result.total, 'issue')}. The list is in priority order.` : 'Every issue is already rated. Shift-click Prioritize to re-check all.', Boolean(result?.failed));
     }); return;
   }
-  if (name === 'run-next') { ui.selectedTask = target.dataset.taskId; resetDetailTab(); render(); void launchDialog({ mode: target.dataset.mode }); return; }
+  if (name === 'run-next') { ui.selectedTask = target.dataset.taskId; resetDetailTab(); render(); void launchDialog(); return; }
   if (name === 'launch-task') { void launchDialog(); return; }
   if (name === 'select-projects') {
     const boxes = [...document.querySelectorAll('[data-source-project]')].filter(box => box.dataset.sourceProject === target.dataset.id && !box.closest('[hidden]'));
