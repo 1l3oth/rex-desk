@@ -16,6 +16,7 @@ import { profileEnvironment, discoverProfiles } from './agents.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
+import { weeklyReport } from './report.js';
 import { orcaStatus, showWorktreesInOrca, openInOrca } from './orca.js';
 
 const exec = promisify(execFile);
@@ -95,6 +96,8 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         const configured = store.config().repositories.map(item => item.path).filter(Boolean);
         return json(response, 200, { repositories: discoverRepositories([...configured.map(item => path.dirname(item)), path.dirname(root)], configured) });
       }
+      if (url.pathname === '/api/report' && request.method === 'GET') return json(response, 200, await weeklyReport(store, { from: url.searchParams.get('from'), to: url.searchParams.get('to'), detail: taskId => desk.sources.taskDetail(taskId, { refresh: true }) }));
+      if (url.pathname === '/api/query' && request.method === 'POST') return json(response, 200, await desk.query.ask((await body(request)).text));
       if (url.pathname === '/api/repositories/scan' && request.method === 'POST') { await desk.scanRepositories(); return json(response, 200, desk.snapshot().catalog); }
       if (url.pathname === '/api/repositories/catalog' && request.method === 'GET') return json(response, 200, store.list('repository'));
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());

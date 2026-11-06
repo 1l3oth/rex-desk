@@ -8,7 +8,7 @@ const taskFile = (task, address) => `/api/task-file?task=${encodeURIComponent(ta
 // Attachments the viewer can show, judged by name; the server checks the real bytes before serving.
 const mediaKind = name => /\.(png|jpe?g|gif|webp|bmp)$/i.test(name) ? 'image' : /\.(mp4|webm|mov|m4v)$/i.test(name) ? 'video' : '';
 const viewable = (kind, src, name, original = '') => `data-view="${kind}" data-view-src="${esc(src)}" data-view-name="${esc(name)}"${original ? ` data-view-original="${esc(original)}"` : ''}`;
-const ui = { page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', search: '', source: '', category: '', person: '', deskStatus: '', platform: '', difficulty: '', hideOutdated: false, snapshot: null, runEvents: new Map(), transcripts: new Map(), openRuns: [], layout: 'grid', runSide: 'runs', selectedDecision: '', draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false,
+const ui = { query: { text: '', loading: false, result: null, error: '' }, report: { from: '', to: '', loading: false, result: null, error: '' }, page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', search: '', source: '', category: '', person: '', deskStatus: '', platform: '', difficulty: '', hideOutdated: false, snapshot: null, runEvents: new Map(), transcripts: new Map(), openRuns: [], layout: 'grid', runSide: 'runs', selectedDecision: '', draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false,
   sort: 'priority', found: null, foundLoading: false, detailLayout: 'tabs', tabSecond: 'messages', splitRatio: 0.5, sideWidth: 0, proofWidth: 0, dragging: false, missedRender: false };
 const labels = { queued: 'Queued', starting: 'Preparing', running: 'Working', waiting: 'Needs you', needs_evidence: 'Needs evidence', ready_for_review: 'Ready for review', published: 'PR created', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted', finished: 'Finished', qa_passed: 'QA passed', qa_failed: 'QA failed', qa_blocked: 'QA blocked' };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -89,6 +89,7 @@ function navigate(page, { runId, taskId } = {}) {
   if (runId) openRun(runId);
   if (taskId) ui.selectedTask = taskId;
   if (page === 'settings' && !ui.draft) ui.draft = structuredClone(ui.snapshot.config);
+  if (page === 'report' && !ui.report.result && !ui.report.loading) { void loadReport(); return; }
   render(); void loadMessages();
 }
 // Open runs and the pane layout are a per-browser convenience, so they live in localStorage.
@@ -170,7 +171,7 @@ async function refresh({ force = false } = {}) {
 function render() {
   const state = ui.snapshot;
   if (!state) return;
-  const pages = [['inbox', 'inbox', 'My issues'], ['runs', 'agents', 'Agent runs'], ['board', 'board', 'Kanban'], ['decisions', 'question', 'Needs you'], ['evidence', 'play', 'Evidence']];
+  const pages = [['inbox', 'inbox', 'My issues'], ['runs', 'agents', 'Agent runs'], ['board', 'board', 'Kanban'], ['decisions', 'question', 'Needs you'], ['evidence', 'play', 'Evidence'], ['search', 'search', 'Ask the trackers'], ['report', 'file', 'Weekly report']];
   const steps = setupSteps(), remaining = steps.filter(step => !step.done && !step.optional).length;
   const waiting = pending().length, active = state.runs.filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state)).length;
   const board = ui.page === 'board' || ui.page === 'inbox' && ui.view === 'board';
@@ -180,7 +181,7 @@ function render() {
   const synced = state.sync.length ? relative(state.sync.map(item => item.at).sort().at(-1)) : '';
   app.innerHTML = `<div class="shell${side ? ' with-side' : ''}"><nav class="activity" aria-label="Workspace"><span class="brand-mark" title="Rex Desk" aria-hidden="true"><i></i><i></i><i></i><i></i></span>${pages.map(navButton).join('')}<span class="activity-spacer"></span>${[['setup', 'compass', 'Setup'], ['settings', 'settings', 'Settings']].map(navButton).join('')}${themeButton()}</nav>
     ${side ? `<aside class="side" aria-label="${ui.page === 'runs' ? 'Agent runs' : 'Assigned issues'}">${side}</aside>${sideResizer()}` : ''}
-    <main class="main page-${ui.page}${board ? ' page-board' : ''}" id="main" tabindex="-1">${ui.page === 'setup' ? renderSetup(steps) : ui.page === 'settings' ? renderSettings() : ui.page === 'decisions' ? renderDecisions() : ui.page === 'runs' ? renderWorkspace() : ui.page === 'evidence' ? renderEvidence() : board ? renderBoardPage() : renderInboxMain()}</main>
+    <main class="main page-${ui.page}${board ? ' page-board' : ''}" id="main" tabindex="-1">${ui.page === 'setup' ? renderSetup(steps) : ui.page === 'settings' ? renderSettings() : ui.page === 'decisions' ? renderDecisions() : ui.page === 'runs' ? renderWorkspace() : ui.page === 'evidence' ? renderEvidence() : ui.page === 'search' ? renderSearch() : ui.page === 'report' ? renderReport() : board ? renderBoardPage() : renderInboxMain()}</main>
     <footer class="statusbar"><span class="status-local"><span class="dot"></span>Running on this computer</span><span class="status-${esc(database.state || 'local')}">${cloud}${database.pending ? ` · ${Number(database.pending)} waiting` : ''}</span><span>${active} active · ${state.config.concurrency} worker${state.config.concurrency === 1 ? '' : 's'}</span>${waiting ? `<span class="status-need">${plural(waiting, 'decision')} waiting</span>` : ''}<span class="status-right">${providerName(state.config.provider)} default${synced ? ` · Synced ${synced}` : ''}</span></footer></div>`;
   if (ui.page === 'settings') for (const repository of ui.draft.repositories) previewBranch(repository.id);
   restoreTranscript();
@@ -188,6 +189,63 @@ function render() {
   if (['setup', 'settings'].includes(ui.page) && !ui.agents && !ui.agentsLoading && !ui.agentsError) void loadAgents();
   if (ui.page === 'settings' && !ui.github) void loadGithub();
   if (ui.page === 'settings') void loadAutostart();
+}
+// ---- Ask the trackers: a typed sentence becomes a checked filter, and Flow and Morningmate are read live with it.
+const queryExamples = ['My open tasks', 'New tasks not assigned to me', 'JP tasks created this week', 'Tasks updated today'];
+const statusWords = { open: 'not finished', request: 'new (Request)', working: 'in progress', done: 'finished' };
+function describeIntent(intent) {
+  const parts = [intent.assignee === 'me' ? 'assigned to you' : intent.assignee === 'not-me' ? 'not assigned to you' : intent.assignee !== 'anyone' ? `assigned to ${personName(intent.assignee)}` : '',
+    intent.statusNames.length ? `status ${intent.statusNames.join(' or ')}` : statusWords[intent.status] || '',
+    intent.projects.length ? `in ${intent.projects.join(', ')}` : 'in your followed projects', intent.sources.length ? `from ${intent.sources.join(', ')}` : '',
+    ...Object.entries(intent.fields).map(([field, options]) => `${field}: ${options.join(' or ')}`), intent.keyword && `title has "${intent.keyword}"`,
+    (intent.numberFrom || intent.numberTo) && `No. ${intent.numberFrom || '…'} to ${intent.numberTo || '…'}`,
+    (intent.createdFrom || intent.createdTo) && `created ${intent.createdFrom || '…'} to ${intent.createdTo || '…'}`,
+    (intent.updatedFrom || intent.updatedTo) && `updated ${intent.updatedFrom || '…'} to ${intent.updatedTo || '…'}`].filter(Boolean);
+  return parts.map(part => `<span class="intent-chip">${esc(part)}</span>`).join('');
+}
+function renderSearch() {
+  const query = ui.query, result = query.result;
+  const form = `<form id="query-form" class="query-form"><label class="search-field">${icon('search')}<input name="text" aria-label="What to look for" placeholder="For example: my open tasks, JP tasks this week, new tasks not assigned to me" value="${esc(query.text)}" ${query.loading ? 'disabled' : ''}></label><button class="button primary" type="submit" ${query.loading ? 'disabled' : ''}>${query.loading ? 'Asking…' : 'Ask'}</button></form>
+    <div class="query-examples">${queryExamples.map(text => button(esc(text), 'query-example', 'small quiet', `type="button" data-text="${esc(text)}"`)).join('')}</div>`;
+  const row = item => `<tr><td class="task-number">${esc(item.number)}</td><td>${item.onDesk ? `<button class="link-button" data-task="${esc(item.id)}" data-from-board="1" title="Open in My issues">${esc(item.title)}</button>` : item.url ? `<a href="${esc(safeUrl(item.url))}" target="_blank" rel="noopener">${esc(item.title)}</a>` : esc(item.title)}</td><td>${tag(item.status)}</td><td>${esc(item.assignees.join(', '))}</td><td>${esc(item.project)}</td><td>${esc(String(item.createdAt || '').slice(0, 10))}</td></tr>`;
+  const body = query.loading ? '<p class="loading">Reading the trackers live. Large projects take up to 20 seconds.</p>'
+    : query.error ? `<div class="notice">${icon('alert')}<span>${esc(query.error)}</span></div>`
+    : result ? `<div class="query-understood"><span class="muted">Understood as</span>${describeIntent(result.intent)}${result.intent.dropped.length ? `<small class="muted">Ignored: ${esc(result.intent.dropped.join(', '))}</small>` : ''}</div>
+      ${result.errors.map(error => `<div class="notice">${icon('alert')}<span>${esc(error)}</span></div>`).join('')}
+      <p class="muted">${result.total} task${result.total === 1 ? '' : 's'}${result.total > result.rows.length ? `, newest ${result.rows.length} shown` : ''}</p>
+      ${result.rows.length ? `<table class="query-table"><thead><tr><th>No.</th><th>Title</th><th>Status</th><th>Assignee</th><th>Project</th><th>Created</th></tr></thead><tbody>${result.rows.map(row).join('')}</tbody></table>` : '<p class="empty-small">Nothing matches.</p>'}`
+    : '';
+  return `${heading('Ask the trackers', 'Type what you want to see. Rex Desk reads Flow and Morningmate live; the model only turns your words into a filter.')}<div class="query-page">${form}${body}</div>`;
+}
+async function runQuery(text) {
+  ui.query = { text, loading: true, result: null, error: '' }; render();
+  try { ui.query = { text, loading: false, result: await api('/query', { method: 'POST', data: { text } }), error: '' }; }
+  catch (error) { ui.query = { text, loading: false, result: null, error: error.message }; }
+  if (ui.page === 'search') render();
+}
+
+// ---- Weekly report: one card per issue worked on in the range, with its QA details, every commit and pull request.
+function renderReport() {
+  const report = ui.report, result = report.result;
+  const form = `<form id="report-form" class="report-form"><label class="field"><span>From</span><input type="date" name="from" value="${esc(result?.from || report.from)}"></label><label class="field"><span>To</span><input type="date" name="to" value="${esc(result?.to || report.to)}"></label><button class="button primary" type="submit" ${report.loading ? 'disabled' : ''}>${report.loading ? 'Loading…' : 'Show'}</button>${result?.cards.length ? button(`${icon('copy')} Copy as text`, 'copy-report', 'quiet', 'type="button"') : ''}</form>`;
+  const runBlock = run => `<section class="report-run"><p><strong>${esc(run.repository || 'Repository')}</strong> · <code>${esc(run.branch || 'no branch')}</code> · ${tag(run.state)}${run.prUrl ? ` · <a href="${esc(safeUrl(run.prUrl))}" target="_blank" rel="noopener">PR${run.prNumber ? ` #${esc(run.prNumber)}` : ''}</a>${run.prState ? ` (${esc(String(run.prState).toLowerCase())})` : ''}` : ''}</p>
+    ${run.commits.length ? `<ul class="report-commits">${run.commits.map(commit => `<li><code>${esc(commit.hash)}</code> ${esc(commit.subject)}</li>`).join('')}</ul>` : `<p class="muted">${esc(run.error || 'No commits.')}</p>`}</section>`;
+  const card = item => `<article class="report-card"><header><span class="task-number">${esc(item.number ? `QA ${item.number}` : 'No QA number')}</span>${item.status ? tag(item.status) : ''}${item.deskStatus ? `<span class="desk-status">${esc(deskStatusLabels[item.deskStatus] || item.deskStatus)}</span>` : ''}</header>
+    <h3>${esc(item.title)}</h3><p class="muted">${esc([item.source && (item.source === 'flow' ? 'Flow' : 'Morningmate'), item.project].filter(Boolean).join(' · '))}${item.url ? ` · <a href="${esc(safeUrl(item.url))}" target="_blank" rel="noopener">QA link</a>` : ' · QA link not loaded'}</p>${item.runs.map(runBlock).join('')}</article>`;
+  const body = report.loading ? '<p class="loading">Reading runs and git history…</p>'
+    : report.error ? `<div class="notice">${icon('alert')}<span>${esc(report.error)}</span></div>`
+    : result ? (result.cards.length ? `<div class="report-cards">${result.cards.map(card).join('')}</div>` : '<p class="empty-small">No agent runs in this range.</p>') : '';
+  return `${heading('Weekly report', 'Every issue an agent worked on: QA status, number and link, each commit, and each pull request.')}<div class="report-page">${form}${body}</div>`;
+}
+async function loadReport(from = '', to = '') {
+  ui.report = { ...ui.report, from, to, loading: true, error: '' }; render();
+  try { ui.report = { from, to, loading: false, result: await api(`/report?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`), error: '' }; }
+  catch (error) { ui.report = { from, to, loading: false, result: null, error: error.message }; }
+  if (ui.page === 'report') render();
+}
+function reportText(result) {
+  return [`Weekly report ${result.from} to ${result.to}`, ...result.cards.map(card => ['', `${card.number ? `QA ${card.number} · ` : ''}${card.title}`, `Status: ${card.status || 'unknown'}${card.url ? ` · ${card.url}` : ''}`,
+    ...card.runs.flatMap(run => [`  ${run.repository} ${run.branch}${run.prUrl ? ` · ${run.prUrl}` : ''}`, ...run.commits.map(commit => `    - ${commit.subject}`)])].join('\n'))].join('\n');
 }
 function heading(title, subtitle, controls = '') {
   return `<header class="titlebar"><div class="titlebar-text"><h1>${title}</h1><p>${subtitle}</p></div><div class="actions">${controls}</div></header>`;
@@ -1170,6 +1228,8 @@ document.addEventListener('click', event => {
   const name = target.dataset.action; if (!name) return;
   // Run actions in a pane apply to that pane's run.
   const paneRun = target.closest('[data-pane-run]')?.dataset.paneRun; if (paneRun && name !== 'close-run') ui.selectedRun = paneRun;
+  if (name === 'query-example') { void runQuery(target.dataset.text); return; }
+  if (name === 'copy-report') { void navigator.clipboard.writeText(reportText(ui.report.result)).then(() => toast('Report copied.')); return; }
   if (name === 'retry-task-detail') { taskErrors.delete(ui.selectedTask); render(); void loadTaskDetail(); return; }
   if (name === 'refresh-task-detail') {
     const taskId = ui.selectedTask; loadingTasks.add(taskId); target.disabled = true;
@@ -1606,6 +1666,8 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('submit', event => {
   const form = event.target;
+  if (form.id === 'query-form') { event.preventDefault(); const text = form.elements.text.value.trim(); if (text) void runQuery(text); return; }
+  if (form.id === 'report-form') { event.preventDefault(); void loadReport(form.elements.from.value, form.elements.to.value); return; }
   if (!['settings-form', 'launch-form', 'publish-form'].includes(form.id) && !form.dataset.interaction && !form.dataset.composer && !form.dataset.say) return;
   event.preventDefault();
   void action(async () => {

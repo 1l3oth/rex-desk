@@ -12,6 +12,7 @@ import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
 import { Jev } from './jev.js';
 import { placeTask, scanRepositories, scanRoots } from './placement.js';
+import { TrackerQuery } from './query.js';
 import { branchName, branchNameFromCli } from './naming.js';
 import { seedFlowWorktree, runtimeProfile } from './flow-runtime.js';
 import { assessRisk, automaticPrAllowed } from './risk.js';
@@ -44,12 +45,13 @@ export function validateAnswer(interaction, answer) {
 }
 
 export class Desk {
-  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, imageFetcher = fetch, orcaOptions } = {}) {
+  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, orcaOptions } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher; this.orcaOptions = orcaOptions;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
     this.sources = new Sources(store, { fetcher, onSynced: () => { if (this.store.config().jev?.auto !== false && this.jev.apiKey()) void this.jev.prioritize().catch(error => store.event('', 'jev-error', { message: error.message })); } }); this.live = new Map(); this.waiters = new Map(); this.tokens = new Map();
+    this.query = new TrackerQuery(store, this.sources, { apiKey: () => this.jev.apiKey(), env: () => this.agents.environment('claude'), cwd: path.join(store.directory, 'coordinator'), ...(queryModel ? { model: queryModel } : {}) });
     this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
     this.evidence = new Evidence(store, runId => this.run(runId), (runId, kind, data) => {
       store.event(runId, kind, data);
