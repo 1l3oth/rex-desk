@@ -95,6 +95,8 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         const configured = store.config().repositories.map(item => item.path).filter(Boolean);
         return json(response, 200, { repositories: discoverRepositories([...configured.map(item => path.dirname(item)), path.dirname(root)], configured) });
       }
+      if (url.pathname === '/api/repositories/scan' && request.method === 'POST') { await desk.scanRepositories(); return json(response, 200, desk.snapshot().catalog); }
+      if (url.pathname === '/api/repositories/catalog' && request.method === 'GET') return json(response, 200, store.list('repository'));
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
       if (url.pathname === '/api/autostart' && request.method === 'GET') return json(response, 200, autostartStatus());
       if (url.pathname === '/api/autostart' && request.method === 'POST') return json(response, 200, await setAutostart(Boolean((await body(request)).enabled), root));
@@ -258,6 +260,8 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const app = await createApp();
+  // The checkouts on this computer, for Jev to place fired issues in. Tests skip it: they run createApp without this block.
+  void app.desk.scanRepositories().catch(error => app.store.event('', 'repository-scan-error', { message: error.message }));
   console.log(`Rex Desk: ${app.address}\nMCP: ${app.address}/mcp\nKeys and history stay in ${app.store.directory}`);
   let closing = false;
   const shutdown = async () => { if (closing) return; closing = true; await app.close(); process.exit(0); };

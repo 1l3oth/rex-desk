@@ -11,6 +11,7 @@ import { Evidence } from './browser.js';
 import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
 import { Jev } from './jev.js';
+import { placeTask, scanRepositories, scanRoots } from './placement.js';
 import { branchName, branchNameFromCli } from './naming.js';
 import { seedFlowWorktree, runtimeProfile } from './flow-runtime.js';
 import { assessRisk, automaticPrAllowed } from './risk.js';
@@ -69,7 +70,7 @@ export class Desk {
       runs: this.store.list('run').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
       interactions: this.store.list('interaction').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
-      directories: this.store.list('directory'), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null };
+      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null };
   }
   // Run keys are kept as hashes in the database, so an agent still working in an Orca terminal keeps its connection through a restart.
   scopeToken(runId) {
@@ -203,15 +204,19 @@ export class Desk {
       const parent = this.run(parentRunId), started = this.store.list('run').filter(item => item.parentRunId === parentRunId).length;
       if (parent.maxDispatch && started >= parent.maxDispatch) throw new Error(`This scheduled run may start at most ${parent.maxDispatch} runs. Report the rest to the human instead.`);
     }
-    // With one repository configured there is nothing to choose, so firing an issue at an agent does not ask.
-    const repository = effectiveRepository(config.repositories.find(item => item.id === (repositoryId || task.repositoryId)) || (config.repositories.length === 1 ? config.repositories[0] : null));
-    if (!repository) throw new Error('Select a repository for this task.');
+    // A repository or base branch the human picked stays. Whatever is left open, Jev places when the run starts
+    // (execute), choosing among the checkouts scanned on this computer; until then the old default holds.
+    const chosen = config.repositories.find(item => item.id === repositoryId);
+    const placeable = this.store.list('repository').length > 1 && (!chosen || !baseBranch) && !parentRunId;
+    const repository = effectiveRepository(chosen || config.repositories.find(item => item.id === task.repositoryId) || (config.repositories.length === 1 ? config.repositories[0] : null));
+    if (!repository && !placeable) throw new Error('Select a repository for this task.');
     const parent = parentRunId ? this.run(parentRunId) : {};
-    const run = { id: id(), role: 'worker', taskId, title: task.title, repositoryId: repository.id,
+    const run = { id: id(), role: 'worker', taskId, title: task.title, repositoryId: repository?.id || '',
+      ...(placeable ? { placement: { state: 'pending', repository: Boolean(chosen), base: Boolean(baseBranch) } } : {}),
       provider: provider || config.provider, state: 'queued', phase: 'queued', createdAt: now(), instructions,
-      baseBranch: baseBranch || parent.baseBranch || repository.baseBranch,
-      targetBranch: targetBranch || parent.targetBranch || repository.targetBranch, parentRunId, execution: 'orca',
-      ...(repository.flowRuntime ? { runtimeProfile: runtimeProfile(repository, profileId || undefined).id } : {}) };
+      baseBranch: baseBranch || parent.baseBranch || repository?.baseBranch || '',
+      targetBranch: targetBranch || parent.targetBranch || repository?.targetBranch || '', parentRunId, execution: 'orca',
+      ...(repository?.flowRuntime ? { runtimeProfile: runtimeProfile(repository, profileId || undefined).id } : {}) };
     if (!['claude', 'codex'].includes(run.provider)) throw new Error('Unknown agent provider.');
     this.store.put('run', run.id, run);
     this.store.put('task', taskId, { ...task, category: category || task.category, runId: run.id });
@@ -236,6 +241,7 @@ export class Desk {
     try {
       // Check the selected CLI profile before creating worktrees or spending an agent turn.
       if (!this.runnerFactory) await this.agents.ensureSignedIn(run.provider);
+      if (run.role === 'worker' && !run.worktree && run.placement?.state === 'pending') run = await this.place(run);
       if (run.role === 'worker' && !run.worktree) {
         const config = this.store.config();
         const repository = { ...effectiveRepository(config.repositories.find(item => item.id === run.repositoryId)), baseBranch: run.baseBranch };
@@ -295,6 +301,33 @@ export class Desk {
       this.cancelQuestions(runId);
       this.live.delete(runId); void this.drain();
     }
+  }
+  // The database's list of checkouts on this computer. Scanned at server start and on demand; a scan is cheap (local git only).
+  scanRepositories() { return scanRepositories(this.store, scanRoots(this.store, this.root || process.cwd())); }
+  async place(run) {
+    const config = this.store.config(), task = this.task(run.taskId), chosen = run.placement.repository ? config.repositories.find(item => item.id === run.repositoryId) : null;
+    let placed = null;
+    try {
+      placed = await placeTask(task, { repositories: this.store.list('repository'), chosenRepository: chosen, chosenBase: run.placement.base ? run.baseBranch : '',
+        apiKey: this.jev.apiKey(), model: config.jev?.model || undefined, fetcher: this.jev.fetcher, versions: config.jev?.versions });
+    } catch (error) { this.store.event(run.id, 'placement-error', { message: error.message }, true); }
+    if (!placed) {
+      if (!run.repositoryId) throw new Error('Rex Desk could not tell which repository this issue belongs to. Choose one and start it again.');
+      return this.patchRun(run.id, { placement: { ...run.placement, state: 'default' } });
+    }
+    // A checkout Jev chose that is not in Settings yet is added with what its own files say; commands are detected later.
+    let repository = config.repositories.find(item => path.resolve(item.path).toLowerCase() === placed.repository.id);
+    if (!repository) {
+      const saved = this.store.saveConfig({ ...this.store.publicConfig(), repositories: [...config.repositories, { name: placed.repository.name, path: placed.repository.path, baseBranch: placed.baseBranch, targetBranch: placed.baseBranch }] });
+      repository = saved.repositories.find(item => path.resolve(item.path).toLowerCase() === placed.repository.id);
+      this.store.event(run.id, 'repository-added', { name: repository.name, path: repository.path }, true);
+    }
+    const effective = effectiveRepository(repository), moved = repository.id !== run.repositoryId;
+    const targetBranch = run.placement.base ? run.targetBranch : placed.baseBranch === repository.baseBranch ? repository.targetBranch : placed.baseBranch;
+    this.store.event(run.id, 'phase', { text: `Placed in ${repository.name} from ${placed.baseBranch}: ${placed.reason}` }, true);
+    return this.patchRun(run.id, { repositoryId: repository.id, baseBranch: placed.baseBranch, targetBranch,
+      ...(moved ? { runtimeProfile: effective.flowRuntime ? runtimeProfile(effective).id : undefined } : {}),
+      placement: { ...run.placement, state: 'placed', by: placed.by, reason: placed.reason } });
   }
   prompt(run) {
     const orbit = this.store.config().reportToOrbit ? 'After the investigation, send a concise report through the installed Orbit MCP if it is available. Include the source task reference and what you found. Never claim a local file URL is publicly accessible.' : 'Do not send Orbit reports; reporting is disabled in Settings.';
