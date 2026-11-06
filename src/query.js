@@ -52,7 +52,7 @@ export async function askSmallModel(prompt, input, { apiKey, fetcher = fetch, en
   if (apiKey) {
     const response = await fetcher('https://openrouter.ai/api/v1/chat/completions', { method: 'POST', signal: AbortSignal.timeout(30000),
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'Rex Desk' },
-      body: JSON.stringify({ model: namingModel, max_tokens: 400, temperature: 0, messages: [{ role: 'system', content: prompt }, { role: 'user', content: input }] }) });
+      body: JSON.stringify({ model: namingModel, max_tokens: 600, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: prompt }, { role: 'user', content: input }] }) });
     if (!response.ok) throw new Error(`The query model failed (${response.status}).`);
     return (await response.json())?.choices?.[0]?.message?.content || '';
   }
@@ -114,7 +114,13 @@ export class TrackerQuery {
     const lists = { today: today.toISOString().slice(0, 10), sourceTypes: context.sources,
       projects: context.projects.sort((left, right) => Number(right.followed) - Number(left.followed)).slice(0, 80).map(project => `${project.name}${project.followed ? ' (followed)' : ''}`),
       statuses: context.statuses, fields: context.fields, people: context.people.slice(0, 200).map(person => `${person.id}: ${person.name}`) };
-    const answer = await this.model(instructions, `Lists: ${JSON.stringify(lists)}\n\nRequest: ${String(text).slice(0, 500)}`, { apiKey: this.apiKey(), env: this.env(), cwd: this.cwd });
+    // The small model now and then answers in prose instead of JSON; one more try almost always returns the filter.
+    let answer = '';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      answer = await this.model(instructions, `Lists: ${JSON.stringify(lists)}\n\nRequest: ${String(text).slice(0, 500)}`, { apiKey: this.apiKey(), env: this.env(), cwd: this.cwd });
+      try { return parseIntent(answer, context); } catch {}
+    }
+    this.store.event?.('', 'query-unreadable', { text: String(text).slice(0, 200), answer: String(answer).slice(0, 500) });
     return parseIntent(answer, context);
   }
   async ask(text, { today = new Date() } = {}) {

@@ -78,3 +78,13 @@ test('the weekly report lists each issue once with every run, commit and pull re
   assert.deepEqual(thisWeek(new Date(2026, 10, 6)), { from: '2026-11-02', to: '2026-11-06' });
   store.close();
 });
+
+test('an answer that is not JSON is asked again once before the request is refused', async () => {
+  const answers = ['Here is the filter you asked for.', '{"assignee":"me"}'];
+  const query = new TrackerQuery({}, {}, { model: async () => answers.shift() });
+  assert.equal((await query.interpret('my tasks', context)).assignee, 'me');
+  const events = [];
+  const stubborn = new TrackerQuery({ event: (...args) => events.push(args) }, {}, { model: async () => 'no idea' });
+  await assert.rejects(stubborn.interpret('my tasks', context), /could not be understood/);
+  assert.equal(events[0][1], 'query-unreadable');
+});
