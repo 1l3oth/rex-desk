@@ -666,3 +666,4 @@ dialog.viewer .viewer-head .actions{margin:0 0 0 auto;flex-wrap:nowrap;justify-c
 .report-run p{margin:0}
 .report-commits{margin:6px 0 0;padding-left:18px;font-size:13px}
 .report-commits code{color:var(--muted)}
+.query-table td:nth-child(5),.query-table td:last-child,.query-table td:first-child{white-space:nowrap}
