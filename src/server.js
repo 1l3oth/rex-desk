@@ -265,6 +265,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const app = await createApp();
   // The checkouts on this computer, for Jev to place fired issues in. Tests skip it: they run createApp without this block.
   void app.desk.scanRepositories().catch(error => app.store.event('', 'repository-scan-error', { message: error.message }));
+  // Issues moved in the tracker while Rex Desk was off show their new status now, not after the first interval.
+  if (app.store.config().sources.length) void app.desk.sources.sync().catch(error => app.store.event('', 'sync-error', { message: error.message }));
   console.log(`Rex Desk: ${app.address}\nMCP: ${app.address}/mcp\nKeys and history stay in ${app.store.directory}`);
   let closing = false;
   const shutdown = async () => { if (closing) return; closing = true; await app.close(); process.exit(0); };

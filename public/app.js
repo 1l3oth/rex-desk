@@ -480,18 +480,17 @@ function renderRunPath(run) {
   return `<ol class="run-path" aria-label="Agent workflow">${stages.map((stage, position) => `<li class="${position <= index ? 'done' : ''}">${stage}</li>`).join('')}</ol>`;
 }
 function boardStage(task) {
+  // A working agent decides the column; otherwise the tracker does, because a person may have moved the issue there
+  // after the last run. The tracker's status group (0 request, 1 in progress, 2 finished) covers any status name.
   const run = taskRun(task);
-  if (run?.state === 'published') return 4;
-  if (run?.state === 'ready_for_review' || run?.state === 'qa_passed') return 3;
-  if (run && ['qa_failed', 'qa_blocked'].includes(run.state)) return 2;
-  if (run && ['waiting', 'failed', 'interrupted', 'needs_evidence'].includes(run.state)) return 2;
-  if (run && ['running', 'starting'].includes(run.state)) return 1;
+  if (run && ['running', 'starting', 'queued'].includes(run.state)) return 1;
+  if (run?.state === 'waiting') return 2;
   const mapping = ui.snapshot.config.sources.find(source => source.id === task.sourceId)?.statusMap || {};
-  const status = String(task.statusName || task.status).toLowerCase();
-  if (status === String(mapping.done || '').toLowerCase() || /^(complete|completed|done)$/.test(status)) return 4;
-  if (status === String(mapping.review || '').toLowerCase() || /^(feedback|review)$/.test(status)) return 3;
-  if (/^(hold|blocked)$/.test(status)) return 2;
-  if (status === String(mapping.working || '').toLowerCase() || /^(progress|in.progress|working)$/.test(status)) return 1;
+  const status = String(task.statusName || task.status).toLowerCase(), group = String(task.statusCategory || '');
+  if (run?.state === 'published' || group === '2' || status === String(mapping.done || '').toLowerCase() || /^(complete|completed|done|closed)$/.test(status)) return 4;
+  if (['ready_for_review', 'qa_passed'].includes(run?.state) || status === String(mapping.review || '').toLowerCase() || /feedback|review|completed|resolved|fixed/.test(status)) return 3;
+  if (/^(hold|blocked)$/.test(status) || (run && ['failed', 'interrupted', 'needs_evidence', 'qa_failed', 'qa_blocked'].includes(run.state))) return 2;
+  if (group === '1' || status === String(mapping.working || '').toLowerCase() || /progress|working|development/.test(status)) return 1;
   return 0;
 }
 function renderBoard(tasks) {
