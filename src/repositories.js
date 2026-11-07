@@ -71,30 +71,41 @@ export async function inspectRepository(directory, { execute = run } = {}) {
     flow: found.flowRuntime ? { available: true, ...found.flowRuntime } : null, electron: detectElectron(root),
     suggested: { setupCommand: found.setupCommand, testCommand: found.testCommand, devCommand: found.devCommand, from: found.from } };
 }
-let picking = false;
+// The dialog can end up behind the browser window, so a second click cancels the one still waiting and opens a new
+// one in front, instead of refusing because a picker is already open.
+let pending = null;
 export async function pickRepositoryFolder() {
   if (process.platform !== 'win32') throw new Error('Paste the absolute repository path on this platform.');
-  if (picking) throw new Error('A folder picker is already open.');
-  picking = true;
-  try {
-    const script = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+  if (pending) { pending.cancelled = true; try { pending.child.kill(); } catch {} pending = null; }
+  const script = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+$area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $owner = New-Object System.Windows.Forms.Form
 $owner.TopMost = $true
 $owner.ShowInTaskbar = $false
+$owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+$owner.Opacity = 0
 $owner.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
-$owner.Location = New-Object System.Drawing.Point(-32000, -32000)
+$owner.Location = New-Object System.Drawing.Point(($area.X + [int]($area.Width / 2)), ($area.Y + [int]($area.Height / 2)))
 $owner.Size = New-Object System.Drawing.Size(1, 1)
-$owner.Show(); $owner.Activate()
+$owner.Show(); $owner.Activate(); $owner.BringToFront()
 $picker = New-Object System.Windows.Forms.FolderBrowserDialog
 $picker.Description = 'Choose the source code Git repository for Rex Desk'
 $picker.ShowNewFolderButton = $false
 try { if ($picker.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Write($picker.SelectedPath) } }
 finally { $picker.Dispose(); $owner.Dispose() }`;
-    const { stdout } = await exec('powershell.exe', ['-NoProfile', '-STA', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 300000 });
+  const running = exec('powershell.exe', ['-NoProfile', '-STA', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 300000 });
+  const state = { child: running.child, cancelled: false };
+  pending = state;
+  try {
+    const { stdout } = await running;
     return { path: stdout.trim() };
-  } finally { picking = false; }
+  } catch (error) {
+    // The replaced dialog reports nothing chosen; the new one answers for the click that replaced it.
+    if (state.cancelled) return { path: '' };
+    throw new Error(`The folder picker could not open: ${String(error.stderr || error.message).trim().split('\n').at(-1)}. Paste the absolute repository path instead.`);
+  } finally { if (pending === state) pending = null; }
 }
 
 // Clone owner/name with the signed-in GitHub CLI next to the Rex Desk folder. An existing folder is reused, never overwritten.

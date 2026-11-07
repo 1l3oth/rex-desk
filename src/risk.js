@@ -31,7 +31,6 @@ export async function assessRisk(run, assessment, currentFingerprint) {
 }
 export function automaticPrAllowed(config, run, currentFingerprint) {
   return Boolean(config.autoPrLowRisk && run.state === 'ready_for_review' && run.checks?.testsPassed
-    && (!config.requireVideo || run.checks.recordedVideo && run.checks.browserAssertionPassed)
     && run.risk?.score <= 2 && !run.risk.requiresHumanReview && run.risk.fingerprint === currentFingerprint
     && run.verification?.fingerprint === currentFingerprint);
 }

@@ -74,8 +74,11 @@ const jevRequests = [];
 const jevFetcher = async (url, options) => {
   const request = JSON.parse(options.body); jevRequests.push({ url, authorization: options.headers.Authorization, title: request.state.title });
   const top = /File preview/.test(request.state.title), waiting = /Duplicate notifications/.test(request.state.title);
+  const phone = /Assignee filter/.test(request.state.title), stale = /Duplicate notifications/.test(request.state.title);
   const score = value => ({ type: 'score', score: value, probabilities: {}, confidence: 0.8 });
   return new Response(JSON.stringify({ model: 'typesafe/jev-1.13', answers: { severity: score(top ? 4 : 1), effort: score(top ? 0 : 1), web: { type: 'noul', noul: 0.95 },
+    platform: { type: 'choice', choice: phone ? 'mobile' : 'web', probabilities: {}, confidence: 0.8 },
+    outdated: { type: 'noul', noul: stale ? 0.86 : 0.04 },
     action: { type: 'choice', choice: waiting ? 'wait' : 'fix', probabilities: {}, confidence: 0.8 } } }), { headers: { 'Content-Type': 'application/json' } });
 };
 let app;
@@ -161,13 +164,15 @@ try {
   await page.locator('[data-catalog-search]').fill('unrelated');
   assert.equal(await page.locator('.project-choice:visible').count(), 1, 'Project search hides non-matching projects');
   await page.locator('[data-catalog-search]').fill('');
-  const employee = page.getByRole('combobox', { name: 'Assigned employee for Morningmate · synthetic QA' });
+  const employee = page.getByRole('combobox', { name: 'Assigned accounts for Morningmate · synthetic QA' });
   await employee.click(); await employee.fill('mina mobile');
   assert.equal(await page.locator('.picker.open [role=option]:visible').count(), 1, 'Employee search shows only the match for name and team');
   await employee.press('Enter');
   assert.equal(await page.locator('input[name$=".userId"]').inputValue(), 'mina@example.invalid');
   await employee.click(); await employee.fill('rex tester'); await employee.press('Enter');
-  assert.equal(await page.locator('input[name$=".userId"]').inputValue(), 'rex@example.invalid');
+  assert.equal(await page.locator('input[name$=".userId"]').inputValue(), 'mina@example.invalid, rex@example.invalid', 'A second person is added to the watched accounts, not put in place of the first');
+  await page.locator('.chosen-accounts li').filter({ hasText: 'mina@example.invalid' }).getByRole('button', { name: 'Remove' }).click();
+  assert.equal(await page.locator('input[name$=".userId"]').inputValue(), 'rex@example.invalid', 'Remove drops one watched account and keeps the rest');
   await page.getByRole('button', { name: 'Add a sign-in' }).click();
   await page.locator('input[name="testAccounts.0.site"]').fill('127.0.0.1');
   await page.locator('input[name="testAccounts.0.username"]').fill('qa@example.invalid');
@@ -196,7 +201,22 @@ try {
   assert.equal(await page.locator('.task-row').first().locator('.task-title').innerText(), posts[0].title);
   assert.equal(await page.locator('.task-row').first().locator('.rank-chip').innerText(), '1');
   assert.equal(await page.locator('.task-row.later').count(), 1, 'The issue waiting on others sinks to the end');
-  assert.match(await page.locator('.next-up p').innerText(), /Critical severity · Fix · small effort/);
+  assert.match(await page.locator('.next-up p').innerText(), /Critical severity · Fix · easy to fix/);
+  // Jev's answers become badges on each row, and the toolbar filters by them.
+  const rowFor = title => page.locator('.task-row').filter({ hasText: title });
+  assert.equal(await rowFor('Assignee filter').locator('.jev-badge.platform-mobile').innerText(), 'Mobile');
+  assert.equal(await rowFor('Duplicate notifications').locator('.jev-badge.outdated').innerText(), 'Outdated', 'The list keeps the short label; the issue page spells it out');
+  await page.locator('#platform-filter').selectOption('not-mobile');
+  assert.equal(await rowFor('Assignee filter').count(), 0, 'Hide mobile drops the phone-only issue');
+  assert.ok(await rowFor('File preview').count() > 0, 'and keeps the rest');
+  await page.locator('#platform-filter').selectOption('');
+  await page.locator('#outdated-filter').check();
+  assert.equal(await rowFor('Duplicate notifications').count(), 0, 'Hide outdated drops what the current release already fixed');
+  await page.locator('#outdated-filter').uncheck();
+  await page.locator('#difficulty-filter').selectOption('easy');
+  assert.ok(await rowFor('File preview').count() > 0, 'The easy issue survives the difficulty filter');
+  assert.equal(await rowFor('Assignee filter').count(), 0, 'A medium one does not');
+  await page.locator('#difficulty-filter').selectOption('');
   await page.getByRole('button', { name: new RegExp(posts[0].title) }).first().click();
   await page.getByText('Keep the selected project after switching.', { exact: true }).waitFor({ timeout: 15000 });
   assert.equal(await page.locator('.issue-images img').evaluate(element => element.complete && element.naturalWidth), 2, 'Issue screenshot loads through the local cache');

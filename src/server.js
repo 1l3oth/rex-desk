@@ -20,7 +20,8 @@ import { profileEnvironment, discoverProfiles } from './agents.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
-import { orcaStatus, showWorktreesInOrca, openInOrca, readOrcaTerminal } from './orca.js';
+import { weeklyReport } from './report.js';
+import { orcaStatus, showWorktreesInOrca, openInOrca } from './orca.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -46,7 +47,7 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, updateOptions } = {}) {
+export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, updateOptions, catchUp = false } = {}) {
   const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataRoot, 'runtime.lock');
@@ -69,6 +70,11 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
     const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher });
     if (address) { desk.mcpUrl = `${address}/mcp`; desk.reattachOrca(); void desk.findPullRequests(); }
+    // The real app (not tests) scans this computer's checkouts for Jev and catches up with tracker moves made while it was off.
+    if (catchUp) {
+      void desk.scanRepositories().catch(error => store.event('', 'repository-scan-error', { message: error.message }));
+      if (store.config().sources.length) void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
+    }
     store.on('change', notify);
     session = { id: entry?.id, email: entry?.email || '', store, desk, cookie: randomBytes(32).toString('base64url'), staySignedIn, cloud: null };
     if (accounts) {
@@ -179,7 +185,10 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         const configured = store.config().repositories.map(item => item.path).filter(Boolean);
         return json(response, 200, { repositories: discoverRepositories([...configured.map(item => path.dirname(item)), path.dirname(root)], configured) });
       }
-      if (url.pathname === '/api/qa/sign-in' && request.method === 'POST') return json(response, 200, await desk.evidence.openQaSignIn((await body(request)).url));
+      if (url.pathname === '/api/report' && request.method === 'GET') return json(response, 200, await weeklyReport(store, { from: url.searchParams.get('from'), to: url.searchParams.get('to'), detail: taskId => desk.sources.taskDetail(taskId, { refresh: true }) }));
+      if (url.pathname === '/api/query' && request.method === 'POST') return json(response, 200, await desk.query.ask((await body(request)).text));
+      if (url.pathname === '/api/repositories/scan' && request.method === 'POST') { await desk.scanRepositories(); return json(response, 200, desk.snapshot().catalog); }
+      if (url.pathname === '/api/repositories/catalog' && request.method === 'GET') return json(response, 200, store.list('repository'));
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
       if (url.pathname === '/api/update/check' && request.method === 'POST') return json(response, 200, await updates.check());
       if (url.pathname === '/api/update/install' && request.method === 'POST') {
@@ -286,6 +295,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       const interactionMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/answer$/);
       const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
       if (taskMatch && request.method === 'GET') return json(response, 200, await desk.sources.taskDetail(decodeURIComponent(taskMatch[1]), { refresh: url.searchParams.has('refresh') }));
+      if (taskMatch && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.setDeskStatus(decodeURIComponent(taskMatch[1]), { status: input.deskStatus, note: input.deskNote, by: 'you' })); }
       if (url.pathname === '/api/task-file' && request.method === 'GET') {
         const media = await cachedTaskMedia(store, url.searchParams.get('task') || '', url.searchParams.get('url') || '', { fetcher: imageFetcher });
         return serveFile(request, response, media, { cache: 'private, max-age=604800' });
@@ -295,12 +305,11 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return serveFile(request, response, image, { cache: 'private, max-age=604800' });
       }
       if (interactionMatch && request.method === 'POST') return json(response, 200, desk.answer(interactionMatch[1], await body(request)));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|journal|stop|resume|verify|publish|orca|tracker|terminal|say))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|orca|say))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         if (request.method === 'GET') {
-          if (action === 'messages' || action === 'journal') return json(response, 200, store.events(runId, { visible: action === 'messages' }));
-          if (action === 'terminal') return json(response, 200, await readOrcaTerminal(desk.run(runId)));
+          if (action === 'messages') return json(response, 200, store.events(runId, { visible: true }));
           return json(response, 200, desk.run(runId));
         }
         if (request.method === 'POST') {
@@ -309,7 +318,6 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
           if (action === 'say') return json(response, 200, await desk.say(runId, input.text));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));
           if (action === 'verify') return json(response, 200, await desk.verify(runId));
-          if (action === 'tracker') return json(response, 200, await desk.trackerFromQa(runId, input.phase));
           if (action === 'publish') return json(response, 200, await desk.publish(runId, { ...input, approved: true }));
           if (action === 'orca') { const run = desk.run(runId); if (!run.worktree) throw new Error('This run has no worktree to open.'); return json(response, 200, await openInOrca(run)); }
         }
@@ -360,7 +368,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  const app = await createApp();
+  const app = await createApp({ catchUp: true });
   console.log(`Rex Desk: ${app.address}\nMCP: ${app.address}/mcp\n${app.store ? `Keys and history stay in ${app.store.directory}` : 'Locked: sign in from the dashboard.'}`);
   let closing = false;
   const shutdown = async () => { if (closing) return; closing = true; await app.close(); process.exit(0); };
