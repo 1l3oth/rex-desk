@@ -692,3 +692,36 @@ dialog.viewer .viewer-head .actions{margin:0 0 0 auto;flex-wrap:nowrap;justify-c
 .report-commits{margin:6px 0 0;padding-left:18px;font-size:13px}
 .report-commits code{color:var(--muted)}
 .query-table td:nth-child(5),.query-table td:last-child,.query-table td:first-child{white-space:nowrap}
+
+/* Computer control: the command bar, what happened, and everything Jev can do here */
+.computer-page{padding:0 24px 24px;display:grid;gap:14px;align-content:start;max-width:1200px}
+.command-form{display:grid;gap:8px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.command-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.command-row input{flex:1;min-width:220px;height:32px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--sunken);font-size:13px}
+.command-row select{height:32px}
+.command-row .button.primary{height:32px}
+.mic{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--line);border-radius:16px;background:var(--raised);color:var(--ink);font:600 12px var(--sans)}
+.mic .icon{width:15px;height:15px}.mic:hover:not(:disabled){border-color:var(--accent)}.mic:disabled{opacity:.5}
+.mic.recording{border-color:var(--red);background:var(--red-soft);color:var(--red);animation:mic-pulse 1.2s ease-in-out infinite}
+@keyframes mic-pulse{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 4px var(--red-soft)}}
+@media(prefers-reduced-motion:reduce){.mic.recording{animation:none}}
+.command-voice-note{margin:0;font-size:11.5px}.command-voice-note .button{margin-left:6px}
+.command-log{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.command-entry{padding:10px 12px;border:1px solid var(--line-soft);border-radius:8px;background:var(--panel);display:grid;gap:6px}
+.command-said{display:flex;align-items:center;gap:8px;font-weight:600}.command-said .icon{width:14px;height:14px;color:var(--accent);flex-shrink:0}.command-said small{margin-left:auto;font-weight:400}
+.command-say{margin:0;color:var(--ink)}
+.command-steps{margin:0;padding-left:20px;font-size:12px}
+.command-results{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:12px}
+.command-results li{display:flex;gap:6px;align-items:flex-start}.command-results .icon{width:13px;height:13px;margin-top:2px;flex-shrink:0}
+.command-results li.ok .icon{color:var(--green)}.command-results li.failed .icon{color:var(--red)}.command-results small{overflow-wrap:anywhere}
+.command-confirm{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 10px;border:1px solid var(--amber-line);border-radius:6px;background:var(--amber-soft)}.command-confirm .icon{color:var(--amber);width:14px;height:14px}
+.computer-catalog h2{font-size:13px;margin:4px 0 8px}.computer-catalog h2 small{font-weight:400;margin-left:6px}
+.computer-groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px}
+.computer-group{border:1px solid var(--line-soft);border-radius:8px;padding:8px 10px;background:var(--panel)}
+.computer-group h3{margin:0 0 6px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.computer-group ul{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.computer-group li{display:flex;align-items:center;gap:8px;padding:4px 0;border-top:1px solid var(--line-soft)}.computer-group li:first-child{border-top:0}
+.computer-group li>span{flex:1;min-width:0}.computer-group li strong{font-weight:600;font-size:12px}.computer-group li small{display:block;font-size:11px}
+.computer-group li.unavailable{opacity:.55}
+.computer-group .tag{display:inline-block;margin-left:4px;padding:0 5px;border-radius:8px;background:var(--amber-soft);color:var(--amber);font-size:10px;font-weight:600}
+@media(max-width:700px){.computer-page{padding:0 16px 16px}.computer-groups{grid-template-columns:1fr}}

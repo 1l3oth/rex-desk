@@ -5,7 +5,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import { effectiveRepository } from './project-detect.js';
 import { cachedTaskMedia } from './images.js';
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const runId = z.string().optional().describe('Run ID. Omit when using a run-scoped agent connection.');
@@ -128,6 +128,35 @@ export function createMcp(desk, scope) {
   tool('desk_publish', 'Request dashboard approval to push the verified branch and create a draft GitHub PR. Does not merge. Call it only once the run is ready for review: the preconditions are checked before the human is asked, so a refusal here is about this run, not about their answer. Set targetBranch for a pull request into another branch, for example a release branch: a run may open one pull request per target branch, and when that target does not hold the base commit of this branch, Rex Desk cuts a branch from the target and cherry-picks only the commits of this run onto it. This is the only route for a push or a pull request, including when the human asks for one in chat. The call then waits for that answer, which can take minutes.',
     { runId, title: z.string().optional(), body: z.string().optional(), targetBranch: z.string().optional() },
     input => desk.requestPublish(resolveRun(input.runId), input));
+  // Computer control for agents: only after the person allows it in Settings, and shutdown-like actions still ask them first.
+  const computerAllowed = () => {
+    if (!desk.computer) throw new Error('Computer control is not available on this Rex Desk.');
+    const control = desk.store.config().control || {};
+    if (control.enabled === false || control.agents !== true) throw new Error('The person has not let agents control this computer. They can allow it in Settings → Computer control.');
+    return desk.computer;
+  };
+  tool('desk_computer_actions', 'List everything this computer can do for you: open apps and settings, volume, brightness, Wi-Fi, Bluetooth, camera, battery saver, sleep and wake, shutdown, mouse, keyboard, reading and clicking what is on screen. Each entry names its values.',
+    {}, () => computerAllowed().catalog().filter(action => action.available), true);
+  tool('desk_computer', 'Do one thing on this computer, by an action ID from desk_computer_actions. To work in an app: open_app, then screen_items to read its buttons, then click_item by name or number, type_text, and press_keys. Positions taken from desk_computer_screenshot need fromScreenshot: true. Actions marked confirm wait for the person to approve on the dashboard.',
+    { action: z.string().min(1), params: z.record(z.string(), z.any()).optional(), fromScreenshot: z.boolean().optional() }, async ({ action, params = {}, fromScreenshot }) => {
+      const computer = computerAllowed(), entry = computer.action(action), values = { ...params };
+      if (fromScreenshot) for (const [x, y] of [['x', 'y'], ['fromX', 'fromY'], ['toX', 'toY']]) if (values[x] !== undefined && values[y] !== undefined) {
+        const point = computer.fromScreenshot(Number(values[x]), Number(values[y])); values[x] = point.x; values[y] = point.y;
+      }
+      if (entry.confirm && desk.store.config().control?.confirm !== false) {
+        if (!scope.runId) throw new Error(`${entry.title} needs the person's approval, which only a run-scoped agent can ask for.`);
+        const answer = await desk.ask(scope.runId, { kind: 'approval', method: 'computer', title: `Computer: ${entry.title}`, request: { action, params: values } });
+        if (answer.action !== 'accept') return { declined: true };
+      }
+      return computer.run(action, values);
+    });
+  server.registerTool('desk_computer_screenshot', { description: 'See the whole screen as a picture. To click something in it, pass its position to desk_computer with fromScreenshot: true. Prefer screen_items and click_item for buttons and links: they are faster and exact.',
+    inputSchema: {}, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } }, async () => {
+    try {
+      const shot = await computerAllowed().screenshot();
+      return { content: [{ type: 'image', data: readFileSync(shot.path).toString('base64'), mimeType: 'image/jpeg' }, { type: 'text', text: JSON.stringify({ width: shot.width, height: shot.height, note: 'Positions in this picture go to desk_computer with fromScreenshot: true.' }) }] };
+    } catch (error) { return { ...reply({ error: error.message }), isError: true }; }
+  });
   return server;
 }
 

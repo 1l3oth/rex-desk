@@ -21,6 +21,8 @@ export const defaults = {
   syncMinutes: 5, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
   models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false, execution: 'orca',
   schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], fix: true, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
+  // Computer control: on for the person here, with a yes asked before shutdown-like actions; agents only when allowed.
+  control: { enabled: true, confirm: true, agents: false, language: 'en' },
 };
 // Claude Code accepts family aliases (opus, sonnet, haiku, fable) or full IDs such as claude-opus-5-5. Typed shorthand is normalized.
 export function modelName(provider, value) {
@@ -214,7 +216,8 @@ export class Store extends EventEmitter {
       syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
       tourDismissed: Boolean(input.tourDismissed), execution: 'orca', testAccounts: accounts,
-      schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false, versions: String(input.jev?.versions || '').trim().slice(0, 300) } };
+      schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false, versions: String(input.jev?.versions || '').trim().slice(0, 300) },
+      control: { enabled: input.control?.enabled !== false, confirm: input.control?.confirm !== false, agents: input.control?.agents === true, language: ['km', 'en', 'ko'].includes(input.control?.language) ? input.control.language : 'en' } };
     for (const account of accounts) {
       const password = String((input.testAccounts || []).find(item => item.id === account.id)?.password || '');
       if (password) this.put('secret', `test-account:${account.id}`, this.encrypt(password));

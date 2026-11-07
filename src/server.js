@@ -22,11 +22,20 @@ import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
 import { weeklyReport } from './report.js';
 import { orcaStatus, showWorktreesInOrca, openInOrca } from './orca.js';
+import { Computer } from './computer.js';
+import { Voice } from './voice.js';
+import { Commander } from './command.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 const json = (response, code, data) => { response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(data)); };
+// Recorded speech for transcription arrives as raw WAV bytes, not JSON.
+async function rawBody(request, limit = 20 * 1024 * 1024) {
+  const chunks = []; let size = 0;
+  for await (const chunk of request) { size += chunk.length; if (size > limit) throw new Error('Recording is too long.'); chunks.push(chunk); }
+  return Buffer.concat(chunks);
+}
 async function body(request) {
   let input = '';
   for await (const chunk of request) { input += chunk; if (Buffer.byteLength(input) > 2 * 1024 * 1024) throw new Error('Request exceeds 2 MB.'); }
@@ -47,7 +56,7 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, updateOptions, catchUp = false } = {}) {
+export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, updateOptions, catchUp = false, computerFactory, voiceFactory } = {}) {
   const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataRoot, 'runtime.lock');
@@ -62,6 +71,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   // One workspace is open at a time. A plain data folder (tests, scripts) opens immediately; account mode waits for sign-in.
   const accounts = dataDirectory ? null : new Accounts(dataRoot);
   const updates = new Updates(dataRoot, updateOptions);
+  // One computer and one voice engine for every account on it: the models are large, so they live beside the accounts.
+  const computer = computerFactory ? computerFactory() : new Computer({ directory: path.join(dataRoot, 'screens') });
+  const voice = voiceFactory ? voiceFactory() : new Voice(process.env.REX_VOICE_DIR || path.join(dataRoot, 'voice'));
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
   let session = null, address = '';
@@ -70,6 +82,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
     const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher });
     if (address) { desk.mcpUrl = `${address}/mcp`; desk.reattachOrca(); void desk.findPullRequests(); }
+    desk.computer = computer;
+    desk.commander = new Commander(computer, { apiKey: () => desk.jev.apiKey(), model: () => store.config().jev?.model, settings: () => store.config().control || {},
+      env: () => desk.agents.environment('claude'), cwd: path.join(store.directory, 'coordinator') });
     // The real app (not tests) scans this computer's checkouts for Jev and catches up with tracker moves made while it was off.
     if (catchUp) {
       void desk.scanRepositories().catch(error => store.event('', 'repository-scan-error', { message: error.message }));
@@ -186,6 +201,20 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return json(response, 200, { repositories: discoverRepositories([...configured.map(item => path.dirname(item)), path.dirname(root)], configured) });
       }
       if (url.pathname === '/api/report' && request.method === 'GET') return json(response, 200, await weeklyReport(store, { from: url.searchParams.get('from'), to: url.searchParams.get('to'), detail: taskId => desk.sources.taskDetail(taskId, { refresh: true }) }));
+      if (url.pathname.startsWith('/api/computer') || url.pathname.startsWith('/api/voice')) {
+        const control = store.config().control || {};
+        if (url.pathname === '/api/computer' && request.method === 'GET') return json(response, 200, { platform: computer.key, catalog: computer.catalog(), control, voice: { ...voice.status(), sizeMB: voice.size() } });
+        if (control.enabled === false) return json(response, 403, { error: 'Computer control is off. Turn it on in Settings → Computer control.' });
+        if (url.pathname === '/api/computer/do' && request.method === 'POST') return json(response, 200, await desk.commander.perform((await body(request)).text));
+        if (url.pathname === '/api/computer/run' && request.method === 'POST') {
+          const input = await body(request), steps = (Array.isArray(input.steps) ? input.steps : []).slice(0, 8).map(step => ({ action: String(step.action), params: step.params || {} }));
+          return json(response, 200, await desk.commander.runSteps(steps));
+        }
+        if (url.pathname === '/api/voice/install' && request.method === 'POST') { void voice.install().then(notify, notify); return json(response, 202, voice.status()); }
+        if (url.pathname === '/api/voice/prepare' && request.method === 'POST') return json(response, 200, { ready: await voice.prepare(url.searchParams.get('language') || control.language || 'en') });
+        if (url.pathname === '/api/voice/transcribe' && request.method === 'POST') return json(response, 200, await voice.transcribe(await rawBody(request), url.searchParams.get('language') || control.language || 'en'));
+        return json(response, 404, { error: 'Unknown computer request.' });
+      }
       if (url.pathname === '/api/query' && request.method === 'POST') return json(response, 200, await desk.query.ask((await body(request)).text));
       if (url.pathname === '/api/repositories/scan' && request.method === 'POST') { await desk.scanRepositories(); return json(response, 200, desk.snapshot().catalog); }
       if (url.pathname === '/api/repositories/catalog' && request.method === 'GET') return json(response, 200, store.list('repository'));
@@ -361,7 +390,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   const firstCheck = updates.state.supported ? setTimeout(() => void updates.check().then(notify), 30000) : null;
   updateTimer?.unref(); firstCheck?.unref();
   const handle = { server, address, accounts, updates, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
-    clearInterval(timer); clearInterval(updateTimer); clearTimeout(firstCheck); await closeSession(); for (const client of clients) client.end();
+    computer.stop(); voice.stopAll(); clearInterval(timer); clearInterval(updateTimer); clearTimeout(firstCheck); await closeSession(); for (const client of clients) client.end();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); unlinkSync(lockPath);
   } };
   return handle;

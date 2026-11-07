@@ -10,6 +10,11 @@ const mediaKind = name => /\.(png|jpe?g|gif|webp|bmp)$/i.test(name) ? 'image' : 
 const viewable = (kind, src, name, original = '') => `data-view="${kind}" data-view-src="${esc(src)}" data-view-name="${esc(name)}"${original ? ` data-view-original="${esc(original)}"` : ''}`;
 const ui = { query: { text: '', loading: false, result: null, error: '' }, report: { from: '', to: '', loading: false, result: null, error: '' }, page: 'inbox', view: 'list', selectedTask: '', selectedRun: '', tab: 'brief', search: '', source: '', category: '', person: '', deskStatus: '', platform: '', difficulty: '', hideOutdated: false, snapshot: null, runEvents: new Map(), transcripts: new Map(), openRuns: [], layout: 'grid', runSide: 'runs', selectedDecision: '', draft: null, busy: false, agents: null, agentsLoading: false, agentsError: '', setupOpen: '', setupPrompt: '', autoTour: false,
   sort: 'priority', found: null, foundLoading: false, detailLayout: 'tabs', tabSecond: 'messages', splitRatio: 0.5, sideWidth: 0, proofWidth: 0, dragging: false, missedRender: false };
+// Computer control (the page is defined at the end of this file).
+const voiceLanguageNames = { km: 'ខ្មែរ Khmer', en: 'English', ko: '한국어 Korean' };
+const commandExamples = { en: ['Turn the volume down', 'Open Bluetooth settings', 'Turn on dark mode', 'Sleep and wake up in 5 hours', 'Open Chrome and search for the weather'],
+  ko: ['볼륨 줄여줘', '블루투스 설정 열어줘', '다크 모드 켜줘'], km: ['បើកកម្មវិធី Chrome', 'បន្ថយសំឡេង', 'បិទកាមេរ៉ា'] };
+ui.computer = { info: null, loading: false, log: [], busy: false, recording: null, language: '' };
 const labels = { queued: 'Queued', starting: 'Preparing', running: 'Working', waiting: 'Needs you', needs_evidence: 'Needs evidence', ready_for_review: 'Ready for review', published: 'PR created', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted', finished: 'Finished', qa_passed: 'QA passed', qa_failed: 'QA failed', qa_blocked: 'QA blocked' };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const icon = name => `<svg class="icon" aria-hidden="true"><use href="/icons.svg#${name}"></use></svg>`;
@@ -172,7 +177,7 @@ async function refresh({ force = false } = {}) {
 function render() {
   const state = ui.snapshot;
   if (!state) return;
-  const pages = [['inbox', 'inbox', 'My issues'], ['runs', 'agents', 'Agent runs'], ['board', 'board', 'Kanban'], ['decisions', 'question', 'Needs you'], ['evidence', 'play', 'Evidence'], ['search', 'search', 'Ask the trackers'], ['report', 'file', 'Weekly report']];
+  const pages = [['inbox', 'inbox', 'My issues'], ['runs', 'agents', 'Agent runs'], ['board', 'board', 'Kanban'], ['decisions', 'question', 'Needs you'], ['evidence', 'play', 'Evidence'], ['search', 'search', 'Ask the trackers'], ['report', 'file', 'Weekly report'], ['computer', 'mic', 'Computer control']];
   const steps = setupSteps(), remaining = steps.filter(step => !step.done && !step.optional).length;
   const waiting = pending().length, active = state.runs.filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state)).length;
   const board = ui.page === 'board' || ui.page === 'inbox' && ui.view === 'board';
@@ -182,7 +187,7 @@ function render() {
   const synced = state.sync.length ? relative(state.sync.map(item => item.at).sort().at(-1)) : '';
   app.innerHTML = `<div class="shell${side ? ' with-side' : ''}"><nav class="activity" aria-label="Workspace"><span class="brand-mark" title="Rex Desk" aria-hidden="true"><i></i><i></i><i></i><i></i></span>${pages.map(navButton).join('')}<span class="activity-spacer"></span>${[['setup', 'compass', 'Setup'], ['settings', 'settings', 'Settings']].map(navButton).join('')}${accountButton()}${themeButton()}</nav>
     ${side ? `<aside class="side" aria-label="${ui.page === 'runs' ? 'Agent runs' : 'Assigned issues'}">${side}</aside>${sideResizer()}` : ''}
-    <main class="main page-${ui.page}${board ? ' page-board' : ''}" id="main" tabindex="-1">${ui.page === 'setup' ? renderSetup(steps) : ui.page === 'settings' ? renderSettings() : ui.page === 'decisions' ? renderDecisions() : ui.page === 'runs' ? renderWorkspace() : ui.page === 'evidence' ? renderEvidence() : ui.page === 'search' ? renderSearch() : ui.page === 'report' ? renderReport() : board ? renderBoardPage() : renderInboxMain()}</main>
+    <main class="main page-${ui.page}${board ? ' page-board' : ''}" id="main" tabindex="-1">${ui.page === 'setup' ? renderSetup(steps) : ui.page === 'settings' ? renderSettings() : ui.page === 'decisions' ? renderDecisions() : ui.page === 'runs' ? renderWorkspace() : ui.page === 'evidence' ? renderEvidence() : ui.page === 'search' ? renderSearch() : ui.page === 'report' ? renderReport() : ui.page === 'computer' ? renderComputer() : board ? renderBoardPage() : renderInboxMain()}</main>
     <footer class="statusbar"><span class="status-local"><span class="dot"></span>Running on this computer</span>${state.database ? `<span class="status-${esc(database.state || 'local')}">${cloud}${database.pending ? ` · ${Number(database.pending)} waiting` : ''}</span>` : ''}<span>${active} active · ${state.config.concurrency} worker${state.config.concurrency === 1 ? '' : 's'}</span>${waiting ? `<span class="status-need">${plural(waiting, 'decision')} waiting</span>` : ''}${state.update?.ready ? `<button class="status-update" data-action="update-install" title="A signed update is downloaded and verified">Update to ${esc(state.update.available.version)}</button>` : ''}<span class="status-right">${providerName(state.config.provider)} default${synced ? ` · Synced ${synced}` : ''}</span></footer></div>`;
   if (ui.page === 'settings') for (const repository of ui.draft.repositories) previewBranch(repository.id);
   restoreTranscript();
@@ -749,12 +754,12 @@ function providerSelect(name, value) { return `<select name="${name}"><option va
 function renderSettings() {
   const config = ui.draft || ui.snapshot.config;
   return `${heading('Settings', 'Connect your projects once. Change accounts, keys, repositories, and agent defaults here.')}
-    <div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><a href="#connections">Connections</a><a href="#jev">Jev priority</a><a href="#sign-ins">Test sign-ins</a><a href="#schedule">Schedule</a><a href="#repositories">Repositories</a><a href="#github">GitHub</a><a href="#agents">Agents & workflow</a><a href="#agent-sign-in">Agent sign-in</a>${ui.snapshot.account?.role === 'member' ? '' : '<a href="#cloud-backup">Cloud backup</a>'}<a href="#updates">Updates</a><a href="#appearance">Appearance</a><a href="#ai-connection">AI connection</a></nav>
+    <div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><a href="#connections">Connections</a><a href="#jev">Jev priority</a><a href="#sign-ins">Test sign-ins</a><a href="#schedule">Schedule</a><a href="#computer-control">Computer control</a><a href="#repositories">Repositories</a><a href="#github">GitHub</a><a href="#agents">Agents & workflow</a><a href="#agent-sign-in">Agent sign-in</a>${ui.snapshot.account?.role === 'member' ? '' : '<a href="#cloud-backup">Cloud backup</a>'}<a href="#updates">Updates</a><a href="#appearance">Appearance</a><a href="#ai-connection">AI connection</a></nav>
     <form id="settings-form"><section class="settings-section" id="connections"><h2>Flow & Morningmate</h2><p>Only issues assigned to your account in these project IDs are imported. API keys stay encrypted on this computer.</p>${config.sources.map((source, index) => renderSourceSettings(source, index)).join('')}${button(`${icon('plus')} Add connection`, 'add-source', '', 'type="button"')}</section>
     <section class="settings-section" id="jev"><h2>Jev priority</h2><p>Jev, TypeSafe AI's decision model, rates each assigned issue through your OpenRouter key: severity, next step (fix, verify, or wait), how hard the fix is, which surface it happens on (web, desktop app, or mobile), whether the current release has probably fixed it already, and whether it can be checked in a browser. The issue list carries those as badges and filters. Rex Desk ranks the issues from those answers and the due date. You choose what to run. The same key gives each new run an English branch name that describes the issue.</p><div class="settings-card"><label class="field"><span>OpenRouter API key</span><input type="password" name="jev.apiKey" autocomplete="off" spellcheck="false" placeholder="${config.jev?.hasKey ? 'Saved · type a new key to replace it' : ui.snapshot.jev?.keySource === 'environment' ? 'Using OPENROUTER_API_KEY from the environment' : 'sk-or-…'}"><small>Stored encrypted on this computer and sent only to OpenRouter.</small></label>${config.jev?.hasKey ? '<label class="field check"><input type="checkbox" name="jev.clearKey"><span>Remove the saved key</span></label>' : ''}${inputField('Jev model', 'jev.model', config.jev?.model || '', 'Blank uses the newest Jev release.', 'text', '~typesafe/jev-latest')}${inputField('Versions you ship now', 'jev.versions', config.jev?.versions || '', 'Jev marks an issue as maybe outdated when it reports a problem in an older version than these. Re-check issues after you change it.', 'text', 'Morningmate desktop app 2.0.1, website current release')}<label class="field check"><input type="checkbox" name="jev.auto" ${config.jev?.auto !== false ? 'checked' : ''}><span>Rate new and changed issues after each sync</span></label></div></section>
     <section class="settings-section" id="sign-ins"><h2>Test sign-ins</h2><p>A sign-in an agent can type into the preview it starts for a run, without ever seeing the password.</p><div class="settings-card"><p class="muted">Save one sign-in per site. An agent is given the one whose site matches the page it is on, and none of them is ever typed into a live production site.</p>${config.testAccounts.map(testAccountRow).join('')}<div class="actions">${button('Add a sign-in', 'add-test-account', 'small', 'type="button"')}</div></div></section>
     <section class="settings-section" id="schedule"><h2>Schedule</h2><p>Let Rex Desk start work on its own while this computer is on. At the set time it syncs, a main agent sorts new issues, and it starts up to your daily limit. Approvals and results wait in Needs you.</p><div class="settings-card"><label class="field check"><input type="checkbox" name="schedule.enabled" ${config.schedule?.enabled ? 'checked' : ''}><span>Start work automatically on a schedule</span></label><div class="field-row">${inputField('Time', 'schedule.time', config.schedule?.time || '09:00', '', 'time')}${inputField('Most runs per day', 'schedule.maxRuns', config.schedule?.maxRuns || 6, 'Runs use your Claude subscription; this keeps its usage limits for your own work. 1–20.', 'number')}</div><fieldset class="day-picker"><legend>Days</legend>${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => `<label><input type="checkbox" name="schedule.days" value="${index}" ${(config.schedule?.days || [1, 2, 3, 4, 5]).includes(index) ? 'checked' : ''}><span>${day}</span></label>`).join('')}</fieldset><label class="field check"><input type="checkbox" name="schedule.fix" ${config.schedule?.fix !== false ? 'checked' : ''}><span>Start a run for the top-ranked issues (needs a source repository)</span></label><div class="actions">${button('Run now', 'schedule-run', 'small', 'type="button"')}<small class="muted" data-schedule-status>${esc(scheduleText())}</small></div><label class="field check"><input type="checkbox" id="autostart"><span>Start Rex Desk when I sign in to Windows, so the schedule runs without opening the app</span></label></div></section>
-    <section class="settings-section" id="repositories"><h2>Source repositories</h2><p>Each worker uses a new worktree. Commands run there; your current checkout stays where it is.</p>${config.repositories.map((repository, index) => renderRepositorySettings(repository, index)).join('')}${button(`${icon('plus')} Add repository`, 'add-repository', '', 'type="button"')}${foundRepositories()}</section>
+    <section class="settings-section" id="computer-control"><h2>Computer control</h2><p>Jev can open apps and settings, change the volume, brightness, Wi-Fi, Bluetooth, camera, and battery saver, sleep and wake this computer, and click and type for you. See everything on the Computer control page.</p><div class="settings-card"><label class="field check"><input type="checkbox" name="control.enabled" ${ui.draft.control?.enabled !== false ? 'checked' : ''}><span>Let Jev control this computer when I ask</span></label><label class="field check"><input type="checkbox" name="control.confirm" ${ui.draft.control?.confirm !== false ? 'checked' : ''}><span>Ask me before shutting down, restarting, signing out, closing apps, stopping programs, or emptying the Recycle Bin</span></label><label class="field check"><input type="checkbox" name="control.agents" ${ui.draft.control?.agents ? 'checked' : ''}><span>Let agents control this computer too (Claude Code and Codex runs get the computer tools)</span></label><label class="field"><span>Voice language</span><select name="control.language">${Object.entries(voiceLanguageNames).map(([key, label]) => `<option value="${key}" ${(ui.draft.control?.language || 'en') === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div></section><section class="settings-section" id="repositories"><h2>Source repositories</h2><p>Each worker uses a new worktree. Commands run there; your current checkout stays where it is.</p>${config.repositories.map((repository, index) => renderRepositorySettings(repository, index)).join('')}${button(`${icon('plus')} Add repository`, 'add-repository', '', 'type="button"')}${foundRepositories()}</section>
     <section class="settings-section" id="github"><h2>GitHub</h2><p>Draft PRs, pushes, and clones use the active account. Sign in as many accounts as you need; Rex Desk uses the GitHub CLI login and never stores a GitHub token.</p><div class="settings-card" data-github="full">${renderGithub()}</div></section>
     <section class="settings-section" id="agents"><h2>Agents & workflow</h2><p>Use your installed Claude Code and Codex sign-ins. You can override the provider for each run.</p><div class="settings-card"><div class="field-row">${inputField('Your name', 'name', config.name)}<label class="field"><span>Default agent</span>${providerSelect('provider', config.provider)}</label></div><p class="muted">Every run opens in its own Orca terminal, so you can watch it work and answer its tool approvals there. Questions, evidence, and PR approval stay in Rex Desk.</p><div class="field-row">${inputField('Parallel workers', 'concurrency', config.concurrency, 'Main agent runs separately. Start with 1 or 2 workers.', 'number')}${inputField('Sync interval (minutes)', 'syncMinutes', config.syncMinutes, 'Set 0 to sync manually.', 'number')}</div>${inputField('Branch prefix', 'branchPrefix', config.branchPrefix, 'For example: temp/rex. Git branch names cannot begin with /.')}<div class="field-row">${inputField('Claude model (optional)', 'model.claude', config.models?.claude || '', 'Blank uses Claude Code’s default. Use opus, sonnet, haiku, or a full ID such as claude-opus-5-5; “opus 5.5” is saved as claude-opus-5-5.', 'text', 'Claude Code default')}${inputField('Codex model (optional)', 'model.codex', config.models?.codex || '', 'Use a model available to your signed-in account.')}</div><label class="field check"><input type="checkbox" name="requireVideo" ${config.requireVideo ? 'checked' : ''}><span>Require a browser recording and passing browser assertion before review</span></label><label class="field check"><input type="checkbox" name="reportToOrbit" ${config.reportToOrbit ? 'checked' : ''}><span>Let verified agents send their final report through my installed Orbit MCP</span></label><label class="field check"><input type="checkbox" name="autoPrLowRisk" ${config.autoPrLowRisk ? 'checked' : ''}><span>Automatically push and create a draft PR for verified low-risk fixes (risk 1–2/10)</span></label><small class="muted">Automatic PRs require a small style, markup, documentation, or test-only change, passing tests, current evidence, and no human-review flag. Application code, sensitive changes, and higher scores require review. Tracker changes still require approval. Nothing is merged automatically.</small></div>${button('Check installed tools', 'diagnostics', '', 'type="button"')}<div id="diagnostics"></div></section>
     <section class="settings-section" id="agent-sign-in"><h2>Agent sign-in</h2><p>Rex Desk runs Claude Code and Codex with the profile folder you choose here. The choice is saved immediately and used for every new run.</p><div data-agent-profiles>${renderAgentProfiles()}</div></section>
@@ -938,6 +943,7 @@ function readSettings() {
   draft.models = { claude: data.get('model.claude'), codex: data.get('model.codex') };
   draft.jev = { model: String(data.get('jev.model') || ''), versions: String(data.get('jev.versions') || ''), auto: data.has('jev.auto'), apiKey: String(data.get('jev.apiKey') || ''), clearKey: data.has('jev.clearKey') };
   draft.testAccounts = draft.testAccounts.map((account, index) => ({ ...account, site: String(data.get(`testAccounts.${index}.site`) || '').trim(), username: String(data.get(`testAccounts.${index}.username`) || '').trim(), password: String(data.get(`testAccounts.${index}.password`) || '') }));
+  draft.control = { enabled: data.has('control.enabled'), confirm: data.has('control.confirm'), agents: data.has('control.agents'), language: String(data.get('control.language') || 'en') };
   draft.schedule = { enabled: data.has('schedule.enabled'), time: String(data.get('schedule.time') || '09:00'), days: data.getAll('schedule.days').map(Number), fix: data.has('schedule.fix'), maxRuns: Number(data.get('schedule.maxRuns') || 6) };
   draft.agentProfiles = ui.snapshot.config.agentProfiles; draft.tourDismissed = ui.snapshot.config.tourDismissed;
   draft.sources = draft.sources.map(source => {
@@ -1816,4 +1822,152 @@ document.addEventListener('change', event => {
 // The account menu closes when the click lands anywhere else.
 document.addEventListener('click', event => {
   if (ui.accountMenu && !event.target.closest('.account-anchor')) { ui.accountMenu = false; render(); }
+});
+
+// Jev computer control: say or type what this computer should do. Jev picks the action, a small model fills in its
+// values, and Rex Desk runs it here. Speech becomes words on this computer, in the local voice engine.
+async function loadComputer() {
+  if (ui.computer.loading) return;
+  ui.computer.loading = true;
+  try { ui.computer.info = await api('/computer'); ui.computer.language ||= ui.computer.info.control.language || 'en'; }
+  catch (error) { toast(error.message, true); }
+  finally { ui.computer.loading = false; }
+  if (ui.page === 'computer' || ui.page === 'settings') render();
+}
+function renderCommandEntry(entry) {
+  const results = (entry.results || []).map(item => `<li class="${item.ok ? 'ok' : 'failed'}">${icon(item.ok ? 'check' : 'alert')}<span><strong>${esc(item.title)}</strong>${item.ok ? (item.result ? ` <small class="muted">${esc(JSON.stringify(item.result).slice(0, 160))}</small>` : '') : ` <span class="error-text">${esc(item.error)}</span>`}</span></li>`).join('');
+  const steps = !entry.results?.length && entry.steps?.length ? `<ol class="command-steps">${entry.steps.map(step => `<li><code>${esc(step.action)}</code>${Object.keys(step.params || {}).length ? ` <small class="muted">${esc(JSON.stringify(step.params))}</small>` : ''}</li>`).join('')}</ol>` : '';
+  const confirm = entry.needsConfirm?.length && !entry.answered ? `<div class="command-confirm">${icon('alert')}<span>${esc(entry.needsConfirm.join(', '))}: run it?</span>${button('Run it', 'computer-confirm', 'primary small', `type="button" data-entry="${entry.id}"`)}${button('Cancel', 'computer-cancel', 'quiet small', `type="button" data-entry="${entry.id}"`)}</div>` : '';
+  return `<li class="command-entry"><div class="command-said">${icon(entry.voice ? 'mic' : 'comment')}<span>${esc(entry.text)}</span><small class="muted">${relative(entry.at)}</small></div>
+    ${entry.busy ? `<p class="loading">${esc(entry.busy)}</p>` : ''}${entry.error ? `<div class="notice">${icon('alert')}<span>${esc(entry.error)}</span></div>` : ''}${entry.fallback ? `<p class="muted">${esc(entry.fallback)}</p>` : ''}
+    ${entry.say ? `<p class="command-say">${esc(entry.say)}${entry.via ? ` <small class="muted">· ${esc(entry.via.replace('jev', 'Jev'))}</small>` : ''}</p>` : ''}${steps}${confirm}${results ? `<ul class="command-results">${results}</ul>` : ''}</li>`;
+}
+function voiceNote(voice, language) {
+  if (!voice.supported) return 'Voice commands run on Windows and macOS.';
+  if (voice.installing) return `Installing voice: ${esc(voice.progress?.file || '')}${voice.progress ? ` · ${voice.progress.receivedMB} of ${voice.progress.sizeMB} MB (${voice.progress.index}/${voice.progress.total})` : ''}`;
+  if (!voice.languages?.[language]) return `Voice for ${esc(voiceLanguageNames[language])} is not installed. ${button(`${icon('plus')} Install voice (${voice.downloadMB} MB, free, works offline)`, 'voice-install', 'small', 'type="button"')}`;
+  return 'Voice runs on this computer: nothing you say leaves it. Press Speak or Alt+J, talk, and pause to send.';
+}
+function renderComputer() {
+  const state = ui.computer, info = state.info;
+  if (!info) { void loadComputer(); return heading('Computer control', 'Loading what this computer can do…'); }
+  if (info.control.enabled === false) return `${heading('Computer control', 'Jev can control this computer when you allow it.')}<div class="notice">${icon('alert')}<span>Computer control is off. Turn it on in Settings → Computer control.</span></div>`;
+  const voice = info.voice, language = state.language || 'en', recording = Boolean(state.recording), canSpeak = Boolean(voice.languages?.[language]);
+  const form = `<form id="command-form" class="command-form"><div class="command-row">
+      <button type="button" class="mic${recording ? ' recording' : ''}" data-action="voice-record" aria-pressed="${recording}" title="${recording ? 'Stop and send (Alt+J)' : 'Speak a command (Alt+J)'}" ${canSpeak ? '' : 'disabled'}>${icon('mic')}<span>${recording ? 'Listening…' : 'Speak'}</span></button>
+      <input name="text" aria-label="What should the computer do?" placeholder="Tell Jev what to do, for example: turn the volume down" autocomplete="off" ${state.busy ? 'disabled' : ''}>
+      <select name="language" aria-label="Voice language">${Object.entries(voiceLanguageNames).map(([key, label]) => `<option value="${key}" ${key === language ? 'selected' : ''}>${label}</option>`).join('')}</select>
+      <button class="button primary" type="submit" ${state.busy ? 'disabled' : ''}>Do it</button></div>
+      <p class="muted command-voice-note">${voiceNote(voice, language)}</p>
+      <div class="query-examples">${(commandExamples[language] || commandExamples.en).map(text => button(esc(text), 'computer-example', 'small quiet', `type="button" data-text="${esc(text)}"`)).join('')}</div></form>`;
+  const groups = Object.entries(Object.groupBy(info.catalog, item => item.group));
+  const row = item => `<li class="${item.available ? '' : 'unavailable'}"><span><strong>${esc(item.title)}</strong>${item.confirm ? ' <span class="tag">asks first</span>' : ''}<small class="muted">${esc(item.does)}${item.available ? '' : ' · not on this system'}${item.note ? ` · ${esc(item.note)}` : ''}</small></span>${item.available && !item.confirm && !Object.values(item.params || {}).some(spec => spec.required) ? button('Run', 'computer-run', 'small quiet', `type="button" data-id="${esc(item.id)}"`) : ''}</li>`;
+  const list = `<section class="computer-catalog"><h2>What Jev can do here <small class="muted">${info.catalog.filter(item => item.available).length} actions on ${info.platform === 'mac' ? 'macOS' : 'Windows'}</small></h2>
+    <div class="computer-groups">${groups.map(([group, items]) => `<div class="computer-group"><h3>${esc(group)}</h3><ul>${items.map(row).join('')}</ul></div>`).join('')}</div></section>`;
+  return `${heading('Computer control', 'Say or type what this computer should do, in Khmer, English, or Korean. Jev picks the action and Rex Desk does it here.')}
+    <div class="computer-page">${form}${state.log.length ? `<ul class="command-log">${state.log.map(renderCommandEntry).join('')}</ul>` : ''}${list}</div>`;
+}
+async function performCommand(text, { voice = false, fallback = '' } = {}) {
+  const entry = { id: crypto.randomUUID(), text, voice, fallback, at: new Date().toISOString(), busy: 'Jev is working out what to do…' };
+  ui.computer.log.unshift(entry); ui.computer.log.length = Math.min(ui.computer.log.length, 20); ui.computer.busy = true; render();
+  try { Object.assign(entry, await api('/computer/do', { method: 'POST', data: { text } })); }
+  catch (error) { entry.error = error.message; }
+  finally { entry.busy = ''; ui.computer.busy = false; }
+  if (ui.page === 'computer') render();
+  const failed = entry.results?.find(item => !item.ok);
+  if (failed) toast(failed.error, true);
+}
+async function runSteps(entry) {
+  entry.answered = true; entry.busy = 'Running…'; render();
+  try { Object.assign(entry, await api('/computer/run', { method: 'POST', data: { steps: entry.steps } })); }
+  catch (error) { entry.error = error.message; }
+  finally { entry.busy = ''; }
+  render();
+}
+// Recording: the microphone at its own rate, turned into 16 kHz mono WAV, which the speech model reads.
+// It sends by itself after a second and a half of quiet once you have spoken, or after 20 seconds.
+async function startRecording() {
+  if (ui.computer.recording) return;
+  const language = ui.computer.language || 'en';
+  void api(`/voice/prepare?language=${language}`, { method: 'POST' }).catch(() => {});
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
+  catch { toast('Rex Desk could not use the microphone. Allow microphone access for this window, then try again.', true); return; }
+  const context = new AudioContext(), source = context.createMediaStreamSource(stream), processor = context.createScriptProcessor(4096, 1, 1);
+  const recording = { stream, context, processor, chunks: [], rate: context.sampleRate, started: performance.now(), heard: false, quietSince: 0, language };
+  processor.onaudioprocess = event => {
+    if (ui.computer.recording !== recording) return;
+    const data = event.inputBuffer.getChannelData(0); recording.chunks.push(new Float32Array(data));
+    let sum = 0; for (const value of data) sum += value * value;
+    const level = Math.sqrt(sum / data.length), time = performance.now();
+    if (level > 0.02) { recording.heard = true; recording.quietSince = 0; } else if (recording.heard && !recording.quietSince) recording.quietSince = time;
+    if ((recording.heard && recording.quietSince && time - recording.quietSince > 1500) || time - recording.started > 20000) void finishRecording();
+  };
+  source.connect(processor); processor.connect(context.destination);
+  ui.computer.recording = recording; render();
+}
+function wavFrom(chunks, rate) {
+  const input = new Float32Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0)); let offset = 0;
+  for (const chunk of chunks) { input.set(chunk, offset); offset += chunk.length; }
+  const ratio = rate / 16000, length = Math.floor(input.length / ratio), samples = new Int16Array(length);
+  for (let index = 0; index < length; index++) { const sample = Math.max(-1, Math.min(1, input[Math.floor(index * ratio)])); samples[index] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF; }
+  const header = new DataView(new ArrayBuffer(44)), text = (at, value) => [...value].forEach((char, index) => header.setUint8(at + index, char.charCodeAt(0)));
+  text(0, 'RIFF'); header.setUint32(4, 36 + samples.byteLength, true); text(8, 'WAVE'); text(12, 'fmt '); header.setUint32(16, 16, true); header.setUint16(20, 1, true); header.setUint16(22, 1, true);
+  header.setUint32(24, 16000, true); header.setUint32(28, 32000, true); header.setUint16(32, 2, true); header.setUint16(34, 16, true); text(36, 'data'); header.setUint32(40, samples.byteLength, true);
+  return new Blob([header.buffer, samples.buffer], { type: 'audio/wav' });
+}
+async function finishRecording() {
+  const recording = ui.computer.recording;
+  if (!recording) return;
+  ui.computer.recording = null;
+  recording.processor.disconnect(); recording.stream.getTracks().forEach(track => track.stop()); void recording.context.close();
+  if (!recording.heard) { toast('Nothing was heard. Check the microphone and speak a little louder.', true); render(); return; }
+  const entry = { id: crypto.randomUUID(), text: 'Listening…', voice: true, at: new Date().toISOString(), busy: 'Turning your words into text on this computer…' };
+  ui.computer.log.unshift(entry); render();
+  try {
+    const response = await fetch(`/api/voice/transcribe?language=${recording.language}`, { method: 'POST', headers: { 'Content-Type': 'audio/wav', 'x-rex-desk': '1' }, body: wavFrom(recording.chunks, recording.rate) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    ui.computer.log.splice(ui.computer.log.indexOf(entry), 1);
+    if (!result.text) throw new Error('No words were recognized. Try again a little closer to the microphone.');
+    await performCommand(result.text, { voice: true, fallback: result.fallback || '' });
+  } catch (error) { Object.assign(entry, { busy: '', error: error.message }); render(); }
+}
+async function runDirect(item) {
+  const entry = { id: crypto.randomUUID(), text: item.title, at: new Date().toISOString(), steps: [{ action: item.id, params: {} }] };
+  ui.computer.log.unshift(entry); await runSteps(entry);
+}
+function watchVoiceInstall() {
+  const timer = setInterval(async () => {
+    const info = await api('/computer').catch(() => null);
+    if (info) { ui.computer.info = info; if (ui.page === 'computer' || ui.page === 'settings') render(); }
+    if (!info || !info.voice.installing) { clearInterval(timer); if (info?.voice.error) toast(info.voice.error, true); else if (info?.voice.installed) toast('Voice commands are ready.'); }
+  }, 2000);
+}
+document.addEventListener('click', event => {
+  const target = event.target.closest('[data-action]'); if (!target) return;
+  const name = target.dataset.action, entry = ui.computer.log.find(item => item.id === target.dataset.entry);
+  if (name === 'voice-record') { void (ui.computer.recording ? finishRecording() : startRecording()); return; }
+  if (name === 'computer-example') { void performCommand(target.dataset.text); return; }
+  if (name === 'computer-confirm' && entry) { void runSteps(entry); return; }
+  if (name === 'computer-cancel' && entry) { Object.assign(entry, { answered: true, say: 'Cancelled. Nothing was done.' }); render(); return; }
+  if (name === 'computer-run') { const item = ui.computer.info?.catalog.find(action => action.id === target.dataset.id); if (item) void runDirect(item); return; }
+  if (name === 'voice-install') { target.disabled = true; void action(async () => { await api('/voice/install', { method: 'POST' }); toast('Downloading the voice engine and models. This takes a few minutes.'); watchVoiceInstall(); }); }
+});
+document.addEventListener('submit', event => {
+  if (event.target.id !== 'command-form') return;
+  event.preventDefault();
+  const input = event.target.elements.text, text = input.value.trim();
+  if (text) { input.value = ''; void performCommand(text); }
+});
+document.addEventListener('change', event => {
+  if (event.target.closest('#command-form') && event.target.name === 'language') { ui.computer.language = event.target.value; render(); }
+});
+// Alt+J speaks a command from anywhere in Rex Desk.
+document.addEventListener('keydown', event => {
+  if (!event.altKey || event.key.toLowerCase() !== 'j') return;
+  event.preventDefault();
+  if (ui.page !== 'computer') navigate('computer');
+  const ready = ui.computer.info?.voice.languages?.[ui.computer.language || 'en'];
+  if (ready) void (ui.computer.recording ? finishRecording() : startRecording());
 });
