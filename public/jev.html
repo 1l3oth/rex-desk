@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#16181d">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <title>Jev</title>
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/jev.css">
+  <script type="module" src="/jev.js"></script>
+</head>
+<body class="jev-body">
+  <main class="jev" aria-live="polite">
+    <form class="jev-bar" id="jev-form" autocomplete="off">
+      <button type="button" class="jev-mic" id="jev-mic" aria-label="Speak to Jev" title="Speak (Space when the box is empty)">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      </button>
+      <input id="jev-text" name="text" placeholder="Tell Jev what to do…" aria-label="Command" spellcheck="false">
+      <select id="jev-language" aria-label="Language">
+        <option value="km">ខ្មែរ</option><option value="en">EN</option><option value="ko">한국어</option>
+      </select>
+      <button type="button" class="jev-close" id="jev-close" aria-label="Close (Esc)" title="Close (Esc)">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </form>
+    <div class="jev-meter" id="jev-meter" aria-hidden="true"><i></i></div>
+    <p class="jev-status" id="jev-status">Opening…</p>
+    <div id="jev-result"></div>
+    <p class="jev-hint">Ctrl+Alt+J from any app · Esc closes · <a href="/" target="_blank" rel="noopener">Open Rex Desk</a></p>
+  </main>
+</body>
+</html>

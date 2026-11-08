@@ -82,6 +82,14 @@ Everyday commands ("볼륨 줄여줘", "បិទកាមេរ៉ា", "open B
 
 Voice is free and stays on this computer: **Install voice** downloads llama.cpp and Qwen3-ASR (about 1.9 GB, a Khmer fine-tune plus the English and Korean model) into `.local/voice` (or `REX_VOICE_DIR`). A model starts on your first command and stops after five quiet minutes.
 
+### Jev anywhere: without opening Rex Desk
+
+- **Windows:** turn on **Jev anywhere** at the top of the Computer control page. A small tray helper (`scripts/jev-anywhere.ps1`) starts now and with Windows (the per-user Run key, no admin). Press **Ctrl+Alt+J** in any app: the Jev bar opens at the top of the screen, listens, does the command, and closes itself. Press the keys again or Esc to close it. Clicking the tray icon opens it too. The helper starts the Rex Desk server when it is not running.
+- **macOS:** turning it on adds a LaunchAgent that keeps the Rex Desk server running from login. For a key, make a Shortcuts shortcut that opens `http://127.0.0.1:4317/jev?listen=1&auto=1` and give it a keyboard shortcut.
+- **Any terminal or script:** `npm run jev -- turn the volume down` (or `node bin/jev.js ...`). Add `--yes` for actions that ask first and `--json` for the full answer.
+
+Jev uses the account that chose **Stay signed in** on this computer, so sign in that way once.
+
 ## Execution and evidence
 
 Each run is one issue you start with **Investigate with agent**, from Next up or the issue page. The agent gets the issue, its link, the repository, branch and worktree to work in, and one job: find the cause and report it. It changes nothing until you read that report and tell it to. Worker concurrency is enforced by the local queue. Nothing starts on an issue you did not choose: when an agent asks to start one (`desk_dispatch`), Rex Desk shows an approval card naming the issue, and the run starts only if you approve it. **Agent runs** shows one run at a time; the layout switch adds side-by-side or grid panes, and that choice is remembered.

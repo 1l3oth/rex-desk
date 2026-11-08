@@ -24,6 +24,7 @@ import { weeklyReport } from './report.js';
 import { orcaStatus, showWorktreesInOrca, openInOrca } from './orca.js';
 import { Computer } from './computer.js';
 import { Voice } from './voice.js';
+import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
 
 const exec = promisify(execFile);
@@ -56,7 +57,7 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, updateOptions, catchUp = false, computerFactory, voiceFactory } = {}) {
+export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory } = {}) {
   const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataRoot, 'runtime.lock');
@@ -74,6 +75,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   // One computer and one voice engine for every account on it: the models are large, so they live beside the accounts.
   const computer = computerFactory ? computerFactory() : new Computer({ directory: path.join(dataRoot, 'screens') });
   const voice = voiceFactory ? voiceFactory() : new Voice(process.env.REX_VOICE_DIR || path.join(dataRoot, 'voice'));
+  const anywhere = anywhereFactory ? anywhereFactory() : new Anywhere({ root, dataRoot });
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
   let session = null, address = '';
@@ -203,8 +205,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/report' && request.method === 'GET') return json(response, 200, await weeklyReport(store, { from: url.searchParams.get('from'), to: url.searchParams.get('to'), detail: taskId => desk.sources.taskDetail(taskId, { refresh: true }) }));
       if (url.pathname.startsWith('/api/computer') || url.pathname.startsWith('/api/voice')) {
         const control = store.config().control || {};
-        if (url.pathname === '/api/computer' && request.method === 'GET') return json(response, 200, { platform: computer.key, catalog: computer.catalog(), control, voice: { ...voice.status(), sizeMB: voice.size() } });
+        if (url.pathname === '/api/computer' && request.method === 'GET') return json(response, 200, { platform: computer.key, catalog: computer.catalog(), control, voice: { ...voice.status(), sizeMB: voice.size() }, anywhere: await anywhere.status() });
         if (control.enabled === false) return json(response, 403, { error: 'Computer control is off. Turn it on in Settings → Computer control.' });
+        if (url.pathname === '/api/computer/anywhere' && request.method === 'POST') return json(response, 200, await anywhere.set((await body(request)).on === true));
         if (url.pathname === '/api/computer/do' && request.method === 'POST') return json(response, 200, await desk.commander.perform((await body(request)).text));
         if (url.pathname === '/api/computer/run' && request.method === 'POST') {
           const input = await body(request), steps = (Array.isArray(input.steps) ? input.steps : []).slice(0, 8).map(step => ({ action: String(step.action), params: step.params || {} }));
@@ -360,7 +363,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html', download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico' };
+      const publicFiles = { '/': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js' };
       // three.js ships from the installed package; the page loads no remote scripts.
       const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });

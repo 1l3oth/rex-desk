@@ -109,6 +109,14 @@ Speech turns into text on this computer, for free and offline, with [Qwen3-ASR](
 
 The first install downloads about 1.9 GB into the voice folder (`.local/voice`, or `REX_VOICE_DIR`). Each model starts on the first command, which takes a few seconds, answers in about a second after that, and stops after five quiet minutes so it does not hold memory.
 
+## Jev anywhere: without opening Rex Desk
+
+- **Windows:** turn on **Jev anywhere** at the top of the Computer control page. A small tray helper (`scripts/jev-anywhere.ps1`) starts now and with Windows (the per-user Run key, no admin). Press **Ctrl+Alt+J** in any app: the Jev bar opens at the top of the screen, listens, does the command, and closes itself. Press the keys again or Esc to close it. Clicking the tray icon opens it too. The helper starts the Rex Desk server when it is not running.
+- **macOS:** turning it on adds a LaunchAgent that keeps the Rex Desk server running from login. For a key, make a Shortcuts shortcut that opens `http://127.0.0.1:4317/jev?listen=1&auto=1` and give it a keyboard shortcut.
+- **Any terminal or script:** `npm run jev -- turn the volume down` (or `node bin/jev.js ...`). Add `--yes` for actions that ask first and `--json` for the full answer.
+
+Jev uses the account that chose **Stay signed in** on this computer, so sign in that way once.
+
 ## Safety
 
 - Only the person signed in to Rex Desk on this computer can use it; requests come from the dashboard on 127.0.0.1 only.

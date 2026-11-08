@@ -1,0 +1,30 @@
+/* The Jev bar: one small window, a command row on top and the answer under it. Reads the dashboard's tokens. */
+.jev-body{background:var(--panel);font-size:13px;overflow:hidden}
+.jev{display:flex;flex-direction:column;gap:8px;height:100dvh;padding:12px 14px 10px}
+.jev-bar{display:flex;align-items:center;gap:8px}
+.jev-mic{width:40px;height:40px;flex-shrink:0;display:grid;place-items:center;border:1px solid var(--line);border-radius:50%;background:var(--raised);color:var(--ink);padding:0;transition:background .12s,border-color .12s}
+.jev-mic:hover{border-color:var(--control-hover);background:var(--hover)}
+.jev-mic .icon{width:19px;height:19px}
+.jev-mic.recording{border-color:var(--red);background:var(--red-soft);color:var(--red);animation:mic-pulse 1.2s ease-in-out infinite}
+.jev-bar input{flex:1;min-width:0;height:40px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:var(--sunken);font-size:14px}
+.jev-bar input:focus{outline:none;border-color:var(--accent)}
+.jev-bar select{height:40px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:var(--raised)}
+.jev-close{width:28px;height:28px;flex-shrink:0;display:grid;place-items:center;border:0;border-radius:6px;background:none;color:var(--faint);padding:0}
+.jev-close:hover{background:var(--hover);color:var(--ink)}
+.jev-meter{height:3px;border-radius:2px;background:var(--line-soft);overflow:hidden}
+.jev-meter i{display:block;width:0;height:100%;background:var(--red);transition:width .08s linear}
+body:not([data-phase=listening]) .jev-meter{visibility:hidden}
+body[data-phase=thinking] .jev-meter{visibility:visible}
+body[data-phase=thinking] .jev-meter i{width:30%;background:var(--accent);animation:jev-think 1.1s var(--ease) infinite}
+@keyframes jev-think{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
+.jev-status{color:var(--muted)}
+.jev-status.good{color:var(--green)}.jev-status.warn{color:var(--amber)}.jev-status.error{color:var(--red)}
+#jev-result{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.jev-say{font-weight:600}
+.jev-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+.jev-steps li.ok span{color:var(--green)}.jev-steps li.failed{color:var(--red)}
+.jev-confirm{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--amber-line);border-radius:8px;background:var(--amber-soft)}
+.jev-confirm p{flex-basis:100%}
+.jev-note{color:var(--faint);font-size:12px}
+.jev-hint{color:var(--faint);font-size:11px}
+@media(prefers-reduced-motion:reduce){.jev-mic.recording,body[data-phase=thinking] .jev-meter i{animation:none}}

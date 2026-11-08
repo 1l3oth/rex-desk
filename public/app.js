@@ -1,3 +1,4 @@
+import { openMicrophone, startRecorder, transcribe } from './recorder.js';
 const app = document.querySelector('#app');
 const repositoryInfo = new Map(), inspecting = new Map(), previewTimers = new Map(), connectingSources = new Set();
 const loadingTasks = new Set(), taskErrors = new Map();
@@ -1848,6 +1849,16 @@ function voiceNote(voice, language) {
   if (!voice.languages?.[language]) return `Voice for ${esc(voiceLanguageNames[language])} is not installed. ${button(`${icon('plus')} Install voice (${voice.downloadMB} MB, free, works offline)`, 'voice-install', 'small', 'type="button"')}`;
   return 'Voice runs on this computer: nothing you say leaves it. Press Speak or Alt+J, talk, and pause to send.';
 }
+// Jev anywhere: the Jev bar over any app (Ctrl+Alt+J on Windows), without opening this window.
+function renderAnywhere(anywhere) {
+  if (!anywhere?.supported) return '';
+  const on = anywhere.atLogin;
+  const how = anywhere.platform === 'mac'
+    ? 'Keeps Rex Desk running from login. For a key, add a Shortcuts keyboard shortcut that opens <code>http://127.0.0.1:4317/jev?listen=1</code>, or run <code>npm run jev -- "turn the volume down"</code>.'
+    : `Press <kbd>${esc(anywhere.hotkey)}</kbd> in any app: the Jev bar opens, listens, does it, and closes. Starts with Windows${anywhere.running ? ' · running now' : ''}.`;
+  return `<section class="anywhere-card"><div><h2>${icon('mic')} Jev anywhere ${on ? '<span class="tag">on</span>' : ''}</h2><p class="muted">${how}</p></div>
+    <div class="actions">${on && anywhere.platform !== 'mac' ? button('Open the Jev bar', 'anywhere-open', 'small quiet', 'type="button"') : ''}${button(on ? 'Turn off' : 'Turn on', 'anywhere-toggle', on ? 'small' : 'small primary', `type="button" data-on="${on ? 'false' : 'true'}"`)}</div></section>`;
+}
 function renderComputer() {
   const state = ui.computer, info = state.info;
   if (!info) { void loadComputer(); return heading('Computer control', 'Loading what this computer can do…'); }
@@ -1865,7 +1876,7 @@ function renderComputer() {
   const list = `<section class="computer-catalog"><h2>What Jev can do here <small class="muted">${info.catalog.filter(item => item.available).length} actions on ${info.platform === 'mac' ? 'macOS' : 'Windows'}</small></h2>
     <div class="computer-groups">${groups.map(([group, items]) => `<div class="computer-group"><h3>${esc(group)}</h3><ul>${items.map(row).join('')}</ul></div>`).join('')}</div></section>`;
   return `${heading('Computer control', 'Say or type what this computer should do, in Khmer, English, or Korean. Jev picks the action and Rex Desk does it here.')}
-    <div class="computer-page">${form}${state.log.length ? `<ul class="command-log">${state.log.map(renderCommandEntry).join('')}</ul>` : ''}${list}</div>`;
+    <div class="computer-page">${renderAnywhere(info.anywhere)}${form}${state.log.length ? `<ul class="command-log">${state.log.map(renderCommandEntry).join('')}</ul>` : ''}${list}</div>`;
 }
 async function performCommand(text, { voice = false, fallback = '' } = {}) {
   const entry = { id: crypto.randomUUID(), text, voice, fallback, at: new Date().toISOString(), busy: 'Jev is working out what to do…' };
@@ -1884,52 +1895,29 @@ async function runSteps(entry) {
   finally { entry.busy = ''; }
   render();
 }
-// Recording: the microphone at its own rate, turned into 16 kHz mono WAV, which the speech model reads.
-// It sends by itself after a second and a half of quiet once you have spoken, or after 20 seconds.
+// Recording lives in recorder.js, shared with the Jev bar.
 async function startRecording() {
   if (ui.computer.recording) return;
   const language = ui.computer.language || 'en';
   void api(`/voice/prepare?language=${language}`, { method: 'POST' }).catch(() => {});
   let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
+  try { stream = await openMicrophone(); }
   catch { toast('Rex Desk could not use the microphone. Allow microphone access for this window, then try again.', true); return; }
-  const context = new AudioContext(), source = context.createMediaStreamSource(stream), processor = context.createScriptProcessor(4096, 1, 1);
-  const recording = { stream, context, processor, chunks: [], rate: context.sampleRate, started: performance.now(), heard: false, quietSince: 0, language };
-  processor.onaudioprocess = event => {
-    if (ui.computer.recording !== recording) return;
-    const data = event.inputBuffer.getChannelData(0); recording.chunks.push(new Float32Array(data));
-    let sum = 0; for (const value of data) sum += value * value;
-    const level = Math.sqrt(sum / data.length), time = performance.now();
-    if (level > 0.02) { recording.heard = true; recording.quietSince = 0; } else if (recording.heard && !recording.quietSince) recording.quietSince = time;
-    if ((recording.heard && recording.quietSince && time - recording.quietSince > 1500) || time - recording.started > 20000) void finishRecording();
-  };
-  source.connect(processor); processor.connect(context.destination);
+  const recording = startRecorder(stream, { onQuiet: () => void finishRecording() });
+  recording.language = language;
   ui.computer.recording = recording; render();
-}
-function wavFrom(chunks, rate) {
-  const input = new Float32Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0)); let offset = 0;
-  for (const chunk of chunks) { input.set(chunk, offset); offset += chunk.length; }
-  const ratio = rate / 16000, length = Math.floor(input.length / ratio), samples = new Int16Array(length);
-  for (let index = 0; index < length; index++) { const sample = Math.max(-1, Math.min(1, input[Math.floor(index * ratio)])); samples[index] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF; }
-  const header = new DataView(new ArrayBuffer(44)), text = (at, value) => [...value].forEach((char, index) => header.setUint8(at + index, char.charCodeAt(0)));
-  text(0, 'RIFF'); header.setUint32(4, 36 + samples.byteLength, true); text(8, 'WAVE'); text(12, 'fmt '); header.setUint32(16, 16, true); header.setUint16(20, 1, true); header.setUint16(22, 1, true);
-  header.setUint32(24, 16000, true); header.setUint32(28, 32000, true); header.setUint16(32, 2, true); header.setUint16(34, 16, true); text(36, 'data'); header.setUint32(40, samples.byteLength, true);
-  return new Blob([header.buffer, samples.buffer], { type: 'audio/wav' });
 }
 async function finishRecording() {
   const recording = ui.computer.recording;
   if (!recording) return;
   ui.computer.recording = null;
-  recording.processor.disconnect(); recording.stream.getTracks().forEach(track => track.stop()); void recording.context.close();
+  recording.stop();
   if (!recording.heard) { toast('Nothing was heard. Check the microphone and speak a little louder.', true); render(); return; }
-  const entry = { id: crypto.randomUUID(), text: 'Listening…', voice: true, at: new Date().toISOString(), busy: 'Turning your words into text on this computer…' };
+  const entry = { id: crypto.randomUUID(), text: 'Listening…', voice: true, at: new Date().toISOString(), busy: 'Turning your words into text on this computer… The first command after a restart loads the voice model, which can take a minute or two.' };
   ui.computer.log.unshift(entry); render();
   try {
-    const response = await fetch(`/api/voice/transcribe?language=${recording.language}`, { method: 'POST', headers: { 'Content-Type': 'audio/wav', 'x-rex-desk': '1' }, body: wavFrom(recording.chunks, recording.rate) });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    const result = await transcribe(recording.wav(), recording.language);
     ui.computer.log.splice(ui.computer.log.indexOf(entry), 1);
-    if (!result.text) throw new Error('No words were recognized. Try again a little closer to the microphone.');
     await performCommand(result.text, { voice: true, fallback: result.fallback || '' });
   } catch (error) { Object.assign(entry, { busy: '', error: error.message }); render(); }
 }
@@ -1952,6 +1940,8 @@ document.addEventListener('click', event => {
   if (name === 'computer-confirm' && entry) { void runSteps(entry); return; }
   if (name === 'computer-cancel' && entry) { Object.assign(entry, { answered: true, say: 'Cancelled. Nothing was done.' }); render(); return; }
   if (name === 'computer-run') { const item = ui.computer.info?.catalog.find(action => action.id === target.dataset.id); if (item) void runDirect(item); return; }
+  if (name === 'anywhere-toggle') { target.disabled = true; void action(async () => { const on = target.dataset.on === 'true'; ui.computer.info.anywhere = await api('/computer/anywhere', { method: 'POST', data: { on } }); toast(on ? 'Jev anywhere is on. Press Ctrl+Alt+J in any app.' : 'Jev anywhere is off.'); render(); }); return; }
+  if (name === 'anywhere-open') { window.open('/jev?listen=1', 'jev', 'popup,width=520,height=300'); return; }
   if (name === 'voice-install') { target.disabled = true; void action(async () => { await api('/voice/install', { method: 'POST' }); toast('Downloading the voice engine and models. This takes a few minutes.'); watchVoiceInstall(); }); }
 });
 document.addEventListener('submit', event => {

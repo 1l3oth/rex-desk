@@ -725,3 +725,9 @@ dialog.viewer .viewer-head .actions{margin:0 0 0 auto;flex-wrap:nowrap;justify-c
 .computer-group li.unavailable{opacity:.55}
 .computer-group .tag{display:inline-block;margin-left:4px;padding:0 5px;border-radius:8px;background:var(--amber-soft);color:var(--amber);font-size:10px;font-weight:600}
 @media(max-width:700px){.computer-page{padding:0 16px 16px}.computer-groups{grid-template-columns:1fr}}
+
+/* Jev anywhere card on the computer control page */
+.anywhere-card{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--panel);margin-bottom:12px}
+.anywhere-card h2{display:flex;align-items:center;gap:6px;font-size:13px}
+.anywhere-card p{margin-top:2px;max-width:70ch}
+.anywhere-card kbd{font:600 11px var(--mono);padding:1px 5px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;background:var(--raised)}

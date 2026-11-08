@@ -123,3 +123,25 @@ test('the voice engine answer loses its language prefix, and an uninstalled engi
   await assert.rejects(voice.transcribe(Buffer.from('RIFF'), 'km'), /not installed/);
   await assert.rejects(voice.transcribe(Buffer.from('RIFF'), 'fr'), /Khmer \(km\), English \(en\), and Korean \(ko\)/);
 });
+
+test('Jev anywhere starts with Windows through the per-user Run key, and keeps Rex Desk running on macOS', async () => {
+  const { Anywhere } = await import('../src/anywhere.js');
+  const calls = [], spawned = [];
+  const runner = async (command, args) => { calls.push([command, ...args]); return { ok: args[0] !== 'query' || calls.some(call => call[1] === 'add'), stdout: calls.some(call => call[1] === 'add') ? 'Rex Desk Jev REG_SZ x' : '' }; };
+  const windows = new Anywhere({ root: 'D:/rex', dataRoot: 'Z:/nowhere', platform: 'win32', runner, spawner: (...args) => { spawned.push(args); return { unref() {} }; } });
+  assert.equal((await windows.status()).atLogin, false);
+  const on = await windows.set(true);
+  assert.equal(on.atLogin, true); assert.equal(on.hotkey, 'Ctrl+Alt+J');
+  const added = calls.find(call => call[1] === 'add');
+  assert.ok(added.includes(String.raw`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`));
+  assert.match(added[added.indexOf('/d') + 1], /jev-anywhere\.ps1/);
+  assert.equal(spawned.length, 1, 'the helper starts now, not only at the next sign-in');
+  await windows.set(false);
+  assert.ok(calls.some(call => call[1] === 'delete'));
+  const { mkdtempSync, readFileSync, existsSync } = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const home = mkdtempSync(path.join(os.tmpdir(), 'rex-mac-'));
+  const mac = new Anywhere({ root: '/Users/me/rex-desk', dataRoot: '/Users/me/rex-desk/.local', platform: 'darwin', home });
+  assert.equal((await mac.set(true)).atLogin, true);
+  const plist = readFileSync(mac.macAgent, 'utf8'); assert.match(plist, /<key>RunAtLoad<\/key><true\/>/); assert.match(plist, /server\.js/);
+  await mac.set(false); assert.equal(existsSync(mac.macAgent), false);
+});

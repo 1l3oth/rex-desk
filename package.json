@@ -13,7 +13,9 @@
     "test": "node --test \"test/*.test.js\"",
     "mcp": "node src/stdio.js",
     "verify": "node scripts/verify.js",
-    "test:browser": "node scripts/browser-test.js"
+    "test:browser": "node scripts/browser-test.js",
+    "jev": "node bin/jev.js",
+    "jev:anywhere": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File scripts/jev-anywhere.ps1"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.0",
@@ -22,5 +24,8 @@
     "playwright": "^1.0.0",
     "three": "0.186.1",
     "zod": "^4.0.0"
+  },
+  "bin": {
+    "jev": "bin/jev.js"
   }
 }
