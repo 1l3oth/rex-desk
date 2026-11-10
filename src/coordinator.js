@@ -192,6 +192,15 @@ export class Desk {
       } catch {}
     }
   }
+  // The main agent is the first thing the person talks to. It gets to know the projects one by one, asks what it cannot tell from their files,
+  // and creates a specialist agent for each. Starting it from the chat sends the person's first message with it.
+  async startMain({ prompt = '' } = {}) {
+    if (this.store.list('run').some(run => run.role === 'coordinator' && !terminalStates.has(run.state))) throw new Error('The main agent is already running. Talk to it in its chat.');
+    const run = { id: id(), role: 'coordinator', main: true, title: 'Main agent', provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'orca' };
+    this.store.put('run', run.id, run);
+    if (run.prompt) this.store.event(run.id, 'human-message', { text: run.prompt, via: 'rex' }, true);
+    void this.drain(); return this.run(run.id);
+  }
   async startConnectionAgent({ sourceId, provider }) {
     provider = 'claude';
     const source = this.store.config().sources.find(item => item.id === sourceId);
@@ -345,6 +354,14 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       return `${common}\nYou are setting up the ${source.type} connection named ${source.name}. Use its installed MCP to list the signed-in user's projects and employee choices. Source ID: ${source.id}. Do not request or print API keys. Do not change tasks, source code, or source settings. Return real identifiers and human-readable names through desk_source_catalog with this sourceId, projects, employees, and accountId if known. The human selects projects and assignee in Settings afterward. Never guess IDs. If the service MCP is missing or its permissions are insufficient, explain the exact blocker using desk_message and desk_ask. Send a brief completion message telling the user to reopen Settings. No coding workers should be dispatched for connection setup.`;
     }
     const config = this.store.config(), repositories = config.repositories.length > 0;
+    if (run.main) return [common,
+      'You are the main agent of Rex Desk, the first agent the person talks to. Keep every message short and plain. Work in small steps.',
+      '1. Read desk_memory with page "index", and desk_specialists. Greet the person in one or two lines: how many projects you found, and how many already have a specialist agent.',
+      '2. Go through the projects that have no specialist, one at a time. For each: read its memory page, then ask the person with desk_ask only what you cannot tell from it (what it is for, how to set it up and run it, rules to follow, anything risky). At most 3 questions per project, in one desk_ask when you can. Never guess.',
+      '3. When you understand a project, call desk_create_specialist with a short human name, the rules the person gave you, and what is still unsure. Then tell the person in one line that the agent exists and that they can rename or duplicate it from its card. Move to the next project.',
+      '4. Record lasting facts about a project with desk_memory_note.',
+      '5. When every project has an agent, offer to look at the assigned issues with desk_tasks and desk_repositories. Never start a run except through desk_dispatch, which the person approves.',
+      `The person's first message: ${run.prompt || '(none: start with step 1)'}`].join('\n');
     if (run.role === 'coordinator') return `${common}\nYou are the main coordinator. Read desk_tasks and desk_task for the selected IDs ${JSON.stringify(run.taskIds)}. Classify issues by affected module, severity, likely dependency, and reproduction path. Do not guess fixes. Use desk_categorize to label tasks and desk_dispatch to start a run for an issue${repositories ? '' : ' (unavailable: no source repository is configured, so say which issues are waiting for one)'}. Respect dependencies: serialize related changes and parallelize independent tasks. Do not modify source code yourself. Each dispatched run gets its own branch, worktree, and port, and investigates one issue. Choose the repository for every issue yourself and pass it as repositoryId: read desk_repositories, and match the issue to the project whose code holds the reported behaviour, by its product, module, screen, platform and the file or class names in its description and comments. Do not fall back to the connection default because it is there, and never send an issue to a repository that cannot contain the cause. If more than one could fit, or the right one is not listed, ask the human once with desk_ask, naming the candidates you found and saying the repository may need adding in Settings. Use desk_runs to track runs; report what you dispatched through desk_message.${run.maxDispatch ? ` This is a scheduled run: start at most ${run.maxDispatch} runs, prioritize by severity, and end with one desk_message summary for the human: what started, what was skipped and why.` : ''} Never mark a source task complete without verified evidence. Base override: ${run.baseBranch || 'repository setting'}. PR target override: ${run.targetBranch || 'repository setting'}. User instruction: ${run.prompt || 'Analyze and dispatch these assigned issues.'}`;
     const task = this.task(run.taskId);
     return `${common}\n${this.taskPrompt(run, task, lessons)}`;

@@ -55,7 +55,7 @@ function renderRail() {
   const line = run => railItem('run', run.id, { dot: stateTone(run), name: runTitle(run), sub: `${provider(run.provider)} · ${stateLabel(run)} · ${ago(run.updatedAt || run.createdAt)}`, badge: pending(run.id).length, warn: true });
   const done = group('done'), shownDone = ui.done ? done : done.slice(0, 6);
   const main = mainRun(), mem = ui.memory;
-  return `<div class="rail-head"><span class="dot ${snap.syncing ? 'working' : 'good'}"></span><strong>Rex Desk</strong></div><div class="rail-scroll">
+  return `<div class="rail-head"><span class="dot ${snap.syncing ? 'working' : 'good'}"></span><strong>Rex Desk</strong><span class="spacer"></span><button class="btn small" data-action="sync" title="Sync issues from the tracker">Sync</button></div><div class="rail-scroll">
     ${railItem('main', '', { dot: main ? stateTone(main) : '', name: 'Main agent', sub: main ? `${provider(main.provider)} · ${stateLabel(main)}` : 'Not started' })}
     ${railItem('inbox', '', { name: 'Needs you', sub: asks ? `${asks} waiting` : 'Nothing waiting', badge: asks, warn: true })}
     <h3>Rooms <button data-action="new-room" title="New room" aria-label="New room">+</button></h3>
@@ -128,7 +128,8 @@ function stageModel() {
     return { title: id, meta: 'Project memory', feed: `<div class="page"><div class="row"><button class="btn primary small" data-action="spec-new">Create agent for this project</button></div><div class="card"><div class="md">${markdown(ui.page || 'Loading…')}</div></div></div>` };
   }
   const run = type === 'main' ? mainRun() : runById(id);
-  if (!run) return emptyStage(type === 'main' ? 'The main agent has not started. Press Sync in Issues &amp; settings, or fire an issue, and it appears here.' : 'That run is gone.');
+  if (!run && type === 'main') return welcomeStage();
+  if (!run) return emptyStage('That run is gone.');
   const items = transcript(ui.events.get(run.id) || []), live = ['starting', 'running'].includes(run.state);
   const feed = (items.length ? items.map(item => item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), html: markdown(item.text) })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) })
@@ -139,6 +140,10 @@ function stageModel() {
   return { title: runTitle(run), meta: `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions: stop, feed,
     composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : (run.provider === 'codex' ? 'Message Claude Code. It takes over from Codex with the chat so far…' : `Message ${provider(run.provider)}. It picks up where it left off…`), mentions: [] } };
 }
+const quick = (label, text) => `<button class="chip-btn" data-action="quick" data-text="${esc(text)}">${esc(label)}</button>`;
+const welcomeStage = () => ({ title: 'Rex', meta: 'Main agent',
+  feed: `<div class="welcome"><div class="avatar big">RX</div><h2>Hi, I am Rex</h2><p>I get to know your projects, set up an agent for each one, and help you work through your issues. Pick a start, or just type.</p><div class="chips">${quick('Meet my projects', 'Meet my projects: go through them one by one, ask me what you are unsure about, and set up an agent for each.')}${quick('Triage my issues', 'Look at my assigned issues and tell me what to do first.')}${quick('What can you do?', 'What can you do for me here?')}</div></div>`,
+  composer: { placeholder: 'Message Rex…', mentions: [] } });
 const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="empty"><h2>Nothing here</h2><p>${text}</p></div>` });
 
 function renderStage(full) {
@@ -190,6 +195,7 @@ async function send() {
   const { type, id } = ui.view; box.disabled = true;
   try {
     if (type === 'room') await api(`/rooms/${id}/messages`, { method: 'POST', data: { text } });
+    else if (type === 'main' && !mainRun()) await api('/main', { method: 'POST', data: { prompt: text } });
     else {
       const run = type === 'main' ? mainRun() : runById(id);
       if (workingStates.includes(run.state) && run.execution === 'orca') await api(`/runs/${run.id}/say`, { method: 'POST', data: { text } });
@@ -219,6 +225,8 @@ document.addEventListener('click', async event => {
     if (action?.startsWith('spec-')) await agentAction(ctx, action);
     else if (action === 'send') await send();
     else if (action === 'new-room') newRoomDialog();
+    else if (action === 'quick') { await api('/main', { method: 'POST', data: { prompt: target.dataset.text } }); await refresh(); }
+    else if (action === 'sync') { toast('Syncing issues…'); await api('/sync', { method: 'POST', data: {} }); toast('Issues synced.'); await refresh(); }
     else if (action === 'toggle-done') { ui.done = !ui.done; renderAll(); }
     else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
     else if (action === 'stop') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }

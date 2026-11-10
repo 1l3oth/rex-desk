@@ -62,3 +62,14 @@ test('editing a specialist updates its rules and model; removing deletes the car
   assert.equal(desk.specialists.list().length, 0);
   assert.ok(!existsSync(desk.specialists.cardFile(agent)));
 });
+
+test('the main agent starts from the chat with the first message and the onboarding prompt, and only one runs at a time', async () => {
+  const { desk, store } = setup();
+  desk.closed = true; // no agent process is started here
+  const run = await desk.startMain({ prompt: 'Meet my projects' });
+  assert.equal(run.role, 'coordinator'); assert.equal(run.main, true); assert.equal(run.provider, 'claude');
+  assert.ok(store.events(run.id, { visible: true }).some(item => item.kind === 'human-message' && item.text === 'Meet my projects'));
+  const prompt = desk.prompt(run);
+  assert.match(prompt, /desk_create_specialist/); assert.match(prompt, /one at a time/); assert.match(prompt, /Meet my projects/);
+  await assert.rejects(desk.startMain({}), /already running/);
+});

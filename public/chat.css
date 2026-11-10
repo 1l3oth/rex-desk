@@ -99,3 +99,9 @@ code,pre{font-family:var(--mono);font-size:12px}
 @keyframes blink{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
 .cap{font-size:12px;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){.dots i{animation:none;opacity:.6}}
+
+.rail-head .spacer{flex:1}
+.welcome{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:56px 12px 24px}
+.welcome h2{margin:6px 0 0;font-size:24px}.welcome p{margin:0;max-width:460px;color:var(--muted)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+.chip-btn{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:8px 16px;font-size:14px}.chip-btn:hover{border-color:var(--accent);color:var(--accent)}
