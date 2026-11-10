@@ -10,7 +10,7 @@ export function toolLine(item) {
     desk_memory_note: () => `Saves a note to ${clip(input.project, 40)}`,
     desk_specialists: () => 'Checks which agents exist',
     desk_create_specialist: () => `Creates the agent “${clip(input.name, 40)}” for ${clip(input.project, 40)}`,
-    desk_ask: () => 'Asks you a question',
+    desk_ask: () => (input.message ? `Asks you: ${clip(input.message, 110)}` : 'Asks you a question'),
     desk_message: () => 'Sends you a message',
     desk_tasks: () => 'Reads your issues', desk_task: () => 'Reads an issue', desk_repositories: () => 'Checks the repositories',
     desk_dispatch: () => 'Asks to start a run', desk_progress: () => `Sets progress: ${clip(input.status, 30)}`,

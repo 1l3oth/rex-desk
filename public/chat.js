@@ -80,13 +80,24 @@ function renderItems(items, run, live) {
   for (const item of items) {
     if (item.role === 'tool') { group.push(item); continue; }
     flush(false);
-    out.push(item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), html: markdown(item.text) })
+    out.push(item.role === 'qa' ? answeredHtml(item)
+      : item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), html: markdown(item.text) })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) })
       : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div></div>`
       : note(`${esc(item.text)} · ${hhmm(item.at)}`));
   }
   flush(true);
   return out.join('');
+}
+// A question that was answered stays in the chat, with what the person said.
+function answeredItem(item) {
+  const properties = item.request?.requestedSchema?.properties || {}, content = item.answer?.content || {}, action = item.answer?.action || (item.state === 'expired' ? 'expired' : 'cancel');
+  const rows = Object.entries(properties).map(([key, property]) => ({ label: property.title || key, value: content[key] })).filter(row => row.value !== undefined && row.value !== '');
+  return { role: 'qa', at: item.answeredAt || item.createdAt, title: item.title, approval: item.kind === 'approval', action, rows };
+}
+function answeredHtml(item) {
+  const head = item.approval ? (item.action === 'accept' ? 'You approved' : 'You declined') : item.action === 'accept' ? 'You answered' : item.action === 'expired' ? 'The question was dropped' : 'You skipped this';
+  return `<div class="qa"><div class="qa-head">${esc(head)} · ${esc(hhmm(item.at))}</div><div class="qa-q md">${markdown(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</div>${item.rows.map(row => `<div class="qa-row"><span class="qa-l">${esc(row.label)}</span><span class="qa-a">${esc(String(row.value))}</span></div>`).join('')}</div>`;
 }
 function transcript(events) {
   const items = [];
@@ -153,7 +164,7 @@ function stageModel() {
   const run = type === 'main' ? mainRun() : runById(id);
   if (!run && type === 'main') return welcomeStage();
   if (!run) return emptyStage('That run is gone.');
-  const items = transcript(ui.events.get(run.id) || []), live = ['starting', 'running'].includes(run.state);
+  const items = [...transcript(ui.events.get(run.id) || []), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && item.state !== 'pending').map(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state);
   const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`)
     + pending(run.id).map(decisionCard).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
   const stop = live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : '';
