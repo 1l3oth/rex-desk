@@ -201,12 +201,29 @@ export function taskStage(ctx) {
     : agents.length ? `<div class="assign"><label>Assign to${pickerHtml(ctx, { id: 'assign-agent', label: 'Assign to', searchable: agents.length > 6, value: agents.find(agent => agent.status?.state !== 'busy')?.id || '', items: agents.map(agent => ({ value: agent.id, label: agent.name, hint: agent.projectSlug, meta: agent.status?.state === 'busy' ? 'busy' : '', disabled: agent.status?.state === 'busy' })) })}</label>
         <label>Tell this room${pickerHtml(ctx, { id: 'assign-room', label: 'Tell this room', value: '', items: [{ value: '', label: 'No room' }, ...rooms.map(room => ({ value: room.id, label: room.name, hint: `${room.members.length} agents` }))] })}</label>
         <button class="btn primary" data-action="task-assign" data-id="${esc(task.id)}">Assign</button></div>` : '<p class="muted">Create an agent first (the + next to Agents), then assign this task to it.</p>';
-  return { title: `#${taskNumber(task)} ${taskName(task)}`, meta: task.statusName || task.status || '',
-    feed: `<div class="page"><section class="idcard"><div class="thead"><span class="tnum">#${esc(taskNumber(task))}</span><h2>${esc(taskName(task))}</h2></div>
-      ${task.titleEn && task.titleEn !== task.title ? `<p class="orig">${esc(task.title)}</p>` : ''}
-      <div class="idmeta">${task.statusName || task.status ? `<span class="chip">${esc(task.statusName || task.status)}</span>` : ''}${task.projectName ? `<span class="chip">${esc(task.projectName)}</span>` : ''}${task.reporter ? `<span class="chip">Reporter: ${esc(task.reporter)}</span>` : ''}${task.url ? `<a class="chip" href="${esc(task.url)}" target="_blank" rel="noopener noreferrer">Open the original</a>` : ''}</div>
-      ${assign}
-      <h3>Description</h3><div class="md">${markdown(String(task.description || 'No description.').slice(0, 6000))}</div></section></div>` };
+  const source = (ui.snap.config?.sources || []).find(item => item.id === task.sourceId) || { type: task.source || '', name: task.sourceName || '' };
+  const rank = (ui.snap.priorities || []).findIndex(item => item.taskId === task.id || item.id === task.id), jev = task.jev || task.priority?.jev || null;
+  const when = value => value ? new Date(value).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  const fact = (label, value) => value ? `<div class="tp-fact"><span>${label}</span><b>${value}</b></div>` : '';
+  const comments = (task.comments || []).filter(item => item && (item.text || item.content || item.body));
+  const side = `<aside class="tp-side">
+    <section class="tp-box"><h3>Work on it</h3>${assign}</section>
+    <section class="tp-box">
+      ${fact('Status', esc(task.statusName || task.status || ''))}
+      ${fact('Source', `<span class="src-mark mini ${esc(source.type)}" aria-hidden="true">${esc((source.name || '?')[0])}</span> ${esc(source.name)}`)}
+      ${fact('Project', esc(task.projectName || ''))}
+      ${fact('Reporter', esc(task.reporter || ''))}
+      ${fact('Assignees', esc((task.assignees || []).join(', ')))}
+      ${fact('Due', esc(when(task.dueDate)))}
+      ${fact('Created', esc(when(task.createdAt)))}
+      ${rank >= 0 ? fact('Jev rank', `#${rank + 1} in the queue`) : ''}
+      ${task.url ? `<a class="btn small tp-open" href="${esc(task.url)}" target="_blank" rel="noopener noreferrer">Open in ${esc(source.name || 'the tracker')}</a>` : ''}
+    </section></aside>`;
+  const main = `<div class="tp-main"><div class="tp-head"><span class="tnum">#${esc(taskNumber(task))}</span><h1>${esc(taskName(task))}</h1>${task.titleEn && task.titleEn !== task.title ? `<p class="orig">${esc(task.title)}</p>` : ''}</div>
+    ${jev?.summary || jev?.reason ? `<p class="tp-jev">${esc(jev.summary || jev.reason)}</p>` : ''}
+    <section class="tp-sec"><h3>Description</h3><div class="md tp-desc">${markdown(String(task.description || 'No description.').slice(0, 12000))}</div></section>
+    ${comments.length ? `<section class="tp-sec"><h3>Comments <span>${comments.length}</span></h3><ol class="lt-comments">${comments.slice(-30).map(item => `<li><div><strong>${esc(item.author || item.by || item.name || 'Someone')}</strong> <time>${esc(when(item.createdAt || item.at || item.date))}</time></div><div class="md">${markdown(String(item.text || item.content || item.body).slice(0, 3000))}</div></li>`).join('')}</ol></section>` : ''}</div>`;
+  return { title: `#${taskNumber(task)} ${taskName(task)}`, meta: task.statusName || task.status || '', top: true, feed: `<div class="page tp">${main}${side}</div>` };
 }
 
 // ---------- room info: name and picture ----------

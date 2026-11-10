@@ -9,7 +9,7 @@ import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttach
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
 // Which screen is open lives in the address (#/room/ID) and is also saved, so a refresh or a restart comes back to the same place.
-const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices'];
+const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'jev'];
 const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
 function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash); return match && SCREENS.includes(match[1]) ? { type: match[1], id: match[2] ? decodeURIComponent(match[2]) : '' } : null; }
 function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
@@ -66,6 +66,7 @@ const SVG = {
   main: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.4 5 5.6.8-4 3.9.9 5.5L12 15.6 7.1 18.2 8 12.7 4 8.8l5.6-.8z"/></svg>',
   inbox: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',
   person: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
+  mic: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   tasks: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>',
   devices: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1"/></svg>',
   run: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 3 14 9-14 9z"/></svg>',
@@ -92,6 +93,7 @@ function renderRail() {
       ${railItem('main', '', { avatar: withDot(iconAv('main', 'accent'), main ? stateTone(main) : ''), name: 'Rex Agent', sub: main ? stateLabel(main) : 'Not started' })}
       ${railItem('inbox', '', { avatar: iconAv('inbox', asks ? 'warn' : ''), name: 'Needs you', sub: asks ? `${asks} waiting` : 'Nothing waiting', badge: asks, warn: true })}
       ${railItem('person', '', { avatar: ui.profile?.photo ? `<img class="av sm photo" src="${photoUrl()}" alt="">` : iconAv('person'), name: 'About you', sub: ui.profile?.name || 'What the agents learned' })}
+      ${railItem('jev', '', { avatar: iconAv('mic', 'accent'), name: 'Jev', sub: 'Control this computer and websites' })}
       ${railItem('tasks', '', { avatar: iconAv('tasks'), name: 'Tasks', sub: busy ? `${busy} being worked on` : `${tasks.length} tasks · ${1 + (snap.config?.sources || []).length} connectors` })}
       ${railItem('devices', '', { avatar: iconAv('devices'), name: 'Devices', sub: (snap.devices?.peers || []).length ? `${(snap.devices.peers.filter(peer => peer.online).length + 1)} of ${snap.devices.peers.length + 1} on` : 'Only this computer' })}
     </div>
@@ -195,6 +197,7 @@ function stageModel() {
   }
   if (type === 'specialist') return agentStage(ctx);
   if (type === 'devices') return devicesStage(ctx);
+  if (type === 'jev') return jevStage();
   if (type === 'person') return { title: 'About you', meta: 'Your profile, from what the agents learned', feed: personPage(), top: true };
   if (type === 'project') {
     return { title: id, meta: 'Project memory', feed: `<div class="page"><div class="row"><button class="btn primary small" data-action="spec-new">Create agent for this project</button></div><div class="card"><div class="md">${markdown(ui.page || 'Loading…')}</div></div></div>` };
@@ -297,7 +300,8 @@ async function send() {
   const text = `${typed || 'See the attached files.'}${attachmentText(ctx)}${spoken}`, picked = pickedOptions(ctx);
   const { type, id } = ui.view; box.disabled = true; ui.voiceDrafts?.delete(draftKey());
   try {
-    if (type === 'room' && /^\/assign\b/i.test(typed)) await assignFromRoom(id, typed);
+    if (type === 'jev') { box.value = ''; ui.drafts.set(draftKey(), ''); void jevDo(typed); }
+    else if (type === 'room' && /^\/assign\b/i.test(typed)) await assignFromRoom(id, typed);
     else if (type === 'room') { const replyTo = ui.reply?.roomId === id ? ui.reply.id : ''; await api(`/rooms/${id}/messages`, { method: 'POST', data: { text, ...(replyTo ? { replyTo } : {}) } }); ui.reply = null; drawReplyBar(); }
     else if (type === 'main' && !mainRun()) await api('/main', { method: 'POST', data: { prompt: text, ...picked } });
     else {
@@ -689,3 +693,55 @@ async function accountsDialog() {
 }
 document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="accounts"]')) return; event.stopPropagation(); void accountsDialog(); }, true);
 void loadAccounts().then(() => { if (ui.snap) renderAll(); });
+
+// ---------- Jev: say or type what this computer (or a website) should do ----------
+function jevStage() {
+  const log = ui.jevLog || [];
+  const examples = ['Turn the volume down to 30', 'Open Bluetooth settings', 'Turn on dark mode', 'Find the cheapest flight from Phnom Penh to Seoul next Friday', 'Take a screenshot', 'What is using my memory?'];
+  const entry = item => `<li class="jv-item"><div class="jv-said"><b>${esc(item.text)}</b><small>${esc(item.at)}</small></div>${item.busy ? '<p class="muted">Working…</p>' : ''}${item.error ? `<p class="bad">${esc(item.error)}</p>` : ''}${item.say ? `<p>${esc(item.say)}</p>` : ''}${(item.results || []).map(step => `<p class="jv-step ${step.ok ? 'ok' : 'bad'}">${step.ok ? '✓' : '✗'} ${esc(step.title)}${step.ok ? (step.result?.url ? ` · <a href="${esc(step.result.url)}">open its chat</a>` : step.result?.text ? ` · ${esc(String(step.result.text).slice(0, 160))}` : '') + jevDetail(step.result) : ` · ${esc(step.error)}`}</p>`).join('')}${item.confirm ? `<div class="jv-confirm"><span>Do this? <b>${esc(item.confirm.join(', '))}</b></span><button class="btn small primary" data-jev-yes="${item.id}">Yes</button><button class="btn small" data-jev-no="${item.id}">Cancel</button></div>` : ''}</li>`;
+  return { title: 'Jev', meta: 'Control this computer and websites', top: true,
+    feed: `<div class="page jv"><section class="jv-hero"><h2>What should Jev do?</h2><p class="muted">On this computer: apps, settings, sound, screen, Wi-Fi and Bluetooth, files, typing and clicking. On the web: search, compare and book with a browser agent that asks before paying. Khmer, English or Korean. Hold Space in the box below to talk. From any app, press <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>J</kbd>.</p>
+      <div class="jv-examples">${examples.map(text => `<button class="chip-btn" data-jev-try="${esc(text)}">${esc(text)}</button>`).join('')}</div></section>
+      ${log.length ? `<ol class="jv-log">${log.slice().reverse().map(entry).join('')}</ol>` : ''}</div>`,
+    composer: { placeholder: 'Tell Jev what to do… (hold Space to talk)', mentions: [], noPickers: true } };
+}
+async function jevDo(text) {
+  const item = { id: String(Date.now()), text, at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), busy: true };
+  ui.jevLog = [...(ui.jevLog || []), item].slice(-30); renderAll();
+  try {
+    const answer = await api('/computer/do', { method: 'POST', data: { text } });
+    Object.assign(item, { busy: false, say: answer.say, results: answer.results || [], steps: answer.steps, confirm: answer.needsConfirm?.length ? answer.needsConfirm : null, error: !answer.steps?.length ? (answer.say || 'Jev did not find something to do for that. Try other words.') : '' });
+    if (item.error === item.say) item.say = '';
+  } catch (error) { Object.assign(item, { busy: false, error: error.message }); }
+  renderAll();
+}
+document.addEventListener('click', async event => {
+  const tryIt = event.target.closest?.('[data-jev-try]'); if (tryIt) { event.stopPropagation(); return jevDo(tryIt.dataset.jevTry); }
+  const yes = event.target.closest?.('[data-jev-yes]'), no = event.target.closest?.('[data-jev-no]'); if (!yes && !no) return;
+  event.stopPropagation(); const item = (ui.jevLog || []).find(entry => entry.id === (yes || no).dataset[yes ? 'jevYes' : 'jevNo']); if (!item) return;
+  item.confirm = null;
+  if (no) { item.say = 'Cancelled.'; return renderAll(); }
+  item.busy = true; renderAll();
+  try { const answer = await api('/computer/run', { method: 'POST', data: { steps: item.steps } }); Object.assign(item, { busy: false, results: answer.results || [] }); } catch (error) { Object.assign(item, { busy: false, error: error.message }); }
+  renderAll();
+}, true);
+
+// What an action returned, in a few readable lines: a list of programs or windows, a level, a battery reading.
+function jevDetail(result) {
+  if (!result || typeof result !== 'object') return '';
+  const list = Array.isArray(result) ? result : result.processes || result.programs || result.windows || result.apps || result.items || null;
+  if (Array.isArray(list) && list.length) {
+    const row = item => {
+      if (typeof item !== 'object') return '<li>' + esc(item) + '</li>';
+      const name = item.name || item.title || item.process || '';
+      const mb = item.memoryMB ?? item.mb, other = item.cpu ?? item.percent ?? item.memory;
+      const extra = mb !== undefined ? Math.round(mb) + ' MB' : other !== undefined ? String(other) : '';
+      return '<li><b>' + esc(name) + '</b>' + (extra ? ' <span class="muted">' + esc(extra) + '</span>' : '') + '</li>';
+    };
+    return '<ul class="jv-list">' + list.slice(0, 8).map(row).join('') + '</ul>';
+  }
+  const parts = [];
+  if (result.level !== undefined) parts.push(result.level + '%' + (result.muted ? ', muted' : ''));
+  if (result.percent !== undefined) parts.push(result.percent + '%' + (result.charging ? ', charging' : ''));
+  return parts.length ? ' · ' + esc(parts.join(' · ')) : '';
+}
