@@ -1,5 +1,6 @@
 import { Rooms } from './rooms.js';
 import { Memory } from './memory.js';
+import { Specialists } from './specialists.js';
 import path from 'node:path';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
@@ -55,7 +56,7 @@ export class Desk {
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
     this.sources = new Sources(store, { fetcher, onSynced: () => { if (this.store.config().jev?.auto !== false && this.jev.apiKey()) void this.jev.prioritize().catch(error => store.event('', 'jev-error', { message: error.message })); } }); this.live = new Map(); this.waiters = new Map(); this.tokens = new Map();
     this.query = new TrackerQuery(store, this.sources, { apiKey: () => this.jev.apiKey(), env: () => this.agents.environment('claude'), cwd: path.join(store.directory, 'coordinator'), ...(queryModel ? { model: queryModel } : {}) });
-    this.rooms = new Rooms(this); this.memory = new Memory(memoryDirectory); this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
+    this.rooms = new Rooms(this); this.memory = new Memory(memoryDirectory); this.specialists = new Specialists(this); this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
     this.evidence = new Evidence(store, runId => this.run(runId), (runId, kind, data) => {
       store.event(runId, kind, data);
     }, () => this.mcpUrl);
@@ -75,7 +76,7 @@ export class Desk {
       runs: this.store.list('run').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
       interactions: this.store.list('interaction').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
-      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null }, ...this.rooms.snapshot() };
+      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, specialists: this.specialists.list(), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null }, ...this.rooms.snapshot() };
   }
   // Run keys are kept as hashes in the database, so an agent still working in an Orca terminal keeps its connection through a restart.
   scopeToken(runId) {

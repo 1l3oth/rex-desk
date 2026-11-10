@@ -1,3 +1,4 @@
+import { agentsRail, agentStage, agentAction } from '/chat-agents.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
 const ui = { snap: null, view: { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true };
@@ -5,6 +6,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&a
 const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`; };
 const provider = name => name === 'codex' ? 'Codex' : name === 'claude' ? 'Claude Code' : 'Agent';
+const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
 async function api(path, { method = 'GET', data } = {}) {
@@ -60,6 +62,7 @@ function renderRail() {
     ${snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>'}
     ${['working', 'review'].map(name => { const list = group(name); return list.length ? `<h3>${name === 'working' ? 'Working' : 'Review'} <span>${list.length}</span></h3>${list.map(line).join('')}` : ''; }).join('')}
     <h3>Done <span>${done.length}</span></h3>${shownDone.map(line).join('')}${done.length > 6 ? `<button class="item" data-action="toggle-done"><span class="name sub">${ui.done ? 'Show fewer' : `Show all ${done.length}`}</span></button>` : ''}
+    ${agentsRail(ctx)}
     <h3>Projects <button data-action="scan" title="Scan this computer for projects" aria-label="Scan this computer">↻</button></h3>
     ${mem?.projects?.length ? mem.projects.map(project => railItem('project', project.slug, { name: project.slug, sub: project.purpose || 'no description' })).join('') : '<p class="rail-empty">Not scanned. Press ↻ to find your projects.</p>'}
   </div><div class="rail-foot"><a href="/classic">Issues &amp; settings</a><button class="btn small" data-action="theme">Theme</button></div>`;
@@ -80,6 +83,7 @@ function transcript(events) {
   return items;
 }
 const bubble = ({ mine, name, time, html }) => `<div class="msg ${mine ? 'mine' : ''}"><div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}</span></div><div class="md">${html}</div></div></div>`;
+const typing = (name, caption = '') => `<div class="msg" aria-live="polite" aria-label="${esc(name)} is typing"><div class="avatar">${esc(initials(name))}</div><div class="bubble typing"><span class="dots"><i></i><i></i><i></i></span>${caption ? `<span class="cap">${esc(caption)}</span>` : ''}</div></div>`;
 const note = text => `<div class="note">${text}</div>`;
 function decisionCard(item) {
   const request = item.request || {}, run = runById(item.runId), properties = request.requestedSchema?.properties || {}, required = request.requestedSchema?.required || [];
@@ -119,8 +123,9 @@ function stageModel() {
     const asks = pending(), wakes = snap.wakes || [];
     return { title: 'Needs you', meta: `${asks.length + wakes.length} waiting`, feed: asks.length + wakes.length ? asks.map(decisionCard).join('') + wakes.map(wakeCard).join('') : '<div class="empty"><h2>All clear</h2><p>Questions, approvals and wake-ups from your agents show up here.</p></div>' };
   }
+  if (type === 'specialist') return agentStage(ctx);
   if (type === 'project') {
-    return { title: id, meta: 'Project memory', feed: `<div class="page"><div class="card"><div class="md">${markdown(ui.page || 'Loading…')}</div></div></div>` };
+    return { title: id, meta: 'Project memory', feed: `<div class="page"><div class="row"><button class="btn primary small" data-action="spec-new">Create agent for this project</button></div><div class="card"><div class="md">${markdown(ui.page || 'Loading…')}</div></div></div>` };
   }
   const run = type === 'main' ? mainRun() : runById(id);
   if (!run) return emptyStage(type === 'main' ? 'The main agent has not started. Press Sync in Issues &amp; settings, or fire an issue, and it appears here.' : 'That run is gone.');
@@ -129,10 +134,10 @@ function stageModel() {
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) })
       : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div></div>`
       : note(`${esc(item.text)} · ${hhmm(item.at)}`)).join('') : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`)
-    + pending(run.id).map(decisionCard).join('') + (live ? note(`<span class="spin"></span>${run.state === 'starting' ? 'Preparing the agent' : `${provider(run.provider)} is working`}`) : '');
+    + pending(run.id).map(decisionCard).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
   const stop = live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : '';
   return { title: runTitle(run), meta: `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions: stop, feed,
-    composer: { placeholder: workingStates.includes(run.state) ? 'Message the agent. It sees this as it works…' : 'Send a follow-up. The agent resumes with its full history…', mentions: [], provider: workingStates.includes(run.state) ? '' : run.provider } };
+    composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : `Message ${provider(run.provider)}. It picks up where it left off…`, mentions: [], provider: workingStates.includes(run.state) ? '' : run.provider } };
 }
 const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="empty"><h2>Nothing here</h2><p>${text}</p></div>` });
 
@@ -145,7 +150,7 @@ function renderStage(full) {
   } else { document.getElementById('head').innerHTML = head; document.getElementById('members').innerHTML = model.members || ''; }
   const feed = document.getElementById('feed'), inner = document.getElementById('feed-inner');
   // Someone typing in an approval form keeps their text: the feed is not redrawn under them.
-  const editing = !full && feed.contains(document.activeElement) && ['INPUT', 'SELECT'].includes(document.activeElement.tagName);
+  const editing = !full && feed.contains(document.activeElement) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName);
   if (!editing) { inner.innerHTML = model.feed; if (ui.stick) feed.scrollTop = feed.scrollHeight; }
   ui.mentions = model.composer?.mentions || [];
 }
@@ -208,10 +213,11 @@ function newRoomDialog() {
 }
 document.addEventListener('click', async event => {
   const target = event.target.closest('[data-open],[data-action]'); if (!target) return;
-  if (target.dataset.open) return open(target.dataset.open, target.dataset.id);
+  if (target.dataset.open) { event.preventDefault(); return open(target.dataset.open, target.dataset.id); }
   const action = target.dataset.action;
   try {
-    if (action === 'send') await send();
+    if (action?.startsWith('spec-')) await agentAction(ctx, action);
+    else if (action === 'send') await send();
     else if (action === 'new-room') newRoomDialog();
     else if (action === 'toggle-done') { ui.done = !ui.done; renderAll(); }
     else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
