@@ -6,12 +6,12 @@ const ICON = {
   file: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
 };
 import { pickerHtml } from '/chat-pick.js';
+import { openMicrophone, startRecorder, transcribe } from '/recorder.js';
 const KEY = 'rex-desk-input';
 const EFFORT_LABEL = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
 const EFFORT_HINT = { low: 'Fast, light thinking', medium: 'Balanced', high: 'Thinks longer', xhigh: 'Thinks a lot longer', max: 'Longest thinking, slowest' };
 const MODE_HINT = { bypassPermissions: 'Runs tools without asking', manual: 'Asks you for each tool, in the chat', auto: 'A checker decides what is safe', plan: 'Plans only, runs nothing', acceptEdits: 'Edits files freely, asks for the rest' };
 const DEFAULT_MODE = 'bypassPermissions';
-const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 function saved() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } }
 function remember(patch) { try { localStorage.setItem(KEY, JSON.stringify({ ...saved(), ...patch })); } catch { /* private window */ } }
@@ -38,7 +38,7 @@ export function composerHtml(ctx, model) {
     <div class="box2"><div id="menu"></div>
       <button class="icon-btn" data-action="plus" aria-label="Add" title="Add">${ICON.plus}</button>
       <textarea id="draft" rows="1" placeholder="${esc(model.composer.placeholder)}">${esc(ui.drafts.get(ctx.draftKey()) || '')}</textarea>
-      ${Recognition ? `<button class="icon-btn" data-action="mic" aria-label="Dictate" title="Dictate">${ICON.mic}</button>` : ''}
+      ${navigator.mediaDevices?.getUserMedia ? `<button class="icon-btn" data-action="mic" aria-label="Dictate" title="Dictate (Khmer, English or Korean, on this computer)">${ICON.mic}</button>` : ''}
       <button class="send-btn" data-action="send" aria-label="Send" title="Send">${ICON.up}</button>
       <input type="file" id="file-input" multiple hidden>
     </div>
@@ -112,17 +112,32 @@ function menuItems(ctx, box) {
 }
 
 // ---------- voice ----------
-let listening = null;
-function toggleMic(ctx) {
-  const box = document.getElementById('draft'), button = document.querySelector('[data-action="mic"]');
-  if (listening) { listening.stop(); return; }
-  const recognition = new Recognition(); listening = recognition; recognition.lang = navigator.language || 'en-US'; recognition.interimResults = true; recognition.continuous = false;
-  const base = box.value ? `${box.value.trim()} ` : '';
-  button?.classList.add('rec');
-  recognition.onresult = event => { box.value = base + [...event.results].map(result => result[0].transcript).join(' '); ctx.ui.drafts.set(ctx.draftKey(), box.value); };
-  recognition.onerror = event => { if (event.error && event.error !== 'aborted' && event.error !== 'no-speech') ctx.toast(`Voice input stopped: ${event.error}`, true); };
-  recognition.onend = () => { listening = null; document.querySelector('[data-action="mic"]')?.classList.remove('rec'); box.focus(); };
-  try { recognition.start(); } catch { listening = null; button?.classList.remove('rec'); }
+// Dictation uses Rex Desk's own speech model on this computer (the same one as Jev), not the browser's online service,
+// which does not work inside the desktop app. Recording stops by itself when you stop talking; press the mic again to stop sooner.
+let listening = null, transcribing = false;
+const micButton = () => document.querySelector('[data-action="mic"]');
+const voiceLanguage = ctx => { try { return localStorage.getItem('jev-language') || ctx.ui.snap?.config?.control?.language || 'en'; } catch { return ctx.ui.snap?.config?.control?.language || 'en'; } };
+async function finishMic(ctx) {
+  const recording = listening; if (!recording) return;
+  listening = null; recording.stop(); micButton()?.classList.remove('rec');
+  if (!recording.heard) { ctx.toast('Nothing was heard. Press the mic and speak.', true); return; }
+  transcribing = true; micButton()?.classList.add('busy');
+  const slow = setTimeout(() => ctx.toast('Loading the voice model. The first time after a restart takes a minute or two.'), 4000);
+  try {
+    const heard = await transcribe(recording.wav(), voiceLanguage(ctx)), box = document.getElementById('draft');
+    if (box) { box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + heard.text; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); box.dispatchEvent(new Event('input', { bubbles: true })); }
+  } catch (error) {
+    ctx.toast(/not installed|install/i.test(error.message) ? 'Voice is not installed yet. Install it in Issues & settings → Computer control.' : `Voice input: ${error.message}`, true);
+  } finally { clearTimeout(slow); transcribing = false; micButton()?.classList.remove('busy'); }
+}
+async function toggleMic(ctx) {
+  if (transcribing) return;
+  if (listening) return finishMic(ctx);
+  void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
+  let stream;
+  try { stream = await openMicrophone(); } catch { ctx.toast('Rex Desk could not use the microphone. Allow it, then press the mic again.', true); return; }
+  listening = startRecorder(stream, { onQuiet: () => void finishMic(ctx) });
+  micButton()?.classList.add('rec');
 }
 
 // ---------- wiring ----------

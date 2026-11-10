@@ -372,3 +372,6 @@ html[data-theme=light] .nc0{color:#3559c7}html[data-theme=light] .nc1{color:#c24
 .pf-tags.big span{font-size:13px;padding:5px 12px;color:var(--ink)}
 .av.photo{object-fit:cover;padding:0}
 @media (max-width:640px){.pf-hero{flex-direction:column;text-align:center}.pf-stats,.pf-actions{justify-content:center}.pf-photo{width:104px;height:104px}}
+
+/* the mic while the words are being turned into text */
+.icon-btn.busy{opacity:.6;animation:mic-busy 1s ease-in-out infinite}@keyframes mic-busy{50%{opacity:.3}}@media (prefers-reduced-motion:reduce){.icon-btn.busy{animation:none}}
