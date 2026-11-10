@@ -4,7 +4,7 @@ import { markdown } from '/chat-markdown.js';
 import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.js';
 import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction, initRoomInfo, avatarHtml, roomRunIds, initLocalTasks, sharedTabButtons } from '/chat-rooms.js';
 import { collectShared, sharedTabsHtml } from '/chat-media.js';
-import { devicesStage, devicesAction } from '/chat-devices.js';
+import { devicesStage, devicesAction, initDevices } from '/chat-devices.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
@@ -226,7 +226,7 @@ const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="em
 
 function renderStage(full) {
   const model = stageModel(), stage = document.getElementById('stage');
-  const head = `<div class="stage-head"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}<span class="spacer"></span>${model.actions || ''}</div>`;
+  const head = `<div class="stage-head"><button class="m-menu" data-action="m-rail" aria-label="Open the menu"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}<span class="spacer"></span>${model.actions || ''}</div>`;
   // A view that needs the message box always gets it, even when an earlier view had none.
   if (full || !document.getElementById('feed') || Boolean(model.composer) !== Boolean(document.getElementById('composer'))) {
     stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}</div><aside class="side" id="side"></aside>`;
@@ -382,7 +382,10 @@ document.addEventListener('submit', async event => {
 });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
 
-initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); initLocalTasks(ctx); window.__rexCtx = ctx;
+initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx;
+// On a phone the side panels start closed, and the menu button opens the list of chats.
+if (window.matchMedia('(max-width: 760px)').matches) { ui.infoOpen = false; ui.chatInfo = false; ui.termOpen = false; }
+document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="m-rail"]')) return; event.stopPropagation(); document.querySelector('.chat-shell')?.classList.toggle('show-rail'); }, true);
 document.addEventListener('click', event => { const head = event.target.closest?.('[data-action="agent-group"]'); if (!head) return; event.stopPropagation(); toggleGroup(head.dataset.project); renderAll(); }, true);
 // The back and forward buttons, and a pasted address, move between screens.
 window.addEventListener('hashchange', () => {

@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { tailscaleAddresses } from './peers.js';
+import QRCode from 'qrcode';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -192,6 +193,11 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         if (!desk) return json(response, 503, { error: 'Rex Desk on this computer is locked. Sign in on it first.' });
         if (url.pathname === '/mcp') return json(response, 403, { error: 'Agents connect on this computer only.' });
         if (url.pathname === '/login.css') return serveFile(request, response, path.join(root, 'public', 'login.css'));
+        // The phone's QR code carries the key, so scanning it signs in at once.
+        if (url.pathname === '/login' && request.method === 'GET' && url.searchParams.get('key')) {
+          if (!desk.peers.checkKey(url.searchParams.get('key').trim())) { response.writeHead(303, { Location: '/login?wrong=1' }); return response.end(); }
+          response.writeHead(303, { Location: '/', 'Set-Cookie': `rexdesk=${desk.peers.session()}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000` }); return response.end();
+        }
         if (url.pathname === '/login' && request.method === 'GET') { const page = readFileSync(path.join(root, 'public', 'login.html'), 'utf8'); response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return response.end(url.searchParams.has('wrong') ? page.replace('class="wrong"', 'class="wrong show"') : page); }
         if (url.pathname === '/login' && request.method === 'POST') {
           let raw = ''; for await (const chunk of request) { raw += chunk; if (raw.length > 4096) break; }
@@ -235,6 +241,11 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         if (url.pathname === '/api/peer/hello') return json(response, 200, desk.peers.self);
         if (url.pathname === '/api/peer/pull') return json(response, 200, desk.peers.serve({ since: Number(url.searchParams.get('since')) || 0, filesSince: Number(url.searchParams.get('files')) || 0 }));
         return json(response, 404, { error: 'API route not found.' });
+      }
+      if (url.pathname === '/api/devices/qr' && request.method === 'GET') {
+        const address = desk.peers.status(desk.port).self?.addresses?.[0]; if (!address) return json(response, 404, { error: 'Turn on connecting from other devices first.' });
+        const svg = await QRCode.toString(`${address.replace(/\/$/, '')}/login?key=${encodeURIComponent(desk.peers.key())}`, { type: 'svg', margin: 2, color: { dark: '#111418', light: '#ffffff' } });
+        response.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' }); return response.end(svg);
       }
       if (url.pathname === '/api/peers' && request.method === 'GET') return json(response, 200, desk.peers.status(desk.port));
       if (url.pathname === '/api/peers' && request.method === 'POST') {

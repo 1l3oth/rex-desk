@@ -715,3 +715,52 @@ button.cn-main{cursor:pointer}
 .acct-add{display:flex;gap:8px;align-items:center}.acct-add input{flex:1}
 .acct-wait{display:flex;gap:8px;align-items:center;margin:0;font-size:13px}
 .pinfo .pick2{width:100%}.pinfo .pick2-btn{width:100%}
+
+/* ---- Devices: this computer and other computers on the left, the phone with its QR code on the right ---- */
+.feed-inner:has(> .page.dv){max-width:none;padding-left:0;padding-right:0}
+.page.dv{max-width:none;margin:0;padding:24px clamp(16px,2.5vw,36px) 40px;display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,440px);gap:20px;align-items:start}
+.dv-col{display:flex;flex-direction:column;gap:16px;min-width:0}
+.dv-card{display:flex;flex-direction:column;gap:12px;padding:18px 20px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.dv-card h2{margin:0;font-size:15px}
+.dv-device{display:flex;gap:14px;align-items:center}
+.dv-icon{flex:none;display:grid;place-items:center;width:46px;height:46px;border-radius:12px;background:color-mix(in srgb,var(--accent) 14%,var(--raised));color:var(--accent)}.dv-icon.small{width:36px;height:36px;border-radius:10px}
+.dv-who{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.dv-name{width:100%;max-width:360px;border:1px solid transparent;border-radius:8px;background:none;padding:2px 8px;margin-left:-9px;font-size:18px;font-weight:650;color:var(--ink)}
+.dv-name:hover{border-color:var(--line)}.dv-name:focus{border-color:var(--accent);background:var(--bg);outline:0}
+.dv-state{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.dv-agents{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0;font-size:13px}
+.dv-chip{padding:2px 9px;border-radius:999px;background:var(--raised);font-size:12px}
+.dv-switch{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line);border-radius:12px;cursor:pointer}
+.dv-switch input{position:absolute;opacity:0;width:1px;height:1px}
+.dv-track{flex:none;width:38px;height:22px;border-radius:999px;background:var(--line);position:relative;transition:background .15s;margin-top:1px}
+.dv-track::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
+.dv-switch input:checked+.dv-track{background:var(--accent)}.dv-switch input:checked+.dv-track::after{transform:translateX(16px)}
+.dv-switch input:focus-visible+.dv-track{outline:2px solid var(--accent);outline-offset:2px}
+.dv-switch span:last-child{display:flex;flex-direction:column;gap:2px;font-size:13.5px}.dv-switch small{color:var(--muted);font-size:12px}
+.dv-warn{margin:0;color:var(--warn);font-size:13px}
+.dv-phone{align-items:center;text-align:center;position:sticky;top:12px}
+.dv-phone-text{display:flex;flex-direction:column;gap:10px;text-align:left;width:100%}
+.dv-steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:13.5px;line-height:1.45}
+.dv-qr{width:220px;height:220px;border-radius:12px;background:#fff;padding:8px;box-shadow:0 0 0 1px var(--line)}
+.dv-link{display:flex;gap:8px;align-items:center}.dv-link code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 10px;border-radius:8px;background:var(--bg);border:1px solid var(--line);font-size:12.5px}
+.dv-link .btn{display:inline-flex;gap:6px;align-items:center}
+.dv-phone.off{flex-direction:row;text-align:left;align-items:flex-start;gap:14px}.dv-phone.off p{margin:4px 0 0;font-size:13px}
+.dv-peers{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.dv-peer{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
+.dv-line{display:flex;gap:8px;align-items:center}.dv-line input{flex:1;min-width:0;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:13.5px}.dv-line input:focus{border-color:var(--accent);outline:0}
+.dv-adv summary{cursor:pointer;font-weight:600;font-size:14px}.dv-adv[open] summary{margin-bottom:4px}
+@media (max-width:980px){.page.dv{grid-template-columns:1fr}.dv-phone{position:static;order:-1}.dv-col:last-child{order:-1}}
+
+/* ---- phones: a menu button opens the list of chats; panels open over the chat ---- */
+.m-menu{display:none;flex:none;border:0;background:none;color:var(--ink);padding:4px;margin:-4px 2px -4px -6px;border-radius:8px}
+@media (max-width:760px){
+  .m-menu{display:grid;place-items:center}
+  .stage-head{padding:10px 12px;gap:8px}.stage-head .meta{display:none}
+  .rail{height:100dvh}
+  .side.on{position:fixed;inset:0;width:100%;z-index:20;box-shadow:none}
+  .composer{padding:8px 10px calc(8px + env(safe-area-inset-bottom))}
+  .composer .foot .hint{display:none}
+  .page,.page.tk,.page.tp,.page.ag,.page.pf,.page.lt,.page.jv{padding-left:12px!important;padding-right:12px!important}
+  .feed-inner{padding-left:10px;padding-right:10px}
+  .dv-qr{width:180px;height:180px}
+}
