@@ -41,9 +41,15 @@ export function roomStage(ctx) {
     side: ui.infoOpen === false ? '' : roomSideHtml(ctx, room), sideClass: 'info',
     actions: ui.infoOpen === false ? '<button class="btn small" data-action="info-toggle">Info</button>' : '',
     members: ui.infoOpen !== false ? '' : `<div class="members">${room.members.map(chip).join('')}${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: 'Add an agent to this room', placeholder: '+ Add agent', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || 'Idle'}` })) }) : ''}</div>`,
-    feed: `${messages.length ? messages.map(render).join('') : empty}${doing}` };
+    feed: `${messages.length ? messages.map(render).join('') : empty}${asks(ctx, room)}${doing}` };
 }
 
+// Questions and approvals from the members' sessions in this room show in the room, from the agent who asked.
+function asks(ctx, room) {
+  const owner = new Map();
+  for (const member of room.members) for (const id of roomRunIds(ctx.ui, { members: [member] })) owner.set(id, member.name);
+  return ctx.pending().filter(item => owner.has(item.runId)).map(item => `<div class="msg rmsg"><div class="ravcol">${ctx.avatar({ name: owner.get(item.runId), size: 'sm' })}</div>${ctx.decisionCard(item)}</div>`).join('');
+}
 // The room's info on the right, like a messenger: picture, name, who is in it and what they are doing, and the tasks talked about.
 // The sessions whose work shows in a room's Activity tab: each member's room session, and the task run of a member who is busy on one.
 export function roomRunIds(ui, room) {

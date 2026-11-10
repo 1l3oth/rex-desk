@@ -186,6 +186,10 @@ export class Desk {
   // An agent may suggest starting work on an issue, but nothing starts until the human approves the card that names it.
   async dispatch(parentRunId, input) {
     const task = this.task(input.taskId);
+    // A task the person gave to an agent stays that agent's: the caller is told who owns it instead of starting a second run.
+    const owner = this.store.list('run').filter(item => item.specialistId && item.taskId === task.id && !['stopped', 'failed', 'cancelled'].includes(item.state)).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+    const caller = this.store.get('run', parentRunId);
+    if (owner && owner.specialistId !== (caller?.specialistId || caller?.roomAgent)) { const agent = this.store.get('specialist', owner.specialistId); throw new Error(`This task is already given to ${agent?.name || 'another agent'}. Do not start your own run: @mention them in the room, or ask the person.`); }
     const answer = await this.ask(parentRunId, { kind: 'approval', title: `Start work on “${task.title}”?`,
       request: { taskId: task.id, issue: task.title, provider: 'claude', note: 'An agent asked to start this run. It starts only if you approve.' }, method: 'dispatch' });
     if (answer.action !== 'accept') throw new Error('The human did not approve starting this run. Do not start it another way.');
@@ -228,7 +232,7 @@ export class Desk {
   async startTask({ taskId, repositoryId, provider, baseBranch, targetBranch, instructions = '', category, parentRunId, runtimeProfile: profileId, specialistId = '', roomId = '' }) {
     const task = this.task(taskId), titleEn = await this.englishName(taskId).catch(() => task.title);
     if (task.demo) throw new Error('Demo tasks cannot launch agents or change a repository.');
-    if (this.store.list('run').some(run => run.taskId === taskId && !terminalStates.has(run.state))) throw new Error('This task already has an active run.');
+    if (this.store.list('run').some(run => run.taskId === taskId && !terminalStates.has(run.state))) { const open = this.store.list('run').find(run => run.taskId === taskId && !terminalStates.has(run.state)); throw new Error(`This task already has an open run${open?.branch ? ` (${open.branch})` : ''}. If it is stuck, the person can close it with Close run on its screen, or you can close it with desk_close_run.`); }
     const config = this.store.config();
     if (parentRunId) {
       const parent = this.run(parentRunId), started = this.store.list('run').filter(item => item.parentRunId === parentRunId).length;
