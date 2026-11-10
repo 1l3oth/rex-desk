@@ -17,3 +17,10 @@ test('the agent can still name which of its fields are required, and a plain que
   assert.deepEqual(askSchema({ kind: 'question' }).required, ['answer']);
   assert.deepEqual(askSchema({ kind: 'approval' }).required, []);
 });
+
+test('suggested answers travel with the question to the dashboard', () => {
+  const fields = { run: { type: 'string', title: 'How do you run it?', options: [{ label: 'docker compose up', description: 'What the compose file defines' }, { label: './gradlew bootRun' }] } };
+  const schema = askSchema({ kind: 'question', fields });
+  assert.equal(schema.properties.run.options.length, 2);
+  assert.equal(schema.properties.run.options[0].description, 'What the compose file defines');
+});

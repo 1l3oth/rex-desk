@@ -112,10 +112,12 @@ function decisionCard(item) {
     const control = property.type === 'boolean' ? `<select ${attrs}><option value="">Choose…</option><option value="true">Yes</option><option value="false">No</option></select>`
       : property.enum ? `<select ${attrs}><option value="">Choose…</option>${property.enum.map(value => `<option>${esc(value)}</option>`).join('')}<option value="__custom">Write another answer…</option></select><input class="qinput hidden" name="${esc(key)}__custom" placeholder="Your answer">`
       : `<input class="qinput" ${attrs} type="${['number', 'integer'].includes(property.type) ? 'number' : 'text'}" placeholder="Type your answer…" autocomplete="off">`;
-    return `<label class="qfield"><span>${esc(property.title || key)}</span>${control}</label>`;
+    const options = (property.options || []).slice(0, 6);
+    const suggestions = options.length ? `<div class="sugg" data-multi="${property.multiSelect ? 1 : 0}">${options.map((option, index) => `<button type="button" class="sugg-chip" data-fill="${esc(option.label)}"><span class="num">${index + 1}</span><span class="txt"><b>${esc(option.label)}</b>${option.description ? `<small>${esc(option.description)}</small>` : ''}</span></button>`).join('')}<div class="sugg-other">Or type your own answer below</div></div>` : '';
+    return `<label class="qfield"><span>${esc(property.title || key)}</span>${suggestions}${control}</label>`;
   };
   const fields = Object.entries(properties).map(([key, property]) => field(key, property, required.includes(key))).join('')
-    + (request.questions || []).map(question => field(question.id || question.question, { type: 'string', title: question.question, enum: question.options?.map(option => option.label) }, true)).join('');
+    + (request.questions || []).map(question => field(question.id || question.question, { type: 'string', title: question.question, options: question.options, multiSelect: question.multiSelect }, true)).join('');
   const many = (fields.match(/class="qfield"/g) || []).length;
   const ask = item.kind !== 'approval', detail = ask ? null : request.command || request.input || request;
   return `<form class="card ask qcard" data-interaction="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>${ask ? (many > 1 ? `${many} questions` : 'Question') : 'Needs your OK'} · ${esc(runTitle(run))}</div><div class="qtext md">${markdown(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</div>${detail ? `<pre>${esc(typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2).slice(0, 1500))}</pre>` : ''}${fields}
@@ -283,6 +285,23 @@ document.addEventListener('submit', async event => {
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
 
 initComposer(ctx);
+// In a question card, the keys 1 to 9 pick that option (when not typing).
+document.addEventListener('keydown', event => {
+  if (!/^[1-9]$/.test(event.key) || event.ctrlKey || event.metaKey || event.altKey) return;
+  const form = document.activeElement?.closest?.('.qcard') || (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) ? null : document.querySelector('.qcard')); if (!form) return;
+  if (document.activeElement?.classList?.contains('qinput') || document.activeElement?.id === 'draft') return;
+  const first = form.querySelector('.sugg'), chip = first?.querySelectorAll('.sugg-chip')[Number(event.key) - 1]; if (!chip) return;
+  event.preventDefault(); chip.click();
+});
+// A suggested answer fills its box; a multi-select question collects several.
+document.addEventListener('click', event => {
+  const chip = event.target.closest?.('.sugg-chip'); if (!chip) return;
+  event.preventDefault();
+  const field = chip.closest('.qfield'), input = field.querySelector('.qinput'), multi = chip.parentElement.dataset.multi === '1', label = chip.dataset.fill;
+  if (multi) { chip.classList.toggle('on'); input.value = [...chip.parentElement.querySelectorAll('.sugg-chip.on')].map(item => item.dataset.fill).join(', '); }
+  else { for (const other of chip.parentElement.children) other.classList.toggle('on', other === chip); input.value = label; }
+  input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+});
 document.addEventListener('toggle', event => { const group = event.target; if (group?.dataset?.steps !== undefined) ui.openSteps.set(group.dataset.steps, group.open); }, true);
 document.addEventListener('keydown', event => {
   const input = event.target.closest?.('.qinput'); if (!input || event.key !== 'Enter' || event.shiftKey || event.isComposing) return;

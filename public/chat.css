@@ -155,3 +155,10 @@ code,pre{font-family:var(--mono);font-size:12px}
 .qfield{gap:4px!important}.qfield>span{font-size:13px;font-weight:600;color:var(--ink)!important}
 .qcard .qinput,.qcard select{padding:7px 11px;border-radius:10px;font-size:13.5px}
 .send-btn.wide{height:32px;padding:0 16px;font-size:13px}.qcard .row{gap:6px}.qhint{font-size:11px}
+
+.sugg{display:flex;flex-direction:column;gap:6px}
+.sugg-chip{display:flex;align-items:flex-start;gap:10px;text-align:left;width:100%;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:8px 12px;font-size:13.5px}
+.sugg-chip .num{flex:none;width:20px;height:20px;border-radius:6px;background:var(--raised);color:var(--muted);display:grid;place-items:center;font-size:12px;font-weight:600;margin-top:1px}
+.sugg-chip .txt{display:flex;flex-direction:column;gap:1px;min-width:0}.sugg-chip b{font-weight:600}.sugg-chip small{color:var(--muted);font-size:12px;line-height:1.35}
+.sugg-chip:hover{border-color:var(--accent)}.sugg-chip.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}.sugg-chip.on .num{background:var(--accent);color:var(--accent-ink)}
+.sugg-other{font-size:12px;color:var(--muted);padding:2px 2px 0}

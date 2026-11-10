@@ -90,7 +90,8 @@ export function createMcp(desk, scope) {
     { runId, text: z.string().min(1).max(50000) }, input => { requireEnglish(input.text, 'this message'); return desk.message(resolveRun(input.runId), input.text); });
   tool('desk_ask', 'Ask the human a question or request approval in the dashboard. Blocks until answered. For clients with short timeouts, use wait=false and poll desk_question.',
     { runId, message: z.string().min(1), kind: z.enum(['question', 'approval']).default('question'),
-      fields: z.record(z.string(), z.object({ type: z.enum(['string', 'boolean', 'number', 'integer']), title: z.string().optional(), enum: z.array(z.string()).optional() })).optional(),
+      fields: z.record(z.string(), z.object({ type: z.enum(['string', 'boolean', 'number', 'integer']), title: z.string().optional(), enum: z.array(z.string()).optional(),
+        options: z.array(z.object({ label: z.string().min(1).max(120), description: z.string().max(200).optional() })).max(6).optional().describe('Suggested answers shown as buttons. Give 2 to 4 whenever you can guess likely ones; the person can pick one or type their own.'), multiSelect: z.boolean().optional() })).optional(),
       required: z.array(z.string()).optional(), wait: z.boolean().default(true) }, async (input, extra) => {
       requireEnglish(input.message, 'this question');
       const request = { requestedSchema: askSchema(input) };
