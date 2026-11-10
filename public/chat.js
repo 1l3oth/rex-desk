@@ -73,7 +73,7 @@ function transcript(events) {
     if (event.kind === 'human-message') items.push({ role: 'human', text: event.text, at: event.createdAt });
     else if (event.kind === 'turn-start') items.push({ role: 'status', text: `${event.resumed ? 'Resumed' : 'Started'} with ${provider(event.provider)}`, at: event.createdAt });
     else if (event.kind === 'agent-result') items.push({ role: 'status', text: `Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${event.cost ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
-    else if (event.kind === 'message') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
+    else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
     else if (event.kind === 'error') items.push({ role: 'error', text: event.text || event.message || 'The run needs attention.', at: event.createdAt });
     else if (event.visible) items.push({ role: 'status', text: event.text || event.message || event.kind.replaceAll('-', ' '), at: event.createdAt });
   }
@@ -132,7 +132,7 @@ function stageModel() {
     + pending(run.id).map(decisionCard).join('') + (live ? note(`<span class="spin"></span>${run.state === 'starting' ? 'Preparing the agent' : `${provider(run.provider)} is working`}`) : '');
   const stop = live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : '';
   return { title: runTitle(run), meta: `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions: stop, feed,
-    composer: { placeholder: workingStates.includes(run.state) ? 'Message the agent. It sees this as it works…' : 'Send a follow-up. The agent resumes with its full history…', mentions: [] } };
+    composer: { placeholder: workingStates.includes(run.state) ? 'Message the agent. It sees this as it works…' : 'Send a follow-up. The agent resumes with its full history…', mentions: [], provider: workingStates.includes(run.state) ? '' : run.provider } };
 }
 const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="empty"><h2>Nothing here</h2><p>${text}</p></div>` });
 
@@ -140,7 +140,7 @@ function renderStage(full) {
   const model = stageModel(), stage = document.getElementById('stage');
   const head = `<div class="stage-head"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}<span class="spacer"></span>${model.actions || ''}</div>`;
   if (full || !document.getElementById('feed')) {
-    stage.innerHTML = `<div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? `<div class="composer"><div class="composer-inner"><div class="box"><div id="menu"></div><textarea id="draft" rows="1" placeholder="${esc(model.composer.placeholder)}">${esc(ui.drafts.get(draftKey()) || '')}</textarea><button class="btn primary small send" data-action="send">Send</button></div><div class="hint">Enter sends · Shift+Enter adds a line</div></div></div>` : '<div></div>'}`;
+    stage.innerHTML = `<div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? `<div class="composer"><div class="composer-inner"><div class="box"><div id="menu"></div><textarea id="draft" rows="1" placeholder="${esc(model.composer.placeholder)}">${esc(ui.drafts.get(draftKey()) || '')}</textarea><button class="btn primary small send" data-action="send">Send</button></div><div class="hint">${model.composer.provider ? `<label class="switch">Agent <select id="provider"><option value="claude" ${model.composer.provider === 'claude' ? 'selected' : ''}>Claude Code</option><option value="codex" ${model.composer.provider === 'codex' ? 'selected' : ''}>Codex</option></select></label> · ` : ''}Enter sends · Shift+Enter adds a line</div></div></div>` : '<div></div>'}`;
     ui.stick = true;
   } else { document.getElementById('head').innerHTML = head; document.getElementById('members').innerHTML = model.members || ''; }
   const feed = document.getElementById('feed'), inner = document.getElementById('feed-inner');
@@ -188,7 +188,7 @@ async function send() {
     else {
       const run = type === 'main' ? mainRun() : runById(id);
       if (workingStates.includes(run.state) && run.execution === 'orca') await api(`/runs/${run.id}/say`, { method: 'POST', data: { text } });
-      else await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text } });
+      else { const chosen = document.getElementById('provider')?.value; await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text, ...(chosen && chosen !== run.provider ? { provider: chosen } : {}) } }); if (chosen && chosen !== run.provider) toast(`Switched to ${provider(chosen)}. The conversation was handed over.`); }
     }
     box.value = ''; ui.drafts.delete(draftKey()); await refresh();
   } catch (error) { toast(error.message, true); }

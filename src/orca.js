@@ -89,7 +89,7 @@ export class OrcaRunner {
     }
     while (!this.signal.aborted) {
       await new Promise(resolve => setTimeout(resolve, this.pollMs || 2500));
-      try { this.session?.track(); } catch { /* the session file appears a moment after the terminal starts */ }
+      try { this.session?.track(); for (const text of this.session?.texts() || []) this.event('agent-text', { text }); } catch { /* the session file appears a moment after the terminal starts */ }
       if (this.isDone?.()) return { status: 'completed' };
       let shown;
       try { shown = await orcaJson(['terminal', 'show', '--terminal', this.handle], this.orca); }
@@ -108,7 +108,7 @@ export class OrcaRunner {
 export class AgentSession {
   constructor({ provider, cwd, configDirectory, since, state = {}, persist = () => {} }) {
     Object.assign(this, { provider, cwd, configDirectory, since: Date.parse(since || 0) || 0, persist });
-    this.file = state.file || '';
+    this.file = state.file || ''; this.offset = Number.isFinite(state.offset) ? state.offset : undefined;
   }
   locate() {
     const recent = file => { try { return statSync(file).mtimeMs >= this.since - 60000; } catch { return false; } };
@@ -131,8 +131,28 @@ export class AgentSession {
   track() {
     if (this.file && existsSync(this.file)) return this.file;
     const found = this.locate();
-    if (found && found !== this.file) { this.file = found; this.persist({ file: found }); }
+    if (found && found !== this.file) { this.file = found; this.offset = undefined; this.persist({ file: found }); }
     return this.file;
+  }
+  // The text the agent wrote since the last call, from its own session log. A log that began with this turn is read from its start;
+  // a reopened session starts at its current end, so earlier turns are not replayed. Only whole lines are consumed.
+  texts() {
+    if (!this.file) return [];
+    let info; try { info = statSync(this.file); } catch { return []; }
+    if (this.offset === undefined) { this.offset = info.birthtimeMs >= this.since - 60000 ? 0 : info.size; this.persist({ file: this.file, offset: this.offset }); }
+    if (info.size <= this.offset) return [];
+    const handle = openSync(this.file, 'r'); let chunk;
+    try { chunk = Buffer.alloc(info.size - this.offset); readSync(handle, chunk, 0, chunk.length, this.offset); } finally { closeSync(handle); }
+    const end = chunk.lastIndexOf(10); if (end < 0) return [];
+    this.offset += end + 1; this.persist({ file: this.file, offset: this.offset });
+    const found = [];
+    for (const line of chunk.subarray(0, end).toString('utf8').split('\n')) {
+      let item; try { item = JSON.parse(line); } catch { continue; }
+      const parts = item.type === 'assistant' && Array.isArray(item.message?.content) ? item.message.content.filter(block => block.type === 'text').map(block => block.text)
+        : item.type === 'response_item' && item.payload?.type === 'message' && item.payload.role === 'assistant' ? (item.payload.content || []).filter(block => block.type === 'output_text').map(block => block.text) : [];
+      const text = parts.join('\n').trim(); if (text) found.push(text);
+    }
+    return found;
   }
 }
 function readFirstLine(file) {

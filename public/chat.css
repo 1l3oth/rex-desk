@@ -82,3 +82,4 @@ code,pre{font-family:var(--mono);font-size:12px}
 
 .rail-empty{margin:2px 8px;color:var(--muted);font-size:12px}.card.bad{border-color:var(--bad)}.btn.x{padding:0 6px;border:0}.muted{color:var(--muted);margin:0}
 .composer .box{position:relative}
+.switch select{padding:1px 4px;border:1px solid var(--line);border-radius:6px;background:var(--bg);font-size:11px}
