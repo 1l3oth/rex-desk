@@ -605,9 +605,12 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const item = this.store.get('interaction', interactionId);
     if (!item || item.kind !== 'terminal' || item.state !== 'pending') throw new Error('This sign-in is no longer waiting.');
     const { command, cwd } = item.request;
-    if (process.platform === 'win32') spawn('cmd.exe', ['/c', 'start', 'Rex Desk sign-in', 'cmd.exe', '/k', `echo Rex Desk: sign in below, then go back to Rex Desk and press "I'm signed in". && echo. && ${command}`], { cwd, detached: true, stdio: 'ignore', windowsHide: false }).unref();
-    else if (process.platform === 'darwin') spawn('osascript', ['-e', `tell application "Terminal" to do script "cd ${JSON.stringify(cwd).slice(1, -1)} && ${command.replace(/"/g, '\\"')}"`, '-e', 'tell application "Terminal" to activate'], { detached: true, stdio: 'ignore' }).unref();
-    else spawn('x-terminal-emulator', ['-e', `bash -lc "${command}; exec bash"`], { cwd, detached: true, stdio: 'ignore' }).unref();
+    // The person's own terminal: without the markers of an AI agent or a build server, which make tools like the Supabase CLI
+    // refuse to ask questions ("Cannot prompt for input in JSON output mode").
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_AGENT.*|CLAUDE_CONFIG_DIR|ANTHROPIC_.*|REX_.*|AI_AGENT|AGENT|CURSOR_.*|CODEX_.*|CI|CONTINUOUS_INTEGRATION|BUILD_NUMBER|GITHUB_ACTIONS|NODE_TEST_CONTEXT)$/i.test(key)));
+    if (process.platform === 'win32') spawn('cmd.exe', ['/c', 'start', 'Rex Desk sign-in', 'cmd.exe', '/k', `echo Rex Desk: sign in below, then go back to Rex Desk and press I'm signed in. && echo. && ${command}`], { cwd, env, detached: true, stdio: 'ignore', windowsHide: false }).unref();
+    else if (process.platform === 'darwin') spawn('osascript', ['-e', `tell application "Terminal" to do script "cd ${JSON.stringify(cwd).slice(1, -1)} && ${command.replace(/"/g, '\\"')}"`, '-e', 'tell application "Terminal" to activate'], { env, detached: true, stdio: 'ignore' }).unref();
+    else spawn('x-terminal-emulator', ['-e', `bash -lc "${command}; exec bash"`], { cwd, env, detached: true, stdio: 'ignore' }).unref();
     this.store.event(item.runId, 'sign-in-terminal', { command });
     return { opened: true };
   }
