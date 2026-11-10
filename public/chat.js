@@ -11,7 +11,7 @@ const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 
 const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
 function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash); return match && SCREENS.includes(match[1]) ? { type: match[1], id: match[2] ? decodeURIComponent(match[2]) : '' } : null; }
 function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
-const ui = { snap: null, view: viewFromHash() || savedView() || { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map(), termOpen: true, qstep: new Map(), qanswers: new Map() };
+const ui = { snap: null, view: viewFromHash() || savedView() || { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map(), termOpen: true, qstep: new Map(), qanswers: new Map(), files: new Map() };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`; };
@@ -153,6 +153,7 @@ const note = text => `<div class="note">${text}</div>`;
 // Runs that are over. Any other run that is not working can still be closed, so a stuck run never blocks its task.
 const FINISHED = ['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked'];
 function decisionCard(item) {
+  if (item.kind === 'file') return fileCard(item);
   const request = item.request || {}, run = runById(item.runId), properties = request.requestedSchema?.properties || {}, required = request.requestedSchema?.required || [];
   const saved = ui.qanswers.get(item.id) || {};
   const field = (key, property, needed) => {
@@ -444,8 +445,8 @@ function remember(form) {
 document.addEventListener('input', event => { if (event.target.classList?.contains('qinput')) remember(event.target.closest('form')); });
 
 // ---------- About you: a small portfolio of the person ----------
-const photoUrl = () => `/api/profile/photo?v=${encodeURIComponent(ui.profile?.photo?.updatedAt || '')}`;
-const noteText = item => { const match = /^(.*?)\s+\((\d{4}-\d{2}-\d{2})(, may change)?\)$/.exec(item); return match ? { text: match[1], when: match[2], soft: Boolean(match[3]) } : { text: item, when: '', soft: false }; };
+function photoUrl() { return `/api/profile/photo?v=${encodeURIComponent(ui.profile?.photo?.updatedAt || '')}`; }
+function noteText(item) { const match = /^(.*?)\s+\((\d{4}-\d{2}-\d{2})(, may change)?\)$/.exec(item); return match ? { text: match[1], when: match[2], soft: Boolean(match[3]) } : { text: item, when: '', soft: false }; }
 function personPage() {
   const profile = ui.profile || { sections: [], projects: [], agents: [] }, name = profile.name || 'You';
   const about = profile.sections.find(section => section.title === 'About them')?.items.map(noteText) || [];
@@ -480,4 +481,72 @@ document.addEventListener('change', async event => {
 document.addEventListener('click', async event => {
   if (!event.target.closest?.('[data-action="photo-remove"]')) return;
   try { await api('/profile/photo', { method: 'DELETE' }); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
+}, true);
+
+// ---------- a file an agent opened for the person to fill in ----------
+// The file is read and saved by Rex Desk on this computer; the agent only learns that it was saved and which keys have values.
+function isEnv(file) { return /(^|[\\/])\.env(\.[\w.-]+)?$|\.env$/i.test(file); }
+function secretKey(key) { return /key|secret|token|passw|pwd|auth|credential|private|cookie|session/i.test(key); }
+function envLine(line) { return /^(\s*(?:export\s+)?)([A-Za-z_][\w.-]*)(\s*=\s*)(.*)$/.exec(line); }
+function fileState(item) {
+  let state = ui.files.get(item.id);
+  if (!state) {
+    state = { loading: true, content: '', mode: isEnv(item.request?.path) ? 'fields' : 'text', shown: new Set() }; ui.files.set(item.id, state);
+    api(`/interactions/${item.id}/file`).then(file => {
+      let content = file.content;
+      // Keys the agent asked for that are not in the file yet are added at the end, empty, for the person to fill.
+      const present = new Set(content.split('\n').map(envLine).filter(Boolean).map(match => match[2]));
+      const missing = (file.keys || []).filter(key => !present.has(key));
+      if (missing.length && state.mode === 'fields') content = `${content}${content && !content.endsWith('\n') ? '\n' : ''}${missing.map(key => `${key}=`).join('\n')}\n`;
+      Object.assign(state, { loading: false, content, original: file.content, exists: file.exists, keys: file.keys || [] }); renderAll(true);
+    }).catch(error => { Object.assign(state, { loading: false, error: error.message }); renderAll(true); });
+  }
+  return state;
+}
+function fileCard(item) {
+  const run = runById(item.runId), state = fileState(item), file = item.request?.path || '';
+  let body;
+  if (state.loading) body = '<p class="muted">Opening the file…</p>';
+  else if (state.error) body = `<p class="fbad">${esc(state.error)}</p>`;
+  else if (state.mode === 'fields') {
+    const lines = state.content.split('\n'), rows = lines.map((line, index) => [line, index, envLine(line)]).filter(([, , match]) => match);
+    body = rows.length ? `<div class="frows">${rows.map(([, index, match]) => {
+      const key = match[2], value = match[4].replace(/^(["'])(.*)\1$/, '$2'), hidden = secretKey(key) && !state.shown.has(index), wanted = state.keys.includes(key);
+      return `<label class="frow${wanted ? ' wanted' : ''}"><span class="fkey">${esc(key)}${wanted ? '<small>asked for</small>' : ''}</span><span class="fval"><input type="${hidden ? 'password' : 'text'}" data-file-line="${index}" value="${esc(value)}" autocomplete="off" spellcheck="false" placeholder="${wanted ? 'Paste the value here' : 'empty'}">${secretKey(key) ? `<button type="button" class="btn small quiet" data-file-show="${index}">${hidden ? 'Show' : 'Hide'}</button>` : ''}</span></label>`;
+    }).join('')}</div>` : '<p class="muted">No KEY=value lines yet. Switch to text to write the file.</p>';
+  } else body = `<textarea class="ftext" data-file-text spellcheck="false">${esc(state.content)}</textarea>`;
+  const toggle = !state.loading && !state.error && isEnv(file) ? `<button type="button" class="btn small quiet" data-file-mode>${state.mode === 'fields' ? 'Edit as text' : 'Edit as fields'}</button>` : '';
+  return `<form class="card ask fcard" data-file="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>File to fill in · ${esc(runTitle(run))}</div>
+    <div class="qtext md">${markdown(String(item.title || ''))}</div>
+    <div class="fpath"><code title="${esc(file)}">${esc(file)}</code>${state.exists === false ? '<span class="chip">new file</span>' : ''}${toggle}</div>
+    ${body}
+    <p class="fnote">Saved straight to this computer. ${esc(runTitle(run))} sees only which keys have a value, never what you type.</p>
+    <div class="row"><button class="send-btn wide" ${state.loading || state.error ? 'disabled' : ''}>Save file</button><button type="button" class="btn small" data-file-close>Close without saving</button></div></form>`;
+}
+function fileLine(state, index, value) {
+  const lines = state.content.split('\n'), match = envLine(lines[index]); if (!match) return;
+  const quote = /^(["']).*\1$/.exec(match[4])?.[1] || (/[\s#]/.test(value) ? '"' : '');
+  lines[index] = `${match[1]}${match[2]}${match[3]}${quote}${value}${quote}`; state.content = lines.join('\n');
+}
+document.addEventListener('input', event => {
+  const form = event.target.closest?.('[data-file]'); if (!form) return;
+  const state = ui.files.get(form.dataset.file); if (!state) return;
+  if (event.target.dataset.fileLine !== undefined) fileLine(state, Number(event.target.dataset.fileLine), event.target.value);
+  else if (event.target.matches('[data-file-text]')) state.content = event.target.value;
+});
+document.addEventListener('click', async event => {
+  const form = event.target.closest?.('[data-file]'); if (!form) return;
+  const state = ui.files.get(form.dataset.file); if (!state) return;
+  const show = event.target.closest('[data-file-show]');
+  if (show) { const index = Number(show.dataset.fileShow); if (state.shown.has(index)) state.shown.delete(index); else state.shown.add(index); renderAll(true); return; }
+  if (event.target.closest('[data-file-mode]')) { state.mode = state.mode === 'fields' ? 'text' : 'fields'; renderAll(true); return; }
+  if (event.target.closest('[data-file-close]')) {
+    try { await api(`/interactions/${form.dataset.file}/answer`, { method: 'POST', data: { action: 'decline' } }); ui.files.delete(form.dataset.file); toast('Closed without saving.'); await refresh(); } catch (error) { toast(error.message, true); }
+  }
+});
+document.addEventListener('submit', async event => {
+  const form = event.target.closest?.('[data-file]'); if (!form) return; event.preventDefault(); event.stopPropagation();
+  const state = ui.files.get(form.dataset.file); if (!state || state.loading) return;
+  try { await api(`/interactions/${form.dataset.file}/file`, { method: 'POST', data: { content: state.content } }); ui.files.delete(form.dataset.file); document.activeElement?.blur?.(); toast('File saved.'); await refresh({ full: true }); }
+  catch (error) { toast(error.message, true); }
 }, true);
