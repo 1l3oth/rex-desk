@@ -161,6 +161,7 @@ const note = text => `<div class="note">${text}</div>`;
 const FINISHED = ['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked'];
 function decisionCard(item) {
   if (item.kind === 'file') return fileCard(item);
+  if (item.kind === 'terminal') return signInCard(item);
   const request = item.request || {}, run = runById(item.runId), properties = request.requestedSchema?.properties || {}, required = request.requestedSchema?.required || [];
   const saved = ui.qanswers.get(item.id) || {};
   const field = (key, property, needed) => {
@@ -794,3 +795,22 @@ function toolsHtml(id) {
     <details class="tl-skills"><summary><h3>Skills and commands <span>${skills.length}</span></h3></summary><ul class="tl-list">${skills.map(item => `<li><b>/${esc(item.name)}</b><small>${esc(item.description || '')}</small></li>`).join('') || '<li class="muted small">None.</li>'}</ul></details>
     <p class="muted small">Type / in the message box to use one.</p>`;
 }
+
+// ---------- a sign-in an agent needs: open a terminal running the command, sign in, say done ----------
+function signInCard(item) {
+  const run = runById(item.runId), opened = ui.signInOpened?.has(item.id);
+  return `<div class="card ask scard" data-signin="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>Sign-in needed · ${esc(runTitle(run))}</div>
+    <div class="qtext md">${markdown(String(item.title || ''))}</div>
+    <div class="scmd"><code>${esc(item.request?.command || '')}</code></div>
+    <p class="fnote">Opens a terminal on this computer running this command. Sign in there; the tool keeps the sign-in on this computer, so every agent can use it.</p>
+    <div class="row"><button type="button" class="send-btn wide" data-signin-open>${opened ? 'Open the terminal again' : 'Open terminal'}</button><button type="button" class="btn small ${opened ? 'primary' : ''}" data-signin-done>I'm signed in</button><button type="button" class="btn small" data-signin-skip>Not now</button></div></div>`;
+}
+document.addEventListener('click', async event => {
+  const card = event.target.closest?.('[data-signin]'); if (!card) return;
+  const id = card.dataset.signin;
+  try {
+    if (event.target.closest('[data-signin-open]')) { await api(`/interactions/${id}/terminal`, { method: 'POST', data: {} }); (ui.signInOpened ||= new Set()).add(id); toast('Terminal opened. Sign in there, then press "I\'m signed in".'); renderAll(); }
+    else if (event.target.closest('[data-signin-done]')) { await api(`/interactions/${id}/answer`, { method: 'POST', data: { action: 'accept', content: {} } }); toast('Thanks. The agent checks the sign-in and goes on.'); await refresh(); }
+    else if (event.target.closest('[data-signin-skip]')) { await api(`/interactions/${id}/answer`, { method: 'POST', data: { action: 'decline' } }); await refresh(); }
+  } catch (error) { toast(error.message, true); }
+});

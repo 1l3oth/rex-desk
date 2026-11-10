@@ -824,3 +824,6 @@ button.cn-main{cursor:pointer}
 .tl-skills summary{list-style:none;cursor:pointer}.tl-skills summary::-webkit-details-marker{display:none}.tl-skills summary h3{display:inline}
 .tl-skills summary h3::after{content:' ▸';font-size:10px;color:var(--muted)}.tl-skills[open] summary h3::after{content:' ▾'}
 .menu{max-height:min(420px,60vh);overflow:auto}
+
+/* ---- a sign-in an agent needs ---- */
+.scard{gap:10px}.scmd code{display:block;padding:10px 12px;border-radius:9px;background:#0d0f12;color:#7ee787;font:13px var(--mono);overflow-x:auto;white-space:nowrap}

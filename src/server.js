@@ -466,6 +466,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         const branches = (await git(repository.path, ['for-each-ref', '--format=%(refname:short)', 'refs/heads', 'refs/remotes/origin'])).split('\n').filter(Boolean);
         return json(response, 200, { branches });
       }
+      const terminalMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/terminal$/);
+      if (terminalMatch && request.method === 'POST') return json(response, 200, desk.openSignInTerminal(terminalMatch[1]));
       const fileMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/file$/);
       if (fileMatch && request.method === 'GET') return json(response, 200, desk.fileForPerson(fileMatch[1]));
       if (fileMatch && request.method === 'POST') return json(response, 200, desk.saveFileForPerson(fileMatch[1], (await body(request)).content));
