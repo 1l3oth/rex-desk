@@ -322,7 +322,10 @@ export class Desk {
       // A headless session that is being reopened already holds the whole conversation, so it is given only what is new.
       const reopened = run.execution !== 'orca' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && run.followUp;
       if (run.followUp) this.patchRun(runId, { followUp: '' });
-      await runner.start(reopened ? run.followUp : this.prompt(run));
+      const digest = this.sessionDigest(run), message = reopened ? run.followUp : this.prompt(run);
+      await runner.start(digest ? `${digest}
+
+${message}` : message);
       const current = this.run(runId);
       if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' ? 'finished' : 'needs_evidence', endedAt: now() });
     } catch (error) {
@@ -386,7 +389,10 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       '5. When every project has an agent, offer to look at the assigned issues with desk_tasks and desk_repositories. Never start a run except through desk_dispatch, which the person approves.',
       `The person's first message: ${run.prompt || '(none: start with step 1)'}`].join('\n');
     if (run.role === 'coordinator') return `${common}\nYou are the main coordinator. Read desk_tasks and desk_task for the selected IDs ${JSON.stringify(run.taskIds)}. Classify issues by affected module, severity, likely dependency, and reproduction path. Do not guess fixes. Use desk_categorize to label tasks and desk_dispatch to start a run for an issue${repositories ? '' : ' (unavailable: no source repository is configured, so say which issues are waiting for one)'}. Respect dependencies: serialize related changes and parallelize independent tasks. Do not modify source code yourself. Each dispatched run gets its own branch, worktree, and port, and investigates one issue. Choose the repository for every issue yourself and pass it as repositoryId: read desk_repositories, and match the issue to the project whose code holds the reported behaviour, by its product, module, screen, platform and the file or class names in its description and comments. Do not fall back to the connection default because it is there, and never send an issue to a repository that cannot contain the cause. If more than one could fit, or the right one is not listed, ask the human once with desk_ask, naming the candidates you found and saying the repository may need adding in Settings. Use desk_runs to track runs; report what you dispatched through desk_message.${run.maxDispatch ? ` This is a scheduled run: start at most ${run.maxDispatch} runs, prioritize by severity, and end with one desk_message summary for the human: what started, what was skipped and why.` : ''} Never mark a source task complete without verified evidence. Base override: ${run.baseBranch || 'repository setting'}. PR target override: ${run.targetBranch || 'repository setting'}. User instruction: ${run.prompt || 'Analyze and dispatch these assigned issues.'}`;
-    if (run.role === 'specialist') return [common, this.specialists.identity(this.specialists.get(run.specialistId)), run.instructions].filter(Boolean).join('\n\n');
+    const roomNote = 'This is your group-chat session: you use it for every room you are in. Your personal chat with the person is a separate conversation; read it with desk_my_chat when you need it.';
+    const personalNote = 'This is your personal chat with the person. Group chats are a separate conversation of yours; read them with desk_rooms and desk_room_history when you need them.';
+    if (run.role === 'specialist') return [common, this.specialists.identity(this.specialists.get(run.specialistId)), run.roomAgent ? roomNote : personalNote, run.instructions].filter(Boolean).join('\n\n');
+    if (run.roomAgent === 'main') return [common, 'You are the main agent of Rex Desk: you know every project and every agent, and you help the person decide who does what. Use desk_specialists, desk_memory, desk_tasks and desk_runs to answer.', roomNote, run.instructions].filter(Boolean).join('\n\n');
     const task = this.task(run.taskId), who = run.specialistId && this.store.get('specialist', run.specialistId) ? `${this.specialists.identity(this.store.get('specialist', run.specialistId))}\nThis issue is assigned to you. ` : '';
     return `${common}\n${who}${this.taskPrompt(run, task, lessons)}`;
   }
@@ -537,23 +543,57 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // so the agent remembers everything it has been told, in every room.
   async specialistTurn(agentId, { prompt, roomId = '', messageId = '' }) {
     const agent = this.specialists.get(agentId), turn = roomId ? { roomId, messageId } : null;
-    // The main agent answers in rooms from its own run.
-    if (agent.kind === 'main') {
+    // Every agent has two sessions: a personal chat with the person, and one session for all its rooms. Room messages never land in the personal chat;
+    // each session can read the other with tools when it needs to.
+    const key = roomId ? 'roomRunId' : 'runId';
+    if (!roomId && agent.kind === 'main') {
       const main = this.store.list('run').filter(run => run.role === 'coordinator' && run.main).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
-      if (!main || main.external) { const started = await this.startMain({ prompt }); this.store.put('run', started.id, { ...this.run(started.id), roomTurn: turn }); return this.run(started.id); }
-      if (this.live.has(main.id)) { this.store.put('run', main.id, { ...main, roomTurn: turn || main.roomTurn }); await this.say(main.id, prompt, {}, { raw: true }); return main; }
-      await this.resume(main.id, { prompt, silent: true, roomTurn: turn }); return this.run(main.id);
+      if (!main) return this.startMain({ prompt });
+      if (this.live.has(main.id)) { await this.say(main.id, prompt, {}, { raw: true }); return main; }
+      await this.resume(main.id, { prompt, silent: true }); return this.run(main.id);
     }
-    const run = agent.runId ? this.store.get('run', agent.runId) : null;
+    const run = agent[key] ? this.store.get('run', agent[key]) : null;
     if (!run) {
-      const home = this.specialists.homeDirectory(agent); mkdirSync(home, { recursive: true });
-      const created = { id: id(), role: 'specialist', specialistId: agent.id, title: agent.name, provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home,
-        projectPath: agent.projectPath, repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(this.specialists.cleanModel(agent.model) ? { model: this.specialists.cleanModel(agent.model) } : {}) };
-      this.store.put('run', created.id, created); this.store.put('specialist', agent.id, { ...this.specialists.get(agentId), runId: created.id });
+      const home = agent.kind === 'main' ? path.join(this.store.directory, 'coordinator') : this.specialists.homeDirectory(agent); mkdirSync(home, { recursive: true });
+      const model = this.specialists.cleanModel(agent.model);
+      const created = { id: id(), role: agent.kind === 'main' ? 'coordinator' : 'specialist', ...(agent.kind === 'main' ? {} : { specialistId: agent.id }), ...(roomId ? { roomAgent: agent.id } : {}),
+        title: roomId ? `${agent.name} · rooms` : agent.name, provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home,
+        projectPath: agent.projectPath || '', repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}) };
+      this.store.put('run', created.id, created); this.store.put('specialist', agent.id, { ...this.specialists.get(agentId), [key]: created.id });
+      if (!roomId) this.store.event(created.id, 'human-message', { text: String(prompt).trim(), via: 'rex' }, true);
       void this.drain(); return created;
     }
     if (this.live.has(run.id)) { this.store.put('run', run.id, { ...run, roomTurn: turn || run.roomTurn }); await this.say(run.id, prompt, {}, { raw: true }); return run; }
-    await this.resume(run.id, { prompt, silent: true, roomTurn: turn }); return this.run(run.id);
+    await this.resume(run.id, { prompt, silent: Boolean(roomId), roomTurn: turn }); return this.run(run.id);
+  }
+  // One agent, two sessions: before a turn, each session is told what happened in the other one since it last looked,
+  // so the personal chat knows the rooms and the room session knows the personal chat, while both can run at the same time.
+  sessionDigest(run) {
+    const agentId = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
+    if (!agentId || run.role === 'worker') return '';
+    if (agentId === 'main') this.specialists.ensureMain();
+    const agent = this.store.get('specialist', agentId); if (!agent) return '';
+    const clip = text => { const value = String(text || '').replace(/\s+/g, ' ').trim(); return value.length > 300 ? `${value.slice(0, 299)}…` : value; };
+    if (run.roomAgent) {
+      const since = agent.seenPersonalAt || '', news = this.personalChat(agentId, 40).filter(item => item.at > since).slice(-10);
+      if (news.length) this.store.put('specialist', agentId, { ...this.store.get('specialist', agentId), seenPersonalAt: news.at(-1).at });
+      return news.length ? `Meanwhile in your personal chat with the person:\n${news.map(item => `- ${item.from}: ${clip(item.text)}`).join('\n')}` : '';
+    }
+    const seen = { ...(agent.personalRoomSeen || {}) }, lines = [];
+    for (const room of this.rooms.roomsOf(agentId)) {
+      const news = this.rooms.messages(room.id, { after: seen[room.id] || 0 }).filter(item => item.from.type !== 'system').slice(-6);
+      if (news.length) { seen[room.id] = news.at(-1).seq; lines.push(`[${room.name}]`, ...news.map(item => `- ${item.from.type === 'human' ? 'The person' : item.from.label}: ${clip(item.text)}`)); }
+    }
+    if (lines.length) this.store.put('specialist', agentId, { ...this.store.get('specialist', agentId), personalRoomSeen: seen });
+    return lines.length ? `Meanwhile in your group chats:\n${lines.join('\n')}` : '';
+  }
+  // What the person and the agent said in the agent's personal chat, for its room session to read when it needs to.
+  personalChat(agentId, limit = 30) {
+    const agent = this.specialists.get(agentId);
+    const run = agent.kind === 'main' ? this.store.list('run').filter(item => item.role === 'coordinator' && item.main).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0] : agent.runId && this.store.get('run', agent.runId);
+    if (!run) return [];
+    return this.store.events(run.id, { visible: true, limit: 400 }).filter(event => ['human-message', 'agent-text', 'message'].includes(event.kind))
+      .map(event => ({ from: event.kind === 'human-message' ? 'The person' : agent.name, at: event.createdAt, text: String(event.text || event.message || '').slice(0, 2000) })).slice(-limit);
   }
   // Gives a task to an agent: a run on that task in the agent's name. While it runs, the agent shows as busy on that task, and what it reports goes to the room it was given in.
   async assignTask({ specialistId, taskId, roomId = '', instructions = '' }) {

@@ -117,7 +117,8 @@ export class Rooms {
 
   // Everything an agent needs to answer as if it had been in the room all along.
   promptFor(room, message, agentId) {
-    const agent = this.agent(agentId), seen = agent?.roomSeen || {};
+    // A room session that does not exist yet starts with the rooms' recent history, not only what is new.
+    const agent = this.agent(agentId), seen = agent?.roomRunId && this.store.get('run', agent.roomRunId) ? (agent.roomSeen || {}) : {};
     const who = item => item.from.type === 'human' ? 'The person' : item.from.type === 'agent' ? this.member(item.from.id).name : 'Rex Desk';
     const line = item => `${who(item)}: ${clip(item.text, 500)}`;
     const here = this.messages(room.id, { after: seen[room.id] || 0 }).filter(item => item.id !== message.id && item.from.type !== 'system' && item.seq < message.seq).slice(-30);
@@ -141,7 +142,7 @@ export class Rooms {
   }
   // Called when an agent's turn ends: what it said goes to the room it was asked in; a finished task is announced.
   async turnFinished(runId) {
-    const run = this.store.get('run', runId), agentId = run?.specialistId || (run?.role === 'coordinator' && run?.main ? 'main' : ''); if (!agentId) return;
+    const run = this.store.get('run', runId), agentId = run?.roomAgent || run?.specialistId || (run?.role === 'coordinator' && run?.main ? 'main' : ''); if (!agentId) return;
     if (run.role === 'worker') {
       if (run.roomId && ['needs_evidence', 'ready_for_review', 'finished', 'failed', 'stopped'].includes(run.state)) {
         const name = this.member(run.specialistId).name, task = this.taskLine(run.taskId);

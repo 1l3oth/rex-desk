@@ -46,12 +46,12 @@ test('what an agent says in its turn is posted to the room, and its session is k
   await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.type === 'agent'));
   const reply = desk.rooms.messages(room.id).find(item => item.from.type === 'agent');
   assert.equal(reply.from.label, 'Dara'); assert.match(reply.text, /Looks like a bug/); assert.deepEqual(reply.to, ['you']);
-  const firstRun = store.get('specialist', dara.id).runId; assert.ok(firstRun);
+  const firstRun = store.get('specialist', dara.id).roomRunId; assert.ok(firstRun);
   await desk.rooms.post(room.id, { text: '@vanna did you see that?' });
   await waitFor(() => turns.length === 2);
   await desk.rooms.post(room.id, { text: '@dara and now?' });
   await waitFor(() => turns.length === 3);
-  assert.equal(store.get('specialist', dara.id).runId, firstRun, 'one session per agent');
+  assert.equal(store.get('specialist', dara.id).roomRunId, firstRun, 'one room session per agent, for every room');
   assert.equal(turns[2].run.id, firstRun);
   assert.match(turns[2].prompt, /Vanna: |The person: @vanna did you see that/, 'the second mention carries what happened since the agent last looked');
   assert.ok(!/You are Dara, the specialist agent/.test(turns[2].prompt), 'a resumed session is given only what is new');
@@ -140,8 +140,39 @@ test('the main agent can be added to a room as @main, and answers there from its
   assert.ok(!desk.specialists.list().some(agent => agent.id === 'main'), 'the main agent is not listed as a project agent');
   await desk.rooms.post(room.id, { text: '@main who should take the cart bug?' });
   await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === 'main'));
-  assert.equal(turns[0].run.role, 'coordinator'); assert.equal(turns[0].run.main, true);
+  assert.equal(turns[0].run.role, 'coordinator'); assert.equal(turns[0].run.roomAgent, 'main'); assert.ok(!turns[0].run.main, 'the room session is not the main chat');
   assert.match(desk.rooms.messages(room.id).find(item => item.from.id === 'main').text, /route this to Dara/);
   assert.equal(desk.rooms.member('main').name, 'Main agent');
   assert.ok(store.get('specialist', 'main'));
+});
+
+test('an agent keeps its personal chat apart from its room session, and the room session can read the personal chat', async () => {
+  const { desk, store, turns, dara, room } = setup({ replies: ['Room answer.', 'Personal answer.'] });
+  await desk.rooms.post(room.id, { text: '@dara status of the cart?' });
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.type === 'agent'));
+  await desk.specialistTurn(dara.id, { prompt: 'Just between us: how are you?' });
+  await waitFor(() => turns.length === 2);
+  const agent = store.get('specialist', dara.id);
+  assert.ok(agent.runId && agent.roomRunId && agent.runId !== agent.roomRunId, 'two separate sessions');
+  assert.equal(turns[1].run.id, agent.runId); assert.ok(!turns[1].run.roomAgent);
+  const personal = store.events(agent.runId, { visible: true }).map(event => event.text || '').join(' ');
+  assert.ok(!personal.includes('status of the cart'), 'room messages never land in the personal chat');
+  await waitFor(() => desk.personalChat(dara.id).some(item => item.text === 'Personal answer.'));
+  assert.ok(!desk.rooms.messages(room.id).some(item => /Personal answer/.test(item.text)), 'a personal reply is not posted to the room');
+});
+
+test('each session of an agent is told what happened in the other one since it last looked', async () => {
+  const { desk, turns, dara, room } = setup({ replies: ['Room reply.', 'Personal reply.', 'Room again.'] });
+  await desk.rooms.post(room.id, { text: '@dara the cart total is wrong' });
+  await waitFor(() => turns.length === 1);
+  await desk.specialistTurn(dara.id, { prompt: 'Privately: I think it is the tax step.' });
+  await waitFor(() => turns.length === 2);
+  assert.match(turns[1].prompt, /Meanwhile in your group chats:\n\[Checkout bug\]/); assert.match(turns[1].prompt, /the cart total is wrong/);
+  await waitFor(() => desk.personalChat(dara.id).some(item => item.text === 'Personal reply.'));
+  await desk.rooms.post(room.id, { text: '@dara any idea?' });
+  await waitFor(() => turns.length === 3);
+  assert.match(turns[2].prompt, /Meanwhile in your personal chat with the person:/); assert.match(turns[2].prompt, /I think it is the tax step/);
+  await desk.specialistTurn(dara.id, { prompt: 'and now?' });
+  await waitFor(() => turns.length === 4);
+  assert.ok(!/the cart total is wrong/.test(turns[3].prompt), 'what was already seen is not repeated');
 });
