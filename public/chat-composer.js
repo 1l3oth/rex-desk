@@ -38,11 +38,11 @@ export function composerHtml(ctx, model) {
     <div class="box2"><div id="menu"></div>
       <button class="icon-btn" data-action="plus" aria-label="Add" title="Add">${ICON.plus}</button>
       <textarea id="draft" rows="1" placeholder="${esc(model.composer.placeholder)}">${esc(ui.drafts.get(ctx.draftKey()) || '')}</textarea>
-      ${navigator.mediaDevices?.getUserMedia ? `<button class="icon-btn" data-action="mic" aria-label="Dictate" title="Dictate (Khmer, English or Korean, on this computer)">${ICON.mic}</button>` : ''}
+      ${navigator.mediaDevices?.getUserMedia ? `<button class="icon-btn" data-action="mic" aria-label="Dictate" title="Dictate: click, or hold Space (Khmer, English or Korean, on this computer)">${ICON.mic}</button>` : ''}
       <button class="send-btn" data-action="send" aria-label="Send" title="Send">${ICON.up}</button>
       <input type="file" id="file-input" multiple hidden>
     </div>
-    <div class="foot"><span class="hint">Type / for commands${model.composer.mentions?.length ? ' · @ to mention · # for a task' : ''}</span><span class="spacer"></span>
+    <div class="foot"><span class="hint">Type / for commands · hold Space to talk${model.composer.mentions?.length ? ' · @ to mention · # for a task' : ''}</span><span class="spacer"></span>
       ${model.composer.noPickers ? '' : `${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
       <span class="ring ${working ? 'busy' : ''}" title="${working ? 'The agent is working' : 'Idle'}" aria-hidden="true"></span>`}</div>
   </div></div>`;
@@ -121,7 +121,7 @@ const voiceLanguage = ctx => { try { return localStorage.getItem('jev-language')
 async function finishMic(ctx) {
   const recording = listening; if (!recording) return;
   listening = null; recording.stop(); micButton()?.classList.remove('rec');
-  if (!recording.heard) { ctx.toast('Nothing was heard. Press the mic and speak.', true); return; }
+  if (!recording.heard) { ctx.toast('Nothing was heard. Hold Space (or press the mic) and speak.', true); return; }
   transcribing = true; micButton()?.classList.add('busy');
   const slow = setTimeout(() => ctx.toast('Loading the voice model. The first time after a restart takes a minute or two.'), 4000);
   try {
@@ -141,8 +141,56 @@ async function toggleMic(ctx) {
   micButton()?.classList.add('rec');
 }
 
+// Hold Space to talk: past a short hold it listens until Space is let go, then the words land in the message box.
+// A quick tap still types a space. It works in the message box, or anywhere that is not another text field.
+const HOLD_MS = 320;
+const hold = { timer: 0, active: false, pending: false, releasedEarly: false };
+const holdable = target => target?.id === 'draft' || !(target?.closest?.('input,textarea,select,[contenteditable="true"],.dialog,.dialog-back'));
+async function startHold(ctx) {
+  if (listening || transcribing) return;
+  hold.active = true; hold.pending = true;
+  void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
+  let stream;
+  try { stream = await openMicrophone(); } catch { hold.active = hold.pending = false; ctx.toast('Rex Desk could not use the microphone. Allow it, then try again.', true); return; }
+  // While Space is held, quiet does not end the recording; only letting go does (or a minute at most).
+  const recording = startRecorder(stream, { onQuiet: () => { if (performance.now() - recording.started > 60000) void finishMic(ctx); } });
+  listening = recording; hold.pending = false;
+  micButton()?.classList.add('rec'); document.body.classList.add('ptt');
+  if (hold.releasedEarly) { hold.releasedEarly = false; hold.active = false; document.body.classList.remove('ptt'); void finishMic(ctx); }
+}
+function insertSpace(box) {
+  const start = box.selectionStart ?? box.value.length, end = box.selectionEnd ?? start;
+  box.value = `${box.value.slice(0, start)} ${box.value.slice(end)}`; box.selectionStart = box.selectionEnd = start + 1;
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function initPushToTalk(ctx) {
+  document.addEventListener('keydown', event => {
+    if (event.code !== 'Space' || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || !holdable(event.target) || ctx.ui.menu) return;
+    if (event.repeat || hold.timer || hold.active) { event.preventDefault(); return; }
+    if (!micButton() || transcribing) return;
+    event.preventDefault();
+    hold.timer = setTimeout(() => { hold.timer = 0; void startHold(ctx); }, HOLD_MS);
+  });
+  document.addEventListener('keyup', event => {
+    if (event.code !== 'Space') return;
+    if (hold.timer) {
+      // Let go before the hold time: it was a normal space.
+      clearTimeout(hold.timer); hold.timer = 0;
+      if (event.target.id === 'draft') insertSpace(event.target);
+      return;
+    }
+    if (!hold.active) return;
+    event.preventDefault();
+    if (hold.pending) { hold.releasedEarly = true; return; }
+    hold.active = false; document.body.classList.remove('ptt'); void finishMic(ctx);
+  });
+  // Leaving the window while holding stops listening, so the microphone never stays on.
+  window.addEventListener('blur', () => { if (hold.timer) { clearTimeout(hold.timer); hold.timer = 0; } if (hold.active && !hold.pending) { hold.active = false; document.body.classList.remove('ptt'); void finishMic(ctx); } });
+}
+
 // ---------- wiring ----------
 export function initComposer(ctx) {
+  initPushToTalk(ctx);
   document.addEventListener('click', event => {
     const chip = event.target.closest('[data-remove-attach]');
     if (chip) { ctx.ui.attachments.splice(Number(chip.dataset.removeAttach), 1); drawChips(ctx); return; }
