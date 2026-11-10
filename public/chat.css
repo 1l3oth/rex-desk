@@ -306,3 +306,7 @@ html[data-theme=light] .nc0{color:#3559c7}html[data-theme=light] .nc1{color:#c24
 /* ---- the sender of a long message stays in view while you scroll through it ---- */
 .feed.room .rmsg .rwho{position:sticky;top:0;z-index:2;background:var(--bg);padding:6px 0 4px;margin-top:-6px;box-shadow:0 6px 8px -8px rgba(0,0,0,.6)}
 .feed.room .rmsg .ravcol .av{position:sticky;top:6px;z-index:2}
+/* sticky headers stick flush to the top: the scrolling box has no padding of its own */
+.feed{padding:0}.feed-inner{padding-top:20px;padding-bottom:20px}
+.feed.room .rmsg .rwho{top:0;margin-top:0;padding:8px 0 6px}
+.feed.room .rmsg .ravcol .av{top:8px}
