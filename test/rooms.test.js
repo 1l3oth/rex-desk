@@ -30,14 +30,17 @@ function setup({ replies = [] } = {}) {
 test('a message reaches only the agents it names, with the room history and the English task name', async () => {
   const { desk, turns, dara, room } = setup();
   await desk.rooms.post(room.id, { text: 'Morning everyone' });
-  assert.equal(turns.length, 0, 'nobody was mentioned');
-  await desk.rooms.post(room.id, { text: '@dara can you look at #49760?' });
   await waitFor(() => turns.length === 1);
-  assert.equal(turns[0].run.role, 'specialist'); assert.equal(turns[0].run.specialistId, dara.id);
-  assert.match(turns[0].prompt, /You are Dara, the specialist agent for the project "shop"/);
-  assert.match(turns[0].prompt, /Morning everyone/);
-  assert.match(turns[0].prompt, /#49760 Cart total is wrong/); assert.ok(!turns[0].prompt.includes('장바구니'), 'the task is named in English');
-  assert.match(turns[0].prompt, /Ask before schema changes\./);
+  assert.equal(turns[0].run.roomAgent, 'main', 'a message that names nobody goes to the main agent');
+  assert.ok(desk.rooms.room(room.id).members.includes('main'), 'the main agent joined the room');
+  await desk.rooms.post(room.id, { text: '@dara can you look at #49760?' });
+  await waitFor(() => turns.some(item => item.run.specialistId === dara.id));
+  const asked = turns.find(item => item.run.specialistId === dara.id);
+  assert.equal(asked.run.role, 'specialist');
+  assert.match(asked.prompt, /You are Dara, the specialist agent for the project "shop"/);
+  assert.match(asked.prompt, /Morning everyone/);
+  assert.match(asked.prompt, /#49760 Cart total is wrong/); assert.ok(!asked.prompt.includes('장바구니'), 'the task is named in English');
+  assert.match(asked.prompt, /Ask before schema changes\./);
 });
 
 test('what an agent says in its turn is posted to the room, and its session is kept for the next mention', async () => {
@@ -63,8 +66,9 @@ test('an agent catches up on its other rooms when it is mentioned', async () => 
   const other = desk.rooms.create('Billing sync', [dara.id, vanna.id]);
   await desk.rooms.post(other.id, { text: 'The invoice export is failing on refunds' });
   await desk.rooms.post(room.id, { text: '@dara anything I should know?' });
-  await waitFor(() => turns.length === 1);
-  assert.match(turns[0].prompt, /News from your other rooms/); assert.match(turns[0].prompt, /\[Billing sync\]/); assert.match(turns[0].prompt, /invoice export is failing/);
+  await waitFor(() => turns.some(item => item.run.specialistId === dara.id));
+  const asked = turns.find(item => item.run.specialistId === dara.id);
+  assert.match(asked.prompt, /News from your other rooms/); assert.match(asked.prompt, /\[Billing sync\]/); assert.match(asked.prompt, /invoice export is failing/);
 });
 
 test('agent-to-agent threads pause after the hop limit and a person resets the count', async () => {

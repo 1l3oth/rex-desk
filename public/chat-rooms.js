@@ -28,7 +28,7 @@ export function roomStage(ctx) {
   const free = [{ id: 'main', name: 'Main agent', projectSlug: 'all projects', status: { label: 'Knows every project' } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
   const chip = member => `<span class="chip member ${esc(member.state)}"><button class="member-open" data-open="${member.runId ? 'run' : 'specialist'}" data-id="${esc(member.runId || member.id)}" title="Open ${esc(member.name)}"><span class="dot ${dotFor(member.state)}"></span><strong>${esc(member.name)}</strong><span class="mlabel">${esc(member.label)}</span></button><button class="btn small x" data-action="room-remove" data-id="${esc(member.id)}" title="Remove from the room">×</button></span>`;
   return { title: room.name, meta: `${room.members.length} agents`, feedClass: 'room',
-    composer: { placeholder: 'Message the room. @ mentions an agent, # mentions a task…', mentions: handles, noPickers: true },
+    composer: { placeholder: 'Message the room. The main agent answers unless you @mention someone; # mentions a task…', mentions: handles, noPickers: true },
     side: ui.infoOpen === false ? '' : roomInfoHtml(ctx, room), sideClass: 'info',
     actions: ui.infoOpen === false ? '<button class="btn small" data-action="info-toggle">Info</button>' : '',
     members: ui.infoOpen !== false ? '' : `<div class="members">${room.members.map(chip).join('')}${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: 'Add an agent to this room', placeholder: '+ Add agent', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || 'Idle'}` })) }) : ''}</div>`,

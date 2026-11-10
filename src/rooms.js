@@ -92,11 +92,13 @@ export class Rooms {
   taskLine(taskId) { const task = this.store.get('task', taskId); return task ? `#${task.taskNumber || task.externalId} ${task.titleEn || task.title}` : ''; }
 
   async post(roomId, { fromAgentId = '', text, replyTo = '', to } = {}) {
-    const room = this.room(roomId), body = String(text || '').trim().slice(0, 8000);
+    let room = this.room(roomId); const body = String(text || '').trim().slice(0, 8000);
     if (!body) throw new Error('Write a message first.');
     if (fromAgentId && !room.members.includes(fromAgentId)) throw new Error('This agent is not in that room.');
     let targets = to === undefined ? this.mentionsIn(room, body) : this.resolveTargets(room, to);
     targets = targets.filter(target => target !== fromAgentId);
+    // The person talking without naming anyone is talking to the main agent, which joins the room the first time.
+    if (!fromAgentId && to === undefined && !targets.some(target => target !== HUMAN)) { if (!room.members.includes('main')) { this.addMember(roomId, 'main'); room = this.room(roomId); } targets = ['main']; }
     const parent = replyTo ? this.store.get('roommsg', replyTo) : null;
     // A person resets the count. An agent talking to another agent extends the thread's count by one.
     const agentToAgent = Boolean(fromAgentId) && targets.some(target => target !== HUMAN);
