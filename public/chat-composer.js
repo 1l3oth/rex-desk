@@ -79,7 +79,7 @@ function commands(ctx) {
     { name: 'main', hint: 'Go to Rex Agent', run: c.main },
     ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }] : []),
     { name: 'voice', hint: 'Voice engine and language: compare which one understands you', run: () => voiceDialog(ctx) },
-    { name: 'settings', hint: 'Open issues and settings', run: c.settings },
+    { name: 'settings', hint: 'Open settings', run: c.settings },
   ];
 }
 function drawMenu(ctx) {
@@ -192,6 +192,7 @@ function initPushToTalk(ctx) {
 // ---------- wiring ----------
 export function initComposer(ctx) {
   initPushToTalk(ctx);
+  document.addEventListener('click', event => { if (event.target.closest?.('[data-action="st-voice"]')) { event.stopPropagation(); void voiceDialog(ctx); } }, true);
   document.addEventListener('click', event => {
     const chip = event.target.closest('[data-remove-attach]');
     if (chip) { ctx.ui.attachments.splice(Number(chip.dataset.removeAttach), 1); drawChips(ctx); return; }
@@ -253,7 +254,7 @@ async function voiceDialog(ctx) {
   const setLanguage = value => { try { localStorage.setItem('jev-language', value); } catch {} };
   const draw = () => {
     const language = voiceLanguage(ctx);
-    back.innerHTML = `<form class="dialog vdialog" onsubmit="return false"><h2>Voice</h2>
+    back.innerHTML = `<form class="dialog vdialog"><h2>Voice</h2>
       <label>I speak<select data-v-language>${LANG.map(([value, label]) => `<option value="${value}" ${value === language ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
       <fieldset class="vengines"><legend>Turn speech into text with</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] ? hint : key === 'local' ? 'Not installed. Install it in Issues & settings → Computer control.' : key === 'gemini' ? 'Needs your OpenRouter key: Issues & settings → Jev priority.' : 'Paste a key below to use it.'}</small></span></label>`).join('')}</fieldset>
       <label>ElevenLabs API key<span class="vkey"><input type="password" data-v-key autocomplete="off" spellcheck="false" placeholder="${info.available.elevenlabs ? 'Saved. Paste a new key to replace it.' : 'From elevenlabs.io → Profile → API keys'}"><button type="button" class="btn small" data-v-savekey>Save key</button>${info.available.elevenlabs ? '<button type="button" class="btn small quiet danger" data-v-dropkey>Remove</button>' : ''}</span></label>

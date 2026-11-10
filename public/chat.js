@@ -5,6 +5,7 @@ import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.
 import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction, initRoomInfo, avatarHtml, roomRunIds, initLocalTasks, sharedTabButtons } from '/chat-rooms.js';
 import { collectShared, sharedTabsHtml } from '/chat-media.js';
 import { devicesStage, devicesAction, initDevices } from '/chat-devices.js';
+import { openSettings } from '/chat-settings.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
@@ -21,7 +22,7 @@ const provider = name => name === 'codex' ? 'Codex (retired)' : name === 'claude
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value),
   render: () => renderAll(), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
-  commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), settings: () => { location.href = '/classic'; } }, get initials() { return initials; } };
+  commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), settings: () => openSettings(ctx) }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
 async function api(path, { method = 'GET', data, retry = false } = {}) {
@@ -100,7 +101,7 @@ function renderRail() {
     ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>')}
     ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentGroups(ctx, agents, (agent, grouped) => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: grouped ? agent.status?.label || 'Idle' : `${agent.status?.state === 'idle' || !agent.status ? agent.projectSlug : agent.status.label}` })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
     ${working.length || review.length || done.length ? section('runs', 'Runs', working.length || '', '', `${working.map(line).join('')}${review.length ? `<p class="rail-label">To review</p>${review.map(line).join('')}` : ''}${done.length ? `<p class="rail-label">Done</p>${shownDone.map(line).join('')}${done.length > 4 ? `<button class="item more" data-action="toggle-done"><span class="name sub">${ui.done ? 'Show fewer' : `Show all ${done.length}`}</span></button>` : ''}` : ''}`) : ''}
-  </div><div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><a href="/classic">Issues &amp; settings</a><button class="btn small" data-action="theme">Theme</button></div>`;
+  </div><div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button><button class="btn small" data-action="theme">Theme</button></div>`;
 }
 
 // ---------- run conversation ----------
@@ -351,6 +352,7 @@ document.addEventListener('click', async event => {
     else if (action === 'sync') await syncIssues();
     else if (action === 'toggle-done') { ui.done = !ui.done; renderAll(); }
     else if (action === 'sec-toggle') toggleSection(target.dataset.sec);
+    else if (action === 'settings-open') openSettings(ctx);
     else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
     else if (action === 'stop') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
     else if (action === 'scan') await scanProjects();
@@ -677,7 +679,7 @@ async function accountsDialog() {
   const back = document.createElement('div'); back.className = 'dialog-back accounts'; document.body.append(back);
   const draw = () => {
     const claude = ui.accounts?.claude || { profiles: [] };
-    back.innerHTML = `<form class="dialog acct-dialog" onsubmit="return false"><h2>Claude account</h2><p class="muted">Agents run on the Claude Code sign-in you pick here. Each profile can be a different subscription; when one runs out, switch to the other. An agent pinned to an account on its card keeps that one.</p>
+    back.innerHTML = `<form class="dialog acct-dialog"><h2>Claude account</h2><p class="muted">Agents run on the Claude Code sign-in you pick here. Each profile can be a different subscription; when one runs out, switch to the other. An agent pinned to an account on its card keeps that one.</p>
       <div class="acct-list">${claude.profiles.map(item => `<label class="${item.loggedIn ? '' : 'off'}"><input type="radio" name="profile" value="${esc(item.profile)}" ${item.profile === claude.selected ? 'checked' : ''} ${item.loggedIn ? '' : 'disabled'}><span><b>${esc(item.account || item.label)}</b><small>${esc([item.label, item.plan && `${item.plan} plan`, item.loggedIn ? 'signed in' : 'not signed in'].filter(Boolean).join(' · '))}</small></span>${item.loggedIn ? '' : `<button type="button" class="btn small primary acct-signin" data-acct-login="${esc(item.profile)}">Sign in</button>`}</label>`).join('') || '<p class="muted">No Claude Code profiles found.</p>'}</div>
       <label class="acct-auto"><input type="checkbox" data-acct-auto ${ui.accountsAuto !== false ? 'checked' : ''}><span>When an account hits its usage limit, switch to another signed-in one and continue</span></label>
       <div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="Name for the new account, like work or personal" aria-label="Name for the new account"><button type="button" class="btn small primary" data-acct-create>Create and sign in</button><button type="button" class="btn small" data-acct-cancel>Cancel</button>` : '<button type="button" class="btn small" data-acct-new>+ Add a Claude account</button>'}</div>
@@ -778,3 +780,5 @@ document.addEventListener('change', async event => {
   const run = runById(ui.view.id), agent = run && personalAgent(run); if (!agent || agent.main) return;
   try { await api(`/specialists/${agent.id}`, { method: 'PUT', data: { profile: event.target.value } }); toast(event.target.value ? `${agent.name} now uses that Claude account.` : `${agent.name} uses the same account as everyone.`); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
 });
+// Forms inside popups are handled by their buttons; pressing Enter never reloads the page.
+document.addEventListener('submit', event => { if (event.target.closest?.('.settings-pop,.acct-dialog,.vdialog,.src-dialog')) event.preventDefault(); });
