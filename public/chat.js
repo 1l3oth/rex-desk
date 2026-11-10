@@ -35,7 +35,8 @@ const stateLabel = run => ({ starting: 'Preparing', queued: 'Queued', running: '
 const pending = runId => (ui.snap?.interactions || []).filter(item => item.state === 'pending' && (!runId || item.runId === runId));
 const runById = id => ui.snap.runs.find(run => run.id === id);
 const mainRun = () => ui.snap.runs.find(run => run.role === 'coordinator');
-const runTitle = run => run?.title || run?.branch || `Run ${String(run?.id || '').slice(0, 8)}`;
+// A run on a task is named by the task's English name, whatever language the tracker used.
+const runTitle = run => { const task = run?.taskId ? ui.snap?.tasks?.find(item => item.id === run.taskId) : null; return task?.titleEn || run?.title || run?.branch || `Run ${String(run?.id || '').slice(0, 8)}`; };
 const roomById = id => ui.snap.rooms.find(room => room.id === id);
 
 // ---------- rail ----------
