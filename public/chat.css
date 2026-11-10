@@ -547,3 +547,24 @@ body.ptt::after{content:"Listening… let go of Space to stop";position:fixed;le
 .rwho .rreply{position:static;display:inline-flex;margin-left:6px;padding:1px 8px;border-color:transparent;background:none;font-size:11.5px;opacity:.75}
 .rwho .rreply:hover,.rwho .rreply:focus-visible{opacity:1;border-color:var(--line);background:var(--panel)}
 @media (hover:none){.rwho .rreply{margin:0 0 0 6px}}
+
+/* ---- shared media, files and links; a personal chat's profile ---- */
+.side-head.tabs{flex-wrap:wrap;row-gap:6px}
+.tcount.quiet{background:var(--raised);color:var(--muted)}
+.side-body.shared{padding:12px 14px;font-family:var(--sans);color:var(--ink)}
+.sh-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.sh-thumb{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;background:var(--raised);display:grid;place-items:center;border:1px solid var(--line)}
+.sh-thumb img{width:100%;height:100%;object-fit:cover}.sh-thumb:hover{border-color:var(--accent)}
+.sh-video{font-size:22px;color:var(--muted)}.sh-cap{position:absolute;left:4px;right:4px;bottom:4px;font-size:10.5px;color:var(--muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.sh-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.sh-list li{display:flex;gap:10px;align-items:center;padding:8px 2px;border-bottom:1px solid var(--line)}
+.sh-icon{flex:none;width:34px;height:34px;border-radius:8px;display:grid;place-items:center;background:var(--raised);color:var(--muted);font-size:9.5px;font-weight:700;letter-spacing:.02em}
+.sh-icon.link{color:var(--accent)}
+.sh-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}.sh-text b{font-weight:600;font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.sh-text small{font-size:11.5px;color:var(--muted)}.sh-text code{font-size:11px;color:var(--muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.sh-empty{color:var(--muted);font-size:13px;margin:6px 2px}
+.pinfo .pname{margin:6px 0 0;font-size:18px}.pinfo .rsub{display:flex;align-items:center;gap:6px;justify-content:center}
+.pabout{margin:0;font-size:13px;line-height:1.5;color:var(--ink)}
+.plessons{margin:0;padding-left:18px;font-size:12.5px;display:flex;flex-direction:column;gap:3px}
+.prow{display:flex;gap:8px;padding-top:6px}
+.side-head.tabs{gap:2px}.side-head.tabs .tab{padding:5px 9px;font-size:13px}.side-head.tabs .tcount{margin-left:5px}

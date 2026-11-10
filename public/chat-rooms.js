@@ -1,4 +1,5 @@
 import { pickerHtml } from '/chat-pick.js';
+import { collectShared, sharedTabsHtml, sharedCount } from '/chat-media.js';
 import { toolLine } from '/chat-activity.js';
 // Rooms (group chats with agents) and Tasks. Both are their own screens, apart from the main agent.
 const WORKING = ['starting', 'running', 'queued', 'verifying'];
@@ -96,8 +97,10 @@ function activityHtml(ctx, room) {
 }
 // The right side of a room: Activity and Chat info, as tabs.
 function roomSideHtml(ctx, room) {
-  const tab = ctx.ui.sideTab === 'info' ? 'info' : 'activity', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
-  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><span class="spacer"></span><button type="button" class="btn small" data-action="info-toggle" aria-label="Close the side panel">Close</button></div>${tab === 'info' ? roomInfoHtml(ctx, room) : activityHtml(ctx, room)}`;
+  const tab = ['info', 'media', 'files', 'links'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'activity', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
+  const messages = (ctx.ui.snap.messages || []).filter(message => message.roomId === room.id && message.from.type !== 'system'), runs = new Set(roomRunIds(ctx.ui, room));
+  const shared = collectShared(messages.map(message => ({ from: message.from.type === 'human' ? 'You' : message.from.label, at: message.at, text: message.text })), (ctx.ui.snap.artifacts || []).filter(item => runs.has(item.runId)));
+  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button>${sharedTabButtons(shared, tab)}<span class="spacer"></span><button type="button" class="btn small" data-action="info-toggle" aria-label="Close the side panel">Close</button></div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'activity' ? activityHtml(ctx, room) : `<div class="side-body shared">${sharedTabsHtml(ctx, shared, tab)}</div>`}`;
 }
 function roomInfoHtml(ctx, room) {
   const { ui, esc } = ctx, messages = (ui.snap.messages || []).filter(message => message.roomId === room.id);
@@ -357,3 +360,9 @@ function connectionsDialog(ctx) {
   });
 }
 document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="task-connect"]')) return; event.stopPropagation(); const ctx = window.__rexCtx; if (ctx) connectionsDialog(ctx); }, true);
+
+// Media, Files and Links tabs, each with how many there are.
+export function sharedTabButtons(shared, tab, action = 'side-tab') {
+  const count = sharedCount(shared);
+  return [['media', 'Media'], ['files', 'Files'], ['links', 'Links']].map(([key, label]) => `<button type="button" class="tab ${tab === key ? 'on' : ''}" data-action="${action}" data-tab="${key}">${label}${count[key] ? `<span class="tcount quiet">${count[key]}</span>` : ''}</button>`).join('');
+}
