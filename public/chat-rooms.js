@@ -25,7 +25,9 @@ export function roomStage(ctx) {
     return bubble({ mine: message.from.type === 'human', name: message.from.label, time: hhmm(message.at), html: markdown(message.text, { mentions: ['you', ...handles], tasks }) + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '') });
   };
   const empty = `<div class="empty"><h2>${esc(room.name)}</h2><p>Mention an agent with @ to talk to it, and a task with #. Agents answer only when they are mentioned, and each one reads this room before it answers.</p></div>`;
-  const doing = room.members.filter(member => member.state === 'replying' || member.state === 'busy').map(member => typing(member.name, member.state === 'busy' ? `${member.name} · ${member.label}` : `${member.name} is replying…`)).join('');
+  // One typing line for everyone answering in the room, like a messenger; work on a task shows in the Activity tab instead.
+  const replying = room.members.filter(member => member.state === 'replying').map(member => member.name);
+  const doing = replying.length ? typing(replying[0], replying.length === 1 ? `${replying[0]} is replying…` : replying.length === 2 ? `${replying[0]} and ${replying[1]} are replying…` : `${replying[0]} and ${replying.length - 1} others are replying…`) : '';
   const free = [{ id: 'main', name: 'Main agent', projectSlug: 'all projects', status: { label: 'Knows every project' } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
   const chip = member => `<span class="chip member ${esc(member.state)}"><button class="member-open" data-open="${member.runId ? 'run' : 'specialist'}" data-id="${esc(member.runId || member.id)}" title="Open ${esc(member.name)}"><span class="dot ${dotFor(member.state)}"></span><strong>${esc(member.name)}</strong><span class="mlabel">${esc(member.label)}</span></button><button class="btn small x" data-action="room-remove" data-id="${esc(member.id)}" title="Remove from the room">×</button></span>`;
   return { title: room.name, meta: `${room.members.length} agents`, feedClass: 'room',
