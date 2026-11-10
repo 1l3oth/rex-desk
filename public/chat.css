@@ -831,3 +831,17 @@ button.cn-main{cursor:pointer}
 .msg>.card,.msg>.qcard,.msg>.fcard,.msg>.scard,.rmsg>.card{flex:1 1 auto;min-width:0;max-width:100%}
 .scmd{min-width:0}.scmd code{white-space:pre-wrap;word-break:break-all;overflow-x:visible}
 .fpath code,.qtext,.fnote{overflow-wrap:anywhere}
+
+/* ---- phones: nothing is ever wider than the screen ---- */
+.stage-main{grid-template-columns:minmax(0,1fr)}
+@media (max-width:760px){
+  html,body{overflow-x:hidden}
+  .chat-shell{grid-template-columns:minmax(0,1fr)}
+  .stage{grid-template-columns:minmax(0,1fr)}
+  .composer .foot{flex-wrap:wrap;row-gap:4px}
+  .composer .foot select,.composer .foot .pick{max-width:46vw;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .feed-inner,.bubble,.md{min-width:0;max-width:100%;overflow-wrap:anywhere}
+  .md pre,.md table{max-width:100%;overflow-x:auto}
+  .stage-head{min-width:0}.stage-head>*{min-width:0}
+}
+@media (max-width:760px){.composer .foot{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}.composer .foot::-webkit-scrollbar{display:none}.composer .foot .spacer{display:none}.composer .foot>*{flex:none}}
