@@ -148,7 +148,7 @@ function transcript(events) {
     else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
     else if (event.kind === 'agent-tool' && ['desk_ask', 'desk_message', 'desk_elicit'].includes(event.tool)) continue; // shown as chat messages already
     else if (event.kind === 'agent-tool-result') continue;
-    else if (event.kind === 'agent-tool') items.push({ role: 'tool', id: event.id, output: results.get(event.id), tool: event.tool, input: event.input, failed: event.failed, text: event.text, at: event.createdAt });
+    else if (event.kind === 'agent-tool') items.push({ role: 'tool', id: event.id, output: results.get(event.id), tool: event.tool, input: event.input, change: event.change, failed: event.failed, text: event.text, at: event.createdAt });
     else if (event.kind === 'error') items.push({ role: 'error', text: event.text || event.message || 'The run needs attention.', at: event.createdAt });
     else if (event.visible) items.push({ role: 'status', text: event.text || event.message || event.kind.replaceAll('-', ' '), at: event.createdAt });
   }

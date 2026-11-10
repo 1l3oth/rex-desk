@@ -1,6 +1,6 @@
 import { pickerHtml } from '/chat-pick.js';
 import { collectShared, sharedTabsHtml, sharedCount } from '/chat-media.js';
-import { toolLine } from '/chat-activity.js';
+import { toolLine, changeHtml } from '/chat-activity.js';
 // Rooms (group chats with agents) and Tasks. Both are their own screens, apart from the main agent.
 const WORKING = ['starting', 'running', 'queued', 'verifying'];
 // A round picture: the room's own image, or its initials on a colour taken from its name.
@@ -91,6 +91,7 @@ function activityHtml(ctx, room) {
     if (item.said) return `<li class="arow">${head}<span class="atext">replied: ${esc(String(item.said).replace(/\s+/g, ' ').slice(0, 140))}</span></li>`;
     const shell = item.event.tool === 'Bash' || item.event.tool === 'PowerShell';
     const line = `<span class="atext">${esc(toolLine({ tool: item.event.tool, input: item.event.input, failed: item.event.failed, text: item.event.text }))}</span>`;
+    if (item.event.change) return `<li class="arow">${head}${changeHtml(item.event.change, esc)}</li>`;
     if (!shell) return `<li class="arow ${item.event.failed ? 'bad' : ''}">${head}${line}</li>`;
     const state = item.out ? (item.out.failed ? 'failed' : 'done') : 'running…';
     return `<li class="arow">${head}<details class="aterm"><summary>${line}<span class="tstate ${item.out ? (item.out.failed ? 'bad' : 'ok') : 'run'}">${state}</span></summary><pre class="tout">$ ${esc(item.event.input?.command || '')}\n${esc(item.out?.text || '')}</pre></details></li>`;

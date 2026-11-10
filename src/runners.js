@@ -51,6 +51,28 @@ const terminalText = value => {
   const raw = (Array.isArray(value) ? value.map(part => part.text || '').join('\n') : String(value || '')).replace(ansiCodes, '').replace(secretLine, '$1: [redacted]');
   return raw.length > 6000 ? `${raw.slice(0, 3000)}\n… ${raw.length - 6000} characters left out …\n${raw.slice(-3000)}` : raw;
 };
+// What a file edit changed, for the chat and the Activity panel: the file, how many lines were added and removed, and those
+// lines (at most 80, each clipped). Files that usually hold secrets show only the counts, and secret-looking values are hidden.
+const SECRET_FILE = /(^|[\\/])(\.env[^\\/]*|.*\.(pem|key|p12|pfx)|.*secret.*|.*credential.*|id_rsa[^\\/]*)$/i;
+const lines = value => String(value ?? '').replace(/\r\n/g, '\n').split('\n');
+export function fileChange(name, input = {}) {
+  if (!['Edit', 'MultiEdit', 'Write', 'NotebookEdit'].includes(name)) return null;
+  const file = String(input.file_path || input.notebook_path || ''); if (!file) return null;
+  const edits = name === 'MultiEdit' ? (input.edits || []) : name === 'Write' ? [{ old_string: '', new_string: input.content }] : name === 'NotebookEdit' ? [{ old_string: '', new_string: input.new_source }] : [{ old_string: input.old_string, new_string: input.new_string }];
+  const diff = []; let added = 0, removed = 0;
+  for (const edit of edits) {
+    const before = edit.old_string ? lines(edit.old_string) : [], after = edit.new_string !== undefined ? lines(edit.new_string) : [];
+    // Lines the edit kept at its start and end are context, not changes.
+    let start = 0; while (start < before.length && start < after.length && before[start] === after[start]) start++;
+    let end = 0; while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
+    const gone = before.slice(start, before.length - end), come = after.slice(start, after.length - end);
+    removed += gone.length; added += come.length;
+    if (diff.length) diff.push('…');
+    for (const line of gone) diff.push(`-${line}`); for (const line of come) diff.push(`+${line}`);
+  }
+  const hidden = SECRET_FILE.test(file);
+  return { file, created: name === 'Write', added, removed, diff: hidden ? [] : diff.slice(0, 80).map(line => line.replace(secretLine, '$1: [redacted]').slice(0, 220)), more: hidden ? 0 : Math.max(0, diff.length - 80), hidden };
+}
 const isShell = name => name === 'Bash' || name === 'PowerShell';
 const sessionId = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '')) ? String(value) : '';
 
@@ -111,7 +133,7 @@ ${news}` } } : {};
         // What the agent says shows in the chat; its tool calls stay in the journal.
         const text = (content || []).filter(block => block.type === 'text').map(block => block.text).join('\n').trim();
         if (text) this.event('agent-text', { text });
-        for (const block of content || []) if (block.type === 'tool_use') { if (isShell(block.name)) (this.terminals ||= new Set()).add(block.id); this.event('agent-tool', { id: block.id, tool: String(block.name).replace(/^mcp__[a-z0-9_]+?__/i, ''), input: toolInput(block.input) }); }
+        for (const block of content || []) if (block.type === 'tool_use') { if (isShell(block.name)) (this.terminals ||= new Set()).add(block.id); this.event('agent-tool', { id: block.id, tool: String(block.name).replace(/^mcp__[a-z0-9_]+?__/i, ''), input: toolInput(block.input), ...(fileChange(block.name, block.input) ? { change: fileChange(block.name, block.input) } : {}) }); }
         this.event('agent-operation', { type: 'assistant', content });
       }
       if (message.type === 'user') {

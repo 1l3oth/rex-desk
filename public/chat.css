@@ -803,3 +803,13 @@ button.cn-main{cursor:pointer}
 .st-x{position:absolute;top:12px;right:14px;border:0;background:none;color:var(--muted);font-size:22px;line-height:1;padding:4px 8px;border-radius:8px}.st-x:hover{background:var(--raised);color:var(--ink)}
 .rail-settings{display:inline-flex;align-items:center;gap:6px}
 @media (max-width:760px){.dialog-back.settings{padding:0}.settings-pop{width:100vw;height:100dvh;border-radius:0;grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.st-nav{flex-direction:row;overflow-x:auto;padding:12px;border-right:0;border-bottom:1px solid var(--line)}.st-nav h1{display:none}.st-nav button{flex:none}.st-nav button small{display:none}.st-panel{padding:18px 16px}.st-row{grid-template-columns:1fr}.st-foot{padding:12px 16px}}
+
+/* ---- file changes: +added −removed, and the lines in green and red ---- */
+.dfile{flex-basis:100%;min-width:0}
+.dfile summary{display:flex;gap:8px;align-items:baseline;cursor:pointer;list-style:none;min-width:0}.dfile summary::-webkit-details-marker{display:none}
+.dfile summary::before{content:'▸';font-size:10px;color:var(--muted);transition:transform .15s}.dfile[open] summary::before{transform:rotate(90deg)}
+.dname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dchg{flex:none;font:600 11.5px var(--mono)}.dchg.add{color:var(--good)}.dchg.del{color:var(--bad)}
+.diff{margin:6px 0 0;max-height:320px;overflow:auto;padding:6px 0;border:1px solid var(--line);border-radius:8px;background:#0d0f12;font:11.5px/1.5 var(--mono);white-space:pre}
+.diff span{display:block;padding:0 10px}.diff .dadd{background:rgba(63,185,80,.14);color:#7ee787}.diff .ddel{background:rgba(248,81,73,.13);color:#ffa198}.diff .dgap{color:#8b93a1;text-align:center}
+.arow .dfile{margin-left:26px}

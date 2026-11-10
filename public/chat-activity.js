@@ -34,6 +34,7 @@ export function stepsHtml(group, { esc, hhmm, live, openKeys, specialists, link 
       return `<li class="step"><span class="when">${esc(hhmm(item.at))}</span><span class="what">${esc(toolLine(item))}</span><button type="button" class="linkish" data-term-focus="${esc(item.id)}">view</button><span class="tstate ${out ? (out.failed ? 'bad' : 'ok') : 'run'}">${out ? (out.failed ? 'failed' : 'done') : 'running…'}</span></li>`;
     }
     const created = item.tool === 'desk_create_specialist' ? specialists.find(agent => agent.name.toLowerCase() === String(item.input?.name || '').toLowerCase()) : null;
+    if (item.change) return `<li class="step"><span class="when">${esc(hhmm(item.at))}</span><span class="what">${changeHtml(item.change, esc)}</span></li>`;
     return `<li class="step ${item.failed ? 'bad' : ''}"><span class="when">${esc(hhmm(item.at))}</span><span class="what">${esc(toolLine(item))}</span>${created ? link(created) : ''}</li>`;
   }).join('');
   const word = group.length === 1 ? '1 step' : `${group.length} steps`;
@@ -48,4 +49,14 @@ export function terminalHtml(entries, { esc, hhmm }) {
     return `<section class="tentry" id="term-${esc(item.id)}" data-entry="${esc(item.id)}"><div class="tcmd"><span class="prompt">${item.tool === 'PowerShell' ? 'PS&gt;' : '$'}</span><span class="cmdtext">${esc(item.input?.command || '')}</span></div><pre class="tout">${esc(out?.text || '')}</pre><div class="tfoot"><span>${esc(hhmm(item.at))}</span><span class="tstate ${out ? (out.failed ? 'bad' : 'ok') : 'run'}">${state}</span></div></section>`;
   }).join('');
   return `<div class="side-head"><strong>Terminal</strong><span class="muted">${entries.length} command${entries.length === 1 ? '' : 's'}</span><span class="spacer"></span><button type="button" class="btn small" data-action="term-close" aria-label="Close the terminal panel">Close</button></div><div class="side-body" id="side-body">${body}</div>`;
+}
+
+// A file change the agent made: the file, +added −removed, and the changed lines when opened.
+export function changeHtml(change, esc) {
+  if (!change) return '';
+  const name = String(change.file).split(/[\\/]/).filter(Boolean).slice(-3).join('/');
+  const counts = `<span class="dchg add">+${change.added}</span><span class="dchg del">−${change.removed}</span>`;
+  const body = change.hidden ? '<p class="muted small">Not shown: this file usually holds secrets.</p>'
+    : change.diff.length ? `<pre class="diff">${change.diff.map(line => line === '…' ? '<span class="dgap">⋯</span>' : `<span class="${line[0] === '+' ? 'dadd' : 'ddel'}">${esc(line)}</span>`).join('')}${change.more ? `<span class="dgap">… ${change.more} more lines</span>` : ''}</pre>` : '<p class="muted small">No line changes.</p>';
+  return `<details class="dfile"><summary><span class="dname" title="${esc(change.file)}">${change.created ? 'Created' : 'Changed'} ${esc(name)}</span>${counts}</summary>${body}</details>`;
 }
