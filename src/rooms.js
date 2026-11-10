@@ -84,7 +84,8 @@ export class Rooms {
   }
   mentionsIn(room, text) {
     const known = new Set([HUMAN, ...room.members.map(id => this.member(id).handle.toLowerCase())]);
-    const names = [...String(text).matchAll(/(^|\s)@([\p{L}\p{N}_.-]+)/gu)].map(match => match[2].toLowerCase() === 'main' ? 'rex' : match[2]).filter(name => known.has(name.toLowerCase()));
+    // A mention can sit in bold (**@dev:**), brackets or after any mark, and a full stop or colon after it is not part of the name.
+    const names = [...String(text).matchAll(/(?<![\p{L}\p{N}_@])@([\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/gu)].map(match => match[1].toLowerCase() === 'main' ? 'rex' : match[1]).filter(name => known.has(name.toLowerCase()));
     return this.resolveTargets(room, names);
   }
   // #49760 names a task by its tracker number.
@@ -97,7 +98,10 @@ export class Rooms {
   taskOwners() {
     const owners = new Map();
     for (const run of this.store.list('run').filter(item => item.specialistId && item.taskId && !['stopped', 'failed', 'cancelled'].includes(item.state)).sort((left, right) => left.createdAt.localeCompare(right.createdAt))) owners.set(run.taskId, run);
-    return [...owners].map(([taskId, run]) => `- ${this.taskLine(taskId)}: ${this.member(run.specialistId).name} (@${this.member(run.specialistId).handle}, ${String(run.state).replaceAll('_', ' ')})`).filter(line => !line.startsWith('- :'));
+    const lines = [...owners].map(([taskId, run]) => `- ${this.taskLine(taskId)}: ${this.member(run.specialistId).name} (@${this.member(run.specialistId).handle}, ${String(run.state).replaceAll('_', ' ')})`).filter(line => !line.startsWith('- :'));
+    // Tasks being done in a room, by an agent's room session.
+    for (const task of this.store.list('task').filter(item => item.roomWork?.agentId && !owners.has(item.id) && this.agent(item.roomWork.agentId))) lines.push(`- ${this.taskLine(task.id)}: ${this.member(task.roomWork.agentId).name} (@${this.member(task.roomWork.agentId).handle}, working in the room)`);
+    return lines;
   }
   taskLine(taskId) { const task = this.store.get('task', taskId); return task ? `#${task.taskNumber || task.externalId} ${task.titleEn || task.title}` : ''; }
 
@@ -111,7 +115,7 @@ export class Rooms {
     const replied = replyTo ? this.store.get('roommsg', replyTo) : null;
     if (!fromAgentId && to === undefined && replied?.roomId === roomId && replied.from?.type === 'agent' && room.members.includes(replied.from.id) && !targets.some(target => target !== HUMAN)) targets = [...targets, replied.from.id];
     // @all (or @everyone) from the person wakes every agent in the room. Agents cannot use it, so they never wake each other all at once.
-    if (!fromAgentId && to === undefined && /(^|\s)@(all|everyone)\b/i.test(body)) targets = [...new Set([...targets, ...room.members.filter(id => id !== HUMAN)])];
+    if (!fromAgentId && to === undefined && /(?<![\p{L}\p{N}_@])@(all|everyone)\b/iu.test(body)) targets = [...new Set([...targets, ...room.members.filter(id => id !== HUMAN)])];
     targets = targets.filter(target => target !== fromAgentId);
     // The person talking without naming anyone is talking to the main agent, which joins the room the first time.
     if (!fromAgentId && to === undefined && !targets.some(target => target !== HUMAN)) { if (!room.members.includes('main')) { this.addMember(roomId, 'main'); room = this.room(roomId); } targets = ['main']; }

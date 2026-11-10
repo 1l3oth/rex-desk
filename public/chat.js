@@ -316,7 +316,7 @@ async function send() {
 }
 // /assign @agent #task: gives a task to an agent from the room.
 async function assignFromRoom(roomId, command) {
-  const room = ui.snap.rooms.find(item => item.id === roomId), handle = /@([\p{L}\p{N}_.-]+)/u.exec(command)?.[1]?.toLowerCase(), number = /#(\d{2,})/.exec(command)?.[1];
+  const room = ui.snap.rooms.find(item => item.id === roomId), handle = /@([\p{L}\p{N}_-]+)/u.exec(command)?.[1]?.toLowerCase(), number = /#(\d{2,})/.exec(command)?.[1];
   const member = room?.members.find(item => item.handle.toLowerCase() === handle || item.name.toLowerCase() === handle), task = (ui.snap.tasks || []).find(item => String(item.taskNumber) === number || String(item.externalId) === number);
   if (!member) throw new Error('Name an agent in this room: /assign @agent #task');
   if (!task) throw new Error('Name a task by its number: /assign @agent #49760');

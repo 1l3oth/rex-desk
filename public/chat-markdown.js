@@ -11,7 +11,8 @@ function inline(text, mentions = [], tasks = {}) {
   html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>').replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
   html = html.replace(/(^|[^*\w])\*([^*\s][^*\n]*?)\*(?!\*)/g, '$1<em>$2</em>').replace(/(^|[^_\w])_([^_\s][^_\n]*?)_(?![_\w])/g, '$1<em>$2</em>');
   html = html.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
-  for (const name of mentions) html = html.replace(new RegExp(`(^|\\s)@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_.-])`, 'giu'), `$1<span class="mention">@${esc(name)}</span>`);
+  // Highlighted wherever the mention sits (in bold, after a bracket) and when a full stop or colon follows it.
+  for (const name of mentions) html = html.replace(new RegExp(`(^|[^\\p{L}\\p{N}_@])@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_-]|\\.[\\p{L}\\p{N}])`, 'giu'), `$1<span class="mention">@${esc(name)}</span>`);
   html = html.replace(/(^|[\s(])#(\d{2,})(?![\w])/g, (match, before, number) => (tasks[number] ? `${before}<span class="taskref" title="${esc(tasks[number])}">#${number} ${esc(tasks[number])}</span>` : match));
   return html.replace(new RegExp(`${CODE}(\\d+)${CODE}`, 'g'), (_, index) => `<code>${codes[Number(index)]}</code>`);
 }

@@ -82,20 +82,22 @@ test('agent-to-agent threads pause after the hop limit and a person resets the c
   assert.ok(MAX_HOPS >= 1);
 });
 
-test('assigning a task makes the agent busy on it, announces it in the room and mirrors its reports; a busy agent refuses a second one', async () => {
-  const { desk, store, dara, room } = setup();
-  desk.closed = true;
-  const directory = store.list('specialist')[0].projectPath;
-  store.put('config', 'main', { ...store.config(), repositories: [{ id: 'repository-1', name: 'shop', path: directory, baseBranch: 'develop', targetBranch: 'develop' }] });
-  const run = await desk.assignTask({ specialistId: dara.id, taskId: 't1', roomId: room.id });
-  assert.equal(run.specialistId, dara.id); assert.equal(run.roomId, room.id); assert.equal(run.title, 'Cart total is wrong');
-  assert.deepEqual([desk.specialists.status(store.get('specialist', dara.id)).state, desk.specialists.status(store.get('specialist', dara.id)).label], ['busy', 'Working on #49760 Cart total is wrong']);
-  assert.ok(desk.rooms.messages(room.id).some(item => /Dara is now working on #49760 Cart total is wrong/.test(item.text)));
-  assert.equal(desk.snapshot().specialists.find(agent => agent.id === dara.id).status.state, 'busy');
-  desk.message(run.id, 'Found it: the discount is applied after tax.');
-  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.type === 'agent' && /discount is applied after tax/.test(item.text)));
-  store.put('task', 't2', { id: 't2', title: 'Another', taskNumber: '1', externalId: '1', active: true });
-  await assert.rejects(desk.assignTask({ specialistId: dara.id, taskId: 't2' }), /already working on a task/);
+test('a task given in a room is done by the agent right there, in its room session, with no separate run', async () => {
+  const { desk, store, turns, dara, room } = setup({ replies: ['On it. Making a worktree for #49760.'] });
+  const directory = store.get('specialist', dara.id).projectPath;
+  store.put('config', 'main', { ...store.config(), branchPrefix: 'temp/rex', repositories: [{ id: 'repository-1', name: 'shop', path: directory, baseBranch: 'develop', targetBranch: 'develop' }] });
+  const result = await desk.assignTask({ specialistId: dara.id, taskId: 't1', roomId: room.id });
+  assert.deepEqual(result, { inRoom: true, agentId: dara.id, roomId: room.id, taskId: 't1' });
+  assert.ok(!store.list('run').some(run => run.role === 'worker'), 'no separate task run');
+  assert.ok(desk.rooms.messages(room.id).some(item => item.from.type === 'system' && /Dara is now working on #49760 Cart total is wrong here in the room/.test(item.text)));
+  await waitFor(() => turns.some(item => item.run.roomAgent === dara.id && item.prompt.includes('gave you this task')));
+  const prompt = turns.find(item => item.run.roomAgent === dara.id && item.prompt.includes('gave you this task')).prompt;
+  assert.match(prompt, /gave you this task to do here in the room: #49760 Cart total is wrong/);
+  assert.ok(prompt.includes('-b temp/rex/49760-cart-total-is-wrong develop'), `the worktree branch follows the naming rules: ${prompt.slice(prompt.indexOf('git worktree add'), prompt.indexOf('git worktree add') + 160)}`);
+  assert.match(prompt, /Never change the main checkout/);
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id && /Making a worktree/.test(item.text)));
+  assert.equal(store.get('task', 't1').roomWork.agentId, dara.id);
+  assert.ok(desk.rooms.taskOwners().some(line => /#49760 Cart total is wrong: Dara .*working in the room/.test(line)));
 });
 
 test('a task title in another language is named in English once, and an English title is left as it is', async () => {
@@ -295,4 +297,13 @@ test('away mode on auto timing: the lead sets when it checks in next', async () 
   await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id));
   assert.equal(desk.rooms.room(room.id).away.every, 'auto');
   assert.equal(desk.rooms.room(room.id).away.nextMinutes, 120);
+});
+
+test('a mention counts in bold, before a colon or a full stop, and inside brackets, but not inside an email address', () => {
+  const { desk, dara, vanna, room } = setup();
+  const who = text => desk.rooms.mentionsIn(desk.rooms.room(room.id), text).sort();
+  assert.deepEqual(who('1. **@dara:** start now.'), [dara.id]);
+  assert.deepEqual(who('Thanks @vanna.'), [vanna.id]);
+  assert.deepEqual(who('(@dara) and [@vanna], please'), [dara.id, vanna.id].sort());
+  assert.deepEqual(who('write to me@dara.com'), []);
 });

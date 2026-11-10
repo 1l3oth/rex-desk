@@ -746,9 +746,23 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const agent = this.specialists.get(specialistId);
     if (this.specialists.status(agent).state === 'busy') throw new Error(`${agent.name} is already working on a task. Ask ${agent.name} to finish, or duplicate the agent.`);
     const name = await this.englishName(taskId);
-    const run = await this.startTask({ taskId, repositoryId: agent.repositoryId || undefined, instructions, specialistId, roomId });
-    if (roomId) this.rooms.system(roomId, `${agent.name} is now working on #${this.task(taskId).taskNumber || this.task(taskId).externalId} ${name}.`);
-    return run;
+    // In a room the agent does the task right there, in its room session, and talks about it in the room: no separate run.
+    if (roomId) return this.workInRoom({ agent, taskId, roomId, name, instructions });
+    return this.startTask({ taskId, repositoryId: agent.repositoryId || undefined, instructions, specialistId, roomId });
+  }
+  async workInRoom({ agent, taskId, roomId, name, instructions = '' }) {
+    const task = this.task(taskId), number = task.taskNumber || task.externalId || '', config = this.store.config();
+    const repository = config.repositories.find(item => item.id === agent.repositoryId) || config.repositories.find(item => agent.projectPath && path.resolve(item.path).toLowerCase() === path.resolve(agent.projectPath).toLowerCase());
+    const base = repository?.baseBranch || 'main', project = repository?.path || agent.projectPath || '';
+    const branch = `${config.branchPrefix || 'temp/rex'}/${String(number).toLowerCase()}-${slug(name).slice(0, 40)}`.replace(/\/+/g, '/');
+    this.store.put('task', taskId, { ...task, roomWork: { agentId: agent.id, roomId, at: now() } });
+    const brief = [`The person gave you this task to do here in the room: #${number} ${name}.`,
+      task.url ? `Tracker link: ${task.url}` : '', `What it says:\n${String(task.description || task.title || '').slice(0, 4000)}`, instructions ? `Notes from the person: ${instructions}` : '',
+      `Do the work in this session and talk about it in this room. Never change the main checkout at ${project}. Work in a git worktree beside it: in ${project} run \`git worktree add "${project}-worktrees/${String(number).toLowerCase()}" -b ${branch} ${base}\` (or reuse it if it exists), then change, run and test the code there.`,
+      'Post a short note in the room when you start, when something important happens, and when you are done (what changed and how you tested it). Commit in the worktree when it works. Ask the person here before pushing, opening a pull request, or anything that touches a live site or other people.',
+      this.memory.workflowText(agent.projectSlug)].filter(Boolean).join('\n\n');
+    await this.rooms.post(roomId, { system: true, text: `${agent.name} is now working on #${number} ${name} here in the room.`, instruction: brief, to: [agent.slug] });
+    return { inRoom: true, agentId: agent.id, roomId, taskId };
   }
   async stop(runId) {
     const active = this.live.get(runId);
