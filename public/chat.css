@@ -430,7 +430,7 @@ p.pf-stats{display:block;margin:2px 0 0;font-size:13px;color:var(--muted)}
 .pf-card p{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .pf-agents{display:flex;flex-wrap:wrap;gap:8px}
 .pf-agent{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 6px;border:1px solid var(--line);border-radius:999px;background:var(--panel);text-align:left}
-.pf-agent:hover{border-color:var(--accent)}.pf-agent span{display:flex;flex-direction:column;line-height:1.2;font-size:13px}.pf-agent small{font-size:11px;color:var(--muted)}
+.pf-agent:hover{border-color:var(--accent)}.pf-agent>span:not(.av){display:flex;flex-direction:column;line-height:1.2;font-size:13px}.pf-agent small{font-size:11px;color:var(--muted)}
 
 /* ---- Tasks: source filter, quick add, Rex Desk tasks by status ---- */
 .tbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.tbar #task-filter{flex:1;min-width:180px}
@@ -593,3 +593,14 @@ button.cn-main{cursor:pointer}
 .page.pf>section,.page.pf>p{margin:0}
 .page.pf .pf-grid{grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
 @media (max-width:900px){.page.pf{grid-template-columns:1fr}.page.pf>*,.page.pf>.pf-hero{grid-column:1;grid-row:auto;position:static}}
+
+/* ---- how agents should talk to you ---- */
+.pf-hint{margin:2px 0 0;font-size:12.5px;color:var(--muted)}
+.pf-notes-grid{margin-top:10px}
+.pf-notes.wide{grid-column:1 / -1;border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.pf-notes ul{list-style:none;padding:0;margin:4px 0 0;gap:2px}
+.pf-notes li{display:flex;gap:8px;align-items:flex-start;padding:5px 6px;border-radius:7px;background:var(--raised);font-size:13.5px;line-height:1.45}
+.pf-notes li>span{flex:1;min-width:0}
+.pf-add{display:flex;gap:6px;margin-top:6px}
+.pf-add input{flex:1;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:13px}
+.pf-add input:focus{border-color:var(--accent);outline:0}

@@ -477,8 +477,18 @@ function personPage() {
     <p class="pf-stats">${stats}</p>
     <div class="pf-actions"><label class="btn small pf-upload">${profile.photo ? 'Change photo' : 'Add a photo'}<input type="file" accept="image/png,image/jpeg,image/webp" data-photo-upload hidden></label>${profile.photo ? '<button class="btn small" data-action="photo-remove">Remove photo</button>' : ''}</div>
     ${profile.photo ? '' : '<p class="muted small">Or let Rex Agent find a picture of you in your projects: it asks before using one.</p>'}</div></section>`;
-  const card = section => `<div class="pf-card"><h3>${esc(section.title)}</h3><ul>${section.items.map(noteText).map(item => `<li>${esc(item.text)}${item.when ? ` <small class="muted">${item.when}${item.soft ? ' · may change' : ''}</small>` : ''}</li>`).join('')}</ul></div>`;
-  const notes = others.length ? `<section><h3 class="pf-title">What your agents learned about you</h3><div class="pf-grid">${others.map(card).join('')}</div></section>` : '';
+  // How agents should talk to you: every section is shown, so you can fill it in yourself; agents add to it as they learn.
+  const SECTIONS = [['explain', 'How to explain things to me', 'Format, length, level of detail, examples, what to always explain, what to skip.', 'Short answer first, then the steps as a numbered list'],
+    ['personality', 'Personality', 'How you think and work, so agents meet you where you are.', 'I learn by doing; show me, then explain'],
+    ['likes', 'Likes', 'What works well for you.', 'Plain words, no jargon'], ['dislikes', 'Dislikes', 'What agents should stop doing.', 'Long walls of text'],
+    ['works', 'How they work', 'Your habits and tools.', 'I work in Orca and test on my phone'], ['about', 'About them', 'Facts about you.', 'I speak Khmer, English and Korean']];
+  const card = ([kind, title, hint, example]) => {
+    const items = (profile.sections.find(section => section.title === title)?.items || []).map(noteText);
+    return `<div class="pf-card pf-notes${kind === 'explain' ? ' wide' : ''}"><h3>${esc(title)}</h3><p class="pf-hint">${esc(hint)}</p>
+      ${items.length ? `<ul>${items.map(item => `<li><span>${esc(item.text)}${item.when ? ` <small class="muted">${item.when}${item.soft ? ' · may change' : ''}</small>` : ''}</span><button type="button" class="ag-x" data-note-forget="${esc(kind)}" data-note-text="${esc(item.text)}" title="Remove this" aria-label="Remove this"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>` : ''}
+      <form class="pf-add" data-note-add="${esc(kind)}"><input name="text" type="text" maxlength="240" placeholder="For example: ${esc(example)}" aria-label="Add to ${esc(title)}" autocomplete="off"><button class="btn small">Add</button></form></div>`;
+  };
+  const notes = `<section><h3 class="pf-title">How your agents should talk to you</h3><p class="pf-hint">Every agent reads this before it answers you, including new ones. Agents add to it when they notice what works; you can add or remove anything.</p><div class="pf-grid pf-notes-grid">${SECTIONS.map(card).join('')}</div></section>`;
   const projects = profile.projects.length ? `<section><h3 class="pf-title">Projects</h3><div class="pf-grid">${profile.projects.map(project => `<button class="pf-card pf-project" data-open="project" data-id="${esc(project.slug)}"><h3>${esc(project.slug)}</h3><p>${esc(plain(project.purpose) || 'No description yet.')}</p>${project.stack.filter(item => !/\.(json|toml|lock|txt)$/i.test(item)).length ? `<div class="pf-tags">${project.stack.filter(item => !/\.(json|toml|lock|txt)$/i.test(item)).slice(0, 5).map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''}</button>`).join('')}</div></section>` : '';
   const agents = profile.agents.length ? `<section><h3 class="pf-title">Your agents</h3><div class="pf-agents">${profile.agents.map(agent => `<button class="pf-agent" data-open="specialist" data-id="${esc(agent.id)}">${avatarHtml(ctx, { name: agent.name, size: 'sm' })}<span>${esc(agent.name)}<small>${esc(agent.project)}</small></span></button>`).join('')}</div></section>` : '';
   return `<div class="page pf">${brainBanner()}${hero}${notes}${projects}${agents}<p class="muted small">Notes are kept in .rexdesk/user.md. Change or delete any line there and every agent follows it.</p></div>`;
@@ -630,3 +640,14 @@ function spokenText(text) { const mark = /\s*\(Sent by voice: [^)]*\)\s*$/; retu
 document.addEventListener('input', event => { if (event.target.id === 'draft' && !event.target.value.trim()) ui.voiceDrafts?.delete(draftKey()); });
 
 function micIcon() { return '<svg class="vmic" viewBox="0 0 16 16" width="12" height="12" aria-label="Sent by voice" role="img"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>'; }
+
+// Adding and removing lines in "How your agents should talk to you".
+document.addEventListener('submit', async event => {
+  const form = event.target.closest?.('[data-note-add]'); if (!form) return; event.preventDefault(); event.stopPropagation();
+  const text = form.text.value.trim(); if (!text) return;
+  try { await api('/profile/notes', { method: 'POST', data: { kind: form.dataset.noteAdd, text } }); form.text.value = ''; document.activeElement?.blur?.(); toast('Saved. Every agent follows it from now on.'); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
+}, true);
+document.addEventListener('click', async event => {
+  const button = event.target.closest?.('[data-note-forget]'); if (!button) return; event.stopPropagation();
+  try { await api('/profile/notes', { method: 'DELETE', data: { kind: button.dataset.noteForget, text: button.dataset.noteText } }); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
+}, true);

@@ -76,7 +76,7 @@ test('what agents learn about the person is kept in sections of user.md, once, w
   assert.equal((text.match(/Short replies/gi) || []).length, 1, 'kept once');
   assert.match(text, /## Dislikes\n\n- Long tables in chat\./);
   assert.ok(!text.includes('hunter2'));
-  assert.throws(() => memory.personNote('hobbies', 'x'), /likes, dislikes, works or about/);
+  assert.throws(() => memory.personNote('hobbies', 'x'), /Choose one of: explain, personality, likes, dislikes, works, about/);
 });
 
 test('notes about the person are dated and soft unless lasting, a new note can replace an old one, and the second brain is recorded once', () => {

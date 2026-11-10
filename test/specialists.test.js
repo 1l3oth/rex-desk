@@ -137,3 +137,16 @@ test('a profile photo is kept only when it is a real picture, and the About you 
   assert.deepEqual(profile.projects.map(item => item.slug), ['shop']);
   desk.memory.removePhoto(); assert.equal(desk.memory.photo(), null);
 });
+
+test('how to explain things to the person comes first in what every agent reads, and the person can remove a line', () => {
+  const { desk } = setup();
+  desk.memory.personNote('likes', 'Plain words');
+  desk.memory.personNote('explain', 'Short answer first, then numbered steps', { lasting: true });
+  const person = desk.memory.person();
+  assert.ok(person.indexOf('## How to explain things to me') < person.indexOf('## Likes'), 'explain comes first');
+  const agent = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop' });
+  assert.match(desk.specialists.identity(agent), /Follow "How to explain things to me" in every answer[\s\S]*Short answer first, then numbered steps/);
+  assert.deepEqual(desk.memory.forgetPersonNote('explain', 'Short answer first'), { removed: true });
+  assert.ok(!desk.memory.person().includes('numbered steps'));
+  assert.throws(() => desk.memory.personNote('mood', 'x y z'), /Choose one of: explain, personality/);
+});

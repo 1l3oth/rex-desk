@@ -29,6 +29,8 @@ export const memoryHome = (env = process.env) => path.resolve(env.REX_DESK_MEMOR
 export const redactText = text => String(text).replace(SECRET_LINE, '$1: [redacted]');
 const read = (file, limit) => { try { return redactText(readFileSync(file, 'utf8').slice(0, limit)); } catch { return ''; } };
 const exists = target => { try { return statSync(target); } catch { return null; } };
+// What agents keep about the person, in this order in .rexdesk/user.md. How to explain comes first: every agent reads it before it answers.
+export const PERSON_SECTIONS = { explain: 'How to explain things to me', personality: 'Personality', likes: 'Likes', dislikes: 'Dislikes', works: 'How they work', about: 'About them' };
 const atomic = (file, text) => { mkdirSync(path.dirname(file), { recursive: true }); const temporary = `${file}.${process.pid}.tmp`; writeFileSync(temporary, text); renameSync(temporary, file); };
 
 function gitFacts(directory) {
@@ -81,8 +83,8 @@ export class Memory {
   // What the agents learned about the person, shared by all of them: likes, dislikes, how they work, and facts about them. Kept in user.md as sections of bullets.
   personNote(kind, text, { lasting = false, replaces = '' } = {}) {
     this.ensure();
-    const titles = { likes: 'Likes', dislikes: 'Dislikes', works: 'How they work', about: 'About them' }, title = titles[kind];
-    if (!title) throw new Error('Choose likes, dislikes, works or about.');
+    const titles = PERSON_SECTIONS, title = titles[kind];
+    if (!title) throw new Error(`Choose one of: ${Object.keys(titles).join(', ')}.`);
     const note = redactText(String(text || '').replace(/\s+/g, ' ').trim()).slice(0, 240);
     if (!note) throw new Error('Write what you learned first.');
     const current = read(this.file('user.md'), 20000), sections = new Map();
@@ -99,6 +101,18 @@ export class Memory {
     const page = ['# About the person', '', 'What the agents learned from how the person talks to them. Every agent reads this. The person can change or delete any line. Notes marked "may change" are hints: what the person says now wins.', '',
       ...[...sections].filter(([, items]) => items.length).flatMap(([name, items]) => [`## ${name}`, '', ...items.map(item => `- ${item}`), ''])].join('\n');
     atomic(this.file('user.md'), page); return { saved: true };
+  }
+  // Removes one line the person no longer wants agents to follow, matched by its words.
+  forgetPersonNote(kind, text) {
+    const title = PERSON_SECTIONS[kind]; if (!title) throw new Error('Unknown section.');
+    const current = read(this.file('user.md'), 20000), wanted = String(text || '').trim().toLowerCase(); let section = '', removed = false;
+    const lines = current.split('\n').filter(line => {
+      const heading = /^##\s+(.+)$/.exec(line); if (heading) { section = heading[1].trim(); return true; }
+      if (!removed && section === title && /^-\s+/.test(line) && line.replace(/^-\s+/, '').trim().toLowerCase().startsWith(wanted)) { removed = true; return false; }
+      return true;
+    });
+    if (removed) atomic(this.file('user.md'), lines.join('\n'));
+    return { removed };
   }
   // The person's profile photo, kept beside user.md. An agent sets it from a picture it found only after the person said it is them;
   // the person can also upload one. Only real PNG, JPEG or WebP pictures are kept.
