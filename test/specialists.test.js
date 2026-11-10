@@ -118,6 +118,7 @@ test('the main agent adds a project folder itself: it becomes a repository and a
   assert.equal(store.config().repositories.length, 1); assert.equal(result.repository.baseBranch, 'develop');
   assert.deepEqual(desk.memory.list().map(item => item.slug).sort(), ['billing', 'shop']);
   assert.equal((await desk.addProject(folder)).added, false, 'adding it again changes nothing');
+  assert.equal((await desk.addProject(folder, { baseBranch: 'master' })).repository.targetBranch, 'master', 'new branches update the repository');
   assert.equal(desk.specialists.create({ name: 'Biller', projectSlug: 'billing' }).purpose, 'Invoices for Acme');
 });
 

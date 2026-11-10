@@ -230,6 +230,11 @@ export class Desk {
       const base = baseBranch || found.preferredBranch || 'develop';
       repository = this.store.saveConfig({ ...this.store.publicConfig(), repositories: [...config.repositories, { name: found.name, path: found.path, baseBranch: base, targetBranch: targetBranch || base }] }).repositories.find(same);
       this.store.event('', 'repository-added', { name: repository.name, path: repository.path, by: 'main agent' }, true); added = true;
+    } else if ((baseBranch && baseBranch !== repository.baseBranch) || (targetBranch && targetBranch !== repository.targetBranch)) {
+      // Calling it again with branches the person chose updates the repository that is already there.
+      const next = { ...repository, baseBranch: baseBranch || repository.baseBranch, targetBranch: targetBranch || baseBranch || repository.targetBranch };
+      repository = this.store.saveConfig({ ...this.store.publicConfig(), repositories: config.repositories.map(item => same(item) ? next : item) }).repositories.find(same);
+      this.store.event('', 'repository-branches-changed', { name: repository.name, baseBranch: repository.baseBranch, targetBranch: repository.targetBranch, by: 'main agent' }, true);
     }
     const known = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === found.path.toLowerCase());
     if (!known) { const previous = this.memory.state(); this.memory.scan({ roots: [...new Set([...(previous.roots || []), found.path])] }); }
