@@ -493,3 +493,14 @@ p.pf-stats{display:block;margin:2px 0 0;font-size:13px;color:var(--muted)}
 /* terminal panel: entries keep their height and the panel scrolls (they were shrinking to fit and clipping their text) */
 .side-body>.tentry{flex:none}
 .tcmd .cmdtext{max-height:9em;overflow:auto}
+
+/* ---- agent card uses the whole stage ---- */
+.page.ag{max-width:none;margin:0;padding:28px clamp(20px,3vw,40px) 40px}
+.ag-head{padding-bottom:20px;border-bottom:1px solid var(--line)}
+.ag-body{grid-template-columns:minmax(0,1fr) minmax(300px,380px);gap:28px}
+.ag-main{padding:18px 20px}
+.ag-main textarea{font-size:13.5px;min-height:240px}
+.ag-ask{max-width:none}
+
+.feed-inner:has(> .page.ag),.feed-inner:has(> .page.lt){max-width:none;padding-left:0;padding-right:0}
+.page.lt{max-width:none;margin:0;padding-left:clamp(20px,3vw,40px);padding-right:clamp(20px,3vw,40px);grid-template-columns:minmax(0,1fr) 300px}

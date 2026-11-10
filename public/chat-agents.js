@@ -117,13 +117,13 @@ export function initAgentCard(ctx) {
     if (event.target.dataset?.taskSource === undefined) return;
     const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
     const taskSources = [...document.querySelectorAll('[data-task-source]:checked')].map(box => box.dataset.taskSource);
-    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { taskSources } }); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); }
+    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { taskSources } }); document.activeElement?.blur?.(); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   // A model picked from the list is saved at once.
   document.addEventListener('change', async event => {
     if (event.target.id !== 'sp-model') return;
     const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
-    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: agent.rules, unsure: agent.unsure || [], model: event.target.value } }); ctx.toast('Model saved.'); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); }
+    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: agent.rules, unsure: agent.unsure || [], model: event.target.value } }); ctx.toast('Model saved.'); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   document.addEventListener('input', event => {
     if (event.target.id !== 'sp-rules') return;
