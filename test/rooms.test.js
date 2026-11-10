@@ -199,3 +199,12 @@ test('an agent that mentions another agent in its reply gets that agent to answe
   await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.label === 'Vanna' && /Invoices look fine/.test(item.text)));
   assert.ok(desk.rooms.messages(room.id).find(item => item.from.label === 'Dara').to.includes(vanna.id));
 });
+
+test('@all from the person wakes every agent in the room, and a Rex Desk task is mentioned as #L1', async () => {
+  const { desk, turns, dara, vanna, room } = setup();
+  const task = desk.localTasks.create({ title: 'Plan the checkout redesign' });
+  await desk.rooms.post(room.id, { text: `@all please read #${task.taskNumber}` });
+  await waitFor(() => turns.some(item => item.run.specialistId === dara.id) && turns.some(item => item.run.specialistId === vanna.id));
+  assert.ok(!turns.some(item => item.run.roomAgent === 'main'), 'the main agent was not in the room, so @all does not pull it in');
+  assert.match(turns.find(item => item.run.specialistId === dara.id).prompt, /#L1 Plan the checkout redesign/);
+});

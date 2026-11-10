@@ -331,6 +331,11 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return json(response, 200, { branches });
       }
       const interactionMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/answer$/);
+      if (url.pathname === '/api/local-tasks' && request.method === 'POST') return json(response, 200, desk.localTasks.create(await body(request), { by: 'you' }));
+      const localMatch = url.pathname.match(/^\/api\/local-tasks\/([^/]+)(\/comments)?$/);
+      if (localMatch && !localMatch[2] && request.method === 'PUT') { const input = await body(request); return json(response, 200, desk.localTasks.update(decodeURIComponent(localMatch[1]), input, { by: 'you', force: Boolean(input.force) })); }
+      if (localMatch && !localMatch[2] && request.method === 'DELETE') return json(response, 200, desk.localTasks.remove(decodeURIComponent(localMatch[1])));
+      if (localMatch && localMatch[2] && request.method === 'POST') return json(response, 200, desk.localTasks.comment(decodeURIComponent(localMatch[1]), (await body(request)).text, { by: 'you' }));
       const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
       if (taskMatch && request.method === 'GET') return json(response, 200, await desk.sources.taskDetail(decodeURIComponent(taskMatch[1]), { refresh: url.searchParams.has('refresh') }));
       if (taskMatch && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.setDeskStatus(decodeURIComponent(taskMatch[1]), { status: input.deskStatus, note: input.deskNote, by: 'you' })); }

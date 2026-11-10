@@ -138,22 +138,37 @@ export function ensureNames(ctx, tasks) {
 }
 const agentOnTask = (ui, task) => { const run = (ui.snap.runs || []).find(item => item.taskId === task.id && item.specialistId && !['finished', 'failed', 'stopped', 'interrupted', 'published', 'ready_for_review', 'needs_evidence'].includes(item.state)); return run ? { run, agent: (ui.snap.specialists || []).find(agent => agent.id === run.specialistId) } : null; };
 
+const STATUS = [['in_progress', 'In progress'], ['in_review', 'In review'], ['todo', 'To do'], ['blocked', 'Blocked'], ['backlog', 'Backlog'], ['done', 'Done']];
+const STATUS_TONE = { in_progress: 'working', in_review: 'warn', blocked: 'bad', done: 'good' };
+const PRIORITY = [['urgent', 'Urgent'], ['high', 'High'], ['normal', 'Normal'], ['low', 'Low']];
+function taskRow(ctx, task) {
+  const { ui, esc } = ctx, on = agentOnTask(ui, task), assignee = task.assignee && (ui.snap.specialists || []).find(agent => agent.id === task.assignee);
+  const done = task.local && task.checklist?.length ? `<span class="tcheck">${task.checklist.filter(item => item.done).length}/${task.checklist.length}</span>` : '';
+  const meta = task.local ? [task.projectSlug, task.dueDate && `due ${task.dueDate}`].filter(Boolean).join(' · ') : `${task.statusName || task.status || ''}${task.projectName ? ` · ${task.projectName}` : ''}`;
+  return `<button class="trow${task.local ? ' local' : ''}" data-open="task" data-id="${esc(task.id)}">${task.local ? `<span class="tstat ${STATUS_TONE[task.status] || ''}" title="${esc(task.statusName)}"></span>` : ''}<span class="tnum">#${esc(taskNumber(task))}</span><span class="tname">${task.priority === 'urgent' || task.priority === 'high' ? `<span class="tprio ${task.priority}">${task.priority === 'urgent' ? 'Urgent' : 'High'}</span>` : ''}${esc(taskName(task))}</span>${done}<span class="tmeta">${esc(meta)}</span>${on?.agent ? `<span class="tagent"><span class="dot working"></span>${esc(on.agent.name)}</span>` : assignee ? `<span class="tagent idle">${esc(assignee.name)}</span>` : ''}</button>`;
+}
 export function tasksStage(ctx) {
-  const { ui, esc } = ctx, all = (ui.snap.tasks || []).filter(task => task.active && !task.demo), filter = String(ui.taskFilter || '').toLowerCase();
-  const shown = all.filter(task => !filter || `${taskNumber(task)} ${taskName(task)} ${task.title} ${task.statusName || task.status || ''} ${task.projectName || ''}`.toLowerCase().includes(filter));
-  ensureNames(ctx, shown);
-  const rows = shown.map(task => {
-    const on = agentOnTask(ui, task);
-    return `<button class="trow" data-open="task" data-id="${esc(task.id)}"><span class="tnum">#${esc(taskNumber(task))}</span><span class="tname">${esc(taskName(task))}</span><span class="tmeta">${esc(task.statusName || task.status || '')}${task.projectName ? ` · ${esc(task.projectName)}` : ''}</span>${on?.agent ? `<span class="tagent"><span class="dot working"></span>${esc(on.agent.name)}</span>` : ''}</button>`;
-  }).join('');
-  return { title: 'Tasks', meta: `${all.length} issues`,
-    members: `<div class="members"><input id="task-filter" type="search" placeholder="Search tasks…" value="${esc(ui.taskFilter || '')}" autocomplete="off"></div>`,
-    feed: `<div class="page"><div class="tlist">${rows || '<div class="empty"><h2>No tasks</h2><p>Press Sync to bring in your assigned issues.</p></div>'}</div></div>` };
+  const { ui, esc } = ctx, everything = (ui.snap.tasks || []).filter(task => !task.demo && (task.active || task.local)), filter = String(ui.taskFilter || '').toLowerCase();
+  const sources = [['all', 'All'], ['local', 'Rex Desk'], ...(ui.snap.config?.sources || []).map(source => [source.id, source.name])];
+  const pick = ui.taskSource || 'all', all = everything.filter(task => pick === 'all' || (pick === 'local' ? task.local : task.sourceId === pick));
+  const shown = all.filter(task => !filter || `${taskNumber(task)} ${taskName(task)} ${task.title} ${task.statusName || task.status || ''} ${task.projectName || ''} ${(task.tags || []).join(' ')}`.toLowerCase().includes(filter));
+  ensureNames(ctx, shown.filter(task => !task.local));
+  const local = shown.filter(task => task.local), synced = shown.filter(task => !task.local);
+  const groups = STATUS.map(([status, label]) => [label, local.filter(task => task.status === status).sort((left, right) => PRIORITY.findIndex(([key]) => key === left.priority) - PRIORITY.findIndex(([key]) => key === right.priority))]).filter(([, list]) => list.length)
+    .map(([label, list]) => `<div class="tgroup"><h3>${label} <span>${list.length}</span></h3>${list.map(task => taskRow(ctx, task)).join('')}</div>`).join('');
+  const projects = ctx.ui.memory?.projects || [];
+  const add = pick === 'all' || pick === 'local' ? `<form class="tadd" data-task-add><input name="title" type="text" maxlength="200" placeholder="New task… press Enter to add" autocomplete="off" aria-label="New task title">${projects.length ? pickerHtml(ctx, { id: 'task-add-project', label: 'Project', value: ui.lastTaskProject || '', compact: true, items: [{ value: '', label: 'No project' }, ...projects.map(project => ({ value: project.slug, label: project.slug }))] }) : ''}<button class="btn primary small">Add</button></form>` : '';
+  const chips = `<div class="tsrc" role="tablist">${sources.map(([id, label]) => `<button role="tab" aria-selected="${pick === id}" class="${pick === id ? 'on' : ''}" data-action="task-source" data-source="${esc(id)}">${esc(label)}</button>`).join('')}</div>`;
+  const empty = pick === 'local' ? '<div class="empty"><h2>No Rex Desk tasks yet</h2><p>Type one above, or ask an agent to make tasks for a project.</p></div>' : '<div class="empty"><h2>No tasks</h2><p>Add one above, or press Sync to bring in your tracker issues.</p></div>';
+  return { title: 'Tasks', meta: `${everything.length} tasks`,
+    members: `<div class="members tbar">${chips}<input id="task-filter" type="search" placeholder="Search tasks…" value="${esc(ui.taskFilter || '')}" autocomplete="off"></div>`,
+    feed: `<div class="page">${add}<div class="tlist">${groups}${synced.length ? `<div class="tgroup">${local.length ? `<h3>From trackers <span>${synced.length}</span></h3>` : ''}${synced.map(task => taskRow(ctx, task)).join('')}</div>` : ''}${shown.length ? '' : empty}</div></div>` };
 }
 
 export function taskStage(ctx) {
   const { ui, esc, markdown } = ctx, task = (ui.snap.tasks || []).find(item => item.id === ui.view.id);
   if (!task) return { title: 'Task', meta: '', feed: '<div class="empty"><h2>That task is gone.</h2></div>' };
+  if (task.local) return localTaskStage(ctx, task);
   ensureNames(ctx, [task]);
   const on = agentOnTask(ui, task), agents = ui.snap.specialists || [], rooms = ui.snap.rooms || [];
   const assign = on?.agent
@@ -205,4 +220,88 @@ export async function roomAction(ctx, action, target) {
     await api(`/specialists/${agentId}/assign`, { method: 'POST', data: { taskId: target.dataset.id, roomId } });
     toast('Assigned. The agent starts on it now.'); await refresh();
   }
+}
+
+// ---------- a Rex Desk task, edited in place ----------
+function localTaskStage(ctx, task) {
+  const { ui, esc, markdown } = ctx, agents = ui.snap.specialists || [], tasks = (ui.snap.tasks || []).filter(item => item.local);
+  const on = agentOnTask(ui, task), parent = task.parentTaskId && tasks.find(item => item.id === task.parentTaskId), children = tasks.filter(item => item.parentTaskId === task.id);
+  const blockers = (task.blockedBy || []).map(id => tasks.find(item => item.id === id)).filter(Boolean);
+  const projects = ui.memory?.projects || [], when = value => value ? new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const field = (label, control) => `<label class="lt-field"><span>${label}</span>${control}</label>`;
+  const side = `<aside class="lt-side">
+    ${field('Status', pickerHtml(ctx, { id: 'lt-status', label: 'Status', value: task.status, items: STATUS.map(([value, label]) => ({ value, label })) }))}
+    ${field('Priority', pickerHtml(ctx, { id: 'lt-priority', label: 'Priority', value: task.priority || 'normal', items: PRIORITY.map(([value, label]) => ({ value, label })) }))}
+    ${field('Agent', pickerHtml(ctx, { id: 'lt-assignee', label: 'Agent', value: task.assignee || '', items: [{ value: '', label: 'Nobody yet' }, ...agents.map(agent => ({ value: agent.id, label: agent.name, hint: agent.projectSlug }))] }))}
+    ${field('Project', pickerHtml(ctx, { id: 'lt-project', label: 'Project', value: task.projectSlug || '', items: [{ value: '', label: 'No project' }, ...projects.map(project => ({ value: project.slug, label: project.slug }))] }))}
+    ${field('Due', `<input id="lt-due" type="date" value="${esc(task.dueDate || '')}">`)}
+    ${field('Tags', `<input id="lt-tags" type="text" value="${esc((task.tags || []).join(', '))}" placeholder="ui, bug" autocomplete="off">`)}
+    <p class="lt-made">Made by ${esc(task.createdBy || 'you')} · ${esc(when(task.createdAt))}</p>
+    <button class="btn small danger" data-action="lt-delete" data-id="${esc(task.id)}">Delete task</button>
+  </aside>`;
+  const checklist = `<section class="lt-sec"><h3>Checklist${task.checklist?.length ? ` <span>${task.checklist.filter(item => item.done).length} of ${task.checklist.length}</span>` : ''}</h3>
+    <ul class="lt-check">${(task.checklist || []).map((item, index) => `<li><label><input type="checkbox" data-lt-check="${index}" ${item.done ? 'checked' : ''}><span>${esc(item.text)}</span></label><button class="ag-x" data-action="lt-check-remove" data-index="${index}" aria-label="Remove this item" title="Remove"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>
+    <form class="lt-inline" data-lt-check-add><input name="text" type="text" maxlength="300" placeholder="Add a step…" autocomplete="off" aria-label="Add a checklist step"></form></section>`;
+  const links = parent || children.length || blockers.length ? `<section class="lt-sec"><h3>Linked tasks</h3><ul class="lt-links">${parent ? `<li>Part of <a href="#" data-open="task" data-id="${esc(parent.id)}">#${esc(parent.taskNumber)} ${esc(parent.title)}</a></li>` : ''}${children.map(child => `<li>Subtask <a href="#" data-open="task" data-id="${esc(child.id)}">#${esc(child.taskNumber)} ${esc(child.title)}</a> · ${esc(child.statusName)}</li>`).join('')}${blockers.map(blocker => `<li>Waits for <a href="#" data-open="task" data-id="${esc(blocker.id)}">#${esc(blocker.taskNumber)} ${esc(blocker.title)}</a> · ${esc(blocker.statusName)}</li>`).join('')}</ul></section>` : '';
+  const comments = `<section class="lt-sec"><h3>Comments</h3>${(task.comments || []).length ? `<ol class="lt-comments">${task.comments.map(comment => `<li><div><strong>${esc(comment.by)}</strong> <time>${esc(when(comment.at))}</time></div><div class="md">${markdown(comment.text)}</div></li>`).join('')}</ol>` : '<p class="muted small">No comments yet. Agents write here what they did and found.</p>'}
+    <form class="lt-inline" data-lt-comment><textarea name="text" rows="2" placeholder="Write a comment…" aria-label="Write a comment"></textarea><button class="btn small">Comment</button></form></section>`;
+  const work = on?.agent ? `<p class="assigned"><span class="dot working"></span><strong>${esc(on.agent.name)}</strong> is working on this. <button class="btn small" data-open="run" data-id="${esc(on.run.id)}">Open the work</button></p>`
+    : task.assignee && agents.some(agent => agent.id === task.assignee) ? `<p class="lt-start"><button class="btn primary small" data-action="lt-start" data-id="${esc(task.id)}">Start ${esc(agents.find(agent => agent.id === task.assignee).name)} on this</button></p>` : '';
+  const main = `<div class="lt-main"><textarea id="lt-title" class="lt-title" rows="1" maxlength="200" aria-label="Task title">${esc(task.title)}</textarea>
+    ${work}<section class="lt-sec"><h3>Description</h3><textarea id="lt-desc" class="lt-desc" placeholder="What needs doing, and how to tell it is done.">${esc(task.description || '')}</textarea></section>${checklist}${links}${comments}</div>`;
+  return { title: `#${task.taskNumber} ${task.title}`, meta: `Rex Desk task · ${task.statusName}`, feed: `<div class="page lt" data-lt="${esc(task.id)}">${main}${side}</div>` };
+}
+// Every change saves at once: pickers when chosen, text when you leave the field.
+export function initLocalTasks(ctx) {
+  const { api, toast, refresh, ui } = ctx;
+  const current = () => (ui.snap.tasks || []).find(item => item.id === ui.view.id && item.local);
+  const save = async data => { const task = current(); if (!task) return; try { await api(`/local-tasks/${encodeURIComponent(task.id)}`, { method: 'PUT', data }); await refresh(); } catch (error) { toast(error.message, true); await refresh({ full: true }); } };
+  document.addEventListener('change', event => {
+    const id = event.target.id, value = event.target.value;
+    if (id === 'lt-status') void save({ status: value });
+    else if (id === 'lt-priority') void save({ priority: value });
+    else if (id === 'lt-assignee') void save({ assignee: value });
+    else if (id === 'lt-project') void save({ project: value });
+    else if (id === 'lt-due') void save({ dueDate: value });
+    else if (id === 'task-add-project') ui.lastTaskProject = value;
+    else if (event.target.dataset.ltCheck !== undefined) { const task = current(); if (task) void save({ checklist: task.checklist.map((item, index) => index === Number(event.target.dataset.ltCheck) ? { ...item, done: event.target.checked } : item) }); }
+  });
+  document.addEventListener('focusout', event => {
+    const task = current(); if (!task) return;
+    if (event.target.id === 'lt-title' && event.target.value.trim() && event.target.value.trim() !== task.title) void save({ title: event.target.value });
+    if (event.target.id === 'lt-desc' && event.target.value !== (task.description || '')) void save({ description: event.target.value });
+    if (event.target.id === 'lt-tags' && event.target.value !== (task.tags || []).join(', ')) void save({ tags: event.target.value });
+  });
+  document.addEventListener('keydown', event => {
+    if (event.target.id === 'lt-title' && event.key === 'Enter') { event.preventDefault(); event.target.blur(); }
+    if (event.target.closest?.('[data-lt-comment]') && event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); event.target.form.requestSubmit(); }
+  });
+  document.addEventListener('submit', async event => {
+    const form = event.target;
+    if (form.matches('[data-task-add]')) {
+      event.preventDefault(); const title = form.title.value.trim(); if (!title) return;
+      try { await api('/local-tasks', { method: 'POST', data: { title, project: ui.lastTaskProject || '' } }); form.title.value = ''; ui.taskSource = ui.taskSource === 'all' || !ui.taskSource ? ui.taskSource : 'local'; await refresh(); document.querySelector('[data-task-add] input')?.focus(); } catch (error) { toast(error.message, true); }
+    } else if (form.matches('[data-lt-check-add]')) {
+      event.preventDefault(); const task = current(), text = form.text.value.trim(); if (!task || !text) return;
+      form.text.value = ''; await api(`/local-tasks/${encodeURIComponent(task.id)}`, { method: 'PUT', data: { checklist: [...(task.checklist || []), { text, done: false }] } }).catch(error => toast(error.message, true));
+      await refresh({ full: true }); document.querySelector('[data-lt-check-add] input')?.focus();
+    } else if (form.matches('[data-lt-comment]')) {
+      event.preventDefault(); const task = current(), text = form.text.value.trim(); if (!task || !text) return;
+      try { await api(`/local-tasks/${encodeURIComponent(task.id)}/comments`, { method: 'POST', data: { text } }); form.text.value = ''; document.activeElement?.blur(); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
+    }
+  }, true);
+  document.addEventListener('click', async event => {
+    const target = event.target.closest?.('[data-action]'); if (!target) return;
+    const action = target.dataset.action;
+    if (action === 'task-source') { event.stopPropagation(); ui.taskSource = target.dataset.source; ctx.render(); return; }
+    const task = current(); if (!task) return;
+    if (action === 'lt-check-remove') { event.stopPropagation(); void save({ checklist: task.checklist.filter((_, index) => index !== Number(target.dataset.index)) }); }
+    else if (action === 'lt-delete') {
+      event.stopPropagation(); if (!confirm(`Delete #${task.taskNumber} "${task.title}"? Its comments go with it.`)) return;
+      try { await api(`/local-tasks/${encodeURIComponent(task.id)}`, { method: 'DELETE' }); ctx.open('tasks'); } catch (error) { toast(error.message, true); }
+    } else if (action === 'lt-start') {
+      event.stopPropagation();
+      try { await api(`/specialists/${task.assignee}/assign`, { method: 'POST', data: { taskId: task.id, roomId: '' } }); toast('Started.'); await refresh(); } catch (error) { toast(error.message, true); }
+    }
+  }, true);
 }

@@ -100,7 +100,8 @@ function menuItems(ctx, box) {
   const room = ctx.ui.view.type === 'room' ? ctx.ui.snap.rooms.find(item => item.id === ctx.ui.view.id) : null;
   const at = /(^|\s)@([\p{L}\p{N}_.-]*)$/u.exec(before);
   if (at) {
-    const items = (room ? room.members.map(member => ({ name: member.handle, hint: `${member.name} · ${member.project} · ${member.label}` })) : (ctx.ui.mentions || []).map(name => ({ name }))).filter(item => item.name && item.name.toLowerCase().startsWith(at[2].toLowerCase()));
+    const agentsHere = room ? room.members.filter(member => member.id !== 'you').length : 0;
+    const items = (room ? [...(agentsHere > 1 ? [{ name: 'all', hint: `Everyone in this room (${agentsHere} agents)` }] : []), ...room.members.map(member => ({ name: member.handle, hint: `${member.name} · ${member.project} · ${member.label}` }))] : (ctx.ui.mentions || []).map(name => ({ name }))).filter(item => item.name && item.name.toLowerCase().startsWith(at[2].toLowerCase()));
     return items.length ? { kind: 'mention', items, index: 0, from: before.length - at[2].length - 1 } : null;
   }
   const hash = /(^|\s)#(\d*)$/.exec(before);

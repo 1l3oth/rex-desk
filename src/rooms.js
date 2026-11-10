@@ -86,7 +86,8 @@ export class Rooms {
   }
   // #49760 names a task by its tracker number.
   tasksIn(text) {
-    const wanted = [...String(text).matchAll(/(^|\s)#(\d{2,})/g)].map(match => match[2]);
+    // #49760 is a tracker number; #L4 is a Rex Desk task.
+    const wanted = [...String(text).matchAll(/(^|\s)#(L\d+|\d{2,})/gi)].map(match => match[2].toUpperCase());
     return [...new Set(wanted.map(number => this.store.list('task').find(task => !task.demo && (String(task.taskNumber) === number || String(task.externalId) === number))?.id).filter(Boolean))];
   }
   // Which agent owns which task: the newest run given to an agent on that task, unless it was stopped or failed. Every agent is told this, so nobody takes a task that is someone else's.
@@ -102,6 +103,8 @@ export class Rooms {
     if (!body) throw new Error('Write a message first.');
     if (fromAgentId && !room.members.includes(fromAgentId)) throw new Error('This agent is not in that room.');
     let targets = to === undefined ? this.mentionsIn(room, body) : this.resolveTargets(room, to);
+    // @all (or @everyone) from the person wakes every agent in the room. Agents cannot use it, so they never wake each other all at once.
+    if (!fromAgentId && to === undefined && /(^|\s)@(all|everyone)\b/i.test(body)) targets = [...new Set([...targets, ...room.members.filter(id => id !== HUMAN)])];
     targets = targets.filter(target => target !== fromAgentId);
     // The person talking without naming anyone is talking to the main agent, which joins the room the first time.
     if (!fromAgentId && to === undefined && !targets.some(target => target !== HUMAN)) { if (!room.members.includes('main')) { this.addMember(roomId, 'main'); room = this.room(roomId); } targets = ['main']; }

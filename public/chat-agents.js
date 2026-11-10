@@ -39,9 +39,12 @@ export function agentStage(ctx) {
     <textarea id="sp-rules" rows="${Math.min(16, Math.max(6, Math.ceil(String(agent.rules || '').length / 60) + String(agent.rules || '').split(/\n/).length))}" spellcheck="false" placeholder="How ${esc(agent.name)} should work here. For example: ask before changing the database.">${esc(agent.rules)}</textarea>
     <div class="ag-save"><button class="btn primary" data-action="spec-save" disabled>Save rules</button></div></section>`;
   const lessonList = lessons.length ? `<ul class="ag-lessons">${lessons.map((lesson, index) => `<li><span>${esc(lesson.text)}</span><button type="button" class="ag-x" data-action="spec-forget" data-index="${index}" title="Forget this lesson" aria-label="Forget this lesson"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>` : `<p class="ag-help">None yet. When you correct ${esc(agent.name)}, it keeps the lesson here.</p>`;
+  const chosen = new Set(agent.taskSources || []), options = [['local', 'Rex Desk tasks', 'Kept here, made by you or the agents'], ...(ui.snap.config?.sources || []).map(source => [source.id, source.name, source.type === 'flow' ? 'Flow tracker' : 'Morningmate tracker'])];
+  const taskSources = `<div class="ag-sources">${options.map(([id, label, hint]) => `<label><input type="checkbox" data-task-source="${esc(id)}" ${chosen.has(id) ? 'checked' : ''}><span>${esc(label)}<small>${esc(hint)}</small></span></label>`).join('')}</div>${chosen.size ? '' : `<p class="ag-help">Not set. ${esc(agent.name)} asks you before it looks for tasks.</p>`}`;
   const side = `<aside class="ag-side">
     <section class="ag-sec"><h2>What ${esc(agent.projectSlug)} is for</h2><p>${esc(agent.purpose || 'Not recorded yet.')}</p></section>
     <section class="ag-sec"><h2>Lessons learned</h2>${lessonList}</section>
+    <section class="ag-sec"><h2>Tasks come from</h2>${taskSources}</section>
     <section class="ag-sec"><h2>Model</h2>${pickerHtml(ctx, { id: 'sp-model', label: 'Model', value: agent.model || '', items: models })}</section>
     <section class="ag-sec ag-meta"><p>Created by ${esc(agent.createdBy || 'you')}${origin ? `, copied from ${esc(origin.name)}` : ''}.</p><button class="btn small danger" data-action="spec-remove">Remove ${esc(agent.name)}</button></section>
   </aside>`;
@@ -109,6 +112,13 @@ export function initAgentCard(ctx) {
     try { await agentAction(ctx, 'spec-rename'); } catch (error) { ctx.toast(error.message, true); }
   }, true);
   document.addEventListener('focusout', event => { if (event.target.id === 'sp-name') event.target.form?.requestSubmit(); });
+  // Ticking where tasks come from saves at once.
+  document.addEventListener('change', async event => {
+    if (event.target.dataset?.taskSource === undefined) return;
+    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
+    const taskSources = [...document.querySelectorAll('[data-task-source]:checked')].map(box => box.dataset.taskSource);
+    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { taskSources } }); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); }
+  });
   // A model picked from the list is saved at once.
   document.addEventListener('change', async event => {
     if (event.target.id !== 'sp-model') return;

@@ -61,10 +61,10 @@ export class Specialists {
       provider: 'claude', model: this.cleanModel(model, { strict: true }), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, createdAt: now(), updatedAt: now() };
     this.store.put('specialist', item.id, item); this.writeCard(item); return item;
   }
-  update(id, { rules, unsure, provider, model }) {
+  update(id, { rules, unsure, provider, model, taskSources }) {
     const item = this.get(id);
     const updated = { ...item, ...(rules !== undefined ? { rules: String(rules).slice(0, 4000) } : {}), ...(unsure !== undefined ? { unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12) } : {}),
-      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true }) } : {}), updatedAt: now() };
+      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true }) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), updatedAt: now() };
     this.store.put('specialist', id, updated); this.writeCard(updated); return updated;
   }
   // Renaming moves the card too; the run history and the project stay as they are.
@@ -127,9 +127,29 @@ export class Specialists {
   }
   // The agent's own folder. It is named by id, so renaming the agent never loses its session.
   homeDirectory(agent) { return this.memory.file('agents', 'home', agent.id); }
+  // Where an agent's tasks come from: "local" (Rex Desk tasks) and/or connected trackers by id. Names are accepted too.
+  cleanSources(value) {
+    const sources = this.store.config().sources;
+    return [...new Set([].concat(value || []).map(item => String(item).trim()).filter(Boolean).map(item => {
+      const key = item.toLowerCase();
+      if (['local', 'rex desk', 'rex desk tasks', 'here'].includes(key)) return 'local';
+      const found = sources.find(source => [source.id, source.name, source.type].some(field => String(field || '').toLowerCase() === key));
+      if (!found) throw new Error(`No task source "${item}". Use "local" or one of: ${sources.map(source => source.name).join(', ') || 'no trackers connected'}.`);
+      return found.id;
+    }))];
+  }
+  sourceNames(agent) {
+    const sources = this.store.config().sources;
+    return (agent.taskSources || []).map(id => id === 'local' ? 'Rex Desk tasks (kept here)' : sources.find(source => source.id === id)?.name || 'a tracker that was removed');
+  }
+  tasksText(agent) {
+    const names = this.sourceNames(agent);
+    return names.length ? `Your tasks come from: ${names.join(' and ')}. Read them with desk_tasks; it lists only those. Create and update Rex Desk tasks with desk_create_task and desk_update_task.`
+      : 'Nobody has told you where this project keeps its tasks yet. Before looking for tasks, ask the person (desk_ask) whether they live in a connected tracker, in Rex Desk tasks, or somewhere else, and save the answer with desk_set_task_sources. Never assume Flow or Morningmate.';
+  }
   identity(agent) {
     return [`You are ${agent.name}, the specialist agent for the project "${agent.projectSlug}" at ${agent.projectPath}. You keep one conversation of your own, and you take part in the person's group chats when you are mentioned.`,
-      agent.purpose ? `What the project is for: ${agent.purpose}` : '', agent.rules ? `Rules from the person:\n${agent.rules}` : '', agent.unsure?.length ? `Still unsure about: ${agent.unsure.join('; ')}` : '',
+      agent.purpose ? `What the project is for: ${agent.purpose}` : '', agent.rules ? `Rules from the person:\n${agent.rules}` : '', agent.unsure?.length ? `Still unsure about: ${agent.unsure.join('; ')}` : '', this.tasksText(agent),
       this.memory.chatStyle(), this.memory.person() ? `What you know about the person (all agents share this):\n${this.memory.person()}` : '', this.lessonsText(agent.id), "Notice what the person likes and dislikes from how they react to you: corrections, praise, frustration, things they ask for again. Save what you notice with desk_learn_person; lessons about your own work go to desk_learn. Preferences can change with time and events: treat the notes about the person as hints, prefer the newest, and when what the person says now differs, follow what they say now and update the note with replaces.", this.memory.secondBrain(),
       "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
       this.memory.workflowText(agent.projectSlug), "When the person tells you how work on a project is done (which branch to start from, where a pull request goes, how to test or sign in, who reviews, what to never touch), or answers a question about it, or corrects a step you took, save it at once with desk_learn_workflow as one short rule. Every agent on that project, now and later, gets these rules, so nobody asks the person the same thing again or repeats the mistake. Before you ask the person how something is done on a project, check its workflow rules first. If a new answer changes an old rule, pass replaces.",
@@ -139,7 +159,7 @@ export class Specialists {
     const lines = [`# ${item.name}`, '', `- Project: ${item.projectSlug} (\`${item.projectPath}\`)`, `- Agent: Claude Code${item.model ? ` · ${item.model}` : ''}`,
       `- Created by: ${item.createdBy}${item.cloneOf ? ` · duplicate of ${this.store.get('specialist', item.cloneOf)?.name || 'another agent'}` : ''}`, `- Updated: ${item.updatedAt}`, '',
       '## What this project is for', '', item.purpose || 'Not recorded yet.', '', '## Rules from the person', '', item.rules || 'None yet.', '',
-      '## Still not sure about', '', item.unsure.length ? item.unsure.map(text => `- ${text}`).join('\n') : 'Nothing open.', '',
+      '## Still not sure about', '', item.unsure.length ? item.unsure.map(text => `- ${text}`).join('\n') : 'Nothing open.', '', '## Tasks come from', '', this.sourceNames(item).join(', ') || 'Not set yet.', '',
       '## Lessons learned', '', (item.lessons || []).length ? item.lessons.map(lesson => `- ${lesson.text}`).join('\n') : 'None yet.', '',
       '## Read first', '', `- Project memory: \`projects/${item.projectSlug}.md\` (set up, test, run, and the project's own instructions)`, '- The repository\'s own CLAUDE.md and AGENTS.md before changing anything', ''];
     atomic(this.cardFile(item), lines.join('\n'));

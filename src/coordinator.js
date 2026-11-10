@@ -18,6 +18,7 @@ import { Evidence } from './browser.js';
 import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
 import { inspectRepository } from './repositories.js';
+import { LocalTasks } from './local-tasks.js';
 import { Jev } from './jev.js';
 import { placeTask, scanRepositories, scanRoots } from './placement.js';
 import { TrackerQuery } from './query.js';
@@ -59,6 +60,7 @@ export class Desk {
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
+    this.localTasks = new LocalTasks(store);
     this.sources = new Sources(store, { fetcher, onSynced: () => { void this.fillEnglishNames(); if (this.store.config().jev?.auto !== false && this.jev.apiKey()) void this.jev.prioritize().catch(error => store.event('', 'jev-error', { message: error.message })); } }); this.live = new Map(); this.waiters = new Map(); this.tokens = new Map();
     this.query = new TrackerQuery(store, this.sources, { apiKey: () => this.jev.apiKey(), env: () => this.agents.environment('claude'), cwd: path.join(store.directory, 'coordinator'), ...(queryModel ? { model: queryModel } : {}) });
     this.presence = { focused: false, at: 0 }; this.notifier = new Notifier(store, { focused: () => this.presence.focused && Date.now() - this.presence.at < 45000, enabled: () => !process.env.NODE_TEST_CONTEXT && this.store.config().notify !== false }); this.rooms = new Rooms(this); this.memory = new Memory(memoryDirectory); this.specialists = new Specialists(this); this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
@@ -419,6 +421,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       this.memory.chatStyle(), this.memory.person() ? `What you know about the person (all agents share this):\n${this.memory.person()}` : '', this.specialists.lessonsText('main'), "Notice what the person likes and dislikes from how they react to you: corrections, praise, frustration, things they ask for again. Save what you notice with desk_learn_person; lessons about your own work go to desk_learn. Preferences can change with time and events: treat the notes about the person as hints, prefer the newest, and when what the person says now differs, follow what they say now and update the note with replaces.", this.memory.secondBrain(), "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
       'While you read projects and the second brain, notice pictures that may be the person (a portfolio, about page, avatar or profile folder). If the About you page has no photo yet, ask the person with desk_ask whether that file is them, and only if they say yes, set it with desk_set_profile_photo.',
       'When the person names a project that is not in the index or not in desk_repositories, find its folder on this computer (ask if there are several) and add it yourself with desk_add_project. Never ask the person to add a repository in Settings.',
+      'Where tasks come from: the person may work on company projects (tasks in Flow or Morningmate), personal projects, or anything else. For each project, ask the person with desk_ask where its tasks live, with options for each connected tracker, "Rex Desk tasks (kept here)", and "Somewhere else". Save the answer with desk_set_task_sources. Never assume a project uses Flow or Morningmate. A project whose tasks live elsewhere can still use Rex Desk tasks: create them with desk_create_task when the person describes the work.',
       '1. Read desk_memory with page "index", and desk_specialists. Greet the person in one or two lines: how many projects you found, and how many already have a specialist agent.',
       '2. Go through the projects that have no specialist, one at a time. For each: read its memory page, then ask the person with desk_ask only what you cannot tell from it (what it is for, how to set it up and run it, rules to follow, anything risky). At most 3 questions per project, in one desk_ask when you can. For every question give 2 to 4 suggested answers in the options property of the field (a short label and a one-line description), based on what you found (the detected commands and branches, what similar projects use). The person can pick one or type their own. Never guess.',
       '3. When you understand a project, call desk_create_specialist with a short human name, the rules the person gave you, and what is still unsure. Then tell the person in one line that the agent exists and that they can rename or duplicate it from its card. Move to the next project.',
@@ -864,6 +867,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const run = this.run(runId);
     if (!['working', 'review', 'done'].includes(phase)) throw new Error('Unknown workflow phase.');
     if (phase === 'done' && !run.checks?.testsPassed) throw new Error('Verified evidence is required before completing a source task.');
+    // A Rex Desk task has no tracker behind it: the run moves it along without asking.
+    if (this.task(run.taskId)?.local) { const moved = this.localTasks.phase(this.task(run.taskId), phase); this.store.event(runId, 'tracker-status', { phase, result: { status: moved.status } }, true); return { status: moved.status }; }
     const answer = await this.ask(runId, { kind: 'approval', method: 'status', title: `Update tracker status: ${phase}`, request: { phase, taskId: run.taskId } });
     if (answer.action !== 'accept') return { declined: true };
     if (phase === 'done' && (!this.run(runId).verification?.passed || this.run(runId).verification.fingerprint !== await fingerprint(run.worktree))) throw new Error('Code changed after verification. Re-run tests before completing the source task.');
