@@ -30,13 +30,22 @@ export function stepsHtml(group, { esc, hhmm, live, openKeys, specialists, link 
   const state = openKeys.get(key), open = state === undefined ? live : state;
   const lines = group.map(item => {
     if ((item.tool === 'Bash' || item.tool === 'PowerShell') && item.id) {
-      const out = item.output, open = openKeys.get(`term:${item.id}`) ?? !out;
-      return `<li class="step term-step"><details class="term" data-term="${esc(item.id)}" ${open ? 'open' : ''}><summary><span class="when">${esc(hhmm(item.at))}</span><span class="what">${esc(toolLine(item))}</span><span class="tstate ${out ? (out.failed ? 'bad' : 'ok') : 'run'}">${out ? (out.failed ? 'failed' : 'done') : 'running…'}</span></summary><pre class="term-out"><span class="prompt">${item.tool === 'PowerShell' ? 'PS&gt; ' : '$ '}</span>${esc(item.input?.command || '')}
-${esc(out?.text || '')}</pre></details></li>`;
+      const out = item.output;
+      return `<li class="step"><span class="when">${esc(hhmm(item.at))}</span><span class="what">${esc(toolLine(item))}</span><button type="button" class="linkish" data-term-focus="${esc(item.id)}">view</button><span class="tstate ${out ? (out.failed ? 'bad' : 'ok') : 'run'}">${out ? (out.failed ? 'failed' : 'done') : 'running…'}</span></li>`;
     }
     const created = item.tool === 'desk_create_specialist' ? specialists.find(agent => agent.name.toLowerCase() === String(item.input?.name || '').toLowerCase()) : null;
     return `<li class="step ${item.failed ? 'bad' : ''}"><span class="when">${esc(hhmm(item.at))}</span><span class="what">${esc(toolLine(item))}</span>${created ? link(created) : ''}</li>`;
   }).join('');
   const word = group.length === 1 ? '1 step' : `${group.length} steps`;
   return `<details class="steps" data-steps="${esc(key)}" ${open ? 'open' : ''}><summary><span class="count">${word}</span><span class="latest">${esc(toolLine(last))}</span></summary><ul>${lines}</ul></details>`;
+}
+
+// The terminal panel beside the chat: every shell command the agent ran, with its output.
+export const terminalItems = items => items.filter(item => item.role === 'tool' && (item.tool === 'Bash' || item.tool === 'PowerShell') && item.id);
+export function terminalHtml(entries, { esc, hhmm }) {
+  const body = entries.map(item => {
+    const out = item.output, state = out ? (out.failed ? 'failed' : 'done') : 'running…';
+    return `<section class="tentry" id="term-${esc(item.id)}" data-entry="${esc(item.id)}"><div class="tcmd"><span class="prompt">${item.tool === 'PowerShell' ? 'PS&gt;' : '$'}</span><span class="cmdtext">${esc(item.input?.command || '')}</span></div><pre class="tout">${esc(out?.text || '')}</pre><div class="tfoot"><span>${esc(hhmm(item.at))}</span><span class="tstate ${out ? (out.failed ? 'bad' : 'ok') : 'run'}">${state}</span></div></section>`;
+  }).join('');
+  return `<div class="side-head"><strong>Terminal</strong><span class="muted">${entries.length} command${entries.length === 1 ? '' : 's'}</span><span class="spacer"></span><button type="button" class="btn small" data-action="term-close" aria-label="Close the terminal panel">Close</button></div><div class="side-body" id="side-body">${body}</div>`;
 }

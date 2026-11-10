@@ -3,8 +3,9 @@ const providerName = name => name === 'codex' ? 'Codex (retired)' : 'Claude Code
 
 export function agentsRail(ctx) {
   const { ui, railItem } = ctx, agents = ui.snap.specialists || [];
-  const items = agents.length ? agents.map(agent => railItem('specialist', agent.id, { name: agent.name, sub: `${agent.projectSlug} · ${providerName(agent.provider)}${agent.cloneOf ? ' · duplicate' : ''}` })).join('')
-    : '<p class="rail-empty">No agents yet. Open a project and press Create agent.</p>';
+  const dot = { busy: 'working', replying: 'working', waiting: 'warn', idle: 'good' };
+  const items = agents.length ? agents.map(agent => railItem('specialist', agent.id, { dot: dot[agent.status?.state] || '', name: agent.name, sub: `${agent.status?.label || 'Idle'} · ${agent.projectSlug}` })).join('')
+    : '<p class="rail-empty">No agents yet. Press + to create one for a project.</p>';
   return `<h3>Agents <button data-action="spec-new" title="New agent" aria-label="New agent">+</button></h3>${items}`;
 }
 
@@ -15,13 +16,13 @@ export function agentStage(ctx) {
   const feed = `<div class="page"><section class="idcard" data-agent="${esc(agent.id)}">
     <div class="idhead"><div class="avatar big">${esc(initials(agent.name))}</div>
       <div class="idname"><label>Name<input id="sp-name" type="text" maxlength="40" value="${esc(agent.name)}"></label><button class="btn small" data-action="spec-rename">Rename</button></div></div>
-    <div class="idmeta"><span class="chip">Project: <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a></span><span class="chip">Created by ${esc(agent.createdBy)}</span>${origin ? `<span class="chip">Duplicate of ${esc(origin.name)}</span>` : ''}</div>
+    <div class="idmeta"><span class="chip ${esc(agent.status?.state || 'idle')}">${esc(agent.status?.label || 'Idle')}</span><span class="chip">Project: <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a></span><span class="chip">Created by ${esc(agent.createdBy)}</span>${origin ? `<span class="chip">Duplicate of ${esc(origin.name)}</span>` : ''}</div>
     <p class="path"><code>${esc(agent.projectPath)}</code></p>
     <h3>What this project is for</h3><p class="md">${esc(agent.purpose || 'Not recorded yet.')}</p>
     <label>Rules from you<textarea id="sp-rules" rows="5" placeholder="How this agent should work on this project. For example: ask before changing the database.">${esc(agent.rules)}</textarea></label>
     <label>Still not sure about (one per line)<textarea id="sp-unsure" rows="3">${esc((agent.unsure || []).join('\n'))}</textarea></label>
     <div class="idrow"><label>Model<input id="sp-model" type="text" maxlength="80" value="${esc(agent.model || '')}" placeholder="default"></label></div>
-    <div class="row"><button class="btn primary" data-action="spec-save">Save</button><button class="btn" data-action="spec-duplicate">Duplicate with another name</button><span class="spacer"></span><button class="btn danger" data-action="spec-remove">Remove</button></div>
+    <div class="row"><button class="btn primary" data-action="spec-save">Save</button><button class="btn" data-action="spec-chat">Chat with ${esc(agent.name)}</button><button class="btn" data-action="spec-duplicate">Duplicate with another name</button><span class="spacer"></span><button class="btn danger" data-action="spec-remove">Remove</button></div>
   </section></div>`;
   return { title: agent.name, meta: `${providerName(agent.provider)} · ${agent.projectSlug}`, feed };
 }
@@ -41,13 +42,19 @@ export async function agentAction(ctx, action) {
   const { ui, api, toast, refresh, open } = ctx, value = id => document.getElementById(id)?.value ?? '';
   const agent = (ui.snap.specialists || []).find(item => item.id === ui.view.id);
   if (action === 'spec-new') {
-    const projects = ui.memory?.projects || [];
-    if (!projects.length) return toast('Scan this computer for projects first (the ↻ button).', true);
+    let projects = ui.memory?.projects || [];
+    if (!projects.length) { toast('Looking for your projects…'); await api('/memory/scan', { method: 'POST', data: {} }); await refresh(); projects = ui.memory?.projects || []; }
+    if (!projects.length) return toast('No projects were found on this computer.', true);
     const current = ui.view.type === 'project' ? ui.view.id : '';
     return dialog(ctx, { title: 'New agent', projects: projects.map(project => ({ slug: project.slug, selected: project.slug === current })), submit: async form => {
       const created = await api('/specialists', { method: 'POST', data: { name: form.name, projectSlug: form.project } }); await refresh(); open('specialist', created.id); } });
   }
   if (!agent) return;
+  if (action === 'spec-chat') {
+    let runId = agent.runId;
+    if (!runId) { await api(`/specialists/${agent.id}/say`, { method: 'POST', data: { text: 'Introduce yourself in one or two lines: who you are and which project you look after.' } }); await refresh(); runId = (ui.snap.specialists || []).find(item => item.id === agent.id)?.runId; }
+    if (runId) open('run', runId); return;
+  }
   if (action === 'spec-rename') { await api(`/specialists/${agent.id}/rename`, { method: 'POST', data: { name: value('sp-name') } }); toast('Renamed.'); await refresh({ full: true }); }
   else if (action === 'spec-save') {
     await api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: value('sp-rules'), unsure: value('sp-unsure').split('\n'), model: value('sp-model') } });

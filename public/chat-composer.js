@@ -37,9 +37,9 @@ export function composerHtml(ctx, model) {
       <button class="send-btn" data-action="send" aria-label="Send" title="Send">${ICON.up}</button>
       <input type="file" id="file-input" multiple hidden>
     </div>
-    <div class="foot"><span class="hint">Type / for commands${model.composer.mentions?.length ? ' · @ to mention' : ''}</span><span class="spacer"></span>
-      ${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
-      <span class="ring ${working ? 'busy' : ''}" title="${working ? 'The agent is working' : 'Idle'}" aria-hidden="true"></span></div>
+    <div class="foot"><span class="hint">Type / for commands${model.composer.mentions?.length ? ' · @ to mention · # for a task' : ''}</span><span class="spacer"></span>
+      ${model.composer.noPickers ? '' : `${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
+      <span class="ring ${working ? 'busy' : ''}" title="${working ? 'The agent is working' : 'Idle'}" aria-hidden="true"></span>`}</div>
   </div></div>`;
 }
 
@@ -70,6 +70,7 @@ function commands(ctx) {
     { name: 'projects', hint: 'Scan this computer for projects', run: c.projects },
     { name: 'room', hint: 'Start a room for several agents', run: c.room },
     { name: 'agent', hint: 'Create an agent for a project', run: c.agent },
+    ...(ui.view.type === 'room' ? [{ name: 'assign', hint: 'Give a task to an agent: /assign @agent #task', run: c.assign }] : []),
     { name: 'main', hint: 'Go to the main agent', run: c.main },
     ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }] : []),
     { name: 'settings', hint: 'Open issues and settings', run: c.settings },
@@ -78,21 +79,30 @@ function commands(ctx) {
 function drawMenu(ctx) {
   const host = document.getElementById('menu'); if (!host) return;
   const menu = ctx.ui.menu;
-  host.innerHTML = menu ? `<div class="menu" role="listbox">${menu.items.map((item, index) => `<button type="button" role="option" class="${index === menu.index ? 'on' : ''}" data-menu="${index}"><strong>${menu.kind === 'slash' ? '/' : item.plain ? '' : '@'}${ctx.esc(item.name)}</strong>${item.hint ? `<small>${ctx.esc(item.hint)}</small>` : ''}</button>`).join('')}</div>` : '';
+  host.innerHTML = menu ? `<div class="menu" role="listbox">${menu.items.map((item, index) => `<button type="button" role="option" class="${index === menu.index ? 'on' : ''}" data-menu="${index}"><strong>${menu.kind === 'slash' ? '/' : menu.kind === 'task' ? '#' : item.plain ? '' : '@'}${ctx.esc(item.name)}</strong>${item.hint ? `<small>${ctx.esc(item.hint)}</small>` : ''}</button>`).join('')}</div>` : '';
 }
 function closeMenu(ctx) { ctx.ui.menu = null; drawMenu(ctx); }
 function choose(ctx, item) {
   const menu = ctx.ui.menu, box = document.getElementById('draft'); if (!menu || !item) return;
   if (menu.kind === 'slash') { box.value = ''; ctx.ui.drafts.set(ctx.draftKey(), ''); closeMenu(ctx); void item.run?.(); return; }
   const end = box.selectionStart;
-  box.value = `${box.value.slice(0, menu.from)}@${item.name} ${box.value.slice(end)}`; ctx.ui.drafts.set(ctx.draftKey(), box.value); closeMenu(ctx); box.focus();
+  box.value = `${box.value.slice(0, menu.from)}${menu.kind === 'task' ? '#' : '@'}${item.name} ${box.value.slice(end)}`; ctx.ui.drafts.set(ctx.draftKey(), box.value); closeMenu(ctx); box.focus();
 }
 function menuItems(ctx, box) {
   const before = box.value.slice(0, box.selectionStart);
   const slash = /^\/([\w-]*)$/.exec(before);
   if (slash) { const items = commands(ctx).filter(item => item.name.startsWith(slash[1].toLowerCase())); return items.length ? { kind: 'slash', items, index: 0, from: 0 } : null; }
+  const room = ctx.ui.view.type === 'room' ? ctx.ui.snap.rooms.find(item => item.id === ctx.ui.view.id) : null;
   const at = /(^|\s)@([\p{L}\p{N}_.-]*)$/u.exec(before);
-  if (at) { const items = (ctx.ui.mentions || []).filter(name => name.toLowerCase().startsWith(at[2].toLowerCase())).map(name => ({ name })); return items.length ? { kind: 'mention', items, index: 0, from: before.length - at[2].length - 1 } : null; }
+  if (at) {
+    const items = (room ? room.members.map(member => ({ name: member.handle, hint: `${member.name} · ${member.project} · ${member.label}` })) : (ctx.ui.mentions || []).map(name => ({ name }))).filter(item => item.name && item.name.toLowerCase().startsWith(at[2].toLowerCase()));
+    return items.length ? { kind: 'mention', items, index: 0, from: before.length - at[2].length - 1 } : null;
+  }
+  const hash = /(^|\s)#(\d*)$/.exec(before);
+  if (hash && room) {
+    const items = (ctx.ui.snap.tasks || []).filter(task => task.active && !task.demo).filter(task => String(task.taskNumber || task.externalId).startsWith(hash[2])).slice(0, 8).map(task => ({ name: String(task.taskNumber || task.externalId), hint: task.titleEn || task.title }));
+    return items.length ? { kind: 'task', items, index: 0, from: before.length - hash[2].length - 1 } : null;
+  }
   return null;
 }
 

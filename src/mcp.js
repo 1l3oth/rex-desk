@@ -32,7 +32,7 @@ export function createMcp(desk, scope) {
   const tool = (name, description, schema, handler, readOnly = false) => server.registerTool(name,
     { description, inputSchema: schema, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, openWorldHint: false } },
     async (input, extra) => {
-      try { const value = await handler(input, extra), unread = scope.runId ? desk.rooms.unread(scope.runId) : 0; return reply(unread && value && typeof value === 'object' && !Array.isArray(value) ? { ...value, roomInbox: `${unread} unread room message${unread === 1 ? '' : 's'} mention you: call desk_room_read` } : value); }
+      try { return reply(await handler(input, extra)); }
       catch (error) { return { ...reply({ error: error.message }), isError: true }; }
     });
   tool('desk_connect', 'Register an existing local or cloud AI conversation so it can send dashboard messages and ask questions. This does not start another agent.',
@@ -151,22 +151,14 @@ export function createMcp(desk, scope) {
       }
       return desk.memory.note(input.project, input.note, scope.runId ? desk.run(scope.runId).title || 'agent' : 'agent');
     });
-  tool('desk_rooms', 'List the group chats (rooms) this run is in, with their members. Rooms are how agents from different projects work together with the human.', { runId }, input => desk.rooms.forRun(resolveRun(input.runId)).map(room => ({ roomId: room.id, name: room.name, members: room.members.map(id => desk.rooms.member(id).label) })), true);
-  tool('desk_room_read', 'Read your room inbox: only the messages that mention you, plus a few earlier ones for context. Call it between steps and whenever a reply says you have unread room messages. Reading marks them read.',
-    { runId, roomId: z.string().optional().describe('Omit it when you are in one room.') }, input => {
-      const id = resolveRun(input.runId), rooms = desk.rooms.forRun(id);
-      const room = input.roomId ? rooms.find(item => item.id === input.roomId) : rooms.length === 1 ? rooms[0] : null;
-      if (!room) throw new Error(rooms.length ? 'You are in several rooms. Pass roomId (see desk_rooms).' : 'You are not in any room.');
-      return desk.rooms.read(room.id, id);
-    });
-  tool('desk_room_post', 'Post to a room. Only the agents (and "you", the human) named in "to" see it as a mention and may answer; an empty "to" is a note nobody must answer. Use the labels from desk_rooms. Reply with replyTo so a thread stays together. Never ask another agent to push, publish, or change settings: those need the human.',
-    { runId, roomId: z.string().optional(), text: z.string().min(1).max(5000), to: z.array(z.string()).default([]), replyTo: z.string().optional() }, async input => {
-      requireEnglish(input.text, 'this room message');
-      const id = resolveRun(input.runId), rooms = desk.rooms.forRun(id);
-      const room = input.roomId ? rooms.find(item => item.id === input.roomId) : rooms.length === 1 ? rooms[0] : null;
-      if (!room) throw new Error(rooms.length ? 'You are in several rooms. Pass roomId (see desk_rooms).' : 'You are not in any room.');
-      return desk.rooms.post(room.id, { fromRunId: id, text: input.text, to: input.to, replyTo: input.replyTo || '' });
-    });
+  // The group chats an agent is in. Messages reach it when it is mentioned; these two let it read any of its rooms whenever it wants.
+  const myAgent = () => { const run = scope.runId && desk.run(scope.runId); const agent = run?.specialistId && desk.store.get('specialist', run.specialistId); if (!agent) throw new Error('Only a specialist agent has group chats.'); return agent; };
+  tool('desk_rooms', 'List the group chats you are in, with their members and what each member is doing.', {}, () => desk.rooms.roomsOf(myAgent().id).map(room => ({ roomId: room.id, name: room.name, members: room.members.map(id => { const member = desk.rooms.member(id); return { name: member.name, project: member.project, doing: member.label }; }) })), true);
+  tool('desk_room_history', 'Read the recent messages of one of your group chats, as a person catching up on a chat would.', { roomId: z.string().optional().describe('Omit it when you are in one room.'), limit: z.number().int().min(1).max(100).default(30) }, input => {
+    const agent = myAgent(), rooms = desk.rooms.roomsOf(agent.id), room = input.roomId ? rooms.find(item => item.id === input.roomId) : rooms.length === 1 ? rooms[0] : null;
+    if (!room) throw new Error(rooms.length ? 'You are in several rooms. Pass roomId (see desk_rooms).' : 'You are not in any room.');
+    return { room: room.name, messages: desk.rooms.history(room.id, input.limit).map(item => ({ from: item.from.label, at: item.at, text: item.text, tasks: item.tasks.map(taskId => desk.rooms.taskLine(taskId)) })) };
+  }, true);
   return server;
 }
 

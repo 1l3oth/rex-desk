@@ -57,14 +57,18 @@ export class ClaudeRunner {
     delete connections.rex_desk;
     const mode = sdkMode(this.run.permissionMode), resume = sessionId(this.run.sessionId);
     // Dangerous mode skips every permission prompt, so what the prompts used to refuse is refused by a hook instead.
-    const refuseClaudeHome = async input => this.run.role !== 'coordinator' && writesClaudeHome(input.tool_name, input.tool_input)
+    // A specialist reads its project but never writes in the original checkout: code changes happen in a task worktree.
+    const writesProject = input => this.run.role === 'specialist' && this.projectDirectory && ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(input.tool_name)
+      && path.resolve(String(input.tool_input?.file_path || input.tool_input?.notebook_path || '/')).toLowerCase().startsWith(`${path.resolve(this.projectDirectory).toLowerCase()}${path.sep}`);
+    const refuseClaudeHome = async input => writesProject(input) ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'You read this project here. Code changes happen on a task in its own worktree, after the person assigns the task.' } }
+      : this.run.role !== 'coordinator' && writesClaudeHome(input.tool_name, input.tool_input)
       ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Rex Desk agents do not write Claude memory, instructions, or settings. Say what you learned in desk_message instead, and continue the task.' } } : {};
     const options = { cwd: this.cwd, env, abortController: this.controller,
       permissionMode: mode, ...(mode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
       ...(this.run.effort ? { effort: this.run.effort } : {}),
       // Claude Code's own question prompt would not reach the dashboard; the agent asks through desk_ask instead.
       disallowedTools: ['AskUserQuestion'],
-      additionalDirectories: [this.artifactDirectory, this.uploadsDirectory].filter(Boolean),
+      additionalDirectories: [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
       settingSources: ['user', 'project', 'local'],
       hooks: { PreToolUse: [{ hooks: [refuseClaudeHome] }] },
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),

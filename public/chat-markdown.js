@@ -3,7 +3,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&a
 const LINK = 'target="_blank" rel="noopener noreferrer"';
 const CODE = '\u0000';
 
-function inline(text, mentions = []) {
+function inline(text, mentions = [], tasks = {}) {
   const codes = [];
   let html = esc(text).replace(/`([^`\n]+)`/g, (_, code) => { codes.push(code); return `${CODE}${codes.length - 1}${CODE}`; });
   html = html.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g, `<a href="$2" ${LINK}>$1</a>`);
@@ -12,6 +12,7 @@ function inline(text, mentions = []) {
   html = html.replace(/(^|[^*\w])\*([^*\s][^*\n]*?)\*(?!\*)/g, '$1<em>$2</em>').replace(/(^|[^_\w])_([^_\s][^_\n]*?)_(?![_\w])/g, '$1<em>$2</em>');
   html = html.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
   for (const name of mentions) html = html.replace(new RegExp(`(^|\\s)@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_.-])`, 'giu'), `$1<span class="mention">@${esc(name)}</span>`);
+  html = html.replace(/(^|[\s(])#(\d{2,})(?![\w])/g, (match, before, number) => (tasks[number] ? `${before}<span class="taskref" title="${esc(tasks[number])}">#${number} ${esc(tasks[number])}</span>` : match));
   return html.replace(new RegExp(`${CODE}(\\d+)${CODE}`, 'g'), (_, index) => `<code>${codes[Number(index)]}</code>`);
 }
 
@@ -34,9 +35,9 @@ function renderList(items) {
   return build(items[0].indent);
 }
 
-export function markdown(source, { mentions = [] } = {}) {
+export function markdown(source, { mentions = [], tasks = {} } = {}) {
   const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n'), out = [];
-  const inl = text => inline(text, mentions);
+  const inl = text => inline(text, mentions, tasks);
   for (let i = 0; i < lines.length;) {
     const line = lines[i];
     if (!line.trim()) { i += 1; continue; }
@@ -57,7 +58,7 @@ export function markdown(source, { mentions = [] } = {}) {
     if (isRule(line)) { out.push('<hr>'); i += 1; continue; }
     if (/^\s*>/.test(line)) {
       const quote = []; while (i < lines.length && /^\s*>/.test(lines[i])) quote.push(lines[i++].replace(/^\s*>\s?/, ''));
-      out.push(`<blockquote>${markdown(quote.join('\n'), { mentions })}</blockquote>`); continue;
+      out.push(`<blockquote>${markdown(quote.join('\n'), { mentions, tasks })}</blockquote>`); continue;
     }
     if (listMarker(line)) {
       const items = [];

@@ -39,3 +39,12 @@ export function branchNameFromCli(task, { env = process.env, cwd, run = execFile
   return new Promise(resolve => run(executable.command, [...executable.args, '-p', '--model', 'haiku', '--max-turns', '1', prompt],
     { env: clean, cwd, timeout: 90000, windowsHide: true, maxBuffer: 1 << 20 }, (error, stdout) => resolve(error ? null : parseBranchName(stdout))));
 }
+
+// Whether a title is already English, so only other languages need a name.
+export function isMostlyEnglish(text) {
+  const value = String(text || '');
+  const foreign = (value.match(/[\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/gu) || []).length;
+  const latin = (value.match(/\p{Script=Latin}/gu) || []).length;
+  return foreign === 0 || foreign < latin * 0.3;
+}
+export const sentenceCase = text => { const value = String(text || '').trim(); return value ? value[0].toUpperCase() + value.slice(1) : value; };

@@ -33,7 +33,7 @@ export class Specialists {
     const repository = this.store.config().repositories.find(item => path.resolve(item.path).toLowerCase() === path.resolve(project.path).toLowerCase());
     const item = { id: randomUUID(), name: clean, slug, projectSlug: project.slug, projectPath: project.path, repositoryId: repository?.id || '', purpose: project.purpose || '',
       rules: String(rules).slice(0, 4000), unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12),
-      provider: 'claude', model: String(model || '').slice(0, 80), createdBy: String(by).slice(0, 40), cloneOf, createdAt: now(), updatedAt: now() };
+      provider: 'claude', model: String(model || '').slice(0, 80), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, createdAt: now(), updatedAt: now() };
     this.store.put('specialist', item.id, item); this.writeCard(item); return item;
   }
   update(id, { rules, unsure, provider, model }) {
@@ -60,6 +60,27 @@ export class Specialists {
     rmSync(this.cardFile(item), { force: true }); this.store.delete('specialist', id); return { removed: true };
   }
 
+  // What the agent is doing right now, for the chat: working on a task, answering a message, waiting for the person, or idle.
+  status(agent) {
+    const working = ['starting', 'running', 'queued', 'verifying'], runs = this.store.list('run').filter(run => run.specialistId === agent.id);
+    const task = runs.find(run => run.role === 'worker' && [...working, 'waiting'].includes(run.state));
+    if (task) {
+      const record = this.store.get('task', task.taskId) || {};
+      return task.state === 'waiting' ? { state: 'waiting', label: 'Needs you', taskId: task.taskId, runId: task.id }
+        : { state: 'busy', label: `Working on #${record.taskNumber || record.externalId || ''} ${record.titleEn || record.title || ''}`.replace(/\s+/g, ' ').trim(), taskId: task.taskId, runId: task.id };
+    }
+    const session = runs.find(run => run.role === 'specialist');
+    if (session?.state === 'waiting') return { state: 'waiting', label: 'Needs you', runId: session.id };
+    if (session && working.includes(session.state)) return { state: 'replying', label: 'Replying…', runId: session.id };
+    return { state: 'idle', label: 'Idle', runId: session?.id || '' };
+  }
+  // The agent's own folder. It is named by id, so renaming the agent never loses its session.
+  homeDirectory(agent) { return this.memory.file('agents', 'home', agent.id); }
+  identity(agent) {
+    return [`You are ${agent.name}, the specialist agent for the project "${agent.projectSlug}" at ${agent.projectPath}. You keep one conversation of your own, and you take part in the person's group chats when you are mentioned.`,
+      agent.purpose ? `What the project is for: ${agent.purpose}` : '', agent.rules ? `Rules from the person:\n${agent.rules}` : '', agent.unsure?.length ? `Still unsure about: ${agent.unsure.join('; ')}` : '',
+      `Read your project's memory first: desk_memory("${agent.projectSlug}"). Here you only read the project and answer; you never edit the original checkout. Code changes happen on a task, in its own worktree, after the person assigns it. Always call a task by its English name. Use desk_rooms and desk_room_history to read any group chat you are in.`].filter(Boolean).join('\n');
+  }
   writeCard(item) {
     const lines = [`# ${item.name}`, '', `- Project: ${item.projectSlug} (\`${item.projectPath}\`)`, `- Agent: Claude Code${item.model ? ` · ${item.model}` : ''}`,
       `- Created by: ${item.createdBy}${item.cloneOf ? ` · duplicate of ${this.store.get('specialist', item.cloneOf)?.name || 'another agent'}` : ''}`, `- Updated: ${item.updatedAt}`, '',

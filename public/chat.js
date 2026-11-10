@@ -1,16 +1,18 @@
 import { agentsRail, agentStage, agentAction } from '/chat-agents.js';
-import { stepsHtml } from '/chat-activity.js';
+import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
+import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction } from '/chat-rooms.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
-const ui = { snap: null, view: { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map() };
+const ui = { snap: null, view: { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map(), termOpen: true };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`; };
 const provider = name => name === 'codex' ? 'Codex (retired)' : name === 'claude' ? 'Claude Code' : 'Agent';
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
-  commands: { sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), settings: () => { location.href = '/classic'; } }, get initials() { return initials; } };
+  bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value),
+  commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), settings: () => { location.href = '/classic'; } }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
 async function api(path, { method = 'GET', data } = {}) {
@@ -42,21 +44,21 @@ function railItem(type, id, { dot = '', name, sub = '', badge = 0, warn = false 
   return `<button class="item ${active ? 'active' : ''}" data-open="${type}" data-id="${esc(id || '')}">${dot ? `<span class="dot ${dot}"></span>` : ''}<span class="name">${esc(name)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span>${badge ? `<span class="badge ${warn ? 'warn' : ''}">${badge}</span>` : ''}</button>`;
 }
 function renderRail() {
-  const snap = ui.snap, runs = snap.runs.filter(run => run.role !== 'coordinator' && !run.setupSourceId), asks = pending().length + (snap.wakes || []).length;
+  const snap = ui.snap, runs = snap.runs.filter(run => run.role !== 'coordinator' && run.role !== 'specialist' && !run.setupSourceId), asks = pending().length;
   const group = name => runs.filter(run => stateGroup(run) === name);
   const line = run => railItem('run', run.id, { dot: stateTone(run), name: runTitle(run), sub: `${provider(run.provider)} · ${stateLabel(run)} · ${ago(run.updatedAt || run.createdAt)}`, badge: pending(run.id).length, warn: true });
-  const done = group('done'), shownDone = ui.done ? done : done.slice(0, 6);
-  const main = mainRun(), mem = ui.memory;
+  const done = group('done'), shownDone = ui.done ? done : done.slice(0, 4), main = mainRun();
+  const tasks = (snap.tasks || []).filter(task => task.active && !task.demo), busy = (snap.specialists || []).filter(agent => agent.status?.state === 'busy').length;
   return `<div class="rail-head"><span class="dot ${snap.syncing ? 'working' : 'good'}"></span><strong>Rex Desk</strong><span class="spacer"></span><button class="btn small" data-action="sync" title="Sync issues from the tracker">Sync</button></div><div class="rail-scroll">
     ${railItem('main', '', { dot: main ? stateTone(main) : '', name: 'Main agent', sub: main ? `${provider(main.provider)} · ${stateLabel(main)}` : 'Not started' })}
     ${railItem('inbox', '', { name: 'Needs you', sub: asks ? `${asks} waiting` : 'Nothing waiting', badge: asks, warn: true })}
     <h3>Rooms <button data-action="new-room" title="New room" aria-label="New room">+</button></h3>
-    ${snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>'}
-    ${['working', 'review'].map(name => { const list = group(name); return list.length ? `<h3>${name === 'working' ? 'Working' : 'Review'} <span>${list.length}</span></h3>${list.map(line).join('')}` : ''; }).join('')}
-    <h3>Done <span>${done.length}</span></h3>${shownDone.map(line).join('')}${done.length > 6 ? `<button class="item" data-action="toggle-done"><span class="name sub">${ui.done ? 'Show fewer' : `Show all ${done.length}`}</span></button>` : ''}
+    ${snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { dot: room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : '', name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>'}
     ${agentsRail(ctx)}
-    <h3>Projects <button data-action="scan" title="Scan this computer for projects" aria-label="Scan this computer">↻</button></h3>
-    ${mem?.projects?.length ? mem.projects.map(project => railItem('project', project.slug, { name: project.slug, sub: project.purpose || 'no description' })).join('') : '<p class="rail-empty">Not scanned. Press ↻ to find your projects.</p>'}
+    <h3>Tasks</h3>
+    ${railItem('tasks', '', { name: 'All tasks', sub: `${tasks.length} issues${busy ? ` · ${busy} being worked on` : ''}` })}
+    ${['working', 'review'].map(name => { const list = group(name); return list.length ? `<h3>${name === 'working' ? 'Runs working' : 'Runs to review'} <span>${list.length}</span></h3>${list.map(line).join('')}` : ''; }).join('')}
+    ${done.length ? `<h3>Runs done <span>${done.length}</span></h3>${shownDone.map(line).join('')}${done.length > 4 ? `<button class="item" data-action="toggle-done"><span class="name sub">${ui.done ? 'Show fewer' : `Show all ${done.length}`}</span></button>` : ''}` : ''}
   </div><div class="rail-foot"><a href="/classic">Issues &amp; settings</a><button class="btn small" data-action="theme">Theme</button></div>`;
 }
 
@@ -139,17 +141,9 @@ function wakeCard(wake) {
 // ---------- stage ----------
 function stageModel() {
   const { type, id } = ui.view, snap = ui.snap;
-  if (type === 'room') {
-    const room = roomById(id); if (!room) return emptyStage('That room is gone.');
-    const names = ['you', ...room.members.map(member => member.label)];
-    const messages = (snap.messages || []).filter(message => message.roomId === id).sort((left, right) => left.seq - right.seq);
-    const body = messages.length ? messages.map(message => message.from.type === 'system' ? note(esc(message.text))
-      : bubble({ mine: message.from.type === 'human', name: message.from.label, time: hhmm(message.at), html: markdown(message.text, { mentions: names }) })).join('') : `<div class="empty"><h2>${esc(room.name)}</h2><p>Mention an agent with @ to talk to it. Agents answer only when they are mentioned.</p></div>`;
-    const free = snap.runs.filter(run => run.role !== 'coordinator' && !room.members.some(member => member.runId === run.id) && stateGroup(run) !== 'done');
-    return { title: room.name, meta: `${room.members.length} agents`, chips: '', head: '', composer: { placeholder: 'Message the room. Use @ to mention an agent…', mentions: names },
-      members: `<div class="members">${room.members.map(member => `<span class="chip ${member.state === 'running' ? 'working' : ''}">${esc(member.label)} · ${esc(member.state)} <button class="btn small x" data-action="room-remove" data-id="${esc(member.runId)}" title="Remove">×</button></span>`).join('')}${free.length ? `<select data-action="room-add"><option value="">+ Add agent…</option>${free.map(run => `<option value="${esc(run.id)}">${esc(runTitle(run))}</option>`).join('')}</select>` : ''}</div>`,
-      feed: `${body}${(snap.wakes || []).filter(wake => wake.roomId === id).map(wakeCard).join('')}` };
-  }
+  if (type === 'room') return roomStage(ctx);
+  if (type === 'tasks') return tasksStage(ctx);
+  if (type === 'task') return taskStage(ctx);
   if (type === 'inbox') {
     const asks = pending(), wakes = snap.wakes || [];
     return { title: 'Needs you', meta: `${asks.length + wakes.length} waiting`, feed: asks.length + wakes.length ? asks.map(decisionCard).join('') + wakes.map(wakeCard).join('') : '<div class="empty"><h2>All clear</h2><p>Questions, approvals and wake-ups from your agents show up here.</p></div>' };
@@ -164,8 +158,8 @@ function stageModel() {
   const items = [...transcript(ui.events.get(run.id) || []), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state);
   const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`)
     + pending(run.id).map(item => `<div class="msg"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
-  const stop = live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : '';
-  return { title: runTitle(run), meta: `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions: stop, feed,
+  const shells = terminalItems(items), stop = (shells.length && !ui.termOpen ? `<button class="btn small" data-action="term-open">Terminal (${shells.length})</button> ` : '') + (live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : '');
+  return { title: runTitle(run), meta: `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions: stop, feed, side: shells.length && ui.termOpen ? terminalHtml(shells, { esc, hhmm }) : '',
     working: workingStates.includes(run.state), composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : (run.provider === 'codex' ? 'Message Claude Code. It takes over from Codex with the chat so far…' : `Message ${provider(run.provider)}. It picks up where it left off…`), mentions: [] } };
 }
 const quick = (label, text) => `<button class="chip-btn" data-action="quick" data-text="${esc(text)}">${esc(label)}</button>`;
@@ -178,9 +172,11 @@ function renderStage(full) {
   const model = stageModel(), stage = document.getElementById('stage');
   const head = `<div class="stage-head"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}<span class="spacer"></span>${model.actions || ''}</div>`;
   if (full || !document.getElementById('feed')) {
-    stage.innerHTML = `<div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}`;
+    stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}</div><aside class="side" id="side"></aside>`;
     ui.stick = true; redrawAttachments(ctx);
-  } else { document.getElementById('head').innerHTML = head; document.getElementById('members').innerHTML = model.members || ''; }
+  } else { document.getElementById('head').innerHTML = head; const slot = document.getElementById('members'); if (!slot.contains(document.activeElement)) slot.innerHTML = model.members || ''; }
+  document.getElementById('feed').className = `feed ${model.feedClass || ''}`;
+  drawSide(model.side || '');
   const feed = document.getElementById('feed'), inner = document.getElementById('feed-inner');
   // Someone typing in an approval form keeps their text: the feed is not redrawn under them.
   // A form that is gone from the new view (it was answered) never holds the redraw back.
@@ -188,6 +184,14 @@ function renderStage(full) {
   const editing = !full && feed.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName) && (!form || model.feed.includes(`data-interaction="${form.dataset.interaction}"`));
   if (!editing) { inner.innerHTML = model.feed; if (ui.stick) feed.scrollTop = feed.scrollHeight; }
   ui.mentions = model.composer?.mentions || [];
+}
+// The terminal panel keeps its scroll place unless it was at the bottom, where it follows the newest command.
+function drawSide(html) {
+  const side = document.getElementById('side'); if (!side) return;
+  const body = document.getElementById('side-body'), keep = body ? { top: body.scrollTop, bottom: body.scrollHeight - body.scrollTop - body.clientHeight < 40 } : { top: 0, bottom: true };
+  if (side.dataset.html !== html) { side.innerHTML = html; side.dataset.html = html; }
+  side.classList.toggle('on', Boolean(html));
+  const fresh = document.getElementById('side-body'); if (fresh) fresh.scrollTop = keep.bottom ? fresh.scrollHeight : keep.top;
 }
 const draftKey = () => `${ui.view.type}:${ui.view.id || ''}`;
 
@@ -227,7 +231,8 @@ async function send() {
   const text = `${typed || 'See the attached files.'}${attachmentText(ctx)}`, picked = pickedOptions(ctx);
   const { type, id } = ui.view; box.disabled = true;
   try {
-    if (type === 'room') await api(`/rooms/${id}/messages`, { method: 'POST', data: { text } });
+    if (type === 'room' && /^\/assign\b/i.test(typed)) await assignFromRoom(id, typed);
+    else if (type === 'room') await api(`/rooms/${id}/messages`, { method: 'POST', data: { text } });
     else if (type === 'main' && !mainRun()) await api('/main', { method: 'POST', data: { prompt: text, ...picked } });
     else {
       const run = type === 'main' ? mainRun() : runById(id);
@@ -238,21 +243,19 @@ async function send() {
   } catch (error) { toast(error.message, true); }
   finally { box.disabled = false; box.focus(); }
 }
+// /assign @agent #task: gives a task to an agent from the room.
+async function assignFromRoom(roomId, command) {
+  const room = ui.snap.rooms.find(item => item.id === roomId), handle = /@([\p{L}\p{N}_.-]+)/u.exec(command)?.[1]?.toLowerCase(), number = /#(\d{2,})/.exec(command)?.[1];
+  const member = room?.members.find(item => item.handle.toLowerCase() === handle || item.name.toLowerCase() === handle), task = (ui.snap.tasks || []).find(item => String(item.taskNumber) === number || String(item.externalId) === number);
+  if (!member) throw new Error('Name an agent in this room: /assign @agent #task');
+  if (!task) throw new Error('Name a task by its number: /assign @agent #49760');
+  await api(`/specialists/${member.id}/assign`, { method: 'POST', data: { taskId: task.id, roomId } });
+  toast(`${member.name} is on it.`);
+}
 async function syncIssues() { toast('Syncing issues…'); await api('/sync', { method: 'POST', data: {} }); toast('Issues synced.'); await refresh(); }
 async function scanProjects() { toast('Scanning this computer for projects…'); const result = await api('/memory/scan', { method: 'POST', data: {} }); toast(`Found ${result.count} projects.`); await refresh(); }
 async function stopAgent() { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast('No agent to stop here.', true); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
-function newRoomDialog() {
-  const runs = ui.snap.runs.filter(run => run.role !== 'coordinator' && stateGroup(run) !== 'done');
-  const back = document.createElement('div'); back.className = 'dialog-back';
-  back.innerHTML = `<form class="dialog"><h2>New room</h2><label>Name<input type="text" name="name" placeholder="Export bug across flow-was and desktop" required></label><label>Agents in the room</label>${runs.length ? runs.map(run => `<label class="pick"><input type="checkbox" name="member" value="${esc(run.id)}"> ${esc(runTitle(run))}</label>`).join('') : '<p class="muted">No working agents yet. You can add them later.</p>'}<div class="row"><button class="btn primary">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`;
-  document.body.append(back);
-  back.addEventListener('click', event => { if (event.target === back || event.target.dataset.close !== undefined) back.remove(); });
-  back.querySelector('form').addEventListener('submit', async event => {
-    event.preventDefault(); const form = new FormData(event.target);
-    try { const room = await api('/rooms', { method: 'POST', data: { name: form.get('name'), members: form.getAll('member') } }); back.remove(); await refresh(); open('room', room.id); }
-    catch (error) { toast(error.message, true); }
-  });
-}
+function newRoomDialog() { openRoomDialog(ctx); }
 document.addEventListener('click', async event => {
   const target = event.target.closest('[data-open],[data-action]'); if (!target) return;
   if (target.dataset.open) { event.preventDefault(); return open(target.dataset.open, target.dataset.id); }
@@ -261,6 +264,9 @@ document.addEventListener('click', async event => {
     if (action?.startsWith('spec-')) await agentAction(ctx, action);
     else if (action === 'send') await send();
     else if (action === 'new-room') newRoomDialog();
+    else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
+    else if (action === 'term-open') { ui.termOpen = true; renderAll(); }
+    else if (action === 'room-remove' || action === 'task-assign') await roomAction(ctx, action, target);
     else if (action === 'quick') { await api('/main', { method: 'POST', data: { prompt: target.dataset.text } }); await refresh(); }
     else if (action === 'sync') await syncIssues();
     else if (action === 'toggle-done') { ui.done = !ui.done; renderAll(); }
@@ -269,12 +275,11 @@ document.addEventListener('click', async event => {
     else if (action === 'scan') await scanProjects();
     else if (action === 'wake-approve') { await api(`/rooms/x/wakes/${target.dataset.id}`, { method: 'POST', data: {} }); toast('Agent resumed.'); await refresh(); }
     else if (action === 'wake-dismiss') { await api(`/rooms/x/wakes/${target.dataset.id}`, { method: 'DELETE' }); await refresh(); }
-    else if (action === 'room-remove') { await api(`/rooms/${ui.view.id}/members/${target.dataset.id}`, { method: 'DELETE' }); await refresh(); }
   } catch (error) { toast(error.message, true); }
 });
 document.addEventListener('change', async event => {
   if (event.target.dataset.action === 'room-add' && event.target.value) {
-    try { await api(`/rooms/${ui.view.id}/members`, { method: 'POST', data: { runId: event.target.value } }); await refresh(); } catch (error) { toast(error.message, true); }
+    try { await api(`/rooms/${ui.view.id}/members`, { method: 'POST', data: { agentId: event.target.value } }); await refresh(); } catch (error) { toast(error.message, true); }
   }
   if (event.target.tagName === 'SELECT' && event.target.closest('[data-interaction]')) event.target.closest('label')?.querySelector('.hidden,input[name$="__custom"]')?.classList.toggle('hidden', event.target.value !== '__custom');
 });
@@ -293,6 +298,13 @@ document.addEventListener('submit', async event => {
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
 
 initComposer(ctx);
+// A shell step in the chat points to its entry in the terminal panel.
+document.addEventListener('click', event => {
+  const link = event.target.closest?.('[data-term-focus]'); if (!link) return;
+  ui.termOpen = true; renderAll();
+  const entry = document.getElementById(`term-${link.dataset.termFocus}`); if (!entry) return;
+  entry.scrollIntoView({ block: 'center' }); entry.classList.add('flash'); setTimeout(() => entry.classList.remove('flash'), 1200);
+});
 // In a question card, the keys 1 to 9 pick that option (when not typing).
 document.addEventListener('keydown', event => {
   if (!/^[1-9]$/.test(event.key) || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -310,6 +322,7 @@ document.addEventListener('click', event => {
   else { for (const other of chip.parentElement.children) other.classList.toggle('on', other === chip); input.value = label; }
   input.focus(); input.setSelectionRange(input.value.length, input.value.length);
 });
+document.addEventListener('input', event => { if (event.target.id === 'task-filter') { ui.taskFilter = event.target.value; renderAll(); } });
 document.addEventListener('toggle', event => { const group = event.target, key = group?.dataset?.steps !== undefined ? group.dataset.steps : group?.dataset?.term !== undefined ? `term:${group.dataset.term}` : null; if (key !== null) ui.openSteps.set(key, group.open); }, true);
 document.addEventListener('keydown', event => {
   const input = event.target.closest?.('.qinput'); if (!input || event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
