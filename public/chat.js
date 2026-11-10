@@ -95,7 +95,7 @@ function answerHtml(item) {
   return bubble({ mine: true, name: 'You', time: hhmm(item.at), html: body });
 }
 function transcript(events) {
-  const items = [];
+  const items = [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event]));
   for (const event of events) {
     if (['command-output', 'dev-output'].includes(event.kind)) continue;
     if (event.kind === 'human-message') items.push({ role: 'human', text: event.text, at: event.createdAt });
@@ -103,7 +103,8 @@ function transcript(events) {
     else if (event.kind === 'agent-result') items.push({ role: 'status', text: `Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${event.cost ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
     else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
     else if (event.kind === 'agent-tool' && ['desk_ask', 'desk_message', 'desk_elicit'].includes(event.tool)) continue; // shown as chat messages already
-    else if (event.kind === 'agent-tool') items.push({ role: 'tool', tool: event.tool, input: event.input, failed: event.failed, text: event.text, at: event.createdAt });
+    else if (event.kind === 'agent-tool-result') continue;
+    else if (event.kind === 'agent-tool') items.push({ role: 'tool', id: event.id, output: results.get(event.id), tool: event.tool, input: event.input, failed: event.failed, text: event.text, at: event.createdAt });
     else if (event.kind === 'error') items.push({ role: 'error', text: event.text || event.message || 'The run needs attention.', at: event.createdAt });
     else if (event.visible) items.push({ role: 'status', text: event.text || event.message || event.kind.replaceAll('-', ' '), at: event.createdAt });
   }
@@ -309,7 +310,7 @@ document.addEventListener('click', event => {
   else { for (const other of chip.parentElement.children) other.classList.toggle('on', other === chip); input.value = label; }
   input.focus(); input.setSelectionRange(input.value.length, input.value.length);
 });
-document.addEventListener('toggle', event => { const group = event.target; if (group?.dataset?.steps !== undefined) ui.openSteps.set(group.dataset.steps, group.open); }, true);
+document.addEventListener('toggle', event => { const group = event.target, key = group?.dataset?.steps !== undefined ? group.dataset.steps : group?.dataset?.term !== undefined ? `term:${group.dataset.term}` : null; if (key !== null) ui.openSteps.set(key, group.open); }, true);
 document.addEventListener('keydown', event => {
   const input = event.target.closest?.('.qinput'); if (!input || event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
   const form = input.closest('form'), all = [...form.querySelectorAll('.qinput:not(.hidden)')], next = all[all.indexOf(input) + 1];

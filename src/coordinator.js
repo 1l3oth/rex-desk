@@ -132,7 +132,7 @@ export class Desk {
   // Watch Orca runs that survived a restart until their terminal ends, then settle them like any finished run.
   reattachOrca(options = {}) {
     for (const run of this.store.list('run').filter(item => item.reattach)) {
-      const controller = new AbortController(), watcher = new OrcaRunner({ run, signal: controller.signal, orcaOptions: options.orcaOptions, pollMs: options.pollMs, isDone: () => terminalStates.has(this.run(run.id).state), session: run.worktree ? this.agentSessionFinder(run) : null, event: (kind, data) => this.store.event(run.id, kind, data, ['agent-text', 'agent-tool'].includes(kind)) });
+      const controller = new AbortController(), watcher = new OrcaRunner({ run, signal: controller.signal, orcaOptions: options.orcaOptions, pollMs: options.pollMs, isDone: () => terminalStates.has(this.run(run.id).state), session: run.worktree ? this.agentSessionFinder(run) : null, event: (kind, data) => this.store.event(run.id, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result'].includes(kind)) });
       this.live.set(run.id, { controller, runner: watcher }); this.patchRun(run.id, { reattach: false });
       this.store.event(run.id, 'phase', { text: 'Rex Desk restarted; still watching the Orca terminal' }, true);
       void watcher.watch(run.sessionId.slice(5), { reattached: true })
@@ -306,7 +306,7 @@ export class Desk {
         ask: request => this.ask(runId, request), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
-          this.store.event(runId, kind, data, ['agent-text', 'agent-tool'].includes(kind));
+          this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result'].includes(kind));
         } };
       const resumeSessionId = this.agentSessionId(run);
       const runner = this.runnerFactory ? this.runnerFactory(options)

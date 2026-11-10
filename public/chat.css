@@ -191,3 +191,18 @@ code,pre{font-family:var(--mono);font-size:12px}
 .md .a-center{text-align:center}.md .a-right{text-align:right}
 .md pre.md-code{margin:6px 0 10px}
 .md td:first-child{white-space:nowrap;font-weight:500}
+
+/* ---- agent replies without a border, like a document; terminal blocks ---- */
+.feed-inner{max-width:780px}
+.msg:not(.mine) .avatar,.msg.mine .avatar{display:none}
+.msg:not(.mine) .bubble{background:transparent;border:0;padding:2px 0;max-width:100%}
+.msg:not(.mine) .who{display:none}
+.msg.mine{justify-content:flex-start}.msg.mine .bubble{background:var(--mine);border:0;border-radius:18px;padding:8px 14px}.msg.mine .who{display:none}
+.msg .md{font-size:15.5px;line-height:1.65}
+.bubble.typing{padding:6px 0!important}
+.steps{margin-left:0}.qa{margin-left:0}
+.term{margin:2px 0}.term summary{display:flex;gap:10px;align-items:baseline;cursor:pointer;list-style:none}.term summary::-webkit-details-marker{display:none}
+.term summary .what{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tstate{font-size:11px;flex:none}.tstate.ok{color:var(--good)}.tstate.bad{color:var(--bad)}.tstate.run{color:var(--accent)}
+.term-out{margin:6px 0 4px;padding:10px 12px;background:#0d0f12;color:#d6dae0;border:1px solid var(--line);border-radius:10px;font-family:var(--mono);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:340px;overflow:auto}
+.term-out .prompt{color:#7ee787}

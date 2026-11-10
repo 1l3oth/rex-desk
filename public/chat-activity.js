@@ -29,6 +29,11 @@ export function stepsHtml(group, { esc, hhmm, live, openKeys, specialists, link 
   const key = String(group[0].at), last = group.at(-1);
   const state = openKeys.get(key), open = state === undefined ? live : state;
   const lines = group.map(item => {
+    if ((item.tool === 'Bash' || item.tool === 'PowerShell') && item.id) {
+      const out = item.output, open = openKeys.get(`term:${item.id}`) ?? !out;
+      return `<li class="step term-step"><details class="term" data-term="${esc(item.id)}" ${open ? 'open' : ''}><summary><span class="when">${esc(hhmm(item.at))}</span><span class="what">${esc(toolLine(item))}</span><span class="tstate ${out ? (out.failed ? 'bad' : 'ok') : 'run'}">${out ? (out.failed ? 'failed' : 'done') : 'running…'}</span></summary><pre class="term-out"><span class="prompt">${item.tool === 'PowerShell' ? 'PS&gt; ' : '$ '}</span>${esc(item.input?.command || '')}
+${esc(out?.text || '')}</pre></details></li>`;
+    }
     const created = item.tool === 'desk_create_specialist' ? specialists.find(agent => agent.name.toLowerCase() === String(item.input?.name || '').toLowerCase()) : null;
     return `<li class="step ${item.failed ? 'bad' : ''}"><span class="when">${esc(hhmm(item.at))}</span><span class="what">${esc(toolLine(item))}</span>${created ? link(created) : ''}</li>`;
   }).join('');

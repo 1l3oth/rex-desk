@@ -105,3 +105,19 @@ test('after a restart, headless agents that were just cut off pick their session
   assert.ok(store.events('fresh', { visible: true }).some(item => /picking up where it stopped/.test(item.text || '')));
   for (const id of ['old', 'orca', 'stopped']) assert.equal(store.get('run', id).state, 'interrupted', `${id} is left alone`);
 });
+
+test('a shell command and its output reach the chat as a terminal block, with colour codes and secrets removed', async () => {
+  const seen = [], events = [], ESC = String.fromCharCode(27);
+  const messages = [{ type: 'system', subtype: 'init', session_id: SESSION },
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'cat notes.txt && echo done', description: 'x' } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'b1', is_error: false, content: `plain ${ESC}[31mred${ESC}[0m
+DB_PASSWORD=hunter2
+done` }] } },
+    { type: 'result', subtype: 'success', result: 'ok', is_error: false }];
+  await new ClaudeRunner({ sdk: fakeSdk(messages, seen), run: { id: 'r', role: 'coordinator' }, cwd: 'x', token: 't', mcpUrl: 'http://127.0.0.1:1/mcp', event: (kind, data) => events.push([kind, data]), ask: async () => ({ action: 'accept' }), controller: new AbortController() }).start('Go');
+  const call = events.find(([kind]) => kind === 'agent-tool')[1], result = events.find(([kind]) => kind === 'agent-tool-result')[1];
+  assert.equal(call.id, 'b1'); assert.equal(call.input.command, 'cat notes.txt && echo done');
+  assert.equal(result.id, 'b1'); assert.equal(result.failed, false);
+  assert.ok(result.text.includes('plain red'), 'colour codes are gone'); assert.ok(!result.text.includes(ESC));
+  assert.ok(!result.text.includes('hunter2') && result.text.includes('[redacted]'), 'a password in the output is hidden');
+});

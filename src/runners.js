@@ -35,7 +35,15 @@ export function writesClaudeHome(name, input = {}) {
 const sdkMode = mode => ({ manual: 'default' }[mode] || mode || 'bypassPermissions');
 // What a tool call shows in the chat: its name and a few short fields, never file contents.
 const hiddenInput = new Set(['content', 'new_string', 'old_string', 'text', 'body']);
-const toolInput = input => Object.fromEntries(Object.entries(input || {}).slice(0, 8).filter(([key, value]) => !hiddenInput.has(key) && ['string', 'number', 'boolean'].includes(typeof value)).map(([key, value]) => [key, typeof value === 'string' ? value.slice(0, 240) : value]));
+const toolInput = input => Object.fromEntries(Object.entries(input || {}).slice(0, 8).filter(([key, value]) => !hiddenInput.has(key) && ['string', 'number', 'boolean'].includes(typeof value)).map(([key, value]) => [key, typeof value === 'string' ? value.slice(0, key === 'command' ? 2000 : 240) : value]));
+// A shell command's output, for the terminal view in the chat: colour codes removed, obvious secrets hidden, long output cut in the middle.
+const ansiCodes = /\u001b\[[0-9;?]*[A-Za-z]/g;
+const secretLine = /(api[_-]?key|secret|passw(?:or)?d|passphrase|token|authorization|bearer)\s*[:=]\s*\S+/gi;
+const terminalText = value => {
+  const raw = (Array.isArray(value) ? value.map(part => part.text || '').join('\n') : String(value || '')).replace(ansiCodes, '').replace(secretLine, '$1: [redacted]');
+  return raw.length > 6000 ? `${raw.slice(0, 3000)}\n… ${raw.length - 6000} characters left out …\n${raw.slice(-3000)}` : raw;
+};
+const isShell = name => name === 'Bash' || name === 'PowerShell';
 const sessionId = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '')) ? String(value) : '';
 
 export class ClaudeRunner {
@@ -85,11 +93,15 @@ export class ClaudeRunner {
         // What the agent says shows in the chat; its tool calls stay in the journal.
         const text = (content || []).filter(block => block.type === 'text').map(block => block.text).join('\n').trim();
         if (text) this.event('agent-text', { text });
-        for (const block of content || []) if (block.type === 'tool_use') this.event('agent-tool', { tool: String(block.name).replace(/^mcp__[a-z0-9_]+?__/i, ''), input: toolInput(block.input) });
+        for (const block of content || []) if (block.type === 'tool_use') { if (isShell(block.name)) (this.terminals ||= new Set()).add(block.id); this.event('agent-tool', { id: block.id, tool: String(block.name).replace(/^mcp__[a-z0-9_]+?__/i, ''), input: toolInput(block.input) }); }
         this.event('agent-operation', { type: 'assistant', content });
       }
       if (message.type === 'user') {
-        for (const block of Array.isArray(message.message?.content) ? message.message.content : []) if (block.type === 'tool_result' && block.is_error) this.event('agent-tool', { tool: 'result', failed: true, text: (Array.isArray(block.content) ? block.content.map(part => part.text || '').join(' ') : String(block.content || '')).slice(0, 300) });
+        for (const block of Array.isArray(message.message?.content) ? message.message.content : []) {
+          if (block.type !== 'tool_result') continue;
+          if (this.terminals?.has(block.tool_use_id)) this.event('agent-tool-result', { id: block.tool_use_id, text: terminalText(block.content), failed: Boolean(block.is_error) });
+          else if (block.is_error) this.event('agent-tool', { tool: 'result', failed: true, text: (Array.isArray(block.content) ? block.content.map(part => part.text || '').join(' ') : String(block.content || '')).slice(0, 300) });
+        }
         this.event('agent-operation', { type: 'tool-result', content: message.message?.content });
       }
       if (message.type === 'result') {
