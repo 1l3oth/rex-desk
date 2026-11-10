@@ -120,3 +120,19 @@ test('the main agent adds a project folder itself: it becomes a repository and a
   assert.equal((await desk.addProject(folder)).added, false, 'adding it again changes nothing');
   assert.equal(desk.specialists.create({ name: 'Biller', projectSlug: 'billing' }).purpose, 'Invoices for Acme');
 });
+
+test('a profile photo is kept only when it is a real picture, and the About you profile lists notes and projects', () => {
+  const { desk } = setup();
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4c40000000049454e44ae426082', 'hex');
+  const folder = temporary('photo'), picture = path.join(folder, 'me.png'), fake = path.join(folder, 'notes.png');
+  writeFileSync(picture, png); writeFileSync(fake, 'not a picture');
+  assert.throws(() => desk.memory.setPhotoFrom(fake), /Only PNG, JPEG or WebP/);
+  assert.equal(desk.memory.photo(), null);
+  desk.memory.setPhotoFrom(picture);
+  assert.match(desk.memory.photo().file, /profile\.png$/);
+  desk.memory.personNote('likes', 'Short answers first');
+  const profile = desk.memory.profile();
+  assert.ok(profile.photo); assert.equal(profile.sections[0].title, 'Likes'); assert.match(profile.sections[0].items[0], /Short answers first/);
+  assert.deepEqual(profile.projects.map(item => item.slug), ['shop']);
+  desk.memory.removePhoto(); assert.equal(desk.memory.photo(), null);
+});

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -99,6 +99,42 @@ export class Memory {
     const page = ['# About the person', '', 'What the agents learned from how the person talks to them. Every agent reads this. The person can change or delete any line. Notes marked "may change" are hints: what the person says now wins.', '',
       ...[...sections].filter(([, items]) => items.length).flatMap(([name, items]) => [`## ${name}`, '', ...items.map(item => `- ${item}`), ''])].join('\n');
     atomic(this.file('user.md'), page); return { saved: true };
+  }
+  // The person's profile photo, kept beside user.md. An agent sets it from a picture it found only after the person said it is them;
+  // the person can also upload one. Only real PNG, JPEG or WebP pictures are kept.
+  photo() {
+    for (const extension of ['.jpg', '.png', '.webp']) { const file = this.file(`profile${extension}`); if (existsSync(file)) return { file, updatedAt: statSync(file).mtime.toISOString() }; }
+    return null;
+  }
+  setPhotoData(data, source = 'upload') {
+    const bytes = Buffer.isBuffer(data) ? data : Buffer.from(String(data || ''), 'base64');
+    if (!bytes.length) throw new Error('The picture is empty.');
+    if (bytes.length > 8 * 1024 * 1024) throw new Error('The picture is larger than 8 MB. Choose a smaller one.');
+    const extension = bytes[0] === 0xff && bytes[1] === 0xd8 ? '.jpg' : bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ? '.png'
+      : bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WEBP' ? '.webp' : '';
+    if (!extension) throw new Error('Only PNG, JPEG or WebP pictures can be a profile photo.');
+    this.ensure();
+    for (const other of ['.jpg', '.png', '.webp']) rmSync(this.file(`profile${other}`), { force: true });
+    writeFileSync(this.file(`profile${extension}`), bytes);
+    atomic(this.file('profile.json'), JSON.stringify({ source, setAt: new Date().toISOString() }, null, 2));
+    return { saved: true, source };
+  }
+  setPhotoFrom(file) {
+    const location = path.resolve(String(file || ''));
+    if (!existsSync(location) || !statSync(location).isFile()) throw new Error(`No picture at ${location}.`);
+    return this.setPhotoData(readFileSync(location), location);
+  }
+  removePhoto() { for (const extension of ['.jpg', '.png', '.webp']) rmSync(this.file(`profile${extension}`), { force: true }); rmSync(this.file('profile.json'), { force: true }); return { removed: true }; }
+  // What the About you page shows: the notes about the person by section, and the projects found on this computer.
+  profile() {
+    const sections = []; let current = null;
+    for (const line of read(this.file('user.md'), 20000).split('\n')) {
+      const heading = /^##\s+(.+)$/.exec(line); if (heading) { current = { title: heading[1].trim(), items: [] }; sections.push(current); continue; }
+      const bullet = /^-\s+(.+)$/.exec(line); if (bullet && current) current.items.push(bullet[1].trim());
+    }
+    const photo = this.photo();
+    return { photo: photo ? { updatedAt: photo.updatedAt } : null, sections: sections.filter(section => section.items.length),
+      projects: this.list().map(item => ({ slug: item.slug, name: item.name || item.slug, purpose: item.purpose || '', stack: item.stack || [], path: item.path })) };
   }
   // The person's second brain (a notes vault): where it is and how agents should use it. Set once, read by every agent.
   secondBrain() { return read(this.file('second-brain.md'), 3000).trim(); }

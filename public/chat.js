@@ -11,7 +11,7 @@ const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 
 const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
 function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash); return match && SCREENS.includes(match[1]) ? { type: match[1], id: match[2] ? decodeURIComponent(match[2]) : '' } : null; }
 function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
-const ui = { snap: null, view: viewFromHash() || savedView() || { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map(), termOpen: true };
+const ui = { snap: null, view: viewFromHash() || savedView() || { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map(), termOpen: true, qstep: new Map(), qanswers: new Map() };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`; };
@@ -88,7 +88,7 @@ function renderRail() {
     <div class="sec-body top">
       ${railItem('main', '', { avatar: withDot(iconAv('main', 'accent'), main ? stateTone(main) : ''), name: 'Rex Agent', sub: main ? stateLabel(main) : 'Not started' })}
       ${railItem('inbox', '', { avatar: iconAv('inbox', asks ? 'warn' : ''), name: 'Needs you', sub: asks ? `${asks} waiting` : 'Nothing waiting', badge: asks, warn: true })}
-      ${railItem('person', '', { avatar: iconAv('person'), name: 'About you', sub: 'What the agents learned' })}
+      ${railItem('person', '', { avatar: ui.profile?.photo ? `<img class="av sm photo" src="${photoUrl()}" alt="">` : iconAv('person'), name: 'About you', sub: ui.profile?.name || 'What the agents learned' })}
     </div>
     ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>')}
     ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agents.map(agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: `${agent.status?.state === 'idle' || !agent.status ? agent.projectSlug : agent.status.label}` })).join('') : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
@@ -154,20 +154,24 @@ const note = text => `<div class="note">${text}</div>`;
 const FINISHED = ['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked'];
 function decisionCard(item) {
   const request = item.request || {}, run = runById(item.runId), properties = request.requestedSchema?.properties || {}, required = request.requestedSchema?.required || [];
+  const saved = ui.qanswers.get(item.id) || {};
   const field = (key, property, needed) => {
     const attrs = `name="${esc(key)}" data-type="${esc(property.type || 'string')}" ${needed ? 'required' : ''}`;
     const control = property.type === 'boolean' ? `<div class="seg"><button type="button" data-seg="true">Yes</button><button type="button" data-seg="false">No</button><input type="hidden" ${attrs.replace('required', '')}></div>`
-      : `<input class="qinput" ${attrs} type="${['number', 'integer'].includes(property.type) ? 'number' : 'text'}" placeholder="Type your answer…" autocomplete="off">`;
+      : `<input class="qinput" ${attrs} type="${['number', 'integer'].includes(property.type) ? 'number' : 'text'}" placeholder="Type your answer…" autocomplete="off" value="${esc(saved[key] || '')}">`;
     const options = (property.options || (property.enum || []).map(label => ({ label }))).slice(0, 8);
-    const suggestions = options.length ? `<div class="sugg" data-multi="${property.multiSelect ? 1 : 0}">${options.map((option, index) => `<button type="button" class="sugg-chip" data-fill="${esc(option.label)}"><span class="num">${index + 1}</span><span class="txt"><b>${esc(option.label)}</b>${option.description ? `<small>${esc(option.description)}</small>` : ''}</span></button>`).join('')}<div class="sugg-other">Or type your own answer below</div></div>` : '';
+    const suggestions = options.length ? `<div class="sugg" data-multi="${property.multiSelect ? 1 : 0}">${options.map((option, index) => `<button type="button" class="sugg-chip${String(saved[key] || '').split(', ').includes(option.label) ? ' on' : ''}" data-fill="${esc(option.label)}"><span class="num">${index + 1}</span><span class="txt"><b>${esc(option.label)}</b>${option.description ? `<small>${esc(option.description)}</small>` : ''}</span></button>`).join('')}<div class="sugg-other">Or type your own answer below</div></div>` : '';
     return `<label class="qfield"><span>${esc(property.title || key)}</span>${suggestions}${control}</label>`;
   };
-  const fields = Object.entries(properties).map(([key, property]) => field(key, property, required.includes(key))).join('')
-    + (request.questions || []).map(question => field(question.id || question.question, { type: 'string', title: question.question, options: question.options, multiSelect: question.multiSelect }, true)).join('');
-  const many = (fields.match(/class="qfield"/g) || []).length;
-  const ask = item.kind !== 'approval', detail = ask ? null : request.command || request.input || request;
-  return `<form class="card ask qcard" data-interaction="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>${ask ? (many > 1 ? `${many} questions` : 'Question') : 'Needs your OK'} · ${esc(runTitle(run))}</div><div class="qtext md">${markdown(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</div>${detail ? `<pre>${esc(typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2).slice(0, 1500))}</pre>` : ''}${fields}
-    <div class="row"><button class="send-btn wide" name="decision" value="accept">${ask ? (many > 1 ? 'Send answers' : 'Send') : 'Approve once'}</button>${request.allowAlways ? '<button class="btn small" name="decision" value="always" formnovalidate>Always allow for this run</button>' : ''}<button class="btn small" name="decision" value="decline" formnovalidate>${ask ? 'Skip' : 'Decline'}</button>${ask && many > 1 ? '<small class="qhint">Enter moves to the next answer · Ctrl+Enter sends</small>' : ''}</div></form>`;
+  const list = [...Object.entries(properties).map(([key, property]) => field(key, property, required.includes(key))),
+    ...(request.questions || []).map(question => field(question.id || question.question, { type: 'string', title: question.question, options: question.options, multiSelect: question.multiSelect }, true))];
+  const many = list.length, ask = item.kind !== 'approval', detail = ask ? null : request.command || request.input || request;
+  // Several questions come one at a time: answering one slides to the next.
+  const slides = ask && many > 1, step = slides ? Math.min(ui.qstep.get(item.id) || 0, many - 1) : 0;
+  const fields = slides ? `<div class="qslider">${list.map((html, index) => `<div class="qslide${index === step ? ' on' : ''}" data-slide="${index}">${html}</div>`).join('')}</div>` : list.join('');
+  const progress = slides ? `<span class="qcount" data-qcount>Question ${step + 1} of ${many}</span><span class="qdots" aria-hidden="true">${list.map((_, index) => `<i class="${index === step ? 'on' : index < step ? 'done' : ''}"></i>`).join('')}</span>` : '';
+  return `<form class="card ask qcard${slides ? ' sliding' : ''}" data-interaction="${esc(item.id)}" data-count="${many}" data-step="${step}" ${slides ? 'novalidate' : ''}><div class="qhead"><span class="qdot"></span>${ask ? (slides ? progress : 'Question') : 'Needs your OK'} · ${esc(runTitle(run))}</div><div class="qtext md">${markdown(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</div>${detail ? `<pre>${esc(typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2).slice(0, 1500))}</pre>` : ''}${fields}
+    <div class="row">${slides ? `<button type="button" class="btn small qback" data-qmove="-1" ${step ? '' : 'hidden'}>Back</button><button type="button" class="send-btn wide qnext" data-qmove="1" ${step < many - 1 ? '' : 'hidden'}>Next</button>` : ''}<button class="send-btn wide qsend" name="decision" value="accept" ${slides && step < many - 1 ? 'hidden' : ''}>${ask ? (many > 1 ? 'Send answers' : 'Send') : 'Approve once'}</button>${request.allowAlways ? '<button class="btn small" name="decision" value="always" formnovalidate>Always allow for this run</button>' : ''}<button class="btn small" name="decision" value="decline" formnovalidate>${ask ? 'Skip' : 'Decline'}</button>${slides ? '<small class="qhint">Pick an answer or type one · Enter for next</small>' : ''}</div></form>`;
 }
 function wakeCard(wake) {
   const run = runById(wake.runId), room = roomById(wake.roomId);
@@ -185,7 +189,7 @@ function stageModel() {
     return { title: 'Needs you', meta: `${asks.length + wakes.length} waiting`, feed: asks.length + wakes.length ? asks.map(decisionCard).join('') + wakes.map(wakeCard).join('') : '<div class="empty"><h2>All clear</h2><p>Questions, approvals and wake-ups from your agents show up here.</p></div>' };
   }
   if (type === 'specialist') return agentStage(ctx);
-  if (type === 'person') return { title: 'About you', meta: 'What the agents learned from you', feed: `<div class="page">${brainBanner()}<div class="card"><div class="md">${markdown(ui.page || 'Nothing learned yet. As you correct and praise your agents, they note what you like here.')}</div><p class="muted small">Saved in .rexdesk/user.md. Change or delete any line there and every agent follows it.</p></div></div>` };
+  if (type === 'person') return { title: 'About you', meta: 'Your profile, from what the agents learned', feed: personPage() };
   if (type === 'project') {
     return { title: id, meta: 'Project memory', feed: `<div class="page"><div class="row"><button class="btn primary small" data-action="spec-new">Create agent for this project</button></div><div class="card"><div class="md">${markdown(ui.page || 'Loading…')}</div></div></div>` };
   }
@@ -194,7 +198,7 @@ function stageModel() {
   if (!run) return emptyStage('That run is gone.');
   const items = [...transcript(ui.events.get(run.id) || []), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state);
   const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`)
-    + pending(run.id).map(item => `<div class="msg"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
+    + pending(run.id).map(item => `<div class="msg qfloat"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
   const shells = terminalItems(items), stop = (shells.length && !ui.termOpen ? `<button class="btn small" data-action="term-open">Terminal (${shells.length})</button> ` : '') + (live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : !FINISHED.includes(run.state) ? '<button class="btn small danger" data-action="stop" title="This run is not working. Close it so the task can get a new run.">Close run</button>' : '');
   return { title: runTitle(run), meta: `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions: stop, feed, side: shells.length && ui.termOpen ? terminalHtml(shells, { esc, hhmm }) : '',
     working: workingStates.includes(run.state), composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : (run.provider === 'codex' ? 'Message Claude Code. It takes over from Codex with the chat so far…' : `Message ${provider(run.provider)}. It picks up where it left off…`), mentions: [] } };
@@ -261,7 +265,7 @@ let busy = false, again = false;
 async function refresh({ full = false } = {}) {
   if (busy) { again = true; return; } busy = true;
   try {
-    ui.snap = await api('/state'); ui.memory = await api('/memory').catch(() => ui.memory);
+    ui.snap = await api('/state'); ui.memory = await api('/memory').catch(() => ui.memory); ui.profile = await api('/profile').catch(() => ui.profile);
     await loadView(); renderAll(full);
   } finally { busy = false; if (again) { again = false; void refresh(); } }
 }
@@ -335,6 +339,10 @@ document.addEventListener('change', async event => {
 document.addEventListener('submit', async event => {
   const form = event.target.closest('[data-interaction]'); if (!form) return; event.preventDefault();
   const decision = event.submitter?.value || 'accept', content = {};
+  if (decision === 'accept' && form.classList.contains('sliding')) {
+    const missing = [...form.querySelectorAll('.qslide')].findIndex(slide => !answered(slide));
+    if (missing >= 0) { slideTo(form, missing); toast('Answer this one first, or press Skip.', true); return; }
+  }
   for (const field of form.querySelectorAll('[data-type]')) {
     let value = field.value; if (value === '__custom') value = form.elements[`${field.name}__custom`].value; if (value === '') continue;
     content[field.name] = field.dataset.type === 'boolean' ? value === 'true' : ['number', 'integer'].includes(field.dataset.type) ? Number(value) : value;
@@ -373,7 +381,7 @@ document.addEventListener('keydown', event => {
   if (!/^[1-9]$/.test(event.key) || event.ctrlKey || event.metaKey || event.altKey) return;
   const form = document.activeElement?.closest?.('.qcard') || (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) ? null : document.querySelector('.qcard')); if (!form) return;
   if (document.activeElement?.classList?.contains('qinput') || document.activeElement?.id === 'draft') return;
-  const first = form.querySelector('.sugg'), chip = first?.querySelectorAll('.sugg-chip')[Number(event.key) - 1]; if (!chip) return;
+  const first = form.querySelector('.qslide.on .sugg') || form.querySelector('.sugg'), chip = first?.querySelectorAll('.sugg-chip')[Number(event.key) - 1]; if (!chip) return;
   event.preventDefault(); chip.click();
 });
 // A suggested answer fills its box; a multi-select question collects several.
@@ -383,6 +391,9 @@ document.addEventListener('click', event => {
   const field = chip.closest('.qfield'), input = field.querySelector('.qinput'), multi = chip.parentElement.dataset.multi === '1', label = chip.dataset.fill;
   if (multi) { chip.classList.toggle('on'); input.value = [...chip.parentElement.querySelectorAll('.sugg-chip.on')].map(item => item.dataset.fill).join(', '); }
   else { for (const other of chip.parentElement.children) other.classList.toggle('on', other === chip); input.value = label; }
+  remember(chip.closest('form'));
+  const form = chip.closest('form.sliding');
+  if (form && !multi) { setTimeout(() => slideTo(form, Number(form.dataset.step) + 1), 220); return; }
   input.focus(); input.setSelectionRange(input.value.length, input.value.length);
 });
 document.addEventListener('input', event => { if (event.target.id === 'task-filter') { ui.taskFilter = event.target.value; renderAll(); } });
@@ -391,7 +402,8 @@ document.addEventListener('keydown', event => {
   const input = event.target.closest?.('.qinput'); if (!input || event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
   const form = input.closest('form'), all = [...form.querySelectorAll('.qinput:not(.hidden)')], next = all[all.indexOf(input) + 1];
   event.preventDefault();
-  if (next && !event.ctrlKey) next.focus(); else form.requestSubmit(form.querySelector('[value=accept]'));
+  if (form.classList.contains('sliding') && !event.ctrlKey) { const step = Number(form.dataset.step); if (step < Number(form.dataset.count) - 1) { if (answered(form.querySelector('.qslide.on'))) slideTo(form, step + 1); return; } }
+  if (next && !event.ctrlKey && !form.classList.contains('sliding')) next.focus(); else form.requestSubmit(form.querySelector('[value=accept]'));
 });
 try {
   await refresh({ full: true });
@@ -399,3 +411,71 @@ try {
   stream.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(() => void refresh().catch(() => {}), 300); });
   setInterval(() => void refresh().catch(() => {}), 15000);
 } catch (error) { app.innerHTML = `<div class="boot"><h2>Rex Desk is unavailable</h2><p>${esc(error.message)}</p><p>Start it with <code>npm start</code>, then reload.</p></div>`; }
+
+// A question card with several questions shows one at a time. Back and Next move between them; picking an answer moves on by itself.
+function answered(slide) {
+  const input = slide?.querySelector('[data-type]'); if (!input) return true;
+  return !input.hasAttribute('required') || String(input.value || '').trim() !== '';
+}
+function slideTo(form, index) {
+  const slides = [...form.querySelectorAll('.qslide')], count = slides.length; if (!count) return;
+  const from = Number(form.dataset.step) || 0, to = Math.max(0, Math.min(count - 1, index));
+  if (to === from && slides[to].classList.contains('on')) { if (to === count - 1) form.querySelector('.qsend')?.focus(); return; }
+  form.dataset.step = String(to); ui.qstep.set(form.dataset.interaction, to);
+  slides.forEach((slide, position) => { slide.classList.toggle('on', position === to); slide.classList.toggle('back', position === to && to < from); });
+  form.querySelectorAll('.qdots i').forEach((dot, position) => { dot.className = position === to ? 'on' : position < to ? 'done' : ''; });
+  const counter = form.querySelector('[data-qcount]'); if (counter) counter.textContent = `Question ${to + 1} of ${count}`;
+  form.querySelector('.qback').hidden = to === 0; form.querySelector('.qnext').hidden = to === count - 1; form.querySelector('.qsend').hidden = to !== count - 1;
+  const box = slides[to].querySelector('.qinput');
+  if (to === count - 1 && box?.value) form.querySelector('.qsend').focus(); else box?.focus({ preventScroll: true });
+}
+document.addEventListener('click', event => {
+  const button = event.target.closest?.('[data-qmove]'); if (!button) return;
+  const form = button.closest('form'), step = Number(form.dataset.step), move = Number(button.dataset.qmove);
+  if (move > 0 && !answered(form.querySelector('.qslide.on'))) { toast('Pick or type an answer first.', true); return; }
+  slideTo(form, step + move);
+});
+// Answers typed or picked so far stay when the chat redraws the card.
+function remember(form) {
+  if (!form?.dataset?.interaction) return;
+  ui.qanswers.set(form.dataset.interaction, Object.fromEntries([...form.querySelectorAll('.qinput[name]')].map(input => [input.name, input.value])));
+}
+document.addEventListener('input', event => { if (event.target.classList?.contains('qinput')) remember(event.target.closest('form')); });
+
+// ---------- About you: a small portfolio of the person ----------
+const photoUrl = () => `/api/profile/photo?v=${encodeURIComponent(ui.profile?.photo?.updatedAt || '')}`;
+const noteText = item => { const match = /^(.*?)\s+\((\d{4}-\d{2}-\d{2})(, may change)?\)$/.exec(item); return match ? { text: match[1], when: match[2], soft: Boolean(match[3]) } : { text: item, when: '', soft: false }; };
+function personPage() {
+  const profile = ui.profile || { sections: [], projects: [], agents: [] }, name = profile.name || 'You';
+  const about = profile.sections.find(section => section.title === 'About them')?.items.map(noteText) || [];
+  const others = profile.sections.filter(section => section.title !== 'About them');
+  const photo = profile.photo ? `<img class="pf-photo" src="${photoUrl()}" alt="${esc(name)}">` : `<div class="pf-photo pf-initials" aria-hidden="true">${esc(initials(name))}</div>`;
+  const stats = [[profile.projects.length, 'projects'], [profile.agents.length, 'agents'], [profile.sections.reduce((sum, section) => sum + section.items.length, 0), 'notes']]
+    .map(([count, label]) => `<div class="pf-stat"><b>${count}</b><span>${label}</span></div>`).join('');
+  const hero = `<section class="pf-hero">${photo}<div class="pf-who"><h2>${esc(name)}</h2>${profile.email ? `<p class="muted">${esc(profile.email)}</p>` : ''}
+    <p class="pf-intro">${about.length ? about.map(item => esc(item.text)).join(' · ') : 'Your agents add what they learn about you here as you work with them.'}</p>
+    <div class="pf-stats">${stats}</div>
+    <div class="pf-actions"><label class="btn small pf-upload">${profile.photo ? 'Change photo' : 'Add a photo'}<input type="file" accept="image/png,image/jpeg,image/webp" data-photo-upload hidden></label>${profile.photo ? '<button class="btn small" data-action="photo-remove">Remove photo</button>' : ''}</div>
+    ${profile.photo ? '' : '<p class="muted small">Or let Rex Agent find a picture of you in your projects: it asks before using one.</p>'}</div></section>`;
+  const card = section => `<div class="pf-card"><h3>${esc(section.title)}</h3><ul>${section.items.map(noteText).map(item => `<li>${esc(item.text)}${item.when ? ` <small class="muted">${item.when}${item.soft ? ' · may change' : ''}</small>` : ''}</li>`).join('')}</ul></div>`;
+  const notes = others.length ? `<section><h3 class="pf-title">What your agents learned</h3><div class="pf-grid">${others.map(card).join('')}</div></section>` : '';
+  const projects = profile.projects.length ? `<section><h3 class="pf-title">Projects</h3><div class="pf-grid">${profile.projects.map(project => `<button class="pf-card pf-project" data-open="project" data-id="${esc(project.slug)}"><h3>${esc(project.slug)}</h3><p>${esc(project.purpose || 'No description yet.')}</p>${project.stack.length ? `<div class="pf-tags">${project.stack.slice(0, 5).map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''}</button>`).join('')}</div></section>` : '';
+  const agents = profile.agents.length ? `<section><h3 class="pf-title">Your agents</h3><div class="pf-tags big">${profile.agents.map(agent => `<span>${esc(agent.name)} <small class="muted">${esc(agent.project)}</small></span>`).join('')}</div></section>` : '';
+  return `<div class="page pf">${brainBanner()}${hero}${notes}${projects}${agents}<p class="muted small">Notes are kept in .rexdesk/user.md. Change or delete any line there and every agent follows it.</p></div>`;
+}
+// A chosen picture is made small (512 px) in the page before it is saved.
+document.addEventListener('change', async event => {
+  if (!event.target.matches?.('[data-photo-upload]')) return;
+  const file = event.target.files?.[0]; if (!file) return;
+  try {
+    const bitmap = await createImageBitmap(file), scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas'); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    await api('/profile/photo', { method: 'POST', data: { data: canvas.toDataURL('image/jpeg', 0.9).split(',')[1] } });
+    toast('Profile photo saved.'); await refresh({ full: true });
+  } catch (error) { toast(error.message || 'That picture could not be read.', true); }
+});
+document.addEventListener('click', async event => {
+  if (!event.target.closest?.('[data-action="photo-remove"]')) return;
+  try { await api('/profile/photo', { method: 'DELETE' }); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
+}, true);

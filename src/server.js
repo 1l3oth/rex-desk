@@ -388,6 +388,10 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/memory' && request.method === 'GET') return json(response, 200, { directory: desk.memory.directory, projects: desk.memory.list(), scannedAt: desk.memory.state().scannedAt || null });
       if (url.pathname === '/api/memory/page' && request.method === 'GET') return json(response, 200, { page: url.searchParams.get('name') || 'index', text: desk.memory.readDoc(url.searchParams.get('name') || 'index') });
       if (url.pathname === '/api/memory/scan' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.memory.scan({ roots: Array.isArray(input.roots) && input.roots.length ? input.roots : scanRoots(store, root) })); }
+      if (url.pathname === '/api/profile' && request.method === 'GET') return json(response, 200, { ...desk.memory.profile(), name: store.config().name || '', email: session?.email || '', agents: desk.specialists.list().filter(agent => agent.kind !== 'main').map(agent => ({ name: agent.name, project: agent.projectSlug })) });
+      if (url.pathname === '/api/profile/photo' && request.method === 'GET') { const photo = desk.memory.photo(); if (!photo) return json(response, 404, { error: 'No profile photo yet.' }); return serveFile(request, response, photo.file); }
+      if (url.pathname === '/api/profile/photo' && request.method === 'POST') { const result = desk.memory.setPhotoData((await body(request)).data, 'upload'); notify(); return json(response, 200, result); }
+      if (url.pathname === '/api/profile/photo' && request.method === 'DELETE') { const result = desk.memory.removePhoto(); notify(); return json(response, 200, result); }
       if (url.pathname === '/api/memory/user' && request.method === 'PUT') return json(response, 200, desk.memory.setUser((await body(request)).text));
       if (url.pathname === '/api/rooms' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.rooms.create(input.name, input.members)); }
       const roomOnly = url.pathname.match(/^\/api\/rooms\/([^/]+)$/);
