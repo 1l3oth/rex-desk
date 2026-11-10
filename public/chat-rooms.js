@@ -41,10 +41,11 @@ export function roomStage(ctx) {
   const doing = replying.length ? typing(replying[0], replying.length === 1 ? `${replying[0]} is replying…` : replying.length === 2 ? `${replying[0]} and ${replying[1]} are replying…` : `${replying[0]} and ${replying.length - 1} others are replying…`) : '';
   const free = [{ id: 'main', name: 'Rex Agent', projectSlug: 'all projects', status: { label: 'Knows every project' } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
   const chip = member => `<span class="chip member ${esc(member.state)}"><button class="member-open" data-open="${member.runId ? 'run' : 'specialist'}" data-id="${esc(member.runId || member.id)}" title="Open ${esc(member.name)}"><span class="dot ${dotFor(member.state)}"></span><strong>${esc(member.name)}</strong><span class="mlabel">${esc(member.label)}</span></button><button class="btn small x" data-action="room-remove" data-id="${esc(member.id)}" title="Remove from the room">×</button></span>`;
-  return { title: room.name, meta: `${room.members.length} agents`, feedClass: 'room',
+  const awayBanner = room.away?.on ? `<div class="away-banner"><span class="dot working"></span><span><b>Away mode</b> · the agents keep working${room.away.goal ? ` on ${esc(room.away.goal)}` : ''} · check-in every ${room.away.every} min${room.away.until ? ` · until ${esc(new Date(room.away.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}` : ' · until you are back'}. Write here to end it.</span></div>` : '';
+  return { title: room.name, meta: `${room.members.length} agents`, feedClass: 'room', banner: awayBanner,
     composer: { placeholder: 'Message the room (Rex Agent answers unless you @mention someone)…', mentions: handles, noPickers: true },
     side: ui.infoOpen === false ? '' : roomSideHtml(ctx, room), sideClass: 'info',
-    actions: ui.infoOpen === false ? '<button class="btn small" data-action="info-toggle">Info</button>' : '',
+    actions: `${room.away?.on ? '<button class="btn small away-on" data-action="away-stop">Away mode on · Stop</button>' : '<button class="btn small" data-action="away-start" title="Let the agents keep working while you are away">Away mode</button>'} ${ui.infoOpen === false ? '<button class="btn small" data-action="info-toggle">Info</button>' : ''}`,
     members: ui.infoOpen !== false ? '' : `<div class="members">${room.members.map(chip).join('')}${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: 'Add an agent to this room', placeholder: '+ Add agent', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || 'Idle'}` })) }) : ''}</div>`,
     feed: `${messages.length ? messages.map(render).join('') : empty}${asks(ctx, room)}${doing}` };
 }
@@ -386,3 +387,29 @@ function connectorsHtml(ctx, tasks) {
       action: type === 'orbit' ? '<button type="button" class="btn small primary" data-action="task-connect" data-service="orbit">Connect</button>' : '<a class="btn small primary" href="/classic#connections">Connect</a>' }));
   return `<section class="cn"><div class="cn-head"><h2>Connectors</h2><button type="button" class="btn small" data-action="task-connect">Manage sources</button></div><div class="cn-grid">${cards.join('')}</div></section>`;
 }
+
+// ---------- away mode: the agents keep going while you are away ----------
+function awayDialog(ctx, room) {
+  const { esc, api, toast, refresh } = ctx;
+  const back = document.createElement('div'); back.className = 'dialog-back';
+  back.innerHTML = `<form class="dialog away-dialog"><h2>Away mode</h2>
+    <p class="muted">The agents in ${esc(room.name)} keep working and talking to each other while you are away. ${esc(room.members.some(member => member.id === 'main') ? 'Rex Agent' : room.members[0]?.name || 'The first agent')} leads: it checks in on a schedule and hands out the next step. Risky things (push, merge, deleting data, production, messages to other people) wait for you. Writing in the room ends it, and you get a "While you were away" summary.</p>
+    <label>What should they work on? (optional)<textarea name="goal" rows="2" maxlength="600" placeholder="For example: finish the database move, then test the login"></textarea></label>
+    <div class="away-row"><label>For<select name="hours"><option value="0">Until I am back</option><option value="1">1 hour</option><option value="3">3 hours</option><option value="8" selected>8 hours</option><option value="24">24 hours</option></select></label>
+    <label>Check in every<select name="every"><option value="10">10 minutes</option><option value="30" selected>30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option></select></label></div>
+    <div class="row"><button class="btn primary">Start away mode</button><button type="button" class="btn" data-close>Cancel</button></div></form>`;
+  document.body.append(back); back.querySelector('textarea').focus();
+  back.addEventListener('click', event => { if (event.target === back || event.target.closest('[data-close]')) back.remove(); });
+  back.querySelector('form').addEventListener('submit', async event => {
+    event.preventDefault(); const data = Object.fromEntries(new FormData(event.target));
+    try { await api(`/rooms/${room.id}/away`, { method: 'PUT', data: { on: true, goal: data.goal, hours: Number(data.hours), every: Number(data.every) } }); back.remove(); toast('Away mode is on. See you later.'); await refresh(); }
+    catch (error) { toast(error.message, true); }
+  });
+}
+document.addEventListener('click', async event => {
+  const button = event.target.closest?.('[data-action="away-start"],[data-action="away-stop"]'); if (!button) return;
+  event.stopPropagation(); const ctx = window.__rexCtx; if (!ctx) return;
+  const room = (ctx.ui.snap.rooms || []).find(item => item.id === ctx.ui.view.id); if (!room) return;
+  if (button.dataset.action === 'away-start') return awayDialog(ctx, room);
+  try { await ctx.api(`/rooms/${room.id}/away`, { method: 'PUT', data: { on: false } }); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); }
+}, true);

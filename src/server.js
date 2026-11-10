@@ -483,6 +483,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         writeFileSync(path.join(folder, room.id + ext), Buffer.concat(chunks));
         return json(response, 200, desk.rooms.setImage(room.id, room.id + ext));
       }
+      const awayMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/away$/);
+      if (awayMatch && request.method === 'PUT') return json(response, 200, desk.rooms.setAway(awayMatch[1], await body(request)));
       const roomMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/(messages|members)(?:\/([^/]+))?$/);
       if (roomMatch) {
         const [, roomId, part, extra] = roomMatch;
@@ -522,6 +524,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       lastSync = Date.now(); void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
     }
     void desk.scheduleTick().catch(error => store.event('', 'schedule-error', { message: error.message }, true));
+    void desk.rooms.awayTick().catch(error => store.event('', 'away-error', { message: error.message }, true));
     if (++ticks % 8 === 0) void desk.findPullRequests();
   }, 15000);
   timer.unref();

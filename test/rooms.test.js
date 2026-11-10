@@ -262,3 +262,28 @@ test('a message for an agent that is working is handed to it between steps, once
   assert.deepEqual(store.get('run', 'vanna-room').queued, []);
   desk.live.delete('vanna-room');
 });
+
+test('away mode: the lead plans without the person, check-ins come on schedule, and writing in the room ends it with a summary', async () => {
+  const { desk, store, turns, dara, vanna, room } = setup({ replies: ['@vanna please check the invoices.', 'Invoices checked.', 'All done for now.', 'While you were away: invoices checked. Waiting for you: nothing.'] });
+  desk.rooms.quietSettle = 10;
+  desk.rooms.setAway(room.id, { on: true, every: 5, goal: 'Fix the cart total' });
+  await waitFor(() => turns.some(item => item.run.specialistId === dara.id));
+  const plan = turns.find(item => item.run.specialistId === dara.id).prompt;
+  assert.match(plan, /turned on away mode and left\. Goal: Fix the cart total/);
+  assert.match(plan, /The person is away until they come back[\s\S]*do not wait for the person/);
+  assert.ok(desk.rooms.messages(room.id).some(item => item.from.type === 'system' && /Away mode on/.test(item.text)));
+  assert.ok(!desk.rooms.messages(room.id).some(item => item.from.type === 'human'), 'nothing is posted as the person');
+  await waitFor(() => turns.some(item => item.run.specialistId === vanna.id));
+  // A quiet room gets a check-in once its interval has passed.
+  await waitFor(() => !['replying', 'busy'].includes(desk.rooms.member(dara.id).state) && !['replying', 'busy'].includes(desk.rooms.member(vanna.id).state));
+  const before = turns.length;
+  store.put('room', room.id, { ...desk.rooms.room(room.id), away: { ...desk.rooms.room(room.id).away, lastTick: Date.now() - 6 * 60000 } });
+  await desk.rooms.awayTick();
+  await waitFor(() => turns.length > before);
+  assert.match(turns.at(-1).prompt, /Away check-in/);
+  // The person writes: away ends and the lead sums up.
+  await desk.rooms.post(room.id, { text: 'I am back, what happened?' });
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.type === 'system' && /writing what happened while you were away/.test(item.text)));
+  assert.equal(desk.rooms.room(room.id).away.on, false);
+  assert.ok(desk.rooms.messages(room.id).some(item => item.from.type === 'system' && item.text === 'Away mode off: you are back.'));
+});
