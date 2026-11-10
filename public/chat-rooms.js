@@ -158,7 +158,7 @@ export function tasksStage(ctx) {
     .map(([label, list]) => `<div class="tgroup"><h3>${label} <span>${list.length}</span></h3>${list.map(task => taskRow(ctx, task)).join('')}</div>`).join('');
   const projects = ctx.ui.memory?.projects || [];
   const add = pick === 'all' || pick === 'local' ? `<form class="tadd" data-task-add><input name="title" type="text" maxlength="200" placeholder="New task… press Enter to add" autocomplete="off" aria-label="New task title">${projects.length ? pickerHtml(ctx, { id: 'task-add-project', label: 'Project', value: ui.lastTaskProject || '', compact: true, items: [{ value: '', label: 'No project' }, ...projects.map(project => ({ value: project.slug, label: project.slug }))] }) : ''}<button class="btn primary small">Add</button></form>` : '';
-  const chips = `<div class="tsrc" role="tablist">${sources.map(([id, label]) => `<button role="tab" aria-selected="${pick === id}" class="${pick === id ? 'on' : ''}" data-action="task-source" data-source="${esc(id)}">${esc(label)}</button>`).join('')}</div>`;
+  const chips = `<div class="tsrc" role="tablist">${sources.map(([id, label]) => `<button role="tab" aria-selected="${pick === id}" class="${pick === id ? 'on' : ''}" data-action="task-source" data-source="${esc(id)}">${esc(label)}</button>`).join('')}</div><button class="btn small" data-action="task-connect">Sources</button>`;
   const empty = pick === 'local' ? '<div class="empty"><h2>No Rex Desk tasks yet</h2><p>Type one above, or ask an agent to make tasks for a project.</p></div>' : '<div class="empty"><h2>No tasks</h2><p>Add one above, or press Sync to bring in your tracker issues.</p></div>';
   return { title: 'Tasks', meta: `${everything.length} tasks`,
     members: `<div class="members tbar">${chips}<input id="task-filter" type="search" placeholder="Search tasks…" value="${esc(ui.taskFilter || '')}" autocomplete="off"></div>`,
@@ -305,3 +305,52 @@ export function initLocalTasks(ctx) {
     }
   }, true);
 }
+
+// ---------- where tasks come from: Rex Desk (built in), Orbit, Flow, Morningmate ----------
+const SERVICE = { orbit: 'Orbit', flow: 'Flow', morningmate: 'Morningmate' };
+function connectionsDialog(ctx) {
+  const { ui, esc, api, toast, refresh } = ctx;
+  document.querySelector('.dialog-back.sources')?.remove();
+  const back = document.createElement('div'); back.className = 'dialog-back sources';
+  const draw = (mode = 'list', editing = null) => {
+    const sources = ui.snap.config?.sources || [], syncs = new Map((ui.snap.sync || []).map(item => [item.sourceId, item]));
+    const row = source => { const sync = syncs.get(source.id); return `<li><span class="src-mark ${esc(source.type)}" aria-hidden="true">${esc((SERVICE[source.type] || '?')[0])}</span><span class="src-text"><b>${esc(source.name)}</b><small>${esc(SERVICE[source.type] || source.type)} · ${sync?.error ? `<span class="bad">${esc(sync.error)}</span>` : sync ? `${sync.count} tasks` : 'not synced yet'}${source.hasKey ? '' : ' · no key'}</small></span>${source.type === 'orbit' ? `<button type="button" class="btn small" data-src-edit="${esc(source.id)}">Change</button>` : ''}<button type="button" class="btn small quiet danger" data-src-remove="${esc(source.id)}">Remove</button></li>`; };
+    const list = `<h2>Task sources</h2><p class="muted">Agents read tasks from these. Each agent uses only the sources you tick on its card.</p>
+      <ul class="src-list"><li><span class="src-mark local" aria-hidden="true">R</span><span class="src-text"><b>Rex Desk tasks</b><small>Built in · kept on this computer · ${(ui.snap.tasks || []).filter(task => task.local).length} tasks</small></span></li>${sources.map(row).join('')}</ul>
+      <div class="src-add"><span class="muted">Connect another:</span><button type="button" class="btn small primary" data-src-new="orbit">Orbit</button><a class="btn small" href="/classic#connections">Flow or Morningmate</a></div>
+      <div class="row"><button type="button" class="btn" data-close>Done</button></div>`;
+    const form = `<h2>${editing ? `Change ${esc(editing.name)}` : 'Connect Orbit'}</h2><p class="muted">One Orbit goal per connection. In Orbit open the goal, then Settings → API → Generate Project Key, and paste the key (it starts with dgm_).</p>
+      <label>Name<input name="name" type="text" maxlength="80" value="${esc(editing?.name || 'Orbit')}" required></label>
+      <label>Project key<input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${editing?.hasKey ? 'Saved. Paste a new key to replace it.' : 'dgm_…'}" ${editing ? '' : 'required'}></label>
+      <label>Bring in<select name="statusFilter">${[['active', 'Work that is on: To do, In progress, In review, Blocked'], ['unfinished', 'Everything not done, with the backlog'], ['all', 'Everything, done too']].map(([value, label]) => `<option value="${value}" ${(editing?.statusFilter || 'active') === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      <details><summary>Orbit address</summary><label>Address<input name="baseUrl" type="url" value="${esc(editing?.baseUrl || 'https://orbitkh.vercel.app')}"></label></details>
+      <div class="row"><button class="btn primary">${editing ? 'Save and sync' : 'Connect and sync'}</button><button type="button" class="btn" data-src-back>Back</button></div>`;
+    back.innerHTML = `<form class="dialog src-dialog" data-mode="${mode}" ${editing ? `data-id="${esc(editing.id)}"` : ''}>${mode === 'list' ? list : form}</form>`;
+    (back.querySelector('input[name=apiKey]') || back.querySelector('button'))?.focus();
+  };
+  draw(); document.body.append(back);
+  back.addEventListener('click', async event => {
+    const target = event.target;
+    if (target === back || target.closest('[data-close]')) { back.remove(); return; }
+    if (target.closest('[data-src-back]')) { draw(); return; }
+    const create = target.closest('[data-src-new]'); if (create) { draw('form'); return; }
+    const edit = target.closest('[data-src-edit]'); if (edit) { draw('form', (ui.snap.config?.sources || []).find(item => item.id === edit.dataset.srcEdit)); return; }
+    const remove = target.closest('[data-src-remove]');
+    if (remove) {
+      const source = (ui.snap.config?.sources || []).find(item => item.id === remove.dataset.srcRemove);
+      if (!source || !confirm(`Remove ${source.name}? Its tasks leave the list; nothing changes in ${SERVICE[source.type] || 'the tracker'}.`)) return;
+      try { await api(`/sources/${encodeURIComponent(source.id)}`, { method: 'DELETE' }); await refresh({ full: true }); draw(); } catch (error) { toast(error.message, true); }
+    }
+  });
+  back.addEventListener('submit', async event => {
+    event.preventDefault(); const form = event.target; if (form.dataset.mode !== 'form') return;
+    const data = Object.fromEntries(new FormData(form)), button = form.querySelector('.btn.primary');
+    button.disabled = true; button.textContent = 'Checking the key…';
+    try {
+      const result = await api('/sources/orbit', { method: 'POST', data: { ...data, id: form.dataset.id || '' } });
+      toast(result.sync?.error ? `Connected, but the sync failed: ${result.sync.error}` : `${result.source.name}: ${result.sync?.count ?? 0} tasks brought in.`, Boolean(result.sync?.error));
+      await refresh({ full: true }); draw();
+    } catch (error) { toast(error.message, true); button.disabled = false; button.textContent = form.dataset.id ? 'Save and sync' : 'Connect and sync'; }
+  });
+}
+document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="task-connect"]')) return; event.stopPropagation(); const ctx = window.__rexCtx; if (ctx) connectionsDialog(ctx); }, true);

@@ -504,3 +504,13 @@ p.pf-stats{display:block;margin:2px 0 0;font-size:13px;color:var(--muted)}
 
 .feed-inner:has(> .page.ag),.feed-inner:has(> .page.lt){max-width:none;padding-left:0;padding-right:0}
 .page.lt{max-width:none;margin:0;padding-left:clamp(20px,3vw,40px);padding-right:clamp(20px,3vw,40px);grid-template-columns:minmax(0,1fr) 300px}
+
+/* ---- task sources dialog ---- */
+.src-dialog{max-width:560px;width:min(560px,94vw)}
+.src-list{list-style:none;margin:4px 0;padding:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.src-list li{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid var(--line)}.src-list li:first-child{border-top:0}
+.src-mark{flex:none;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-weight:700;font-size:13px;color:#fff;background:var(--muted)}
+.src-mark.local{background:linear-gradient(135deg,#5b8def,#7c5cf0)}.src-mark.orbit{background:#0f9f8f}.src-mark.flow{background:#3b6fe0}.src-mark.morningmate{background:#e0803b}
+.src-text{flex:1;min-width:0;display:flex;flex-direction:column}.src-text b{font-weight:600;font-size:14px}.src-text small{font-size:12px;color:var(--muted);overflow-wrap:anywhere}.src-text .bad{color:var(--bad)}
+.src-add{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0}
+.src-dialog details{font-size:13px;color:var(--muted)}.src-dialog details label{margin-top:6px}

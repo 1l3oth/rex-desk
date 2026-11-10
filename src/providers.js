@@ -1,3 +1,4 @@
+import { orbitTasks, orbitStatus, orbitCall } from './orbit.js';
 import { now } from './store.js';
 
 const text = value => String(value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -235,7 +236,24 @@ export class Sources {
       accountId: String(input.accountId || ''), errors: input.errors || {}, origin, at: now() };
     this.store.put('directory', sourceId, directory); return directory;
   }
+  // Orbit: one key is one goal, so the connection syncs that goal's tasks. Nothing to choose first.
+  async syncOrbit(source) {
+    const key = this.store.credential(source.id);
+    if (!key) throw new Error(`Add the Orbit project key for ${source.name}.`);
+    const fetched = await orbitTasks(source, key, this.fetcher);
+    for (const task of this.store.list('task').filter(item => item.sourceId === source.id)) this.store.put('task', task.id, { ...task, active: false });
+    for (const task of fetched) {
+      const previous = this.store.get('task', task.id);
+      this.store.put('task', task.id, { ...task, category: previous?.category || '', runId: previous?.runId, deskStatus: previous?.deskStatus || '', deskNote: previous?.deskNote || '',
+        ...(previous?.titleEn && previous.title === task.title ? { titleEn: previous.titleEn } : {}) });
+    }
+    const result = { sourceId: source.id, name: source.name, count: fetched.length, account: 'Orbit project key', accounts: [], accountSource: 'the Orbit project key', verified: fetched.length, at: now() };
+    this.store.put('sync', source.id, result); return result;
+  }
+  // Checks an Orbit key before it is saved: one cheap list call.
+  async testOrbit(source, key) { const result = await orbitCall(source, key, 'tasks.list', { limit: 1 }, this.fetcher); return { ok: true, sample: (result.tasks || []).length }; }
   async syncSource(source) {
+    if (source.type === 'orbit') return this.syncOrbit(source);
     if (!source.projectIds.length) throw new Error('Select at least one project ID in Settings.');
     let account = source.userId;
     if (!account) {
@@ -358,6 +376,7 @@ export class Sources {
   }
   async updateStatus(task, phase) {
     const source = this.store.config().sources.find(item => item.id === task.sourceId);
+    if (source?.type === 'orbit') { const result = await orbitStatus(source, this.store.credential(source.id), task, phase, this.fetcher); if (result.status) this.store.put('task', task.id, { ...task, status: result.status }); return result; }
     const status = source?.statusMap?.[phase];
     if (!status) return { skipped: true, reason: `No source status mapped for ${phase}.` };
     const data = await this.request(source, `/user/posts/projects/${encodeURIComponent(task.projectId)}/tasks/${encodeURIComponent(task.externalId)}/status`,

@@ -299,6 +299,22 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         const input = await body(request);
         return json(response, 200, { prompt: setupPrompt({ target: input.target, root, dataDirectory: store.directory, mcpUrl: desk.mcpUrl, profiles: { claude: desk.agents.selected('claude') } }) });
       }
+      // Orbit: the key is checked first, then the goal's tasks are brought in at once. Flow and Morningmate continue below.
+      if (url.pathname === '/api/sources/orbit' && request.method === 'POST') {
+        const input = await body(request), name = String(input.name || 'Orbit').trim().slice(0, 80) || 'Orbit', key = String(input.apiKey || '').trim();
+        const existing = input.id ? store.config().sources.find(item => item.id === input.id && item.type === 'orbit') : null;
+        if (!existing && !/^dgm_\S{8,}$/.test(key)) return json(response, 400, { error: 'Paste an Orbit project key. It starts with dgm_ (Orbit: Goal → Settings → API → Generate Project Key).' });
+        const draft = { ...(existing || {}), id: existing?.id, name, type: 'orbit', baseUrl: input.baseUrl || existing?.baseUrl || 'https://orbitkh.vercel.app', projectIds: [], userId: '', statusFilter: ['active', 'unfinished', 'all'].includes(input.statusFilter) ? input.statusFilter : existing?.statusFilter || 'active', statuses: [], statusMap: {} };
+        if (key) await desk.sources.testOrbit(draft, key);
+        const source = store.saveConnection({ ...draft, ...(key ? { apiKey: key } : {}) });
+        return json(response, 200, { source: store.publicConfig().sources.find(item => item.id === source.id), sync: await desk.sources.syncSource(source).catch(error => ({ error: error.message })) });
+      }
+      const sourceMatch = url.pathname.match(/^\/api\/sources\/([^/]+)$/);
+      if (sourceMatch && request.method === 'DELETE') {
+        const config = store.publicConfig();
+        store.saveConfig({ ...config, sources: config.sources.filter(item => item.id !== decodeURIComponent(sourceMatch[1])) });
+        return json(response, 200, { removed: true });
+      }
       if (url.pathname === '/api/sources/connect' && request.method === 'POST') {
         const source = store.saveConnection(await body(request));
         return json(response, 200, { source, directory: await desk.sources.directory(source.id) });

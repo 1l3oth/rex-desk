@@ -192,9 +192,9 @@ export class Store extends EventEmitter {
     if (!Array.isArray(input.sources) || !Array.isArray(input.repositories)) throw new Error('Sources and repositories must be lists.');
     const sources = input.sources.map(source => {
       const sourceId = source.id || id();
-      const base = new URL(source.baseUrl);
+      const base = new URL(source.baseUrl || (source.type === 'orbit' ? 'https://orbitkh.vercel.app' : ''));
       if (base.protocol !== 'https:') throw new Error('Source APIs must use HTTPS.');
-      if (!['flow', 'morningmate'].includes(source.type)) throw new Error('Unknown source type.');
+      if (!['flow', 'morningmate', 'orbit'].includes(source.type)) throw new Error('Unknown source type.');
       if (source.apiKey?.trim()) secretUpdates.push({ id: sourceId, value: this.encrypt(source.apiKey.trim()) });
       if (source.clearKey) secretUpdates.push({ id: sourceId, remove: true });
       return { id: sourceId, name: source.name || source.type, type: source.type, baseUrl: base.origin,
