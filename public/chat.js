@@ -1,5 +1,6 @@
 import { agentsRail, agentStage, agentAction } from '/chat-agents.js';
 import { stepsHtml } from '/chat-activity.js';
+import { markdown } from '/chat-markdown.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
@@ -22,18 +23,6 @@ let toastTimer;
 function toast(text, bad = false) {
   const box = document.getElementById('toast'); box.textContent = text; box.className = `on${bad ? ' bad' : ''}`;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { box.className = ''; }, 3500);
-}
-
-// A safe markdown subset: escape first, then restore fenced code, inline code, bold and links.
-function markdown(text, { mentions = [] } = {}) {
-  const parts = String(text ?? '').split(/```[^\n]*\n?/);
-  return parts.map((part, index) => {
-    if (index % 2) return `<pre><code>${esc(part.replace(/\n$/, ''))}</code></pre>`;
-    let html = esc(part).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>').replace(/^(\s*)[-*] /gm, '$1• ');
-    for (const name of mentions) html = html.replace(new RegExp(`(^|\\s)@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_.-])`, 'giu'), '$1<span class="mention">@' + esc(name) + '</span>');
-    return html;
-  }).join('');
 }
 
 const workingStates = ['starting', 'running', 'queued', 'waiting', 'verifying'];
