@@ -137,6 +137,9 @@ export class Desk {
     this.store.event(runId, 'inbox-delivered', { count: run.queued.length });
     return run.queued.join('\n\n');
   }
+  // The person's Orbit account, when connected: every agent can search and read their goals, notes and knowledge.
+  orbitAccount() { const saved = this.store.get('secret', 'orbit-account'); if (!saved) return null; try { return JSON.parse(this.store.decrypt(saved)); } catch { return null; } }
+  orbitAccountMcp() { const account = this.orbitAccount(); return account?.token ? { orbit: { type: 'http', url: `${account.base.replace(/\/$/, '')}/mcp`, headers: { Authorization: `Bearer ${account.token}` } } } : {}; }
   // The Claude account (profile folder) a run uses: the agent's own if it was pinned to one, otherwise the one for everyone.
   accountFor(run) {
     const id = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
@@ -388,7 +391,7 @@ export class Desk {
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
         mcpUrl: this.mcpUrl, model: run.model || modelName(run.provider, this.store.config().models[run.provider]), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
-        ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), event: (kind, data) => {
+        ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
           this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result'].includes(kind));

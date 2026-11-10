@@ -670,3 +670,7 @@ button.cn-main{cursor:pointer}
 .dialog label{font-size:12.5px}
 .dialog details summary{cursor:pointer;color:var(--muted);font-size:13px}
 .dialog .row{margin-top:4px}
+
+.src-h{margin:8px 0 0;font-size:13.5px}
+.src-account{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px}.src-account p{margin:0}.src-account .btn{align-self:flex-start}
+.orbit-code{font-family:var(--mono);font-size:24px;letter-spacing:.18em;font-weight:700;color:var(--ink)}

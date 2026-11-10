@@ -342,9 +342,10 @@ function connectionsDialog(ctx, startWith = '') {
     const row = source => { const sync = syncs.get(source.id); return `<li><span class="src-mark ${esc(source.type)}" aria-hidden="true">${esc((SERVICE[source.type] || '?')[0])}</span><span class="src-text"><b>${esc(source.name)}</b><small>${esc(SERVICE[source.type] || source.type)} · ${sync?.error ? `<span class="bad">${esc(sync.error)}</span>` : sync ? `${sync.count} tasks` : 'not synced yet'}${source.hasKey ? '' : ' · no key'}</small></span>${source.type === 'orbit' ? `<button type="button" class="btn small" data-src-edit="${esc(source.id)}">Change</button>` : ''}<button type="button" class="btn small quiet danger" data-src-remove="${esc(source.id)}">Remove</button></li>`; };
     const list = `<h2>Task sources</h2><p class="muted">Agents read tasks from these. Each agent uses only the sources you tick on its card.</p>
       <ul class="src-list"><li><span class="src-mark local" aria-hidden="true">R</span><span class="src-text"><b>Rex Desk tasks</b><small>Built in · kept on this computer · ${(ui.snap.tasks || []).filter(task => task.local).length} tasks</small></span></li>${sources.map(row).join('')}</ul>
-      <div class="src-add"><span class="muted">Connect another:</span><button type="button" class="btn small primary" data-src-new="orbit">Orbit</button><a class="btn small" href="/classic#connections">Flow or Morningmate</a></div>
+      <div class="src-add"><span class="muted">Connect another:</span><button type="button" class="btn small primary" data-src-new="orbit">Orbit goal (tasks)</button><a class="btn small" href="/classic#connections">Flow or Morningmate</a></div>
+      <h3 class="src-h">Orbit account</h3><div class="src-account" data-orbit-account><p class="muted">Checking…</p></div>
       <div class="row"><button type="button" class="btn" data-close>Done</button></div>`;
-    const form = `<h2>${editing ? `Change ${esc(editing.name)}` : 'Connect Orbit'}</h2><p class="muted">One Orbit goal per connection. In Orbit open the goal, then Settings → API → Generate Project Key, and paste the key (it starts with dgm_).</p>
+    const form = `<h2>${editing ? `Change ${esc(editing.name)}` : 'Connect an Orbit goal'}</h2><p class="muted">Brings one goal's tasks into Tasks. For your goals, notes and knowledge in every agent, use the Orbit account sign-in instead. One Orbit goal per connection. In Orbit open the goal, then Settings → API → Generate Project Key, and paste the key (it starts with dgm_).</p>
       <label>Name<input name="name" type="text" maxlength="80" value="${esc(editing?.name || 'Orbit')}" required></label>
       <label>Project key<input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${editing?.hasKey ? 'Saved. Paste a new key to replace it.' : 'dgm_…'}" ${editing ? '' : 'required'}></label>
       <label>Bring in<select name="statusFilter">${[['active', 'Work that is on: To do, In progress, In review, Blocked'], ['unfinished', 'Everything not done, with the backlog'], ['all', 'Everything, done too']].map(([value, label]) => `<option value="${value}" ${(editing?.statusFilter || 'active') === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
@@ -353,11 +354,13 @@ function connectionsDialog(ctx, startWith = '') {
     back.innerHTML = `<form class="dialog src-dialog" data-mode="${mode}" ${editing ? `data-id="${esc(editing.id)}"` : ''}>${mode === 'list' ? list : form}</form>`;
     (back.querySelector('input[name=apiKey]') || back.querySelector('button'))?.focus();
   };
-  draw(startWith ? 'form' : 'list'); document.body.append(back);
+  draw(startWith ? 'form' : 'list'); document.body.append(back); void drawOrbitAccount(ctx, back);
   back.addEventListener('click', async event => {
     const target = event.target;
     if (target === back || target.closest('[data-close]')) { back.remove(); return; }
-    if (target.closest('[data-src-back]')) { draw(); return; }
+    if (target.closest('[data-src-back]')) { draw(); void drawOrbitAccount(ctx, back); return; }
+    if (target.closest('[data-orbit-signin]')) { void orbitSignIn(ctx, back); return; }
+    if (target.closest('[data-orbit-signout]')) { await api('/orbit/account', { method: 'DELETE' }); void drawOrbitAccount(ctx, back); return; }
     const create = target.closest('[data-src-new]'); if (create) { draw('form'); return; }
     const edit = target.closest('[data-src-edit]'); if (edit) { draw('form', (ui.snap.config?.sources || []).find(item => item.id === edit.dataset.srcEdit)); return; }
     const remove = target.closest('[data-src-remove]');
@@ -432,3 +435,27 @@ document.addEventListener('click', async event => {
 }, true);
 
 document.addEventListener('change', event => { if (!event.target.matches?.('[data-task-done]')) return; const ctx = window.__rexCtx; if (!ctx) return; ctx.ui.taskDone = event.target.checked; ctx.render(); });
+
+// The Orbit account (goals, notes, knowledge for every agent): sign in once with a short code approved on Orbit.
+async function drawOrbitAccount(ctx, back) {
+  const box = back.querySelector('[data-orbit-account]'); if (!box) return;
+  const account = await ctx.api('/orbit/account').catch(() => ({ connected: false }));
+  box.innerHTML = account.connected
+    ? `<p><span class="dot good"></span> Connected since ${ctx.esc(new Date(account.since).toLocaleDateString([], { month: 'short', day: 'numeric' }))}. Every agent can search and read your Orbit goals, notes and knowledge.</p><button type="button" class="btn small quiet danger" data-orbit-signout>Disconnect</button>`
+    : '<p class="muted">Give every agent your Orbit goals, notes and knowledge (search, read, add notes). You approve it once in Orbit; no key to copy.</p><button type="button" class="btn small primary" data-orbit-signin>Sign in to Orbit</button>';
+}
+async function orbitSignIn(ctx, back) {
+  const box = back.querySelector('[data-orbit-account]'); if (!box) return;
+  try {
+    const login = await ctx.api('/orbit/account/start', { method: 'POST', data: {} });
+    box.innerHTML = `<p>Open Orbit and approve this code:</p><p class="orbit-code">${ctx.esc(login.userCode)}</p><p><a class="btn small primary" href="${ctx.esc(login.url)}" target="_blank" rel="noopener noreferrer">Open Orbit to approve</a> <span class="muted small">Waiting for you to approve…</span></p>`;
+    window.open(login.url, '_blank', 'noopener');
+    const until = Date.now() + login.expiresIn * 1000;
+    while (Date.now() < until && document.body.contains(box)) {
+      await new Promise(resolve => setTimeout(resolve, login.interval * 1000));
+      const result = await ctx.api('/orbit/account/poll', { method: 'POST', data: {} });
+      if (result.connected) { ctx.toast('Orbit connected. Agents can use your goals and notes from their next reply.'); return drawOrbitAccount(ctx, back); }
+    }
+    if (document.body.contains(box)) box.innerHTML = '<p class="bad">The code expired before it was approved.</p><button type="button" class="btn small" data-orbit-signin>Try again</button>';
+  } catch (error) { ctx.toast(error.message, true); void drawOrbitAccount(ctx, back); }
+}

@@ -26,6 +26,7 @@ import { orcaStatus, showWorktreesInOrca, openInOrca } from './orca.js';
 import { Computer } from './computer.js';
 import { Voice } from './voice.js';
 import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
+import { orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
 import { scanRoots } from './placement.js';
@@ -338,6 +339,22 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/setup-prompt' && request.method === 'POST') {
         const input = await body(request);
         return json(response, 200, { prompt: setupPrompt({ target: input.target, root, dataDirectory: store.directory, mcpUrl: desk.mcpUrl, profiles: { claude: desk.agents.selected('claude') } }) });
+      }
+      if (url.pathname === '/api/orbit/account' && request.method === 'GET') { const account = desk.orbitAccount(); return json(response, 200, { connected: Boolean(account?.token), base: account?.base || 'https://orbitkh.vercel.app', since: account?.at || '' }); }
+      if (url.pathname === '/api/orbit/account' && request.method === 'DELETE') { store.delete('secret', 'orbit-account'); return json(response, 200, { connected: false }); }
+      if (url.pathname === '/api/orbit/account/start' && request.method === 'POST') {
+        const base = String((await body(request)).base || 'https://orbitkh.vercel.app').replace(/\/$/, '');
+        if (!/^https:\/\//.test(base)) return json(response, 400, { error: 'Orbit must be an https address.' });
+        const login = await orbitDeviceStart(base);
+        desk.orbitLogin = { ...login, base, until: Date.now() + login.expiresIn * 1000 };
+        return json(response, 200, { userCode: login.userCode, url: login.url, expiresIn: login.expiresIn, interval: login.interval });
+      }
+      if (url.pathname === '/api/orbit/account/poll' && request.method === 'POST') {
+        const login = desk.orbitLogin; if (!login || login.until < Date.now()) return json(response, 400, { error: 'The sign-in code expired. Start again.' });
+        const result = await orbitDevicePoll(login.deviceCode, login.base);
+        if (result.pending) return json(response, 200, { connected: false });
+        store.put('secret', 'orbit-account', store.encrypt(JSON.stringify({ token: result.token, base: login.base, at: new Date().toISOString() }))); desk.orbitLogin = null;
+        return json(response, 200, { connected: true });
       }
       // Orbit: the key is checked first, then the goal's tasks are brought in at once. Flow and Morningmate continue below.
       if (url.pathname === '/api/sources/orbit' && request.method === 'POST') {

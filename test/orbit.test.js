@@ -36,3 +36,22 @@ test('an Orbit goal syncs its open tasks, and a run moves the Orbit status', asy
   assert.equal(orbit.tasks[0].status, 'in_progress');
   await assert.rejects(desk.sources.testOrbit({ ...source }, 'dgm_wrong_key_123'), /refused the key/);
 });
+
+test('signing in to the Orbit account gives every agent an Orbit MCP server', async () => {
+  const { orbitDeviceStart, orbitDevicePoll } = await import('../src/orbit.js');
+  let polls = 0;
+  const fetcher = async (url, options) => {
+    if (String(url).endsWith('/api/device-login-start')) return Response.json({ device_code: 'dev-code', user_code: 'ABCD2345', verification_uri: 'https://orbitkh.vercel.app/connect', verification_uri_complete: 'https://orbitkh.vercel.app/connect?code=ABCD2345', expires_in: 600, interval: 3 });
+    assert.equal(options.headers.Authorization, 'Bearer dev-code');
+    return Response.json(++polls < 2 ? { status: 'pending' } : { status: 'confirmed', token: 'dgm_pat_secret' });
+  };
+  const login = await orbitDeviceStart('https://orbitkh.vercel.app', fetcher);
+  assert.equal(login.userCode, 'ABCD2345'); assert.match(login.url, /connect\?code=ABCD2345/);
+  assert.deepEqual(await orbitDevicePoll(login.deviceCode, 'https://orbitkh.vercel.app', fetcher), { pending: true });
+  assert.deepEqual(await orbitDevicePoll(login.deviceCode, 'https://orbitkh.vercel.app', fetcher), { token: 'dgm_pat_secret' });
+  await assert.rejects(orbitDevicePoll('x', 'https://orbitkh.vercel.app', async () => Response.json({ status: 'expired' })), /expired/);
+  const store = new Store(temporary('orbit-acct')), desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory') });
+  assert.deepEqual(desk.orbitAccountMcp(), {});
+  store.put('secret', 'orbit-account', store.encrypt(JSON.stringify({ token: 'dgm_pat_secret', base: 'https://orbitkh.vercel.app', at: new Date().toISOString() })));
+  assert.deepEqual(desk.orbitAccountMcp(), { orbit: { type: 'http', url: 'https://orbitkh.vercel.app/mcp', headers: { Authorization: 'Bearer dgm_pat_secret' } } });
+});

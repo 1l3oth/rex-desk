@@ -88,7 +88,7 @@ ${news}` } } : {};
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
       ...(this.model ? { model: this.model } : {}), ...(resume ? { resume } : {}),
       strictMcpConfig: true,
-      mcpServers: { ...connections, rex_desk: { type: 'http', url: this.mcpUrl, headers: { Authorization: `Bearer ${this.token}` }, alwaysLoad: true } },
+      mcpServers: { ...connections, ...(this.extraMcp || {}), rex_desk: { type: 'http', url: this.mcpUrl, headers: { Authorization: `Bearer ${this.token}` }, alwaysLoad: true } },
       onElicitation: async request => {
         const answer = await this.ask({ kind: 'question', title: request.message, request, method: 'elicitation' });
         return { action: answer.action, ...(answer.action === 'accept' ? { content: answer.content || {} } : {}) };

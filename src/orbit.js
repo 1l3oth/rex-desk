@@ -50,3 +50,21 @@ export async function orbitStatus(source, key, task, phase, fetcher = fetch) {
   return { status };
 }
 export const orbitComment = (source, key, task, body, fetcher = fetch) => orbitCall(source, key, 'tasks.comment', { task_id: task.externalId, body: String(body).slice(0, 4000) }, fetcher);
+
+// The Orbit account connection: one sign-in for the person's whole Orbit (goals, notes, knowledge, tasks by date), given to
+// every agent as an MCP server. The person approves a short code on Orbit's /connect page; Orbit then hands back a personal
+// token (dgm_pat_..., 90 days) that Rex Desk keeps encrypted.
+export async function orbitDeviceStart(base = ORBIT_URL, fetcher = fetch) {
+  const response = await fetcher(new URL('/api/device-login-start', base), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Rex Desk agents' }), signal: AbortSignal.timeout(20000) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.device_code) throw new Error(data.error || `Orbit did not start the sign-in (HTTP ${response.status}).`);
+  return { deviceCode: data.device_code, userCode: data.user_code, url: data.verification_uri_complete || data.verification_uri, expiresIn: Number(data.expires_in) || 600, interval: Math.max(2, Number(data.interval) || 3) };
+}
+export async function orbitDevicePoll(deviceCode, base = ORBIT_URL, fetcher = fetch) {
+  const response = await fetcher(new URL('/api/device-login-poll', base), { method: 'POST', headers: { Authorization: `Bearer ${deviceCode}` }, signal: AbortSignal.timeout(20000) });
+  const data = await response.json().catch(() => ({}));
+  if (data.status === 'confirmed' && data.token) return { token: data.token };
+  if (['expired', 'not_found', 'claimed'].includes(data.status)) throw new Error('The Orbit sign-in code expired or was already used. Start again.');
+  if (response.status >= 400 && !['pending', 'authorization_pending'].includes(data.status || data.error)) throw new Error(data.error_description || data.error || `Orbit sign-in failed (HTTP ${response.status}).`);
+  return { pending: true };
+}
