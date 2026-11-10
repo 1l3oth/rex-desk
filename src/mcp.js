@@ -19,6 +19,13 @@ export function requireEnglish(text, what) {
   if (foreign + english >= 4 && foreign / (foreign + english) > 0.4) throw new Error(`Rewrite ${what} in English: the human reads English. Quote Korean or Japanese tracker text only where its exact wording matters.`);
 }
 
+// The form for a desk_ask. With no fields it is one free-text answer, which is required for a question. With the agent's own fields, only the ones it names as required are
+// required: asking for an `answer` field that the form does not have would make the question impossible to submit.
+export function askSchema(input) {
+  return { type: 'object', properties: input.fields || { answer: { type: 'string', title: 'Your answer' } },
+    required: input.required || (input.fields ? [] : input.kind === 'question' ? ['answer'] : []) };
+}
+
 export function createMcp(desk, scope) {
   const server = new McpServer({ name: 'rex-desk', version: '0.1.0' });
   const resolveRun = supplied => { const resolved = supplied || scope.runId; if (!resolved) throw new Error('Supply a runId.'); desk.authorize(scope, resolved); return resolved; };
@@ -86,8 +93,7 @@ export function createMcp(desk, scope) {
       fields: z.record(z.string(), z.object({ type: z.enum(['string', 'boolean', 'number', 'integer']), title: z.string().optional(), enum: z.array(z.string()).optional() })).optional(),
       required: z.array(z.string()).optional(), wait: z.boolean().default(true) }, async (input, extra) => {
       requireEnglish(input.message, 'this question');
-      const request = { requestedSchema: { type: 'object', properties: input.fields || { answer: { type: 'string', title: 'Your answer' } },
-        required: input.required || (input.kind === 'question' ? ['answer'] : []) } };
+      const request = { requestedSchema: askSchema(input) };
       const interaction = desk.beginAsk(resolveRun(input.runId), { kind: input.kind, title: input.message, request, method: 'desk' });
       if (!input.wait) return { questionId: interaction.id, state: 'pending' };
       // Clients that sent a progress token get a keep-alive every 25 seconds, so a question can wait for the human as long as it takes.
