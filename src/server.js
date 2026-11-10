@@ -89,7 +89,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     if (address) startDesk(desk, store);
     desk.computer = computer;
     desk.commander = new Commander(computer, { apiKey: () => desk.jev.apiKey(), model: () => store.config().jev?.model, settings: () => store.config().control || {},
-      env: () => desk.agents.environment('claude'), cwd: path.join(store.directory, 'coordinator') });
+      env: () => desk.agents.environment('claude'), cwd: path.join(store.directory, 'coordinator'), webTask: text => desk.startWebTask(text) });
     // The real app (not tests) scans this computer's checkouts for Jev and catches up with tracker moves made while it was off.
     if (catchUp) {
       void desk.scanRepositories().catch(error => store.event('', 'repository-scan-error', { message: error.message }));

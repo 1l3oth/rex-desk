@@ -9,6 +9,8 @@ import { checkParams } from './computer.js';
 export const plannerModel = '~anthropic/claude-haiku-latest';
 const settle = { open_app: 1800, open_settings: 1800, open_url: 1500, web_search: 1500, open_folder: 1200, focus_window: 700, click_item: 700, press_keys: 400 };
 
+// Not a computer action: Jev hands it to a browser agent that works in its own chat.
+export const webAction = { id: 'web_task', title: 'Do it on a website', does: 'Do a task on websites for the person: search and compare (flights, hotels, prices, products), fill in a form, book or buy (it asks before paying), sign up, check an account. Not for opening one page: use open_url or web_search for that.', params: { task: { type: 'string', required: true, describe: 'the whole request in English, with every detail the person gave (places, dates, number of people, budget)' } } };
 export function describeActions(list) {
   return list.map(action => {
     const params = Object.entries(action.params || {}).map(([name, spec]) => `${name}${spec.required ? '' : '?'}: ${spec.type === 'enum' ? spec.values.join('|') : spec.type}${spec.describe ? ` (${spec.describe})` : ''}`);
@@ -68,8 +70,8 @@ export function parsePlan(text, known) {
 }
 
 export class Commander {
-  constructor(computer, { apiKey = () => '', model = () => defaultJevModel, fetcher = fetch, settings = () => ({}), env = () => process.env, cwd, planner } = {}) {
-    Object.assign(this, { computer, apiKey, model, fetcher, settings, env, cwd });
+  constructor(computer, { apiKey = () => '', model = () => defaultJevModel, fetcher = fetch, settings = () => ({}), env = () => process.env, cwd, planner, webTask } = {}) {
+    Object.assign(this, { computer, apiKey, model, fetcher, settings, env, cwd, webTask });
     if (planner) this.plan = planner;
   }
   // Jev's single choice: which action, "several" for a multi-step request, or "none".
@@ -99,7 +101,7 @@ export class Commander {
   async understand(text) {
     const request = String(text || '').trim().slice(0, 1000);
     if (!request) throw new Error('Say or type what the computer should do.');
-    const available = this.computer.available(), known = new Set(available.map(action => action.id)), apiKey = this.apiKey();
+    const available = [...this.computer.available(), ...(this.webTask ? [webAction] : [])], known = new Set(available.map(action => action.id)), apiKey = this.apiKey();
     const quick = quickMatch(request);
     if (quick && quick.steps.every(step => known.has(step.action))) return { ...quick, say: quick.steps.map(step => this.computer.action(step.action).title).join(', '), via: 'instant' };
     let choice = 'several', via = 'planner';
@@ -113,21 +115,27 @@ export class Commander {
   }
   needsConfirm(steps) {
     if (this.settings().confirm === false) return [];
-    return steps.filter(step => this.computer.action(step.action).confirm).map(step => this.computer.action(step.action).title);
+    return steps.filter(step => this.actionOf(step.action).confirm).map(step => this.actionOf(step.action).title);
   }
   // Understand, then run unless something needs the person's yes first.
   async perform(text) {
     const plan = await this.understand(text);
     if (!plan.steps.length) return { ...plan, done: false, results: [] };
-    plan.steps.forEach(step => { step.params = checkParams(this.computer.action(step.action), step.params); });
+    plan.steps.forEach(step => { step.params = checkParams(this.actionOf(step.action), step.params); });
     const confirm = this.needsConfirm(plan.steps);
     if (confirm.length) return { ...plan, done: false, needsConfirm: confirm, results: [] };
     return { ...plan, ...await this.runSteps(plan.steps) };
   }
+  actionOf(id) { return id === webAction.id ? webAction : this.computer.action(id); }
   async runSteps(steps) {
     const results = [];
     for (const step of steps.slice(0, 8)) {
-      const action = this.computer.action(step.action);
+      const action = this.actionOf(step.action);
+      if (step.action === webAction.id) {
+        try { const run = await this.webTask(step.params.task); results.push({ action: step.action, title: action.title, ok: true, result: { text: 'A browser agent is on it. Follow it in Rex Desk; it asks you before paying or sending anything.', runId: run.id, url: `/#/run/${run.id}` } }); }
+        catch (error) { results.push({ action: step.action, title: action.title, ok: false, error: error.message }); }
+        break;
+      }
       try { results.push({ action: step.action, title: action.title, ok: true, result: (await this.computer.run(step.action, step.params)).result ?? null }); }
       catch (error) { results.push({ action: step.action, title: action.title, ok: false, error: error.message }); break; }
       if (settle[step.action] && step !== steps.at(-1)) await new Promise(resolve => setTimeout(resolve, settle[step.action]));

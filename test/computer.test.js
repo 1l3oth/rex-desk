@@ -145,3 +145,23 @@ test('Jev anywhere starts with Windows through the per-user Run key, and keeps R
   const plist = readFileSync(mac.macAgent, 'utf8'); assert.match(plist, /<key>RunAtLoad<\/key><true\/>/); assert.match(plist, /server\.js/);
   await mac.set(false); assert.equal(existsSync(mac.macAgent), false);
 });
+
+test('Jev hands a task on websites to a browser agent, which is told to stop before paying', async () => {
+  const { computer } = fakeWindows(), started = [];
+  const plan = async () => '{"steps":[{"action":"web_task","params":{"task":"Find the cheapest flight from Phnom Penh to Seoul on 20 December for one adult"}}],"say":"Looking for flights."}';
+  const commander = new Commander(computer, { planner: plan, webTask: async task => { started.push(task); return { id: 'web-run-1' }; } });
+  const result = await commander.perform('ស្វែងរកជើងហោះហើរពីភ្នំពេញទៅសេអ៊ូល ថ្ងៃទី២០ ធ្នូ');
+  assert.deepEqual(started, ['Find the cheapest flight from Phnom Penh to Seoul on 20 December for one adult']);
+  assert.equal(result.done, true); assert.equal(result.results[0].result.url, '/#/run/web-run-1');
+  const { mkdtempSync } = await import('node:fs'), os = (await import('node:os')).default, path = (await import('node:path')).default;
+  const { Store } = await import('../src/store.js'), { Desk } = await import('../src/coordinator.js');
+  const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
+  const desk = new Desk(new Store(temporary('web')), { root: temporary('root'), memoryDirectory: temporary('memory') });
+  desk.closed = true;
+  const run = await desk.startWebTask('Book a hotel in Seoul for two nights');
+  assert.equal(run.role, 'web');
+  const prompt = desk.prompt(desk.run(run.id));
+  assert.match(prompt, /Book a hotel in Seoul for two nights/);
+  assert.match(prompt, /Stop and ask with desk_ask before anything that spends money/);
+  assert.match(prompt, /Never type card numbers, passwords, or one-time codes yourself/);
+});

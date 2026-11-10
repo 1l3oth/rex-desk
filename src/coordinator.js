@@ -30,6 +30,16 @@ import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from '
 
 const exec = promisify(execFile);
 // qa_* belong to QA checks, which Rex Desk no longer runs; they stay listed so older runs still count as finished.
+// What a browser agent is told: use a real browser, keep the person informed, and stop before anything that costs money or cannot be undone.
+const webAgentPrompt = task => [
+  `You are Rex Desk's web agent. Do this for the person on the web: ${task}`,
+  'Use a real browser: the Playwright browser tools (browser_navigate, browser_snapshot, browser_click, browser_type, browser_fill_form) if you have them, otherwise the Claude in Chrome tools. Read each page from its snapshot; never guess what a page says.',
+  'Work step by step and post a one-line progress note with desk_message when you reach a page that matters (search results, a form, a checkout).',
+  'Stop and ask with desk_ask before anything that spends money, books or buys, signs up for an account, submits a form to a company or person, sends a message, or shares personal data. Show exactly what will happen: site, price with currency, dates, names, and what can and cannot be undone.',
+  'Never type card numbers, passwords, or one-time codes yourself. When one is needed, ask the person to type it into the browser window, then wait for them to say they are done.',
+  'Never make up prices, times, or availability: quote what the page shows and name the site. Compare at least two sites when the person asks for the best option.',
+  'Finish with a short answer: what you found or did, the key numbers with their sites and links, and what is left for the person.',
+].join('\n');
 const terminalStates = new Set(['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked']);
 
 export function validateAnswer(interaction, answer) {
@@ -252,6 +262,14 @@ export class Desk {
     const project = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === found.path.toLowerCase());
     return { added, repository: { id: repository.id, name: repository.name, path: repository.path, baseBranch: repository.baseBranch, targetBranch: repository.targetBranch }, project: project?.slug || '', branches: found.branches.length, warnings: found.warnings };
   }
+  // Jev hands a task that happens on websites (search and compare, fill a form, book) to a browser agent with its own chat.
+  async startWebTask(task) {
+    const text = String(task || '').trim().slice(0, 2000); if (!text) throw new Error('Say what to do on the web.');
+    const home = path.join(this.store.directory, 'web'); mkdirSync(home, { recursive: true });
+    const run = { id: id(), role: 'web', title: `Web · ${text.length > 60 ? `${text.slice(0, 60)}…` : text}`, provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home, instructions: text, taskIds: [], ...runOptions({}, this.store) };
+    this.store.put('run', run.id, run); this.store.event(run.id, 'human-message', { text, via: 'jev' }, true);
+    void this.drain(); return this.run(run.id);
+  }
   async startConnectionAgent({ sourceId, provider }) {
     provider = 'claude';
     const source = this.store.config().sources.find(item => item.id === sourceId);
@@ -359,7 +377,7 @@ export class Desk {
       // A headless session that is being reopened already holds the whole conversation, so it is given only what is new.
       const reopened = run.execution !== 'orca' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && run.followUp;
       if (run.followUp) this.patchRun(runId, { followUp: '' });
-      const chat = run.role === 'specialist' || (run.role === 'coordinator' && (run.main || run.roomAgent));
+      const chat = run.role === 'specialist' || run.role === 'web' || (run.role === 'coordinator' && (run.main || run.roomAgent));
       const owner = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
       const person = owner ? this.memory.person() : '', personKey = person ? createHash('sha256').update(person).digest('hex').slice(0, 16) : '';
       const personUpdate = reopened && person && run.personSeen !== personKey ? `What you know about the person (updated, all agents share this):\n${person}` : '';
@@ -372,7 +390,7 @@ export class Desk {
 
 ${message}` : message);
       const current = this.run(runId);
-      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' ? 'finished' : 'needs_evidence', endedAt: now() });
+      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' ? 'finished' : 'needs_evidence', endedAt: now() });
     } catch (error) {
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: error.message, endedAt: now() });
       this.store.event(runId, 'error', { message: error.message }, true);
@@ -438,6 +456,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       ...(this.memory.secondBrain() ? [] : [`0. The person's second brain (notes vault) is not set up for the agents yet. Early on, ask the person with desk_ask whether they keep one, where it is${this.memory.secondBrainCandidates().length ? ` (found on this computer: ${this.memory.secondBrainCandidates().join(', ')})` : ''}, and how they want agents to use it; then call desk_second_brain.`]),
       '5. When every project has an agent, offer to look at the assigned issues with desk_tasks and desk_repositories. Never start a run except through desk_dispatch, which the person approves.',
       `The person's first message: ${run.prompt || '(none: start with step 1)'}`].join('\n');
+    if (run.role === 'web') return [common, webAgentPrompt(run.instructions)].join('\n\n');
     if (run.role === 'coordinator') return `${common}\nYou are the main coordinator. Read desk_tasks and desk_task for the selected IDs ${JSON.stringify(run.taskIds)}. Classify issues by affected module, severity, likely dependency, and reproduction path. Do not guess fixes. Use desk_categorize to label tasks and desk_dispatch to start a run for an issue${repositories ? '' : ' (unavailable: no source repository is configured, so say which issues are waiting for one)'}. Respect dependencies: serialize related changes and parallelize independent tasks. Do not modify source code yourself. Each dispatched run gets its own branch, worktree, and port, and investigates one issue. Choose the repository for every issue yourself and pass it as repositoryId: read desk_repositories, and match the issue to the project whose code holds the reported behaviour, by its product, module, screen, platform and the file or class names in its description and comments. Do not fall back to the connection default because it is there, and never send an issue to a repository that cannot contain the cause. If more than one could fit, or the right one is not listed, ask the human once with desk_ask, naming the candidates you found and saying the repository may need adding in Settings. Use desk_runs to track runs; report what you dispatched through desk_message.${run.maxDispatch ? ` This is a scheduled run: start at most ${run.maxDispatch} runs, prioritize by severity, and end with one desk_message summary for the human: what started, what was skipped and why.` : ''} Never mark a source task complete without verified evidence. Base override: ${run.baseBranch || 'repository setting'}. PR target override: ${run.targetBranch || 'repository setting'}. User instruction: ${run.prompt || 'Analyze and dispatch these assigned issues.'}`;
     const roomNote = 'This is your group-chat session: you use it for every room you are in. Your personal chat with the person is a separate conversation; read it with desk_my_chat when you need it.';
     const personalNote = 'This is your personal chat with the person. Group chats are a separate conversation of yours; read them with desk_rooms and desk_room_history when you need them.';
