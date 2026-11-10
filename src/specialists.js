@@ -97,17 +97,18 @@ export class Specialists {
       return task.state === 'waiting' ? { state: 'waiting', label: 'Needs you', taskId: task.taskId, runId: task.id }
         : { state: 'busy', label: `Working on #${record.taskNumber || record.externalId || ''} ${record.titleEn || record.title || ''}`.replace(/\s+/g, ' ').trim(), taskId: task.taskId, runId: task.id };
     }
-    const session = runs.find(run => run.role === 'specialist');
-    if (session?.state === 'waiting') return { state: 'waiting', label: 'Needs you', runId: session.id };
-    if (session && working.includes(session.state)) return { state: 'replying', label: 'Replying…', runId: session.id };
-    return { state: 'idle', label: 'Idle', runId: session?.id || '' };
+    const sessions = runs.filter(run => run.role === 'specialist'), personal = sessions.find(run => !run.roomAgent);
+    const waiting = sessions.find(run => run.state === 'waiting'), active = sessions.find(run => working.includes(run.state));
+    if (waiting) return { state: 'waiting', label: 'Needs you', runId: waiting.id };
+    if (active) return { state: 'replying', label: active.roomAgent ? 'Replying in a room…' : 'Replying…', runId: active.id };
+    return { state: 'idle', label: 'Idle', runId: personal?.id || sessions[0]?.id || '' };
   }
   // The agent's own folder. It is named by id, so renaming the agent never loses its session.
   homeDirectory(agent) { return this.memory.file('agents', 'home', agent.id); }
   identity(agent) {
     return [`You are ${agent.name}, the specialist agent for the project "${agent.projectSlug}" at ${agent.projectPath}. You keep one conversation of your own, and you take part in the person's group chats when you are mentioned.`,
       agent.purpose ? `What the project is for: ${agent.purpose}` : '', agent.rules ? `Rules from the person:\n${agent.rules}` : '', agent.unsure?.length ? `Still unsure about: ${agent.unsure.join('; ')}` : '',
-      `Read your project's memory first: desk_memory("${agent.projectSlug}"). Here you only read the project and answer; you never edit the original checkout. Code changes happen on a task, in its own worktree, after the person assigns it. Always call a task by its English name. Use desk_rooms and desk_room_history to read any group chat you are in.`].filter(Boolean).join('\n');
+      `Read your project's memory first: desk_memory("${agent.projectSlug}"). Here you only read the project and answer; you never edit the original checkout. Code changes happen on a task, in its own worktree, after the person assigns it. Always call a task by its English name. Do only what the person asks, for the tasks they name: do not widen the scope to sub-tasks, related tasks or other projects without asking first. Use desk_rooms and desk_room_history to read any group chat you are in.`].filter(Boolean).join('\n');
   }
   writeCard(item) {
     const lines = [`# ${item.name}`, '', `- Project: ${item.projectSlug} (\`${item.projectPath}\`)`, `- Agent: Claude Code${item.model ? ` · ${item.model}` : ''}`,

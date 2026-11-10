@@ -281,3 +281,18 @@ code,pre{font-family:var(--mono);font-size:12px}
 .side.info .pick2{margin-top:6px}.side.info .pick2-btn{width:100%;border-style:dashed;color:var(--accent);justify-content:center}
 .rtask{display:flex;gap:8px;width:100%;text-align:left;border:0;background:none;padding:7px 8px;border-radius:9px;font-size:13.5px;color:var(--ink)}.rtask:hover{background:var(--raised)}
 .rdanger{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}.small{font-size:12.5px}
+
+/* ---- side panel tabs and the room activity ---- */
+.side-head.tabs{gap:4px;padding:8px 10px}
+.tab{border:0;background:none;color:var(--muted);font-weight:600;font-size:13px;padding:6px 12px;border-radius:9px;display:inline-flex;align-items:center;gap:6px}
+.tab:hover{background:var(--raised);color:var(--ink)}.tab.on{background:var(--raised);color:var(--ink)}
+.tcount{background:var(--accent);color:var(--accent-ink);border-radius:9px;font-size:11px;padding:0 6px}
+.av.xs{width:20px;height:20px;font-size:9px}
+.ractivity{gap:4px!important}
+.anow{display:flex;flex-direction:column;gap:6px}.anow-row{display:flex;align-items:center;gap:8px;font-size:13px}.anow-row span:last-child{color:var(--accent);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.arow{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;padding:5px 4px;border-radius:8px;font-size:13px}.arow:hover{background:var(--raised)}
+.arow .av{align-self:center}.arow b{font-weight:600}.atime{color:var(--muted);font-size:11px}
+.atext{flex-basis:100%;padding-left:26px;color:var(--ink);overflow-wrap:anywhere}.arow.bad .atext{color:var(--bad)}
+.aterm{flex-basis:100%}.aterm summary{display:flex;gap:8px;cursor:pointer;list-style:none;align-items:baseline}.aterm summary::-webkit-details-marker{display:none}.aterm summary .atext{flex:1;flex-basis:auto}
+.aterm .tout{margin:6px 0 0 26px;background:#0d0f12;color:#c9ced6;border:1px solid var(--line);border-radius:8px;max-height:220px;font-size:11.5px}

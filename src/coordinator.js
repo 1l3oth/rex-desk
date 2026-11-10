@@ -308,6 +308,7 @@ export class Desk {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
           this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result'].includes(kind));
+          if (kind === 'agent-text') this.streamToRoom(runId, data.text);
         } };
       const resumeSessionId = this.agentSessionId(run);
       const runner = this.runnerFactory ? this.runnerFactory(options)
@@ -327,7 +328,7 @@ export class Desk {
 
 ${message}` : message);
       const current = this.run(runId);
-      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' ? 'finished' : 'needs_evidence', endedAt: now() });
+      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' ? 'finished' : 'needs_evidence', endedAt: now() });
     } catch (error) {
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: error.message, endedAt: now() });
       this.store.event(runId, 'error', { message: error.message }, true);
@@ -563,8 +564,15 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       if (!roomId) this.store.event(created.id, 'human-message', { text: String(prompt).trim(), via: 'rex' }, true);
       void this.drain(); return created;
     }
-    if (this.live.has(run.id)) { this.store.put('run', run.id, { ...run, roomTurn: turn || run.roomTurn }); await this.say(run.id, prompt, {}, { raw: true }); return run; }
+    if (this.live.has(run.id)) { this.store.put('run', run.id, { ...run, roomTurn: turn || run.roomTurn, ...(turn ? { roomPosted: false } : {}) }); await this.say(run.id, prompt, {}, { raw: true }); return run; }
     await this.resume(run.id, { prompt, silent: Boolean(roomId), roomTurn: turn }); return this.run(run.id);
+  }
+  // During a room turn, each piece of text the agent writes is posted to the room as it comes, so the person never waits for the whole turn.
+  streamToRoom(runId, text) {
+    const run = this.store.get('run', runId), turn = run?.roomTurn, agentId = run?.roomAgent || run?.specialistId || '';
+    if (!turn?.roomId || !agentId || !String(text || '').trim()) return;
+    this.store.put('run', runId, { ...run, roomPosted: true });
+    void this.rooms.post(turn.roomId, { fromAgentId: agentId, text: String(text).trim(), replyTo: turn.messageId }).catch(() => {});
   }
   // One agent, two sessions: before a turn, each session is told what happened in the other one since it last looked,
   // so the personal chat knows the rooms and the room session knows the personal chat, while both can run at the same time.
@@ -631,7 +639,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     // The follow-up is part of the conversation: it shows in the chat the moment it is sent.
     if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: String(prompt).replace(/\s+/g, ' ').trim(), via: 'rex' }, true);
     this.patchRun(runId, { state: 'queued', provider, followUp: sameProvider ? String(prompt).trim() : '', sessionId: sameProvider ? run.sessionId : undefined, mirror: sameProvider ? run.mirror : undefined,
-      ...(roomTurn !== undefined ? { roomTurn } : {}),
+      ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}),
       instructions: run.role === 'specialist' ? run.instructions : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
       ...runOptions(picked, this.store), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
     void this.drain(); return this.run(runId);

@@ -2,7 +2,7 @@ import { agentsRail, agentStage, agentAction } from '/chat-agents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
 import { initPickers, setPickActions, pickerOpen } from '/chat-pick.js';
-import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction, initRoomInfo, avatarHtml } from '/chat-rooms.js';
+import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction, initRoomInfo, avatarHtml, roomRunIds } from '/chat-rooms.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
@@ -218,6 +218,9 @@ async function loadView() {
     if (type === 'main' || type === 'run') {
       const run = type === 'main' ? mainRun() : runById(id); if (!run) return;
       const events = await api(`/runs/${run.id}/messages`); ui.events.set(run.id, events);
+    } else if (type === 'room') {
+      const room = ui.snap.rooms.find(item => item.id === id);
+      if (room && ui.infoOpen !== false && ui.sideTab !== 'info') await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
     } else if (type === 'project') ui.page = (await api(`/memory/page?name=${encodeURIComponent(id)}`)).text;
   } catch (error) { if (type === 'project') ui.page = error.message; }
 }
@@ -277,7 +280,7 @@ document.addEventListener('click', async event => {
     else if (action === 'new-room') newRoomDialog();
     else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
     else if (action === 'term-open') { ui.termOpen = true; renderAll(); }
-    else if (['room-remove', 'task-assign', 'info-toggle', 'room-image', 'room-delete'].includes(action)) await roomAction(ctx, action, target);
+    else if (['room-remove', 'task-assign', 'info-toggle', 'room-image', 'room-delete', 'side-tab'].includes(action)) await roomAction(ctx, action, target);
     else if (action === 'quick') { await api('/main', { method: 'POST', data: { prompt: target.dataset.text } }); await refresh(); }
     else if (action === 'sync') await syncIssues();
     else if (action === 'toggle-done') { ui.done = !ui.done; renderAll(); }

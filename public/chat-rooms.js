@@ -1,4 +1,5 @@
 import { pickerHtml } from '/chat-pick.js';
+import { toolLine } from '/chat-activity.js';
 // Rooms (group chats with agents) and Tasks. Both are their own screens, apart from the main agent.
 const WORKING = ['starting', 'running', 'queued', 'verifying'];
 // A round picture: the room's own image, or its initials on a colour taken from its name.
@@ -28,21 +29,65 @@ export function roomStage(ctx) {
   const free = [{ id: 'main', name: 'Main agent', projectSlug: 'all projects', status: { label: 'Knows every project' } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
   const chip = member => `<span class="chip member ${esc(member.state)}"><button class="member-open" data-open="${member.runId ? 'run' : 'specialist'}" data-id="${esc(member.runId || member.id)}" title="Open ${esc(member.name)}"><span class="dot ${dotFor(member.state)}"></span><strong>${esc(member.name)}</strong><span class="mlabel">${esc(member.label)}</span></button><button class="btn small x" data-action="room-remove" data-id="${esc(member.id)}" title="Remove from the room">×</button></span>`;
   return { title: room.name, meta: `${room.members.length} agents`, feedClass: 'room',
-    composer: { placeholder: 'Message the room. The main agent answers unless you @mention someone; # mentions a task…', mentions: handles, noPickers: true },
-    side: ui.infoOpen === false ? '' : roomInfoHtml(ctx, room), sideClass: 'info',
+    composer: { placeholder: 'Message the room (the main agent answers unless you @mention someone)…', mentions: handles, noPickers: true },
+    side: ui.infoOpen === false ? '' : roomSideHtml(ctx, room), sideClass: 'info',
     actions: ui.infoOpen === false ? '<button class="btn small" data-action="info-toggle">Info</button>' : '',
     members: ui.infoOpen !== false ? '' : `<div class="members">${room.members.map(chip).join('')}${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: 'Add an agent to this room', placeholder: '+ Add agent', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || 'Idle'}` })) }) : ''}</div>`,
     feed: `${messages.length ? messages.map(render).join('') : empty}${doing}` };
 }
 
 // The room's info on the right, like a messenger: picture, name, who is in it and what they are doing, and the tasks talked about.
+// The sessions whose work shows in a room's Activity tab: each member's room session, and the task run of a member who is busy on one.
+export function roomRunIds(ui, room) {
+  const ids = [];
+  for (const member of room.members) {
+    const agent = member.id === 'main' ? null : (ui.snap.specialists || []).find(item => item.id === member.id);
+    const roomRun = member.id === 'main' ? (ui.snap.runs || []).find(run => run.roomAgent === 'main')?.id : agent?.roomRunId;
+    if (roomRun) ids.push(roomRun);
+    if (member.state === 'busy' && member.runId) ids.push(member.runId);
+  }
+  return [...new Set(ids)];
+}
+const HIDDEN_STEPS = ['desk_ask', 'desk_message', 'desk_elicit', 'desk_room_post'];
+// What everyone in the room is doing, newest at the bottom: their steps, the commands they ran (with output), and when they replied.
+function activityHtml(ctx, room) {
+  const { ui, esc, hhmm } = ctx, names = new Map(room.members.map(member => [member.id, member.name])), owner = new Map();
+  for (const member of room.members) for (const id of roomRunIds(ui, { members: [member] })) owner.set(id, member.name);
+  const rows = [];
+  for (const [runId, who] of owner) {
+    const events = ui.events.get(runId) || [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event]));
+    for (const event of events) {
+      if (event.kind === 'agent-tool' && !HIDDEN_STEPS.includes(event.tool)) rows.push({ at: event.createdAt, who, event, out: results.get(event.id) });
+      else if (event.kind === 'agent-text') rows.push({ at: event.createdAt, who, said: event.text });
+      else if (event.kind === 'turn-start') rows.push({ at: event.createdAt, who, note: 'started working' });
+    }
+  }
+  rows.sort((left, right) => String(left.at).localeCompare(String(right.at)));
+  const working = room.members.filter(member => member.state === 'busy' || member.state === 'replying' || member.state === 'waiting');
+  const now = working.length ? `<div class="anow">${working.map(member => `<div class="anow-row"><span class="dot ${member.state === 'waiting' ? 'warn' : 'working'}"></span><b>${esc(member.name)}</b><span>${esc(member.label)}</span></div>`).join('')}</div>` : '<p class="muted small">Nobody is working right now.</p>';
+  const row = item => {
+    const head = `${ctx.avatar({ name: item.who, size: 'xs' })}<b>${esc(item.who)}</b><span class="atime">${esc(hhmm(item.at))}</span>`;
+    if (item.note) return `<li class="arow">${head}<span class="atext muted">${esc(item.note)}</span></li>`;
+    if (item.said) return `<li class="arow">${head}<span class="atext">replied: ${esc(String(item.said).replace(/\s+/g, ' ').slice(0, 140))}</span></li>`;
+    const shell = item.event.tool === 'Bash' || item.event.tool === 'PowerShell';
+    const line = `<span class="atext">${esc(toolLine({ tool: item.event.tool, input: item.event.input, failed: item.event.failed, text: item.event.text }))}</span>`;
+    if (!shell) return `<li class="arow ${item.event.failed ? 'bad' : ''}">${head}${line}</li>`;
+    const state = item.out ? (item.out.failed ? 'failed' : 'done') : 'running…';
+    return `<li class="arow">${head}<details class="aterm"><summary>${line}<span class="tstate ${item.out ? (item.out.failed ? 'bad' : 'ok') : 'run'}">${state}</span></summary><pre class="tout">$ ${esc(item.event.input?.command || '')}\n${esc(item.out?.text || '')}</pre></details></li>`;
+  };
+  return `<div class="side-body ractivity" id="side-body"><h3>Now</h3>${now}<h3>Recent</h3>${rows.length ? `<ul class="alist">${rows.slice(-80).map(row).join('')}</ul>` : '<p class="muted small">Nothing yet. Mention an agent and its work shows here.</p>'}</div>`;
+}
+// The right side of a room: Activity and Chat info, as tabs.
+function roomSideHtml(ctx, room) {
+  const tab = ctx.ui.sideTab === 'info' ? 'info' : 'activity', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
+  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><span class="spacer"></span><button type="button" class="btn small" data-action="info-toggle" aria-label="Close the side panel">Close</button></div>${tab === 'info' ? roomInfoHtml(ctx, room) : activityHtml(ctx, room)}`;
+}
 function roomInfoHtml(ctx, room) {
   const { ui, esc } = ctx, messages = (ui.snap.messages || []).filter(message => message.roomId === room.id);
   const mentioned = [...new Set(messages.flatMap(message => message.tasks || []))].map(id => (ui.snap.tasks || []).find(task => task.id === id)).filter(Boolean);
   const free = [{ id: 'main', name: 'Main agent', projectSlug: 'all projects', status: { label: 'Knows every project' } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
   const member = person => `<li class="rperson"><button class="rperson-main" data-open="${person.runId ? 'run' : 'specialist'}" data-id="${esc(person.runId || person.id)}" title="Open ${esc(person.name)}">${avatarHtml(ctx, { name: person.name, size: 'sm' })}<span class="rperson-text"><b>${esc(person.name)}</b><small>${esc(person.project)} · <span class="st ${esc(person.state)}">${esc(person.label)}</span></small></span></button><button class="btn small x" data-action="room-remove" data-id="${esc(person.id)}" title="Remove from the room" aria-label="Remove ${esc(person.name)}">×</button></li>`;
-  return `<div class="side-head"><strong>Chat info</strong><span class="spacer"></span><button type="button" class="btn small" data-action="info-toggle" aria-label="Close the info panel">Close</button></div>
-    <div class="side-body rinfo">
+  return `<div class="side-body rinfo">
       <div class="rhero"><button type="button" class="ravatar" data-action="room-image" title="Change the picture">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'xl' })}<span class="cam">Change</span></button><input type="file" id="room-image-input" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
         <input class="rname" id="room-name" value="${esc(room.name)}" maxlength="80" aria-label="Room name" spellcheck="false">
         <p class="rsub">${room.members.length} agent${room.members.length === 1 ? '' : 's'} · started ${esc(new Date(room.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }))}</p></div>
@@ -131,6 +176,7 @@ export function initRoomInfo(ctx) {
 // ---------- actions ----------
 export async function roomAction(ctx, action, target) {
   const { ui, api, toast, refresh } = ctx;
+  if (action === 'side-tab') { ui.sideTab = target.dataset.tab; ctx.render(); return; }
   if (action === 'info-toggle') { ui.infoOpen = ui.infoOpen === false; ctx.render(); return; }
   if (action === 'room-image') { document.getElementById('room-image-input')?.click(); return; }
   if (action === 'room-delete') {
