@@ -63,3 +63,17 @@ test('a message sent while the agent works waits for the end of the turn, then g
     starts[2].release();
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('an agent\'s tool calls reach the chat as short steps, without file contents', async () => {
+  const seen = [], events = [];
+  const messages = [{ type: 'system', subtype: 'init', session_id: SESSION },
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__rex_desk_run__desk_create_specialist', input: { project: 'authentication', name: 'Dara', rules: 'Never read .env' } },
+      { type: 'tool_use', id: 't2', name: 'Write', input: { file_path: 'F:/p/a.txt', content: 'SECRET FILE CONTENTS' } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't2', is_error: true, content: [{ type: 'text', text: 'Permission denied' }] }] } },
+    { type: 'result', subtype: 'success', result: 'ok', is_error: false }];
+  await new ClaudeRunner({ sdk: fakeSdk(messages, seen), run: { id: 'r', role: 'coordinator' }, cwd: 'x', token: 't', mcpUrl: 'http://127.0.0.1:1/mcp', event: (kind, data) => events.push([kind, data]), ask: async () => ({ action: 'accept' }), controller: new AbortController() }).start('Go');
+  const steps = events.filter(([kind]) => kind === 'agent-tool').map(([, data]) => data);
+  assert.equal(steps[0].tool, 'desk_create_specialist'); assert.equal(steps[0].input.name, 'Dara');
+  assert.equal(steps[1].tool, 'Write'); assert.equal(steps[1].input.file_path, 'F:/p/a.txt'); assert.ok(!JSON.stringify(steps[1]).includes('SECRET FILE CONTENTS'), 'contents are never shown');
+  assert.equal(steps[2].failed, true); assert.match(steps[2].text, /Permission denied/);
+});

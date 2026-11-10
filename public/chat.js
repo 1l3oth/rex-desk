@@ -1,8 +1,9 @@
 import { agentsRail, agentStage, agentAction } from '/chat-agents.js';
+import { stepsHtml } from '/chat-activity.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
-const ui = { snap: null, view: { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [] };
+const ui = { snap: null, view: { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map() };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`; };
@@ -71,6 +72,22 @@ function renderRail() {
 }
 
 // ---------- run conversation ----------
+// The conversation, with the agent's steps folded into groups between its messages.
+function renderItems(items, run, live) {
+  const out = []; let group = [];
+  const link = agent => `<a href="#" class="steplink" data-open="specialist" data-id="${esc(agent.id)}">Open card</a>`;
+  const flush = last => { if (group.length) out.push(stepsHtml(group, { esc, hhmm, live: live && last, openKeys: ui.openSteps, specialists: ui.snap.specialists || [], link })); group = []; };
+  for (const item of items) {
+    if (item.role === 'tool') { group.push(item); continue; }
+    flush(false);
+    out.push(item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), html: markdown(item.text) })
+      : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) })
+      : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div></div>`
+      : note(`${esc(item.text)} · ${hhmm(item.at)}`));
+  }
+  flush(true);
+  return out.join('');
+}
 function transcript(events) {
   const items = [];
   for (const event of events) {
@@ -79,6 +96,7 @@ function transcript(events) {
     else if (event.kind === 'turn-start') items.push({ role: 'status', text: `${event.resumed ? 'Resumed' : 'Started'} with ${provider(event.provider)}`, at: event.createdAt });
     else if (event.kind === 'agent-result') items.push({ role: 'status', text: `Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${event.cost ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
     else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
+    else if (event.kind === 'agent-tool') items.push({ role: 'tool', tool: event.tool, input: event.input, failed: event.failed, text: event.text, at: event.createdAt });
     else if (event.kind === 'error') items.push({ role: 'error', text: event.text || event.message || 'The run needs attention.', at: event.createdAt });
     else if (event.visible) items.push({ role: 'status', text: event.text || event.message || event.kind.replaceAll('-', ' '), at: event.createdAt });
   }
@@ -134,10 +152,7 @@ function stageModel() {
   if (!run && type === 'main') return welcomeStage();
   if (!run) return emptyStage('That run is gone.');
   const items = transcript(ui.events.get(run.id) || []), live = ['starting', 'running'].includes(run.state);
-  const feed = (items.length ? items.map(item => item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), html: markdown(item.text) })
-      : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) })
-      : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div></div>`
-      : note(`${esc(item.text)} · ${hhmm(item.at)}`)).join('') : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`)
+  const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`)
     + pending(run.id).map(decisionCard).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
   const stop = live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : '';
   return { title: runTitle(run), meta: `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions: stop, feed,
@@ -268,6 +283,7 @@ document.addEventListener('submit', async event => {
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
 
 initComposer(ctx);
+document.addEventListener('toggle', event => { const group = event.target; if (group?.dataset?.steps !== undefined) ui.openSteps.set(group.dataset.steps, group.open); }, true);
 document.addEventListener('keydown', event => {
   const input = event.target.closest?.('.qinput'); if (!input || event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
   const form = input.closest('form'), all = [...form.querySelectorAll('.qinput:not(.hidden)')], next = all[all.indexOf(input) + 1];

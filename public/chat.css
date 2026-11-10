@@ -137,3 +137,13 @@ code,pre{font-family:var(--mono);font-size:12px}
 .qcard .qinput,.qcard select{padding:10px 14px;border:1px solid var(--line);border-radius:14px;background:var(--bg);font-size:15px}
 .qcard .qinput:focus,.qcard select:focus{border-color:var(--accent);outline:0}
 .qhint{color:var(--muted);font-size:12px;margin-left:auto}
+
+/* ---- agent steps ---- */
+.steps{margin:2px 0 2px 38px;font-size:13px;color:var(--muted)}
+.steps summary{cursor:pointer;display:flex;gap:10px;align-items:baseline;list-style:none;padding:2px 0}.steps summary::-webkit-details-marker{display:none}
+.steps summary::before{content:'▸';font-size:11px;width:10px;transition:transform .15s}.steps[open] summary::before{transform:rotate(90deg)}
+.steps .count{font-weight:600;color:var(--ink);white-space:nowrap}.steps .latest{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.steps[open] .latest{display:none}
+.steps ul{list-style:none;margin:4px 0 0;padding:0 0 0 14px;border-left:2px solid var(--line);display:flex;flex-direction:column;gap:3px}
+.step{display:flex;gap:10px;align-items:baseline}.step .when{font-size:11px;opacity:.7;flex:none}.step .what{min-width:0;overflow-wrap:anywhere}.step.bad{color:var(--bad)}
+.steplink{margin-left:auto;font-size:12px;flex:none}
