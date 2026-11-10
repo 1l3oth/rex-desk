@@ -78,7 +78,13 @@ export class ClaudeRunner {
       disallowedTools: ['AskUserQuestion'],
       additionalDirectories: [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
       settingSources: ['user', 'project', 'local'],
-      hooks: { PreToolUse: [{ hooks: [refuseClaudeHome] }] },
+      hooks: { PreToolUse: [{ hooks: [refuseClaudeHome] }], PostToolUse: [{ hooks: [async () => {
+        // New messages for this agent arrived while it worked: hand them over now, between steps.
+        const news = this.inbox?.() || '';
+        return news ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: `New messages arrived while you were working. Read them now; they may change what you are doing. Answer them in your reply.
+
+${news}` } } : {};
+      }] }] },
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
       ...(this.model ? { model: this.model } : {}), ...(resume ? { resume } : {}),
       strictMcpConfig: true,

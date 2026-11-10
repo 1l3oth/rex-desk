@@ -116,6 +116,14 @@ export class Desk {
   }
   // A message to an agent. A terminal agent gets it typed in. A headless agent that is mid-turn takes it as soon as the turn ends;
   // one that is idle takes it right now, resuming its session with the whole chat behind it.
+  // Messages sent to a working agent wait in its queue; after each tool call it is handed what arrived, so it can change course
+  // at once instead of after its whole turn. What it was handed is not sent again when the turn ends.
+  takeInbox(runId) {
+    const run = this.store.get('run', runId); if (!run?.queued?.length) return '';
+    this.store.put('run', runId, { ...run, queued: [] });
+    this.store.event(runId, 'inbox-delivered', { count: run.queued.length });
+    return run.queued.join('\n\n');
+  }
   async say(runId, text, picked = {}, { raw = false } = {}) {
     const run = this.run(runId), line = raw ? String(text || '').trim() : String(text || '').replace(/\s+/g, ' ').trim();
     if (!line) throw new Error('Write a message first.');
@@ -332,7 +340,7 @@ export class Desk {
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
         mcpUrl: this.mcpUrl, model: run.model || modelName(run.provider, this.store.config().models[run.provider]), controller, signal: controller.signal, agentEnv: { ...this.agents.environment(run.provider), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
-        ask: request => this.ask(runId, request), event: (kind, data) => {
+        ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
           this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result'].includes(kind));

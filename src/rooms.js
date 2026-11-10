@@ -164,7 +164,10 @@ export class Rooms {
     const targets = message.to.filter(target => target !== HUMAN && this.agent(target));
     const start = async agentId => {
       const agent = this.agent(agentId); if (!agent) return;
-      const prompt = this.promptFor(this.room(room.id), message, agentId);
+      // An agent already working in its room session gets the message handed to it between steps, as one short line.
+      const working = agent.roomRunId && this.desk.live?.has(agent.roomRunId);
+      const sender = message.from.type === 'human' ? 'The person' : message.from.label;
+      const prompt = working ? `[Room "${room.name}"] ${sender} → you: ${message.text}` : this.promptFor(this.room(room.id), message, agentId);
       // The agent has now seen the room up to this message, whatever else happens with its turn.
       this.store.put('specialist', agentId, { ...agent, roomSeen: { ...(agent.roomSeen || {}), [room.id]: message.seq } });
       await this.desk.specialistTurn(agentId, { prompt, roomId: room.id, messageId: message.id }).catch(error => this.system(room.id, `${this.member(agentId).name} could not take the message: ${error.message}`));

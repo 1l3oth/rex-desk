@@ -247,3 +247,18 @@ test('an agent that already saw the room still gets the last messages as context
   const prompt = turns.filter(item => item.run.specialistId === dara.id)[1].prompt;
   assert.match(prompt, /The conversation so far[\s\S]*checkout total is wrong after a coupon[\s\S]*First answer\./);
 });
+
+test('a message for an agent that is working is handed to it between steps, once', async () => {
+  const { desk, store, vanna, room } = setup();
+  store.put('run', 'vanna-room', { id: 'vanna-room', role: 'specialist', specialistId: vanna.id, roomAgent: vanna.id, state: 'running', createdAt: now() });
+  store.put('specialist', vanna.id, { ...store.get('specialist', vanna.id), roomRunId: 'vanna-room' });
+  desk.live.set('vanna-room', { runner: { interrupt() {} } });
+  desk.rooms.quietSettle = 10;
+  await desk.rooms.post(room.id, { text: '@vanna stop, use Sydney not Seoul' });
+  await waitFor(() => (store.get('run', 'vanna-room').queued || []).length === 1);
+  assert.equal(store.get('run', 'vanna-room').queued[0], '[Room "Checkout bug"] The person → you: @vanna stop, use Sydney not Seoul');
+  assert.match(desk.takeInbox('vanna-room'), /use Sydney not Seoul/);
+  assert.equal(desk.takeInbox('vanna-room'), '', 'handed over once, not again when the turn ends');
+  assert.deepEqual(store.get('run', 'vanna-room').queued, []);
+  desk.live.delete('vanna-room');
+});
