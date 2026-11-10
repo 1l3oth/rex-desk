@@ -48,7 +48,8 @@ const stateLabel = run => ({ starting: 'Preparing', queued: 'Queued', running: '
 const pending = runId => (ui.snap?.interactions || []).filter(item => item.state === 'pending' && (!runId || item.runId === runId));
 const runById = id => ui.snap.runs.find(run => run.id === id);
 // The main agent's personal chat. Its room session (role coordinator, roomAgent main) is a separate conversation and never opens here.
-const mainRun = () => ui.snap.runs.find(run => run.role === 'coordinator' && run.main && !run.roomAgent) || ui.snap.runs.find(run => run.role === 'coordinator' && !run.roomAgent && !run.setupSourceId);
+// Only this computer's main agent: the other computers' main agents sync in through Turso but are theirs.
+const mainRun = () => ui.snap.runs.find(run => run.role === 'coordinator' && run.main && !run.roomAgent && run.computer === ui.snap.computer);
 // A run on a task is named by the task's English name, whatever language the tracker used.
 const runTitle = run => { const task = run?.taskId ? ui.snap?.tasks?.find(item => item.id === run.taskId) : null; return task?.titleEn || run?.title || run?.branch || `Run ${String(run?.id || '').slice(0, 8)}`; };
 const roomById = id => ui.snap.rooms.find(room => room.id === id);

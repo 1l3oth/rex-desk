@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { now, id, modelName, deskStatus, deskStatusLabels } from './store.js';
+import { now, id, thisComputer, latestLocalMain, modelName, deskStatus, deskStatusLabels } from './store.js';
 import { Sources } from './providers.js';
 import { AgentProfiles } from './agents.js';
 import { OrcaRunner, AgentSession, sendToOrca, showWorktreesInOrca } from './orca.js';
@@ -76,7 +76,7 @@ export class Desk {
     return Object.fromEntries(this.store.config().repositories.map(repository => { const { detected } = effectiveRepository(repository); return [repository.id, { setupCommand: detected.setupCommand, testCommand: detected.testCommand, devCommand: detected.devCommand, from: detected.from, flow: Boolean(detected.flowRuntime), electron: Boolean(detected.electronRuntime) }]; }));
   }
   snapshot() {
-    return { config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
+    return { computer: thisComputer(), config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
       runs: this.store.list('run').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
       interactions: this.store.list('interaction').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
@@ -214,8 +214,8 @@ export class Desk {
   // The main agent is the first thing the person talks to. It gets to know the projects one by one, asks what it cannot tell from their files,
   // and creates a specialist agent for each. Starting it from the chat sends the person's first message with it.
   async startMain({ prompt = '', ...picked } = {}) {
-    if (this.store.list('run').some(run => run.role === 'coordinator' && !terminalStates.has(run.state))) throw new Error('The main agent is already running. Talk to it in its chat.');
-    const run = { id: id(), role: 'coordinator', main: true, title: 'Rex Agent', provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'headless', ...runOptions(picked, this.store) };
+    if (this.store.list('run').some(run => run.role === 'coordinator' && (!run.main || run.computer === thisComputer()) && !terminalStates.has(run.state))) throw new Error('The main agent is already running. Talk to it in its chat.');
+    const run = { id: id(), role: 'coordinator', main: true, computer: thisComputer(), title: 'Rex Agent', provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'headless', ...runOptions(picked, this.store) };
     this.store.put('run', run.id, run);
     if (run.prompt) this.store.event(run.id, 'human-message', { text: run.prompt, via: 'rex' }, true);
     void this.drain(); return this.run(run.id);
@@ -571,7 +571,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     // each session can read the other with tools when it needs to.
     const key = roomId ? 'roomRunId' : 'runId';
     if (!roomId && agent.kind === 'main') {
-      const main = this.store.list('run').filter(run => run.role === 'coordinator' && run.main).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
+      const main = latestLocalMain(this.store.list('run'));
       if (!main) return this.startMain({ prompt });
       if (this.live.has(main.id)) { await this.say(main.id, prompt, {}, { raw: true }); return main; }
       await this.resume(main.id, { prompt, silent: true }); return this.run(main.id);
@@ -621,7 +621,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // What the person and the agent said in the agent's personal chat, for its room session to read when it needs to.
   personalChat(agentId, limit = 30) {
     const agent = this.specialists.get(agentId);
-    const run = agent.kind === 'main' ? this.store.list('run').filter(item => item.role === 'coordinator' && item.main).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0] : agent.runId && this.store.get('run', agent.runId);
+    const run = agent.kind === 'main' ? latestLocalMain(this.store.list('run')) : agent.runId && this.store.get('run', agent.runId);
     if (!run) return [];
     return this.store.events(run.id, { visible: true, limit: 400 }).filter(event => ['human-message', 'agent-text', 'message'].includes(event.kind))
       .map(event => ({ from: event.kind === 'human-message' ? 'The person' : agent.name, at: event.createdAt, text: String(event.text || event.message || '').slice(0, 2000) })).slice(-limit);

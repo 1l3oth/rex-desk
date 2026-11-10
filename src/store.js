@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { EventEmitter } from 'node:events';
 import { randomUUID, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
 import { issueBranch } from './branches.js';
@@ -15,6 +16,10 @@ export const deskStatuses = [['new', 'New'], ['investigating', 'Investigating'],
 export const deskStatusLabels = Object.fromEntries(deskStatuses);
 export const deskStatus = value => (deskStatusLabels[String(value || '').trim().toLowerCase()] ? String(value).trim().toLowerCase() : '');
 export const now = () => new Date().toISOString();
+// Records sync between computers through Turso, but each computer has its own main agent: its runs carry this computer's name.
+export const thisComputer = () => process.env.REX_COMPUTER_NAME || os.hostname();
+export const isLocalMain = run => run?.role === 'coordinator' && Boolean(run.main) && !run.roomAgent && run.computer === thisComputer();
+export const latestLocalMain = runs => runs.filter(isLocalMain).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
 export const id = () => randomUUID();
 export const defaults = {
   name: 'Rex', notify: true, provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',

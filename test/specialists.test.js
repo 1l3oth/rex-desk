@@ -77,6 +77,18 @@ test('the main agent starts from the chat with the first message and the onboard
   await assert.rejects(desk.startMain({}), /already running/);
 });
 
+test('each computer has its own main agent: one synced from another computer is not used here', async () => {
+  const { desk, store } = setup();
+  desk.closed = true;
+  store.put('run', 'elsewhere', { id: 'elsewhere', role: 'coordinator', main: true, computer: 'OTHER-LAPTOP', title: 'Rex Agent', state: 'running', createdAt: '2030-01-01T00:00:00.000Z', taskIds: [] });
+  desk.specialists.ensureMain();
+  const run = await desk.startMain({ prompt: 'Hello' });
+  assert.notEqual(run.id, 'elsewhere', 'a main agent running on another computer does not block this one');
+  assert.equal(run.computer, desk.snapshot().computer);
+  assert.equal(desk.specialists.status(desk.specialists.get('main')).runId, run.id);
+  assert.deepEqual(desk.personalChat('main').map(item => item.text), ['Hello']);
+});
+
 test('an agent saves what it learned from a correction, sees it in its prompt and card, and the person can delete it', () => {
   const { desk } = setup();
   const agent = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop' });
