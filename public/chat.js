@@ -101,7 +101,7 @@ function renderRail() {
     ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>')}
     ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentGroups(ctx, agents, (agent, grouped) => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: grouped ? agent.status?.label || 'Idle' : `${agent.status?.state === 'idle' || !agent.status ? agent.projectSlug : agent.status.label}` })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
     ${working.length || review.length || done.length ? section('runs', 'Runs', working.length || '', '', `${working.map(line).join('')}${review.length ? `<p class="rail-label">To review</p>${review.map(line).join('')}` : ''}${done.length ? `<p class="rail-label">Done</p>${shownDone.map(line).join('')}${done.length > 4 ? `<button class="item more" data-action="toggle-done"><span class="name sub">${ui.done ? 'Show fewer' : `Show all ${done.length}`}</span></button>` : ''}` : ''}`) : ''}
-  </div><div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button><button class="btn small" data-action="theme">Theme</button></div>`;
+  </div>${phoneTabs(asks)}<div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button><button class="btn small" data-action="theme">Theme</button></div>`;
 }
 
 // ---------- run conversation ----------
@@ -228,7 +228,7 @@ const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="em
 
 function renderStage(full) {
   const model = stageModel(), stage = document.getElementById('stage');
-  const head = `<div class="stage-head"><button class="m-menu" data-action="m-rail" aria-label="Open the menu"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}<span class="spacer"></span>${model.actions || ''}</div>`;
+  const head = `<div class="stage-head"><button class="m-menu" data-action="m-rail" aria-label="Back to the list"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}<span class="spacer"></span>${model.actions || ''}</div>`;
   // A view that needs the message box always gets it, even when an earlier view had none.
   if (full || !document.getElementById('feed') || Boolean(model.composer) !== Boolean(document.getElementById('composer'))) {
     stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}</div><aside class="side" id="side"></aside>`;
@@ -259,7 +259,8 @@ const draftKey = () => `${ui.view.type}:${ui.view.id || ''}`;
 function renderAll(full = false) {
   queueMicrotask(drawReplyBar);
   if (!ui.snap) return;
-  if (!document.getElementById('rail')) app.innerHTML = '<div class="chat-shell"><aside class="rail" id="rail"></aside><main class="stage" id="stage"></main></div>';
+  // On a phone Rex Desk opens on the list, like a messaging app; a chat slides in over it and the back arrow returns.
+  if (!document.getElementById('rail')) app.innerHTML = `<div class="chat-shell${phone() && !location.hash ? ' show-rail' : ''}"><aside class="rail" id="rail"></aside><main class="stage" id="stage"></main></div>`;
   const rail = document.getElementById('rail'), scroll = rail.querySelector('.rail-scroll')?.scrollTop || 0;
   rail.innerHTML = renderRail(); const restored = rail.querySelector('.rail-scroll'); if (restored) restored.scrollTop = scroll;
   renderStage(full);
@@ -814,3 +815,18 @@ document.addEventListener('click', async event => {
     else if (event.target.closest('[data-signin-skip]')) { await api(`/interactions/${id}/answer`, { method: 'POST', data: { action: 'decline' } }); await refresh(); }
   } catch (error) { toast(error.message, true); }
 });
+
+// ---------- phone: the list screen's tab bar ----------
+function phone() { return window.matchMedia('(max-width:760px)').matches; }
+function phoneTabs(asks) {
+  const ic = d => `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const tab = (attrs, label, icon, on = false, badge = 0) => `<button type="button" ${attrs} class="${on ? 'on' : ''}">${icon}${badge ? `<span class="tb-badge">${badge}</span>` : ''}<span>${label}</span></button>`;
+  return `<nav class="m-tabs" aria-label="Sections">
+    ${tab('data-action="m-top"', 'Chats', ic('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>'), true)}
+    ${tab('data-open="inbox" data-id=""', 'Needs you', ic('<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'), false, asks)}
+    ${tab('data-open="tasks" data-id=""', 'Tasks', ic('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>'))}
+    ${tab('data-open="jev" data-id=""', 'Jev', ic('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>'))}
+    ${tab('data-action="settings-open"', 'Settings', ic('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>'))}
+  </nav>`;
+}
+document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="m-top"]')) return; event.stopPropagation(); document.querySelector('.rail-scroll')?.scrollTo({ top: 0, behavior: 'smooth' }); }, true);

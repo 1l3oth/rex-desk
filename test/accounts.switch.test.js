@@ -37,3 +37,21 @@ test('with automatic switching off, a usage limit only tells the person', async 
   assert.ok(store.events(run.id, { limit: 50 }).some(event => event.kind === 'account-limit'));
   desk.closed = true;
 });
+
+test('an agent moved to another Claude account takes its conversation along', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const pathModule = (await import('node:path')).default;
+  const { carrySession } = await import('../src/agents.js');
+  const root = mkdtempSync(pathModule.join(tmpdir(), 'carry-'));
+  const first = pathModule.join(root, 'first'), second = pathModule.join(root, 'second'), cwd = pathModule.join(root, 'work');
+  const folder = pathModule.resolve(cwd).replace(/[^a-zA-Z0-9]/g, '-');
+  mkdirSync(pathModule.join(first, 'projects', folder), { recursive: true }); mkdirSync(second, { recursive: true });
+  writeFileSync(pathModule.join(first, 'projects', folder, 'abc.jsonl'), '{"hello":1}\n');
+  const profiles = [{ profile: first }, { profile: second }];
+  assert.equal(carrySession('abc', cwd, second, { profiles }), true);
+  assert.equal(readFileSync(pathModule.join(second, 'projects', folder, 'abc.jsonl'), 'utf8'), '{"hello":1}\n');
+  assert.equal(carrySession('abc', cwd, second, { profiles }), false, 'already there, nothing to copy');
+  assert.equal(carrySession('missing', cwd, second, { profiles }), false);
+  assert.ok(!existsSync(pathModule.join(second, 'projects', folder, 'missing.jsonl')));
+});

@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
+import { carrySession } from './agents.js';
 
 export function existingMcpConnections(sourcePath, configDirectory = process.env.CLAUDE_CONFIG_DIR) {
   let connections = {};
@@ -86,6 +87,7 @@ export class ClaudeRunner {
     const connections = existingMcpConnections(this.sourcePath, env.CLAUDE_CONFIG_DIR), allowedTools = new Set();
     delete connections.rex_desk;
     const mode = sdkMode(this.run.permissionMode), resume = sessionId(this.run.sessionId);
+    if (resume) { try { carrySession(resume, this.cwd, env.CLAUDE_CONFIG_DIR || ''); } catch { /* the resume reports it if the conversation is really gone */ } }
     // Dangerous mode skips every permission prompt, so what the prompts used to refuse is refused by a hook instead.
     // A specialist reads its project but never writes in the original checkout: code changes happen in a task worktree.
     const writesProject = input => this.run.role === 'specialist' && this.projectDirectory && ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(input.tool_name)

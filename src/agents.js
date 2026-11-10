@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
@@ -48,6 +48,27 @@ export function discoverProfiles(provider, { configured = '', env = process.env,
   try { for (const entry of readdirSync(orca, { withFileTypes: true })) if (entry.isDirectory()) add(path.join(orca, entry.name, 'home'), 'orca'); } catch {}
   if (configured) add(configured, 'saved');
   return [...found.values()];
+}
+
+// Each Claude account (profile folder) keeps its own conversations. When an agent moves to another account (the first one hit its
+// usage limit, or the person switched), its conversation is copied into that account first, so it carries on instead of failing
+// with "No conversation found". Only the conversation is copied, never a sign-in.
+export function carrySession(sessionId, cwd, profile, { roots = { home, appData }, profiles } = {}) {
+  if (!sessionId || !cwd) return false;
+  const projects = value => path.join(value || path.join(roots.home, '.claude'), 'projects');
+  const folder = path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, '-');
+  const target = path.join(projects(profile), folder, `${sessionId}.jsonl`);
+  if (existsSync(target)) return false;
+  for (const item of profiles || discoverProfiles('claude', { roots })) {
+    const source = path.join(projects(item.profile), folder, `${sessionId}.jsonl`);
+    if (!existsSync(source) || canonical(source) === canonical(target)) continue;
+    mkdirSync(path.dirname(target), { recursive: true });
+    cpSync(source, target);
+    const extras = source.slice(0, -'.jsonl'.length);
+    if (directory(extras)) cpSync(extras, target.slice(0, -'.jsonl'.length), { recursive: true });
+    return true;
+  }
+  return false;
 }
 
 function capture(command, args, env, timeout) {
