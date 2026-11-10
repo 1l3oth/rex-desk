@@ -286,7 +286,9 @@ export class Sources {
       const reusable = previous?.detailLoaded && task.detailLoaded === false && previous.postId === task.postId && (!task.updatedAt || previous.updatedAt === task.updatedAt);
       const detail = reusable ? Object.fromEntries(['description', 'contentImages', 'contentFiles', 'images', 'files', 'comments', 'url', 'detailLoadedAt'].map(key => [key, previous[key]])) : {};
       this.store.put('task', task.id, { ...task, ...detail, ...(reusable ? { detailLoaded: true, raw: { ...task.raw, post: previous.raw?.post } } : {}), category: previous?.category || '', runId: previous?.runId,
-        deskStatus: previous?.deskStatus || '', deskNote: previous?.deskNote || '', deskStatusAt: previous?.deskStatusAt || '', deskStatusBy: previous?.deskStatusBy || '' });
+        deskStatus: previous?.deskStatus || '', deskNote: previous?.deskNote || '', deskStatusAt: previous?.deskStatusAt || '', deskStatusBy: previous?.deskStatusBy || '',
+        // The English name made for this task is kept until the tracker title itself changes.
+        ...(previous?.titleEn && previous.title === task.title ? { titleEn: previous.titleEn } : {}) });
     }
     for (const set of statusSets) this.store.put('statuses', `${source.id}:${set.projectId}`, set);
     const people = this.store.get('directory', source.id)?.employees || [];

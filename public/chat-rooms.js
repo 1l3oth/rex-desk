@@ -8,6 +8,7 @@ export function avatarHtml(ctx, { name, image = '', id = '', at = '', size = '' 
   const { esc, initials } = ctx;
   return image ? `<span class="av ${size}"><img src="/api/rooms/${esc(id)}/image?v=${encodeURIComponent(at)}" alt=""></span>` : `<span class="av av${hashOf(name)} ${size}">${esc(initials(name))}</span>`;
 }
+export const nameHash = text => [...String(text)].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7) % 8;
 const taskNumber = task => String(task.taskNumber || task.externalId || '');
 export const taskName = task => task.titleEn || task.title;
 const dotFor = state => ({ busy: 'working', replying: 'working', waiting: 'warn', idle: 'good' })[state] || '';
@@ -19,10 +20,15 @@ export function roomStage(ctx) {
   const handles = room.members.map(member => member.handle).filter(Boolean), tasks = Object.fromEntries((ui.snap.tasks || []).map(task => [taskNumber(task), taskName(task)]));
   const messages = (ui.snap.messages || []).filter(message => message.roomId === room.id).sort((left, right) => left.seq - right.seq);
   const names = new Map(room.members.map(member => [member.id, member.name]));
+  // Like a group chat: an agent's message has its picture and its name in its own colour; messages in a row from the same sender share one header.
+  let previous = null;
   const render = message => {
-    if (message.from.type === 'system') return note(esc(message.text));
+    if (message.from.type === 'system') { previous = null; return note(esc(message.text)); }
     const to = message.from.type === 'human' && message.to.some(id => id !== 'you') ? message.to.filter(id => id !== 'you').map(id => names.get(id)).filter(Boolean) : [];
-    return bubble({ mine: message.from.type === 'human', name: message.from.label, time: hhmm(message.at), html: markdown(message.text, { mentions: ['you', ...handles], tasks }) + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '') });
+    const html = markdown(message.text, { mentions: ['you', ...handles], tasks }) + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '');
+    const same = previous && previous.from.id === message.from.id && Date.parse(message.at) - Date.parse(previous.at) < 5 * 60000; previous = message;
+    if (message.from.type === 'human') return bubble({ mine: true, name: 'You', time: hhmm(message.at), html });
+    return `<div class="msg rmsg ${same ? 'cont' : ''}"><div class="ravcol">${same ? '' : ctx.avatar({ name: message.from.label, size: 'sm' })}</div><div class="bubble"><div class="who rwho"><strong class="nc${nameHash(message.from.label)}">${esc(message.from.label)}</strong><span>${esc(hhmm(message.at))}</span></div><div class="md">${html}</div></div></div>`;
   };
   const empty = `<div class="empty"><h2>${esc(room.name)}</h2><p>Mention an agent with @ to talk to it, and a task with #. Agents answer only when they are mentioned, and each one reads this room before it answers.</p></div>`;
   // One typing line for everyone answering in the room, like a messenger; work on a task shows in the Activity tab instead.

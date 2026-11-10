@@ -296,3 +296,10 @@ code,pre{font-family:var(--mono);font-size:12px}
 .atext{flex-basis:100%;padding-left:26px;color:var(--ink);overflow-wrap:anywhere}.arow.bad .atext{color:var(--bad)}
 .aterm{flex-basis:100%}.aterm summary{display:flex;gap:8px;cursor:pointer;list-style:none;align-items:baseline}.aterm summary::-webkit-details-marker{display:none}.aterm summary .atext{flex:1;flex-basis:auto}
 .aterm .tout{margin:6px 0 0 26px;background:#0d0f12;color:#c9ced6;border:1px solid var(--line);border-radius:8px;max-height:220px;font-size:11.5px}
+
+/* ---- room messages with pictures ---- */
+.feed.room .rmsg{gap:10px}.feed.room .rmsg .ravcol{width:30px;flex:none;padding-top:2px}
+.feed.room .rmsg.cont{margin-top:-10px}.feed.room .rmsg.cont .rwho{display:none}
+.feed.room .msg:not(.mine) .rwho{display:flex}.feed.room .rwho strong{font-weight:700}
+.nc0{color:#7aa2ff}.nc1{color:#ff8f7a}.nc2{color:#4fd1a5}.nc3{color:#f08bd0}.nc4{color:#f6c453}.nc5{color:#5cc8f0}.nc6{color:#8fd47a}.nc7{color:#b79cff}
+html[data-theme=light] .nc0{color:#3559c7}html[data-theme=light] .nc1{color:#c2410c}html[data-theme=light] .nc2{color:#047857}html[data-theme=light] .nc3{color:#be185d}html[data-theme=light] .nc4{color:#a16207}html[data-theme=light] .nc5{color:#0369a1}html[data-theme=light] .nc6{color:#3f7d1f}html[data-theme=light] .nc7{color:#6d28d9}

@@ -79,8 +79,9 @@ test('sync follows API cursors, isolates assignments, preserves categories, and 
   const sources = new Sources(store, { fetcher });
   const result = await sources.sync(); assert.equal(result[0].count, 1);
   const task = store.list('task')[0]; assert.equal(task.title, 'My issue');
-  store.put('task', task.id, { ...task, category: 'Regression' });
+  store.put('task', task.id, { ...task, category: 'Regression', titleEn: 'My issue in English' });
   await sources.sync(); assert.equal(store.get('task', task.id).category, 'Regression');
+  assert.equal(store.get('task', task.id).titleEn, 'My issue in English', 'a sync keeps the English name while the title is the same');
   const failedSources = new Sources(store, { fetcher: async () => new Response('{}', { status: 403 }) });
   const failed = await failedSources.sync(); assert.match(failed[0].error, /403/);
   assert.equal(store.get('task', task.id).active, true);
