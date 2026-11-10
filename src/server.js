@@ -226,6 +226,8 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       }
       if (url.pathname === '/api/specialists' && request.method === 'GET') return json(response, 200, desk.specialists.list());
       if (url.pathname === '/api/specialists' && request.method === 'POST') return json(response, 200, desk.specialists.create({ ...(await body(request)), by: 'you' }));
+      const lessonMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)\/lessons\/(\d+)$/);
+      if (lessonMatch && request.method === 'DELETE') return json(response, 200, desk.specialists.forget(lessonMatch[1], Number(lessonMatch[2])));
       const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say))?$/);
       if (specialistMatch) {
         const [, specialistId, part] = specialistMatch;

@@ -310,3 +310,7 @@ html[data-theme=light] .nc0{color:#3559c7}html[data-theme=light] .nc1{color:#c24
 .feed{padding:0}.feed-inner{padding-top:20px;padding-bottom:20px}
 .feed.room .rmsg .rwho{top:0;margin-top:0;padding:8px 0 6px}
 .feed.room .rmsg .ravcol .av{top:8px}
+
+.lessons{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.lessons li{display:flex;align-items:flex-start;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-size:13.5px}.lessons li span{flex:1}
+.lessons .x{opacity:.6}.lessons li:hover .x{opacity:1}

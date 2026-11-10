@@ -324,7 +324,8 @@ export class Desk {
       const reopened = run.execution !== 'orca' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && run.followUp;
       if (run.followUp) this.patchRun(runId, { followUp: '' });
       const chat = run.role === 'specialist' || (run.role === 'coordinator' && (run.main || run.roomAgent));
-      const digest = [this.sessionDigest(run), reopened && chat ? '(Reply like a teammate in a chat: short, plain, answer first; no code or long lists unless asked.)' : ''].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : this.prompt(run);
+      const owner = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
+      const digest = [this.sessionDigest(run), reopened && owner ? this.specialists.lessonsText(owner) : '', reopened && chat ? '(Reply like a teammate in a chat: short, plain, answer first; no code or long lists unless asked. When corrected, save the lesson with desk_learn.)' : ''].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : this.prompt(run);
       await runner.start(digest ? `${digest}
 
 ${message}` : message);
@@ -384,7 +385,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const config = this.store.config(), repositories = config.repositories.length > 0;
     if (run.main) return [common,
       'You are the main agent of Rex Desk, the first agent the person talks to. Keep every message short and plain. Work in small steps.',
-      this.memory.chatStyle(),
+      this.memory.chatStyle(), this.specialists.lessonsText('main'), "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
       '1. Read desk_memory with page "index", and desk_specialists. Greet the person in one or two lines: how many projects you found, and how many already have a specialist agent.',
       '2. Go through the projects that have no specialist, one at a time. For each: read its memory page, then ask the person with desk_ask only what you cannot tell from it (what it is for, how to set it up and run it, rules to follow, anything risky). At most 3 questions per project, in one desk_ask when you can. For every question give 2 to 4 suggested answers in the options property of the field (a short label and a one-line description), based on what you found (the detected commands and branches, what similar projects use). The person can pick one or type their own. Never guess.',
       '3. When you understand a project, call desk_create_specialist with a short human name, the rules the person gave you, and what is still unsure. Then tell the person in one line that the agent exists and that they can rename or duplicate it from its card. Move to the next project.',
@@ -395,7 +396,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const roomNote = 'This is your group-chat session: you use it for every room you are in. Your personal chat with the person is a separate conversation; read it with desk_my_chat when you need it.';
     const personalNote = 'This is your personal chat with the person. Group chats are a separate conversation of yours; read them with desk_rooms and desk_room_history when you need them.';
     if (run.role === 'specialist') return [common, this.specialists.identity(this.specialists.get(run.specialistId)), run.roomAgent ? roomNote : personalNote, run.instructions].filter(Boolean).join('\n\n');
-    if (run.roomAgent === 'main') return [common, 'You are the main agent of Rex Desk: you know every project and every agent, and you help the person decide who does what. Use desk_specialists, desk_memory, desk_tasks and desk_runs to answer.', this.memory.chatStyle(), roomNote, run.instructions].filter(Boolean).join('\n\n');
+    if (run.roomAgent === 'main') return [common, 'You are the main agent of Rex Desk: you know every project and every agent, and you help the person decide who does what. Use desk_specialists, desk_memory, desk_tasks and desk_runs to answer.', this.memory.chatStyle(), this.specialists.lessonsText('main'), "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.", roomNote, run.instructions].filter(Boolean).join('\n\n');
     const task = this.task(run.taskId), who = run.specialistId && this.store.get('specialist', run.specialistId) ? `${this.specialists.identity(this.store.get('specialist', run.specialistId))}\nThis issue is assigned to you. ` : '';
     return `${common}\n${who}${this.taskPrompt(run, task, lessons)}`;
   }

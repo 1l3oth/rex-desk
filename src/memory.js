@@ -26,7 +26,7 @@ export const CHAT_STYLE = [
   '',
 ].join('\n');
 export const memoryHome = (env = process.env) => path.resolve(env.REX_DESK_MEMORY || path.join(os.homedir(), '.rexdesk'));
-const redactText = text => String(text).replace(SECRET_LINE, '$1: [redacted]');
+export const redactText = text => String(text).replace(SECRET_LINE, '$1: [redacted]');
 const read = (file, limit) => { try { return redactText(readFileSync(file, 'utf8').slice(0, limit)); } catch { return ''; } };
 const exists = target => { try { return statSync(target); } catch { return null; } };
 const atomic = (file, text) => { mkdirSync(path.dirname(file), { recursive: true }); const temporary = `${file}.${process.pid}.tmp`; writeFileSync(temporary, text); renameSync(temporary, file); };

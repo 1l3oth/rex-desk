@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { modelName } from './store.js';
 import { modelList } from './choices.js';
+import { redactText } from './memory.js';
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -103,12 +104,32 @@ export class Specialists {
     if (active) return { state: 'replying', label: active.roomAgent ? 'Replying in a room…' : 'Replying…', runId: active.id };
     return { state: 'idle', label: 'Idle', runId: personal?.id || sessions[0]?.id || '' };
   }
+  // Lessons the agent learned from the person's corrections. Kept on the agent (newest last, at most 30) and given to it with every turn.
+  learn(agentId, text, by = 'agent') {
+    if (agentId === 'main') this.ensureMain();
+    const agent = this.get(agentId), lesson = redactText(String(text || '').replace(/\s+/g, ' ').trim()).slice(0, 300);
+    if (!lesson) throw new Error('Write the lesson first.');
+    const lessons = (agent.lessons || []).filter(item => item.text.toLowerCase() !== lesson.toLowerCase());
+    const updated = { ...agent, lessons: [...lessons, { text: lesson, at: now(), by: String(by).slice(0, 40) }].slice(-30), updatedAt: now() };
+    this.store.put('specialist', agentId, updated); if (agent.kind !== 'main') this.writeCard(updated); return { saved: true, lessons: updated.lessons.length };
+  }
+  forget(agentId, index) {
+    const agent = this.get(agentId), lessons = [...(agent.lessons || [])];
+    if (!lessons[index]) throw new Error('That lesson is gone.');
+    lessons.splice(index, 1); const updated = { ...agent, lessons, updatedAt: now() };
+    this.store.put('specialist', agentId, updated); if (agent.kind !== 'main') this.writeCard(updated); return updated;
+  }
+  lessonsText(agentId) {
+    const agent = agentId && this.store.get('specialist', agentId), lessons = agent?.lessons || [];
+    return lessons.length ? `Lessons you learned from the person (follow them):\n${lessons.map(item => `- ${item.text}`).join('\n')}` : '';
+  }
   // The agent's own folder. It is named by id, so renaming the agent never loses its session.
   homeDirectory(agent) { return this.memory.file('agents', 'home', agent.id); }
   identity(agent) {
     return [`You are ${agent.name}, the specialist agent for the project "${agent.projectSlug}" at ${agent.projectPath}. You keep one conversation of your own, and you take part in the person's group chats when you are mentioned.`,
       agent.purpose ? `What the project is for: ${agent.purpose}` : '', agent.rules ? `Rules from the person:\n${agent.rules}` : '', agent.unsure?.length ? `Still unsure about: ${agent.unsure.join('; ')}` : '',
-      this.memory.chatStyle(),
+      this.memory.chatStyle(), this.lessonsText(agent.id),
+      "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
       `Read your project's memory first: desk_memory("${agent.projectSlug}"). Here you only read the project and answer; you never edit the original checkout. Code changes happen on a task, in its own worktree, after the person assigns it. Always call a task by its English name. Do only what the person asks, for the tasks they name: do not widen the scope to sub-tasks, related tasks or other projects without asking first. Use desk_rooms and desk_room_history to read any group chat you are in.`].filter(Boolean).join('\n');
   }
   writeCard(item) {
@@ -116,6 +137,7 @@ export class Specialists {
       `- Created by: ${item.createdBy}${item.cloneOf ? ` · duplicate of ${this.store.get('specialist', item.cloneOf)?.name || 'another agent'}` : ''}`, `- Updated: ${item.updatedAt}`, '',
       '## What this project is for', '', item.purpose || 'Not recorded yet.', '', '## Rules from the person', '', item.rules || 'None yet.', '',
       '## Still not sure about', '', item.unsure.length ? item.unsure.map(text => `- ${text}`).join('\n') : 'Nothing open.', '',
+      '## Lessons learned', '', (item.lessons || []).length ? item.lessons.map(lesson => `- ${lesson.text}`).join('\n') : 'None yet.', '',
       '## Read first', '', `- Project memory: \`projects/${item.projectSlug}.md\` (set up, test, run, and the project's own instructions)`, '- The repository\'s own CLAUDE.md and AGENTS.md before changing anything', ''];
     atomic(this.cardFile(item), lines.join('\n'));
   }

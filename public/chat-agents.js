@@ -22,6 +22,7 @@ export function agentStage(ctx) {
     <p class="path"><code>${esc(agent.projectPath)}</code></p>
     <h3>What this project is for</h3><p class="md">${esc(agent.purpose || 'Not recorded yet.')}</p>
     <label>Rules from you<textarea id="sp-rules" rows="5" placeholder="How this agent should work on this project. For example: ask before changing the database.">${esc(agent.rules)}</textarea></label>
+    <h3>Lessons learned</h3>${(agent.lessons || []).length ? `<ul class="lessons">${agent.lessons.map((lesson, index) => `<li><span>${esc(lesson.text)}</span><button type="button" class="btn small x" data-action="spec-forget" data-index="${index}" title="Forget this lesson" aria-label="Forget this lesson">×</button></li>`).join('')}</ul>` : '<p class="muted small">None yet. When you correct this agent, it saves what it learned here.</p>'}
     <label>Still not sure about (one per line)<textarea id="sp-unsure" rows="3">${esc((agent.unsure || []).join('\n'))}</textarea></label>
     <div class="idrow"><label>Model${pickerHtml(ctx, { id: 'sp-model', label: 'Model', value: agent.model || '', items: [{ value: '', label: 'Default', hint: 'The model set in Settings' }, ...(ui.snap.choices?.models || []).map(model => ({ value: model.id, label: model.label }))] })}</label></div>
     <div class="row"><button class="btn primary" data-action="spec-save">Save</button><button class="btn" data-action="spec-chat">Chat with ${esc(agent.name)}</button><button class="btn" data-action="spec-duplicate">Duplicate with another name</button><span class="spacer"></span><button class="btn danger" data-action="spec-remove">Remove</button></div>
@@ -40,7 +41,7 @@ function dialog(ctx, { title, nameValue = '', projects = null, submit }) {
   });
 }
 
-export async function agentAction(ctx, action) {
+export async function agentAction(ctx, action, target = null) {
   const { ui, api, toast, refresh, open } = ctx, value = id => document.getElementById(id)?.value ?? '';
   const agent = (ui.snap.specialists || []).find(item => item.id === ui.view.id);
   if (action === 'spec-new') {
@@ -57,6 +58,7 @@ export async function agentAction(ctx, action) {
     if (!runId) { await api(`/specialists/${agent.id}/say`, { method: 'POST', data: { text: 'Introduce yourself in one or two lines: who you are and which project you look after.' } }); await refresh(); runId = (ui.snap.specialists || []).find(item => item.id === agent.id)?.runId; }
     if (runId) open('run', runId); return;
   }
+  if (action === 'spec-forget') { await api(`/specialists/${agent.id}/lessons/${target.dataset.index}`, { method: 'DELETE' }); await refresh(); return; }
   if (action === 'spec-rename') { await api(`/specialists/${agent.id}/rename`, { method: 'POST', data: { name: value('sp-name') } }); toast('Renamed.'); await refresh({ full: true }); }
   else if (action === 'spec-save') {
     await api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: value('sp-rules'), unsure: value('sp-unsure').split('\n'), model: value('sp-model') } });

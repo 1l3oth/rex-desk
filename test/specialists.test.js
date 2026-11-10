@@ -76,3 +76,20 @@ test('the main agent starts from the chat with the first message and the onboard
   assert.match(prompt, /desk_create_specialist/); assert.match(prompt, /one at a time/); assert.match(prompt, /Meet my projects/);
   await assert.rejects(desk.startMain({}), /already running/);
 });
+
+test('an agent saves what it learned from a correction, sees it in its prompt and card, and the person can delete it', () => {
+  const { desk } = setup();
+  const agent = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop' });
+  desk.specialists.learn(agent.id, 'Morningmate QA issues: check global/release, not global/develop.');
+  desk.specialists.learn(agent.id, 'morningmate qa issues: check global/release, not global/develop.');
+  desk.specialists.learn(agent.id, 'Never print token=abc123 in chat.');
+  const saved = desk.specialists.get(agent.id).lessons;
+  assert.equal(saved.length, 2, 'the same lesson is kept once');
+  assert.ok(!saved[1].text.includes('abc123'), 'secrets are stripped');
+  assert.match(desk.specialists.identity(desk.specialists.get(agent.id)), /Lessons you learned from the person[\s\S]*global\/release/);
+  assert.match(readFileSync(desk.specialists.cardFile(agent), 'utf8'), /## Lessons learned[\s\S]*global\/release/);
+  desk.specialists.forget(agent.id, 0);
+  assert.equal(desk.specialists.get(agent.id).lessons.length, 1);
+  desk.specialists.learn('main', 'Rooms: answer in two sentences.');
+  assert.match(desk.specialists.lessonsText('main'), /answer in two sentences/);
+});

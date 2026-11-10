@@ -276,7 +276,7 @@ document.addEventListener('click', async event => {
   if (target.dataset.open) { event.preventDefault(); return open(target.dataset.open, target.dataset.id); }
   const action = target.dataset.action;
   try {
-    if (action?.startsWith('spec-')) await agentAction(ctx, action);
+    if (action?.startsWith('spec-')) await agentAction(ctx, action, target);
     else if (action === 'send') await send();
     else if (action === 'new-room') newRoomDialog();
     else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
