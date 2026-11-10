@@ -93,3 +93,19 @@ test('notes about the person are dated and soft unless lasting, a new note can r
   memory.setSecondBrain({ path: vault, how: 'Read the index first; add notes as wiki pages.' });
   assert.match(memory.secondBrain(), /Where: `.+`/); assert.match(memory.secondBrain(), /index\.md/); assert.match(memory.secondBrain(), /add notes as wiki pages/);
 });
+
+test('workflow rules learned from the person are kept per project, once, replaceable and without secrets', () => {
+  const root = temporary('flow'), memory = new Memory(temporary('home'));
+  project(root, 'shop', { 'package.json': '{"name":"shop"}' });
+  memory.scan({ roots: [root] });
+  assert.equal(memory.workflowText('shop'), '');
+  memory.learnWorkflow('shop', 'Branch from global/develop.', { by: 'Sokha' });
+  memory.learnWorkflow('shop', 'branch from global/develop.');
+  memory.learnWorkflow('shop', 'Sign in with token: abc123');
+  assert.equal((memory.workflow('shop').match(/global\/develop/g) || []).length, 1, 'kept once');
+  assert.ok(!memory.workflow('shop').includes('abc123'));
+  memory.learnWorkflow('shop', 'Branch from global/release and open the PR into global/release.', { replaces: 'global/develop' });
+  assert.ok(!memory.workflow('shop').includes('global/develop'));
+  assert.match(memory.workflowText('shop'), /never ask again[\s\S]*global\/release/);
+  assert.throws(() => memory.learnWorkflow('missing', 'x y z'), /No project/);
+});

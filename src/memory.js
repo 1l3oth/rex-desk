@@ -186,5 +186,26 @@ export class Memory {
     atomic(file, `${page.slice(0, at)}- ${now().slice(0, 10)} (${String(by).slice(0, 40)}): ${line}\n${page.slice(at)}`);
     return { saved: true };
   }
+  // How the person wants work done on a project, learned from what they said in chat. Every agent on the project gets it.
+  workflow(slug) {
+    const name = String(slug || '').toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    return name ? read(this.file('workflows', `${name}.md`), 6000).trim() : '';
+  }
+  workflowText(slug) { const text = this.workflow(slug); return /^- /m.test(text) ? `How the person wants work done on ${slug} (learned from them; follow it, never ask again what it answers):\n${text.split('\n').filter(line => line.startsWith('- ')).join('\n')}` : ''; }
+  learnWorkflow(slug, text, { replaces = '', by = 'agent' } = {}) {
+    const name = String(slug || '').toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    if (!name || !this.list().some(item => item.slug === name)) throw new Error(`No project "${slug}" in memory.`);
+    const rule = redactText(String(text || '').replace(/\s+/g, ' ').trim()).slice(0, 300);
+    if (!rule) throw new Error('Write the rule first.');
+    const file = this.file('workflows', `${name}.md`), gone = String(replaces || '').trim().toLowerCase();
+    const plain = line => line.replace(/^- /, '').replace(/\s+\(\d{4}-\d{2}-\d{2}[^)]*\)$/, '').toLowerCase();
+    let rules = read(file, 20000).split('\n').filter(line => line.startsWith('- '));
+    if (gone) rules = rules.filter(line => !plain(line).includes(gone));
+    if (rules.some(line => plain(line) === rule.toLowerCase())) return { saved: false, reason: 'Already known.' };
+    rules = [...rules, `- ${rule} (${now().slice(0, 10)}, ${String(by).slice(0, 40)})`].slice(-60);
+    mkdirSync(path.dirname(file), { recursive: true });
+    atomic(file, [`# How work is done on ${name}`, '', 'Learned from what the person said in chat. Every agent on this project follows it. The person can change or delete any line.', '', ...rules, ''].join('\n'));
+    return { saved: true, rules: rules.length };
+  }
   setUser(text) { this.ensure(); atomic(this.file('user.md'), redactText(String(text || '')).slice(0, 20000)); return { saved: true }; }
 }
