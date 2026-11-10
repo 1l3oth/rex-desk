@@ -149,28 +149,45 @@ const agentOnTask = (ui, task) => { const run = (ui.snap.runs || []).find(item =
 const STATUS = [['in_progress', 'In progress'], ['in_review', 'In review'], ['todo', 'To do'], ['blocked', 'Blocked'], ['backlog', 'Backlog'], ['done', 'Done']];
 const STATUS_TONE = { in_progress: 'working', in_review: 'warn', blocked: 'bad', done: 'good' };
 const PRIORITY = [['urgent', 'Urgent'], ['high', 'High'], ['normal', 'Normal'], ['low', 'Low']];
+// One task as a row of columns: state, number, title, where it comes from, its status, who works on it, and when it is due.
 function taskRow(ctx, task) {
   const { ui, esc } = ctx, on = agentOnTask(ui, task), assignee = task.assignee && (ui.snap.specialists || []).find(agent => agent.id === task.assignee);
-  const done = task.local && task.checklist?.length ? `<span class="tcheck">${task.checklist.filter(item => item.done).length}/${task.checklist.length}</span>` : '';
-  const meta = task.local ? [task.projectSlug, task.dueDate && `due ${task.dueDate}`].filter(Boolean).join(' · ') : `${task.statusName || task.status || ''}${task.projectName ? ` · ${task.projectName}` : ''}`;
-  return `<button class="trow${task.local ? ' local' : ''}" data-open="task" data-id="${esc(task.id)}">${task.local ? `<span class="tstat ${STATUS_TONE[task.status] || ''}" title="${esc(task.statusName)}"></span>` : ''}<span class="tnum">#${esc(taskNumber(task))}</span><span class="tname">${task.priority === 'urgent' || task.priority === 'high' ? `<span class="tprio ${task.priority}">${task.priority === 'urgent' ? 'Urgent' : 'High'}</span>` : ''}${esc(taskName(task))}</span>${done}<span class="tmeta">${esc(meta)}</span>${on?.agent ? `<span class="tagent"><span class="dot working"></span>${esc(on.agent.name)}</span>` : assignee ? `<span class="tagent idle">${esc(assignee.name)}</span>` : ''}</button>`;
+  const source = task.local ? { type: 'local', name: 'Rex Desk' } : (ui.snap.config?.sources || []).find(item => item.id === task.sourceId) || { type: task.source || '', name: task.sourceName || '' };
+  const steps = task.checklist?.length ? `<span class="tk-check" title="Checklist">${task.checklist.filter(item => item.done).length}/${task.checklist.length}</span>` : '';
+  const tags = (task.tags || []).slice(0, 3).map(tag => `<span class="tk-tag">${esc(tag)}</span>`).join('');
+  const who = on?.agent ? `<span class="tk-who working" title="${esc(on.agent.name)} is working on it"><span class="dot working"></span>${esc(on.agent.name)}</span>` : assignee ? `<span class="tk-who">${esc(assignee.name)}</span>` : '<span class="tk-who none">—</span>';
+  const due = task.dueDate ? `<span class="tk-due${task.dueDate < new Date().toISOString().slice(0, 10) && task.status !== 'done' ? ' late' : ''}">${esc(new Date(`${task.dueDate}T00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span>` : '<span class="tk-due none"></span>';
+  const prio = task.priority === 'urgent' || task.priority === 'high' ? `<span class="tprio ${task.priority}">${task.priority === 'urgent' ? 'Urgent' : 'High'}</span>` : '';
+  return `<button class="tk-row" data-open="task" data-id="${esc(task.id)}"><span class="tstat ${task.local ? STATUS_TONE[task.status] || '' : 'tracker'}" title="${esc(task.statusName || task.status || '')}"></span><span class="tnum">#${esc(taskNumber(task))}</span><span class="tk-title">${prio}<span class="tk-name">${esc(taskName(task))}</span>${steps}</span><span class="tk-src"><span class="src-mark mini ${esc(source.type)}" aria-hidden="true">${esc((source.name || '?')[0])}</span>${esc(task.local ? (task.projectSlug || 'Rex Desk') : task.projectName || source.name)}</span><span class="tk-status">${esc(task.statusName || task.status || '')}</span>${who}${due}</button>`;
 }
 export function tasksStage(ctx) {
   const { ui, esc } = ctx, everything = (ui.snap.tasks || []).filter(task => !task.demo && (task.active || task.local)), filter = String(ui.taskFilter || '').toLowerCase();
-  const sources = [['all', 'All'], ['local', 'Rex Desk'], ...(ui.snap.config?.sources || []).map(source => [source.id, source.name])];
-  const pick = ui.taskSource || 'all', all = everything.filter(task => pick === 'all' || (pick === 'local' ? task.local : task.sourceId === pick));
+  const sources = ui.snap.config?.sources || [], syncs = new Map((ui.snap.sync || []).map(item => [item.sourceId, item]));
+  const pick = ui.taskSource || 'all', inSource = task => pick === 'all' || (pick === 'local' ? task.local : task.sourceId === pick);
+  const showDone = ui.taskDone === true, all = everything.filter(inSource).filter(task => showDone || task.status !== 'done');
   const shown = all.filter(task => !filter || `${taskNumber(task)} ${taskName(task)} ${task.title} ${task.statusName || task.status || ''} ${task.projectName || ''} ${(task.tags || []).join(' ')}`.toLowerCase().includes(filter));
   ensureNames(ctx, shown.filter(task => !task.local));
-  const local = shown.filter(task => task.local), synced = shown.filter(task => !task.local);
-  const groups = STATUS.map(([status, label]) => [label, local.filter(task => task.status === status).sort((left, right) => PRIORITY.findIndex(([key]) => key === left.priority) - PRIORITY.findIndex(([key]) => key === right.priority))]).filter(([, list]) => list.length)
-    .map(([label, list]) => `<div class="tgroup"><h3>${label} <span>${list.length}</span></h3>${list.map(task => taskRow(ctx, task)).join('')}</div>`).join('');
-  const projects = ctx.ui.memory?.projects || [];
-  const add = pick === 'all' || pick === 'local' ? `<form class="tadd" data-task-add><input name="title" type="text" maxlength="200" placeholder="New task… press Enter to add" autocomplete="off" aria-label="New task title">${projects.length ? pickerHtml(ctx, { id: 'task-add-project', label: 'Project', value: ui.lastTaskProject || '', compact: true, items: [{ value: '', label: 'No project' }, ...projects.map(project => ({ value: project.slug, label: project.slug }))] }) : ''}<button class="btn primary small">Add</button></form>` : '';
-  const chips = `<div class="tsrc" role="tablist">${sources.map(([id, label]) => `<button role="tab" aria-selected="${pick === id}" class="${pick === id ? 'on' : ''}" data-action="task-source" data-source="${esc(id)}">${esc(label)}</button>`).join('')}</div><button class="btn small" data-action="task-connect">Sources</button>`;
-  const empty = pick === 'local' ? '<div class="empty"><h2>No Rex Desk tasks yet</h2><p>Type one above, or ask an agent to make tasks for a project.</p></div>' : '<div class="empty"><h2>No tasks</h2><p>Add one above, or press Sync to bring in your tracker issues.</p></div>';
+  const count = test => everything.filter(test).filter(task => showDone || task.status !== 'done').length;
+  // Left: where tasks come from.
+  const item = (id, mark, name, number, extra = '') => `<button class="tk-source${pick === id ? ' on' : ''}" data-action="task-source" data-source="${esc(id)}" aria-pressed="${pick === id}"><span class="src-mark mini ${esc(mark)}" aria-hidden="true">${esc(name[0])}</span><span class="tk-sname">${esc(name)}</span>${extra}<span class="tk-count">${number}</span></button>`;
+  const connected = sources.map(source => { const sync = syncs.get(source.id); return item(source.id, source.type, source.name, count(task => task.sourceId === source.id), sync?.error ? `<span class="dot bad" title="${esc(sync.error)}"></span>` : ''); }).join('');
+  const missing = [['flow', 'Flow'], ['morningmate', 'Morningmate'], ['orbit', 'Orbit']].filter(([type]) => !sources.some(source => source.type === type))
+    .map(([type, name]) => type === 'orbit' ? `<button class="tk-connect" data-action="task-connect" data-service="orbit"><span class="src-mark mini orbit" aria-hidden="true">O</span>Connect ${name}</button>` : `<a class="tk-connect" href="/classic#connections"><span class="src-mark mini ${type}" aria-hidden="true">${name[0]}</span>Connect ${name}</a>`).join('');
+  const side = `<aside class="tk-side"><h3>Sources</h3>${item('all', 'all', 'All tasks', count(() => true))}${item('local', 'local', 'Rex Desk tasks', count(task => task.local))}${connected}
+    ${missing ? `<h3>Connect</h3>${missing}` : ''}<button class="btn small tk-manage" data-action="task-connect">Manage sources</button>
+    <label class="tk-donebox"><input type="checkbox" data-task-done ${showDone ? 'checked' : ''}> Show done tasks</label></aside>`;
+  // Right: add, then the tasks, Rex Desk ones by status and tracker ones by source.
+  const projects = ui.memory?.projects || [];
+  const add = pick === 'all' || pick === 'local' ? `<form class="tadd" data-task-add><input name="title" type="text" maxlength="200" placeholder="Add a task and press Enter" autocomplete="off" aria-label="New task title">${projects.length ? pickerHtml(ctx, { id: 'task-add-project', label: 'Project', value: ui.lastTaskProject || '', compact: true, items: [{ value: '', label: 'No project' }, ...projects.map(project => ({ value: project.slug, label: project.slug }))] }) : ''}<button class="btn primary small">Add</button></form>` : '';
+  const head = '<div class="tk-head" aria-hidden="true"><span></span><span>#</span><span>Task</span><span>Project</span><span>Status</span><span>Agent</span><span>Due</span></div>';
+  const group = (title, list) => list.length ? `<section class="tk-group"><h3>${esc(title)} <span>${list.length}</span></h3>${list.map(task => taskRow(ctx, task)).join('')}</section>` : '';
+  const local = shown.filter(task => task.local), order = (left, right) => PRIORITY.findIndex(([key]) => key === left.priority) - PRIORITY.findIndex(([key]) => key === right.priority);
+  const groups = STATUS.map(([status, label]) => group(label, local.filter(task => task.status === status).sort(order))).join('')
+    + sources.map(source => group(source.name, shown.filter(task => task.sourceId === source.id))).join('');
+  const empty = pick === 'local' ? '<div class="empty"><h2>No Rex Desk tasks yet</h2><p>Add one above, or ask an agent to make tasks for a project.</p></div>' : filter ? '<div class="empty"><h2>Nothing matches</h2><p>Try other words.</p></div>' : '<div class="empty"><h2>No tasks</h2><p>Add one above, connect a source on the left, or press Sync.</p></div>';
   return { title: 'Tasks', meta: `${everything.length} tasks`, top: true,
-    members: `<div class="members tbar">${chips}<input id="task-filter" type="search" placeholder="Search tasks…" value="${esc(ui.taskFilter || '')}" autocomplete="off"></div>`,
-    feed: `<div class="page">${connectorsHtml(ctx, everything)}${add}<div class="tlist">${groups}${synced.length ? `<div class="tgroup">${local.length ? `<h3>From trackers <span>${synced.length}</span></h3>` : ''}${synced.map(task => taskRow(ctx, task)).join('')}</div>` : ''}${shown.length ? '' : empty}</div></div>` };
+    members: `<div class="members tbar"><input id="task-filter" type="search" placeholder="Search tasks, numbers, tags…" value="${esc(ui.taskFilter || '')}" autocomplete="off"></div>`,
+    feed: `<div class="page tk">${side}<div class="tk-main">${add}${shown.length ? `<div class="tk-list">${head}${groups}</div>` : empty}</div></div>` };
 }
 
 export function taskStage(ctx) {
@@ -413,3 +430,5 @@ document.addEventListener('click', async event => {
   if (button.dataset.action === 'away-start') return awayDialog(ctx, room);
   try { await ctx.api(`/rooms/${room.id}/away`, { method: 'PUT', data: { on: false } }); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); }
 }, true);
+
+document.addEventListener('change', event => { if (!event.target.matches?.('[data-task-done]')) return; const ctx = window.__rexCtx; if (!ctx) return; ctx.ui.taskDone = event.target.checked; ctx.render(); });

@@ -609,3 +609,39 @@ button.cn-main{cursor:pointer}
 .away-banner{display:flex;align-items:center;gap:8px;padding:8px 20px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--accent) 10%,var(--panel));font-size:13px}
 .btn.away-on{border-color:var(--accent);color:var(--accent)}
 .away-dialog{width:min(560px,94vw);max-width:560px}.away-row{display:flex;gap:10px}.away-row label{flex:1}
+
+/* ---- Tasks: sources on the left, the list as columns on the right, using the whole width ---- */
+.feed-inner:has(> .page.tk){max-width:none;padding-left:0;padding-right:0}
+.page.tk{max-width:none;margin:0;padding:18px clamp(16px,2.5vw,32px) 32px;display:grid;grid-template-columns:230px minmax(0,1fr);gap:28px;align-items:start}
+.tk-side{position:sticky;top:12px;display:flex;flex-direction:column;gap:2px}
+.tk-side h3{margin:12px 8px 4px;font-size:12px;font-weight:600;color:var(--muted)}.tk-side h3:first-child{margin-top:0}
+.tk-source,.tk-connect{display:flex;align-items:center;gap:9px;width:100%;padding:6px 8px;border:0;border-radius:8px;background:none;color:var(--ink);font-size:13.5px;text-align:left;text-decoration:none}
+.tk-source:hover,.tk-connect:hover{background:var(--raised);text-decoration:none}
+.tk-source.on{background:color-mix(in srgb,var(--accent) 14%,transparent);box-shadow:inset 3px 0 0 var(--accent)}
+.tk-sname{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tk-count{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tk-connect{color:var(--muted)}.tk-connect .src-mark{opacity:.7}
+.src-mark.mini{width:20px;height:20px;border-radius:6px;font-size:10.5px}.src-mark.all{background:var(--raised);color:var(--muted)}
+.tk-manage{margin:10px 8px 0;align-self:flex-start}
+.tk-donebox{display:flex;align-items:center;gap:8px;margin:10px 8px 0;font-size:12.5px;color:var(--muted);cursor:pointer}
+.tk-main{min-width:0;display:flex;flex-direction:column;gap:14px}
+.tk-main .tadd{margin:0}
+.tk-list{display:flex;flex-direction:column}
+.tk-head,.tk-row{display:grid;grid-template-columns:14px 64px minmax(0,1fr) minmax(110px,170px) minmax(90px,130px) minmax(80px,120px) 64px;gap:12px;align-items:center}
+.tk-head{padding:0 10px 6px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line)}
+.tk-group h3{display:flex;gap:8px;align-items:baseline;margin:16px 10px 4px;font-size:12.5px;font-weight:600;color:var(--muted)}.tk-group h3 span{font-weight:400}
+.tk-row{width:100%;padding:9px 10px;border:0;border-bottom:1px solid var(--line);background:none;color:var(--ink);text-align:left;font-size:13.5px}
+.tk-row:hover{background:var(--raised)}
+.tk-row .tnum{font-size:12px}
+.tk-title{display:flex;align-items:center;gap:8px;min-width:0}
+.tk-name{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:500}
+.tk-tag{flex:none;font-size:11px;padding:1px 7px;border-radius:999px;background:var(--raised);color:var(--muted)}
+.tk-check{flex:none;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tk-src{display:flex;align-items:center;gap:7px;min-width:0;font-size:12.5px;color:var(--muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tk-status{font-size:12.5px;color:var(--muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tk-who{display:flex;align-items:center;gap:6px;font-size:12.5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.tk-who.working{color:var(--accent)}.tk-who.none{color:var(--muted)}
+.tk-due{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}.tk-due.late{color:var(--bad);font-weight:600}
+.tstat.tracker{border-color:var(--muted);border-style:dashed}
+@media (max-width:1100px){.tk-head,.tk-row{grid-template-columns:14px 58px minmax(0,1fr) minmax(90px,130px) 64px}.tk-head span:nth-child(5),.tk-head span:nth-child(6),.tk-row .tk-status,.tk-row .tk-who{display:none}}
+@media (max-width:800px){.page.tk{grid-template-columns:1fr}.tk-side{position:static;flex-direction:row;flex-wrap:wrap}.tk-side h3,.tk-donebox,.tk-manage{display:none}.tk-source,.tk-connect{width:auto}}
+.tk-title .tk-name{flex:0 1 auto;min-width:45%}.tk-title .tk-tag{flex:0 2 auto;min-width:0;max-width:110px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.tk-title .tprio,.tk-title .tk-check{flex:none}
