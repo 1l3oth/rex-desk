@@ -126,6 +126,8 @@ export class Rooms {
       tasks: this.tasksIn(body), hops, paused, at: now(), ...(instruction ? { instruction: String(instruction).slice(0, 4000) } : {}) };
     this.store.put('room', roomId, { ...this.room(roomId), seq }); this.store.put('roommsg', message.id, message);
     if (paused) this.system(roomId, `Thread paused after ${room.away?.on ? AWAY_HOPS : MAX_HOPS} agent-to-agent replies. Reply here to let it continue.`);
+    // In auto timing, the lead says when it wants the next check-in.
+    if (fromAgentId && room.away?.on && room.away.every === 'auto' && fromAgentId === this.lead(room)) { const next = /next check-?in:?\s*(\d{1,3})\s*(h|hour|min)/i.exec(body); if (next) this.store.put('room', roomId, { ...this.room(roomId), away: { ...this.room(roomId).away, nextMinutes: Math.min(240, Math.max(5, Number(next[1]) * (/^h/i.test(next[2]) ? 60 : 1))) } }); }
     // The person writing in the room means they are back: away mode ends and the lead sums up what happened.
     if (!fromAgentId && !system && room.away?.on && !body.startsWith('/')) void this.endAway(roomId, { back: true });
     else await this.deliver(room, message);
@@ -221,19 +223,20 @@ export class Rooms {
   setAway(roomId, { on, hours = 0, every = 30, goal = '' } = {}) {
     const room = this.room(roomId);
     if (!on) { void this.endAway(roomId, { back: true }); return this.room(roomId); }
-    const minutes = Math.min(240, Math.max(5, Number(every) || 30)), until = Number(hours) > 0 ? new Date(Date.now() + Math.min(72, Number(hours)) * 3600000).toISOString() : '';
-    const away = { on: true, every: minutes, until, goal: String(goal || '').trim().slice(0, 600), startedAt: now(), lastTick: Date.now(), ticks: 0 };
+    const auto = every === 'auto', minutes = auto ? 'auto' : Math.min(240, Math.max(5, Number(every) || 30)), until = Number(hours) > 0 ? new Date(Date.now() + Math.min(72, Number(hours)) * 3600000).toISOString() : '';
+    const away = { on: true, every: minutes, nextMinutes: 30, until, goal: String(goal || '').trim().slice(0, 600), startedAt: now(), lastTick: Date.now(), ticks: 0 };
     this.store.put('room', roomId, { ...room, away });
-    this.system(roomId, `Away mode on. The agents keep working${away.goal ? ` on: ${away.goal}` : ''}, checking in every ${minutes} minutes${until ? ` until ${new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ' until you are back'}. Write here to end it.`);
+    this.system(roomId, `Away mode on. The agents keep working${away.goal ? ` on: ${away.goal}` : ''}, ${auto ? 'with check-ins the lead times itself' : `checking in every ${minutes} minutes`}${until ? ` until ${new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ' until you are back'}. Write here to end it.`);
     void this.wakeLead(roomId, 'start'); return this.room(roomId);
   }
   lead(room) { return room.members.includes('main') ? 'main' : room.members.find(id => this.agent(id)) || ''; }
   async wakeLead(roomId, reason) {
     const room = this.room(roomId), lead = this.lead(room); if (!lead || !room.away?.on) return;
     this.store.put('room', roomId, { ...room, away: { ...room.away, lastTick: Date.now(), ticks: (room.away.ticks || 0) + 1 } });
-    const text = reason === 'start'
-      ? `The person turned on away mode and left${room.away.goal ? `. Goal: ${room.away.goal}` : ''}. Plan the next steps with the agents in this room and hand the first one out with an @mention.`
-      : 'Away check-in: read what happened since the last check-in. If work is stuck or finished, decide the next step and @mention who does it. If everything is done, or only the person can unblock it, say so in one line and stop.';
+    const timing = room.away.every === 'auto' ? ' End your message with "Next check-in: N minutes" (5 to 240): sooner while work is moving, later while everyone waits on something slow.' : '';
+    const text = (reason === 'start'
+      ? `The person turned on away mode and left${room.away.goal ? `. Goal: ${room.away.goal}` : '. No goal was given: find unfinished tasks (desk_tasks) that the agents in this room can finish'}. Plan the next steps with the agents in this room and hand the first one out with an @mention.`
+      : 'Away check-in: read what happened since the last check-in. If work is stuck or finished, look for unfinished tasks (desk_tasks) the agents here can finish, decide the next step and @mention who does it. If everything is done, or only the person can unblock it, say so in one line and stop.') + timing;
     await this.post(roomId, { system: true, text: reason === 'start' ? `${this.member(lead).name} is planning the work.` : `Away check-in: ${this.member(lead).name} is looking at where things stand.`, instruction: text, to: [this.member(lead).handle || lead] }).catch(() => {});
   }
   async endAway(roomId, { back = false } = {}) {
@@ -248,7 +251,8 @@ export class Rooms {
     for (const room of this.list().filter(item => item.away?.on)) {
       if (room.away.until && Date.parse(room.away.until) <= Date.now()) { await this.endAway(room.id); continue; }
       const busy = room.members.some(id => this.agent(id) && ['replying', 'busy'].includes(this.member(id).state));
-      if (!busy && Date.now() - (room.away.lastTick || 0) >= room.away.every * 60000) await this.wakeLead(room.id, 'tick');
+      const wait = room.away.every === 'auto' ? room.away.nextMinutes || 30 : room.away.every;
+      if (!busy && Date.now() - (room.away.lastTick || 0) >= wait * 60000) await this.wakeLead(room.id, 'tick');
     }
   }
   history(roomId, limit = 30) { return this.messages(roomId, { limit }).filter(item => item.from.type !== 'system'); }

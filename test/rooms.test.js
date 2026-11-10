@@ -287,3 +287,12 @@ test('away mode: the lead plans without the person, check-ins come on schedule, 
   assert.equal(desk.rooms.room(room.id).away.on, false);
   assert.ok(desk.rooms.messages(room.id).some(item => item.from.type === 'system' && item.text === 'Away mode off: you are back.'));
 });
+
+test('away mode on auto timing: the lead sets when it checks in next', async () => {
+  const { desk, room, dara } = setup({ replies: ['Plan: finish the cart fix. Next check-in: 2 hours'] });
+  desk.rooms.quietSettle = 10;
+  desk.rooms.setAway(room.id, { on: true, every: 'auto' });
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id));
+  assert.equal(desk.rooms.room(room.id).away.every, 'auto');
+  assert.equal(desk.rooms.room(room.id).away.nextMinutes, 120);
+});

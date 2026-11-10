@@ -257,5 +257,13 @@ export class Memory {
     atomic(file, [`# How work is done on ${name}`, '', 'Learned from what the person said in chat. Every agent on this project follows it. The person can change or delete any line.', '', ...rules, ''].join('\n'));
     return { saved: true, rules: rules.length };
   }
+  // Whether the person has looked at a project's workflow once, after the first task an agent finished there.
+  workflowConfirmed(slug) { const name = String(slug || '').toLowerCase().replace(/[^a-z0-9._-]/g, ''); try { return Boolean(name && JSON.parse(readFileSync(this.file('workflows', `${name}.json`), 'utf8')).confirmedAt); } catch { return false; } }
+  confirmWorkflow(slug) {
+    const name = String(slug || '').toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    if (!name || !this.list().some(item => item.slug === name)) throw new Error(`No project "${slug}" in memory.`);
+    mkdirSync(this.file('workflows'), { recursive: true }); atomic(this.file('workflows', `${name}.json`), JSON.stringify({ confirmedAt: now() }, null, 2));
+    return { confirmed: true };
+  }
   setUser(text) { this.ensure(); atomic(this.file('user.md'), redactText(String(text || '')).slice(0, 20000)); return { saved: true }; }
 }

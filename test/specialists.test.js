@@ -150,3 +150,14 @@ test('how to explain things to the person comes first in what every agent reads,
   assert.ok(!desk.memory.person().includes('numbered steps'));
   assert.throws(() => desk.memory.personNote('mood', 'x y z'), /Choose one of: explain, personality/);
 });
+
+test('the first task on a project ends with the person checking its workflow, once', () => {
+  const { desk, store } = setup();
+  const repository = { id: 'repo-shop', name: 'shop', path: desk.memory.list()[0].path, baseBranch: 'main', targetBranch: 'main' };
+  store.saveConfig({ ...store.publicConfig(), repositories: [repository] });
+  store.put('task', 't1', { id: 't1', title: 'Fix the cart', active: true });
+  const run = { id: 'w1', role: 'worker', taskId: 't1', repositoryId: 'repo-shop', provider: 'claude', taskIds: ['t1'] };
+  assert.match(desk.prompt(run), /first task on shop whose workflow the person has not checked[\s\S]*desk_confirm_workflow/);
+  desk.memory.confirmWorkflow('shop');
+  assert.ok(!/whose workflow the person has not checked/.test(desk.prompt(run)), 'not asked again');
+});
