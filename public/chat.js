@@ -80,7 +80,7 @@ function renderItems(items, run, live) {
   for (const item of items) {
     if (item.role === 'tool') { group.push(item); continue; }
     flush(false);
-    out.push(item.role === 'qa' ? answeredHtml(item)
+    out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
       : item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), html: markdown(item.text) })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) })
       : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div></div>`
@@ -89,15 +89,21 @@ function renderItems(items, run, live) {
   flush(true);
   return out.join('');
 }
-// A question that was answered stays in the chat, with what the person said.
+// A question that was answered stays in the chat as two messages: the agent asking, and the person answering.
 function answeredItem(item) {
   const properties = item.request?.requestedSchema?.properties || {}, content = item.answer?.content || {}, action = item.answer?.action || (item.state === 'expired' ? 'expired' : 'cancel');
-  const rows = Object.entries(properties).map(([key, property]) => ({ label: property.title || key, value: content[key] })).filter(row => row.value !== undefined && row.value !== '');
-  return { role: 'qa', at: item.answeredAt || item.createdAt, title: item.title, approval: item.kind === 'approval', action, rows };
+  const rows = Object.entries(properties).map(([key, property]) => ({ label: property.title || key, value: content[key] }));
+  return [{ role: 'qa-ask', at: item.createdAt, title: item.title, approval: item.kind === 'approval', labels: rows.map(row => row.label) },
+    { role: 'qa-answer', at: item.answeredAt || item.createdAt, approval: item.kind === 'approval', action, rows: rows.filter(row => row.value !== undefined && row.value !== '') }];
 }
-function answeredHtml(item) {
-  const head = item.approval ? (item.action === 'accept' ? 'You approved' : 'You declined') : item.action === 'accept' ? 'You answered' : item.action === 'expired' ? 'The question was dropped' : 'You skipped this';
-  return `<div class="qa"><div class="qa-head">${esc(head)} · ${esc(hhmm(item.at))}</div><div class="qa-q md">${markdown(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</div>${item.rows.map(row => `<div class="qa-row"><span class="qa-l">${esc(row.label)}</span><span class="qa-a">${esc(String(row.value))}</span></div>`).join('')}</div>`;
+function askHtml(item, run) {
+  const list = item.labels.length > 1 ? `<ol class="qa-list">${item.labels.map(label => `<li>${esc(label)}</li>`).join('')}</ol>` : item.labels.length === 1 ? `<p class="qa-one"><b>${esc(item.labels[0])}</b></p>` : '';
+  return bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, '')) + list });
+}
+function answerHtml(item) {
+  const body = item.action !== 'accept' ? `<em>${item.approval ? 'Declined' : item.action === 'expired' ? '(question dropped)' : 'Skipped'}</em>`
+    : item.approval ? '<em>Approved</em>' : item.rows.length > 1 ? item.rows.map(row => `<div class="qa-ans"><span class="qa-l">${esc(row.label)}</span><br>${esc(String(row.value))}</div>`).join('') : item.rows.length ? esc(String(item.rows[0].value)) : '<em>Sent</em>';
+  return bubble({ mine: true, name: 'You', time: hhmm(item.at), html: body });
 }
 function transcript(events) {
   const items = [];
@@ -107,6 +113,7 @@ function transcript(events) {
     else if (event.kind === 'turn-start') items.push({ role: 'status', text: `${event.resumed ? 'Resumed' : 'Started'} with ${provider(event.provider)}`, at: event.createdAt });
     else if (event.kind === 'agent-result') items.push({ role: 'status', text: `Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${event.cost ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
     else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
+    else if (event.kind === 'agent-tool' && ['desk_ask', 'desk_message', 'desk_elicit'].includes(event.tool)) continue; // shown as chat messages already
     else if (event.kind === 'agent-tool') items.push({ role: 'tool', tool: event.tool, input: event.input, failed: event.failed, text: event.text, at: event.createdAt });
     else if (event.kind === 'error') items.push({ role: 'error', text: event.text || event.message || 'The run needs attention.', at: event.createdAt });
     else if (event.visible) items.push({ role: 'status', text: event.text || event.message || event.kind.replaceAll('-', ' '), at: event.createdAt });
@@ -164,9 +171,9 @@ function stageModel() {
   const run = type === 'main' ? mainRun() : runById(id);
   if (!run && type === 'main') return welcomeStage();
   if (!run) return emptyStage('That run is gone.');
-  const items = [...transcript(ui.events.get(run.id) || []), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && item.state !== 'pending').map(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state);
+  const items = [...transcript(ui.events.get(run.id) || []), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state);
   const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`)
-    + pending(run.id).map(decisionCard).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
+    + pending(run.id).map(item => `<div class="msg"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
   const stop = live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : '';
   return { title: runTitle(run), meta: `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions: stop, feed,
     working: workingStates.includes(run.state), composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : (run.provider === 'codex' ? 'Message Claude Code. It takes over from Codex with the chat so far…' : `Message ${provider(run.provider)}. It picks up where it left off…`), mentions: [] } };
