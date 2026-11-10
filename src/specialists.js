@@ -61,10 +61,10 @@ export class Specialists {
       provider: 'claude', model: this.cleanModel(model, { strict: true }), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, createdAt: now(), updatedAt: now() };
     this.store.put('specialist', item.id, item); this.writeCard(item); return item;
   }
-  update(id, { rules, unsure, provider, model, taskSources }) {
+  update(id, { rules, unsure, provider, model, taskSources, profile }) {
     const item = this.get(id);
     const updated = { ...item, ...(rules !== undefined ? { rules: String(rules).slice(0, 4000) } : {}), ...(unsure !== undefined ? { unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12) } : {}),
-      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true }) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), updatedAt: now() };
+      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true }) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), ...(profile !== undefined ? { profile: String(profile || '').slice(0, 500) } : {}), updatedAt: now() };
     this.store.put('specialist', id, updated); this.writeCard(updated); return updated;
   }
   // Renaming moves the card too; the run history and the project stay as they are.

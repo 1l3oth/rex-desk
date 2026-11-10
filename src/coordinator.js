@@ -40,6 +40,8 @@ const webAgentPrompt = task => [
   'Never make up prices, times, or availability: quote what the page shows and name the site. Compare at least two sites when the person asks for the best option.',
   'Finish with a short answer: what you found or did, the key numbers with their sites and links, and what is left for the person.',
 ].join('\n');
+// What Claude Code says when an account has used up its plan for now.
+const LIMIT = /usage limit|limit reached|out of (extra )?usage|credit balance is too low|weekly limit|5-hour limit|rate_limit_error|reached your .{0,20}limit/i;
 const terminalStates = new Set(['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked']);
 
 export function validateAnswer(interaction, answer) {
@@ -133,6 +135,33 @@ export class Desk {
     this.store.put('run', runId, { ...run, queued: [] });
     this.store.event(runId, 'inbox-delivered', { count: run.queued.length });
     return run.queued.join('\n\n');
+  }
+  // The Claude account (profile folder) a run uses: the agent's own if it was pinned to one, otherwise the one for everyone.
+  accountFor(run) {
+    const id = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
+    return (id && this.store.get('specialist', id)?.profile) || '';
+  }
+  // When a turn stops because the account hit its usage limit, Rex Desk moves to another signed-in account and continues
+  // the same conversation there (both accounts share their history folder), unless the person turned this off.
+  async switchIfLimited(runId, message = '') {
+    const run = this.store.get('run', runId); if (!run || run.provider !== 'claude') return false;
+    const since = Date.parse(run.turnStartedAt || 0) || 0;
+    const hit = message || this.store.events(runId, { limit: 60 }).filter(event => Date.parse(event.createdAt) >= since - 1000 && ['agent-text', 'agent-result', 'error', 'message'].includes(event.kind))
+      .map(event => String(event.text || event.message || event.result || '')).find(text => LIMIT.test(text));
+    if (!hit) return false;
+    const pinned = this.accountFor(run), current = pinned || this.agents.selected('claude');
+    this.agents.markLimited(current);
+    if (this.store.get('accounts', 'auto')?.off) { this.store.event(runId, 'account-limit', { text: 'This Claude account hit its usage limit. Switch accounts at the bottom left, then continue.' }, true); return false; }
+    if (run.accountSwitchedAt && Date.now() - Date.parse(run.accountSwitchedAt) < 120000) return false;
+    const next = await this.agents.alternative('claude', current);
+    if (!next) { this.store.event(runId, 'account-limit', { text: 'Every signed-in Claude account has hit its usage limit. The run continues when you send a message after one resets.' }, true); return false; }
+    const owner = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
+    if (pinned && owner) this.store.put('specialist', owner, { ...this.store.get('specialist', owner), profile: next.profile });
+    else this.store.saveConfig({ ...this.store.publicConfig(), agentProfiles: { ...this.store.config().agentProfiles, claude: next.profile } });
+    this.agents.invalidate('claude');
+    this.store.event(runId, 'account-switched', { text: `Claude account hit its usage limit. Switched to ${next.account || next.label}${next.plan ? ` (${next.plan})` : ''} and continuing.` }, true);
+    this.patchRun(runId, { accountSwitchedAt: now(), state: 'queued', queued: [], followUp: 'You were cut off by a usage limit. Continue exactly where you left off.' });
+    this.live.delete(runId); void this.drain(); return true;
   }
   async say(runId, text, picked = {}, { raw = false } = {}) {
     const run = this.run(runId), line = raw ? String(text || '').trim() : String(text || '').replace(/\s+/g, ' ').trim();
@@ -356,7 +385,7 @@ export class Desk {
       token = this.scopeToken(runId);
       const options = { run, cwd: run.cwd || run.worktree || path.join(this.store.directory, 'coordinator'), projectDirectory: run.projectPath || '', token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
-        mcpUrl: this.mcpUrl, model: run.model || modelName(run.provider, this.store.config().models[run.provider]), controller, signal: controller.signal, agentEnv: { ...this.agents.environment(run.provider), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
+        mcpUrl: this.mcpUrl, model: run.model || modelName(run.provider, this.store.config().models[run.provider]), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
@@ -389,9 +418,11 @@ export class Desk {
       await runner.start(digest ? `${digest}
 
 ${message}` : message);
+      if (await this.switchIfLimited(runId)) return;
       const current = this.run(runId);
       if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' ? 'finished' : 'needs_evidence', endedAt: now() });
     } catch (error) {
+      if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) return;
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: error.message, endedAt: now() });
       this.store.event(runId, 'error', { message: error.message }, true);
     } finally {

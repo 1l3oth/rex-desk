@@ -45,6 +45,7 @@ export function agentStage(ctx) {
     <section class="ag-sec"><h2>What ${esc(agent.projectSlug)} is for</h2><p>${esc(agent.purpose || 'Not recorded yet.')}</p></section>
     <section class="ag-sec"><h2>Lessons learned</h2>${lessonList}</section>
     <section class="ag-sec"><h2>Tasks come from</h2>${taskSources}</section>
+    <section class="ag-sec"><h2>Claude account</h2>${pickerHtml(ctx, { id: 'sp-profile', label: 'Claude account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.claude?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}</section>
     <section class="ag-sec"><h2>Model</h2>${pickerHtml(ctx, { id: 'sp-model', label: 'Model', value: agent.model || '', items: models })}</section>
     <section class="ag-sec ag-meta"><p>Created by ${esc(agent.createdBy || 'you')}${origin ? `, copied from ${esc(origin.name)}` : ''}.</p><button class="btn small danger" data-action="spec-remove">Remove ${esc(agent.name)}</button></section>
   </aside>`;
@@ -118,6 +119,12 @@ export function initAgentCard(ctx) {
     const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
     const taskSources = [...document.querySelectorAll('[data-task-source]:checked')].map(box => box.dataset.taskSource);
     try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { taskSources } }); document.activeElement?.blur?.(); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
+  });
+  // An account picked for this agent is saved at once.
+  document.addEventListener('change', async event => {
+    if (event.target.id !== 'sp-profile') return;
+    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
+    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { profile: event.target.value } }); ctx.toast(event.target.value ? 'This agent now uses that Claude account.' : 'This agent uses the same account as everyone.'); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   // A model picked from the list is saved at once.
   document.addEventListener('change', async event => {

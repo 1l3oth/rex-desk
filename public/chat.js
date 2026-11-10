@@ -95,7 +95,7 @@ function renderRail() {
     ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>')}
     ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentGroups(ctx, agents, (agent, grouped) => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: grouped ? agent.status?.label || 'Idle' : `${agent.status?.state === 'idle' || !agent.status ? agent.projectSlug : agent.status.label}` })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
     ${working.length || review.length || done.length ? section('runs', 'Runs', working.length || '', '', `${working.map(line).join('')}${review.length ? `<p class="rail-label">To review</p>${review.map(line).join('')}` : ''}${done.length ? `<p class="rail-label">Done</p>${shownDone.map(line).join('')}${done.length > 4 ? `<button class="item more" data-action="toggle-done"><span class="name sub">${ui.done ? 'Show fewer' : `Show all ${done.length}`}</span></button>` : ''}` : ''}`) : ''}
-  </div><div class="rail-foot"><a href="/classic">Issues &amp; settings</a><button class="btn small" data-action="theme">Theme</button></div>`;
+  </div><div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><a href="/classic">Issues &amp; settings</a><button class="btn small" data-action="theme">Theme</button></div>`;
 }
 
 // ---------- run conversation ----------
@@ -652,3 +652,35 @@ document.addEventListener('click', async event => {
   const button = event.target.closest?.('[data-note-forget]'); if (!button) return; event.stopPropagation();
   try { await api('/profile/notes', { method: 'DELETE', data: { kind: button.dataset.noteForget, text: button.dataset.noteText } }); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
 }, true);
+
+// ---------- Claude accounts: which subscription the agents run on ----------
+function accountChip() {
+  const claude = ui.accounts?.claude, current = claude?.profiles?.find(item => item.profile === claude.selected) || claude?.profiles?.[0];
+  return `<span class="acct-dot ${current?.loggedIn ? 'good' : 'bad'}"></span><span class="acct-text"><b>Claude</b> ${esc(current ? (current.account || current.label) : 'account')}</span>`;
+}
+async function loadAccounts(refreshStatus = false) { try { ui.accounts = await api(`/agents${refreshStatus ? '?refresh=1' : ''}`); ui.accountsAuto = (await api('/accounts/auto')).on; } catch {} }
+async function accountsDialog() {
+  document.querySelector('.dialog-back.accounts')?.remove();
+  const back = document.createElement('div'); back.className = 'dialog-back accounts'; document.body.append(back);
+  const draw = () => {
+    const claude = ui.accounts?.claude || { profiles: [] };
+    back.innerHTML = `<form class="dialog acct-dialog" onsubmit="return false"><h2>Claude account</h2><p class="muted">Agents run on the Claude Code sign-in you pick here. Each profile can be a different subscription; when one runs out, switch to the other. An agent pinned to an account on its card keeps that one.</p>
+      <div class="acct-list">${claude.profiles.map(item => `<label class="${item.loggedIn ? '' : 'off'}"><input type="radio" name="profile" value="${esc(item.profile)}" ${item.profile === claude.selected ? 'checked' : ''} ${item.loggedIn ? '' : 'disabled'}><span><b>${esc(item.account || item.label)}</b><small>${esc([item.label, item.plan && `${item.plan} plan`, item.loggedIn ? 'signed in' : 'not signed in'].filter(Boolean).join(' · '))}</small></span></label>`).join('') || '<p class="muted">No Claude Code profiles found.</p>'}</div>
+      <label class="acct-auto"><input type="checkbox" data-acct-auto ${ui.accountsAuto !== false ? 'checked' : ''}><span>When an account hits its usage limit, switch to another signed-in one and continue</span></label>
+      <div class="row"><button type="button" class="btn" data-acct-refresh>Check again</button><span class="spacer"></span><button type="button" class="btn primary" data-close>Done</button></div></form>`;
+  };
+  if (!ui.accounts) { back.innerHTML = '<div class="dialog"><p class="muted">Checking your Claude accounts…</p></div>'; await loadAccounts(true); }
+  draw();
+  back.addEventListener('click', async event => {
+    if (event.target === back || event.target.closest('[data-close]')) { back.remove(); renderAll(); return; }
+    if (event.target.closest('[data-acct-refresh]')) { back.querySelector('[data-acct-refresh]').textContent = 'Checking…'; await loadAccounts(true); draw(); }
+  });
+  back.addEventListener('change', async event => {
+    try {
+      if (event.target.name === 'profile') { await api('/agents/profile', { method: 'POST', data: { provider: 'claude', profile: event.target.value } }); await loadAccounts(); toast('Agents now use this Claude account from their next reply.'); draw(); }
+      if (event.target.matches('[data-acct-auto]')) { ui.accountsAuto = (await api('/accounts/auto', { method: 'POST', data: { on: event.target.checked } })).on; }
+    } catch (error) { toast(error.message, true); }
+  });
+}
+document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="accounts"]')) return; event.stopPropagation(); void accountsDialog(); }, true);
+void loadAccounts().then(() => { if (ui.snap) renderAll(); });

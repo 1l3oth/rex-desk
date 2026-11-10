@@ -645,3 +645,17 @@ button.cn-main{cursor:pointer}
 @media (max-width:1100px){.tk-head,.tk-row{grid-template-columns:14px 58px minmax(0,1fr) minmax(90px,130px) 64px}.tk-head span:nth-child(5),.tk-head span:nth-child(6),.tk-row .tk-status,.tk-row .tk-who{display:none}}
 @media (max-width:800px){.page.tk{grid-template-columns:1fr}.tk-side{position:static;flex-direction:row;flex-wrap:wrap}.tk-side h3,.tk-donebox,.tk-manage{display:none}.tk-source,.tk-connect{width:auto}}
 .tk-title .tk-name{flex:0 1 auto;min-width:45%}.tk-title .tk-tag{flex:0 2 auto;min-width:0;max-width:110px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.tk-title .tprio,.tk-title .tk-check{flex:none}
+
+/* ---- Claude account switcher ---- */
+.rail-foot{align-items:center}
+.acct-btn{display:flex;align-items:center;gap:7px;width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink);font-size:12.5px;text-align:left}
+.acct-btn:hover{border-color:var(--accent)}
+.acct-text{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--muted)}.acct-text b{color:var(--ink);font-weight:600;margin-right:3px}
+.acct-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--muted)}.acct-dot.good{background:var(--good)}.acct-dot.bad{background:var(--bad)}
+.acct-dialog{width:min(560px,94vw);max-width:560px}
+.acct-list{display:flex;flex-direction:column;gap:6px}
+.dialog .acct-list label{flex-direction:row;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;color:var(--ink);font-size:13.5px;cursor:pointer}
+.dialog .acct-list label:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.dialog .acct-list label.off{opacity:.55;cursor:default}
+.acct-list span{display:flex;flex-direction:column}.acct-list small{color:var(--muted);font-size:12px}.acct-list input{margin-top:3px;accent-color:var(--accent)}
+.dialog label.acct-auto{flex-direction:row;align-items:flex-start;gap:8px;color:var(--ink);font-size:13px}

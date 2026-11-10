@@ -69,6 +69,22 @@ export class AgentProfiles {
     return saved === undefined || saved === null ? inheritedProfile(provider) : saved;
   }
   environment(provider, env = process.env) { return profileEnvironment(provider, this.selected(provider), env); }
+  // An agent can be pinned to one Claude account; otherwise it uses the one chosen for everyone.
+  environmentFor(provider, profile, env = process.env) { return profileEnvironment(provider, profile || this.selected(provider), env); }
+  // Another signed-in account to move to when this one hits its usage limit. Accounts that hit theirs recently are skipped.
+  async alternative(provider, current) {
+    const limited = this.store.get('accounts', 'limited')?.until || {}, key = value => canonical(value || '');
+    for (const item of discoverProfiles(provider, { configured: current })) {
+      if (key(item.profile) === key(current) || (limited[key(item.profile)] || 0) > Date.now()) continue;
+      const status = await this.status(provider, item.profile, { refresh: true }).catch(() => null);
+      if (status?.loggedIn) return { profile: item.profile, label: status.label, account: status.account, plan: status.plan };
+    }
+    return null;
+  }
+  markLimited(profile, hours = 5) {
+    const record = this.store.get('accounts', 'limited') || { id: 'limited', until: {} };
+    this.store.put('accounts', 'limited', { ...record, until: { ...record.until, [canonical(profile || '')]: Date.now() + hours * 3600000 } });
+  }
   async status(provider, profile = this.selected(provider), { refresh = false } = {}) {
     const key = `${provider}:${profile ? canonical(profile) : ''}`, cached = this.cache.get(key);
     if (!refresh && cached && Date.now() - cached.checkedAtMs < this.ttl) return cached;
