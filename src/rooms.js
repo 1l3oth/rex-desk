@@ -103,6 +103,9 @@ export class Rooms {
     if (!body) throw new Error('Write a message first.');
     if (fromAgentId && !room.members.includes(fromAgentId)) throw new Error('This agent is not in that room.');
     let targets = to === undefined ? this.mentionsIn(room, body) : this.resolveTargets(room, to);
+    // The person replying to an agent's message, without naming anyone, is talking to that agent.
+    const replied = replyTo ? this.store.get('roommsg', replyTo) : null;
+    if (!fromAgentId && to === undefined && replied?.roomId === roomId && replied.from?.type === 'agent' && room.members.includes(replied.from.id) && !targets.some(target => target !== HUMAN)) targets = [...targets, replied.from.id];
     // @all (or @everyone) from the person wakes every agent in the room. Agents cannot use it, so they never wake each other all at once.
     if (!fromAgentId && to === undefined && /(^|\s)@(all|everyone)\b/i.test(body)) targets = [...new Set([...targets, ...room.members.filter(id => id !== HUMAN)])];
     targets = targets.filter(target => target !== fromAgentId);

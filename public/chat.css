@@ -533,3 +533,17 @@ body.ptt::after{content:"Listening… let go of Space to stop";position:fixed;le
 .vresults li{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
 .vresults li>div{display:flex;gap:8px;align-items:baseline}.vresults small{color:var(--muted);font-size:11.5px}
 .vresults p{margin:0;font-size:15px;line-height:1.5}.vresults p.bad{color:var(--bad);font-size:13px}.vresults .btn{align-self:flex-start}
+
+/* ---- replies in rooms ---- */
+.rmsg{position:relative}
+.rreply{position:absolute;top:2px;right:0;display:none;align-items:center;gap:5px;padding:3px 9px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);font-size:12px}
+.rmsg:hover .rreply,.rreply:focus-visible{display:inline-flex}.rreply:hover{color:var(--ink);border-color:var(--accent)}
+@media (hover:none){.rreply{display:inline-flex;position:static;margin:4px 0 0 38px}}
+.rquote{display:flex;align-items:center;gap:6px;max-width:100%;margin:2px 0 4px;padding:3px 9px 3px 7px;border:0;border-left:2px solid var(--accent);border-radius:0 7px 7px 0;background:color-mix(in srgb,var(--accent) 8%,transparent);color:var(--muted);font-size:12.5px;text-align:left;cursor:pointer;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.rquote b{color:var(--ink);font-weight:600;flex:none}.rquote svg{flex:none}
+.msg.flash .bubble{box-shadow:0 0 0 2px var(--accent);transition:box-shadow .2s}
+.replybar{display:flex;align-items:center;gap:8px;margin:0 6px 6px;padding:6px 10px;border-left:2px solid var(--accent);border-radius:0 8px 8px 0;background:color-mix(in srgb,var(--accent) 8%,transparent);font-size:13px}
+.replybar>span{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.rwho .rreply{position:static;display:inline-flex;margin-left:6px;padding:1px 8px;border-color:transparent;background:none;font-size:11.5px;opacity:.75}
+.rwho .rreply:hover,.rwho .rreply:focus-visible{opacity:1;border-color:var(--line);background:var(--panel)}
+@media (hover:none){.rwho .rreply{margin:0 0 0 6px}}

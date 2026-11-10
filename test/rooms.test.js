@@ -208,3 +208,17 @@ test('@all from the person wakes every agent in the room, and a Rex Desk task is
   assert.ok(!turns.some(item => item.run.roomAgent === 'main'), 'the main agent was not in the room, so @all does not pull it in');
   assert.match(turns.find(item => item.run.specialistId === dara.id).prompt, /#L1 Plan the checkout redesign/);
 });
+
+test('replying to an agent message without a mention goes to that agent, and its answer quotes the reply', async () => {
+  const { desk, store, turns, vanna, room } = setup({ replies: ['Billing looks fine.', 'Yes, the cron runs at 2am.'] });
+  await desk.rooms.post(room.id, { text: '@vanna is billing ok?' });
+  await waitFor(() => store.list('roommsg').some(item => item.from.id === vanna.id));
+  const answer = store.list('roommsg').find(item => item.from.id === vanna.id);
+  const reply = await desk.rooms.post(room.id, { text: 'does the cron still run?', replyTo: answer.id });
+  assert.deepEqual(reply.delivered.filter(id => id !== 'you'), [vanna.id], 'the reply is for Vanna, not the main agent');
+  await waitFor(() => turns.filter(item => item.run.specialistId === vanna.id).length >= 2);
+  assert.ok(!turns.some(item => item.run.roomAgent === 'main'), 'the main agent was not woken');
+  await waitFor(() => store.list('roommsg').filter(item => item.from.id === vanna.id).length >= 2);
+  const second = store.list('roommsg').filter(item => item.from.id === vanna.id).sort((left, right) => left.seq - right.seq)[1];
+  assert.equal(second.replyTo, reply.id, "Vanna's answer is linked to the person's reply");
+});

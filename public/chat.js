@@ -215,7 +215,8 @@ const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="em
 function renderStage(full) {
   const model = stageModel(), stage = document.getElementById('stage');
   const head = `<div class="stage-head"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}<span class="spacer"></span>${model.actions || ''}</div>`;
-  if (full || !document.getElementById('feed')) {
+  // A view that needs the message box always gets it, even when an earlier view had none.
+  if (full || !document.getElementById('feed') || Boolean(model.composer) !== Boolean(document.getElementById('composer'))) {
     stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}</div><aside class="side" id="side"></aside>`;
     ui.stick = true; redrawAttachments(ctx);
   } else { document.getElementById('head').innerHTML = head; const slot = document.getElementById('members'); if (!slot.contains(document.activeElement) && !pickerOpen()) slot.innerHTML = model.members || ''; }
@@ -241,6 +242,7 @@ function drawSide(html, extra = '') {
 const draftKey = () => `${ui.view.type}:${ui.view.id || ''}`;
 
 function renderAll(full = false) {
+  queueMicrotask(drawReplyBar);
   if (!ui.snap) return;
   if (!document.getElementById('rail')) app.innerHTML = '<div class="chat-shell"><aside class="rail" id="rail"></aside><main class="stage" id="stage"></main></div>';
   const rail = document.getElementById('rail'), scroll = rail.querySelector('.rail-scroll')?.scrollTop || 0;
@@ -284,7 +286,7 @@ async function send() {
   const { type, id } = ui.view; box.disabled = true;
   try {
     if (type === 'room' && /^\/assign\b/i.test(typed)) await assignFromRoom(id, typed);
-    else if (type === 'room') await api(`/rooms/${id}/messages`, { method: 'POST', data: { text } });
+    else if (type === 'room') { const replyTo = ui.reply?.roomId === id ? ui.reply.id : ''; await api(`/rooms/${id}/messages`, { method: 'POST', data: { text, ...(replyTo ? { replyTo } : {}) } }); ui.reply = null; drawReplyBar(); }
     else if (type === 'main' && !mainRun()) await api('/main', { method: 'POST', data: { prompt: text, ...picked } });
     else {
       const run = type === 'main' ? mainRun() : runById(id);
@@ -550,3 +552,24 @@ document.addEventListener('submit', async event => {
   try { await api(`/interactions/${form.dataset.file}/file`, { method: 'POST', data: { content: state.content } }); ui.files.delete(form.dataset.file); document.activeElement?.blur?.(); toast('File saved.'); await refresh({ full: true }); }
   catch (error) { toast(error.message, true); }
 }, true);
+
+// ---------- reply to a room message: it goes to that agent without an @mention ----------
+function drawReplyBar() {
+  const composer = document.querySelector('.composer-inner'); if (!composer) return;
+  composer.querySelector('.replybar')?.remove();
+  const reply = ui.reply; if (!reply || ui.view.type !== 'room' || reply.roomId !== ui.view.id) return;
+  composer.insertAdjacentHTML('afterbegin', `<div class="replybar"><span>Replying to <b>${esc(reply.name)}</b> <span class="muted">${esc(reply.text)}</span></span><button type="button" class="ag-x" data-reply-cancel aria-label="Cancel the reply" title="Cancel the reply"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>`);
+}
+document.addEventListener('click', event => {
+  const button = event.target.closest?.('[data-reply]');
+  if (button) {
+    const message = (ui.snap.messages || []).find(item => item.id === button.dataset.reply); if (!message) return;
+    const plain = String(message.text).replace(/\s+/g, ' ').trim();
+    ui.reply = { roomId: message.roomId, id: message.id, name: message.from.label, text: plain.length > 80 ? `${plain.slice(0, 80)}…` : plain };
+    drawReplyBar(); document.getElementById('draft')?.focus(); return;
+  }
+  if (event.target.closest?.('[data-reply-cancel]')) { ui.reply = null; drawReplyBar(); document.getElementById('draft')?.focus(); return; }
+  const jump = event.target.closest?.('[data-jump]');
+  if (jump) { const target = document.querySelector(`[data-msg="${CSS.escape(jump.dataset.jump)}"]`); if (target) { target.scrollIntoView({ block: 'center', behavior: 'smooth' }); target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1200); } }
+});
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && ui.reply && event.target.id === 'draft' && !ui.menu) { ui.reply = null; drawReplyBar(); } });

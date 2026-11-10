@@ -22,13 +22,16 @@ export function roomStage(ctx) {
   const names = new Map(room.members.map(member => [member.id, member.name]));
   // Like a group chat: an agent's message has its picture and its name in its own colour; messages in a row from the same sender share one header.
   let previous = null;
+  const byId = new Map(messages.map(message => [message.id, message]));
+  const snippet = text => { const plain = String(text || '').replace(/\s+/g, ' ').trim(); return plain.length > 90 ? `${plain.slice(0, 90)}…` : plain; };
+  const quote = message => { const parent = message.replyTo && byId.get(message.replyTo); return parent ? `<button type="button" class="rquote" data-jump="${esc(parent.id)}" title="Show the message this answers"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6 4L2 8l4 4M2 8h8a4 4 0 0 1 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><b>${esc(parent.from.type === 'human' ? 'You' : parent.from.label)}</b> ${esc(snippet(parent.text))}</button>` : ''; };
   const render = message => {
     if (message.from.type === 'system') { previous = null; return note(esc(message.text)); }
     const to = message.from.type === 'human' && message.to.some(id => id !== 'you') ? message.to.filter(id => id !== 'you').map(id => names.get(id)).filter(Boolean) : [];
     const html = markdown(message.text, { mentions: ['you', ...handles], tasks }) + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '');
     const same = previous && previous.from.id === message.from.id && Date.parse(message.at) - Date.parse(previous.at) < 5 * 60000; previous = message;
-    if (message.from.type === 'human') return bubble({ mine: true, name: 'You', time: hhmm(message.at), html });
-    return `<div class="msg rmsg ${same ? 'cont' : ''}"><div class="ravcol">${same ? '' : ctx.avatar({ name: message.from.label, size: 'sm' })}</div><div class="bubble"><div class="who rwho"><strong class="nc${nameHash(message.from.label)}">${esc(message.from.label)}</strong><span>${esc(hhmm(message.at))}</span></div><div class="md">${html}</div></div></div>`;
+    if (message.from.type === 'human') return bubble({ mine: true, name: 'You', time: hhmm(message.at), html: quote(message) + html }).replace('<div class="msg mine', `<div data-msg="${esc(message.id)}" class="msg mine`);
+    return `<div class="msg rmsg ${same ? 'cont' : ''}" data-msg="${esc(message.id)}"><div class="ravcol">${same ? '' : ctx.avatar({ name: message.from.label, size: 'sm' })}</div><div class="bubble"><div class="who rwho"><strong class="nc${nameHash(message.from.label)}">${esc(message.from.label)}</strong><span>${esc(hhmm(message.at))}</span><button type="button" class="rreply" data-reply="${esc(message.id)}" title="Reply to ${esc(message.from.label)}" aria-label="Reply to ${esc(message.from.label)}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 4L2 8l4 4M2 8h8a4 4 0 0 1 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Reply</button></div>${quote(message)}<div class="md">${html}</div></div></div>`;
   };
   const empty = `<div class="empty"><h2>${esc(room.name)}</h2><p>Mention an agent with @ to talk to it, and a task with #. Agents answer only when they are mentioned, and each one reads this room before it answers.</p></div>`;
   // One typing line for everyone answering in the room, like a messenger; work on a task shows in the Activity tab instead.
