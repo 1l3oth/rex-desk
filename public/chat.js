@@ -1,7 +1,7 @@
 import { agentStage, agentAction, agentGroups, initAgentCard, toggleGroup } from '/chat-agents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
-import { initPickers, setPickActions, pickerOpen } from '/chat-pick.js';
+import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.js';
 import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction, initRoomInfo, avatarHtml, roomRunIds, initLocalTasks, sharedTabButtons } from '/chat-rooms.js';
 import { collectShared, sharedTabsHtml } from '/chat-media.js';
 import { devicesStage, devicesAction } from '/chat-devices.js';
@@ -628,6 +628,7 @@ function personalSide(run, agent, items, shells) {
   return `${tabs}<div class="side-body rinfo pinfo">
     <div class="rhero">${avatarHtml(ctx, { name: agent.name, size: 'xl' })}<h2 class="pname">${esc(agent.name)}</h2><p class="rsub"><span class="dot ${stateTone(run) === 'working' ? 'working' : 'good'}"></span> ${esc(agent.status?.label || stateLabel(run))}${agent.main ? '' : ` on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>`}</p></div>
     ${agent.purpose ? `<h3>About</h3><p class="pabout">${esc(agent.purpose)}</p>` : ''}
+    ${agent.main ? '' : `<h3>Claude account</h3>${pickerHtml(ctx, { id: 'pp-profile', label: 'Claude account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.claude?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}<button type="button" class="btn small quiet" data-action="accounts">Manage accounts</button>`}
     ${agent.main ? '' : `<h3>Tasks come from</h3><p class="pabout">${esc(sources.join(', ') || 'Not set yet')}</p>`}
     ${(agent.lessons || []).length ? `<h3>Lessons learned <span>${agent.lessons.length}</span></h3><ul class="plessons">${agent.lessons.slice(-4).map(lesson => `<li>${esc(lesson.text)}</li>`).join('')}</ul>` : ''}
     ${rooms.length ? `<h3>Group chats <span>${rooms.length}</span></h3><ul class="rtasks">${rooms.map(room => `<li><button class="rtask" data-open="room" data-id="${esc(room.id)}">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'xs' })}<span>${esc(room.name)}</span></button></li>`).join('')}</ul>` : ''}
@@ -674,8 +675,10 @@ async function accountsDialog() {
   const draw = () => {
     const claude = ui.accounts?.claude || { profiles: [] };
     back.innerHTML = `<form class="dialog acct-dialog" onsubmit="return false"><h2>Claude account</h2><p class="muted">Agents run on the Claude Code sign-in you pick here. Each profile can be a different subscription; when one runs out, switch to the other. An agent pinned to an account on its card keeps that one.</p>
-      <div class="acct-list">${claude.profiles.map(item => `<label class="${item.loggedIn ? '' : 'off'}"><input type="radio" name="profile" value="${esc(item.profile)}" ${item.profile === claude.selected ? 'checked' : ''} ${item.loggedIn ? '' : 'disabled'}><span><b>${esc(item.account || item.label)}</b><small>${esc([item.label, item.plan && `${item.plan} plan`, item.loggedIn ? 'signed in' : 'not signed in'].filter(Boolean).join(' · '))}</small></span></label>`).join('') || '<p class="muted">No Claude Code profiles found.</p>'}</div>
+      <div class="acct-list">${claude.profiles.map(item => `<label class="${item.loggedIn ? '' : 'off'}"><input type="radio" name="profile" value="${esc(item.profile)}" ${item.profile === claude.selected ? 'checked' : ''} ${item.loggedIn ? '' : 'disabled'}><span><b>${esc(item.account || item.label)}</b><small>${esc([item.label, item.plan && `${item.plan} plan`, item.loggedIn ? 'signed in' : 'not signed in'].filter(Boolean).join(' · '))}</small></span>${item.loggedIn ? '' : `<button type="button" class="btn small primary acct-signin" data-acct-login="${esc(item.profile)}">Sign in</button>`}</label>`).join('') || '<p class="muted">No Claude Code profiles found.</p>'}</div>
       <label class="acct-auto"><input type="checkbox" data-acct-auto ${ui.accountsAuto !== false ? 'checked' : ''}><span>When an account hits its usage limit, switch to another signed-in one and continue</span></label>
+      <div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="Name for the new account, like work or personal" aria-label="Name for the new account"><button type="button" class="btn small primary" data-acct-create>Create and sign in</button><button type="button" class="btn small" data-acct-cancel>Cancel</button>` : '<button type="button" class="btn small" data-acct-new>+ Add a Claude account</button>'}</div>
+      ${ui.acctWaiting ? `<p class="acct-wait"><span class="dot working"></span> Finish signing in to Claude in the browser window that opened. This list updates by itself when you are done.</p>` : ''}
       <div class="row"><button type="button" class="btn" data-acct-refresh>Check again</button><span class="spacer"></span><button type="button" class="btn primary" data-close>Done</button></div></form>`;
   };
   if (!ui.accounts) { back.innerHTML = '<div class="dialog"><p class="muted">Checking your Claude accounts…</p></div>'; await loadAccounts(true); }
@@ -683,7 +686,27 @@ async function accountsDialog() {
   back.addEventListener('click', async event => {
     if (event.target === back || event.target.closest('[data-close]')) { back.remove(); renderAll(); return; }
     if (event.target.closest('[data-acct-refresh]')) { back.querySelector('[data-acct-refresh]').textContent = 'Checking…'; await loadAccounts(true); draw(); }
+    if (event.target.closest('[data-acct-new]')) { ui.acctAdding = true; draw(); back.querySelector('[data-acct-name]')?.focus(); }
+    if (event.target.closest('[data-acct-cancel]')) { ui.acctAdding = false; draw(); }
+    const login = event.target.closest('[data-acct-login]'), create = event.target.closest('[data-acct-create]');
+    if (login || create) {
+      event.preventDefault();
+      try {
+        if (create) { const name = back.querySelector('[data-acct-name]').value.trim(); if (!name) return toast('Give the account a name first.', true); await api('/agents/add', { method: 'POST', data: { name } }); ui.acctAdding = false; }
+        else await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin } });
+        ui.acctWaiting = true; await loadAccounts(true); draw();
+        // Sign-in happens in the browser; look again every few seconds for up to three minutes.
+        for (let tries = 0; tries < 60 && ui.acctWaiting && document.body.contains(back); tries++) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const before = (ui.accounts?.claude?.profiles || []).filter(item => item.loggedIn).length; await loadAccounts(true);
+          if ((ui.accounts?.claude?.profiles || []).filter(item => item.loggedIn).length > before) { ui.acctWaiting = false; toast('Signed in. You can pick this account now.'); }
+          if (document.body.contains(back)) draw();
+        }
+        ui.acctWaiting = false; if (document.body.contains(back)) draw();
+      } catch (error) { ui.acctWaiting = false; toast(error.message, true); draw(); }
+    }
   });
+  back.addEventListener('keydown', event => { if (event.target.matches('[data-acct-name]') && event.key === 'Enter') { event.preventDefault(); back.querySelector('[data-acct-create]')?.click(); } });
   back.addEventListener('change', async event => {
     try {
       if (event.target.name === 'profile') { await api('/agents/profile', { method: 'POST', data: { provider: 'claude', profile: event.target.value } }); await loadAccounts(); toast('Agents now use this Claude account from their next reply.'); draw(); }
@@ -745,3 +768,10 @@ function jevDetail(result) {
   if (result.percent !== undefined) parts.push(result.percent + '%' + (result.charging ? ', charging' : ''));
   return parts.length ? ' · ' + esc(parts.join(' · ')) : '';
 }
+
+// The account picked in an agent's profile panel is saved for that agent at once.
+document.addEventListener('change', async event => {
+  if (event.target.id !== 'pp-profile') return;
+  const run = runById(ui.view.id), agent = run && personalAgent(run); if (!agent || agent.main) return;
+  try { await api(`/specialists/${agent.id}`, { method: 'PUT', data: { profile: event.target.value } }); toast(event.target.value ? `${agent.name} now uses that Claude account.` : `${agent.name} uses the same account as everyone.`); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
+});

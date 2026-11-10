@@ -1,5 +1,5 @@
-import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
@@ -39,6 +39,10 @@ export function discoverProfiles(provider, { configured = '', env = process.env,
     for (const entry of readdirSync(roots.home, { withFileTypes: true })) {
       if (entry.isDirectory() && entry.name.startsWith(`${name}-`)) add(path.join(roots.home, entry.name), 'home');
     }
+  } catch {}
+  try {
+    const config = path.join(roots.home, '.config');
+    for (const entry of readdirSync(config, { withFileTypes: true })) if (entry.isDirectory() && /^claude/i.test(entry.name) && !/shared-history|\s$/i.test(entry.name)) add(path.join(config, entry.name), 'config');
   } catch {}
   const orca = path.join(roots.appData, 'orca', `${provider}-profiles`);
   try { for (const entry of readdirSync(orca, { withFileTypes: true })) if (entry.isDirectory()) add(path.join(orca, entry.name, 'home'), 'orca'); } catch {}
@@ -120,6 +124,25 @@ export class AgentProfiles {
     const name = 'Claude Code';
     throw new Error(fresh.error && !fresh.installed ? fresh.error
       : `${name} profile ${fresh.label} is not signed in. Open Setup and choose a signed-in ${name} profile, then continue this run. No agent turn was started.`);
+  }
+  // Signs a profile in to a Claude account: Claude Code opens the browser, the person signs in, and the profile is ready.
+  login(provider, profile) {
+    const executable = resolveCommand(provider), env = profileEnvironment(provider, profile);
+    const child = spawn(executable.command, [...executable.args, 'auth', 'login'], { env, windowsHide: false, detached: true, stdio: 'ignore' });
+    child.unref(); this.invalidate(provider);
+    return { started: true, profile, label: profileLabel(provider, profile) };
+  }
+  // A new profile folder for another Claude account. It shares the conversation history folder with the others when there is
+  // one, so an agent keeps its conversation when it moves between accounts.
+  addProfile(provider, name, { roots = { home } } = {}) {
+    const slug = String(name || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+    if (!slug) throw new Error('Give the account a short name, like work or personal.');
+    const folder = path.join(roots.home, '.config', `claude-${slug}`);
+    if (existsSync(folder)) throw new Error(`There is already a profile called ${slug}.`);
+    mkdirSync(folder, { recursive: true });
+    const shared = path.join(roots.home, '.config', 'claude-code-shared-history');
+    if (existsSync(shared)) { try { symlinkSync(shared, path.join(folder, 'projects'), 'junction'); } catch {} }
+    return { profile: folder, label: profileLabel(provider, folder) };
   }
   invalidate(provider) { for (const key of this.cache.keys()) if (!provider || key.startsWith(`${provider}:`)) this.cache.delete(key); }
   mcpInstalled(provider, profile = this.selected(provider)) {

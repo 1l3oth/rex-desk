@@ -710,3 +710,8 @@ button.cn-main{cursor:pointer}
 .jv-confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--warn) 12%,var(--panel))}.jv-confirm span{flex:1}
 .tp-box .assign{display:flex!important;flex-direction:column;grid-template-columns:none!important;align-items:stretch;gap:10px}.tp-box .assign>label{display:flex!important;flex-direction:column;width:100%;margin:0}
 .jv-list{margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--ink);display:flex;flex-direction:column;gap:2px}
+
+.acct-list label{align-items:center}.acct-signin{margin-left:auto;flex:none}
+.acct-add{display:flex;gap:8px;align-items:center}.acct-add input{flex:1}
+.acct-wait{display:flex;gap:8px;align-items:center;margin:0;font-size:13px}
+.pinfo .pick2{width:100%}.pinfo .pick2-btn{width:100%}

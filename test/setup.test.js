@@ -227,3 +227,19 @@ test('MCP coverage is reported for every profile, not only the one runs use', as
 
   store.close();
 });
+
+test('a new Claude account gets its own profile folder in ~/.config, sharing the conversation history', async () => {
+  const { mkdtempSync, mkdirSync, existsSync, realpathSync } = await import('node:fs');
+  const os = (await import('node:os')).default, path = (await import('node:path')).default;
+  const { AgentProfiles, discoverProfiles } = await import('../src/agents.js');
+  const home = mkdtempSync(path.join(os.tmpdir(), 'rex-home-')), shared = path.join(home, '.config', 'claude-code-shared-history');
+  mkdirSync(shared, { recursive: true }); mkdirSync(path.join(home, '.config', 'claude1'), { recursive: true });
+  const profiles = new AgentProfiles({ config: () => ({}) });
+  const created = profiles.addProfile('claude', 'Work Account', { roots: { home } });
+  assert.equal(path.basename(created.profile), 'claude-work-account');
+  assert.equal(realpathSync(path.join(created.profile, 'projects')).toLowerCase(), realpathSync(shared).toLowerCase());
+  assert.throws(() => profiles.addProfile('claude', 'work account', { roots: { home } }), /already a profile/);
+  const found = discoverProfiles('claude', { roots: { home, appData: path.join(home, 'AppData') } }).map(item => path.basename(item.profile));
+  assert.ok(found.includes('claude1') && found.includes('claude-work-account') && !found.includes('claude-code-shared-history'));
+  assert.ok(existsSync(created.profile));
+});

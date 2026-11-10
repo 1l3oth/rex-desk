@@ -334,6 +334,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return json(response, 200, { branch: issueBranch(input.pattern, { prefix: input.prefix || 'temp/rex' }) });
       }
       if (url.pathname === '/api/config' && request.method === 'PUT') { const saved = store.saveConfig(await body(request)); desk.agents.invalidate(); return json(response, 200, saved); }
+      if (url.pathname === '/api/agents/login' && request.method === 'POST') return json(response, 200, desk.agents.login('claude', String((await body(request)).profile || '')));
+      if (url.pathname === '/api/agents/add' && request.method === 'POST') { const created = desk.agents.addProfile('claude', (await body(request)).name); return json(response, 200, { ...created, ...desk.agents.login('claude', created.profile) }); }
       if (url.pathname === '/api/accounts/auto' && request.method === 'GET') return json(response, 200, { on: !store.get('accounts', 'auto')?.off });
       if (url.pathname === '/api/accounts/auto' && request.method === 'POST') { const on = (await body(request)).on !== false; store.put('accounts', 'auto', { id: 'auto', off: !on }); return json(response, 200, { on }); }
       if (url.pathname === '/api/agents' && request.method === 'GET') return json(response, 200, await desk.agents.overview({ refresh: url.searchParams.has('refresh') }));
