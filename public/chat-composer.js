@@ -5,8 +5,11 @@ const ICON = {
   up: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   file: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
 };
+import { pickerHtml } from '/chat-pick.js';
 const KEY = 'rex-desk-input';
 const EFFORT_LABEL = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
+const EFFORT_HINT = { low: 'Fast, light thinking', medium: 'Balanced', high: 'Thinks longer', xhigh: 'Thinks a lot longer', max: 'Longest thinking, slowest' };
+const MODE_HINT = { bypassPermissions: 'Runs tools without asking', manual: 'Asks you for each tool, in the chat', auto: 'A checker decides what is safe', plan: 'Plans only, runs nothing', acceptEdits: 'Edits files freely, asks for the rest' };
 const DEFAULT_MODE = 'bypassPermissions';
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -26,8 +29,8 @@ export function pickedOptions(ctx) {
 
 export function composerHtml(ctx, model) {
   const { ui, esc } = ctx, choices = ui.snap?.choices || { models: [], efforts: [], modes: [] }, now = currentOptions(ctx), working = Boolean(model.working);
-  const select = (id, label, items, value) => `<label class="pick"><span class="sr">${label}</span><select id="${id}" aria-label="${label}">${items.map(item => `<option value="${esc(item.id)}" ${item.id === value ? 'selected' : ''}>${esc(item.label)}</option>`).join('')}</select></label>`;
-  const modes = choices.modes.map(item => item.id === 'bypassPermissions' ? { ...item, label: 'Dangerous' } : item);
+  const select = (id, label, items, value) => pickerHtml(ctx, { id, label, compact: true, value, items: items.map(item => ({ value: item.id, label: item.label, hint: item.hint })) });
+  const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? 'Dangerous' : item.label, hint: MODE_HINT[item.id] }));
   return `<div class="composer" id="composer"><div class="composer-inner">
     <div class="attach-chips" id="attach-chips"></div>
     <div class="box2"><div id="menu"></div>
@@ -38,7 +41,7 @@ export function composerHtml(ctx, model) {
       <input type="file" id="file-input" multiple hidden>
     </div>
     <div class="foot"><span class="hint">Type / for commands${model.composer.mentions?.length ? ' · @ to mention · # for a task' : ''}</span><span class="spacer"></span>
-      ${model.composer.noPickers ? '' : `${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
+      ${model.composer.noPickers ? '' : `${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
       <span class="ring ${working ? 'busy' : ''}" title="${working ? 'The agent is working' : 'Idle'}" aria-hidden="true"></span>`}</div>
   </div></div>`;
 }

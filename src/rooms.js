@@ -1,6 +1,8 @@
 // Group chats between the person and their agents. An agent answers only when it is mentioned (@name); a task is mentioned with #number.
 // Every agent has one session of its own, like a person: it is brought up to date with the room when it is mentioned, and it can read any room it belongs to.
 import { randomUUID } from 'node:crypto';
+import { readdirSync, rmSync } from 'node:fs';
+import path from 'node:path';
 
 export const MAX_HOPS = 6;
 export const HUMAN = 'you';
@@ -25,6 +27,20 @@ export class Rooms {
   snapshot() {
     const rooms = this.list();
     return { rooms: rooms.map(room => ({ ...room, members: room.members.map(id => this.member(id)) })), messages: rooms.flatMap(room => this.messages(room.id, { limit: 150 })) };
+  }
+  rename(roomId, name) {
+    const room = this.room(roomId), title = String(name || '').trim().slice(0, 80);
+    if (!title) throw new Error('Name the room.');
+    this.store.put('room', roomId, { ...room, name: title }); return this.room(roomId);
+  }
+  setImage(roomId, image) { const room = this.room(roomId); this.store.put('room', roomId, { ...room, image, imageAt: now() }); return this.room(roomId); }
+  remove(roomId) {
+    this.room(roomId);
+    for (const message of this.store.list('roommsg').filter(item => item.roomId === roomId)) this.store.delete('roommsg', message.id);
+    this.store.delete('room', roomId);
+    const folder = path.join(this.store.directory, 'room-images');
+    try { for (const file of readdirSync(folder).filter(name => name.startsWith(roomId))) rmSync(path.join(folder, file), { force: true }); } catch { /* no picture */ }
+    return { removed: true };
   }
   // Rooms made when members were runs keep only the members that are agents now.
   cleanup() { for (const room of this.list()) { const kept = room.members.filter(id => this.agent(id)); if (kept.length !== room.members.length) this.store.put('room', room.id, { ...room, members: kept }); } }

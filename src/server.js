@@ -252,6 +252,25 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       if (url.pathname === '/api/memory/scan' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.memory.scan({ roots: Array.isArray(input.roots) && input.roots.length ? input.roots : scanRoots(store, root) })); }
       if (url.pathname === '/api/memory/user' && request.method === 'PUT') return json(response, 200, desk.memory.setUser((await body(request)).text));
       if (url.pathname === '/api/rooms' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.rooms.create(input.name, input.members)); }
+      const roomOnly = url.pathname.match(/^\/api\/rooms\/([^/]+)$/);
+      if (roomOnly && request.method === 'PUT') return json(response, 200, desk.rooms.rename(roomOnly[1], (await body(request)).name));
+      if (roomOnly && request.method === 'DELETE') return json(response, 200, desk.rooms.remove(roomOnly[1]));
+      const roomImage = url.pathname.match(/^\/api\/rooms\/([^/]+)\/image$/);
+      if (roomImage && request.method === 'GET') {
+        const room = desk.rooms.room(roomImage[1]), file = room.image && path.join(store.directory, 'room-images', path.basename(room.image));
+        if (!file || !existsSync(file)) return json(response, 404, { error: 'This room has no picture.' });
+        return serveFile(request, response, file, { cache: 'no-cache' });
+      }
+      if (roomImage && request.method === 'POST') {
+        const ext = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' }[String(request.headers['content-type'] || '').split(';')[0]];
+        if (!ext) throw new Error('Choose a PNG, JPEG, WebP or GIF picture.');
+        const room = desk.rooms.room(roomImage[1]), folder = path.join(store.directory, 'room-images'), chunks = []; let size = 0;
+        for await (const chunk of request) { size += chunk.length; if (size > 5 * 1024 * 1024) throw new Error('The picture can be at most 5 MB.'); chunks.push(chunk); }
+        mkdirSync(folder, { recursive: true });
+        if (room.image && room.image !== room.id + ext) rmSync(path.join(folder, path.basename(room.image)), { force: true });
+        writeFileSync(path.join(folder, room.id + ext), Buffer.concat(chunks));
+        return json(response, 200, desk.rooms.setImage(room.id, room.id + ext));
+      }
       const roomMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/(messages|members)(?:\/([^/]+))?$/);
       if (roomMatch) {
         const [, roomId, part, extra] = roomMatch;
@@ -269,7 +288,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html', download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg' };
       const file = publicFiles[url.pathname];
       if (!file || !existsSync(path.join(root, 'public', file))) return json(response, 404, { error: 'Page not found.' });
       return serveFile(request, response, path.join(root, 'public', file));

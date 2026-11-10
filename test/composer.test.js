@@ -56,3 +56,17 @@ test('an uploaded file is saved under the data folder, and the size limit and he
     assert.ok(existsSync(saved.path));
   } finally { await app.close(); }
 });
+
+test('a room picture is stored, served back as the same bytes, and only pictures under 5 MB are accepted', async () => {
+  const app = await createApp({ dataDirectory: temporary('roompic'), port: 0 });
+  try {
+    const room = app.desk.rooms.create('Pictures', []), png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+    const head = { 'x-rex-desk': '1', 'Content-Type': 'image/png' };
+    assert.equal((await fetch(`${app.address}/api/rooms/${room.id}/image`, { method: 'POST', headers: { ...head, 'Content-Type': 'text/html' }, body: '<b>x</b>' })).status, 400);
+    const saved = await (await fetch(`${app.address}/api/rooms/${room.id}/image`, { method: 'POST', headers: head, body: png })).json();
+    assert.equal(saved.image, `${room.id}.png`);
+    const back = Buffer.from(await (await fetch(`${app.address}/api/rooms/${room.id}/image`)).arrayBuffer());
+    assert.ok(back.equals(png), 'the picture comes back unchanged');
+    assert.equal((await fetch(`${app.address}/api/rooms/${room.id}`, { method: 'PUT', headers: { 'x-rex-desk': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Renamed' }) })).status, 200);
+  } finally { await app.close(); }
+});

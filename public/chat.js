@@ -1,17 +1,24 @@
 import { agentsRail, agentStage, agentAction } from '/chat-agents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
-import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction } from '/chat-rooms.js';
+import { initPickers, setPickActions, pickerOpen } from '/chat-pick.js';
+import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction, initRoomInfo, avatarHtml } from '/chat-rooms.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
-const ui = { snap: null, view: { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map(), termOpen: true };
+// Which screen is open lives in the address (#/room/ID) and is also saved, so a refresh or a restart comes back to the same place.
+const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project'];
+const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
+function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash); return match && SCREENS.includes(match[1]) ? { type: match[1], id: match[2] ? decodeURIComponent(match[2]) : '' } : null; }
+function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
+const ui = { snap: null, view: viewFromHash() || savedView() || { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map(), termOpen: true };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`; };
 const provider = name => name === 'codex' ? 'Codex (retired)' : name === 'claude' ? 'Claude Code' : 'Agent';
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value),
+  render: () => renderAll(), avatar: args => avatarHtml(ctx, args),
   commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), settings: () => { location.href = '/classic'; } }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
@@ -40,9 +47,9 @@ const runTitle = run => { const task = run?.taskId ? ui.snap?.tasks?.find(item =
 const roomById = id => ui.snap.rooms.find(room => room.id === id);
 
 // ---------- rail ----------
-function railItem(type, id, { dot = '', name, sub = '', badge = 0, warn = false }) {
+function railItem(type, id, { dot = '', avatar = '', name, sub = '', badge = 0, warn = false }) {
   const active = ui.view.type === type && (ui.view.id || '') === (id || '');
-  return `<button class="item ${active ? 'active' : ''}" data-open="${type}" data-id="${esc(id || '')}">${dot ? `<span class="dot ${dot}"></span>` : ''}<span class="name">${esc(name)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span>${badge ? `<span class="badge ${warn ? 'warn' : ''}">${badge}</span>` : ''}</button>`;
+  return `<button class="item ${active ? 'active' : ''}" data-open="${type}" data-id="${esc(id || '')}">${avatar || (dot ? `<span class="dot ${dot}"></span>` : '')}<span class="name">${esc(name)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span>${badge ? `<span class="badge ${warn ? 'warn' : ''}">${badge}</span>` : ''}</button>`;
 }
 function renderRail() {
   const snap = ui.snap, runs = snap.runs.filter(run => run.role !== 'coordinator' && run.role !== 'specialist' && !run.setupSourceId), asks = pending().length;
@@ -54,7 +61,7 @@ function renderRail() {
     ${railItem('main', '', { dot: main ? stateTone(main) : '', name: 'Main agent', sub: main ? `${provider(main.provider)} · ${stateLabel(main)}` : 'Not started' })}
     ${railItem('inbox', '', { name: 'Needs you', sub: asks ? `${asks} waiting` : 'Nothing waiting', badge: asks, warn: true })}
     <h3>Rooms <button data-action="new-room" title="New room" aria-label="New room">+</button></h3>
-    ${snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { dot: room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : '', name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>'}
+    ${snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), dot: room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : '', name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>'}
     ${agentsRail(ctx)}
     <h3>Tasks</h3>
     ${railItem('tasks', '', { name: 'All tasks', sub: `${tasks.length} issues${busy ? ` · ${busy} being worked on` : ''}` })}
@@ -120,10 +127,9 @@ function decisionCard(item) {
   const request = item.request || {}, run = runById(item.runId), properties = request.requestedSchema?.properties || {}, required = request.requestedSchema?.required || [];
   const field = (key, property, needed) => {
     const attrs = `name="${esc(key)}" data-type="${esc(property.type || 'string')}" ${needed ? 'required' : ''}`;
-    const control = property.type === 'boolean' ? `<select ${attrs}><option value="">Choose…</option><option value="true">Yes</option><option value="false">No</option></select>`
-      : property.enum ? `<select ${attrs}><option value="">Choose…</option>${property.enum.map(value => `<option>${esc(value)}</option>`).join('')}<option value="__custom">Write another answer…</option></select><input class="qinput hidden" name="${esc(key)}__custom" placeholder="Your answer">`
+    const control = property.type === 'boolean' ? `<div class="seg"><button type="button" data-seg="true">Yes</button><button type="button" data-seg="false">No</button><input type="hidden" ${attrs.replace('required', '')}></div>`
       : `<input class="qinput" ${attrs} type="${['number', 'integer'].includes(property.type) ? 'number' : 'text'}" placeholder="Type your answer…" autocomplete="off">`;
-    const options = (property.options || []).slice(0, 6);
+    const options = (property.options || (property.enum || []).map(label => ({ label }))).slice(0, 8);
     const suggestions = options.length ? `<div class="sugg" data-multi="${property.multiSelect ? 1 : 0}">${options.map((option, index) => `<button type="button" class="sugg-chip" data-fill="${esc(option.label)}"><span class="num">${index + 1}</span><span class="txt"><b>${esc(option.label)}</b>${option.description ? `<small>${esc(option.description)}</small>` : ''}</span></button>`).join('')}<div class="sugg-other">Or type your own answer below</div></div>` : '';
     return `<label class="qfield"><span>${esc(property.title || key)}</span>${suggestions}${control}</label>`;
   };
@@ -175,23 +181,24 @@ function renderStage(full) {
   if (full || !document.getElementById('feed')) {
     stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}</div><aside class="side" id="side"></aside>`;
     ui.stick = true; redrawAttachments(ctx);
-  } else { document.getElementById('head').innerHTML = head; const slot = document.getElementById('members'); if (!slot.contains(document.activeElement)) slot.innerHTML = model.members || ''; }
+  } else { document.getElementById('head').innerHTML = head; const slot = document.getElementById('members'); if (!slot.contains(document.activeElement) && !pickerOpen()) slot.innerHTML = model.members || ''; }
   document.getElementById('feed').className = `feed ${model.feedClass || ''}`;
-  drawSide(model.side || '');
+  drawSide(model.side || '', model.sideClass || '');
   const feed = document.getElementById('feed'), inner = document.getElementById('feed-inner');
   // Someone typing in an approval form keeps their text: the feed is not redrawn under them.
   // A form that is gone from the new view (it was answered) never holds the redraw back.
   const active = document.activeElement, form = active?.closest?.('[data-interaction]');
   const editing = !full && feed.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName) && (!form || model.feed.includes(`data-interaction="${form.dataset.interaction}"`));
-  if (!editing) { inner.innerHTML = model.feed; if (ui.stick) feed.scrollTop = feed.scrollHeight; }
+  const choosing = pickerOpen();
+  if (!editing && !choosing) { inner.innerHTML = model.feed; if (ui.stick) feed.scrollTop = feed.scrollHeight; }
   ui.mentions = model.composer?.mentions || [];
 }
 // The terminal panel keeps its scroll place unless it was at the bottom, where it follows the newest command.
-function drawSide(html) {
+function drawSide(html, extra = '') {
   const side = document.getElementById('side'); if (!side) return;
   const body = document.getElementById('side-body'), keep = body ? { top: body.scrollTop, bottom: body.scrollHeight - body.scrollTop - body.clientHeight < 40 } : { top: 0, bottom: true };
   if (side.dataset.html !== html) { side.innerHTML = html; side.dataset.html = html; }
-  side.classList.toggle('on', Boolean(html));
+  side.className = `side${html ? ' on' : ''} ${extra}`.trim();
   const fresh = document.getElementById('side-body'); if (fresh) fresh.scrollTop = keep.bottom ? fresh.scrollHeight : keep.top;
 }
 const draftKey = () => `${ui.view.type}:${ui.view.id || ''}`;
@@ -222,7 +229,10 @@ async function refresh({ full = false } = {}) {
     await loadView(); renderAll(full);
   } finally { busy = false; if (again) { again = false; void refresh(); } }
 }
-function open(type, id = '') { ui.view = { type, id }; ui.page = ''; document.querySelector('.chat-shell')?.classList.remove('show-rail'); void refresh({ full: true }); }
+function open(type, id = '') {
+  ui.view = { type, id }; ui.page = '';
+  try { localStorage.setItem('rex-desk-view', JSON.stringify(ui.view)); } catch { /* private window */ }
+  if (location.hash !== hashOf(ui.view)) { ui.fromOpen = true; location.hash = hashOf(ui.view); } document.querySelector('.chat-shell')?.classList.remove('show-rail'); void refresh({ full: true }); }
 
 // ---------- actions ----------
 async function send() {
@@ -267,7 +277,7 @@ document.addEventListener('click', async event => {
     else if (action === 'new-room') newRoomDialog();
     else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
     else if (action === 'term-open') { ui.termOpen = true; renderAll(); }
-    else if (action === 'room-remove' || action === 'task-assign') await roomAction(ctx, action, target);
+    else if (['room-remove', 'task-assign', 'info-toggle', 'room-image', 'room-delete'].includes(action)) await roomAction(ctx, action, target);
     else if (action === 'quick') { await api('/main', { method: 'POST', data: { prompt: target.dataset.text } }); await refresh(); }
     else if (action === 'sync') await syncIssues();
     else if (action === 'toggle-done') { ui.done = !ui.done; renderAll(); }
@@ -298,6 +308,20 @@ document.addEventListener('submit', async event => {
 });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
 
+initPickers(ctx); initRoomInfo(ctx);
+// The back and forward buttons, and a pasted address, move between screens.
+window.addEventListener('hashchange', () => {
+  if (ui.fromOpen) { ui.fromOpen = false; return; }
+  const view = viewFromHash(); if (!view) return;
+  ui.view = view; ui.page = ''; void refresh({ full: true });
+});
+setPickActions({ 'room-add': async agentId => { try { await api(`/rooms/${ui.view.id}/members`, { method: 'POST', data: { agentId } }); await refresh(); } catch (error) { toast(error.message, true); } } });
+// Yes and No answers.
+document.addEventListener('click', event => {
+  const button = event.target.closest?.('[data-seg]'); if (!button) return;
+  const group = button.parentElement; for (const other of group.querySelectorAll('[data-seg]')) other.classList.toggle('on', other === button);
+  group.querySelector('input').value = button.dataset.seg;
+});
 initComposer(ctx);
 // A shell step in the chat points to its entry in the terminal panel.
 document.addEventListener('click', event => {

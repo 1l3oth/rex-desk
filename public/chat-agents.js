@@ -1,3 +1,4 @@
+import { pickerHtml } from '/chat-pick.js';
 // Specialist agents: one identity per project. The card shows who the agent is and what it was told; the person can rename, edit or duplicate it.
 const providerName = name => name === 'codex' ? 'Codex (retired)' : 'Claude Code';
 
@@ -29,7 +30,7 @@ export function agentStage(ctx) {
 
 function dialog(ctx, { title, nameValue = '', projects = null, submit }) {
   const { esc, toast } = ctx, back = document.createElement('div'); back.className = 'dialog-back';
-  back.innerHTML = `<form class="dialog"><h2>${esc(title)}</h2><label>Name<input type="text" name="name" value="${esc(nameValue)}" maxlength="40" required></label>${projects ? `<label>Project<select name="project" required>${projects.map(project => `<option value="${esc(project.slug)}" ${project.selected ? 'selected' : ''}>${esc(project.slug)}</option>`).join('')}</select></label>` : ''}<div class="row"><button class="btn primary">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`;
+  back.innerHTML = `<form class="dialog"><h2>${esc(title)}</h2><label>Name<input type="text" name="name" value="${esc(nameValue)}" maxlength="40" required></label>${projects ? `<label>Project${pickerHtml(ctx, { id: 'newagent-project', name: 'project', label: 'Project', searchable: projects.length > 6, value: (projects.find(project => project.selected) || projects[0] || {}).slug || '', items: projects.map(project => ({ value: project.slug, label: project.slug })) })}</label>` : ''}<div class="row"><button class="btn primary">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`;
   document.body.append(back); back.querySelector('input').select();
   back.addEventListener('click', event => { if (event.target === back || event.target.dataset.close !== undefined) back.remove(); });
   back.querySelector('form').addEventListener('submit', async event => {

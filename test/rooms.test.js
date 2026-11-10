@@ -120,3 +120,15 @@ test('a room made when members were runs keeps only the members that are agents 
   desk.rooms.cleanup();
   assert.deepEqual(store.get('room', room.id).members, [dara.id]);
 });
+
+test('a room can be renamed, given a picture and deleted with its messages', async () => {
+  const { desk, store, room } = setup();
+  await desk.rooms.post(room.id, { text: 'hello' });
+  assert.equal(desk.rooms.rename(room.id, '  Billing bug  ').name, 'Billing bug');
+  assert.throws(() => desk.rooms.rename(room.id, '   '), /Name the room/);
+  assert.equal(desk.rooms.setImage(room.id, `${room.id}.png`).image, `${room.id}.png`);
+  assert.ok(desk.rooms.messages(room.id).length > 0);
+  desk.rooms.remove(room.id);
+  assert.equal(store.get('room', room.id), undefined);
+  assert.equal(store.list('roommsg').filter(item => item.roomId === room.id).length, 0);
+});

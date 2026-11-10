@@ -1,5 +1,12 @@
+import { pickerHtml } from '/chat-pick.js';
 // Rooms (group chats with agents) and Tasks. Both are their own screens, apart from the main agent.
 const WORKING = ['starting', 'running', 'queued', 'verifying'];
+// A round picture: the room's own image, or its initials on a colour taken from its name.
+const hashOf = text => [...String(text)].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7) % 8;
+export function avatarHtml(ctx, { name, image = '', id = '', at = '', size = '' }) {
+  const { esc, initials } = ctx;
+  return image ? `<span class="av ${size}"><img src="/api/rooms/${esc(id)}/image?v=${encodeURIComponent(at)}" alt=""></span>` : `<span class="av av${hashOf(name)} ${size}">${esc(initials(name))}</span>`;
+}
 const taskNumber = task => String(task.taskNumber || task.externalId || '');
 export const taskName = task => task.titleEn || task.title;
 const dotFor = state => ({ busy: 'working', replying: 'working', waiting: 'warn', idle: 'good' })[state] || '';
@@ -22,8 +29,30 @@ export function roomStage(ctx) {
   const chip = member => `<span class="chip member ${esc(member.state)}"><button class="member-open" data-open="${member.runId ? 'run' : 'specialist'}" data-id="${esc(member.runId || member.id)}" title="Open ${esc(member.name)}"><span class="dot ${dotFor(member.state)}"></span><strong>${esc(member.name)}</strong><span class="mlabel">${esc(member.label)}</span></button><button class="btn small x" data-action="room-remove" data-id="${esc(member.id)}" title="Remove from the room">×</button></span>`;
   return { title: room.name, meta: `${room.members.length} agents`, feedClass: 'room',
     composer: { placeholder: 'Message the room. @ mentions an agent, # mentions a task…', mentions: handles, noPickers: true },
-    members: `<div class="members">${room.members.map(chip).join('')}${free.length ? `<select data-action="room-add"><option value="">+ Add agent…</option>${free.map(agent => `<option value="${esc(agent.id)}">${esc(agent.name)} · ${esc(agent.projectSlug)}</option>`).join('')}</select>` : ''}</div>`,
+    side: ui.infoOpen === false ? '' : roomInfoHtml(ctx, room), sideClass: 'info',
+    actions: ui.infoOpen === false ? '<button class="btn small" data-action="info-toggle">Info</button>' : '',
+    members: ui.infoOpen !== false ? '' : `<div class="members">${room.members.map(chip).join('')}${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: 'Add an agent to this room', placeholder: '+ Add agent', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || 'Idle'}` })) }) : ''}</div>`,
     feed: `${messages.length ? messages.map(render).join('') : empty}${doing}` };
+}
+
+// The room's info on the right, like a messenger: picture, name, who is in it and what they are doing, and the tasks talked about.
+function roomInfoHtml(ctx, room) {
+  const { ui, esc } = ctx, messages = (ui.snap.messages || []).filter(message => message.roomId === room.id);
+  const mentioned = [...new Set(messages.flatMap(message => message.tasks || []))].map(id => (ui.snap.tasks || []).find(task => task.id === id)).filter(Boolean);
+  const free = (ui.snap.specialists || []).filter(agent => !room.members.some(member => member.id === agent.id));
+  const member = person => `<li class="rperson"><button class="rperson-main" data-open="${person.runId ? 'run' : 'specialist'}" data-id="${esc(person.runId || person.id)}" title="Open ${esc(person.name)}">${avatarHtml(ctx, { name: person.name, size: 'sm' })}<span class="rperson-text"><b>${esc(person.name)}</b><small>${esc(person.project)} · <span class="st ${esc(person.state)}">${esc(person.label)}</span></small></span></button><button class="btn small x" data-action="room-remove" data-id="${esc(person.id)}" title="Remove from the room" aria-label="Remove ${esc(person.name)}">×</button></li>`;
+  return `<div class="side-head"><strong>Chat info</strong><span class="spacer"></span><button type="button" class="btn small" data-action="info-toggle" aria-label="Close the info panel">Close</button></div>
+    <div class="side-body rinfo">
+      <div class="rhero"><button type="button" class="ravatar" data-action="room-image" title="Change the picture">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'xl' })}<span class="cam">Change</span></button><input type="file" id="room-image-input" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+        <input class="rname" id="room-name" value="${esc(room.name)}" maxlength="80" aria-label="Room name" spellcheck="false">
+        <p class="rsub">${room.members.length} agent${room.members.length === 1 ? '' : 's'} · started ${esc(new Date(room.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }))}</p></div>
+      <h3>Members <span>${room.members.length + 1}</span></h3>
+      <ul class="rmembers"><li class="rperson me"><span class="rperson-main">${avatarHtml(ctx, { name: 'You', size: 'sm' })}<span class="rperson-text"><b>You</b><small>The person</small></span></span></li>${room.members.map(member).join('')}</ul>
+      ${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: 'Add people', placeholder: '+ Add people', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || 'Idle'}` })) }) : ''}
+      <h3>Tasks in this chat <span>${mentioned.length}</span></h3>
+      ${mentioned.length ? `<ul class="rtasks">${mentioned.map(task => `<li><button class="rtask" data-open="task" data-id="${esc(task.id)}"><span class="tnum">#${esc(taskNumber(task))}</span><span>${esc(taskName(task))}</span></button></li>`).join('')}</ul>` : '<p class="muted small">None yet. Type # in the message box to mention a task.</p>'}
+      <div class="rdanger"><button class="btn danger small" data-action="room-delete">Delete this room</button></div>
+    </div>`;
 }
 
 export function newRoomDialog(ctx) {
@@ -70,8 +99,8 @@ export function taskStage(ctx) {
   const on = agentOnTask(ui, task), agents = ui.snap.specialists || [], rooms = ui.snap.rooms || [];
   const assign = on?.agent
     ? `<p class="assigned"><span class="dot working"></span><strong>${esc(on.agent.name)}</strong> is working on this. <button class="btn small" data-open="run" data-id="${esc(on.run.id)}">Open the work</button></p>`
-    : agents.length ? `<div class="assign"><label>Assign to<select id="assign-agent">${agents.map(agent => `<option value="${esc(agent.id)}" ${agent.status?.state === 'busy' ? 'disabled' : ''}>${esc(agent.name)} · ${esc(agent.projectSlug)}${agent.status?.state === 'busy' ? ' (busy)' : ''}</option>`).join('')}</select></label>
-        <label>Tell this room<select id="assign-room"><option value="">None</option>${rooms.map(room => `<option value="${esc(room.id)}">${esc(room.name)}</option>`).join('')}</select></label>
+    : agents.length ? `<div class="assign"><label>Assign to${pickerHtml(ctx, { id: 'assign-agent', label: 'Assign to', searchable: agents.length > 6, value: agents.find(agent => agent.status?.state !== 'busy')?.id || '', items: agents.map(agent => ({ value: agent.id, label: agent.name, hint: agent.projectSlug, meta: agent.status?.state === 'busy' ? 'busy' : '', disabled: agent.status?.state === 'busy' })) })}</label>
+        <label>Tell this room${pickerHtml(ctx, { id: 'assign-room', label: 'Tell this room', value: '', items: [{ value: '', label: 'No room' }, ...rooms.map(room => ({ value: room.id, label: room.name, hint: `${room.members.length} agents` }))] })}</label>
         <button class="btn primary" data-action="task-assign" data-id="${esc(task.id)}">Assign</button></div>` : '<p class="muted">Create an agent first (the + next to Agents), then assign this task to it.</p>';
   return { title: `#${taskNumber(task)} ${taskName(task)}`, meta: task.statusName || task.status || '',
     feed: `<div class="page"><section class="idcard"><div class="thead"><span class="tnum">#${esc(taskNumber(task))}</span><h2>${esc(taskName(task))}</h2></div>
@@ -81,9 +110,34 @@ export function taskStage(ctx) {
       <h3>Description</h3><div class="md">${markdown(String(task.description || 'No description.').slice(0, 6000))}</div></section></div>` };
 }
 
+// ---------- room info: name and picture ----------
+export function initRoomInfo(ctx) {
+  document.addEventListener('change', async event => {
+    const { ui, api, toast, refresh } = ctx;
+    if (event.target.id === 'room-name') {
+      try { await api(`/rooms/${ui.view.id}`, { method: 'PUT', data: { name: event.target.value } }); await refresh(); } catch (error) { toast(error.message, true); await refresh(); }
+    } else if (event.target.id === 'room-image-input' && event.target.files[0]) {
+      const file = event.target.files[0]; event.target.value = '';
+      try {
+        const response = await fetch(`/api/rooms/${ui.view.id}/image`, { method: 'POST', headers: { 'x-rex-desk': '1', 'Content-Type': file.type }, body: file }), body = await response.json();
+        if (!response.ok) throw new Error(body.error || 'Upload failed.');
+        await refresh(); toast('Room picture changed.');
+      } catch (error) { toast(error.message, true); }
+    }
+  });
+  document.addEventListener('keydown', event => { if (event.target.id === 'room-name' && event.key === 'Enter') { event.preventDefault(); event.target.blur(); } });
+}
+
 // ---------- actions ----------
 export async function roomAction(ctx, action, target) {
   const { ui, api, toast, refresh } = ctx;
+  if (action === 'info-toggle') { ui.infoOpen = ui.infoOpen === false; ctx.render(); return; }
+  if (action === 'room-image') { document.getElementById('room-image-input')?.click(); return; }
+  if (action === 'room-delete') {
+    const room = ui.snap.rooms.find(item => item.id === ui.view.id);
+    if (room && confirm(`Delete the room "${room.name}" and its messages? The agents and their sessions stay.`)) { await api(`/rooms/${room.id}`, { method: 'DELETE' }); ctx.open('main'); }
+    return;
+  }
   if (action === 'room-remove') { await api(`/rooms/${ui.view.id}/members/${target.dataset.id}`, { method: 'DELETE' }); await refresh(); }
   else if (action === 'task-assign') {
     const agentId = document.getElementById('assign-agent')?.value, roomId = document.getElementById('assign-room')?.value || '';
