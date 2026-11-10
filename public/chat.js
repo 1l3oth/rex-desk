@@ -22,11 +22,15 @@ const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem,
   commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), settings: () => { location.href = '/classic'; } }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
-async function api(path, { method = 'GET', data } = {}) {
+async function api(path, { method = 'GET', data, retry = false } = {}) {
   const response = await fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) });
   const body = await response.json().catch(() => ({}));
-  // With accounts, a window that is not signed in goes to the sign-in page first.
-  if (response.status === 401 && body.signIn) { location.href = '/classic'; throw new Error('Sign in to Rex Desk.'); }
+  // With accounts, a workspace that stays signed in hands this window its cookie through /api/auth; otherwise the window signs in first.
+  if (response.status === 401 && body.signIn) {
+    const auth = retry ? null : await fetch('/api/auth', { headers: { 'x-rex-desk': '1' } }).then(reply => reply.json()).catch(() => null);
+    if (auth?.current) return api(path, { method, data, retry: true });
+    location.href = '/classic'; throw new Error('Sign in to Rex Desk.');
+  }
   if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
   return body;
 }
