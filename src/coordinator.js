@@ -1,4 +1,5 @@
 import { Rooms } from './rooms.js';
+import { Peers } from './peers.js';
 import { Memory } from './memory.js';
 import { Specialists } from './specialists.js';
 import { ClaudeRunner } from './runners.js';
@@ -69,7 +70,7 @@ export function validateAnswer(interaction, answer) {
 
 const providerLabel = name => name === 'codex' ? 'Codex' : 'Claude Code';
 export class Desk {
-  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, orcaOptions, memoryDirectory } = {}) {
+  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, orcaOptions, memoryDirectory, peerTransport } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher; this.orcaOptions = orcaOptions;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
@@ -81,6 +82,7 @@ export class Desk {
     this.evidence = new Evidence(store, runId => this.run(runId), (runId, kind, data) => {
       store.event(runId, kind, data);
     }, () => this.mcpUrl);
+    this.peers = new Peers(this, { transport: peerTransport });
     this.worktreeRoot = path.join(path.dirname(store.directory), 'worktrees');
     mkdirSync(this.worktreeRoot, { recursive: true });
     mkdirSync(path.join(store.directory, 'coordinator'), { recursive: true });
@@ -94,10 +96,11 @@ export class Desk {
   }
   snapshot() {
     return { computer: thisComputer(), config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
-      runs: this.store.list('run').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
-      interactions: this.store.list('interaction').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+      runs: [...this.store.list('run'), ...this.peers.remoteRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
+      interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
+      devices: this.peers.status(this.port),
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
-      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, choices: { models: modelList(this.store), efforts: EFFORTS, modes: MODES }, specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
+      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, choices: { models: modelList(this.store), efforts: EFFORTS, modes: MODES }, specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent), device: this.peers.deviceName(agent.node), remote: this.peers.isRemote(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
   }
   // Run keys are kept as hashes in the database, so an agent still working in an Orca terminal keeps its connection through a restart.
   scopeToken(runId) {
@@ -981,5 +984,5 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       this.mcpSessions.delete(sessionId); await session.server.close().catch(() => {});
     }
   }
-  async shutdown() { this.closed = true; await Promise.allSettled([...this.live.keys()].map(runId => this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
+  async shutdown() { this.closed = true; this.peers.stop(); await Promise.allSettled([...this.live.keys()].map(runId => this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
 }

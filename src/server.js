@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { tailscaleAddresses } from './peers.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -109,7 +110,11 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     notify(); return session;
   }
   // Once the server has its address: reconnect agents' terminals, resume interrupted runs, and get the agents ready.
+  let listenPort = 0, remoteAt = '', remoteOpen = () => {}; const remoteServers = [];
   function startDesk(desk, store) {
+    desk.port = listenPort; desk.peers.port = listenPort;
+    desk.peers.onRemoteChange = () => { remoteAt = '-'; remoteOpen(); }; remoteOpen();
+    if (!process.env.NODE_TEST_CONTEXT) desk.peers.start();
     desk.mcpUrl = `${address}/mcp`; desk.reattachOrca(); void desk.findPullRequests();
     void desk.resumeInterrupted(); desk.notifier.start(); void desk.fillEnglishNames(); desk.memory.ensure(); desk.rooms.cleanup(); desk.specialists.normalizeModels(); desk.specialists.ensureMain();
     if (!process.env.NODE_TEST_CONTEXT) void desk.refreshModels().catch(error => store.event('', 'models-error', { message: error.message }));
@@ -168,7 +173,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   }
   if (!accounts) await openSession(null, null);
   else { const remembered = await accounts.rememberedSession(); if (remembered) await openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true }).catch(() => { session = null; }); }
-  const server = http.createServer(async (request, response) => {
+  const handler = async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
@@ -177,8 +182,29 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       const hostname = host ? new URL(`http://${host}`).hostname : '';
       const localHost = ['127.0.0.1', 'localhost', '[::1]'].includes(hostname);
       const publicMcp = process.env.REX_PUBLIC_MCP_HOST && hostname === process.env.REX_PUBLIC_MCP_HOST && request.url?.split('?')[0] === '/mcp';
-      if (!localHost && !publicMcp) return json(response, 403, { error: 'Use the local dashboard address.' });
+      // A request that came in over Tailscale (the person's other computers and phone) needs the shared key, or a browser signed in with it.
+      const remoteSocket = !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress);
+      if (!localHost && !publicMcp && !remoteSocket) return json(response, 403, { error: 'Use the local dashboard address.' });
       const url = new URL(request.url, `http://${host}`);
+      let peerSignedIn = false;
+      if (remoteSocket) {
+        const desk = session?.desk;
+        if (!desk) return json(response, 503, { error: 'Rex Desk on this computer is locked. Sign in on it first.' });
+        if (url.pathname === '/mcp') return json(response, 403, { error: 'Agents connect on this computer only.' });
+        if (url.pathname === '/login.css') return serveFile(request, response, path.join(root, 'public', 'login.css'));
+        if (url.pathname === '/login' && request.method === 'GET') { const page = readFileSync(path.join(root, 'public', 'login.html'), 'utf8'); response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return response.end(url.searchParams.has('wrong') ? page.replace('class="wrong"', 'class="wrong show"') : page); }
+        if (url.pathname === '/login' && request.method === 'POST') {
+          let raw = ''; for await (const chunk of request) { raw += chunk; if (raw.length > 4096) break; }
+          const key = new URLSearchParams(raw).get('key') || '';
+          if (!desk.peers.checkKey(key.trim())) { response.writeHead(303, { Location: '/login?wrong=1' }); return response.end(); }
+          response.writeHead(303, { Location: '/', 'Set-Cookie': `rexdesk=${desk.peers.session()}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000` }); return response.end();
+        }
+        if (!desk.peers.checkKey(request.headers['x-rex-peer-key']) && !desk.peers.checkSession(request.headers.cookie)) {
+          if (request.method === 'GET' && !url.pathname.startsWith('/api/')) { response.writeHead(303, { Location: '/login' }); return response.end(); }
+          return json(response, 401, { error: 'Sign in with the key from your Rex Desk first.' });
+        }
+        peerSignedIn = true;
+      }
       if (url.pathname === '/mcp') {
         const token = request.headers.authorization?.replace(/^Bearer /i, '');
         if (!session) return json(response, 401, { error: 'Rex Desk is locked. Sign in to the dashboard first.' });
@@ -192,7 +218,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (request.method !== 'GET' && request.headers['x-rex-desk'] !== '1') return json(response, 403, { error: 'Missing dashboard request header.' });
       if (url.pathname === '/api/auth' || url.pathname.startsWith('/api/auth/')) return await handleAuth(request, response, url);
       // Everything else that touches a workspace needs this window's sign-in.
-      if ((url.pathname.startsWith('/api/') || url.pathname.startsWith('/artifacts/')) && !signedIn(request)) return json(response, 401, { error: 'Sign in to Rex Desk.', signIn: true });
+      if ((url.pathname.startsWith('/api/') || url.pathname.startsWith('/artifacts/')) && !signedIn(request) && !peerSignedIn) return json(response, 401, { error: 'Sign in to Rex Desk.', signIn: true });
       const store = session?.store, desk = session?.desk;
       // The cloud database belongs to the superadmin; other accounts never see or change it.
       if (url.pathname.startsWith('/api/database/') && role() !== 'superadmin') return json(response, 403, { error: 'Only a superadmin can manage the cloud database.' });
@@ -201,6 +227,24 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         response.write('event: connected\ndata: {}\n\n'); clients.add(response);
         const heartbeat = setInterval(() => response.write(': keepalive\n\n'), 25000);
         request.on('close', () => { clients.delete(response); clearInterval(heartbeat); }); return;
+      }
+      if (url.pathname.startsWith('/api/peer/')) {
+        if (!desk.peers.checkKey(request.headers['x-rex-peer-key'])) return json(response, 401, { error: 'Wrong key.' });
+        const node = String(request.headers['x-rex-peer-node'] || ''), peerUrl = String(request.headers['x-rex-peer-url'] || '');
+        if (node && /^http:\/\/100\.\d+\.\d+\.\d+:\d+$/.test(peerUrl)) desk.peers.remember({ id: node, name: decodeURIComponent(String(request.headers['x-rex-peer-name'] || '')).slice(0, 40), url: peerUrl });
+        if (url.pathname === '/api/peer/hello') return json(response, 200, desk.peers.self);
+        if (url.pathname === '/api/peer/pull') return json(response, 200, desk.peers.serve({ since: Number(url.searchParams.get('since')) || 0, filesSince: Number(url.searchParams.get('files')) || 0 }));
+        return json(response, 404, { error: 'API route not found.' });
+      }
+      if (url.pathname === '/api/peers' && request.method === 'GET') return json(response, 200, desk.peers.status(desk.port));
+      if (url.pathname === '/api/peers' && request.method === 'POST') {
+        const input = await body(request);
+        if (input.action === 'rename') return json(response, 200, desk.peers.rename(input.name));
+        if (input.action === 'remote') return json(response, 200, desk.peers.setRemote(input.on));
+        if (input.action === 'join') return json(response, 200, desk.peers.join(input.key));
+        if (input.action === 'add') return json(response, 200, await desk.peers.add(input.url));
+        if (input.action === 'remove') return json(response, 200, desk.peers.remove(input.id));
+        throw new Error('Unknown action.');
       }
       if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: updates.status(), account: { email: session.email, role: role() }, ...(role() === 'superadmin' ? {} : { database: null }) }); }
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
@@ -423,10 +467,12 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         const image = await cachedTaskImage(store, url.searchParams.get('task') || '', url.searchParams.get('url') || '', { fetcher: imageFetcher });
         return serveFile(request, response, image, { cache: 'private, max-age=604800' });
       }
-      if (interactionMatch && request.method === 'POST') return json(response, 200, desk.answer(interactionMatch[1], await body(request)));
+      if (interactionMatch && request.method === 'POST') { const owner = !store.get('interaction', interactionMatch[1]) && desk.peers.interactionOwner(interactionMatch[1]); return json(response, 200, owner ? await desk.peers.forward(owner, 'POST', url.pathname, await body(request)) : desk.answer(interactionMatch[1], await body(request))); }
       const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|orca|say))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
+        const runOwner = !store.get('run', runId) && desk.peers.runOwner(runId);
+        if (runOwner) return json(response, 200, await desk.peers.forward(runOwner, request.method, `${url.pathname}${url.search}`, request.method === 'POST' ? await body(request) : undefined));
         if (request.method === 'GET') {
           if (action === 'messages') return json(response, 200, store.events(runId, { visible: true }));
           return json(response, 200, desk.run(runId));
@@ -448,11 +494,17 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say))?$/);
       if (specialistMatch) {
         const [, specialistId, part] = specialistMatch;
+        const remoteAgent = store.get('specialist', specialistId);
+        if (desk.peers.isRemote(remoteAgent) && request.method === 'POST' && ['say', 'assign'].includes(part)) {
+          const input = await body(request), task = input.taskId && store.get('task', input.taskId);
+          return json(response, 200, await desk.peers.command(remoteAgent, part, task ? { ...input, taskNumber: task.taskNumber || task.externalId } : input));
+        }
+        if (desk.peers.isRemote(remoteAgent) && request.method === 'POST' && part === 'duplicate') return json(response, 200, await desk.peers.forward(remoteAgent.node, 'POST', url.pathname, await body(request)));
+        if (request.method === 'POST' && part === 'assign') { const input = await body(request); return json(response, 200, await desk.assignTask({ specialistId, ...desk.peers.localTask(input) })); }
         if (request.method === 'PUT' && !part) return json(response, 200, desk.specialists.update(specialistId, await body(request)));
         if (request.method === 'POST' && part === 'rename') return json(response, 200, desk.specialists.rename(specialistId, (await body(request)).name));
         if (request.method === 'POST' && part === 'duplicate') return json(response, 200, desk.specialists.duplicate(specialistId, (await body(request)).name));
         if (request.method === 'POST' && part === 'say') return json(response, 200, await desk.specialistTurn(specialistId, { prompt: String((await body(request)).text || '').slice(0, 4000) }));
-        if (request.method === 'POST' && part === 'assign') return json(response, 200, await desk.assignTask({ specialistId, ...(await body(request)) }));
         if (request.method === 'DELETE' && !part) return json(response, 200, desk.specialists.remove(specialistId));
       }
       // A file someone attached in a chat, to show in the chat's Media and Files tabs. Only files under Rex Desk's uploads folder.
@@ -521,7 +573,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html', download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-devices.js': 'chat-devices.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js' };
       // three.js ships from the installed package; the page loads no remote scripts.
       const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });
@@ -529,10 +581,19 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (!file || !existsSync(path.join(root, 'public', file))) return json(response, 404, { error: 'Page not found.' });
       return serveFile(request, response, path.join(root, 'public', file));
     } catch (error) { if (!response.headersSent) json(response, 400, { error: error.message }); else response.end(); }
-  });
+  };
+  const server = http.createServer(handler);
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); }); }
   catch (error) { await closeSession(); unlinkSync(lockPath); throw error; }
   address = `http://127.0.0.1:${server.address().port}`;
+  listenPort = server.address().port;
+  // The person's other computers and phone reach this Rex Desk over Tailscale when they turned that on (see peers.js).
+  remoteOpen = () => {
+    const desk = session?.desk, wanted = desk?.peers.settings().remote ? tailscaleAddresses() : [], key = wanted.join(',');
+    if (key === remoteAt) return; remoteAt = key;
+    for (const item of remoteServers.splice(0)) item.close();
+    for (const host of wanted) { const item = http.createServer(handler); item.on('error', error => session?.store.event('', 'remote-listen-error', { message: error.message })); item.listen(listenPort, host); remoteServers.push(item); }
+  };
   if (session) startDesk(session.desk, session.store);
   let lastSync = Date.now(), ticks = 0;
   const timer = setInterval(() => {
@@ -545,6 +606,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     void desk.scheduleTick().catch(error => store.event('', 'schedule-error', { message: error.message }, true));
     void desk.rooms.awayTick().catch(error => store.event('', 'away-error', { message: error.message }, true));
     if (++ticks % 8 === 0) void desk.findPullRequests();
+    if (ticks % 4 === 0) remoteOpen(); // Tailscale may start after Rex Desk
   }, 15000);
   timer.unref();
   // The installed app looks for a signed update shortly after start and every six hours.
@@ -552,7 +614,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   const firstCheck = updates.state.supported ? setTimeout(() => void updates.check().then(notify), 30000) : null;
   updateTimer?.unref(); firstCheck?.unref();
   const handle = { server, address, accounts, updates, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
-    computer.stop(); voice.stopAll(); clearInterval(timer); clearInterval(updateTimer); clearTimeout(firstCheck); await closeSession(); for (const client of clients) client.end();
+    computer.stop(); voice.stopAll(); clearInterval(timer); for (const item of remoteServers) item.close(); clearInterval(updateTimer); clearTimeout(firstCheck); await closeSession(); for (const client of clients) client.end();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); unlinkSync(lockPath);
   } };
   return handle;

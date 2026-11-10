@@ -3,6 +3,7 @@ import { backup } from 'node:sqlite';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
+import { SHARED } from './store.js';
 
 // Local transactions and their cloud outbox commit together. Failed uploads can be retried without losing work.
 export class TursoSync {
@@ -29,8 +30,20 @@ export class TursoSync {
     if (!this.enabled) return;
     this.store.db.prepare('INSERT INTO cloud_outbox(destination,sql,args) VALUES(?,?,?)').run(this.connection.url, sql, JSON.stringify(args));
   }
-  record(kind, id, value) { this.enqueue('INSERT INTO rex_records(workspace,kind,id,value) VALUES(?,?,?,?) ON CONFLICT(workspace,kind,id) DO UPDATE SET value=excluded.value', [this.workspace, kind, id, JSON.stringify(value)]); }
-  remove(kind, id) { this.enqueue('DELETE FROM rex_records WHERE workspace=? AND kind=? AND id=?', [this.workspace, kind, id]); }
+  // Shared records (rooms, messages, agents) also go to one table that every computer of the person reads, so the same
+  // Turso database gives each of them the same chats, also while another computer is off. The newest version wins.
+  shared(kind, id, value, deleted = false) {
+    if (!SHARED.has(kind) || (kind === 'specialist' && id === 'main') || !value?._v && !deleted) return;
+    this.enqueue('INSERT INTO rex_shared(kind,id,value,deleted,v,node) VALUES(?,?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value,deleted=excluded.deleted,v=excluded.v,node=excluded.node WHERE excluded.v > rex_shared.v',
+      [kind, id, deleted ? '' : JSON.stringify(value), deleted ? 1 : 0, deleted ? this.store.stamp() : value._v, this.store.nodeId]);
+  }
+  async pullShared(since, limit = 400) {
+    if (!this.ready || this.closed) return null;
+    const result = await this.client.execute({ sql: 'SELECT kind,id,value,deleted,v FROM rex_shared WHERE v > ? AND node != ? ORDER BY v LIMIT ?', args: [since, this.store.nodeId, limit] });
+    return result.rows.map(row => ({ kind: row.kind, id: row.id, deleted: Boolean(Number(row.deleted)), value: Number(row.deleted) ? null : JSON.parse(row.value), v: row.v }));
+  }
+  record(kind, id, value) { this.shared(kind, id, value); this.enqueue('INSERT INTO rex_records(workspace,kind,id,value) VALUES(?,?,?,?) ON CONFLICT(workspace,kind,id) DO UPDATE SET value=excluded.value', [this.workspace, kind, id, JSON.stringify(value)]); }
+  remove(kind, id) { this.shared(kind, id, null, true); this.enqueue('DELETE FROM rex_records WHERE workspace=? AND kind=? AND id=?', [this.workspace, kind, id]); }
   event(row) { this.enqueue('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,sequence) DO UPDATE SET run_id=excluded.run_id,kind=excluded.kind,visible=excluded.visible,value=excluded.value,created_at=excluded.created_at', [this.workspace, Number(row.sequence), row.run_id, row.kind, row.visible, row.value, row.created_at]); }
   schedule() {
     if (!this.ready || this.timer || this.closed) return;
@@ -58,6 +71,8 @@ export class TursoSync {
       this.client = this.clientFactory({ ...this.connection, fetch: (input, options = {}) => fetch(input, { ...options, signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) }) });
       await this.client.batch([
         'CREATE TABLE IF NOT EXISTS rex_records (workspace TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(workspace,kind,id))',
+        'CREATE TABLE IF NOT EXISTS rex_shared (kind TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, v TEXT NOT NULL, node TEXT NOT NULL, PRIMARY KEY(kind,id))',
+        'CREATE INDEX IF NOT EXISTS rex_shared_v ON rex_shared(v)',
         'CREATE TABLE IF NOT EXISTS rex_events (workspace TEXT NOT NULL, sequence INTEGER NOT NULL, run_id TEXT, kind TEXT, visible INTEGER, value TEXT, created_at TEXT, PRIMARY KEY(workspace,sequence))',
         'CREATE TABLE IF NOT EXISTS rex_workspaces (workspace TEXT PRIMARY KEY, name TEXT NOT NULL, kdf TEXT NOT NULL, sealed_key TEXT NOT NULL, updated_at TEXT)',
       ], 'write');

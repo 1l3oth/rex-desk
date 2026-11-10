@@ -12,7 +12,7 @@ export function avatarHtml(ctx, { name, image = '', id = '', at = '', size = '' 
 export const nameHash = text => [...String(text)].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7) % 8;
 const taskNumber = task => String(task.taskNumber || task.externalId || '');
 export const taskName = task => task.titleEn || task.title;
-const dotFor = state => ({ busy: 'working', replying: 'working', waiting: 'warn', idle: 'good' })[state] || '';
+const dotFor = state => ({ busy: 'working', replying: 'working', waiting: 'warn', idle: 'good', offline: 'off' })[state] || '';
 
 // ---------- rooms ----------
 export function roomStage(ctx) {
@@ -242,7 +242,7 @@ export async function roomAction(ctx, action, target) {
   else if (action === 'task-assign') {
     const agentId = document.getElementById('assign-agent')?.value, roomId = document.getElementById('assign-room')?.value || '';
     if (!agentId) return toast('Pick an agent first.', true);
-    await api(`/specialists/${agentId}/assign`, { method: 'POST', data: { taskId: target.dataset.id, roomId } });
+    const given = await api(`/specialists/${agentId}/assign`, { method: 'POST', data: { taskId: target.dataset.id, roomId } }); if (given?.queued) ctx.toast(given.message);
     toast('Assigned. The agent starts on it now.'); await refresh();
   }
 }

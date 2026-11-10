@@ -169,10 +169,13 @@ export class Rooms {
   }
   // Agents take turns, like people in a group chat: while another agent in the room is typing, the next one waits
   // (a minute at most), then reads the room as it is by then, so its answer builds on what was just said.
-  async deliver(room, message) {
-    const targets = message.to.filter(target => target !== HUMAN && this.agent(target));
+  async deliver(room, message, only = null) {
+    const targets = message.to.filter(target => target !== HUMAN && this.agent(target) && (!only || only.includes(target)));
     const start = async agentId => {
       const agent = this.agent(agentId); if (!agent) return;
+      // An agent on another computer answers there; while that computer is off, the message waits for it.
+      const peers = this.desk.peers;
+      if (peers && !peers.owns(agentId, message)) { if (peers.isRemote(agent) && !peers.online(agent.node)) peers.offlineNote(room.id, agent); return; }
       // An agent already working in its room session gets the message handed to it between steps, as one short line.
       const working = agent.roomRunId && this.desk.live?.has(agent.roomRunId);
       const sender = message.from.type === 'human' ? 'The person' : message.from.label;
