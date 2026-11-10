@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store, defaults } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
-import { AgentProfiles, discoverProfiles, parseClaudeStatus, parseCodexStatus, profileEnvironment } from '../src/agents.js';
+import { AgentProfiles, discoverProfiles, parseClaudeStatus, profileEnvironment } from '../src/agents.js';
 import { normalizeTask, subtaskRecord, taskComments, uniqueImages, Sources } from '../src/providers.js';
 import { cachedTaskImage } from '../src/images.js';
 import { setupPrompt } from '../src/setup-prompt.js';
@@ -17,34 +17,31 @@ const signedIn = folder => async (command, args, env) => ({ code: 0, stderr: '',
 
 test('agent profiles are discovered from home and Orca folders and selected per provider', () => {
   const home = temporary('home'), appData = temporary('appdata');
-  mkdirSync(path.join(home, '.claude-third-profile')); mkdirSync(path.join(home, '.codex-work'));
+  mkdirSync(path.join(home, '.claude-third-profile'));
   mkdirSync(path.join(appData, 'orca', 'claude-profiles', '6090b7ff-test', 'home'), { recursive: true });
   const claude = discoverProfiles('claude', { env: {}, roots: { home, appData } });
   assert.deepEqual(claude.map(item => item.origin), ['default', 'home', 'orca']);
   assert.match(claude[2].label, /^Orca profile 6090b7ff/);
-  assert.deepEqual(discoverProfiles('codex', { env: {}, roots: { home, appData } }).map(item => item.origin), ['default', 'home']);
   assert.equal(profileEnvironment('claude', 'C:\\profile', { CLAUDE_CONFIG_DIR: 'C:\\other' }).CLAUDE_CONFIG_DIR, path.resolve('C:\\profile'));
   assert.equal(profileEnvironment('claude', '', { CLAUDE_CONFIG_DIR: 'C:\\other' }).CLAUDE_CONFIG_DIR, undefined);
   assert.equal(parseClaudeStatus('{"loggedIn":false}').loggedIn, false);
-  assert.equal(parseCodexStatus('Logged in using ChatGPT', 0).method, 'ChatGPT');
-  assert.equal(parseCodexStatus('Not logged in', 1).loggedIn, false);
 });
 
 test('profile choice persists, and a signed-out profile fails before any worktree or agent turn', async () => {
   const directory = temporary('profiles'), signed = temporary('signed'), signedOut = temporary('signed-out');
   const store = new Store(directory);
   const repository = temporary('repository');
-  store.saveConfig({ ...defaults, sources: [], repositories: [{ id: 'repo', name: 'repo', path: repository, baseBranch: 'develop' }], agentProfiles: { claude: signedOut, codex: null } });
+  store.saveConfig({ ...defaults, sources: [], repositories: [{ id: 'repo', name: 'repo', path: repository, baseBranch: 'develop' }], agentProfiles: { claude: signedOut } });
   const agents = new AgentProfiles(store, { run: signedIn(signed) });
   await assert.rejects(agents.ensureSignedIn('claude'), /is not signed in\. Open Setup/);
-  store.saveConfig({ ...store.publicConfig(), agentProfiles: { claude: signed, codex: null } });
+  store.saveConfig({ ...store.publicConfig(), agentProfiles: { claude: signed } });
   agents.invalidate();
   assert.equal((await agents.ensureSignedIn('claude')).account, 'rex@example.invalid');
   assert.throws(() => store.saveConfig({ ...store.publicConfig(), agentProfiles: { claude: path.join(signed, 'missing') } }), /does not exist/);
   store.close();
 
   const deskStore = new Store(temporary('preflight'));
-  deskStore.saveConfig({ ...defaults, sources: [], repositories: [{ id: 'repo', name: 'repo', path: repository, baseBranch: 'develop' }], agentProfiles: { claude: signedOut, codex: null } });
+  deskStore.saveConfig({ ...defaults, sources: [], repositories: [{ id: 'repo', name: 'repo', path: repository, baseBranch: 'develop' }], agentProfiles: { claude: signedOut } });
   deskStore.put('task', 'task-1', { id: 'task-1', externalId: '1', title: 'Issue', source: 'morningmate', active: true, repositoryId: 'repo' });
   const desk = new Desk(deskStore, { root: process.cwd(), agentCommand: signedIn(signed) });
   const run = await desk.startTask({ taskId: 'task-1' });
@@ -228,10 +225,5 @@ test('MCP coverage is reported for every profile, not only the one runs use', as
   assert.equal(agents.mcpInstalled('claude', withEntry), true);
   assert.equal(agents.mcpInstalled('claude', without), false, 'A profile without the entry cannot reach Rex Desk');
 
-  const codexHome = path.join(home, 'codex');
-  mkdirSync(codexHome, { recursive: true });
-  writeFileSync(path.join(codexHome, 'config.toml'), '[mcp_servers.rex_desk]\ncommand = "node"\n');
-  assert.equal(agents.mcpInstalled('codex', codexHome), true);
-  assert.equal(agents.mcpInstalled('codex', path.join(home, 'nothing')), false);
   store.close();
 });

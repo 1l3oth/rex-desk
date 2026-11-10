@@ -6,7 +6,6 @@ import path from 'node:path';
 import { Store, defaults, now } from '../src/store.js';
 import { Sources, normalizeTask, taskAssignees, postContent, matchesTaskStatus, accountList } from '../src/providers.js';
 import { Desk, validateAnswer } from '../src/coordinator.js';
-import { codexAnswer } from '../src/runners.js';
 import { git, createWorktree, slug, fingerprint } from '../src/processes.js';
 import { createApp } from '../src/server.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -99,12 +98,6 @@ test('dashboard answers are validated, single-use, and restore review state afte
   assert.throws(() => desk.answer(interaction.id, { action: 'accept' }), /no longer/); store.close();
 });
 
-test('Codex approval, native elicitation, and question responses preserve wire schemas', () => {
-  assert.deepEqual(codexAnswer('item/commandExecution/requestApproval', {}, { action: 'decline' }), { decision: 'decline' });
-  assert.deepEqual(codexAnswer('mcpServer/elicitation/request', {}, { action: 'accept', content: { answer: 'release' } }), { action: 'accept', content: { answer: 'release' }, _meta: null });
-  assert.deepEqual(codexAnswer('item/tool/requestUserInput', { questions: [{ id: 'base' }] }, { action: 'accept', content: { base: 'develop' } }), { answers: { base: { answers: ['develop'] } } });
-});
-
 test('MCP scopes prevent workers reading or dispatching unrelated work', async () => {
   const app = await createApp({ dataDirectory: temporary('scope'), port: 0 });
   try {
@@ -182,19 +175,19 @@ test('the queue enforces concurrency across both providers and switching preserv
   try {
     for (let index = 1; index <= 3; index++) store.put('task', `task-${index}`, { id: `task-${index}`, title: `Issue ${index}`, source: 'flow', externalId: String(index), repositoryId: 'repository-1', active: true });
     const first = await desk.startTask({ taskId: 'task-1', provider: 'claude' });
-    await desk.startTask({ taskId: 'task-2', provider: 'codex' });
+    await desk.startTask({ taskId: 'task-2', provider: 'claude' });
     const third = await desk.startTask({ taskId: 'task-3', provider: 'claude' });
     await waitFor(() => starts.length === 2);
-    assert.deepEqual(starts.map(item => item.run.provider).sort(), ['claude', 'codex']);
+    assert.deepEqual(starts.map(item => item.run.provider).sort(), ['claude', 'claude']);
     assert.equal(desk.run(third.id).state, 'queued');
     assert.notEqual(starts[0].cwd, starts[1].cwd); assert.notEqual(starts[0].run.port, starts[1].run.port);
     const originalWorktree = desk.run(first.id).worktree;
     starts.find(item => item.run.id === first.id).release(); await waitFor(() => starts.length === 3);
     for (const runId of [...desk.live.keys()]) await desk.stop(runId);
     await waitFor(() => desk.live.size === 0);
-    await desk.resume(first.id, { provider: 'codex', prompt: 'Continue the same issue.' });
+    await desk.resume(first.id, { prompt: 'Continue the same issue.' });
     await waitFor(() => starts.length === 4);
-    assert.equal(starts[3].run.provider, 'codex'); assert.equal(starts[3].cwd, originalWorktree); assert.equal(starts[3].run.sessionId, undefined);
+    assert.equal(starts[3].run.provider, 'claude'); assert.equal(starts[3].cwd, originalWorktree); assert.equal(starts[3].run.sessionId, undefined);
   } finally { await desk.shutdown(); store.close(); }
 });
 
@@ -267,16 +260,17 @@ test('the session a follow-up reopens comes from the provider log, and a provide
   assert.equal(desk.agentSessionId(run), '7c3a8d71-d78d-409a-9a84-91fb162c1be3');
   assert.equal(desk.agentSessionId({ ...run, mirror: { file: path.join(directory, 'rollout-2026-10-26T07-12-33-7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl') } }), '', 'A log that is gone cannot be reopened');
   writeFileSync(path.join(directory, 'rollout-2026-10-26T07-12-33-7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl'), '{}\n');
-  assert.equal(desk.agentSessionId({ ...run, provider: 'codex', mirror: { file: path.join(directory, 'rollout-2026-10-26T07-12-33-7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl') } }), '7c3a8d71-d78d-409a-9a84-91fb162c1be3');
+  assert.equal(desk.agentSessionId({ ...run, mirror: { file: path.join(directory, 'rollout-2026-10-26T07-12-33-7c3a8d71-d78d-409a-9a84-91fb162c1be3.jsonl') } }), '7c3a8d71-d78d-409a-9a84-91fb162c1be3');
   assert.equal(desk.agentSessionId({ ...run, mirror: undefined }), '', 'A run with no recorded log starts fresh');
 
   store.put('run', 'r1', run);
   await desk.resume('r1', { prompt: 'try the dev server' });
   assert.deepEqual(store.get('run', 'r1').mirror, { file, offset: 2 }, 'The same provider keeps its session');
   await settle();
-  store.put('run', 'r1', { ...run, state: 'needs_evidence' });
-  await desk.resume('r1', { provider: 'codex', prompt: 'try again' });
-  assert.equal(store.get('run', 'r1').mirror, undefined, 'The other CLI cannot reopen it');
+  store.put('run', 'r1', { ...run, provider: 'codex', state: 'needs_evidence' });
+  await desk.resume('r1', { prompt: 'try again' });
+  assert.equal(store.get('run', 'r1').mirror, undefined, 'An older Codex run cannot be reopened by Claude Code, so it starts fresh');
+  assert.equal(store.get('run', 'r1').provider, 'claude');
   await settle(); await desk.shutdown(); store.close();
 });
 

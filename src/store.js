@@ -19,7 +19,7 @@ export const id = () => randomUUID();
 export const defaults = {
   name: 'Rex', provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
   syncMinutes: 5, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
-  models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false, execution: 'orca',
+  models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, execution: 'orca',
   schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], fix: true, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
 };
 // Claude Code accepts family aliases (opus, sonnet, haiku, fable) or full IDs such as claude-opus-5-5. Typed shorthand is normalized.
@@ -175,7 +175,6 @@ export class Store extends EventEmitter {
   }
   saveConfig(input) {
     const secretUpdates = [];
-    if (!['claude', 'codex'].includes(input.provider)) throw new Error('Choose Claude Code or Codex.');
     if (!Number.isInteger(input.concurrency) || input.concurrency < 1 || input.concurrency > 6) throw new Error('Concurrency must be 1–6.');
     if (!Number.isFinite(input.syncMinutes) || input.syncMinutes < 0 || input.syncMinutes > 1440) throw new Error('Sync interval must be 0–1440 minutes.');
     if (!Array.isArray(input.sources) || !Array.isArray(input.repositories)) throw new Error('Sources and repositories must be lists.');
@@ -204,10 +203,10 @@ export class Store extends EventEmitter {
     const accounts = (Array.isArray(input.testAccounts) ? input.testAccounts : []).map(account => ({
       id: String(account.id || id()), site: String(account.site || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').slice(0, 200),
       username: String(account.username || '').trim().slice(0, 200) })).filter(account => account.username);
-    const config = { ...defaults, name: String(input.name || 'Rex'), provider: input.provider,
+    const config = { ...defaults, name: String(input.name || 'Rex'), provider: 'claude',
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
-      syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex) }, sources, repositories,
-      agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
+      syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude) }, sources, repositories,
+      agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code') },
       tourDismissed: Boolean(input.tourDismissed), execution: 'orca', testAccounts: accounts,
       schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false, versions: String(input.jev?.versions || '').trim().slice(0, 300) } };
     for (const account of accounts) {

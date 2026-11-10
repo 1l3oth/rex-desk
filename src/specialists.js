@@ -29,19 +29,17 @@ export class Specialists {
   create({ name, projectSlug, rules = '', unsure = [], provider, model = '', by = 'you', cloneOf = '' }) {
     const project = this.memory.list().find(item => item.slug === String(projectSlug || '').toLowerCase());
     if (!project) throw new Error(`No project "${projectSlug}" in memory. Scan this computer first, then pick one of the projects.`);
-    if (provider && !['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
     const { name: clean, slug } = this.checkName(name);
     const repository = this.store.config().repositories.find(item => path.resolve(item.path).toLowerCase() === path.resolve(project.path).toLowerCase());
     const item = { id: randomUUID(), name: clean, slug, projectSlug: project.slug, projectPath: project.path, repositoryId: repository?.id || '', purpose: project.purpose || '',
       rules: String(rules).slice(0, 4000), unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12),
-      provider: provider || this.store.config().provider, model: String(model || '').slice(0, 80), createdBy: String(by).slice(0, 40), cloneOf, createdAt: now(), updatedAt: now() };
+      provider: 'claude', model: String(model || '').slice(0, 80), createdBy: String(by).slice(0, 40), cloneOf, createdAt: now(), updatedAt: now() };
     this.store.put('specialist', item.id, item); this.writeCard(item); return item;
   }
   update(id, { rules, unsure, provider, model }) {
     const item = this.get(id);
-    if (provider !== undefined && !['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
     const updated = { ...item, ...(rules !== undefined ? { rules: String(rules).slice(0, 4000) } : {}), ...(unsure !== undefined ? { unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12) } : {}),
-      ...(provider !== undefined ? { provider } : {}), ...(model !== undefined ? { model: String(model).slice(0, 80) } : {}), updatedAt: now() };
+      ...(model !== undefined ? { model: String(model).slice(0, 80) } : {}), updatedAt: now() };
     this.store.put('specialist', id, updated); this.writeCard(updated); return updated;
   }
   // Renaming moves the card too; the run history and the project stay as they are.
@@ -63,7 +61,7 @@ export class Specialists {
   }
 
   writeCard(item) {
-    const lines = [`# ${item.name}`, '', `- Project: ${item.projectSlug} (\`${item.projectPath}\`)`, `- Agent: ${item.provider === 'codex' ? 'Codex' : 'Claude Code'}${item.model ? ` · ${item.model}` : ''}`,
+    const lines = [`# ${item.name}`, '', `- Project: ${item.projectSlug} (\`${item.projectPath}\`)`, `- Agent: Claude Code${item.model ? ` · ${item.model}` : ''}`,
       `- Created by: ${item.createdBy}${item.cloneOf ? ` · duplicate of ${this.store.get('specialist', item.cloneOf)?.name || 'another agent'}` : ''}`, `- Updated: ${item.updatedAt}`, '',
       '## What this project is for', '', item.purpose || 'Not recorded yet.', '', '## Rules from the person', '', item.rules || 'None yet.', '',
       '## Still not sure about', '', item.unsure.length ? item.unsure.map(text => `- ${text}`).join('\n') : 'Nothing open.', '',

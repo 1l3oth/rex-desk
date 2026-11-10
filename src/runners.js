@@ -1,9 +1,7 @@
-import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { resolveCommand, stopTree } from './processes.js';
+import { resolveCommand } from './processes.js';
 
 export function existingMcpConnections(sourcePath, configDirectory = process.env.CLAUDE_CONFIG_DIR) {
   let connections = {};
@@ -20,114 +18,6 @@ export function existingMcpConnections(sourcePath, configDirectory = process.env
     connections = { ...connections, ...data.mcpServers };
   }
   return connections;
-}
-
-export function codexAnswer(method, request, answer) {
-  const accepted = answer.action === 'accept';
-  if (method === 'mcpServer/elicitation/request') return { action: answer.action, content: accepted ? answer.content || {} : null, _meta: null };
-  if (method === 'item/tool/requestUserInput' || method === 'tool/requestUserInput') {
-    return { answers: Object.fromEntries((request.questions || []).map(question => [question.id,
-      { answers: accepted ? [String(answer.content?.[question.id] ?? '')] : [] }])) };
-  }
-  if (method === 'item/permissions/requestApproval') return { permissions: accepted ? request.permissions : {}, scope: 'turn' };
-  return { decision: accepted ? 'accept' : answer.action === 'cancel' ? 'cancel' : 'decline' };
-}
-
-export class CodexRunner {
-  constructor({ run, cwd, token, mcpUrl, model, ask, event, signal, sourcePath, agentEnv }) {
-    Object.assign(this, { run, cwd, token, mcpUrl, model, ask, event, signal, sourcePath, agentEnv });
-    this.pending = new Map(); this.sequence = 0; this.closed = false;
-  }
-  async start(prompt) {
-    const executable = resolveCommand('codex');
-    const args = [...executable.args, 'app-server', '--listen', 'stdio://',
-      '-c', 'mcp_servers.rex_desk.enabled=false',
-      '-c', `mcp_servers.rex_desk_run.url=${JSON.stringify(this.mcpUrl)}`,
-      '-c', 'mcp_servers.rex_desk_run.bearer_token_env_var="REX_AGENT_TOKEN"',
-      '-c', 'mcp_servers.rex_desk_run.tool_timeout_sec=86400'];
-    this.child = spawn(executable.command, args, { cwd: this.cwd, env: { ...(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl },
-      windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    const completed = new Promise((resolve, reject) => { this.resolveTurn = resolve; this.rejectTurn = reject; });
-    // Attach immediately, so early process errors never become unhandled rejections.
-    completed.catch(() => {});
-    this.child.once('error', error => this.rejectTurn(error));
-    this.child.once('close', code => {
-      this.closed = true;
-      const error = new Error(`Codex process exited (${code ?? 'signal'}).`);
-      for (const item of this.pending.values()) { clearTimeout(item.timer); item.reject(error); }
-      this.pending.clear(); this.rejectTurn(error);
-    });
-    this.child.stderr.on('data', data => this.event('process', { text: data.toString().slice(-10000) }));
-    createInterface({ input: this.child.stdout }).on('line', line => {
-      try { this.receive(JSON.parse(line)); } catch (error) { this.event('protocol-error', { message: error.message }); }
-    });
-    this.abort = () => this.close();
-    this.signal.addEventListener('abort', this.abort, { once: true });
-    try {
-      await this.request('initialize', { clientInfo: { name: 'rex_desk', title: 'Rex Desk', version: '0.1.0' }, capabilities: { experimentalApi: true } });
-      this.send({ method: 'initialized', params: {} });
-      const params = { cwd: this.cwd, approvalPolicy: 'on-request', sandbox: this.run.role === 'worker' ? 'workspace-write' : 'read-only',
-        ...(this.model ? { model: this.model } : {}) };
-      const response = this.run.sessionId
-        ? await this.request('thread/resume', { ...params, threadId: this.run.sessionId })
-        : await this.request('thread/start', params);
-      this.threadId = response.thread.id;
-      this.event('session', { sessionId: this.threadId });
-      const result = await this.request('turn/start', { threadId: this.threadId, input: [{ type: 'text', text: prompt, text_elements: [] }] });
-      this.turnId = result.turn.id;
-      return await completed;
-    } finally { this.signal.removeEventListener('abort', this.abort); this.close(); }
-  }
-  send(value) { if (!this.closed && this.child.stdin.writable) this.child.stdin.write(JSON.stringify(value) + '\n'); }
-  request(method, params) {
-    const requestId = ++this.sequence;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(requestId); reject(new Error(`Codex ${method} timed out.`)); }, 90000);
-      this.pending.set(requestId, { resolve, reject, timer });
-      this.send({ id: requestId, method, params });
-    });
-  }
-  receive(message) {
-    if (message.id !== undefined && !message.method) {
-      const item = this.pending.get(message.id);
-      if (!item) return;
-      this.pending.delete(message.id); clearTimeout(item.timer);
-      if (message.error) item.reject(new Error(message.error.message)); else item.resolve(message.result);
-      return;
-    }
-    if (message.id !== undefined && message.method) { void this.serverRequest(message); return; }
-    const { method, params = {} } = message;
-    if (method === 'turn/completed') {
-      if (params.turn?.status === 'failed') this.rejectTurn(new Error(params.turn.error?.message || 'Codex turn failed.'));
-      else this.resolveTurn({ status: params.turn?.status || 'completed' });
-    }
-    if (method === 'serverRequest/resolved') this.event('request-resolved', { requestId: params.requestId });
-    if (method === 'item/started' || method === 'item/completed') {
-      const item = params.item || {};
-      if (item.type !== 'reasoning') this.event('agent-operation', { method, item });
-    }
-    if (method === 'item/commandExecution/outputDelta') this.event('command-output', { text: params.delta?.slice(-20000) });
-  }
-  async serverRequest(message) {
-    const { method, params, id: requestId } = message;
-    const recognized = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval',
-      'item/tool/requestUserInput', 'tool/requestUserInput', 'mcpServer/elicitation/request'];
-    if (!recognized.includes(method)) { this.send({ id: requestId, error: { code: -32601, message: `Rex Desk does not handle ${method}.` } }); return; }
-    const tool = method === 'mcpServer/elicitation/request' && params._meta?.codex_approval_kind === 'mcp_tool_call' && params.serverName === 'rex_desk_run'
-      ? String(params.message || '').match(/tool "([^"]+)"/)?.[1] : '';
-    if (tool && quietRexTool(`mcp__rex_desk__${tool}`)) { this.send({ id: requestId, result: codexAnswer(method, params, { action: 'accept' }) }); return; }
-    try {
-      const answer = await this.ask({ kind: /Approval/.test(method) ? 'approval' : 'question',
-        title: params.message || params.reason || (params.command ? 'Approve command' : 'Agent needs your input'),
-        request: params, method, nativeId: requestId });
-      this.send({ id: requestId, result: codexAnswer(method, params, answer) });
-    } catch (error) { this.send({ id: requestId, result: codexAnswer(method, params, { action: 'cancel' }) }); }
-  }
-  async interrupt() {
-    if (this.threadId && this.turnId) await this.request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }).catch(() => {});
-    this.close();
-  }
-  close() { if (!this.closed) { this.closed = true; stopTree(this.child); } }
 }
 
 // Rex Desk's own tools read tasks, label them, message the dashboard, or act inside the run's worktree. desk_status,

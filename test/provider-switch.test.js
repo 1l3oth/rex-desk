@@ -16,9 +16,9 @@ function setup(role = 'worker') {
   return { store, desk };
 }
 
-test('switching provider keeps the recorded chat and hands it to the new agent', async () => {
+test('an older Codex run resumes as Claude Code and is handed the recorded chat', async () => {
   const { store, desk } = setup();
-  await desk.resume('run-1', { provider: 'claude', prompt: 'Go on.' });
+  await desk.resume('run-1', { prompt: 'Go on.' });
   const run = store.get('run', 'run-1');
   assert.equal(run.provider, 'claude');
   assert.equal(run.sessionId, undefined, 'the other CLI cannot reopen the old session');
@@ -30,18 +30,19 @@ test('switching provider keeps the recorded chat and hands it to the new agent',
   assert.ok(events.some(item => item.kind === 'provider-switch' && item.to === 'claude'));
 });
 
-test('resuming with the same provider keeps the session and adds no handover', async () => {
+test('resuming a Claude Code run keeps the session and adds no handover', async () => {
   const { store, desk } = setup();
+  store.put('run', 'run-1', { ...store.get('run', 'run-1'), provider: 'claude' });
   await desk.resume('run-1', { prompt: 'Go on.' });
   const run = store.get('run', 'run-1');
-  assert.equal(run.provider, 'codex');
+  assert.equal(run.provider, 'claude');
   assert.equal(run.sessionId, 'orca:abc');
   assert.ok(!/conversation so far/.test(run.instructions));
 });
 
 test('a main agent that switches provider gets the handover and the follow-up in its prompt', async () => {
   const { store, desk } = setup('coordinator');
-  await desk.resume('run-1', { provider: 'claude', prompt: 'Only dispatch the Gmail issue.' });
+  await desk.resume('run-1', { prompt: 'Only dispatch the Gmail issue.' });
   const run = store.get('run', 'run-1');
   assert.match(run.prompt, /Dispatch the issues\./);
   assert.match(run.prompt, /conversation so far/);

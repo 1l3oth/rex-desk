@@ -1,5 +1,5 @@
 // Specialist agents: one identity per project. The card shows who the agent is and what it was told; the person can rename, edit or duplicate it.
-const providerName = name => name === 'codex' ? 'Codex' : 'Claude Code';
+const providerName = name => name === 'codex' ? 'Codex (retired)' : 'Claude Code';
 
 export function agentsRail(ctx) {
   const { ui, railItem } = ctx, agents = ui.snap.specialists || [];
@@ -20,8 +20,7 @@ export function agentStage(ctx) {
     <h3>What this project is for</h3><p class="md">${esc(agent.purpose || 'Not recorded yet.')}</p>
     <label>Rules from you<textarea id="sp-rules" rows="5" placeholder="How this agent should work on this project. For example: ask before changing the database.">${esc(agent.rules)}</textarea></label>
     <label>Still not sure about (one per line)<textarea id="sp-unsure" rows="3">${esc((agent.unsure || []).join('\n'))}</textarea></label>
-    <div class="idrow"><label>Agent<select id="sp-provider"><option value="claude" ${agent.provider === 'claude' ? 'selected' : ''}>Claude Code</option><option value="codex" ${agent.provider === 'codex' ? 'selected' : ''}>Codex</option></select></label>
-      <label>Model<input id="sp-model" type="text" maxlength="80" value="${esc(agent.model || '')}" placeholder="default"></label></div>
+    <div class="idrow"><label>Model<input id="sp-model" type="text" maxlength="80" value="${esc(agent.model || '')}" placeholder="default"></label></div>
     <div class="row"><button class="btn primary" data-action="spec-save">Save</button><button class="btn" data-action="spec-duplicate">Duplicate with another name</button><span class="spacer"></span><button class="btn danger" data-action="spec-remove">Remove</button></div>
   </section></div>`;
   return { title: agent.name, meta: `${providerName(agent.provider)} · ${agent.projectSlug}`, feed };
@@ -51,7 +50,7 @@ export async function agentAction(ctx, action) {
   if (!agent) return;
   if (action === 'spec-rename') { await api(`/specialists/${agent.id}/rename`, { method: 'POST', data: { name: value('sp-name') } }); toast('Renamed.'); await refresh({ full: true }); }
   else if (action === 'spec-save') {
-    await api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: value('sp-rules'), unsure: value('sp-unsure').split('\n'), provider: value('sp-provider'), model: value('sp-model') } });
+    await api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: value('sp-rules'), unsure: value('sp-unsure').split('\n'), model: value('sp-model') } });
     toast('Saved. Other agents can read this card in .rexdesk.'); await refresh();
   } else if (action === 'spec-duplicate') {
     dialog(ctx, { title: `Duplicate ${agent.name}`, nameValue: `${agent.name} 2`, submit: async form => {

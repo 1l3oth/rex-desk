@@ -7,7 +7,6 @@ export function setupPrompt({ target = 'local', root, dataDirectory, mcpUrl, pro
   const proxy = path.join(root, 'src', 'stdio.js');
   const claudeHome = profiles.claude || path.join(os.homedir(), '.claude');
   const claudeConfig = profiles.claude ? path.join(profiles.claude, '.claude.json') : path.join(os.homedir(), '.claude.json');
-  const codexHome = profiles.codex || path.join(os.homedir(), '.codex');
   const verify = 'Verify by listing MCP servers, then call the read-only tool desk_tasks once and report how many tasks it returned. Do not call tools that dispatch agents, change tracker status, push, or create pull requests.';
   if (target === 'remote') {
     return [
@@ -30,7 +29,7 @@ export function setupPrompt({ target = 'local', root, dataDirectory, mcpUrl, pro
     ].join('\n');
   }
   return [
-    'Set up the local Rex Desk MCP server on this Windows computer for both Claude Code and Codex.',
+    'Set up the local Rex Desk MCP server on this Windows computer for Claude Code.',
     '',
     'Server:',
     '- Name: rex_desk',
@@ -43,11 +42,6 @@ export function setupPrompt({ target = 'local', root, dataDirectory, mcpUrl, pro
     `- Profile folder: ${quote(claudeHome)}${profiles.claude ? ` (set CLAUDE_CONFIG_DIR=${quote(profiles.claude)} for the command)` : ''}`,
     `- Run: claude mcp add --scope user rex_desk -- ${quote(node)} ${quote(proxy)}`,
     `- The entry is written to ${quote(claudeConfig)}.`,
-    '',
-    'Codex:',
-    `- Profile folder: ${quote(codexHome)}${profiles.codex ? ` (set CODEX_HOME=${quote(profiles.codex)} for the command)` : ''}`,
-    `- Run: codex mcp add rex_desk -- ${quote(node)} ${quote(proxy)}`,
-    `- The entry is written to ${quote(path.join(codexHome, 'config.toml'))}.`,
     '',
     'Rules:',
     '- If rex_desk already exists, keep it when its command matches; otherwise replace only that entry.',

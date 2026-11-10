@@ -20,9 +20,9 @@ test('a new session log is read from its start, one whole line at a time', () =>
 });
 
 test('a reopened session log does not replay earlier turns', () => {
-  const file = path.join(dir, 'old.jsonl'); writeFileSync(file, codex('Old answer.'));
-  const session = new AgentSession({ provider: 'codex', cwd: 'x', since: new Date(Date.now() + 3600000).toISOString(), state: { file }, persist: () => {} });
+  const file = path.join(dir, 'old.jsonl'); writeFileSync(file, claude('Old answer.'));
+  const session = new AgentSession({ provider: 'claude', cwd: 'x', since: new Date(Date.now() + 3600000).toISOString(), state: { file }, persist: () => {} });
   assert.deepEqual(session.texts(), []);
-  appendFileSync(file, codex('New answer.'));
+  appendFileSync(file, claude('New answer.'));
   assert.deepEqual(session.texts(), ['New answer.']);
 });

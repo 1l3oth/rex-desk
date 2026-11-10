@@ -5,7 +5,7 @@ const ui = { snap: null, view: { type: 'main' }, events: new Map(), memory: null
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`; };
-const provider = name => name === 'codex' ? 'Codex' : name === 'claude' ? 'Claude Code' : 'Agent';
+const provider = name => name === 'codex' ? 'Codex (retired)' : name === 'claude' ? 'Claude Code' : 'Agent';
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
@@ -137,7 +137,7 @@ function stageModel() {
     + pending(run.id).map(decisionCard).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
   const stop = live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : '';
   return { title: runTitle(run), meta: `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions: stop, feed,
-    composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : `Message ${provider(run.provider)}. It picks up where it left off…`, mentions: [], provider: workingStates.includes(run.state) ? '' : run.provider } };
+    composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : (run.provider === 'codex' ? 'Message Claude Code. It takes over from Codex with the chat so far…' : `Message ${provider(run.provider)}. It picks up where it left off…`), mentions: [] } };
 }
 const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="empty"><h2>Nothing here</h2><p>${text}</p></div>` });
 
@@ -145,7 +145,7 @@ function renderStage(full) {
   const model = stageModel(), stage = document.getElementById('stage');
   const head = `<div class="stage-head"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}<span class="spacer"></span>${model.actions || ''}</div>`;
   if (full || !document.getElementById('feed')) {
-    stage.innerHTML = `<div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? `<div class="composer"><div class="composer-inner"><div class="box"><div id="menu"></div><textarea id="draft" rows="1" placeholder="${esc(model.composer.placeholder)}">${esc(ui.drafts.get(draftKey()) || '')}</textarea><button class="btn primary small send" data-action="send">Send</button></div><div class="hint">${model.composer.provider ? `<label class="switch">Agent <select id="provider"><option value="claude" ${model.composer.provider === 'claude' ? 'selected' : ''}>Claude Code</option><option value="codex" ${model.composer.provider === 'codex' ? 'selected' : ''}>Codex</option></select></label> · ` : ''}Enter sends · Shift+Enter adds a line</div></div></div>` : '<div></div>'}`;
+    stage.innerHTML = `<div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? `<div class="composer"><div class="composer-inner"><div class="box"><div id="menu"></div><textarea id="draft" rows="1" placeholder="${esc(model.composer.placeholder)}">${esc(ui.drafts.get(draftKey()) || '')}</textarea><button class="btn primary small send" data-action="send">Send</button></div><div class="hint">Enter sends · Shift+Enter adds a line</div></div></div>` : '<div></div>'}`;
     ui.stick = true;
   } else { document.getElementById('head').innerHTML = head; document.getElementById('members').innerHTML = model.members || ''; }
   const feed = document.getElementById('feed'), inner = document.getElementById('feed-inner');
@@ -193,7 +193,7 @@ async function send() {
     else {
       const run = type === 'main' ? mainRun() : runById(id);
       if (workingStates.includes(run.state) && run.execution === 'orca') await api(`/runs/${run.id}/say`, { method: 'POST', data: { text } });
-      else { const chosen = document.getElementById('provider')?.value; await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text, ...(chosen && chosen !== run.provider ? { provider: chosen } : {}) } }); if (chosen && chosen !== run.provider) toast(`Switched to ${provider(chosen)}. The conversation was handed over.`); }
+      else { await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text } }); if (run.provider === 'codex') toast('Claude Code took over from Codex. The chat so far was handed over.'); }
     }
     box.value = ''; ui.drafts.delete(draftKey()); await refresh();
   } catch (error) { toast(error.message, true); }

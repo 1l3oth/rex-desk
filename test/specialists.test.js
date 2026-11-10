@@ -37,7 +37,7 @@ test('an unknown project and a taken name are refused', () => {
 
 test('rename moves the card; duplicate copies the rules under a new name', () => {
   const { desk } = setup();
-  const original = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop', rules: 'Use pnpm.', provider: 'codex' });
+  const original = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop', rules: 'Use pnpm.' });
   const oldCard = desk.specialists.cardFile(original);
   const renamed = desk.specialists.rename(original.id, 'Cashier');
   assert.equal(renamed.name, 'Cashier');
@@ -47,7 +47,7 @@ test('rename moves the card; duplicate copies the rules under a new name', () =>
   assert.notEqual(copy.id, original.id);
   assert.equal(copy.projectSlug, 'shop');
   assert.equal(copy.rules, 'Use pnpm.');
-  assert.equal(copy.provider, 'codex');
+  assert.equal(copy.provider, 'claude');
   assert.equal(copy.cloneOf, original.id);
   assert.match(readFileSync(desk.specialists.cardFile(copy), 'utf8'), /duplicate of Cashier/);
   assert.throws(() => desk.specialists.duplicate(original.id, 'cashier two'), /already exists/);
@@ -56,9 +56,8 @@ test('rename moves the card; duplicate copies the rules under a new name', () =>
 test('editing a specialist updates its rules and model; removing deletes the card', () => {
   const { desk } = setup();
   const agent = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop' });
-  const updated = desk.specialists.update(agent.id, { rules: 'Ask before schema changes.', provider: 'claude', model: 'opus' });
+  const updated = desk.specialists.update(agent.id, { rules: 'Ask before schema changes.', model: 'opus' });
   assert.match(readFileSync(desk.specialists.cardFile(updated), 'utf8'), /Ask before schema changes\./);
-  assert.throws(() => desk.specialists.update(agent.id, { provider: 'gpt' }), /Choose Claude Code or Codex/);
   desk.specialists.remove(agent.id);
   assert.equal(desk.specialists.list().length, 0);
   assert.ok(!existsSync(desk.specialists.cardFile(agent)));

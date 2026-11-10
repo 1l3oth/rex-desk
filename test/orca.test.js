@@ -56,14 +56,14 @@ test('an Orca run opens a terminal with a one-time spec and ends when the agent 
   assert.ok(events.some(([kind, value]) => kind === 'orca-terminal' && value.handle === 'term_1'));
 
   const hidden = fakeOrca({ 'repo list': { ok: true, result: { repos: [] } } });
-  await assert.rejects(new OrcaRunner({ run: { id: 'run-2', title: 'x', provider: 'codex' }, cwd: worktree, sourcePath: 'F:\\flow-was', dataDirectory: data, signal: new AbortController().signal, event() {}, orcaOptions: hidden.options }).start('x'), /does not show Rex Desk worktrees/);
+  await assert.rejects(new OrcaRunner({ run: { id: 'run-2', title: 'x', provider: 'claude' }, cwd: worktree, sourcePath: 'F:\\flow-was', dataDirectory: data, signal: new AbortController().signal, event() {}, orcaOptions: hidden.options }).start('x'), /does not show Rex Desk worktrees/);
 });
 
 test('the Orca launcher deletes its spec, passes the token only to the agent, and reports the exit code', () => {
   const directory = temporary('orca-launcher'), spec = path.join(directory, 'agent.json');
-  const probe = 'console.log(process.env.REX_AGENT_TOKEN === "run-scoped-token" ? "token-present" : "token-missing"); console.log("config=" + (process.env.CODEX_HOME || "unset")); process.exit(3)';
-  writeFileSync(spec, JSON.stringify({ runId: 'run-1', provider: 'codex', cwd: directory, prompt: 'Fix it', token: 'run-scoped-token', mcpUrl: 'http://127.0.0.1:4317/mcp',
-    executable: { command: process.execPath, args: ['-e', probe, '--'] }, env: { CODEX_HOME: directory }, unset: [] }));
+  const probe = 'console.log(process.env.REX_AGENT_TOKEN === "run-scoped-token" ? "token-present" : "token-missing"); console.log("config=" + (process.env.CLAUDE_CONFIG_DIR || "unset")); process.exit(3)';
+  writeFileSync(spec, JSON.stringify({ runId: 'run-1', provider: 'claude', cwd: directory, prompt: 'Fix it', token: 'run-scoped-token', mcpUrl: 'http://127.0.0.1:4317/mcp',
+    executable: { command: process.execPath, args: ['-e', probe, '--'] }, env: { CLAUDE_CONFIG_DIR: directory }, unset: [] }));
   const result = spawnSync(process.execPath, [path.resolve('scripts/orca-agent.mjs'), spec], { encoding: 'utf8', env: { ...process.env, REX_AGENT_TOKEN: '' } });
   assert.equal(result.status, 3);
   assert.match(result.stdout, /token-present/);
@@ -178,6 +178,13 @@ test('a blocked terminal message is sent again with the request ID Orca gave, ne
   assert.equal(other.calls.length, 1, 'A failure without an ID is never typed twice');
 });
 
+test('a message that stays blocked by a permission prompt says what to do', async () => {
+  const blocked = { ok: false, error: { code: 'agent_prompt_blocked', message: 'agent_prompt_blocked Terminal prompt request ID: 7c3a8d71-d78d-409a-9a84-91fb162c1be3.' } };
+  const orca = fakeOrca({ 'terminal send': blocked });
+  await assert.rejects(sendToOrca({ sessionId: 'orca:term_7' }, 'hello', orca.options), /waiting for a permission in its Orca terminal/);
+  assert.equal(orca.calls.length, 2, 'it retried once with the request ID before giving up');
+});
+
 test('Claude Code in an Orca terminal cannot use its own question prompt', () => {
   const directory = temporary('orca-ask'), spec = path.join(directory, 'agent.json');
   const probe = 'console.log("args=" + process.argv.slice(2).join(" ")); process.exit(0)';
@@ -196,10 +203,6 @@ test('a follow-up reopens the provider session instead of starting an empty one'
 
   write('claude', '7c3a8d71-d78d-409a-9a84-91fb162c1be3');
   assert.match(launch(), /--resume 7c3a8d71-d78d-409a-9a84-91fb162c1be3/);
-  write('codex', '7c3a8d71-d78d-409a-9a84-91fb162c1be3');
-  const codex = launch();
-  assert.match(codex, /args=resume /, 'codex takes resume as its subcommand');
-  assert.match(codex, /7c3a8d71-d78d-409a-9a84-91fb162c1be3 Continue/, 'the session id comes before the prompt');
   write('claude', '');
   assert.doesNotMatch(launch(), /--resume/, 'A first turn starts a new session');
 });

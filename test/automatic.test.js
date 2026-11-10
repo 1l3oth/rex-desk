@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store, defaults, now, modelName, redact } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
-import { CodexRunner } from '../src/runners.js';
 import { issueBranch, provisionalTitle, defaultBranchPattern } from '../src/branches.js';
 import { detectProject, effectiveRepository, findJava8 } from '../src/project-detect.js';
 import { git, createWorktree } from '../src/processes.js';
@@ -33,25 +32,9 @@ test('typed model shorthand becomes a real Claude model ID, and family names sta
   assert.equal(modelName('claude', 'claude-sonnet-5-5'), 'claude-sonnet-5-5');
   assert.equal(modelName('claude', 'sonnet'), 'sonnet');
   assert.equal(modelName('claude', ''), '');
-  assert.equal(modelName('codex', 'gpt-5.5'), 'gpt-5.5', 'Codex names are passed through');
   const store = new Store(temporary('model'));
-  store.saveConfig({ ...defaults, models: { claude: 'opus5.5', codex: '' } });
+  store.saveConfig({ ...defaults, models: { claude: 'opus5.5' } });
   assert.equal(store.config().models.claude, 'claude-opus-5-5'); store.close();
-});
-
-test('Codex runs Rex Desk tools without its own prompt, while other servers still ask', async () => {
-  const sent = [], asked = [];
-  const runner = new CodexRunner({ run: { role: 'coordinator' }, ask: async request => { asked.push(request); return { action: 'accept' }; }, event() {}, signal: new AbortController().signal });
-  runner.send = value => sent.push(value);
-  const approval = (tool, serverName = 'rex_desk_run') => ({ method: 'mcpServer/elicitation/request', id: 7,
-    params: { serverName, message: `Allow the ${serverName} MCP server to run tool "${tool}"?`, _meta: { codex_approval_kind: 'mcp_tool_call' } } });
-  await runner.serverRequest(approval('desk_message'));
-  assert.deepEqual(sent.at(-1), { id: 7, result: { action: 'accept', content: {}, _meta: null } });
-  assert.equal(asked.length, 0);
-  await runner.serverRequest(approval('desk_dispatch'));
-  assert.equal(asked.length, 0, 'Rex Desk asks about dispatches itself, with the issue named');
-  await runner.serverRequest(approval('desk_message', 'another_server'));
-  assert.equal(asked.length, 1, 'Another server’s tools still ask');
 });
 
 test('branches read as English summaries, never internal IDs, and a taken name gets a suffix', async () => {

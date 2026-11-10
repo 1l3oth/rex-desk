@@ -117,7 +117,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       if (url.pathname === '/api/agents' && request.method === 'GET') return json(response, 200, await desk.agents.overview({ refresh: url.searchParams.has('refresh') }));
       if (url.pathname === '/api/agents/profile' && request.method === 'POST') {
         const input = await body(request);
-        if (!['claude', 'codex'].includes(input.provider)) throw new Error('Choose Claude Code or Codex.');
+        input.provider = 'claude';
         const config = store.publicConfig();
         store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [input.provider]: input.profile ?? null } });
         desk.agents.invalidate(input.provider);
@@ -125,10 +125,9 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       }
       if (url.pathname === '/api/agents/mcp' && request.method === 'POST') {
         const { provider } = await body(request);
-        if (!['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
+        if (provider !== 'claude') throw new Error('Rex Desk runs Claude Code.');
         const command = resolveCommand(provider), proxy = path.join(root, 'src', 'stdio.js');
-        const args = provider === 'claude' ? [...command.args, 'mcp', 'add', '--scope', 'user', 'rex_desk', '--', process.execPath, proxy]
-          : [...command.args, 'mcp', 'add', 'rex_desk', '--', process.execPath, proxy];
+        const args = [...command.args, 'mcp', 'add', '--scope', 'user', 'rex_desk', '--', process.execPath, proxy];
         // An agent started from any profile folder, in any directory, must be able to read tasks, so every profile
         // this computer has gets the entry, not only the one Rex Desk's own runs use.
         const profiles = discoverProfiles(provider, { configured: desk.agents.selected(provider) });
@@ -161,7 +160,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       }
       if (url.pathname === '/api/setup-prompt' && request.method === 'POST') {
         const input = await body(request);
-        return json(response, 200, { prompt: setupPrompt({ target: input.target, root, dataDirectory: store.directory, mcpUrl: desk.mcpUrl, profiles: { claude: desk.agents.selected('claude'), codex: desk.agents.selected('codex') } }) });
+        return json(response, 200, { prompt: setupPrompt({ target: input.target, root, dataDirectory: store.directory, mcpUrl: desk.mcpUrl, profiles: { claude: desk.agents.selected('claude') } }) });
       }
       if (url.pathname === '/api/sources/connect' && request.method === 'POST') {
         const source = store.saveConnection(await body(request));
@@ -178,11 +177,10 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       if (url.pathname === '/api/demo' && request.method === 'DELETE') { for (const task of store.list('task')) if (task.demo) store.delete('task', task.id); return json(response, 200, { removed: true }); }
       if (url.pathname === '/api/mcp-config' && request.method === 'POST') {
         return json(response, 200, { url: desk.mcpUrl, token: store.token,
-          codex: `[mcp_servers.rex_desk]\nurl = "${desk.mcpUrl}"\nbearer_token_env_var = "REX_DESK_TOKEN"\ntool_timeout_sec = 86400`,
           claude: { mcpServers: { rex_desk: { type: 'http', url: desk.mcpUrl, headers: { Authorization: 'Bearer ${REX_DESK_TOKEN}' } } } } });
       }
       if (url.pathname === '/api/diagnostics') {
-        const results = await Promise.all(['claude', 'codex', 'git', 'gh'].map(async name => {
+        const results = await Promise.all(['claude', 'git', 'gh'].map(async name => {
           const command = resolveCommand(name);
           try { const { stdout } = await exec(command.command, [...command.args, '--version'], { windowsHide: true, timeout: 10000 }); return { name, available: true, version: stdout.split('\n')[0] }; }
           catch (error) { return { name, available: false, error: error.message }; }

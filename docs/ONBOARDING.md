@@ -1,6 +1,6 @@
 # Welcome to Rex Desk
 
-Rex Desk is a workspace on your own computer for QA issues from Flow and Morningmate. It brings in the issues assigned to you, ranks them so you know what to do first, and runs a coding agent (Claude Code or Codex) on the issue you choose, in its own copy of your project. You answer the agent's questions, review its recorded browser proof, and decide whether a draft pull request is created.
+Rex Desk is a workspace on your own computer for QA issues from Flow and Morningmate. It brings in the issues assigned to you, ranks them so you know what to do first, and runs a coding agent (Claude Code) on the issue you choose, in its own copy of your project. You answer the agent's questions, review its recorded browser proof, and decide whether a draft pull request is created.
 
 Pick the path that fits you:
 
@@ -14,7 +14,7 @@ Pick the path that fits you:
 | Windows 10 or 11 | Rex Desk is built and tested on Windows. The Flow/Morningmate Tomcat preview and Orca support are Windows only. |
 | [Node.js 24 or newer](https://nodejs.org) | Runs Rex Desk. |
 | [Git](https://git-scm.com) | Each run works in its own Git worktree. |
-| Claude Code or Codex, signed in | The coding agents. Rex Desk uses the sign-in you already have. |
+| Claude Code, signed in | The coding agents. Rex Desk uses the sign-in you already have. |
 | [GitHub CLI](https://cli.github.com) (`gh`), signed in | Cloning, forking, and draft pull requests. |
 | A Flow or Morningmate user API key | To bring in your assigned issues. |
 
@@ -47,7 +47,7 @@ The repository is private. Ask the owner for access before cloning or forking.
    `.\Start-RexDesk.ps1` does the same in the background and opens the dashboard. The desktop app in `desktop/` is the same dashboard in its own window.
 
 4. **Follow Setup.** The first screen is a checklist that reads your real settings:
-   1. Choose a Claude Code or Codex profile that shows **Signed in**.
+   1. Choose a Claude Code profile that shows **Signed in**.
    2. Paste your Flow or Morningmate API key. It is encrypted on this computer.
    3. Pick your projects and yourself as the assignee.
    4. Choose the folder of the project you fix, such as `flow-was`. Branches and commands are detected from the project itself.
@@ -100,7 +100,7 @@ npm run dev
 | `src/server.js` | HTTP server, dashboard API, and the MCP endpoint |
 | `src/coordinator.js` | Runs, the queue, worktrees, and agent instructions |
 | `src/mcp.js` | Tools agents use (`desk_task`, `desk_browser`, `desk_verify`, …) |
-| `src/runners.js`, `src/orca.js` | Starting Claude Code, Codex, and Orca terminals |
+| `src/runners.js`, `src/orca.js` | Starting Claude Code and Orca terminals |
 | `src/providers.js` | Flow and Morningmate sync |
 | `src/jev.js` | Jev priority ranking |
 | `src/project-detect.js` | Reading install, preview, and test commands from a project |
