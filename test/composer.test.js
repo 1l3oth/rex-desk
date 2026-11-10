@@ -70,3 +70,18 @@ test('a room picture is stored, served back as the same bytes, and only pictures
     assert.equal((await fetch(`${app.address}/api/rooms/${room.id}`, { method: 'PUT', headers: { 'x-rex-desk': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Renamed' }) })).status, 200);
   } finally { await app.close(); }
 });
+
+test('the model list comes from the signed-in Claude Code; agents and choices follow it, and a model it lacks falls back to the default', async () => {
+  const store = new Store(temporary('models')), desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory') });
+  desk.closed = true;
+  store.put('specialist', 'x', { id: 'x', name: 'X', slug: 'x', model: 'Sonnet 5.5', unsure: [], roomSeen: {}, createdAt: now() });
+  store.put('specialist', 'y', { id: 'y', name: 'Y', slug: 'y', model: 'claude-fable-5-1', unsure: [], roomSeen: {}, createdAt: now() });
+  const sdk = { query: () => ({ supportedModels: async () => [{ value: 'default', displayName: 'Default (recommended)', description: 'Opus 5.5' }, { value: 'sonnet', displayName: 'Sonnet 5.5', description: 'Fast' }], close() {} }) };
+  const items = await desk.refreshModels({ sdk });
+  assert.deepEqual(items.map(item => item.id), ['default', 'sonnet']);
+  assert.deepEqual(desk.snapshot().choices.models.map(item => item.label), ['Default (recommended)', 'Sonnet 5.5']);
+  assert.equal(store.get('specialist', 'x').model, 'sonnet', 'a typed display name becomes the listed id');
+  assert.equal(store.get('specialist', 'y').model, '', 'a model the list does not have goes back to the default');
+  assert.deepEqual(runOptions({ model: 'sonnet' }, store), { model: 'sonnet' });
+  assert.throws(() => runOptions({ model: 'claude-opus-5-5' }, store), /listed models/);
+});

@@ -20,7 +20,9 @@ function remember(patch) { try { localStorage.setItem(KEY, JSON.stringify({ ...s
 export function currentOptions(ctx) {
   const { ui } = ctx, choices = ui.snap?.choices || { models: [], efforts: [], modes: [] }, run = ui.view.type === 'main' ? ctx.mainRun() : ui.view.type === 'run' ? ctx.runById(ui.view.id) : null, last = saved();
   const configured = ui.snap?.config?.models?.claude;
-  return { model: run?.model || last.model || configured || choices.models[0]?.id || '', effort: run?.effort || last.effort || 'medium', permissionMode: run?.permissionMode || last.permissionMode || DEFAULT_MODE };
+  // Only a model that is on the current list is shown and sent; anything else falls back to the first one (the recommended default).
+  const ids = choices.models.map(item => item.id), model = [run?.model, last.model, configured].find(value => value && ids.includes(value)) || ids[0] || '';
+  return { model, effort: run?.effort || last.effort || 'medium', permissionMode: run?.permissionMode || last.permissionMode || DEFAULT_MODE };
 }
 export function pickedOptions(ctx) {
   const read = id => document.getElementById(id)?.value || '';

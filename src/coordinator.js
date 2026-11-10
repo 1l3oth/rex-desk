@@ -3,7 +3,8 @@ import { Memory } from './memory.js';
 import { Specialists } from './specialists.js';
 import { ClaudeRunner } from './runners.js';
 import { Notifier } from './notify.js';
-import { MODELS, EFFORTS, MODES, runOptions } from './choices.js';
+import { EFFORTS, MODES, runOptions, modelList } from './choices.js';
+import { fetchModels } from './models.js';
 import path from 'node:path';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
@@ -79,7 +80,7 @@ export class Desk {
       runs: this.store.list('run').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
       interactions: this.store.list('interaction').sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
-      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, choices: { models: MODELS, efforts: EFFORTS, modes: MODES }, specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null }, ...this.rooms.snapshot() };
+      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, choices: { models: modelList(this.store), efforts: EFFORTS, modes: MODES }, specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null }, ...this.rooms.snapshot() };
   }
   // Run keys are kept as hashes in the database, so an agent still working in an Orca terminal keeps its connection through a restart.
   scopeToken(runId) {
@@ -122,7 +123,7 @@ export class Desk {
       return { sent: true };
     }
     if (this.live.has(runId)) {
-      this.store.put('run', runId, { ...run, ...runOptions({ model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }), queued: [...(run.queued || []), line], updatedAt: now() });
+      this.store.put('run', runId, { ...run, ...runOptions({ model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), line], updatedAt: now() });
       this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
       return { queued: true };
     }
@@ -210,7 +211,7 @@ export class Desk {
   // and creates a specialist agent for each. Starting it from the chat sends the person's first message with it.
   async startMain({ prompt = '', ...picked } = {}) {
     if (this.store.list('run').some(run => run.role === 'coordinator' && !terminalStates.has(run.state))) throw new Error('The main agent is already running. Talk to it in its chat.');
-    const run = { id: id(), role: 'coordinator', main: true, title: 'Main agent', provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'headless', ...runOptions(picked) };
+    const run = { id: id(), role: 'coordinator', main: true, title: 'Main agent', provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'headless', ...runOptions(picked, this.store) };
     this.store.put('run', run.id, run);
     if (run.prompt) this.store.event(run.id, 'human-message', { text: run.prompt, via: 'rex' }, true);
     void this.drain(); return this.run(run.id);
@@ -519,6 +520,14 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     this.store.put('task', taskId, { ...this.task(taskId), titleEn: name }); return name;
   }
   // In the background, names the tasks that have none yet. Only with the fast OpenRouter key; otherwise a task is named the first time it is mentioned or assigned.
+  // Asks the signed-in Claude Code which models it offers, keeps the list, and fixes any agent whose saved model is not on it.
+  async refreshModels({ sdk } = {}) {
+    const items = await fetchModels({ env: this.agents.environment('claude'), sdk });
+    if (!items.length) return modelList(this.store);
+    this.store.put('models', 'list', { id: 'list', items, at: now() });
+    this.specialists.normalizeModels();
+    return items;
+  }
   async fillEnglishNames(limit = 40) {
     if (!this.jev.apiKey() || this.namingBusy) return; this.namingBusy = true;
     try { for (const task of this.store.list('task').filter(item => item.active && !item.demo && !item.titleEn).slice(0, limit)) await this.englishName(task.id).catch(() => {}); }
@@ -584,7 +593,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     this.patchRun(runId, { state: 'queued', provider, followUp: sameProvider ? String(prompt).trim() : '', sessionId: sameProvider ? run.sessionId : undefined, mirror: sameProvider ? run.mirror : undefined,
       ...(roomTurn !== undefined ? { roomTurn } : {}),
       instructions: run.role === 'specialist' ? run.instructions : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
-      ...runOptions(picked), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
+      ...runOptions(picked, this.store), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
     void this.drain(); return this.run(runId);
   }
   async verify(runId, { command: proposed = '' } = {}) {

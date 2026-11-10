@@ -16,10 +16,13 @@ export const MODES = [
   { id: 'acceptEdits', label: 'Accept edits' },
 ];
 
+// The models offered: the list the signed-in Claude Code reported (kept in the store), or the built-in one until it has.
+export const modelList = store => { const saved = store?.get?.('models', 'list')?.items; return Array.isArray(saved) && saved.length ? saved : MODELS; };
+
 // Only values from the lists above are accepted; anything else is refused instead of being passed to the CLI.
-export function runOptions(input = {}) {
+export function runOptions(input = {}, store) {
   const out = {};
-  if (input.model) { if (!MODELS.some(item => item.id === input.model)) throw new Error('Choose one of the listed models.'); out.model = input.model; }
+  if (input.model) { if (!modelList(store).some(item => item.id === input.model)) throw new Error('Choose one of the listed models.'); out.model = input.model; }
   if (input.effort) { if (!EFFORTS.includes(input.effort)) throw new Error('Choose low, medium, high, xhigh or max effort.'); out.effort = input.effort; }
   if (input.permissionMode) { if (!MODES.some(item => item.id === input.permissionMode)) throw new Error('Choose Dangerous, Manual, Auto, Plan or Accept edits.'); out.permissionMode = input.permissionMode; }
   return out;

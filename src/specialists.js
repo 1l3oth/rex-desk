@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { modelName } from './store.js';
-import { MODELS } from './choices.js';
+import { modelList } from './choices.js';
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -28,11 +28,15 @@ export class Specialists {
   cleanModel(value, { strict = false } = {}) {
     const text = String(value || '').trim();
     if (!text) return '';
-    const id = modelName('claude', text);
-    if (MODELS.some(item => item.id === id)) return id;
+    const list = modelList(this.store), id = modelName('claude', text);
+    if (list.some(item => item.id === text)) return text;
+    if (list.some(item => item.id === id)) return id;
+    const byName = list.find(item => item.label.toLowerCase() === text.toLowerCase()); if (byName) return byName.id;
     if (strict) throw new Error('Choose a model from the list.');
     return '';
   }
+  // A saved model that the current list does not have is set back to the default, so an agent never fails to start on it.
+  normalizeModels() { for (const agent of this.store.list('specialist')) { const model = this.cleanModel(agent.model); if (model !== (agent.model || '')) this.store.put('specialist', agent.id, { ...agent, model }); } }
   checkName(name, exceptId = '') {
     const text = String(name || '').trim().replace(/\s+/g, ' ');
     if (!text) throw new Error('Give the agent a name.');
