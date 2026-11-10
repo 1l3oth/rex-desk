@@ -1,4 +1,4 @@
-import { agentsRail, agentStage, agentAction } from '/chat-agents.js';
+import { agentStage, agentAction, agentGroups, initAgentCard, toggleGroup } from '/chat-agents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
 import { initPickers, setPickActions, pickerOpen } from '/chat-pick.js';
@@ -91,7 +91,7 @@ function renderRail() {
       ${railItem('person', '', { avatar: ui.profile?.photo ? `<img class="av sm photo" src="${photoUrl()}" alt="">` : iconAv('person'), name: 'About you', sub: ui.profile?.name || 'What the agents learned' })}
     </div>
     ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>')}
-    ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agents.map(agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: `${agent.status?.state === 'idle' || !agent.status ? agent.projectSlug : agent.status.label}` })).join('') : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
+    ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentGroups(ctx, agents, (agent, grouped) => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: grouped ? agent.status?.label || 'Idle' : `${agent.status?.state === 'idle' || !agent.status ? agent.projectSlug : agent.status.label}` })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
     ${section('tasks', 'Tasks', tasks.length, '', railItem('tasks', '', { avatar: iconAv('tasks'), name: 'All tasks', sub: busy ? `${busy} being worked on` : `${tasks.length} issues` }))}
     ${working.length || review.length || done.length ? section('runs', 'Runs', working.length || '', '', `${working.map(line).join('')}${review.length ? `<p class="rail-label">To review</p>${review.map(line).join('')}` : ''}${done.length ? `<p class="rail-label">Done</p>${shownDone.map(line).join('')}${done.length > 4 ? `<button class="item more" data-action="toggle-done"><span class="name sub">${ui.done ? 'Show fewer' : `Show all ${done.length}`}</span></button>` : ''}` : ''}`) : ''}
   </div><div class="rail-foot"><a href="/classic">Issues &amp; settings</a><button class="btn small" data-action="theme">Theme</button></div>`;
@@ -354,7 +354,8 @@ document.addEventListener('submit', async event => {
 });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
 
-initPickers(ctx); initRoomInfo(ctx);
+initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx);
+document.addEventListener('click', event => { const head = event.target.closest?.('[data-action="agent-group"]'); if (!head) return; event.stopPropagation(); toggleGroup(head.dataset.project); renderAll(); }, true);
 // The back and forward buttons, and a pasted address, move between screens.
 window.addEventListener('hashchange', () => {
   if (ui.fromOpen) { ui.fromOpen = false; return; }
@@ -450,17 +451,18 @@ function personPage() {
   const about = profile.sections.find(section => section.title === 'About them')?.items.map(noteText) || [];
   const others = profile.sections.filter(section => section.title !== 'About them');
   const photo = profile.photo ? `<img class="pf-photo" src="${photoUrl()}" alt="${esc(name)}">` : `<div class="pf-photo pf-initials" aria-hidden="true">${esc(initials(name))}</div>`;
-  const stats = [[profile.projects.length, 'projects'], [profile.agents.length, 'agents'], [profile.sections.reduce((sum, section) => sum + section.items.length, 0), 'notes']]
-    .map(([count, label]) => `<div class="pf-stat"><b>${count}</b><span>${label}</span></div>`).join('');
+  const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+  const stats = `Works on ${plural(profile.projects.length, 'project')} with ${plural(profile.agents.length, 'agent')}.`;
+  const plain = text => String(text || '').replace(/\*\*|__|`/g, '');
   const hero = `<section class="pf-hero">${photo}<div class="pf-who"><h2>${esc(name)}</h2>${profile.email ? `<p class="muted">${esc(profile.email)}</p>` : ''}
     <p class="pf-intro">${about.length ? about.map(item => esc(item.text)).join(' · ') : 'Your agents add what they learn about you here as you work with them.'}</p>
-    <div class="pf-stats">${stats}</div>
+    <p class="pf-stats">${stats}</p>
     <div class="pf-actions"><label class="btn small pf-upload">${profile.photo ? 'Change photo' : 'Add a photo'}<input type="file" accept="image/png,image/jpeg,image/webp" data-photo-upload hidden></label>${profile.photo ? '<button class="btn small" data-action="photo-remove">Remove photo</button>' : ''}</div>
     ${profile.photo ? '' : '<p class="muted small">Or let Rex Agent find a picture of you in your projects: it asks before using one.</p>'}</div></section>`;
   const card = section => `<div class="pf-card"><h3>${esc(section.title)}</h3><ul>${section.items.map(noteText).map(item => `<li>${esc(item.text)}${item.when ? ` <small class="muted">${item.when}${item.soft ? ' · may change' : ''}</small>` : ''}</li>`).join('')}</ul></div>`;
-  const notes = others.length ? `<section><h3 class="pf-title">What your agents learned</h3><div class="pf-grid">${others.map(card).join('')}</div></section>` : '';
-  const projects = profile.projects.length ? `<section><h3 class="pf-title">Projects</h3><div class="pf-grid">${profile.projects.map(project => `<button class="pf-card pf-project" data-open="project" data-id="${esc(project.slug)}"><h3>${esc(project.slug)}</h3><p>${esc(project.purpose || 'No description yet.')}</p>${project.stack.length ? `<div class="pf-tags">${project.stack.slice(0, 5).map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''}</button>`).join('')}</div></section>` : '';
-  const agents = profile.agents.length ? `<section><h3 class="pf-title">Your agents</h3><div class="pf-tags big">${profile.agents.map(agent => `<span>${esc(agent.name)} <small class="muted">${esc(agent.project)}</small></span>`).join('')}</div></section>` : '';
+  const notes = others.length ? `<section><h3 class="pf-title">What your agents learned about you</h3><div class="pf-grid">${others.map(card).join('')}</div></section>` : '';
+  const projects = profile.projects.length ? `<section><h3 class="pf-title">Projects</h3><div class="pf-grid">${profile.projects.map(project => `<button class="pf-card pf-project" data-open="project" data-id="${esc(project.slug)}"><h3>${esc(project.slug)}</h3><p>${esc(plain(project.purpose) || 'No description yet.')}</p>${project.stack.filter(item => !/\.(json|toml|lock|txt)$/i.test(item)).length ? `<div class="pf-tags">${project.stack.filter(item => !/\.(json|toml|lock|txt)$/i.test(item)).slice(0, 5).map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''}</button>`).join('')}</div></section>` : '';
+  const agents = profile.agents.length ? `<section><h3 class="pf-title">Your agents</h3><div class="pf-agents">${profile.agents.map(agent => `<button class="pf-agent" data-open="specialist" data-id="${esc(agent.id)}">${avatarHtml(ctx, { name: agent.name, size: 'sm' })}<span>${esc(agent.name)}<small>${esc(agent.project)}</small></span></button>`).join('')}</div></section>` : '';
   return `<div class="page pf">${brainBanner()}${hero}${notes}${projects}${agents}<p class="muted small">Notes are kept in .rexdesk/user.md. Change or delete any line there and every agent follows it.</p></div>`;
 }
 // A chosen picture is made small (512 px) in the page before it is saved.
