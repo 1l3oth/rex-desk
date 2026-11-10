@@ -127,7 +127,7 @@ async function finishMic(ctx) {
   const slow = setTimeout(() => ctx.toast('Loading the voice model. The first time after a restart takes a minute or two.'), 4000);
   try {
     const heard = await transcribe(recording.wav(), voiceLanguage(ctx)), box = document.getElementById('draft');
-    if (box) { box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + heard.text; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); box.dispatchEvent(new Event('input', { bubbles: true })); }
+    if (box) { ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(ctx.draftKey()); box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + heard.text; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); box.dispatchEvent(new Event('input', { bubbles: true })); }
   } catch (error) {
     ctx.toast(/not installed|install/i.test(error.message) ? 'Voice is not installed yet. Install it in Issues & settings → Computer control.' : `Voice input: ${error.message}`, true);
   } finally { clearTimeout(slow); transcribing = false; micButton()?.classList.remove('busy'); }

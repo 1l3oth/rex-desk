@@ -568,3 +568,15 @@ body.ptt::after{content:"Listening… let go of Space to stop";position:fixed;le
 .plessons{margin:0;padding-left:18px;font-size:12.5px;display:flex;flex-direction:column;gap:3px}
 .prow{display:flex;gap:8px;padding-top:6px}
 .side-head.tabs{gap:2px}.side-head.tabs .tab{padding:5px 9px;font-size:13px}.side-head.tabs .tcount{margin-left:5px}
+
+/* ---- task connectors at the top of Tasks ---- */
+.cn{margin-top:16px;display:flex;flex-direction:column;gap:8px}
+.cn-head{display:flex;align-items:center;justify-content:space-between}.cn-head h2{margin:0;font-size:13.5px}
+.cn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.cn-card{display:flex;align-items:center;gap:6px;padding:6px 8px 6px 6px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.cn-card.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
+.cn-card.off{border-style:dashed;background:none}
+.cn-main{flex:1;min-width:0;display:flex;align-items:center;gap:10px;border:0;background:none;padding:2px;text-align:left;color:inherit}
+button.cn-main{cursor:pointer}
+.cn-text{min-width:0;display:flex;flex-direction:column}.cn-text b{font-size:13.5px;font-weight:600}
+.cn-text small{font-size:11.5px;color:var(--muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.cn-text small.bad{color:var(--bad)}

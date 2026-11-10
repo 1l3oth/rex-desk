@@ -29,9 +29,10 @@ export function roomStage(ctx) {
   const render = message => {
     if (message.from.type === 'system') { previous = null; return note(esc(message.text)); }
     const to = message.from.type === 'human' && message.to.some(id => id !== 'you') ? message.to.filter(id => id !== 'you').map(id => names.get(id)).filter(Boolean) : [];
-    const html = markdown(message.text, { mentions: ['you', ...handles], tasks }) + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '');
+    const shown = message.from.type === 'human' ? String(message.text).replace(/\n\n\(Sent by voice: [^)]*\)\s*$/, '') : message.text;
+    const html = markdown(shown, { mentions: ['you', ...handles], tasks }) + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '');
     const same = previous && previous.from.id === message.from.id && Date.parse(message.at) - Date.parse(previous.at) < 5 * 60000; previous = message;
-    if (message.from.type === 'human') return bubble({ mine: true, name: 'You', time: hhmm(message.at), html: quote(message) + html }).replace('<div class="msg mine', `<div data-msg="${esc(message.id)}" class="msg mine`);
+    if (message.from.type === 'human') return bubble({ mine: true, name: 'You', time: `${hhmm(message.at)}${shown !== message.text ? ' · by voice' : ''}`, html: quote(message) + html }).replace('<div class="msg mine', `<div data-msg="${esc(message.id)}" class="msg mine`);
     return `<div class="msg rmsg ${same ? 'cont' : ''}" data-msg="${esc(message.id)}"><div class="ravcol">${same ? '' : ctx.avatar({ name: message.from.label, size: 'sm' })}</div><div class="bubble"><div class="who rwho"><strong class="nc${nameHash(message.from.label)}">${esc(message.from.label)}</strong><span>${esc(hhmm(message.at))}</span><button type="button" class="rreply" data-reply="${esc(message.id)}" title="Reply to ${esc(message.from.label)}" aria-label="Reply to ${esc(message.from.label)}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 4L2 8l4 4M2 8h8a4 4 0 0 1 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Reply</button></div>${quote(message)}<div class="md">${html}</div></div></div>`;
   };
   const empty = `<div class="empty"><h2>${esc(room.name)}</h2><p>Mention an agent with @ to talk to it, and a task with #. Agents answer only when they are mentioned, and each one reads this room before it answers.</p></div>`;
@@ -166,9 +167,9 @@ export function tasksStage(ctx) {
   const add = pick === 'all' || pick === 'local' ? `<form class="tadd" data-task-add><input name="title" type="text" maxlength="200" placeholder="New task… press Enter to add" autocomplete="off" aria-label="New task title">${projects.length ? pickerHtml(ctx, { id: 'task-add-project', label: 'Project', value: ui.lastTaskProject || '', compact: true, items: [{ value: '', label: 'No project' }, ...projects.map(project => ({ value: project.slug, label: project.slug }))] }) : ''}<button class="btn primary small">Add</button></form>` : '';
   const chips = `<div class="tsrc" role="tablist">${sources.map(([id, label]) => `<button role="tab" aria-selected="${pick === id}" class="${pick === id ? 'on' : ''}" data-action="task-source" data-source="${esc(id)}">${esc(label)}</button>`).join('')}</div><button class="btn small" data-action="task-connect">Sources</button>`;
   const empty = pick === 'local' ? '<div class="empty"><h2>No Rex Desk tasks yet</h2><p>Type one above, or ask an agent to make tasks for a project.</p></div>' : '<div class="empty"><h2>No tasks</h2><p>Add one above, or press Sync to bring in your tracker issues.</p></div>';
-  return { title: 'Tasks', meta: `${everything.length} tasks`,
+  return { title: 'Tasks', meta: `${everything.length} tasks`, top: true,
     members: `<div class="members tbar">${chips}<input id="task-filter" type="search" placeholder="Search tasks…" value="${esc(ui.taskFilter || '')}" autocomplete="off"></div>`,
-    feed: `<div class="page">${add}<div class="tlist">${groups}${synced.length ? `<div class="tgroup">${local.length ? `<h3>From trackers <span>${synced.length}</span></h3>` : ''}${synced.map(task => taskRow(ctx, task)).join('')}</div>` : ''}${shown.length ? '' : empty}</div></div>` };
+    feed: `<div class="page">${connectorsHtml(ctx, everything)}${add}<div class="tlist">${groups}${synced.length ? `<div class="tgroup">${local.length ? `<h3>From trackers <span>${synced.length}</span></h3>` : ''}${synced.map(task => taskRow(ctx, task)).join('')}</div>` : ''}${shown.length ? '' : empty}</div></div>` };
 }
 
 export function taskStage(ctx) {
@@ -314,7 +315,7 @@ export function initLocalTasks(ctx) {
 
 // ---------- where tasks come from: Rex Desk (built in), Orbit, Flow, Morningmate ----------
 const SERVICE = { orbit: 'Orbit', flow: 'Flow', morningmate: 'Morningmate' };
-function connectionsDialog(ctx) {
+function connectionsDialog(ctx, startWith = '') {
   const { ui, esc, api, toast, refresh } = ctx;
   document.querySelector('.dialog-back.sources')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back sources';
@@ -334,7 +335,7 @@ function connectionsDialog(ctx) {
     back.innerHTML = `<form class="dialog src-dialog" data-mode="${mode}" ${editing ? `data-id="${esc(editing.id)}"` : ''}>${mode === 'list' ? list : form}</form>`;
     (back.querySelector('input[name=apiKey]') || back.querySelector('button'))?.focus();
   };
-  draw(); document.body.append(back);
+  draw(startWith ? 'form' : 'list'); document.body.append(back);
   back.addEventListener('click', async event => {
     const target = event.target;
     if (target === back || target.closest('[data-close]')) { back.remove(); return; }
@@ -359,10 +360,29 @@ function connectionsDialog(ctx) {
     } catch (error) { toast(error.message, true); button.disabled = false; button.textContent = form.dataset.id ? 'Save and sync' : 'Connect and sync'; }
   });
 }
-document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="task-connect"]')) return; event.stopPropagation(); const ctx = window.__rexCtx; if (ctx) connectionsDialog(ctx); }, true);
+document.addEventListener('click', event => { const button = event.target.closest?.('[data-action="task-connect"]'); if (!button) return; event.stopPropagation(); const ctx = window.__rexCtx; if (ctx) connectionsDialog(ctx, button.dataset.service || ''); }, true);
 
 // Media, Files and Links tabs, each with how many there are.
 export function sharedTabButtons(shared, tab, action = 'side-tab') {
   const count = sharedCount(shared);
   return [['media', 'Media'], ['files', 'Files'], ['links', 'Links']].map(([key, label]) => `<button type="button" class="tab ${tab === key ? 'on' : ''}" data-action="${action}" data-tab="${key}">${label}${count[key] ? `<span class="tcount quiet">${count[key]}</span>` : ''}</button>`).join('');
+}
+
+// The task connectors, as cards at the top of Tasks: Rex Desk (built in), Flow, Morningmate and Orbit.
+// A connected one shows how many tasks it brought in and filters the list when clicked; the others offer to connect.
+function connectorsHtml(ctx, tasks) {
+  const { ui, esc } = ctx, sources = ui.snap.config?.sources || [], syncs = new Map((ui.snap.sync || []).map(item => [item.sourceId, item])), pick = ui.taskSource || 'all';
+  const count = id => tasks.filter(task => id === 'local' ? task.local : task.sourceId === id).length, many = id => `${count(id)} task${count(id) === 1 ? '' : 's'}`;
+  const card = ({ id, mark, name, kind, detail, bad = false, action }) => `<div class="cn-card${pick === id ? ' on' : ''}${id ? '' : ' off'}">${id ? `<button type="button" class="cn-main" data-action="task-source" data-source="${esc(id)}" aria-pressed="${pick === id}">` : '<div class="cn-main">'}<span class="src-mark ${esc(mark)}" aria-hidden="true">${esc(kind[0])}</span><span class="cn-text"><b>${esc(name)}</b><small class="${bad ? 'bad' : ''}">${esc(detail)}</small></span>${id ? '</button>' : '</div>'}${action || ''}</div>`;
+  const cards = [card({ id: 'local', mark: 'local', name: 'Rex Desk tasks', kind: 'Rex', detail: `Built in · ${many('local')}` })];
+  for (const source of sources) {
+    const sync = syncs.get(source.id);
+    cards.push(card({ id: source.id, mark: source.type, name: source.name, kind: SERVICE[source.type] || source.type,
+      detail: sync?.error ? sync.error : `${SERVICE[source.type] || source.type} · ${many(source.id)}${sync?.at ? '' : ' · not synced yet'}`, bad: Boolean(sync?.error),
+      action: source.type === 'orbit' ? '<button type="button" class="btn small quiet" data-action="task-connect">Manage</button>' : '<a class="btn small quiet" href="/classic#connections">Manage</a>' }));
+  }
+  for (const [type, hint] of [['flow', 'Issues assigned to you in Flow'], ['morningmate', 'Issues assigned to you in Morningmate'], ['orbit', 'Tasks of an Orbit goal']])
+    if (!sources.some(source => source.type === type)) cards.push(card({ id: '', mark: type, name: SERVICE[type], kind: SERVICE[type], detail: hint,
+      action: type === 'orbit' ? '<button type="button" class="btn small primary" data-action="task-connect" data-service="orbit">Connect</button>' : '<a class="btn small primary" href="/classic#connections">Connect</a>' }));
+  return `<section class="cn"><div class="cn-head"><h2>Connectors</h2><button type="button" class="btn small" data-action="task-connect">Manage sources</button></div><div class="cn-grid">${cards.join('')}</div></section>`;
 }

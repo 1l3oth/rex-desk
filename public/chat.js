@@ -90,10 +90,10 @@ function renderRail() {
       ${railItem('main', '', { avatar: withDot(iconAv('main', 'accent'), main ? stateTone(main) : ''), name: 'Rex Agent', sub: main ? stateLabel(main) : 'Not started' })}
       ${railItem('inbox', '', { avatar: iconAv('inbox', asks ? 'warn' : ''), name: 'Needs you', sub: asks ? `${asks} waiting` : 'Nothing waiting', badge: asks, warn: true })}
       ${railItem('person', '', { avatar: ui.profile?.photo ? `<img class="av sm photo" src="${photoUrl()}" alt="">` : iconAv('person'), name: 'About you', sub: ui.profile?.name || 'What the agents learned' })}
+      ${railItem('tasks', '', { avatar: iconAv('tasks'), name: 'Tasks', sub: busy ? `${busy} being worked on` : `${tasks.length} tasks · ${1 + (snap.config?.sources || []).length} connectors` })}
     </div>
     ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>')}
     ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentGroups(ctx, agents, (agent, grouped) => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: grouped ? agent.status?.label || 'Idle' : `${agent.status?.state === 'idle' || !agent.status ? agent.projectSlug : agent.status.label}` })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
-    ${section('tasks', 'Tasks', tasks.length, '', railItem('tasks', '', { avatar: iconAv('tasks'), name: 'All tasks', sub: busy ? `${busy} being worked on` : `${tasks.length} issues` }))}
     ${working.length || review.length || done.length ? section('runs', 'Runs', working.length || '', '', `${working.map(line).join('')}${review.length ? `<p class="rail-label">To review</p>${review.map(line).join('')}` : ''}${done.length ? `<p class="rail-label">Done</p>${shownDone.map(line).join('')}${done.length > 4 ? `<button class="item more" data-action="toggle-done"><span class="name sub">${ui.done ? 'Show fewer' : `Show all ${done.length}`}</span></button>` : ''}` : ''}`) : ''}
   </div><div class="rail-foot"><a href="/classic">Issues &amp; settings</a><button class="btn small" data-action="theme">Theme</button></div>`;
 }
@@ -108,7 +108,7 @@ function renderItems(items, run, live) {
     if (item.role === 'tool') { group.push(item); continue; }
     flush(false);
     out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
-      : item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), html: markdown(item.text) })
+      : item.role === 'human' ? bubble({ mine: true, name: 'You', time: `${hhmm(item.at)}${item.voice ? ' · by voice' : ''}`, html: markdown(item.text) })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) })
       : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div></div>`
       : note(`${esc(item.text)} · ${hhmm(item.at)}`));
@@ -136,7 +136,7 @@ function transcript(events) {
   const items = [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event]));
   for (const event of events) {
     if (['command-output', 'dev-output'].includes(event.kind)) continue;
-    if (event.kind === 'human-message') items.push({ role: 'human', text: event.text, at: event.createdAt });
+    if (event.kind === 'human-message') { const said = spokenText(event.text); items.push({ role: 'human', text: said.text, voice: said.voice, at: event.createdAt }); }
     else if (event.kind === 'turn-start') items.push({ role: 'status', text: `${event.resumed ? 'Resumed' : 'Started'} with ${provider(event.provider)}`, at: event.createdAt });
     else if (event.kind === 'agent-result') items.push({ role: 'status', text: `Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${event.cost ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
     else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
@@ -223,7 +223,7 @@ function renderStage(full) {
   // A view that needs the message box always gets it, even when an earlier view had none.
   if (full || !document.getElementById('feed') || Boolean(model.composer) !== Boolean(document.getElementById('composer'))) {
     stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}</div><aside class="side" id="side"></aside>`;
-    ui.stick = true; redrawAttachments(ctx);
+    ui.stick = !model.top; redrawAttachments(ctx); if (model.top) document.getElementById('feed').scrollTop = 0;
   } else { document.getElementById('head').innerHTML = head; const slot = document.getElementById('members'); if (!slot.contains(document.activeElement) && !pickerOpen()) slot.innerHTML = model.members || ''; }
   document.getElementById('feed').className = `feed ${model.feedClass || ''}`;
   drawSide(model.side || '', model.sideClass || '');
@@ -233,7 +233,7 @@ function renderStage(full) {
   const active = document.activeElement, form = active?.closest?.('[data-interaction]');
   const editing = !full && feed.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName) && (!form || model.feed.includes(`data-interaction="${form.dataset.interaction}"`));
   const choosing = pickerOpen();
-  if (!editing && !choosing) { inner.innerHTML = model.feed; if (ui.stick) feed.scrollTop = feed.scrollHeight; }
+  if (!editing && !choosing) { inner.innerHTML = model.feed; if (ui.stick && !model.top) feed.scrollTop = feed.scrollHeight; }
   ui.mentions = model.composer?.mentions || [];
 }
 // The terminal panel keeps its scroll place unless it was at the bottom, where it follows the newest command.
@@ -287,8 +287,10 @@ async function send() {
   const box = document.getElementById('draft'), typed = box?.value.trim(), hasFiles = ui.attachments.some(file => file.path);
   if (!typed && !hasFiles) return;
   if (ui.attachments.some(file => !file.path)) return toast('Wait for the upload to finish.', true);
-  const text = `${typed || 'See the attached files.'}${attachmentText(ctx)}`, picked = pickedOptions(ctx);
-  const { type, id } = ui.view; box.disabled = true;
+  // Dictated words may be misheard: the agent is told, quietly, so it reads them against the conversation.
+  const spoken = ui.voiceDrafts?.has(draftKey()) ? VOICE_NOTE : '';
+  const text = `${typed || 'See the attached files.'}${attachmentText(ctx)}${spoken}`, picked = pickedOptions(ctx);
+  const { type, id } = ui.view; box.disabled = true; ui.voiceDrafts?.delete(draftKey());
   try {
     if (type === 'room' && /^\/assign\b/i.test(typed)) await assignFromRoom(id, typed);
     else if (type === 'room') { const replyTo = ui.reply?.roomId === id ? ui.reply.id : ''; await api(`/rooms/${id}/messages`, { method: 'POST', data: { text, ...(replyTo ? { replyTo } : {}) } }); ui.reply = null; drawReplyBar(); }
@@ -620,3 +622,9 @@ document.addEventListener('click', event => {
   else ui.chatInfo = target.dataset.action === 'chat-info';
   renderAll();
 }, true);
+
+// ---------- dictated messages ----------
+// Added to a message that came from the microphone. It reaches the agent, but the chat shows the message without it.
+const VOICE_NOTE = '\n\n(Sent by voice: speech-to-text may have misheard some words, names or Khmer and Korean terms. Read it against our conversation and the topic we are on, and work out what I meant. If a word could change what you do and you are not sure, ask.)';
+function spokenText(text) { const mark = /\n\n\(Sent by voice: [^)]*\)\s*$/; return mark.test(String(text || '')) ? { text: String(text).replace(mark, ''), voice: true } : { text, voice: false }; }
+document.addEventListener('input', event => { if (event.target.id === 'draft' && !event.target.value.trim()) ui.voiceDrafts?.delete(draftKey()); });
