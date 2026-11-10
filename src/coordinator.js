@@ -528,11 +528,18 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // so the agent remembers everything it has been told, in every room.
   async specialistTurn(agentId, { prompt, roomId = '', messageId = '' }) {
     const agent = this.specialists.get(agentId), turn = roomId ? { roomId, messageId } : null;
+    // The main agent answers in rooms from its own run.
+    if (agent.kind === 'main') {
+      const main = this.store.list('run').filter(run => run.role === 'coordinator' && run.main).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
+      if (!main || main.external) { const started = await this.startMain({ prompt }); this.store.put('run', started.id, { ...this.run(started.id), roomTurn: turn }); return this.run(started.id); }
+      if (this.live.has(main.id)) { this.store.put('run', main.id, { ...main, roomTurn: turn || main.roomTurn }); await this.say(main.id, prompt, {}, { raw: true }); return main; }
+      await this.resume(main.id, { prompt, silent: true, roomTurn: turn }); return this.run(main.id);
+    }
     const run = agent.runId ? this.store.get('run', agent.runId) : null;
     if (!run) {
       const home = this.specialists.homeDirectory(agent); mkdirSync(home, { recursive: true });
       const created = { id: id(), role: 'specialist', specialistId: agent.id, title: agent.name, provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home,
-        projectPath: agent.projectPath, repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(agent.model ? { model: agent.model } : {}) };
+        projectPath: agent.projectPath, repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(this.specialists.cleanModel(agent.model) ? { model: this.specialists.cleanModel(agent.model) } : {}) };
       this.store.put('run', created.id, created); this.store.put('specialist', agent.id, { ...this.specialists.get(agentId), runId: created.id });
       void this.drain(); return created;
     }
@@ -577,7 +584,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     this.patchRun(runId, { state: 'queued', provider, followUp: sameProvider ? String(prompt).trim() : '', sessionId: sameProvider ? run.sessionId : undefined, mirror: sameProvider ? run.mirror : undefined,
       ...(roomTurn !== undefined ? { roomTurn } : {}),
       instructions: run.role === 'specialist' ? run.instructions : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
-      ...runOptions(picked), ...(run.role === 'coordinator' ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
+      ...runOptions(picked), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
     void this.drain(); return this.run(runId);
   }
   async verify(runId, { command: proposed = '' } = {}) {

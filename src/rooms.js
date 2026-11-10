@@ -55,6 +55,7 @@ export class Rooms {
     return this.room(room.id);
   }
   addMember(roomId, agentId) {
+    if (agentId === 'main') this.desk.specialists.ensureMain();
     const room = this.room(roomId); this.desk.specialists.get(agentId);
     if (room.members.includes(agentId)) return room;
     const updated = { ...room, members: [...room.members, agentId] };
@@ -140,7 +141,7 @@ export class Rooms {
   }
   // Called when an agent's turn ends: what it said goes to the room it was asked in; a finished task is announced.
   async turnFinished(runId) {
-    const run = this.store.get('run', runId); if (!run?.specialistId) return;
+    const run = this.store.get('run', runId), agentId = run?.specialistId || (run?.role === 'coordinator' && run?.main ? 'main' : ''); if (!agentId) return;
     if (run.role === 'worker') {
       if (run.roomId && ['needs_evidence', 'ready_for_review', 'finished', 'failed', 'stopped'].includes(run.state)) {
         const name = this.member(run.specialistId).name, task = this.taskLine(run.taskId);
@@ -150,14 +151,15 @@ export class Rooms {
     }
     const turn = run.roomTurn; if (!turn?.roomId) return;
     this.store.put('run', runId, { ...this.store.get('run', runId), roomTurn: null });
-    if (run.state === 'failed') return this.system(turn.roomId, `${this.member(run.specialistId).name} could not reply: ${clip(run.error, 200)}`);
+    if (run.state === 'failed') return this.system(turn.roomId, `${this.member(agentId).name} could not reply: ${clip(run.error, 200)}`);
     const since = Date.parse(run.turnStartedAt || 0) || 0, said = [];
     for (const event of this.store.events(runId, { visible: true, limit: 200 })) {
       if (!['agent-text', 'message'].includes(event.kind) || Date.parse(event.createdAt) < since - 1000) continue;
       const text = String(event.text || event.message || '').trim(); if (text && !said.includes(text)) said.push(text);
     }
-    if (!said.length) return this.system(turn.roomId, `${this.member(run.specialistId).name} had nothing to add.`);
-    await this.post(turn.roomId, { fromAgentId: run.specialistId, text: said.join('\n\n'), replyTo: turn.messageId });
+    if (!said.length) return this.system(turn.roomId, `${this.member(agentId).name} had nothing to add.`);
+    if (!this.room(turn.roomId).members.includes(agentId)) return;
+    await this.post(turn.roomId, { fromAgentId: agentId, text: said.join('\n\n'), replyTo: turn.messageId });
   }
   history(roomId, limit = 30) { return this.messages(roomId, { limit }).filter(item => item.from.type !== 'system'); }
 }

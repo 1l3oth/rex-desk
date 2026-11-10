@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { modelName } from './store.js';
+import { MODELS } from './choices.js';
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -11,10 +13,26 @@ const atomic = (file, text) => { mkdirSync(path.dirname(file), { recursive: true
 export class Specialists {
   constructor(desk) { this.desk = desk; this.store = desk.store; this.memory = desk.memory; }
 
-  list() { return this.store.list('specialist').sort((left, right) => left.name.localeCompare(right.name)); }
+  list() { return this.store.list('specialist').filter(item => item.kind !== 'main').sort((left, right) => left.name.localeCompare(right.name)); }
+  // The main agent as a room member. Its session is the main agent's run, so it answers in rooms with everything it knows.
+  ensureMain() {
+    const existing = this.store.get('specialist', 'main');
+    if (existing) return existing;
+    const item = { id: 'main', kind: 'main', name: 'Main agent', slug: 'main', projectSlug: 'all projects', projectPath: '', repositoryId: '', purpose: 'Knows every project and agent, and helps the person decide who does what.', rules: '', unsure: [], provider: 'claude', model: '', createdBy: 'Rex Desk', cloneOf: '', runId: '', roomSeen: {}, createdAt: now(), updatedAt: now() };
+    this.store.put('specialist', 'main', item); return item;
+  }
   get(id) { const item = this.store.get('specialist', id); if (!item) throw new Error('Specialist not found.'); return item; }
   cardFile(item) { return this.memory.file('agents', `${item.slug}.md`); }
 
+  // The model must be one of the listed ones. A value typed by hand in an older version ("Opus 5.5") is turned into the listed id, or dropped.
+  cleanModel(value, { strict = false } = {}) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const id = modelName('claude', text);
+    if (MODELS.some(item => item.id === id)) return id;
+    if (strict) throw new Error('Choose a model from the list.');
+    return '';
+  }
   checkName(name, exceptId = '') {
     const text = String(name || '').trim().replace(/\s+/g, ' ');
     if (!text) throw new Error('Give the agent a name.');
@@ -33,13 +51,13 @@ export class Specialists {
     const repository = this.store.config().repositories.find(item => path.resolve(item.path).toLowerCase() === path.resolve(project.path).toLowerCase());
     const item = { id: randomUUID(), name: clean, slug, projectSlug: project.slug, projectPath: project.path, repositoryId: repository?.id || '', purpose: project.purpose || '',
       rules: String(rules).slice(0, 4000), unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12),
-      provider: 'claude', model: String(model || '').slice(0, 80), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, createdAt: now(), updatedAt: now() };
+      provider: 'claude', model: this.cleanModel(model, { strict: true }), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, createdAt: now(), updatedAt: now() };
     this.store.put('specialist', item.id, item); this.writeCard(item); return item;
   }
   update(id, { rules, unsure, provider, model }) {
     const item = this.get(id);
     const updated = { ...item, ...(rules !== undefined ? { rules: String(rules).slice(0, 4000) } : {}), ...(unsure !== undefined ? { unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12) } : {}),
-      ...(model !== undefined ? { model: String(model).slice(0, 80) } : {}), updatedAt: now() };
+      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true }) } : {}), updatedAt: now() };
     this.store.put('specialist', id, updated); this.writeCard(updated); return updated;
   }
   // Renaming moves the card too; the run history and the project stay as they are.
@@ -62,6 +80,12 @@ export class Specialists {
 
   // What the agent is doing right now, for the chat: working on a task, answering a message, waiting for the person, or idle.
   status(agent) {
+    if (agent.kind === 'main') {
+      const run = this.store.list('run').filter(item => item.role === 'coordinator' && item.main).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
+      if (run?.state === 'waiting') return { state: 'waiting', label: 'Needs you', runId: run.id };
+      if (run && ['starting', 'running', 'queued', 'verifying'].includes(run.state)) return { state: 'replying', label: 'Working…', runId: run.id };
+      return { state: 'idle', label: 'Idle', runId: run?.id || '' };
+    }
     const working = ['starting', 'running', 'queued', 'verifying'], runs = this.store.list('run').filter(run => run.specialistId === agent.id);
     const task = runs.find(run => run.role === 'worker' && [...working, 'waiting'].includes(run.state));
     if (task) {

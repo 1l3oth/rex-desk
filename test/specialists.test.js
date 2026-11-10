@@ -56,7 +56,10 @@ test('rename moves the card; duplicate copies the rules under a new name', () =>
 test('editing a specialist updates its rules and model; removing deletes the card', () => {
   const { desk } = setup();
   const agent = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop' });
-  const updated = desk.specialists.update(agent.id, { rules: 'Ask before schema changes.', model: 'opus' });
+  const updated = desk.specialists.update(agent.id, { rules: 'Ask before schema changes.', model: 'Opus 5.5' });
+  assert.equal(updated.model, 'claude-opus-5-5', 'a typed model name becomes the listed id');
+  assert.throws(() => desk.specialists.update(agent.id, { model: 'gpt-5' }), /Choose a model from the list/);
+  assert.equal(desk.specialists.update(agent.id, { model: '' }).model, '', 'empty means the default');
   assert.match(readFileSync(desk.specialists.cardFile(updated), 'utf8'), /Ask before schema changes\./);
   desk.specialists.remove(agent.id);
   assert.equal(desk.specialists.list().length, 0);

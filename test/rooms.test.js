@@ -132,3 +132,16 @@ test('a room can be renamed, given a picture and deleted with its messages', asy
   assert.equal(store.get('room', room.id), undefined);
   assert.equal(store.list('roommsg').filter(item => item.roomId === room.id).length, 0);
 });
+
+test('the main agent can be added to a room as @main, and answers there from its own session', async () => {
+  const { desk, store, turns, room } = setup({ replies: ['I can route this to Dara.'] });
+  desk.rooms.addMember(room.id, 'main');
+  assert.ok(desk.rooms.room(room.id).members.includes('main'));
+  assert.ok(!desk.specialists.list().some(agent => agent.id === 'main'), 'the main agent is not listed as a project agent');
+  await desk.rooms.post(room.id, { text: '@main who should take the cart bug?' });
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === 'main'));
+  assert.equal(turns[0].run.role, 'coordinator'); assert.equal(turns[0].run.main, true);
+  assert.match(desk.rooms.messages(room.id).find(item => item.from.id === 'main').text, /route this to Dara/);
+  assert.equal(desk.rooms.member('main').name, 'Main agent');
+  assert.ok(store.get('specialist', 'main'));
+});

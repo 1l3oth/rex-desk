@@ -13,6 +13,7 @@ export function agentsRail(ctx) {
 export function agentStage(ctx) {
   const { ui, esc, initials } = ctx, agent = (ui.snap.specialists || []).find(item => item.id === ui.view.id);
   if (!agent) return { title: 'Agent', meta: '', feed: '<div class="empty"><h2>That agent is gone.</h2></div>' };
+  delete ui.picks['sp-model'];
   const origin = agent.cloneOf ? (ui.snap.specialists || []).find(item => item.id === agent.cloneOf) : null;
   const feed = `<div class="page"><section class="idcard" data-agent="${esc(agent.id)}">
     <div class="idhead"><div class="avatar big">${esc(initials(agent.name))}</div>
@@ -22,7 +23,7 @@ export function agentStage(ctx) {
     <h3>What this project is for</h3><p class="md">${esc(agent.purpose || 'Not recorded yet.')}</p>
     <label>Rules from you<textarea id="sp-rules" rows="5" placeholder="How this agent should work on this project. For example: ask before changing the database.">${esc(agent.rules)}</textarea></label>
     <label>Still not sure about (one per line)<textarea id="sp-unsure" rows="3">${esc((agent.unsure || []).join('\n'))}</textarea></label>
-    <div class="idrow"><label>Model<input id="sp-model" type="text" maxlength="80" value="${esc(agent.model || '')}" placeholder="default"></label></div>
+    <div class="idrow"><label>Model${pickerHtml(ctx, { id: 'sp-model', label: 'Model', value: agent.model || '', items: [{ value: '', label: 'Default', hint: 'The model set in Settings' }, ...(ui.snap.choices?.models || []).map(model => ({ value: model.id, label: model.label }))] })}</label></div>
     <div class="row"><button class="btn primary" data-action="spec-save">Save</button><button class="btn" data-action="spec-chat">Chat with ${esc(agent.name)}</button><button class="btn" data-action="spec-duplicate">Duplicate with another name</button><span class="spacer"></span><button class="btn danger" data-action="spec-remove">Remove</button></div>
   </section></div>`;
   return { title: agent.name, meta: `${providerName(agent.provider)} · ${agent.projectSlug}`, feed };

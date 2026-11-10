@@ -152,7 +152,7 @@ export function createMcp(desk, scope) {
       return desk.memory.note(input.project, input.note, scope.runId ? desk.run(scope.runId).title || 'agent' : 'agent');
     });
   // The group chats an agent is in. Messages reach it when it is mentioned; these two let it read any of its rooms whenever it wants.
-  const myAgent = () => { const run = scope.runId && desk.run(scope.runId); const agent = run?.specialistId && desk.store.get('specialist', run.specialistId); if (!agent) throw new Error('Only a specialist agent has group chats.'); return agent; };
+  const myAgent = () => { const run = scope.runId && desk.run(scope.runId), id = run?.specialistId || (run?.role === 'coordinator' && run?.main ? 'main' : ''); const agent = id && desk.store.get('specialist', id); if (!agent) throw new Error('Only a specialist agent has group chats.'); return agent; };
   tool('desk_rooms', 'List the group chats you are in, with their members and what each member is doing.', {}, () => desk.rooms.roomsOf(myAgent().id).map(room => ({ roomId: room.id, name: room.name, members: room.members.map(id => { const member = desk.rooms.member(id); return { name: member.name, project: member.project, doing: member.label }; }) })), true);
   tool('desk_room_history', 'Read the recent messages of one of your group chats, as a person catching up on a chat would.', { roomId: z.string().optional().describe('Omit it when you are in one room.'), limit: z.number().int().min(1).max(100).default(30) }, input => {
     const agent = myAgent(), rooms = desk.rooms.roomsOf(agent.id), room = input.roomId ? rooms.find(item => item.id === input.roomId) : rooms.length === 1 ? rooms[0] : null;

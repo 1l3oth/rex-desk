@@ -25,7 +25,7 @@ export function roomStage(ctx) {
   };
   const empty = `<div class="empty"><h2>${esc(room.name)}</h2><p>Mention an agent with @ to talk to it, and a task with #. Agents answer only when they are mentioned, and each one reads this room before it answers.</p></div>`;
   const doing = room.members.filter(member => member.state === 'replying' || member.state === 'busy').map(member => typing(member.name, member.state === 'busy' ? `${member.name} · ${member.label}` : `${member.name} is replying…`)).join('');
-  const free = (ui.snap.specialists || []).filter(agent => !room.members.some(member => member.id === agent.id));
+  const free = [{ id: 'main', name: 'Main agent', projectSlug: 'all projects', status: { label: 'Knows every project' } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
   const chip = member => `<span class="chip member ${esc(member.state)}"><button class="member-open" data-open="${member.runId ? 'run' : 'specialist'}" data-id="${esc(member.runId || member.id)}" title="Open ${esc(member.name)}"><span class="dot ${dotFor(member.state)}"></span><strong>${esc(member.name)}</strong><span class="mlabel">${esc(member.label)}</span></button><button class="btn small x" data-action="room-remove" data-id="${esc(member.id)}" title="Remove from the room">×</button></span>`;
   return { title: room.name, meta: `${room.members.length} agents`, feedClass: 'room',
     composer: { placeholder: 'Message the room. @ mentions an agent, # mentions a task…', mentions: handles, noPickers: true },
@@ -39,7 +39,7 @@ export function roomStage(ctx) {
 function roomInfoHtml(ctx, room) {
   const { ui, esc } = ctx, messages = (ui.snap.messages || []).filter(message => message.roomId === room.id);
   const mentioned = [...new Set(messages.flatMap(message => message.tasks || []))].map(id => (ui.snap.tasks || []).find(task => task.id === id)).filter(Boolean);
-  const free = (ui.snap.specialists || []).filter(agent => !room.members.some(member => member.id === agent.id));
+  const free = [{ id: 'main', name: 'Main agent', projectSlug: 'all projects', status: { label: 'Knows every project' } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
   const member = person => `<li class="rperson"><button class="rperson-main" data-open="${person.runId ? 'run' : 'specialist'}" data-id="${esc(person.runId || person.id)}" title="Open ${esc(person.name)}">${avatarHtml(ctx, { name: person.name, size: 'sm' })}<span class="rperson-text"><b>${esc(person.name)}</b><small>${esc(person.project)} · <span class="st ${esc(person.state)}">${esc(person.label)}</span></small></span></button><button class="btn small x" data-action="room-remove" data-id="${esc(person.id)}" title="Remove from the room" aria-label="Remove ${esc(person.name)}">×</button></li>`;
   return `<div class="side-head"><strong>Chat info</strong><span class="spacer"></span><button type="button" class="btn small" data-action="info-toggle" aria-label="Close the info panel">Close</button></div>
     <div class="side-body rinfo">
@@ -58,7 +58,7 @@ function roomInfoHtml(ctx, room) {
 export function newRoomDialog(ctx) {
   const { ui, esc, toast, api, refresh, open } = ctx, agents = ui.snap.specialists || [];
   const back = document.createElement('div'); back.className = 'dialog-back';
-  back.innerHTML = `<form class="dialog"><h2>New room</h2><label>Name<input type="text" name="name" placeholder="Checkout bug" required maxlength="80"></label><label>Agents in the room</label>${agents.length ? agents.map(agent => `<label class="pick"><input type="checkbox" name="member" value="${esc(agent.id)}"> ${esc(agent.name)} <span class="muted">· ${esc(agent.projectSlug)}</span></label>`).join('') : '<p class="muted">No agents yet. Create one with the + next to Agents, then add it to a room.</p>'}<div class="row"><button class="btn primary">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`;
+  back.innerHTML = `<form class="dialog"><h2>New room</h2><label>Name<input type="text" name="name" placeholder="Checkout bug" required maxlength="80"></label><label>Agents in the room</label><label class="pick"><input type="checkbox" name="member" value="main"> Main agent <span class="muted">· knows every project</span></label>${agents.length ? agents.map(agent => `<label class="pick"><input type="checkbox" name="member" value="${esc(agent.id)}"> ${esc(agent.name)} <span class="muted">· ${esc(agent.projectSlug)}</span></label>`).join('') : '<p class="muted">No agents yet. Create one with the + next to Agents, then add it to a room.</p>'}<div class="row"><button class="btn primary">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`;
   document.body.append(back); back.querySelector('input').focus();
   back.addEventListener('click', event => { if (event.target === back || event.target.dataset.close !== undefined) back.remove(); });
   back.querySelector('form').addEventListener('submit', async event => {
