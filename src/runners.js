@@ -31,33 +31,41 @@ export function writesClaudeHome(name, input = {}) {
   return false;
 }
 
+// Maps the mode picked in the chat input to the SDK. Manual is the SDK's own default. Rex Desk agents start in Dangerous mode (no permission prompts) unless another is picked.
+const sdkMode = mode => ({ manual: 'default' }[mode] || mode || 'bypassPermissions');
+const sessionId = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '')) ? String(value) : '';
+
 export class ClaudeRunner {
   constructor(options) { Object.assign(this, options); }
   async start(prompt) {
-    const { query } = await import('@anthropic-ai/claude-agent-sdk');
+    const { query } = this.sdk || await import('@anthropic-ai/claude-agent-sdk');
     const env = { ...(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
     delete env.CLAUDECODE;
     const executable = resolveCommand('claude');
     const connections = existingMcpConnections(this.sourcePath, env.CLAUDE_CONFIG_DIR), allowedTools = new Set();
     delete connections.rex_desk;
+    const mode = sdkMode(this.run.permissionMode), resume = sessionId(this.run.sessionId);
+    // Dangerous mode skips every permission prompt, so what the prompts used to refuse is refused by a hook instead.
+    const refuseClaudeHome = async input => this.run.role !== 'coordinator' && writesClaudeHome(input.tool_name, input.tool_input)
+      ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Rex Desk agents do not write Claude memory, instructions, or settings. Say what you learned in desk_message instead, and continue the task.' } } : {};
     const options = { cwd: this.cwd, env, abortController: this.controller,
-      permissionMode: this.run.role === 'worker' ? 'acceptEdits' : 'default',
-      ...(this.artifactDirectory ? { additionalDirectories: [this.artifactDirectory] } : {}),
+      permissionMode: mode, ...(mode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
+      ...(this.run.effort ? { effort: this.run.effort } : {}),
+      // Claude Code's own question prompt would not reach the dashboard; the agent asks through desk_ask instead.
+      disallowedTools: ['AskUserQuestion'],
+      additionalDirectories: [this.artifactDirectory, this.uploadsDirectory].filter(Boolean),
       settingSources: ['user', 'project', 'local'],
+      hooks: { PreToolUse: [{ hooks: [refuseClaudeHome] }] },
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
-      ...(this.model ? { model: this.model } : {}), ...(this.run.sessionId ? { resume: this.run.sessionId } : {}),
+      ...(this.model ? { model: this.model } : {}), ...(resume ? { resume } : {}),
       strictMcpConfig: true,
       mcpServers: { ...connections, rex_desk: { type: 'http', url: this.mcpUrl, headers: { Authorization: `Bearer ${this.token}` }, alwaysLoad: true } },
       onElicitation: async request => {
         const answer = await this.ask({ kind: 'question', title: request.message, request, method: 'elicitation' });
         return { action: answer.action, ...(answer.action === 'accept' ? { content: answer.content || {} } : {}) };
       },
+      // Only reached in modes that ask: each request becomes an approval card in the chat.
       canUseTool: async (name, input, context) => {
-        if (name === 'AskUserQuestion') {
-          const answer = await this.ask({ kind: 'question', title: 'Claude needs your input', request: input, method: 'claude-question' });
-          if (answer.action !== 'accept') return { behavior: 'deny', message: 'User declined the question.' };
-          return { behavior: 'allow', updatedInput: { ...input, answers: answer.content || {} } };
-        }
         if (this.run.role !== 'coordinator' && writesClaudeHome(name, input)) return { behavior: 'deny', message: 'Rex Desk agents do not write Claude memory, instructions, or settings. Say what you learned in desk_message instead, and continue the task.' };
         if (quietRexTool(name) || allowedTools.has(name)) return { behavior: 'allow', updatedInput: input };
         const answer = await this.ask({ kind: 'approval', title: `Approve ${name}`, request: { tool: name, input, suggestions: context.suggestions, allowAlways: true }, method: 'claude-permission' });
@@ -71,6 +79,9 @@ export class ClaudeRunner {
       if (message.type === 'system' && message.subtype === 'init') this.event('session', { sessionId: message.session_id });
       if (message.type === 'assistant') {
         const content = message.message?.content?.filter(block => block.type !== 'thinking' && block.type !== 'redacted_thinking');
+        // What the agent says shows in the chat; its tool calls stay in the journal.
+        const text = (content || []).filter(block => block.type === 'text').map(block => block.text).join('\n').trim();
+        if (text) this.event('agent-text', { text });
         this.event('agent-operation', { type: 'assistant', content });
       }
       if (message.type === 'user') this.event('agent-operation', { type: 'tool-result', content: message.message?.content });

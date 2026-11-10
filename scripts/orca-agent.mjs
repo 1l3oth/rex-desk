@@ -20,8 +20,8 @@ if (spec.provider === 'claude') {
   cleanup = () => rmSync(config, { force: true });
   // Claude Code's own question prompt would appear only in this terminal, where the dashboard cannot show it or
   // record the answer, so it is turned off and the agent asks through desk_ask instead.
-  args = [...spec.executable.args, '--allowedTools', 'mcp__rex_desk_run', '--mcp-config', config, '--disallowed-tools', 'AskUserQuestion',
-    ...(resume ? ['--resume', resume] : []), ...(spec.addDir ? ['--add-dir', spec.addDir] : []), ...(spec.model ? ['--model', spec.model] : []), spec.prompt];
+  args = [...spec.executable.args, '--allowedTools', 'mcp__rex_desk_run', ...(spec.effort ? ['--effort', spec.effort] : []), ...(spec.permissionMode && spec.permissionMode !== 'manual' ? ['--permission-mode', spec.permissionMode] : []), '--mcp-config', config, '--disallowed-tools', 'AskUserQuestion',
+    ...(resume ? ['--resume', resume] : []), ...(spec.addDir ? ['--add-dir', spec.addDir, ...(spec.uploadsDir ? [spec.uploadsDir] : [])] : []), ...(spec.model ? ['--model', spec.model] : []), spec.prompt];
 } else {
   console.error('Rex Desk runs Claude Code only. Resume this run to continue with Claude Code.'); process.exit(2);
 }

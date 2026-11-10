@@ -1,7 +1,8 @@
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, createReadStream, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, createReadStream, createWriteStream, rmSync, statSync } from 'node:fs';
 import { Store } from './store.js';
 import { Desk } from './coordinator.js';
 import { handleMcp } from './mcp.js';
@@ -232,6 +233,13 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         if (request.method === 'POST' && part === 'rename') return json(response, 200, desk.specialists.rename(specialistId, (await body(request)).name));
         if (request.method === 'POST' && part === 'duplicate') return json(response, 200, desk.specialists.duplicate(specialistId, (await body(request)).name));
         if (request.method === 'DELETE' && !part) return json(response, 200, desk.specialists.remove(specialistId));
+      }
+      if (url.pathname === '/api/uploads' && request.method === 'POST') {
+        const name = path.basename(String(url.searchParams.get('name') || 'file')).replace(/[^\p{L}\p{N}._ -]+/gu, '_').slice(0, 120) || 'file', folder = path.join(store.directory, 'uploads', randomUUID()), target = path.join(folder, name);
+        mkdirSync(folder, { recursive: true }); let size = 0; const out = createWriteStream(target);
+        try { for await (const chunk of request) { size += chunk.length; if (size > 25 * 1024 * 1024) throw new Error('A file can be at most 25 MB.'); if (!out.write(chunk)) await new Promise(resolve => out.once('drain', resolve)); } await new Promise((resolve, reject) => { out.end(); out.once('finish', resolve); out.once('error', reject); }); }
+        catch (error) { out.destroy(); rmSync(folder, { recursive: true, force: true }); throw error; }
+        return json(response, 200, { path: target, name, size });
       }
       if (url.pathname === '/api/main' && request.method === 'POST') return json(response, 200, await desk.startMain(await body(request)));
       if (url.pathname === '/api/memory' && request.method === 'GET') return json(response, 200, { directory: desk.memory.directory, projects: desk.memory.list(), scannedAt: desk.memory.state().scannedAt || null });

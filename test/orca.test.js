@@ -138,7 +138,6 @@ test('an Orca agent’s session log is found for its id, and Rex Desk messages a
   const sent = [];
   const desk = new Desk(store, { root: config, runnerFactory: () => ({}), orcaOptions: { run: (command, args, options, callback) => { sent.push(args); callback(null, JSON.stringify({ ok: true, result: { accepted: true } })); } } });
   store.put('run', 'r1', { id: 'r1', role: 'worker', provider: 'claude', execution: 'orca', sessionId: 'orca:term_1', worktree, state: 'running', createdAt: now() });
-  await assert.rejects(desk.say('r1', 'hello'), /Only a running Orca agent/);
   desk.live.set('r1', { controller: new AbortController() });
   await desk.say('r1', 'please also\ncheck Japanese');
   assert.deepEqual(sent[0].slice(0, 7), ['terminal', 'send', '--terminal', 'term_1', '--text', 'please also check Japanese', '--enter']);

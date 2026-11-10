@@ -19,7 +19,7 @@ export const id = () => randomUUID();
 export const defaults = {
   name: 'Rex', provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
   syncMinutes: 5, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
-  models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, execution: 'orca',
+  models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, execution: 'headless',
   schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], fix: true, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
 };
 // Claude Code accepts family aliases (opus, sonnet, haiku, fable) or full IDs such as claude-opus-5-5. Typed shorthand is normalized.
@@ -150,7 +150,7 @@ export class Store extends EventEmitter {
   migrateConfig() {
     const config = this.get('config', 'main');
     if (!config) return;
-    if (config.execution !== 'orca') this.put('config', 'main', { ...config, execution: 'orca' });
+    if (config.execution !== 'headless') this.put('config', 'main', { ...config, execution: 'headless' });
     if (Array.isArray(config.testAccounts)) return;
     const legacy = config.testAccount || {}, accounts = [];
     const carry = (from, to) => { const saved = this.get('secret', from); if (saved) this.put('secret', `test-account:${to}`, saved); };
@@ -207,7 +207,7 @@ export class Store extends EventEmitter {
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
       syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code') },
-      tourDismissed: Boolean(input.tourDismissed), execution: 'orca', testAccounts: accounts,
+      tourDismissed: Boolean(input.tourDismissed), execution: 'headless', testAccounts: accounts,
       schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false, versions: String(input.jev?.versions || '').trim().slice(0, 300) } };
     for (const account of accounts) {
       const password = String((input.testAccounts || []).find(item => item.id === account.id)?.password || '');

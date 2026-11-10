@@ -198,7 +198,7 @@ async function send() {
     else if (type === 'main' && !mainRun()) await api('/main', { method: 'POST', data: { prompt: text } });
     else {
       const run = type === 'main' ? mainRun() : runById(id);
-      if (workingStates.includes(run.state) && run.execution === 'orca') await api(`/runs/${run.id}/say`, { method: 'POST', data: { text } });
+      if (workingStates.includes(run.state)) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text } });
       else { await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text } }); if (run.provider === 'codex') toast('Claude Code took over from Codex. The chat so far was handed over.'); }
     }
     box.value = ''; ui.drafts.delete(draftKey()); await refresh();

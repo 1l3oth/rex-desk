@@ -102,9 +102,9 @@ export class Rooms {
       const run = this.store.get('run', runId);
       if (!run) continue;
       if (message.from.type === 'run' && message.from.id === runId) continue;
-      if (this.desk.live.has(runId) && run.execution === 'orca') {
+      if (this.desk.live.has(runId)) {
         const line = `Rex Desk room "${room.name}": ${message.from.label} mentioned you. Call desk_room_read, and answer with desk_room_post if it needs a reply.`;
-        await sendToOrca(run, line, this.desk.orcaOptions).catch(error => this.store.event(runId, 'room-nudge-failed', { message: error.message }));
+        await this.desk.say(runId, line).catch(error => this.store.event(runId, 'room-nudge-failed', { message: error.message }));
       } else if (!run.external) {
         const wake = { id: randomUUID(), roomId: room.id, runId, messageId: message.id, from: message.from.label, text: message.text.slice(0, 300), state: 'pending', createdAt: now() };
         if (!this.store.list('roomwake').some(item => item.runId === runId && item.state === 'pending' && item.roomId === room.id)) this.store.put('roomwake', wake.id, wake);
