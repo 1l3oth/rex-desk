@@ -827,3 +827,7 @@ button.cn-main{cursor:pointer}
 
 /* ---- a sign-in an agent needs ---- */
 .scard{gap:10px}.scmd code{display:block;padding:10px 12px;border-radius:9px;background:#0d0f12;color:#7ee787;font:13px var(--mono);overflow-x:auto;white-space:nowrap}
+/* cards inside a chat message never grow wider than the chat; long commands and paths wrap */
+.msg>.card,.msg>.qcard,.msg>.fcard,.msg>.scard,.rmsg>.card{flex:1 1 auto;min-width:0;max-width:100%}
+.scmd{min-width:0}.scmd code{white-space:pre-wrap;word-break:break-all;overflow-x:visible}
+.fpath code,.qtext,.fnote{overflow-wrap:anywhere}
