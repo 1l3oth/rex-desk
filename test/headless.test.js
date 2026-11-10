@@ -77,3 +77,31 @@ test('an agent\'s tool calls reach the chat as short steps, without file content
   assert.equal(steps[1].tool, 'Write'); assert.equal(steps[1].input.file_path, 'F:/p/a.txt'); assert.ok(!JSON.stringify(steps[1]).includes('SECRET FILE CONTENTS'), 'contents are never shown');
   assert.equal(steps[2].failed, true); assert.match(steps[2].text, /Permission denied/);
 });
+
+test('a resumed headless session is given only what is new, not the whole startup prompt again', async () => {
+  const store = new Store(temporary('followup')), starts = [];
+  const desk = new Desk(store, { root: temporary('root'), runnerFactory: options => ({ start: prompt => new Promise(resolve => { starts.push({ prompt, release: resolve }); options.event('session', { sessionId: SESSION }); }), interrupt() {}, close() {} }) });
+  const waitFor = async predicate => { for (let attempt = 0; attempt < 200; attempt++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 25)); } throw new Error('timed out'); };
+  try {
+    const main = await desk.startMain({ prompt: 'hi' });
+    await waitFor(() => starts.length === 1);
+    assert.match(starts[0].prompt, /main agent of Rex Desk/, 'the first turn carries the startup prompt');
+    starts[0].release(); await waitFor(() => store.get('run', main.id).state === 'finished');
+    await desk.resume(main.id, { prompt: 'next question' });
+    await waitFor(() => starts.length === 2);
+    assert.equal(starts[1].prompt, 'next question');
+    starts[1].release();
+  } finally { await desk.shutdown(); store.close(); }
+});
+
+test('after a restart, headless agents that were just cut off pick their session up again; older and terminal ones do not', async () => {
+  const store = new Store(temporary('restart')), desk = new Desk(store, { root: temporary('root') });
+  desk.closed = true;
+  const cut = (id, extra) => store.put('run', id, { id, role: 'coordinator', main: true, title: id, provider: 'claude', execution: 'headless', state: 'interrupted', error: 'Server restarted. Resume this run to continue.', endedAt: new Date().toISOString(), createdAt: new Date().toISOString(), sessionId: SESSION, ...extra });
+  cut('fresh'); cut('old', { endedAt: new Date(Date.now() - 3600000).toISOString() }); cut('orca', { execution: 'orca' }); cut('stopped', { error: 'Run stopped.' });
+  await desk.resumeInterrupted();
+  assert.equal(store.get('run', 'fresh').state, 'queued');
+  assert.match(store.get('run', 'fresh').followUp, /Rex Desk restarted/);
+  assert.ok(store.events('fresh', { visible: true }).some(item => /picking up where it stopped/.test(item.text || '')));
+  for (const id of ['old', 'orca', 'stopped']) assert.equal(store.get('run', id).state, 'interrupted', `${id} is left alone`);
+});

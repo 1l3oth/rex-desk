@@ -2,6 +2,7 @@ import { Rooms } from './rooms.js';
 import { Memory } from './memory.js';
 import { Specialists } from './specialists.js';
 import { ClaudeRunner } from './runners.js';
+import { Notifier } from './notify.js';
 import { MODELS, EFFORTS, MODES, runOptions } from './choices.js';
 import path from 'node:path';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
@@ -58,7 +59,7 @@ export class Desk {
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
     this.sources = new Sources(store, { fetcher, onSynced: () => { if (this.store.config().jev?.auto !== false && this.jev.apiKey()) void this.jev.prioritize().catch(error => store.event('', 'jev-error', { message: error.message })); } }); this.live = new Map(); this.waiters = new Map(); this.tokens = new Map();
     this.query = new TrackerQuery(store, this.sources, { apiKey: () => this.jev.apiKey(), env: () => this.agents.environment('claude'), cwd: path.join(store.directory, 'coordinator'), ...(queryModel ? { model: queryModel } : {}) });
-    this.rooms = new Rooms(this); this.memory = new Memory(memoryDirectory); this.specialists = new Specialists(this); this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
+    this.presence = { focused: false, at: 0 }; this.notifier = new Notifier(store, { focused: () => this.presence.focused && Date.now() - this.presence.at < 45000, enabled: () => !process.env.NODE_TEST_CONTEXT && this.store.config().notify !== false }); this.rooms = new Rooms(this); this.memory = new Memory(memoryDirectory); this.specialists = new Specialists(this); this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
     this.evidence = new Evidence(store, runId => this.run(runId), (runId, kind, data) => {
       store.event(runId, kind, data);
     }, () => this.mcpUrl);
@@ -317,7 +318,10 @@ export class Desk {
       // Each turn records its own start, so a resumed run shows time since it resumed, not since it was first created.
       this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), turnStartedAt: now(), endedAt: null, error: '' });
       this.store.event(runId, 'turn-start', { provider: run.provider, resumed: Boolean(run.startedAt) });
-      await runner.start(this.prompt(run));
+      // A headless session that is being reopened already holds the whole conversation, so it is given only what is new.
+      const reopened = run.execution !== 'orca' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && run.followUp;
+      if (run.followUp) this.patchRun(runId, { followUp: '' });
+      await runner.start(reopened ? run.followUp : this.prompt(run));
       const current = this.run(runId);
       if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' ? 'finished' : 'needs_evidence', endedAt: now() });
     } catch (error) {
@@ -486,6 +490,15 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     return { taskId, deskStatus: updated.deskStatus, deskNote: updated.deskNote, at: updated.deskStatusAt, by: updated.deskStatusBy };
   }
   message(runId, text) { this.run(runId); this.store.event(runId, 'message', { text: String(text).slice(0, 50000) }, true); return { delivered: true }; }
+  // Headless agents live in this process, so a restart ends their turn. Each one that was cut off a moment ago picks its session up again by itself.
+  async resumeInterrupted() {
+    for (const run of this.store.list('run')) {
+      if (run.execution !== 'headless' || run.state !== 'interrupted' || !/Server restarted/.test(run.error || '') || Date.now() - Date.parse(run.endedAt || 0) > 120000) continue;
+      this.store.event(run.id, 'phase', { text: 'Rex Desk restarted; the agent is picking up where it stopped' }, true);
+      await this.resume(run.id, { prompt: 'Rex Desk restarted while you were working. Continue where you left off. If you were waiting for an answer from the person, ask again.', silent: true })
+        .catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
+    }
+  }
   async stop(runId) {
     const active = this.live.get(runId);
     active?.controller.abort();
@@ -512,7 +525,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (!sameProvider) this.store.event(runId, 'provider-switch', { text: `Switched from ${providerLabel(run.provider)} to ${providerLabel(provider)}. The earlier conversation was handed over.`, from: run.provider, to: provider }, true);
     // The follow-up is part of the conversation: it shows in the chat the moment it is sent.
     if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: String(prompt).replace(/\s+/g, ' ').trim(), via: 'rex' }, true);
-    this.patchRun(runId, { state: 'queued', provider, sessionId: sameProvider ? run.sessionId : undefined, mirror: sameProvider ? run.mirror : undefined,
+    this.patchRun(runId, { state: 'queued', provider, followUp: sameProvider ? String(prompt).trim() : '', sessionId: sameProvider ? run.sessionId : undefined, mirror: sameProvider ? run.mirror : undefined,
       instructions: `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
       ...runOptions(picked), ...(run.role === 'coordinator' ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
     void this.drain(); return this.run(runId);

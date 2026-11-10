@@ -241,6 +241,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         catch (error) { out.destroy(); rmSync(folder, { recursive: true, force: true }); throw error; }
         return json(response, 200, { path: target, name, size });
       }
+      if (url.pathname === '/api/presence' && request.method === 'POST') { desk.presence = { focused: Boolean((await body(request)).focused), at: Date.now() }; return json(response, 200, { ok: true }); }
       if (url.pathname === '/api/main' && request.method === 'POST') return json(response, 200, await desk.startMain(await body(request)));
       if (url.pathname === '/api/memory' && request.method === 'GET') return json(response, 200, { directory: desk.memory.directory, projects: desk.memory.list(), scannedAt: desk.memory.state().scannedAt || null });
       if (url.pathname === '/api/memory/page' && request.method === 'GET') return json(response, 200, { page: url.searchParams.get('name') || 'index', text: desk.memory.readDoc(url.searchParams.get('name') || 'index') });
@@ -266,7 +267,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html', download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg' };
       const file = publicFiles[url.pathname];
       if (!file || !existsSync(path.join(root, 'public', file))) return json(response, 404, { error: 'Page not found.' });
       return serveFile(request, response, path.join(root, 'public', file));
@@ -277,6 +278,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
   const address = `http://127.0.0.1:${server.address().port}`;
   desk.mcpUrl = `${address}/mcp`;
   desk.reattachOrca();
+  void desk.resumeInterrupted(); desk.notifier.start();
   let lastSync = Date.now(), ticks = 0;
   void desk.findPullRequests();
   const timer = setInterval(() => {

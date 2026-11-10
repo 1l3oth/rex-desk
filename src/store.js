@@ -17,7 +17,7 @@ export const deskStatus = value => (deskStatusLabels[String(value || '').trim().
 export const now = () => new Date().toISOString();
 export const id = () => randomUUID();
 export const defaults = {
-  name: 'Rex', provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
+  name: 'Rex', notify: true, provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
   syncMinutes: 5, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
   models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, execution: 'headless',
   schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], fix: true, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
@@ -203,7 +203,7 @@ export class Store extends EventEmitter {
     const accounts = (Array.isArray(input.testAccounts) ? input.testAccounts : []).map(account => ({
       id: String(account.id || id()), site: String(account.site || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').slice(0, 200),
       username: String(account.username || '').trim().slice(0, 200) })).filter(account => account.username);
-    const config = { ...defaults, name: String(input.name || 'Rex'), provider: 'claude',
+    const config = { ...defaults, name: String(input.name || 'Rex'), notify: input.notify !== false, provider: 'claude',
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
       syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code') },
