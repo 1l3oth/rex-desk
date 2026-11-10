@@ -80,7 +80,23 @@ function commands(ctx) {
     ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }] : []),
     { name: 'voice', hint: 'Voice engine and language: compare which one understands you', run: () => voiceDialog(ctx) },
     { name: 'settings', hint: 'Open settings', run: c.settings },
+    // The agent's own skills and commands, like typing / in Claude Code: choosing one puts it in the box to send to the agent.
+    ...agentSlash(ctx),
   ];
+}
+function toolsAgent(ctx) {
+  const { ui } = ctx, view = ui.view;
+  if (view.type === 'main') return 'main';
+  if (view.type === 'run') { const run = (ui.snap?.runs || []).find(item => item.id === view.id); return run?.specialistId || (run?.main ? 'main' : ''); }
+  return '';
+}
+function agentSlash(ctx) {
+  const id = toolsAgent(ctx); if (!id) return [];
+  const tools = ctx.ui.tools?.[id];
+  if (!tools) { ctx.ui.tools = ctx.ui.tools || {}; ctx.ui.tools[id] = { skills: [], commands: [], loading: true }; void ctx.api(`/agents/tools?agent=${encodeURIComponent(id)}`).then(found => { ctx.ui.tools[id] = found; }).catch(() => {}); return []; }
+  const put = name => () => { const box = document.getElementById('draft'); if (!box) return; box.value = `/${name} `; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); };
+  return [...(tools.commands || []).map(item => ({ name: item.name, hint: `Command · ${item.description || item.source}`, run: put(item.name) })),
+    ...(tools.skills || []).map(item => ({ name: item.name, hint: `Skill · ${item.description || item.source}`, run: put(item.name) }))];
 }
 function drawMenu(ctx) {
   const host = document.getElementById('menu'); if (!host) return;

@@ -634,6 +634,7 @@ function personalSide(run, agent, items, shells) {
     <div class="rhero">${avatarHtml(ctx, { name: agent.name, size: 'xl' })}<h2 class="pname">${esc(agent.name)}</h2><p class="rsub"><span class="dot ${stateTone(run) === 'working' ? 'working' : 'good'}"></span> ${esc(agent.status?.label || stateLabel(run))}${agent.main ? '' : ` on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>`}</p></div>
     ${agent.purpose ? `<h3>About</h3><p class="pabout">${esc(agent.purpose)}</p>` : ''}
     ${agent.main ? '' : `<h3>Claude account</h3>${pickerHtml(ctx, { id: 'pp-profile', label: 'Claude account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.claude?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}<button type="button" class="btn small quiet" data-action="accounts">Manage accounts</button>`}
+    ${toolsHtml(agent.main ? 'main' : agent.id)}
     ${agent.main ? '' : `<h3>Tasks come from</h3><p class="pabout">${esc(sources.join(', ') || 'Not set yet')}</p>`}
     ${(agent.lessons || []).length ? `<h3>Lessons learned <span>${agent.lessons.length}</span></h3><ul class="plessons">${agent.lessons.slice(-4).map(lesson => `<li>${esc(lesson.text)}</li>`).join('')}</ul>` : ''}
     ${rooms.length ? `<h3>Group chats <span>${rooms.length}</span></h3><ul class="rtasks">${rooms.map(room => `<li><button class="rtask" data-open="room" data-id="${esc(room.id)}">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'xs' })}<span>${esc(room.name)}</span></button></li>`).join('')}</ul>` : ''}
@@ -782,3 +783,14 @@ document.addEventListener('change', async event => {
 });
 // Forms inside popups are handled by their buttons; pressing Enter never reloads the page.
 document.addEventListener('submit', event => { if (event.target.closest?.('.settings-pop,.acct-dialog,.vdialog,.src-dialog')) event.preventDefault(); });
+
+// The MCP servers and skills an agent has, in its profile panel.
+function toolsHtml(id) {
+  const tools = ui.tools?.[id];
+  if (!tools || tools.loading) { ui.tools = ui.tools || {}; if (!tools) { ui.tools[id] = { loading: true, skills: [], commands: [], mcp: [] }; void api(`/agents/tools?agent=${encodeURIComponent(id)}`).then(found => { ui.tools[id] = found; renderAll(); }).catch(() => {}); } return '<h3>Tools</h3><p class="muted small">Checking…</p>'; }
+  const server = item => `<li><span class="tl-type ${esc(item.type)}">${esc(item.type === 'stdio' ? 'local' : item.type)}</span><b>${esc(item.name)}</b><small>${esc(item.where || '')}${item.source ? ` · ${esc(item.source === 'account' ? 'from the Claude account' : item.source === 'project' ? 'from the project' : item.source)}` : ''}</small></li>`;
+  const skills = [...(tools.commands || []), ...(tools.skills || [])];
+  return `<h3>Tools (MCP) <span>${tools.mcp.length}</span></h3><ul class="tl-list">${tools.mcp.map(server).join('')}</ul>
+    <details class="tl-skills"><summary><h3>Skills and commands <span>${skills.length}</span></h3></summary><ul class="tl-list">${skills.map(item => `<li><b>/${esc(item.name)}</b><small>${esc(item.description || '')}</small></li>`).join('') || '<li class="muted small">None.</li>'}</ul></details>
+    <p class="muted small">Type / in the message box to use one.</p>`;
+}

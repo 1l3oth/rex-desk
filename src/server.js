@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { tailscaleAddresses } from './peers.js';
 import QRCode from 'qrcode';
+import { agentTools } from './agent-tools.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -345,6 +346,11 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return json(response, 200, { branch: issueBranch(input.pattern, { prefix: input.prefix || 'temp/rex' }) });
       }
       if (url.pathname === '/api/config' && request.method === 'PUT') { const saved = store.saveConfig(await body(request)); desk.agents.invalidate(); return json(response, 200, saved); }
+      // The skills, commands and MCP servers an agent has (or Rex Agent, with agent=main), for the / menu and its profile.
+      if (url.pathname === '/api/agents/tools' && request.method === 'GET') {
+        const id = url.searchParams.get('agent') || 'main', agent = id === 'main' ? null : store.get('specialist', id);
+        return json(response, 200, agentTools({ profile: agent?.profile || desk.agents.selected('claude') || '', projectPath: agent?.projectPath || '', extra: desk.orbitAccountMcp() }));
+      }
       if (url.pathname === '/api/agents/login' && request.method === 'POST') return json(response, 200, desk.agents.login('claude', String((await body(request)).profile || '')));
       if (url.pathname === '/api/agents/add' && request.method === 'POST') { const created = desk.agents.addProfile('claude', (await body(request)).name); return json(response, 200, { ...created, ...desk.agents.login('claude', created.profile) }); }
       if (url.pathname === '/api/accounts/auto' && request.method === 'GET') return json(response, 200, { on: !store.get('accounts', 'auto')?.off });

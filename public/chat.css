@@ -813,3 +813,14 @@ button.cn-main{cursor:pointer}
 .diff{margin:6px 0 0;max-height:320px;overflow:auto;padding:6px 0;border:1px solid var(--line);border-radius:8px;background:#0d0f12;font:11.5px/1.5 var(--mono);white-space:pre}
 .diff span{display:block;padding:0 10px}.diff .dadd{background:rgba(63,185,80,.14);color:#7ee787}.diff .ddel{background:rgba(248,81,73,.13);color:#ffa198}.diff .dgap{color:#8b93a1;text-align:center}
 .arow .dfile{margin-left:26px}
+
+/* ---- an agent's tools and skills in its profile ---- */
+.tl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.tl-list li{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:8px;align-items:baseline;padding:6px 8px;border-radius:8px;background:var(--raised);font-size:13px}
+.tl-list li small{grid-column:1 / -1;color:var(--muted);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tl-skills .tl-list li{grid-template-columns:1fr}
+.tl-type{font:600 10px var(--mono);padding:1px 6px;border-radius:5px;background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent);text-transform:uppercase}
+.tl-type.stdio{background:color-mix(in srgb,var(--good) 16%,transparent);color:var(--good)}
+.tl-skills summary{list-style:none;cursor:pointer}.tl-skills summary::-webkit-details-marker{display:none}.tl-skills summary h3{display:inline}
+.tl-skills summary h3::after{content:' ▸';font-size:10px;color:var(--muted)}.tl-skills[open] summary h3::after{content:' ▾'}
+.menu{max-height:min(420px,60vh);overflow:auto}
