@@ -56,3 +56,10 @@ test('page names cannot escape the memory folder', () => {
   assert.throws(() => memory.readDoc('../../secret'), /No memory page/);
   assert.match(memory.readDoc('user'), /About the person/);
 });
+
+test('agents get the chat style, which the person can change in chat-style.md', () => {
+  const memory = new Memory(temporary('style')).ensure();
+  assert.match(memory.chatStyle(), /Write like a teammate in a group chat/);
+  writeFileSync(path.join(memory.directory, 'chat-style.md'), '# Mine\n- Always one sentence.');
+  assert.equal(memory.chatStyle(), '# Mine\n- Always one sentence.');
+});

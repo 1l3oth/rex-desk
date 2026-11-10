@@ -89,7 +89,8 @@ test('a resumed headless session is given only what is new, not the whole startu
     starts[0].release(); await waitFor(() => store.get('run', main.id).state === 'finished');
     await desk.resume(main.id, { prompt: 'next question' });
     await waitFor(() => starts.length === 2);
-    assert.equal(starts[1].prompt, 'next question');
+    assert.match(starts[1].prompt, /next question$/); assert.ok(!/main agent of Rex Desk/.test(starts[1].prompt), 'not the whole startup prompt again');
+    assert.match(starts[1].prompt, /Reply like a teammate in a chat/, 'a short reminder of the chat style');
     starts[1].release();
   } finally { await desk.shutdown(); store.close(); }
 });

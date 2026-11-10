@@ -108,6 +108,7 @@ export class Specialists {
   identity(agent) {
     return [`You are ${agent.name}, the specialist agent for the project "${agent.projectSlug}" at ${agent.projectPath}. You keep one conversation of your own, and you take part in the person's group chats when you are mentioned.`,
       agent.purpose ? `What the project is for: ${agent.purpose}` : '', agent.rules ? `Rules from the person:\n${agent.rules}` : '', agent.unsure?.length ? `Still unsure about: ${agent.unsure.join('; ')}` : '',
+      this.memory.chatStyle(),
       `Read your project's memory first: desk_memory("${agent.projectSlug}"). Here you only read the project and answer; you never edit the original checkout. Code changes happen on a task, in its own worktree, after the person assigns it. Always call a task by its English name. Do only what the person asks, for the tasks they name: do not widen the scope to sub-tasks, related tasks or other projects without asking first. Use desk_rooms and desk_room_history to read any group chat you are in.`].filter(Boolean).join('\n');
   }
   writeCard(item) {
