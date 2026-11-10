@@ -25,6 +25,7 @@ import { weeklyReport } from './report.js';
 import { orcaStatus, showWorktreesInOrca, openInOrca } from './orca.js';
 import { Computer } from './computer.js';
 import { Voice } from './voice.js';
+import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
 import { scanRoots } from './placement.js';
@@ -211,6 +212,43 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return json(response, 200, { repositories: discoverRepositories([...configured.map(item => path.dirname(item)), path.dirname(root)], configured) });
       }
       if (url.pathname === '/api/report' && request.method === 'GET') return json(response, 200, await weeklyReport(store, { from: url.searchParams.get('from'), to: url.searchParams.get('to'), detail: taskId => desk.sources.taskDetail(taskId, { refresh: true }) }));
+      // Speech to text, for the chat and the Jev bar. It works whether or not computer control is on.
+      // The engine is the on-computer model, or (when the person chose one) Gemini through their OpenRouter key, or ElevenLabs Scribe.
+      if (url.pathname.startsWith('/api/voice/')) {
+        const control = store.config().control || {}, language = url.searchParams.get('language') || control.language || 'en';
+        const elevenKey = () => { const saved = store.get('secret', 'elevenlabs'); return saved ? store.decrypt(saved) : ''; };
+        const engines = () => ({ local: voice.status().installed, gemini: Boolean(desk.jev.apiKey()), elevenlabs: Boolean(elevenKey()) });
+        const chosen = () => store.get('voice', 'engine')?.engine || 'local';
+        const run = (engine, audio) => engine === 'gemini' ? transcribeGemini(audio, language, desk.jev.apiKey()) : engine === 'elevenlabs' ? transcribeElevenLabs(audio, language, elevenKey()) : voice.transcribe(audio, language);
+        if (url.pathname === '/api/voice/engines' && request.method === 'GET') return json(response, 200, { engine: chosen(), available: engines() });
+        if (url.pathname === '/api/voice/engine' && request.method === 'POST') {
+          const engine = String((await body(request)).engine || '');
+          if (!['local', 'gemini', 'elevenlabs'].includes(engine)) return json(response, 400, { error: 'Choose local, gemini or elevenlabs.' });
+          if (!engines()[engine]) return json(response, 400, { error: engine === 'local' ? 'Install the voice model first.' : engine === 'gemini' ? 'Add your OpenRouter key first (Issues & settings → Jev priority).' : 'Add your ElevenLabs key first.' });
+          store.put('voice', 'engine', { id: 'engine', engine }); return json(response, 200, { engine });
+        }
+        if (url.pathname === '/api/voice/key' && request.method === 'POST') {
+          const key = String((await body(request)).key || '').trim();
+          if (!key) { store.delete('secret', 'elevenlabs'); if (chosen() === 'elevenlabs') store.put('voice', 'engine', { id: 'engine', engine: 'local' }); return json(response, 200, { saved: false }); }
+          if (key.length < 20) return json(response, 400, { error: 'That does not look like an ElevenLabs API key.' });
+          store.put('secret', 'elevenlabs', store.encrypt(key)); return json(response, 200, { saved: true });
+        }
+        if (url.pathname === '/api/voice/install' && request.method === 'POST') { void voice.install().then(notify, notify); return json(response, 202, voice.status()); }
+        if (url.pathname === '/api/voice/prepare' && request.method === 'POST') return json(response, 200, { ready: chosen() === 'local' ? await voice.prepare(language) : true });
+        if (url.pathname === '/api/voice/transcribe' && request.method === 'POST') {
+          const audio = await rawBody(request), engine = url.searchParams.get('engine') || chosen();
+          // An online engine that fails falls back to the on-computer model, and the answer says so.
+          if (engine !== 'local') try { const started = Date.now(); return json(response, 200, { ...await run(engine, audio), ms: Date.now() - started }); } catch (error) { if (!engines().local) throw error; return json(response, 200, { ...await voice.transcribe(audio, language), fallback: `${error.message} Used the voice model on this computer instead.` }); }
+          return json(response, 200, await voice.transcribe(audio, language));
+        }
+        // One recording through every engine that is ready, side by side, so the person can hear which one understands them.
+        if (url.pathname === '/api/voice/compare' && request.method === 'POST') {
+          const audio = await rawBody(request), ready = Object.entries(engines()).filter(([, on]) => on).map(([engine]) => engine);
+          const results = await Promise.all(ready.map(async engine => { const started = Date.now(); try { const result = await run(engine, audio); return { engine, text: result.text, model: result.model || '', ms: Date.now() - started }; } catch (error) { return { engine, error: error.message, ms: Date.now() - started }; } }));
+          return json(response, 200, { language, results });
+        }
+        return json(response, 404, { error: 'Unknown voice request.' });
+      }
       if (url.pathname.startsWith('/api/computer') || url.pathname.startsWith('/api/voice')) {
         const control = store.config().control || {};
         if (url.pathname === '/api/computer' && request.method === 'GET') return json(response, 200, { platform: computer.key, catalog: computer.catalog(), control, voice: { ...voice.status(), sizeMB: voice.size() }, anywhere: await anywhere.status() });

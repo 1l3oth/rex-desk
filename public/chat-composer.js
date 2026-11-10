@@ -78,6 +78,7 @@ function commands(ctx) {
     ...(ui.view.type === 'room' ? [{ name: 'assign', hint: 'Give a task to an agent: /assign @agent #task', run: c.assign }] : []),
     { name: 'main', hint: 'Go to Rex Agent', run: c.main },
     ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }] : []),
+    { name: 'voice', hint: 'Voice engine and language: compare which one understands you', run: () => voiceDialog(ctx) },
     { name: 'settings', hint: 'Open issues and settings', run: c.settings },
   ];
 }
@@ -201,7 +202,7 @@ export function initComposer(ctx) {
     if (button.dataset.action === 'mic') return toggleMic(ctx);
     const items = [
       { name: 'Attach a file or image', plain: true, hint: '', run: () => document.getElementById('file-input').click() },
-      { name: 'Start a room', plain: true, run: ctx.commands.room }, { name: 'Create an agent', plain: true, run: ctx.commands.agent }, { name: 'Scan for projects', plain: true, run: ctx.commands.projects },
+      { name: 'Start a room', plain: true, run: ctx.commands.room }, { name: 'Create an agent', plain: true, run: ctx.commands.agent }, { name: 'Scan for projects', plain: true, run: ctx.commands.projects }, { name: 'Voice engine and language', plain: true, run: () => voiceDialog(ctx) },
     ];
     ctx.ui.menu = { kind: 'slash', items, index: 0, from: 0 }; drawMenu(ctx);
   });
@@ -239,3 +240,57 @@ export function initComposer(ctx) {
   });
 }
 export const redrawAttachments = drawChips;
+
+// ---------- voice engine: which speech-to-text understands the person best ----------
+const ENGINE = { local: ['On this computer', 'Private and free. Weak on Khmer.'], gemini: ['Gemini (online)', 'Uses your OpenRouter key. Good with Khmer.'], elevenlabs: ['ElevenLabs Scribe (online)', 'Its own key. Strong across languages.'] };
+const LANG = [['km', 'Khmer'], ['en', 'English'], ['ko', 'Korean']];
+async function voiceDialog(ctx) {
+  const { api, toast, esc } = ctx;
+  document.querySelector('.dialog-back.voice')?.remove();
+  const back = document.createElement('div'); back.className = 'dialog-back voice'; document.body.append(back);
+  let info = await api('/voice/engines').catch(error => { toast(error.message, true); return null; }); if (!info) { back.remove(); return; }
+  let results = null, recording = null, busy = false;
+  const setLanguage = value => { try { localStorage.setItem('jev-language', value); } catch {} };
+  const draw = () => {
+    const language = voiceLanguage(ctx);
+    back.innerHTML = `<form class="dialog vdialog" onsubmit="return false"><h2>Voice</h2>
+      <label>I speak<select data-v-language>${LANG.map(([value, label]) => `<option value="${value}" ${value === language ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      <fieldset class="vengines"><legend>Turn speech into text with</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] ? hint : key === 'local' ? 'Not installed. Install it in Issues & settings → Computer control.' : key === 'gemini' ? 'Needs your OpenRouter key: Issues & settings → Jev priority.' : 'Paste a key below to use it.'}</small></span></label>`).join('')}</fieldset>
+      <label>ElevenLabs API key<span class="vkey"><input type="password" data-v-key autocomplete="off" spellcheck="false" placeholder="${info.available.elevenlabs ? 'Saved. Paste a new key to replace it.' : 'From elevenlabs.io → Profile → API keys'}"><button type="button" class="btn small" data-v-savekey>Save key</button>${info.available.elevenlabs ? '<button type="button" class="btn small quiet danger" data-v-dropkey>Remove</button>' : ''}</span></label>
+      <section class="vcompare"><h3>Which one understands you?</h3><p class="muted small">Press Record, say one sentence, then Stop. It goes through every engine that is ready, so you can pick the best. Online engines receive this recording.</p>
+        <button type="button" class="btn ${recording ? 'danger' : 'primary'}" data-v-record ${busy ? 'disabled' : ''}>${recording ? 'Stop' : busy ? 'Comparing…' : 'Record a sentence'}</button>
+        ${results ? `<ol class="vresults">${results.map(item => `<li><div><b>${esc(ENGINE[item.engine]?.[0] || item.engine)}</b><small>${(item.ms / 1000).toFixed(1)} s${item.model ? ` · ${esc(item.model)}` : ''}</small></div><p class="${item.error ? 'bad' : ''}">${esc(item.error || item.text || '(nothing heard)')}</p>${item.error ? '' : `<button type="button" class="btn small" data-v-use="${esc(item.engine)}">Use this one</button>`}</li>`).join('')}</ol>` : ''}
+      </section>
+      <div class="row"><button type="button" class="btn" data-v-close>Done</button></div></form>`;
+  };
+  draw();
+  const choose = async engine => { try { info = { ...info, engine: (await api('/voice/engine', { method: 'POST', data: { engine } })).engine }; toast(`Voice now uses ${ENGINE[engine][0]}.`); draw(); } catch (error) { toast(error.message, true); draw(); } };
+  back.addEventListener('change', event => {
+    if (event.target.matches('[data-v-language]')) { setLanguage(event.target.value); results = null; draw(); }
+    if (event.target.name === 'engine') void choose(event.target.value);
+  });
+  back.addEventListener('click', async event => {
+    const target = event.target;
+    if (target === back || target.closest('[data-v-close]')) { recording?.stop(); back.remove(); return; }
+    const use = target.closest('[data-v-use]'); if (use) { await choose(use.dataset.vUse); return; }
+    if (target.closest('[data-v-savekey]') || target.closest('[data-v-dropkey]')) {
+      const key = target.closest('[data-v-dropkey]') ? '' : back.querySelector('[data-v-key]').value.trim();
+      if (!key && !target.closest('[data-v-dropkey]')) return toast('Paste the key first.', true);
+      try { await api('/voice/key', { method: 'POST', data: { key } }); info = await api('/voice/engines'); toast(key ? 'ElevenLabs key saved.' : 'ElevenLabs key removed.'); draw(); } catch (error) { toast(error.message, true); }
+      return;
+    }
+    if (!target.closest('[data-v-record]')) return;
+    if (recording) {
+      const done = recording; recording = null; done.stop(); busy = true; draw();
+      if (!done.heard) { busy = false; toast('Nothing was heard. Try again a little closer to the microphone.', true); draw(); return; }
+      try {
+        const response = await fetch(`/api/voice/compare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'Content-Type': 'audio/wav', 'x-rex-desk': '1' }, body: done.wav() });
+        const body = await response.json(); if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+        results = body.results;
+      } catch (error) { toast(error.message, true); }
+      busy = false; draw(); return;
+    }
+    try { recording = startRecorder(await openMicrophone(), { onQuiet: () => {} }); results = null; draw(); }
+    catch { toast('Rex Desk could not use the microphone.', true); }
+  });
+}
