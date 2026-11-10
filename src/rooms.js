@@ -81,7 +81,7 @@ export class Rooms {
   }
   mentionsIn(room, text) {
     const known = new Set([HUMAN, ...room.members.map(id => this.member(id).handle.toLowerCase())]);
-    const names = [...String(text).matchAll(/(^|\s)@([\p{L}\p{N}_.-]+)/gu)].map(match => match[2]).filter(name => known.has(name.toLowerCase()));
+    const names = [...String(text).matchAll(/(^|\s)@([\p{L}\p{N}_.-]+)/gu)].map(match => match[2].toLowerCase() === 'main' ? 'rex' : match[2]).filter(name => known.has(name.toLowerCase()));
     return this.resolveTargets(room, names);
   }
   // #49760 names a task by its tracker number.

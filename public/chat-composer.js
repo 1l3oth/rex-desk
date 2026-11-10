@@ -76,7 +76,7 @@ function commands(ctx) {
     { name: 'room', hint: 'Start a room for several agents', run: c.room },
     { name: 'agent', hint: 'Create an agent for a project', run: c.agent },
     ...(ui.view.type === 'room' ? [{ name: 'assign', hint: 'Give a task to an agent: /assign @agent #task', run: c.assign }] : []),
-    { name: 'main', hint: 'Go to the main agent', run: c.main },
+    { name: 'main', hint: 'Go to Rex Agent', run: c.main },
     ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }] : []),
     { name: 'settings', hint: 'Open issues and settings', run: c.settings },
   ];

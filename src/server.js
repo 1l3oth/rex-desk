@@ -301,7 +301,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
   const address = `http://127.0.0.1:${server.address().port}`;
   desk.mcpUrl = `${address}/mcp`;
   desk.reattachOrca();
-  void desk.resumeInterrupted(); desk.notifier.start(); void desk.fillEnglishNames(); desk.memory.ensure(); desk.rooms.cleanup(); desk.specialists.normalizeModels(); if (!process.env.NODE_TEST_CONTEXT) void desk.refreshModels().catch(error => store.event('', 'models-error', { message: error.message }));
+  void desk.resumeInterrupted(); desk.notifier.start(); void desk.fillEnglishNames(); desk.memory.ensure(); desk.rooms.cleanup(); desk.specialists.normalizeModels(); desk.specialists.ensureMain(); if (!process.env.NODE_TEST_CONTEXT) void desk.refreshModels().catch(error => store.event('', 'models-error', { message: error.message }));
   let lastSync = Date.now(), ticks = 0;
   void desk.findPullRequests();
   const timer = setInterval(() => {

@@ -18,8 +18,10 @@ export class Specialists {
   // The main agent as a room member. Its session is the main agent's run, so it answers in rooms with everything it knows.
   ensureMain() {
     const existing = this.store.get('specialist', 'main');
+    // The main agent is called Rex Agent (@rex); a record saved under its old name is renamed once.
+    if (existing && existing.name === 'Main agent') { const renamed = { ...existing, name: 'Rex Agent', slug: 'rex' }; this.store.put('specialist', 'main', renamed); for (const run of this.store.list('run').filter(item => item.title === 'Main agent')) this.store.put('run', run.id, { ...run, title: 'Rex Agent' }); return renamed; }
     if (existing) return existing;
-    const item = { id: 'main', kind: 'main', name: 'Main agent', slug: 'main', projectSlug: 'all projects', projectPath: '', repositoryId: '', purpose: 'Knows every project and agent, and helps the person decide who does what.', rules: '', unsure: [], provider: 'claude', model: '', createdBy: 'Rex Desk', cloneOf: '', runId: '', roomSeen: {}, createdAt: now(), updatedAt: now() };
+    const item = { id: 'main', kind: 'main', name: 'Rex Agent', slug: 'rex', projectSlug: 'all projects', projectPath: '', repositoryId: '', purpose: 'Knows every project and agent, and helps the person decide who does what.', rules: '', unsure: [], provider: 'claude', model: '', createdBy: 'Rex Desk', cloneOf: '', runId: '', roomSeen: {}, createdAt: now(), updatedAt: now() };
     this.store.put('specialist', 'main', item); return item;
   }
   get(id) { const item = this.store.get('specialist', id); if (!item) throw new Error('Specialist not found.'); return item; }

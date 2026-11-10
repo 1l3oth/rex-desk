@@ -33,7 +33,7 @@ export class Notifier {
     this.store.on('change', event => { try { this.onChange(event); } catch { /* a notification never breaks the app */ } });
     return this;
   }
-  runTitle(run) { return run?.title || (run?.main ? 'Main agent' : 'An agent'); }
+  runTitle(run) { return run?.title || (run?.main ? 'Rex Agent' : 'An agent'); }
   onChange({ kind, id }) {
     if (kind === 'interaction') {
       const item = this.store.get('interaction', id);

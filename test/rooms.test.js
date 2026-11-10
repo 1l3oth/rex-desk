@@ -146,7 +146,7 @@ test('the main agent can be added to a room as @main, and answers there from its
   await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === 'main'));
   assert.equal(turns[0].run.role, 'coordinator'); assert.equal(turns[0].run.roomAgent, 'main'); assert.ok(!turns[0].run.main, 'the room session is not the main chat');
   assert.match(desk.rooms.messages(room.id).find(item => item.from.id === 'main').text, /route this to Dara/);
-  assert.equal(desk.rooms.member('main').name, 'Main agent');
+  assert.equal(desk.rooms.member('main').name, 'Rex Agent'); assert.equal(desk.rooms.member('main').handle, 'rex', '@rex, and the old @main still reaches it');
   assert.ok(store.get('specialist', 'main'));
 });
 

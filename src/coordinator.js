@@ -215,7 +215,7 @@ export class Desk {
   // and creates a specialist agent for each. Starting it from the chat sends the person's first message with it.
   async startMain({ prompt = '', ...picked } = {}) {
     if (this.store.list('run').some(run => run.role === 'coordinator' && !terminalStates.has(run.state))) throw new Error('The main agent is already running. Talk to it in its chat.');
-    const run = { id: id(), role: 'coordinator', main: true, title: 'Main agent', provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'headless', ...runOptions(picked, this.store) };
+    const run = { id: id(), role: 'coordinator', main: true, title: 'Rex Agent', provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'headless', ...runOptions(picked, this.store) };
     this.store.put('run', run.id, run);
     if (run.prompt) this.store.event(run.id, 'human-message', { text: run.prompt, via: 'rex' }, true);
     void this.drain(); return this.run(run.id);
