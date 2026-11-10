@@ -180,3 +180,22 @@ test('each session of an agent is told what happened in the other one since it l
   await waitFor(() => turns.length === 4);
   assert.ok(!/the cart total is wrong/.test(turns[3].prompt), 'what was already seen is not repeated');
 });
+
+test('an agent is told who else is answering in the room, with their handles, and to build on their replies', async () => {
+  const { desk, store, turns, dara, vanna, room } = setup();
+  store.put('run', 'busy-vanna', { id: 'busy-vanna', role: 'specialist', specialistId: vanna.id, roomAgent: vanna.id, state: 'running', createdAt: now() });
+  await desk.rooms.post(room.id, { text: '@dara what do you think?' });
+  await waitFor(() => turns.some(item => item.run.specialistId === dara.id));
+  const asked = turns.find(item => item.run.specialistId === dara.id).prompt;
+  assert.match(asked, /Vanna \(@vanna, billing\)/);
+  assert.match(asked, /Also working in this room right now: Vanna \(Replying in a room…\)/);
+  assert.match(asked, /read desk_room_history for what they just posted/);
+});
+
+test('an agent that mentions another agent in its reply gets that agent to answer in the room', async () => {
+  const { desk, turns, vanna, room } = setup({ replies: ['@vanna can you check the invoice side?', 'Invoices look fine.'] });
+  await desk.rooms.post(room.id, { text: '@dara is billing involved?' });
+  await waitFor(() => turns.some(item => item.run.specialistId === vanna.id));
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.label === 'Vanna' && /Invoices look fine/.test(item.text)));
+  assert.ok(desk.rooms.messages(room.id).find(item => item.from.label === 'Dara').to.includes(vanna.id));
+});
