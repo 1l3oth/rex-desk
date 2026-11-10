@@ -256,7 +256,7 @@ function localTaskStage(ctx, task) {
     : task.assignee && agents.some(agent => agent.id === task.assignee) ? `<p class="lt-start"><button class="btn primary small" data-action="lt-start" data-id="${esc(task.id)}">Start ${esc(agents.find(agent => agent.id === task.assignee).name)} on this</button></p>` : '';
   const main = `<div class="lt-main"><textarea id="lt-title" class="lt-title" rows="1" maxlength="200" aria-label="Task title">${esc(task.title)}</textarea>
     ${work}<section class="lt-sec"><h3>Description</h3><textarea id="lt-desc" class="lt-desc" placeholder="What needs doing, and how to tell it is done.">${esc(task.description || '')}</textarea></section>${checklist}${links}${comments}</div>`;
-  return { title: `#${task.taskNumber} ${task.title}`, meta: `Rex Desk task · ${task.statusName}`, feed: `<div class="page lt" data-lt="${esc(task.id)}">${main}${side}</div>` };
+  return { title: `#${task.taskNumber} ${task.title}`, meta: `Rex Desk task · ${task.statusName}`, top: true, feed: `<div class="page lt" data-lt="${esc(task.id)}">${main}${side}</div>` };
 }
 // Every change saves at once: pickers when chosen, text when you leave the field.
 export function initLocalTasks(ctx) {

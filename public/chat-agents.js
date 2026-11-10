@@ -49,7 +49,7 @@ export function agentStage(ctx) {
     <section class="ag-sec ag-meta"><p>Created by ${esc(agent.createdBy || 'you')}${origin ? `, copied from ${esc(origin.name)}` : ''}.</p><button class="btn small danger" data-action="spec-remove">Remove ${esc(agent.name)}</button></section>
   </aside>`;
   const feed = `<div class="page ag" data-agent="${esc(agent.id)}">${head}${questions}<div class="ag-body"><div class="ag-main">${rules}</div>${side}</div></div>`;
-  return { title: agent.name, meta: `${providerName(agent.provider)} · ${agent.projectSlug}`, feed };
+  return { title: agent.name, meta: `${providerName(agent.provider)} · ${agent.projectSlug}`, feed, top: true };
 }
 
 function dialog(ctx, { title, nameValue = '', projects = null, submit }) {

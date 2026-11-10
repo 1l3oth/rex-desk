@@ -191,7 +191,7 @@ function stageModel() {
     return { title: 'Needs you', meta: `${asks.length + wakes.length} waiting`, feed: asks.length + wakes.length ? asks.map(decisionCard).join('') + wakes.map(wakeCard).join('') : '<div class="empty"><h2>All clear</h2><p>Questions, approvals and wake-ups from your agents show up here.</p></div>' };
   }
   if (type === 'specialist') return agentStage(ctx);
-  if (type === 'person') return { title: 'About you', meta: 'Your profile, from what the agents learned', feed: personPage() };
+  if (type === 'person') return { title: 'About you', meta: 'Your profile, from what the agents learned', feed: personPage(), top: true };
   if (type === 'project') {
     return { title: id, meta: 'Project memory', feed: `<div class="page"><div class="row"><button class="btn primary small" data-action="spec-new">Create agent for this project</button></div><div class="card"><div class="md">${markdown(ui.page || 'Loading…')}</div></div></div>` };
   }
