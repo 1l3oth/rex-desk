@@ -240,14 +240,15 @@ test('while another agent is typing in the room the next one waits, then reads w
   assert.match(prompt, /Already answered after that message[\s\S]*Refunds go through the billing queue/);
 });
 
-test('an agent that already saw the room still gets the last messages as context', async () => {
+test('an agent that already saw the room is sent only what is new, not the history its session already holds', async () => {
   const { desk, turns, dara, room } = setup({ replies: ['First answer.', 'Second answer.'] });
   await desk.rooms.post(room.id, { text: '@dara the checkout total is wrong after a coupon' });
   await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id));
   await desk.rooms.post(room.id, { text: '@dara any idea why?' });
   await waitFor(() => turns.filter(item => item.run.specialistId === dara.id).length >= 2);
-  const prompt = turns.filter(item => item.run.specialistId === dara.id)[1].prompt;
-  assert.match(prompt, /The conversation so far[\s\S]*checkout total is wrong after a coupon[\s\S]*First answer\./);
+  const second = turns.filter(item => item.run.specialistId === dara.id)[1].prompt;
+  assert.ok(!second.includes('checkout total is wrong after a coupon'), 'the earlier message is not sent again');
+  assert.match(second, /any idea why?/);
 });
 
 test('a message for an agent that is working is handed to it between steps, once', async () => {
@@ -306,4 +307,21 @@ test('a mention counts in bold, before a colon or a full stop, and inside bracke
   assert.deepEqual(who('Thanks @vanna.'), [vanna.id]);
   assert.deepEqual(who('(@dara) and [@vanna], please'), [dara.id, vanna.id].sort());
   assert.deepEqual(who('write to me@dara.com'), []);
+});
+
+test('away check-ins skip a quiet room and wait longer each time, and room chat runs on Sonnet unless saving is off', async () => {
+  const { desk, store, turns, dara, room } = setup({ replies: ['Plan done. Next check-in: 10 minutes'] });
+  desk.rooms.quietSettle = 10;
+  desk.rooms.setAway(room.id, { on: true, every: 10 });
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id));
+  await waitFor(() => !['replying', 'busy'].includes(desk.rooms.member(dara.id).state));
+  const before = turns.length;
+  store.put('room', room.id, { ...desk.rooms.room(room.id), away: { ...desk.rooms.room(room.id).away, lastTick: Date.now() - 11 * 60000 } });
+  await desk.rooms.awayTick();
+  assert.equal(turns.length, before, 'nothing happened since the last check-in, so the lead is not woken');
+  assert.equal(desk.rooms.room(room.id).away.idle, 1);
+  const roomRun = store.list('run').find(run => run.roomAgent === dara.id);
+  assert.equal(desk.saverModel(roomRun), 'sonnet');
+  store.saveConfig({ ...store.publicConfig(), saver: false });
+  assert.equal(desk.saverModel(roomRun), '');
 });

@@ -6,7 +6,7 @@ import path from 'node:path';
 
 export const MAX_HOPS = 6;
 // In away mode agents keep talking to each other without the person, so a thread may run much longer before it pauses.
-export const AWAY_HOPS = 60;
+export const AWAY_HOPS = 24;
 const awayRules = away => `The person is away${away.until ? ` until ${away.until}` : ' until they come back'}${away.goal ? `. Goal: ${away.goal}` : ''}. Keep the work going with the other agents: @mention whoever should take the next step, and do not wait for the person or ask them questions. Make reasonable, low-risk choices yourself and say what you chose. Anything that cannot be undone or is risky (pushing or merging, deleting data, production, money, secrets, messages to other people) waits: write it under "Waiting for you" instead of doing it. Finish your turn with what you did and who is next.`;
 export const HUMAN = 'you';
 const now = () => new Date().toISOString();
@@ -149,10 +149,9 @@ export class Rooms {
     const agent = this.agent(agentId), seen = agent?.roomRunId && this.store.get('run', agent.roomRunId) ? (agent.roomSeen || {}) : {};
     const who = item => item.from.type === 'human' ? 'The person' : item.from.type === 'agent' ? this.member(item.from.id).name : 'Rex Desk';
     const line = item => `${who(item)}: ${clip(item.text, 500)}`;
-    // What is new since the agent last looked, and never less than the last dozen messages, so it always has the context.
-    const unseen = this.messages(room.id, { after: seen[room.id] || 0 }).filter(item => item.id !== message.id && item.seq < message.seq && item.from.type !== 'system').slice(-30);
-    const recent = this.messages(room.id, { limit: 40 }).filter(item => item.id !== message.id && item.seq < message.seq && item.from.type !== 'system').slice(-12);
-    const here = [...new Map([...recent, ...unseen].map(item => [item.id, item])).values()].sort((left, right) => left.seq - right.seq).slice(-30);
+    // Only what is new since the agent last looked: its room session already holds everything before that, so sending it again
+    // would only spend the person's Claude usage. A session that is new gets the room's recent history instead.
+    const here = this.messages(room.id, { after: seen[room.id] || 0 }).filter(item => item.id !== message.id && item.seq < message.seq && item.from.type !== 'system').slice(-30);
     // Replies posted after this message (another agent answered first) are part of the conversation too.
     const since = this.messages(room.id, { after: message.seq }).filter(item => item.from.type === 'agent' && item.from.id !== agentId).slice(-10);
     const owners = this.taskOwners();
@@ -239,7 +238,7 @@ export class Rooms {
   lead(room) { return room.members.includes('main') ? 'main' : room.members.find(id => this.agent(id)) || ''; }
   async wakeLead(roomId, reason) {
     const room = this.room(roomId), lead = this.lead(room); if (!lead || !room.away?.on) return;
-    this.store.put('room', roomId, { ...room, away: { ...room.away, lastTick: Date.now(), ticks: (room.away.ticks || 0) + 1 } });
+    this.store.put('room', roomId, { ...room, away: { ...room.away, lastTick: Date.now(), ticks: (room.away.ticks || 0) + 1, tickSeq: room.seq + 1 } });
     const timing = room.away.every === 'auto' ? ' End your message with "Next check-in: N minutes" (5 to 240): sooner while work is moving, later while everyone waits on something slow.' : '';
     const text = (reason === 'start'
       ? `The person turned on away mode and left${room.away.goal ? `. Goal: ${room.away.goal}` : '. No goal was given: find unfinished tasks (desk_tasks) that the agents in this room can finish'}. Plan the next steps with the agents in this room and hand the first one out with an @mention.`
@@ -258,8 +257,15 @@ export class Rooms {
     for (const room of this.list().filter(item => item.away?.on)) {
       if (room.away.until && Date.parse(room.away.until) <= Date.now()) { await this.endAway(room.id); continue; }
       const busy = room.members.some(id => this.agent(id) && ['replying', 'busy'].includes(this.member(id).state));
-      const wait = room.away.every === 'auto' ? room.away.nextMinutes || 30 : room.away.every;
-      if (!busy && Date.now() - (room.away.lastTick || 0) >= wait * 60000) await this.wakeLead(room.id, 'tick');
+      // A check-in costs a turn of the lead. When nothing has happened since the last one (no agent but the lead said anything),
+      // skip it and wait twice as long next time, up to four hours; any new activity brings the normal timing back.
+      const lead = this.lead(room), idle = room.away.idle || 0;
+      const wait = Math.min(240, (room.away.every === 'auto' ? room.away.nextMinutes || 30 : room.away.every) * 2 ** idle);
+      if (busy || Date.now() - (room.away.lastTick || 0) < wait * 60000) continue;
+      const activity = this.messages(room.id, { after: room.away.tickSeq || 0 }).some(item => (item.from.type === 'agent' && item.from.id !== lead) || item.from.type === 'human');
+      if (room.away.ticks && !activity) { this.store.put('room', room.id, { ...room, away: { ...room.away, lastTick: Date.now(), idle: Math.min(idle + 1, 4) } }); continue; }
+      if (idle) this.store.put('room', room.id, { ...room, away: { ...room.away, idle: 0 } });
+      await this.wakeLead(room.id, 'tick');
     }
   }
   history(roomId, limit = 30) { return this.messages(roomId, { limit }).filter(item => item.from.type !== 'system'); }

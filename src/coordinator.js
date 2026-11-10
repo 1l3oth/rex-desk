@@ -143,6 +143,13 @@ export class Desk {
   // The person's Orbit account, when connected: every agent can search and read their goals, notes and knowledge.
   orbitAccount() { const saved = this.store.get('secret', 'orbit-account'); if (!saved) return null; try { return JSON.parse(this.store.decrypt(saved)); } catch { return null; } }
   orbitAccountMcp() { const account = this.orbitAccount(); return account?.token ? { orbit: { type: 'http', url: `${account.base.replace(/\/$/, '')}/mcp`, headers: { Authorization: `Bearer ${account.token}` } } } : {}; }
+  // Usage saver (on unless the person turns it off): talking in rooms and away check-ins run on Sonnet, which uses much less of the
+  // Claude subscription than the top model; changing code, personal chats and Rex Agent keep the model the person chose.
+  saverModel(run) {
+    if (this.store.config().saver === false || !run.roomAgent) return '';
+    const agent = this.store.get('specialist', run.roomAgent);
+    return agent?.model ? '' : 'sonnet';
+  }
   // The Claude account (profile folder) a run uses: the agent's own if it was pinned to one, otherwise the one for everyone.
   accountFor(run) {
     const id = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
@@ -392,7 +399,7 @@ export class Desk {
       token = this.scopeToken(runId);
       const options = { run, cwd: run.cwd || run.worktree || path.join(this.store.directory, 'coordinator'), projectDirectory: run.projectPath || '', token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
-        mcpUrl: this.mcpUrl, model: run.model || modelName(run.provider, this.store.config().models[run.provider]), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
+        mcpUrl: this.mcpUrl, model: run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
