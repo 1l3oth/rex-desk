@@ -78,3 +78,18 @@ test('what agents learn about the person is kept in sections of user.md, once, w
   assert.ok(!text.includes('hunter2'));
   assert.throws(() => memory.personNote('hobbies', 'x'), /likes, dislikes, works or about/);
 });
+
+test('notes about the person are dated and soft unless lasting, a new note can replace an old one, and the second brain is recorded once', () => {
+  const memory = new Memory(temporary('brain')).ensure();
+  memory.personNote('likes', 'The colour red.');
+  memory.personNote('likes', 'Short replies.', { lasting: true });
+  assert.match(memory.person(), /- The colour red\. \(\d{4}-\d{2}-\d{2}, may change\)/);
+  assert.match(memory.person(), /- Short replies\. \(\d{4}-\d{2}-\d{2}\)$/m);
+  memory.personNote('likes', 'The colour blue.', { replaces: 'colour red' });
+  assert.ok(!memory.person().includes('red'), 'the old note is gone'); assert.match(memory.person(), /colour blue/);
+  assert.equal(memory.secondBrain(), '');
+  const vault = temporary('vault'); mkdirSync(path.join(vault, 'wiki'), { recursive: true }); writeFileSync(path.join(vault, 'wiki', 'index.md'), '# Index');
+  assert.throws(() => memory.setSecondBrain({ path: path.join(vault, 'missing') }), /does not exist/);
+  memory.setSecondBrain({ path: vault, how: 'Read the index first; add notes as wiki pages.' });
+  assert.match(memory.secondBrain(), /Where: `.+`/); assert.match(memory.secondBrain(), /index\.md/); assert.match(memory.secondBrain(), /add notes as wiki pages/);
+});

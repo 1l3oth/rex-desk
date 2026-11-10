@@ -79,7 +79,7 @@ export class Memory {
     return taken.get(base) && taken.get(base) !== directory.toLowerCase() ? `${base}-${hash}` : base;
   }
   // What the agents learned about the person, shared by all of them: likes, dislikes, how they work, and facts about them. Kept in user.md as sections of bullets.
-  personNote(kind, text) {
+  personNote(kind, text, { lasting = false, replaces = '' } = {}) {
     this.ensure();
     const titles = { likes: 'Likes', dislikes: 'Dislikes', works: 'How they work', about: 'About them' }, title = titles[kind];
     if (!title) throw new Error('Choose likes, dislikes, works or about.');
@@ -89,12 +89,32 @@ export class Memory {
     for (const name of Object.values(titles)) sections.set(name, []);
     let section = '';
     for (const line of current.split('\n')) { const heading = /^##\s+(.+)$/.exec(line); if (heading) { section = heading[1].trim(); if (!sections.has(section)) sections.set(section, []); continue; } const bullet = /^-\s+(.+)$/.exec(line); if (bullet && section) sections.get(section).push(bullet[1].trim()); }
+    // A note carries its date and, unless it is clearly lasting, a mark that it may change. A note that replaces an older one removes it.
+    const plain = item => item.replace(/\s+\(\d{4}-\d{2}-\d{2}(?:, may change)?\)$/, '').toLowerCase();
+    const gone = String(replaces || '').trim().toLowerCase();
+    for (const [name, items] of sections) sections.set(name, gone ? items.filter(item => !plain(item).includes(gone)) : items);
     const list = sections.get(title);
-    if (list.some(item => item.toLowerCase() === note.toLowerCase())) return { saved: false, reason: 'Already known.' };
-    list.push(note); sections.set(title, list.slice(-40));
-    const page = ['# About the person', '', 'What the agents learned from how the person talks to them. Every agent reads this. The person can change or delete any line.', '',
+    if (list.some(item => plain(item) === note.toLowerCase())) return { saved: false, reason: 'Already known.' };
+    list.push(`${note} (${new Date().toISOString().slice(0, 10)}${lasting ? '' : ', may change'})`); sections.set(title, list.slice(-40));
+    const page = ['# About the person', '', 'What the agents learned from how the person talks to them. Every agent reads this. The person can change or delete any line. Notes marked "may change" are hints: what the person says now wins.', '',
       ...[...sections].filter(([, items]) => items.length).flatMap(([name, items]) => [`## ${name}`, '', ...items.map(item => `- ${item}`), ''])].join('\n');
     atomic(this.file('user.md'), page); return { saved: true };
+  }
+  // The person's second brain (a notes vault): where it is and how agents should use it. Set once, read by every agent.
+  secondBrain() { return read(this.file('second-brain.md'), 3000).trim(); }
+  setSecondBrain({ path: folder, how = '' } = {}) {
+    const where = path.resolve(String(folder || '').trim());
+    if (!String(folder || '').trim() || !exists(where)?.isDirectory()) throw new Error('That folder does not exist. Give the full path of the second brain.');
+    const index = ['wiki/index.md', 'index.md', 'README.md'].map(name => path.join(where, name)).find(file => exists(file));
+    atomic(this.file('second-brain.md'), ['# The person\'s second brain', '', `- Where: \`${where}\``, index ? `- Start from: \`${index}\`` : '', `- How the person wants it used: ${String(how || 'Read it before asking the person something it may already answer; add what you learn that will last.').replace(/\s+/g, ' ').trim().slice(0, 800)}`, '',
+      'Rules for every agent: read the second brain before asking the person something it may already answer, and cite the page you used. When you learn something that will last, add it the way the vault\'s own rules say (read its index or README first). Never write secrets into it.', ''].filter(line => line !== '').join('\n') + '\n');
+    return { saved: true, path: where, index: index || '' };
+  }
+  // Folders on this computer that look like a second brain: a project named like one, or a usual place.
+  secondBrainCandidates() {
+    const named = this.list().filter(item => /brain|vault|notes|wiki/i.test(item.slug)).map(item => item.path);
+    const usual = ['F:/secondbrain', 'D:/second_brain', 'D:/secondbrain', path.join(os.homedir(), 'secondbrain'), path.join(os.homedir(), 'second-brain')];
+    return [...new Set([...named, ...usual].map(item => path.resolve(item)))].filter(item => exists(path.join(item, 'wiki', 'index.md')) || exists(path.join(item, 'index.md'))).slice(0, 5);
   }
   // The profile as agents get it, or nothing while it is empty.
   person() { const text = read(this.file('user.md'), 4000).trim(); return /^- /m.test(text) ? text : ''; }

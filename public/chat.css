@@ -314,3 +314,20 @@ html[data-theme=light] .nc0{color:#3559c7}html[data-theme=light] .nc1{color:#c24
 .lessons{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
 .lessons li{display:flex;align-items:flex-start;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-size:13.5px}.lessons li span{flex:1}
 .lessons .x{opacity:.6}.lessons li:hover .x{opacity:1}
+
+.brainbar{flex-direction:row;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;border-color:var(--accent)}.brainbar>div{display:flex;flex-direction:column;gap:2px}
+/* ---- sidebar: pictures, status dots, sections that fold ---- */
+.rail-scroll{overflow-x:hidden;padding:0 8px 10px}
+.rail-head .brand{display:flex;align-items:center;gap:8px}.av.icon.brandmark{width:26px;height:26px;background:linear-gradient(135deg,#5b8def,#7c5cf0);color:#fff}
+.av.icon{background:var(--raised);color:var(--muted)}.av.icon.accent{background:linear-gradient(135deg,#5b8def,#7c5cf0);color:#fff}.av.icon.warn{background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}
+.avwrap{position:relative;display:inline-flex;flex:none}
+.sdot{position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;border:2px solid var(--panel);background:var(--muted)}
+.sdot.good{background:var(--good)}.sdot.working{background:var(--accent)}.sdot.warn{background:var(--warn)}.sdot.bad{background:var(--bad)}
+.item{gap:10px;padding:6px 8px;min-width:0}.item .name{line-height:1.25}.item .sub{margin-top:1px}
+.sec{margin-top:10px}.sec-head{display:flex;align-items:center;padding:0 4px}
+.sec-toggle{flex:1;display:flex;align-items:center;gap:6px;border:0;background:none;color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:4px 4px;border-radius:6px;text-align:left}
+.sec-toggle:hover{color:var(--ink)}.sec-toggle .chev{display:inline-block;font-size:10px;transition:transform .15s}.sec.shut .chev{transform:rotate(-90deg)}
+.sec-toggle .cnt{background:var(--raised);color:var(--muted);border-radius:8px;padding:0 6px;font-size:10.5px;letter-spacing:0}
+.sec-add{border:0;background:none;color:var(--muted);font-size:17px;line-height:1;width:24px;height:24px;border-radius:6px}.sec-add:hover{background:var(--raised);color:var(--ink)}
+.sec-body{display:flex;flex-direction:column;gap:1px;margin-top:2px}.sec-body.top{margin-top:6px}
+.rail-label{margin:8px 8px 2px;font-size:11px;color:var(--muted)}.item.more{padding-left:46px}
