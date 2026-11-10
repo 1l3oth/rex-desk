@@ -17,6 +17,7 @@ import { OrcaRunner, AgentSession, sendToOrca, showWorktreesInOrca } from './orc
 import { Evidence } from './browser.js';
 import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
+import { inspectRepository } from './repositories.js';
 import { Jev } from './jev.js';
 import { placeTask, scanRepositories, scanRoots } from './placement.js';
 import { TrackerQuery } from './query.js';
@@ -220,6 +221,21 @@ export class Desk {
     if (run.prompt) this.store.event(run.id, 'human-message', { text: run.prompt, via: 'rex' }, true);
     void this.drain(); return this.run(run.id);
   }
+  // The main agent adds a project folder the person named: it becomes a source repository in Settings and a project in memory, so it can get its own agent.
+  async addProject(folder, { baseBranch = '', targetBranch = '' } = {}) {
+    const found = await inspectRepository(path.resolve(String(folder || '')));
+    const config = this.store.config(), same = item => path.resolve(item.path).toLowerCase() === found.path.toLowerCase();
+    let repository = config.repositories.find(same), added = false;
+    if (!repository) {
+      const base = baseBranch || found.preferredBranch || 'develop';
+      repository = this.store.saveConfig({ ...this.store.publicConfig(), repositories: [...config.repositories, { name: found.name, path: found.path, baseBranch: base, targetBranch: targetBranch || base }] }).repositories.find(same);
+      this.store.event('', 'repository-added', { name: repository.name, path: repository.path, by: 'main agent' }, true); added = true;
+    }
+    const known = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === found.path.toLowerCase());
+    if (!known) { const previous = this.memory.state(); this.memory.scan({ roots: [...new Set([...(previous.roots || []), found.path])] }); }
+    const project = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === found.path.toLowerCase());
+    return { added, repository: { id: repository.id, name: repository.name, path: repository.path, baseBranch: repository.baseBranch, targetBranch: repository.targetBranch }, project: project?.slug || '', branches: found.branches.length, warnings: found.warnings };
+  }
   async startConnectionAgent({ sourceId, provider }) {
     provider = 'claude';
     const source = this.store.config().sources.find(item => item.id === sourceId);
@@ -396,6 +412,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (run.main) return [common,
       'You are the main agent of Rex Desk, the first agent the person talks to. Keep every message short and plain. Work in small steps.', "You run the desk for the person: with desk_runs, desk_stop_run, desk_assign_task and desk_tell_run you can stop or close any run, give a task to an agent, and tell any run what to do. Do it when the person asks; when you do it on your own judgment, say what you did in one line.",
       this.memory.chatStyle(), this.memory.person() ? `What you know about the person (all agents share this):\n${this.memory.person()}` : '', this.specialists.lessonsText('main'), "Notice what the person likes and dislikes from how they react to you: corrections, praise, frustration, things they ask for again. Save what you notice with desk_learn_person; lessons about your own work go to desk_learn. Preferences can change with time and events: treat the notes about the person as hints, prefer the newest, and when what the person says now differs, follow what they say now and update the note with replaces.", this.memory.secondBrain(), "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
+      'When the person names a project that is not in the index or not in desk_repositories, find its folder on this computer (ask if there are several) and add it yourself with desk_add_project. Never ask the person to add a repository in Settings.',
       '1. Read desk_memory with page "index", and desk_specialists. Greet the person in one or two lines: how many projects you found, and how many already have a specialist agent.',
       '2. Go through the projects that have no specialist, one at a time. For each: read its memory page, then ask the person with desk_ask only what you cannot tell from it (what it is for, how to set it up and run it, rules to follow, anything risky). At most 3 questions per project, in one desk_ask when you can. For every question give 2 to 4 suggested answers in the options property of the field (a short label and a one-line description), based on what you found (the detected commands and branches, what similar projects use). The person can pick one or type their own. Never guess.',
       '3. When you understand a project, call desk_create_specialist with a short human name, the rules the person gave you, and what is still unsure. Then tell the person in one line that the agent exists and that they can rename or duplicate it from its card. Move to the next project.',

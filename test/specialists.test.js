@@ -105,3 +105,18 @@ test('an agent saves what it learned from a correction, sees it in its prompt an
   desk.specialists.learn('main', 'Rooms: answer in two sentences.');
   assert.match(desk.specialists.lessonsText('main'), /answer in two sentences/);
 });
+
+test('the main agent adds a project folder itself: it becomes a repository and a memory project, and keeps the projects already known', async () => {
+  const { desk, store } = setup();
+  const folder = path.join(temporary('add'), 'billing');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'billing', description: 'Invoices for Acme' }));
+  const { execFileSync } = await import('node:child_process');
+  execFileSync('git', ['init', '-q', '-b', 'develop'], { cwd: folder });
+  const result = await desk.addProject(folder);
+  assert.equal(result.added, true); assert.equal(result.project, 'billing');
+  assert.equal(store.config().repositories.length, 1); assert.equal(result.repository.baseBranch, 'develop');
+  assert.deepEqual(desk.memory.list().map(item => item.slug).sort(), ['billing', 'shop']);
+  assert.equal((await desk.addProject(folder)).added, false, 'adding it again changes nothing');
+  assert.equal(desk.specialists.create({ name: 'Biller', projectSlug: 'billing' }).purpose, 'Invoices for Acme');
+});
