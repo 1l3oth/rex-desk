@@ -105,3 +105,35 @@ code,pre{font-family:var(--mono);font-size:12px}
 .welcome h2{margin:6px 0 0;font-size:24px}.welcome p{margin:0;max-width:460px;color:var(--muted)}
 .chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px}
 .chip-btn{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:8px 16px;font-size:14px}.chip-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ---- chat input ---- */
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.composer{padding:10px 20px 12px}
+.composer .box2{position:relative;display:flex;align-items:flex-end;gap:6px;background:var(--raised);border:1px solid var(--line);border-radius:18px;padding:8px 8px 8px 6px}
+.composer .box2:focus-within{border-color:var(--accent)}
+.composer textarea{flex:1;min-height:34px;max-height:200px;resize:none;border:0;outline:0;background:transparent;padding:7px 4px;font-size:15px;line-height:1.5}
+.icon-btn{display:grid;place-items:center;width:34px;height:34px;border:0;border-radius:50%;background:transparent;color:var(--muted);flex:none}
+.icon-btn:hover{background:var(--panel);color:var(--ink)}.icon-btn.rec{background:var(--bad);color:#fff}
+.send-btn{display:grid;place-items:center;width:34px;height:34px;border:0;border-radius:50%;background:var(--accent);color:var(--accent-ink);flex:none}
+.send-btn.wide{width:auto;height:36px;border-radius:18px;padding:0 18px;font-weight:600;font-size:14px}
+.send-btn:hover{filter:brightness(1.08)}
+.composer .foot{display:flex;align-items:center;gap:4px;padding:6px 6px 0;font-size:12px;color:var(--muted)}
+.composer .foot .spacer{flex:1}.composer .foot .hint{font-size:12px}
+.pick select{appearance:none;border:0;background:transparent;color:var(--ink);font-size:13px;padding:3px 6px;border-radius:8px;cursor:pointer}
+.pick:nth-of-type(2) select{color:var(--muted)}.pick select:hover{background:var(--raised)}
+.ring{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);margin-left:6px}.ring.busy{border-color:var(--line);border-top-color:var(--accent);animation:spin 1s linear infinite}
+.attach-chips{display:flex;gap:6px;flex-wrap:wrap}.attach-chips:not(:empty){margin-bottom:8px}
+.attach{display:inline-flex;align-items:center;gap:6px;background:var(--raised);border:1px solid var(--line);border-radius:10px;padding:3px 6px 3px 8px;font-size:12px;max-width:260px}
+.attach .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attach .sp{width:10px;height:10px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+.attach button{border:0;background:none;color:var(--muted);font-size:15px;line-height:1;padding:0 2px}.attach.bad{border-color:var(--bad)}
+.menu button{flex-direction:column;align-items:flex-start;gap:0}.menu small{color:var(--muted);font-size:11px}
+.menu{bottom:100%;left:0;margin-bottom:8px;min-width:280px}
+/* ---- question card ---- */
+.qcard{gap:12px;border-radius:18px;padding:16px 18px}
+.qhead{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.qdot{width:8px;height:8px;border-radius:50%;background:var(--warn)}
+.qtext{font-size:15px}
+.qfield{gap:6px!important}.qfield>span{font-size:14px;color:var(--ink)!important}
+.qcard .qinput,.qcard select{padding:10px 14px;border:1px solid var(--line);border-radius:14px;background:var(--bg);font-size:15px}
+.qcard .qinput:focus,.qcard select:focus{border-color:var(--accent);outline:0}
+.qhint{color:var(--muted);font-size:12px;margin-left:auto}

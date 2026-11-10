@@ -16,7 +16,8 @@ test('only listed models, efforts and permission modes are accepted', () => {
   assert.deepEqual(runOptions({}), {});
   assert.throws(() => runOptions({ model: 'gpt-5' }), /listed models/);
   assert.throws(() => runOptions({ effort: 'extreme' }), /effort/);
-  assert.throws(() => runOptions({ permissionMode: 'bypassPermissions' }), /Manual, Auto, Plan/);
+  assert.equal(runOptions({ permissionMode: 'bypassPermissions' }).permissionMode, 'bypassPermissions');
+  assert.throws(() => runOptions({ permissionMode: 'dontAsk' }), /Dangerous, Manual, Auto, Plan/);
 });
 
 test('the main agent and a resumed run keep the model, effort and mode picked in the input', async () => {

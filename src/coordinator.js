@@ -110,7 +110,7 @@ export class Desk {
   }
   // A message to an agent. A terminal agent gets it typed in. A headless agent that is mid-turn takes it as soon as the turn ends;
   // one that is idle takes it right now, resuming its session with the whole chat behind it.
-  async say(runId, text) {
+  async say(runId, text, picked = {}) {
     const run = this.run(runId), line = String(text || '').replace(/\s+/g, ' ').trim();
     if (!line) throw new Error('Write a message first.');
     if (run.execution === 'orca' && this.live.has(runId)) {
@@ -121,11 +121,11 @@ export class Desk {
       return { sent: true };
     }
     if (this.live.has(runId)) {
-      this.store.put('run', runId, { ...run, queued: [...(run.queued || []), line], updatedAt: now() });
+      this.store.put('run', runId, { ...run, ...runOptions({ model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }), queued: [...(run.queued || []), line], updatedAt: now() });
       this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
       return { queued: true };
     }
-    await this.resume(runId, { prompt: text });
+    await this.resume(runId, { prompt: text, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });
     return { sent: true };
   }
   // Watch Orca runs that survived a restart until their terminal ends, then settle them like any finished run.

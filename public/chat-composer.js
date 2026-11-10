@@ -1,0 +1,162 @@
+// The chat input: a rounded box with a + menu, slash commands, @ mentions, voice, attachments, and the model, effort and mode pickers underneath.
+const ICON = {
+  plus: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  mic: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
+  up: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  file: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
+};
+const KEY = 'rex-desk-input';
+const EFFORT_LABEL = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
+const DEFAULT_MODE = 'bypassPermissions';
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function saved() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } }
+function remember(patch) { try { localStorage.setItem(KEY, JSON.stringify({ ...saved(), ...patch })); } catch { /* private window */ } }
+
+// What the pickers show: the run's own choice when it has one, else what the person last picked, else the defaults.
+export function currentOptions(ctx) {
+  const { ui } = ctx, choices = ui.snap?.choices || { models: [], efforts: [], modes: [] }, run = ui.view.type === 'main' ? ctx.mainRun() : ui.view.type === 'run' ? ctx.runById(ui.view.id) : null, last = saved();
+  const configured = ui.snap?.config?.models?.claude;
+  return { model: run?.model || last.model || configured || choices.models[0]?.id || '', effort: run?.effort || last.effort || 'medium', permissionMode: run?.permissionMode || last.permissionMode || DEFAULT_MODE };
+}
+export function pickedOptions(ctx) {
+  const read = id => document.getElementById(id)?.value || '';
+  return { model: read('opt-model') || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
+}
+
+export function composerHtml(ctx, model) {
+  const { ui, esc } = ctx, choices = ui.snap?.choices || { models: [], efforts: [], modes: [] }, now = currentOptions(ctx), working = Boolean(model.working);
+  const select = (id, label, items, value) => `<label class="pick"><span class="sr">${label}</span><select id="${id}" aria-label="${label}">${items.map(item => `<option value="${esc(item.id)}" ${item.id === value ? 'selected' : ''}>${esc(item.label)}</option>`).join('')}</select></label>`;
+  const modes = choices.modes.map(item => item.id === 'bypassPermissions' ? { ...item, label: 'Dangerous' } : item);
+  return `<div class="composer" id="composer"><div class="composer-inner">
+    <div class="attach-chips" id="attach-chips"></div>
+    <div class="box2"><div id="menu"></div>
+      <button class="icon-btn" data-action="plus" aria-label="Add" title="Add">${ICON.plus}</button>
+      <textarea id="draft" rows="1" placeholder="${esc(model.composer.placeholder)}">${esc(ui.drafts.get(ctx.draftKey()) || '')}</textarea>
+      ${Recognition ? `<button class="icon-btn" data-action="mic" aria-label="Dictate" title="Dictate">${ICON.mic}</button>` : ''}
+      <button class="send-btn" data-action="send" aria-label="Send" title="Send">${ICON.up}</button>
+      <input type="file" id="file-input" multiple hidden>
+    </div>
+    <div class="foot"><span class="hint">Type / for commands${model.composer.mentions?.length ? ' · @ to mention' : ''}</span><span class="spacer"></span>
+      ${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
+      <span class="ring ${working ? 'busy' : ''}" title="${working ? 'The agent is working' : 'Idle'}" aria-hidden="true"></span></div>
+  </div></div>`;
+}
+
+// ---------- attachments ----------
+function drawChips(ctx) {
+  const host = document.getElementById('attach-chips'); if (!host) return;
+  host.innerHTML = ctx.ui.attachments.map((file, index) => `<span class="attach ${file.error ? 'bad' : ''}">${ICON.file}<span class="nm">${ctx.esc(file.name)}</span>${file.path ? '' : '<span class="sp"></span>'}<button type="button" data-remove-attach="${index}" aria-label="Remove">×</button></span>`).join('');
+}
+async function upload(ctx, file) {
+  const entry = { name: file.name || 'pasted-file', path: '' }; ctx.ui.attachments.push(entry); drawChips(ctx);
+  try {
+    const response = await fetch(`/api/uploads?name=${encodeURIComponent(entry.name)}`, { method: 'POST', headers: { 'x-rex-desk': '1' }, body: file });
+    const body = await response.json(); if (!response.ok) throw new Error(body.error || 'Upload failed.');
+    entry.path = body.path; entry.name = body.name;
+  } catch (error) { ctx.ui.attachments.splice(ctx.ui.attachments.indexOf(entry), 1); ctx.toast(error.message, true); }
+  drawChips(ctx);
+}
+export const attachmentText = ctx => {
+  const ready = ctx.ui.attachments.filter(file => file.path);
+  return ready.length ? `\n\nAttached files (read them from these paths):\n${ready.map(file => `- ${file.path}`).join('\n')}` : '';
+};
+
+// ---------- menus: slash commands and @ mentions share one list ----------
+function commands(ctx) {
+  const { ui } = ctx, c = ctx.commands;
+  return [
+    { name: 'sync', hint: 'Sync issues from the tracker', run: c.sync },
+    { name: 'projects', hint: 'Scan this computer for projects', run: c.projects },
+    { name: 'room', hint: 'Start a room for several agents', run: c.room },
+    { name: 'agent', hint: 'Create an agent for a project', run: c.agent },
+    { name: 'main', hint: 'Go to the main agent', run: c.main },
+    ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }] : []),
+    { name: 'settings', hint: 'Open issues and settings', run: c.settings },
+  ];
+}
+function drawMenu(ctx) {
+  const host = document.getElementById('menu'); if (!host) return;
+  const menu = ctx.ui.menu;
+  host.innerHTML = menu ? `<div class="menu" role="listbox">${menu.items.map((item, index) => `<button type="button" role="option" class="${index === menu.index ? 'on' : ''}" data-menu="${index}"><strong>${menu.kind === 'slash' ? '/' : item.plain ? '' : '@'}${ctx.esc(item.name)}</strong>${item.hint ? `<small>${ctx.esc(item.hint)}</small>` : ''}</button>`).join('')}</div>` : '';
+}
+function closeMenu(ctx) { ctx.ui.menu = null; drawMenu(ctx); }
+function choose(ctx, item) {
+  const menu = ctx.ui.menu, box = document.getElementById('draft'); if (!menu || !item) return;
+  if (menu.kind === 'slash') { box.value = ''; ctx.ui.drafts.set(ctx.draftKey(), ''); closeMenu(ctx); void item.run?.(); return; }
+  const end = box.selectionStart;
+  box.value = `${box.value.slice(0, menu.from)}@${item.name} ${box.value.slice(end)}`; ctx.ui.drafts.set(ctx.draftKey(), box.value); closeMenu(ctx); box.focus();
+}
+function menuItems(ctx, box) {
+  const before = box.value.slice(0, box.selectionStart);
+  const slash = /^\/([\w-]*)$/.exec(before);
+  if (slash) { const items = commands(ctx).filter(item => item.name.startsWith(slash[1].toLowerCase())); return items.length ? { kind: 'slash', items, index: 0, from: 0 } : null; }
+  const at = /(^|\s)@([\p{L}\p{N}_.-]*)$/u.exec(before);
+  if (at) { const items = (ctx.ui.mentions || []).filter(name => name.toLowerCase().startsWith(at[2].toLowerCase())).map(name => ({ name })); return items.length ? { kind: 'mention', items, index: 0, from: before.length - at[2].length - 1 } : null; }
+  return null;
+}
+
+// ---------- voice ----------
+let listening = null;
+function toggleMic(ctx) {
+  const box = document.getElementById('draft'), button = document.querySelector('[data-action="mic"]');
+  if (listening) { listening.stop(); return; }
+  const recognition = new Recognition(); listening = recognition; recognition.lang = navigator.language || 'en-US'; recognition.interimResults = true; recognition.continuous = false;
+  const base = box.value ? `${box.value.trim()} ` : '';
+  button?.classList.add('rec');
+  recognition.onresult = event => { box.value = base + [...event.results].map(result => result[0].transcript).join(' '); ctx.ui.drafts.set(ctx.draftKey(), box.value); };
+  recognition.onerror = event => { if (event.error && event.error !== 'aborted' && event.error !== 'no-speech') ctx.toast(`Voice input stopped: ${event.error}`, true); };
+  recognition.onend = () => { listening = null; document.querySelector('[data-action="mic"]')?.classList.remove('rec'); box.focus(); };
+  try { recognition.start(); } catch { listening = null; button?.classList.remove('rec'); }
+}
+
+// ---------- wiring ----------
+export function initComposer(ctx) {
+  document.addEventListener('click', event => {
+    const chip = event.target.closest('[data-remove-attach]');
+    if (chip) { ctx.ui.attachments.splice(Number(chip.dataset.removeAttach), 1); drawChips(ctx); return; }
+    const entry = event.target.closest('[data-menu]');
+    if (entry && ctx.ui.menu) { choose(ctx, ctx.ui.menu.items[Number(entry.dataset.menu)]); return; }
+    const button = event.target.closest('[data-action="plus"],[data-action="mic"]');
+    if (!button) { if (ctx.ui.menu && !event.target.closest('.box2')) closeMenu(ctx); return; }
+    if (button.dataset.action === 'mic') return toggleMic(ctx);
+    const items = [
+      { name: 'Attach a file or image', plain: true, hint: '', run: () => document.getElementById('file-input').click() },
+      { name: 'Start a room', plain: true, run: ctx.commands.room }, { name: 'Create an agent', plain: true, run: ctx.commands.agent }, { name: 'Scan for projects', plain: true, run: ctx.commands.projects },
+    ];
+    ctx.ui.menu = { kind: 'slash', items, index: 0, from: 0 }; drawMenu(ctx);
+  });
+  document.addEventListener('change', event => {
+    if (event.target.id === 'file-input') { for (const file of event.target.files) void upload(ctx, file); event.target.value = ''; return; }
+    if (event.target.id === 'opt-model') remember({ model: event.target.value });
+    if (event.target.id === 'opt-effort') remember({ effort: event.target.value });
+    if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast('Dangerous: the agent runs tools without asking.'); }
+  });
+  document.addEventListener('keydown', event => {
+    if (event.target.id !== 'draft') return;
+    const menu = ctx.ui.menu;
+    if (menu && ['ArrowDown', 'ArrowUp', 'Tab', 'Escape'].includes(event.key)) {
+      event.preventDefault();
+      if (event.key === 'Escape') return closeMenu(ctx);
+      if (event.key === 'Tab') return choose(ctx, menu.items[menu.index]);
+      menu.index = (menu.index + (event.key === 'ArrowDown' ? 1 : -1) + menu.items.length) % menu.items.length; return drawMenu(ctx);
+    }
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (menu) return choose(ctx, menu.items[menu.index]); void ctx.send(); }
+  });
+  document.addEventListener('input', event => {
+    if (event.target.id !== 'draft') return;
+    const box = event.target; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.style.height = 'auto'; box.style.height = `${Math.min(200, box.scrollHeight)}px`;
+    ctx.ui.menu = menuItems(ctx, box); drawMenu(ctx);
+  });
+  document.addEventListener('paste', event => {
+    if (event.target.id !== 'draft') return;
+    const files = [...(event.clipboardData?.files || [])]; if (!files.length) return;
+    event.preventDefault(); for (const file of files) void upload(ctx, file);
+  });
+  document.addEventListener('dragover', event => { if (event.target.closest?.('#composer')) event.preventDefault(); });
+  document.addEventListener('drop', event => {
+    if (!event.target.closest?.('#composer')) return;
+    event.preventDefault(); for (const file of event.dataTransfer?.files || []) void upload(ctx, file);
+  });
+}
+export const redrawAttachments = drawChips;

@@ -7,8 +7,9 @@ export const MODELS = [
   { id: 'claude-fable-5-1', label: 'Fable 5.1' },
 ];
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
-// Manual is Claude Code's usual behaviour: it asks in the terminal. bypassPermissions and dontAsk are not offered.
+// Dangerous runs tools without asking and is what Rex Desk agents start with. Manual asks for each one in the chat. dontAsk is not offered.
 export const MODES = [
+  { id: 'bypassPermissions', label: 'Dangerous' },
   { id: 'manual', label: 'Manual' },
   { id: 'auto', label: 'Auto' },
   { id: 'plan', label: 'Plan' },
@@ -20,6 +21,6 @@ export function runOptions(input = {}) {
   const out = {};
   if (input.model) { if (!MODELS.some(item => item.id === input.model)) throw new Error('Choose one of the listed models.'); out.model = input.model; }
   if (input.effort) { if (!EFFORTS.includes(input.effort)) throw new Error('Choose low, medium, high, xhigh or max effort.'); out.effort = input.effort; }
-  if (input.permissionMode) { if (!MODES.some(item => item.id === input.permissionMode)) throw new Error('Choose Manual, Auto, Plan or Accept edits.'); out.permissionMode = input.permissionMode; }
+  if (input.permissionMode) { if (!MODES.some(item => item.id === input.permissionMode)) throw new Error('Choose Dangerous, Manual, Auto, Plan or Accept edits.'); out.permissionMode = input.permissionMode; }
   return out;
 }

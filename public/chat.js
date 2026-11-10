@@ -1,12 +1,14 @@
 import { agentsRail, agentStage, agentAction } from '/chat-agents.js';
+import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
-const ui = { snap: null, view: { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true };
+const ui = { snap: null, view: { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [] };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`; };
 const provider = name => name === 'codex' ? 'Codex (retired)' : name === 'claude' ? 'Claude Code' : 'Agent';
-const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, get initials() { return initials; } };
+const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
+  commands: { sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), settings: () => { location.href = '/classic'; } }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
 async function api(path, { method = 'GET', data } = {}) {
@@ -90,15 +92,16 @@ function decisionCard(item) {
   const field = (key, property, needed) => {
     const attrs = `name="${esc(key)}" data-type="${esc(property.type || 'string')}" ${needed ? 'required' : ''}`;
     const control = property.type === 'boolean' ? `<select ${attrs}><option value="">Choose…</option><option value="true">Yes</option><option value="false">No</option></select>`
-      : property.enum ? `<select ${attrs}><option value="">Choose…</option>${property.enum.map(value => `<option>${esc(value)}</option>`).join('')}<option value="__custom">Write another answer…</option></select><input class="hidden" name="${esc(key)}__custom" placeholder="Your answer">`
-      : `<input ${attrs} type="${['number', 'integer'].includes(property.type) ? 'number' : 'text'}" placeholder="Your answer">`;
-    return `<label><span>${esc(property.title || key)}</span>${control}</label>`;
+      : property.enum ? `<select ${attrs}><option value="">Choose…</option>${property.enum.map(value => `<option>${esc(value)}</option>`).join('')}<option value="__custom">Write another answer…</option></select><input class="qinput hidden" name="${esc(key)}__custom" placeholder="Your answer">`
+      : `<input class="qinput" ${attrs} type="${['number', 'integer'].includes(property.type) ? 'number' : 'text'}" placeholder="Type your answer…" autocomplete="off">`;
+    return `<label class="qfield"><span>${esc(property.title || key)}</span>${control}</label>`;
   };
   const fields = Object.entries(properties).map(([key, property]) => field(key, property, required.includes(key))).join('')
     + (request.questions || []).map(question => field(question.id || question.question, { type: 'string', title: question.question, enum: question.options?.map(option => option.label) }, true)).join('');
-  const detail = item.kind === 'approval' ? request.command || request.input || request : null;
-  return `<form class="card ask" data-interaction="${esc(item.id)}"><h4>${item.kind === 'approval' ? 'Approve' : 'Question'} · ${esc(runTitle(run))}</h4><div>${esc(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</div>${detail ? `<pre>${esc(typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2).slice(0, 1500))}</pre>` : ''}${fields}
-    <div class="row"><button class="btn primary small" name="decision" value="accept">${item.kind === 'approval' ? 'Approve once' : 'Send answer'}</button>${request.allowAlways ? '<button class="btn small" name="decision" value="always" formnovalidate>Always allow for this run</button>' : ''}<button class="btn small" name="decision" value="decline" formnovalidate>Decline</button></div></form>`;
+  const many = (fields.match(/class="qfield"/g) || []).length;
+  const ask = item.kind !== 'approval', detail = ask ? null : request.command || request.input || request;
+  return `<form class="card ask qcard" data-interaction="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>${ask ? (many > 1 ? `${many} questions` : 'Question') : 'Needs your OK'} · ${esc(runTitle(run))}</div><div class="qtext md">${markdown(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</div>${detail ? `<pre>${esc(typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2).slice(0, 1500))}</pre>` : ''}${fields}
+    <div class="row"><button class="send-btn wide" name="decision" value="accept">${ask ? (many > 1 ? 'Send answers' : 'Send') : 'Approve once'}</button>${request.allowAlways ? '<button class="btn small" name="decision" value="always" formnovalidate>Always allow for this run</button>' : ''}<button class="btn small" name="decision" value="decline" formnovalidate>${ask ? 'Skip' : 'Decline'}</button>${ask && many > 1 ? '<small class="qhint">Enter moves to the next answer · Ctrl+Enter sends</small>' : ''}</div></form>`;
 }
 function wakeCard(wake) {
   const run = runById(wake.runId), room = roomById(wake.roomId);
@@ -138,7 +141,7 @@ function stageModel() {
     + pending(run.id).map(decisionCard).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
   const stop = live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : '';
   return { title: runTitle(run), meta: `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions: stop, feed,
-    composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : (run.provider === 'codex' ? 'Message Claude Code. It takes over from Codex with the chat so far…' : `Message ${provider(run.provider)}. It picks up where it left off…`), mentions: [] } };
+    working: workingStates.includes(run.state), composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : (run.provider === 'codex' ? 'Message Claude Code. It takes over from Codex with the chat so far…' : `Message ${provider(run.provider)}. It picks up where it left off…`), mentions: [] } };
 }
 const quick = (label, text) => `<button class="chip-btn" data-action="quick" data-text="${esc(text)}">${esc(label)}</button>`;
 const welcomeStage = () => ({ title: 'Rex', meta: 'Main agent',
@@ -150,12 +153,14 @@ function renderStage(full) {
   const model = stageModel(), stage = document.getElementById('stage');
   const head = `<div class="stage-head"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}<span class="spacer"></span>${model.actions || ''}</div>`;
   if (full || !document.getElementById('feed')) {
-    stage.innerHTML = `<div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? `<div class="composer"><div class="composer-inner"><div class="box"><div id="menu"></div><textarea id="draft" rows="1" placeholder="${esc(model.composer.placeholder)}">${esc(ui.drafts.get(draftKey()) || '')}</textarea><button class="btn primary small send" data-action="send">Send</button></div><div class="hint">Enter sends · Shift+Enter adds a line</div></div></div>` : '<div></div>'}`;
-    ui.stick = true;
+    stage.innerHTML = `<div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}`;
+    ui.stick = true; redrawAttachments(ctx);
   } else { document.getElementById('head').innerHTML = head; document.getElementById('members').innerHTML = model.members || ''; }
   const feed = document.getElementById('feed'), inner = document.getElementById('feed-inner');
   // Someone typing in an approval form keeps their text: the feed is not redrawn under them.
-  const editing = !full && feed.contains(document.activeElement) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName);
+  // A form that is gone from the new view (it was answered) never holds the redraw back.
+  const active = document.activeElement, form = active?.closest?.('[data-interaction]');
+  const editing = !full && feed.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName) && (!form || model.feed.includes(`data-interaction="${form.dataset.interaction}"`));
   if (!editing) { inner.innerHTML = model.feed; if (ui.stick) feed.scrollTop = feed.scrollHeight; }
   ui.mentions = model.composer?.mentions || [];
 }
@@ -191,20 +196,26 @@ function open(type, id = '') { ui.view = { type, id }; ui.page = ''; document.qu
 
 // ---------- actions ----------
 async function send() {
-  const box = document.getElementById('draft'), text = box?.value.trim(); if (!text) return;
+  const box = document.getElementById('draft'), typed = box?.value.trim(), hasFiles = ui.attachments.some(file => file.path);
+  if (!typed && !hasFiles) return;
+  if (ui.attachments.some(file => !file.path)) return toast('Wait for the upload to finish.', true);
+  const text = `${typed || 'See the attached files.'}${attachmentText(ctx)}`, picked = pickedOptions(ctx);
   const { type, id } = ui.view; box.disabled = true;
   try {
     if (type === 'room') await api(`/rooms/${id}/messages`, { method: 'POST', data: { text } });
-    else if (type === 'main' && !mainRun()) await api('/main', { method: 'POST', data: { prompt: text } });
+    else if (type === 'main' && !mainRun()) await api('/main', { method: 'POST', data: { prompt: text, ...picked } });
     else {
       const run = type === 'main' ? mainRun() : runById(id);
-      if (workingStates.includes(run.state)) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text } });
-      else { await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text } }); if (run.provider === 'codex') toast('Claude Code took over from Codex. The chat so far was handed over.'); }
+      if (workingStates.includes(run.state)) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text, ...picked } });
+      else await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text, ...picked } });
     }
-    box.value = ''; ui.drafts.delete(draftKey()); await refresh();
+    box.value = ''; box.style.height = ''; ui.drafts.delete(draftKey()); ui.attachments = []; redrawAttachments(ctx); await refresh();
   } catch (error) { toast(error.message, true); }
   finally { box.disabled = false; box.focus(); }
 }
+async function syncIssues() { toast('Syncing issues…'); await api('/sync', { method: 'POST', data: {} }); toast('Issues synced.'); await refresh(); }
+async function scanProjects() { toast('Scanning this computer for projects…'); const result = await api('/memory/scan', { method: 'POST', data: {} }); toast(`Found ${result.count} projects.`); await refresh(); }
+async function stopAgent() { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast('No agent to stop here.', true); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
 function newRoomDialog() {
   const runs = ui.snap.runs.filter(run => run.role !== 'coordinator' && stateGroup(run) !== 'done');
   const back = document.createElement('div'); back.className = 'dialog-back';
@@ -226,11 +237,11 @@ document.addEventListener('click', async event => {
     else if (action === 'send') await send();
     else if (action === 'new-room') newRoomDialog();
     else if (action === 'quick') { await api('/main', { method: 'POST', data: { prompt: target.dataset.text } }); await refresh(); }
-    else if (action === 'sync') { toast('Syncing issues…'); await api('/sync', { method: 'POST', data: {} }); toast('Issues synced.'); await refresh(); }
+    else if (action === 'sync') await syncIssues();
     else if (action === 'toggle-done') { ui.done = !ui.done; renderAll(); }
     else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
     else if (action === 'stop') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
-    else if (action === 'scan') { toast('Scanning this computer for projects…'); const result = await api('/memory/scan', { method: 'POST', data: {} }); toast(`Found ${result.count} projects. Notes are in ${result.directory}`); await refresh(); }
+    else if (action === 'scan') await scanProjects();
     else if (action === 'wake-approve') { await api(`/rooms/x/wakes/${target.dataset.id}`, { method: 'POST', data: {} }); toast('Agent resumed.'); await refresh(); }
     else if (action === 'wake-dismiss') { await api(`/rooms/x/wakes/${target.dataset.id}`, { method: 'DELETE' }); await refresh(); }
     else if (action === 'room-remove') { await api(`/rooms/${ui.view.id}/members/${target.dataset.id}`, { method: 'DELETE' }); await refresh(); }
@@ -250,38 +261,19 @@ document.addEventListener('submit', async event => {
     content[field.name] = field.dataset.type === 'boolean' ? value === 'true' : ['number', 'integer'].includes(field.dataset.type) ? Number(value) : value;
   }
   const always = decision === 'always';
+  document.activeElement?.blur?.();
   try { await api(`/interactions/${form.dataset.interaction}/answer`, { method: 'POST', data: { action: always ? 'accept' : decision, content: always ? { ...content, always: true } : content } }); toast(decision === 'accept' || always ? 'Sent to the agent.' : 'Declined.'); await refresh(); }
   catch (error) { toast(error.message, true); }
 });
-// Composer: Enter sends; typing @ offers the room's agents.
-document.addEventListener('keydown', event => {
-  if (event.target.id !== 'draft') return;
-  if (ui.menu && ['ArrowDown', 'ArrowUp', 'Tab', 'Escape'].includes(event.key)) {
-    event.preventDefault();
-    if (event.key === 'Escape') { ui.menu = null; document.getElementById('menu').innerHTML = ''; return; }
-    if (event.key === 'Tab') return pickMention(ui.menu.items[ui.menu.index]);
-    ui.menu.index = (ui.menu.index + (event.key === 'ArrowDown' ? 1 : -1) + ui.menu.items.length) % ui.menu.items.length; return drawMenu();
-  }
-  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (ui.menu) return pickMention(ui.menu.items[ui.menu.index]); void send(); }
-});
-document.addEventListener('input', event => {
-  if (event.target.id !== 'draft') return;
-  const box = event.target; ui.drafts.set(draftKey(), box.value); box.style.height = 'auto'; box.style.height = `${Math.min(180, box.scrollHeight)}px`;
-  const before = box.value.slice(0, box.selectionStart), match = /(^|\s)@([\p{L}\p{N}_.-]*)$/u.exec(before);
-  const items = match ? (ui.mentions || []).filter(name => name.toLowerCase().startsWith(match[2].toLowerCase())) : [];
-  ui.menu = items.length ? { items, index: 0, from: before.length - match[2].length - 1 } : null; drawMenu();
-});
-function drawMenu() {
-  const host = document.getElementById('menu'); if (!host) return;
-  host.innerHTML = ui.menu ? `<div class="menu">${ui.menu.items.map((name, index) => `<button type="button" class="${index === ui.menu.index ? 'on' : ''}" data-mention="${esc(name)}">@${esc(name)}</button>`).join('')}</div>` : '';
-}
-function pickMention(name) {
-  const box = document.getElementById('draft'), end = box.selectionStart;
-  box.value = `${box.value.slice(0, ui.menu.from)}@${name} ${box.value.slice(end)}`; ui.drafts.set(draftKey(), box.value); ui.menu = null; drawMenu(); box.focus();
-}
-document.addEventListener('mousedown', event => { const item = event.target.closest('[data-mention]'); if (item && ui.menu) { event.preventDefault(); pickMention(item.dataset.mention); } });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
 
+initComposer(ctx);
+document.addEventListener('keydown', event => {
+  const input = event.target.closest?.('.qinput'); if (!input || event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+  const form = input.closest('form'), all = [...form.querySelectorAll('.qinput:not(.hidden)')], next = all[all.indexOf(input) + 1];
+  event.preventDefault();
+  if (next && !event.ctrlKey) next.focus(); else form.requestSubmit(form.querySelector('[value=accept]'));
+});
 try {
   await refresh({ full: true });
   const stream = new EventSource('/api/events'); let timer;
