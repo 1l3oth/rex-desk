@@ -7,7 +7,7 @@ import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttach
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
 // Which screen is open lives in the address (#/room/ID) and is also saved, so a refresh or a restart comes back to the same place.
-const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project'];
+const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person'];
 const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
 function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash); return match && SCREENS.includes(match[1]) ? { type: match[1], id: match[2] ? decodeURIComponent(match[2]) : '' } : null; }
 function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
@@ -60,6 +60,7 @@ function renderRail() {
   const tasks = (snap.tasks || []).filter(task => task.active && !task.demo), busy = (snap.specialists || []).filter(agent => agent.status?.state === 'busy').length;
   return `<div class="rail-head"><span class="dot ${snap.syncing ? 'working' : 'good'}"></span><strong>Rex Desk</strong><span class="spacer"></span><button class="btn small" data-action="sync" title="Sync issues from the tracker">Sync</button></div><div class="rail-scroll">
     ${railItem('main', '', { dot: main ? stateTone(main) : '', name: 'Main agent', sub: main ? `${provider(main.provider)} · ${stateLabel(main)}` : 'Not started' })}
+    ${railItem('person', '', { name: 'About you', sub: 'What the agents learned' })}
     ${railItem('inbox', '', { name: 'Needs you', sub: asks ? `${asks} waiting` : 'Nothing waiting', badge: asks, warn: true })}
     <h3>Rooms <button data-action="new-room" title="New room" aria-label="New room">+</button></h3>
     ${snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), dot: room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : '', name: room.name, sub: `${room.members.length} agents` })).join('') : '<p class="rail-empty">No rooms yet.</p>'}
@@ -157,6 +158,7 @@ function stageModel() {
     return { title: 'Needs you', meta: `${asks.length + wakes.length} waiting`, feed: asks.length + wakes.length ? asks.map(decisionCard).join('') + wakes.map(wakeCard).join('') : '<div class="empty"><h2>All clear</h2><p>Questions, approvals and wake-ups from your agents show up here.</p></div>' };
   }
   if (type === 'specialist') return agentStage(ctx);
+  if (type === 'person') return { title: 'About you', meta: 'What the agents learned from you', feed: `<div class="page"><div class="card"><div class="md">${markdown(ui.page || 'Nothing learned yet. As you correct and praise your agents, they note what you like here.')}</div><p class="muted small">Saved in .rexdesk/user.md. Change or delete any line there and every agent follows it.</p></div></div>` };
   if (type === 'project') {
     return { title: id, meta: 'Project memory', feed: `<div class="page"><div class="row"><button class="btn primary small" data-action="spec-new">Create agent for this project</button></div><div class="card"><div class="md">${markdown(ui.page || 'Loading…')}</div></div></div>` };
   }
@@ -222,7 +224,8 @@ async function loadView() {
     } else if (type === 'room') {
       const room = ui.snap.rooms.find(item => item.id === id);
       if (room && ui.infoOpen !== false && ui.sideTab !== 'info') await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
-    } else if (type === 'project') ui.page = (await api(`/memory/page?name=${encodeURIComponent(id)}`)).text;
+    } else if (type === 'person') { ui.page = (await api('/memory/page?name=user')).text; }
+    else if (type === 'project') ui.page = (await api(`/memory/page?name=${encodeURIComponent(id)}`)).text;
   } catch (error) { if (type === 'project') ui.page = error.message; }
 }
 let busy = false, again = false;

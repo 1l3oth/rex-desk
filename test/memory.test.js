@@ -63,3 +63,18 @@ test('agents get the chat style, which the person can change in chat-style.md', 
   writeFileSync(path.join(memory.directory, 'chat-style.md'), '# Mine\n- Always one sentence.');
   assert.equal(memory.chatStyle(), '# Mine\n- Always one sentence.');
 });
+
+test('what agents learn about the person is kept in sections of user.md, once, without secrets', () => {
+  const memory = new Memory(temporary('person')).ensure();
+  assert.equal(memory.person(), '', 'nothing known yet');
+  memory.personNote('likes', 'Short replies with the answer first.');
+  memory.personNote('likes', 'short replies with the answer first.');
+  memory.personNote('dislikes', 'Long tables in chat.');
+  memory.personNote('works', 'Reviews in the morning; password=hunter2');
+  const text = memory.person();
+  assert.match(text, /## Likes\n\n- Short replies with the answer first\./);
+  assert.equal((text.match(/Short replies/gi) || []).length, 1, 'kept once');
+  assert.match(text, /## Dislikes\n\n- Long tables in chat\./);
+  assert.ok(!text.includes('hunter2'));
+  assert.throws(() => memory.personNote('hobbies', 'x'), /likes, dislikes, works or about/);
+});

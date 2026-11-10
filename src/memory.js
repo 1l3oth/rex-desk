@@ -78,6 +78,26 @@ export class Memory {
     const hash = createHash('sha1').update(directory.toLowerCase()).digest('hex').slice(0, 6);
     return taken.get(base) && taken.get(base) !== directory.toLowerCase() ? `${base}-${hash}` : base;
   }
+  // What the agents learned about the person, shared by all of them: likes, dislikes, how they work, and facts about them. Kept in user.md as sections of bullets.
+  personNote(kind, text) {
+    this.ensure();
+    const titles = { likes: 'Likes', dislikes: 'Dislikes', works: 'How they work', about: 'About them' }, title = titles[kind];
+    if (!title) throw new Error('Choose likes, dislikes, works or about.');
+    const note = redactText(String(text || '').replace(/\s+/g, ' ').trim()).slice(0, 240);
+    if (!note) throw new Error('Write what you learned first.');
+    const current = read(this.file('user.md'), 20000), sections = new Map();
+    for (const name of Object.values(titles)) sections.set(name, []);
+    let section = '';
+    for (const line of current.split('\n')) { const heading = /^##\s+(.+)$/.exec(line); if (heading) { section = heading[1].trim(); if (!sections.has(section)) sections.set(section, []); continue; } const bullet = /^-\s+(.+)$/.exec(line); if (bullet && section) sections.get(section).push(bullet[1].trim()); }
+    const list = sections.get(title);
+    if (list.some(item => item.toLowerCase() === note.toLowerCase())) return { saved: false, reason: 'Already known.' };
+    list.push(note); sections.set(title, list.slice(-40));
+    const page = ['# About the person', '', 'What the agents learned from how the person talks to them. Every agent reads this. The person can change or delete any line.', '',
+      ...[...sections].filter(([, items]) => items.length).flatMap(([name, items]) => [`## ${name}`, '', ...items.map(item => `- ${item}`), ''])].join('\n');
+    atomic(this.file('user.md'), page); return { saved: true };
+  }
+  // The profile as agents get it, or nothing while it is empty.
+  person() { const text = read(this.file('user.md'), 4000).trim(); return /^- /m.test(text) ? text : ''; }
   // The chat style the person keeps in chat-style.md, or the built-in one.
   chatStyle() { try { const text = readFileSync(this.file('chat-style.md'), 'utf8').trim(); return text ? text.slice(0, 3000) : CHAT_STYLE; } catch { return CHAT_STYLE; } }
   state() { try { return JSON.parse(readFileSync(this.file('scan.json'), 'utf8')); } catch { return { projects: {} }; } }

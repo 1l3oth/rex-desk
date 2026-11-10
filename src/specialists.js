@@ -128,7 +128,7 @@ export class Specialists {
   identity(agent) {
     return [`You are ${agent.name}, the specialist agent for the project "${agent.projectSlug}" at ${agent.projectPath}. You keep one conversation of your own, and you take part in the person's group chats when you are mentioned.`,
       agent.purpose ? `What the project is for: ${agent.purpose}` : '', agent.rules ? `Rules from the person:\n${agent.rules}` : '', agent.unsure?.length ? `Still unsure about: ${agent.unsure.join('; ')}` : '',
-      this.memory.chatStyle(), this.lessonsText(agent.id),
+      this.memory.chatStyle(), this.memory.person() ? `What you know about the person (all agents share this):\n${this.memory.person()}` : '', this.lessonsText(agent.id), "Notice what the person likes and dislikes from how they react to you: corrections, praise, frustration, things they ask for again. When you see a lasting preference or fact about the person, save it with desk_learn_person; lessons about your own work go to desk_learn.",
       "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
       `Read your project's memory first: desk_memory("${agent.projectSlug}"). Here you only read the project and answer; you never edit the original checkout. Code changes happen on a task, in its own worktree, after the person assigns it. Always call a task by its English name. Do only what the person asks, for the tasks they name: do not widen the scope to sub-tasks, related tasks or other projects without asking first. Use desk_rooms and desk_room_history to read any group chat you are in.`].filter(Boolean).join('\n');
   }
