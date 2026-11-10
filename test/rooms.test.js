@@ -184,6 +184,7 @@ test('each session of an agent is told what happened in the other one since it l
 test('an agent is told who else is answering in the room, with their handles, and to build on their replies', async () => {
   const { desk, store, turns, dara, vanna, room } = setup();
   store.put('run', 'busy-vanna', { id: 'busy-vanna', role: 'specialist', specialistId: vanna.id, roomAgent: vanna.id, state: 'running', createdAt: now() });
+  desk.rooms.quietLimit = 300; // Vanna never finishes here, so Dara waits only briefly
   await desk.rooms.post(room.id, { text: '@dara what do you think?' });
   await waitFor(() => turns.some(item => item.run.specialistId === dara.id));
   const asked = turns.find(item => item.run.specialistId === dara.id).prompt;
@@ -221,4 +222,28 @@ test('replying to an agent message without a mention goes to that agent, and its
   await waitFor(() => store.list('roommsg').filter(item => item.from.id === vanna.id).length >= 2);
   const second = store.list('roommsg').filter(item => item.from.id === vanna.id).sort((left, right) => left.seq - right.seq)[1];
   assert.equal(second.replyTo, reply.id, "Vanna's answer is linked to the person's reply");
+});
+
+test('while another agent is typing in the room the next one waits, then reads what was just said', async () => {
+  const { desk, store, turns, dara, vanna, room } = setup();
+  desk.rooms.quietSettle = 50;
+  store.put('run', 'typing-vanna', { id: 'typing-vanna', role: 'specialist', specialistId: vanna.id, roomAgent: vanna.id, state: 'running', createdAt: now() });
+  await desk.rooms.post(room.id, { text: '@dara and what about the refunds?' });
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.ok(!turns.some(item => item.run.specialistId === dara.id), 'Dara waits while Vanna is typing');
+  await desk.rooms.post(room.id, { fromAgentId: vanna.id, text: 'Refunds go through the billing queue.' });
+  store.put('run', 'typing-vanna', { ...store.get('run', 'typing-vanna'), state: 'finished' });
+  await waitFor(() => turns.some(item => item.run.specialistId === dara.id));
+  const prompt = turns.find(item => item.run.specialistId === dara.id).prompt;
+  assert.match(prompt, /Already answered after that message[\s\S]*Refunds go through the billing queue/);
+});
+
+test('an agent that already saw the room still gets the last messages as context', async () => {
+  const { desk, turns, dara, room } = setup({ replies: ['First answer.', 'Second answer.'] });
+  await desk.rooms.post(room.id, { text: '@dara the checkout total is wrong after a coupon' });
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id));
+  await desk.rooms.post(room.id, { text: '@dara any idea why?' });
+  await waitFor(() => turns.filter(item => item.run.specialistId === dara.id).length >= 2);
+  const prompt = turns.filter(item => item.run.specialistId === dara.id)[1].prompt;
+  assert.match(prompt, /The conversation so far[\s\S]*checkout total is wrong after a coupon[\s\S]*First answer\./);
 });
