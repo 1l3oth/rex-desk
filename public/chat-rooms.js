@@ -29,10 +29,10 @@ export function roomStage(ctx) {
   const render = message => {
     if (message.from.type === 'system') { previous = null; return note(esc(message.text)); }
     const to = message.from.type === 'human' && message.to.some(id => id !== 'you') ? message.to.filter(id => id !== 'you').map(id => names.get(id)).filter(Boolean) : [];
-    const shown = message.from.type === 'human' ? String(message.text).replace(/\n\n\(Sent by voice: [^)]*\)\s*$/, '') : message.text;
+    const shown = message.from.type === 'human' ? String(message.text).replace(/\s*\(Sent by voice: [^)]*\)\s*$/, '') : message.text;
     const html = markdown(shown, { mentions: ['you', ...handles], tasks }) + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '');
     const same = previous && previous.from.id === message.from.id && Date.parse(message.at) - Date.parse(previous.at) < 5 * 60000; previous = message;
-    if (message.from.type === 'human') return bubble({ mine: true, name: 'You', time: `${hhmm(message.at)}${shown !== message.text ? ' · by voice' : ''}`, html: quote(message) + html }).replace('<div class="msg mine', `<div data-msg="${esc(message.id)}" class="msg mine`);
+    if (message.from.type === 'human') return bubble({ mine: true, name: 'You', time: hhmm(message.at), voice: shown !== message.text, html: quote(message) + html }).replace('<div class="msg mine', `<div data-msg="${esc(message.id)}" class="msg mine`);
     return `<div class="msg rmsg ${same ? 'cont' : ''}" data-msg="${esc(message.id)}"><div class="ravcol">${same ? '' : ctx.avatar({ name: message.from.label, size: 'sm' })}</div><div class="bubble"><div class="who rwho"><strong class="nc${nameHash(message.from.label)}">${esc(message.from.label)}</strong><span>${esc(hhmm(message.at))}</span><button type="button" class="rreply" data-reply="${esc(message.id)}" title="Reply to ${esc(message.from.label)}" aria-label="Reply to ${esc(message.from.label)}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 4L2 8l4 4M2 8h8a4 4 0 0 1 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Reply</button></div>${quote(message)}<div class="md">${html}</div></div></div>`;
   };
   const empty = `<div class="empty"><h2>${esc(room.name)}</h2><p>Mention an agent with @ to talk to it, and a task with #. Agents answer only when they are mentioned, and each one reads this room before it answers.</p></div>`;

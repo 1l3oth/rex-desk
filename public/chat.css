@@ -580,3 +580,4 @@ body.ptt::after{content:"Listening… let go of Space to stop";position:fixed;le
 button.cn-main{cursor:pointer}
 .cn-text{min-width:0;display:flex;flex-direction:column}.cn-text b{font-size:13.5px;font-weight:600}
 .cn-text small{font-size:11.5px;color:var(--muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.cn-text small.bad{color:var(--bad)}
+.who .vmic{vertical-align:-2px;margin-left:4px;opacity:.75}

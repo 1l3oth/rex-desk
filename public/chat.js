@@ -108,7 +108,7 @@ function renderItems(items, run, live) {
     if (item.role === 'tool') { group.push(item); continue; }
     flush(false);
     out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
-      : item.role === 'human' ? bubble({ mine: true, name: 'You', time: `${hhmm(item.at)}${item.voice ? ' · by voice' : ''}`, html: markdown(item.text) })
+      : item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), voice: item.voice, html: markdown(item.text) })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) })
       : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div></div>`
       : note(`${esc(item.text)} · ${hhmm(item.at)}`));
@@ -148,7 +148,7 @@ function transcript(events) {
   }
   return items;
 }
-const bubble = ({ mine, name, time, html }) => `<div class="msg ${mine ? 'mine' : ''}"><div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}</span></div><div class="md">${html}</div></div></div>`;
+const bubble = ({ mine, name, time, html, voice = false }) => `<div class="msg ${mine ? 'mine' : ''}"><div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}${voice ? ` ${micIcon()}` : ''}</span></div><div class="md">${html}</div></div></div>`;
 const typing = (name, caption = '') => `<div class="msg" aria-live="polite" aria-label="${esc(name)} is typing"><div class="avatar">${esc(initials(name))}</div><div class="bubble typing"><span class="dots"><i></i><i></i><i></i></span>${caption ? `<span class="cap">${esc(caption)}</span>` : ''}</div></div>`;
 const note = text => `<div class="note">${text}</div>`;
 // Runs that are over. Any other run that is not working can still be closed, so a stuck run never blocks its task.
@@ -626,5 +626,7 @@ document.addEventListener('click', event => {
 // ---------- dictated messages ----------
 // Added to a message that came from the microphone. It reaches the agent, but the chat shows the message without it.
 const VOICE_NOTE = '\n\n(Sent by voice: speech-to-text may have misheard some words, names or Khmer and Korean terms. Read it against our conversation and the topic we are on, and work out what I meant. If a word could change what you do and you are not sure, ask.)';
-function spokenText(text) { const mark = /\n\n\(Sent by voice: [^)]*\)\s*$/; return mark.test(String(text || '')) ? { text: String(text).replace(mark, ''), voice: true } : { text, voice: false }; }
+function spokenText(text) { const mark = /\s*\(Sent by voice: [^)]*\)\s*$/; return mark.test(String(text || '')) ? { text: String(text).replace(mark, ''), voice: true } : { text, voice: false }; }
 document.addEventListener('input', event => { if (event.target.id === 'draft' && !event.target.value.trim()) ui.voiceDrafts?.delete(draftKey()); });
+
+function micIcon() { return '<svg class="vmic" viewBox="0 0 16 16" width="12" height="12" aria-label="Sent by voice" role="img"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>'; }
