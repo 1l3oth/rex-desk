@@ -490,3 +490,6 @@ p.pf-stats{display:block;margin:2px 0 0;font-size:13px;color:var(--muted)}
 .ftext{width:100%;min-height:180px;max-height:55vh;field-sizing:content;resize:vertical;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:12.5px;line-height:1.55}
 .fnote{margin:0;font-size:12px;color:var(--muted)}.fbad{margin:0;color:var(--bad)}
 @media (max-width:640px){.fcard .frow{grid-template-columns:1fr}}
+/* terminal panel: entries keep their height and the panel scrolls (they were shrinking to fit and clipping their text) */
+.side-body>.tentry{flex:none}
+.tcmd .cmdtext{max-height:9em;overflow:auto}
