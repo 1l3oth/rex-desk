@@ -15,6 +15,9 @@ export const deskStatuses = [['new', 'New'], ['investigating', 'Investigating'],
 export const deskStatusLabels = Object.fromEntries(deskStatuses);
 export const deskStatus = value => (deskStatusLabels[String(value || '').trim().toLowerCase()] ? String(value).trim().toLowerCase() : '');
 export const now = () => new Date().toISOString();
+// Records every computer of the person shares (see peers.js). The Rex Agent record is each computer's own.
+export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd']);
+const shared = (kind, key) => SHARED.has(kind) && !(kind === 'specialist' && key === 'main');
 export const id = () => randomUUID();
 export const defaults = {
   name: 'Rex', notify: true, provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
@@ -80,6 +83,20 @@ export class Store extends EventEmitter {
     this.token = this.decrypt(token);
     this.migrateConfig();
     this.cloud = new TursoSync(this);
+    // This computer's id, and a log of changed shared records that the person's other computers read from.
+    this.nodeId = this.cloud.workspace; this.clock = 0;
+    this.db.exec('CREATE TABLE IF NOT EXISTS changes (seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, id TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)');
+    if (!this.get('meta', 'changes-backfilled')) {
+      this.transaction(() => {
+        for (const kind of SHARED) for (const row of this.db.prepare('SELECT id, value FROM records WHERE kind=?').all(kind)) {
+          if (!shared(kind, row.id)) continue;
+          const value = JSON.parse(row.value);
+          this.db.prepare('UPDATE records SET value=? WHERE kind=? AND id=?').run(JSON.stringify({ ...value, node: value.node || this.nodeId, _v: value._v || this.stamp() }), kind, row.id);
+          this.db.prepare('INSERT INTO changes(kind,id) VALUES(?,?)').run(kind, row.id);
+        }
+        this.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?)').run('meta', 'changes-backfilled', JSON.stringify({ at: now() }));
+      });
+    }
     // Running processes cannot be resurrected after a crash. Keep their history and make recovery explicit.
     // An agent in an Orca terminal keeps running through a restart, so its run is reattached instead of interrupted.
     const reattached = new Set();
@@ -104,8 +121,28 @@ export class Store extends EventEmitter {
     try { const result = callback(); this.db.exec('COMMIT'); return result; }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
+  // A version that sorts by time, then by computer, so the newest change wins on every computer.
+  stamp() { this.clock = (this.clock + 1) % 1679616; return `${Date.now().toString(36).padStart(9, '0')}.${this.clock.toString(36).padStart(4, '0')}.${this.nodeId}`; }
+  logChange(kind, key, deleted = false) {
+    if (!shared(kind, key) || !this.nodeId) return;
+    this.db.prepare('DELETE FROM changes WHERE kind=? AND id=?').run(kind, key);
+    this.db.prepare('INSERT INTO changes(kind,id,deleted) VALUES(?,?,?)').run(kind, key, deleted ? 1 : 0);
+  }
+  // A shared record from another computer is kept when it is newer than the copy here.
+  applyRemote(kind, key, value, deleted = false) {
+    if (!shared(kind, key)) return { changed: false };
+    const local = this.get(kind, key);
+    this.remote = true;
+    try {
+      if (deleted) { if (local) this.delete(kind, key); return { changed: Boolean(local) }; }
+      if (!value || (local && String(local._v || '') >= String(value._v || ''))) return { changed: false };
+      this.put(kind, key, value); return { changed: true, isNew: !local };
+    } finally { this.remote = false; }
+  }
   put(kind, key, value) {
+    if (shared(kind, key) && !this.remote && this.nodeId) value = { ...value, node: value.node || this.nodeId, _v: this.stamp() };
     this.transaction(() => {
+      this.logChange(kind, key);
       this.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value').run(kind, key, JSON.stringify(value));
       this.cloud?.record(kind, key, value);
     });
@@ -113,7 +150,7 @@ export class Store extends EventEmitter {
     this.emit('change', { kind, id: key });
     return value;
   }
-  delete(kind, key) { this.transaction(() => { this.db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(kind, key); this.cloud?.remove(kind, key); }); this.cloud?.schedule(); this.emit('change', { kind, id: key }); }
+  delete(kind, key) { this.transaction(() => { this.db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(kind, key); this.logChange(kind, key, true); this.cloud?.remove(kind, key); }); this.cloud?.schedule(); this.emit('change', { kind, id: key }); }
   event(runId, kind, value, visible = false) {
     this.transaction(() => {
       const result = this.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?)').run(runId ?? '', kind, visible ? 1 : 0, JSON.stringify(redact(value)), now());

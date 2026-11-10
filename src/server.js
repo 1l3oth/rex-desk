@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { tailscaleAddresses } from './peers.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -61,7 +62,7 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
   store.on('change', notify);
   void store.cloud.open();
-  const server = http.createServer(async (request, response) => {
+  const handler = async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
@@ -70,8 +71,25 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       const hostname = host ? new URL(`http://${host}`).hostname : '';
       const localHost = ['127.0.0.1', 'localhost', '[::1]'].includes(hostname);
       const publicMcp = process.env.REX_PUBLIC_MCP_HOST && hostname === process.env.REX_PUBLIC_MCP_HOST && request.url?.split('?')[0] === '/mcp';
-      if (!localHost && !publicMcp) return json(response, 403, { error: 'Use the local dashboard address.' });
+      // A request that came in over Tailscale (the person's other computers and phone) needs the shared key, or a browser signed in with it.
+      const remoteSocket = !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress);
+      if (!localHost && !publicMcp && !remoteSocket) return json(response, 403, { error: 'Use the local dashboard address.' });
       const url = new URL(request.url, `http://${host}`);
+      if (remoteSocket) {
+        if (url.pathname === '/mcp') return json(response, 403, { error: 'Agents connect on this computer only.' });
+        if (url.pathname === '/login.css') return serveFile(request, response, path.join(root, 'public', 'login.css'));
+        if (url.pathname === '/login' && request.method === 'GET') { const page = readFileSync(path.join(root, 'public', 'login.html'), 'utf8'); response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return response.end(url.searchParams.has('wrong') ? page.replace('class="wrong"', 'class="wrong show"') : page); }
+        if (url.pathname === '/login' && request.method === 'POST') {
+          let raw = ''; for await (const chunk of request) { raw += chunk; if (raw.length > 4096) break; }
+          const key = new URLSearchParams(raw).get('key') || '';
+          if (!desk.peers.checkKey(key.trim())) { response.writeHead(303, { Location: '/login?wrong=1' }); return response.end(); }
+          response.writeHead(303, { Location: '/', 'Set-Cookie': `rexdesk=${desk.peers.session()}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000` }); return response.end();
+        }
+        if (!desk.peers.checkKey(request.headers['x-rex-peer-key']) && !desk.peers.checkSession(request.headers.cookie)) {
+          if (request.method === 'GET' && !url.pathname.startsWith('/api/')) { response.writeHead(303, { Location: '/login' }); return response.end(); }
+          return json(response, 401, { error: 'Sign in with the key from your Rex Desk first.' });
+        }
+      }
       if (url.pathname === '/mcp') {
         const token = request.headers.authorization?.replace(/^Bearer /i, '');
         const scope = desk.scope(token);
@@ -87,6 +105,24 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         response.write('event: connected\ndata: {}\n\n'); clients.add(response);
         const heartbeat = setInterval(() => response.write(': keepalive\n\n'), 25000);
         request.on('close', () => { clients.delete(response); clearInterval(heartbeat); }); return;
+      }
+      if (url.pathname.startsWith('/api/peer/')) {
+        if (!desk.peers.checkKey(request.headers['x-rex-peer-key'])) return json(response, 401, { error: 'Wrong key.' });
+        const node = String(request.headers['x-rex-peer-node'] || ''), peerUrl = String(request.headers['x-rex-peer-url'] || '');
+        if (node && /^http:\/\/100\.\d+\.\d+\.\d+:\d+$/.test(peerUrl)) desk.peers.remember({ id: node, name: decodeURIComponent(String(request.headers['x-rex-peer-name'] || '')).slice(0, 40), url: peerUrl });
+        if (url.pathname === '/api/peer/hello') return json(response, 200, desk.peers.self);
+        if (url.pathname === '/api/peer/pull') return json(response, 200, desk.peers.serve({ since: Number(url.searchParams.get('since')) || 0, filesSince: Number(url.searchParams.get('files')) || 0 }));
+        return json(response, 404, { error: 'API route not found.' });
+      }
+      if (url.pathname === '/api/peers' && request.method === 'GET') return json(response, 200, desk.peers.status(desk.port));
+      if (url.pathname === '/api/peers' && request.method === 'POST') {
+        const input = await body(request);
+        if (input.action === 'rename') return json(response, 200, desk.peers.rename(input.name));
+        if (input.action === 'remote') return json(response, 200, desk.peers.setRemote(input.on));
+        if (input.action === 'join') return json(response, 200, desk.peers.join(input.key));
+        if (input.action === 'add') return json(response, 200, await desk.peers.add(input.url));
+        if (input.action === 'remove') return json(response, 200, desk.peers.remove(input.id));
+        throw new Error('Unknown action.');
       }
       if (url.pathname === '/api/state') return json(response, 200, desk.snapshot());
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
@@ -206,10 +242,12 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         const image = await cachedTaskImage(store, url.searchParams.get('task') || '', url.searchParams.get('url') || '', { fetcher: imageFetcher });
         return serveFile(request, response, image, { cache: 'private, max-age=604800' });
       }
-      if (interactionMatch && request.method === 'POST') return json(response, 200, desk.answer(interactionMatch[1], await body(request)));
+      if (interactionMatch && request.method === 'POST') { const owner = !store.get('interaction', interactionMatch[1]) && desk.peers.interactionOwner(interactionMatch[1]); return json(response, 200, owner ? await desk.peers.forward(owner, 'POST', url.pathname, await body(request)) : desk.answer(interactionMatch[1], await body(request))); }
       const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|orca|say))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
+        const runOwner = !store.get('run', runId) && desk.peers.runOwner(runId);
+        if (runOwner) return json(response, 200, await desk.peers.forward(runOwner, request.method, `${url.pathname}${url.search}`, request.method === 'POST' ? await body(request) : undefined));
         if (request.method === 'GET') {
           if (action === 'messages') return json(response, 200, store.events(runId, { visible: true }));
           return json(response, 200, desk.run(runId));
@@ -231,11 +269,17 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
       const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say))?$/);
       if (specialistMatch) {
         const [, specialistId, part] = specialistMatch;
+        const remoteAgent = store.get('specialist', specialistId);
+        if (desk.peers.isRemote(remoteAgent) && request.method === 'POST' && ['say', 'assign'].includes(part)) {
+          const input = await body(request), task = input.taskId && store.get('task', input.taskId);
+          return json(response, 200, await desk.peers.command(remoteAgent, part, task ? { ...input, taskNumber: task.taskNumber || task.externalId } : input));
+        }
+        if (desk.peers.isRemote(remoteAgent) && request.method === 'POST' && part === 'duplicate') return json(response, 200, await desk.peers.forward(remoteAgent.node, 'POST', url.pathname, await body(request)));
+        if (request.method === 'POST' && part === 'assign') { const input = await body(request); return json(response, 200, await desk.assignTask({ specialistId, ...desk.peers.localTask(input) })); }
         if (request.method === 'PUT' && !part) return json(response, 200, desk.specialists.update(specialistId, await body(request)));
         if (request.method === 'POST' && part === 'rename') return json(response, 200, desk.specialists.rename(specialistId, (await body(request)).name));
         if (request.method === 'POST' && part === 'duplicate') return json(response, 200, desk.specialists.duplicate(specialistId, (await body(request)).name));
         if (request.method === 'POST' && part === 'say') return json(response, 200, await desk.specialistTurn(specialistId, { prompt: String((await body(request)).text || '').slice(0, 4000) }));
-        if (request.method === 'POST' && part === 'assign') return json(response, 200, await desk.assignTask({ specialistId, ...(await body(request)) }));
         if (request.method === 'DELETE' && !part) return json(response, 200, desk.specialists.remove(specialistId));
       }
       if (url.pathname === '/api/uploads' && request.method === 'POST') {
@@ -290,14 +334,25 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html', download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-devices.js': 'chat-devices.js', '/chat-pick.js': 'chat-pick.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg' };
       const file = publicFiles[url.pathname];
       if (!file || !existsSync(path.join(root, 'public', file))) return json(response, 404, { error: 'Page not found.' });
       return serveFile(request, response, path.join(root, 'public', file));
     } catch (error) { if (!response.headersSent) json(response, 400, { error: error.message }); else response.end(); }
-  });
+  };
+  const server = http.createServer(handler);
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); }); }
   catch (error) { store.close(); unlinkSync(lockPath); throw error; }
+  desk.port = server.address().port; desk.peers.port = desk.port;
+  const remoteServers = []; let remoteAt = '';
+  const openRemote = () => {
+    const wanted = desk.peers.settings().remote ? tailscaleAddresses() : [], key = wanted.join(',');
+    if (key === remoteAt) return; remoteAt = key;
+    for (const item of remoteServers.splice(0)) item.close();
+    for (const host of wanted) { const item = http.createServer(handler); item.on('error', error => store.event('', 'remote-listen-error', { message: error.message })); item.listen(desk.port, host); remoteServers.push(item); }
+  };
+  desk.peers.onRemoteChange = () => { remoteAt = '-'; openRemote(); }; openRemote();
+  if (!process.env.NODE_TEST_CONTEXT) desk.peers.start();
   const address = `http://127.0.0.1:${server.address().port}`;
   desk.mcpUrl = `${address}/mcp`;
   desk.reattachOrca();
@@ -311,10 +366,11 @@ export async function createApp({ dataDirectory = process.env.REX_DATA_DIR || pa
     }
     void desk.scheduleTick().catch(error => store.event('', 'schedule-error', { message: error.message }, true));
     if (++ticks % 8 === 0) void desk.findPullRequests();
+    if (ticks % 4 === 0) openRemote(); // Tailscale may start after Rex Desk
   }, 15000);
   timer.unref();
-  return { server, store, desk, address, async close() {
-    clearInterval(timer); await desk.shutdown(); for (const client of clients) client.end();
+  return { server, store, desk, address, handler, async close() {
+    clearInterval(timer); for (const item of remoteServers) item.close(); await desk.shutdown(); for (const client of clients) client.end();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await store.cloud.close(); store.close(); unlinkSync(lockPath);
   } };
 }

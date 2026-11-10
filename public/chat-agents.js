@@ -55,6 +55,8 @@ export async function agentAction(ctx, action, target = null) {
   if (!agent) return;
   if (action === 'spec-chat') {
     let runId = agent.runId;
+    // An agent on a computer that is off: its chat lives there, so it opens when that computer is back.
+    if (agent.remote && agent.status?.state === 'offline') { toast(`${agent.name} is offline: ${agent.device} is off. Its chat opens when it is back; messages in rooms wait for it.`); return; }
     if (!runId) { await api(`/specialists/${agent.id}/say`, { method: 'POST', data: { text: 'Introduce yourself in one or two lines: who you are and which project you look after.' } }); await refresh(); runId = (ui.snap.specialists || []).find(item => item.id === agent.id)?.runId; }
     if (runId) open('run', runId); return;
   }

@@ -87,6 +87,7 @@ export class Specialists {
 
   // What the agent is doing right now, for the chat: working on a task, answering a message, waiting for the person, or idle.
   status(agent) {
+    if (this.desk.peers?.isRemote(agent)) return this.desk.peers.statusOf(agent);
     if (agent.kind === 'main') {
       const run = this.store.list('run').filter(item => item.role === 'coordinator' && (item.main || item.roomAgent === 'main')).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
       if (run?.state === 'waiting') return { state: 'waiting', label: 'Needs you', runId: run.id };
