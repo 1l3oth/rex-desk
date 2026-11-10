@@ -12,17 +12,17 @@ const directory = value => { try { return statSync(value).isDirectory(); } catch
 const tilde = value => canonical(value).startsWith(canonical(home) + '/') ? `~${path.resolve(value).slice(path.resolve(home).length).replaceAll('\\', '/')}` : path.resolve(value);
 
 export function inheritedProfile(provider, env = process.env) {
-  return provider === 'claude' ? env.CLAUDE_CONFIG_DIR || '' : env.CODEX_HOME || '';
+  return env.CLAUDE_CONFIG_DIR || '';
 }
 export function profileEnvironment(provider, profile, env = process.env) {
-  const result = { ...env }, key = provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME';
+  const result = { ...env }, key = 'CLAUDE_CONFIG_DIR';
   const selected = profile === undefined ? inheritedProfile(provider, env) : profile;
   if (selected) result[key] = path.resolve(selected); else delete result[key];
   return result;
 }
 export function profileLabel(provider, profile) {
-  if (!profile) return provider === 'claude' ? 'Default (~/.claude)' : 'Default (~/.codex)';
-  const orca = canonical(profile).match(/\/orca\/(?:claude|codex)-profiles\/([^/]+)\/home$/);
+  if (!profile) return 'Default (~/.claude)';
+  const orca = canonical(profile).match(/\/orca\/claude-profiles\/([^/]+)\/home$/);
   return orca ? `Orca profile ${orca[1].slice(0, 8)}` : tilde(profile);
 }
 export function discoverProfiles(provider, { configured = '', env = process.env, roots = { home, appData } } = {}) {
@@ -32,7 +32,7 @@ export function discoverProfiles(provider, { configured = '', env = process.env,
     if (value && !directory(value)) return;
     if (!found.has(key)) found.set(key, { profile: value ? path.resolve(value) : '', label: profileLabel(provider, value), origin });
   };
-  const name = provider === 'claude' ? '.claude' : '.codex';
+  const name = '.claude';
   add('', 'default');
   if (inheritedProfile(provider, env)) add(inheritedProfile(provider, env), 'launch');
   try {
@@ -61,12 +61,6 @@ export function parseClaudeStatus(output) {
       organization: String(data.orgName || ''), plan: String(data.subscriptionType || '') };
   } catch { return null; }
 }
-export function parseCodexStatus(output, code) {
-  const text = output.trim();
-  if (/not logged in/i.test(text)) return { loggedIn: false, method: '', account: '', organization: '', plan: '' };
-  const method = text.match(/logged in using (.+)$/im)?.[1]?.trim() || '';
-  return { loggedIn: code === 0 && /logged in/i.test(text), method, account: '', organization: '', plan: '' };
-}
 
 export class AgentProfiles {
   constructor(store, { run = capture, ttl = 120000 } = {}) { this.store = store; this.run = run; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); }
@@ -81,19 +75,19 @@ export class AgentProfiles {
     if (this.pending.has(key)) return this.pending.get(key);
     const check = (async () => {
       const executable = resolveCommand(provider), env = profileEnvironment(provider, profile);
-      const args = provider === 'claude' ? [...executable.args, 'auth', 'status', '--json'] : [...executable.args, 'login', 'status'];
+      const args = [...executable.args, 'auth', 'status', '--json'];
       const result = await this.run(executable.command, args, env, 20000);
-      const parsed = provider === 'claude' ? parseClaudeStatus(result.stdout) : parseCodexStatus(`${result.stdout}\n${result.stderr}`, result.code);
+      const parsed = parseClaudeStatus(result.stdout);
       const status = { provider, profile, label: profileLabel(provider, profile), checkedAt: new Date().toISOString(), checkedAtMs: Date.now(),
         installed: !(result.error?.code === 'ENOENT'), loggedIn: Boolean(parsed?.loggedIn), method: parsed?.method || '', account: parsed?.account || '',
         organization: parsed?.organization || '', plan: parsed?.plan || '',
-        error: parsed ? '' : result.error?.code === 'ENOENT' ? `${provider === 'claude' ? 'Claude Code' : 'Codex'} CLI is not installed.` : (result.stderr || result.stdout || 'Sign-in status unavailable.').trim().slice(0, 300) };
+        error: parsed ? '' : result.error?.code === 'ENOENT' ? 'Claude Code CLI is not installed.' : (result.stderr || result.stdout || 'Sign-in status unavailable.').trim().slice(0, 300) };
       this.cache.set(key, status); return status;
     })().finally(() => this.pending.delete(key));
     this.pending.set(key, check); return check;
   }
   async overview({ refresh = false } = {}) {
-    const providers = await Promise.all(['claude', 'codex'].map(async provider => {
+    const providers = await Promise.all(['claude'].map(async provider => {
       const selected = this.selected(provider), profiles = discoverProfiles(provider, { configured: selected });
       const statuses = await Promise.all(profiles.map(item => this.status(provider, item.profile, { refresh })));
       return [provider, { selected, saved: this.store.config().agentProfiles?.[provider] ?? null, inherited: inheritedProfile(provider), mcp: this.mcpInstalled(provider, selected),
@@ -107,19 +101,15 @@ export class AgentProfiles {
     if (status.loggedIn) return status;
     const fresh = await this.status(provider, profile, { refresh: true });
     if (fresh.loggedIn) return fresh;
-    const name = provider === 'claude' ? 'Claude Code' : 'Codex';
+    const name = 'Claude Code';
     throw new Error(fresh.error && !fresh.installed ? fresh.error
       : `${name} profile ${fresh.label} is not signed in. Open Setup and choose a signed-in ${name} profile, then continue this run. No agent turn was started.`);
   }
   invalidate(provider) { for (const key of this.cache.keys()) if (!provider || key.startsWith(`${provider}:`)) this.cache.delete(key); }
   mcpInstalled(provider, profile = this.selected(provider)) {
     try {
-      if (provider === 'claude') {
-        const file = profile ? path.join(profile, '.claude.json') : path.join(home, '.claude.json');
-        return existsSync(file) && Boolean(JSON.parse(readFileSync(file, 'utf8')).mcpServers?.rex_desk);
-      }
-      const file = path.join(profile || path.join(home, '.codex'), 'config.toml');
-      return existsSync(file) && /^\[mcp_servers\.rex_desk\]/m.test(readFileSync(file, 'utf8'));
+      const file = profile ? path.join(profile, '.claude.json') : path.join(home, '.claude.json');
+      return existsSync(file) && Boolean(JSON.parse(readFileSync(file, 'utf8')).mcpServers?.rex_desk);
     } catch { return false; }
   }
 }

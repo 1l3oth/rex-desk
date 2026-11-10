@@ -14,7 +14,7 @@ Delegated by the user: a desktop application or web application is acceptable if
 
 A developer handling QA issues assigned to them across specific Flow and Morningmate projects. Their source repositories already exist locally.
 
-The user primarily uses Claude Code and explicitly requires switching between Claude Code and Codex and running both. Claude Code is the default. API credentials, account identity, project choices, repositories, agent sign-in profiles, and runtime profiles belong in editable application settings; do not request them in chat. The user works inside Orca and wants agents visible there when chosen.
+The user primarily uses Claude Code and uses Claude Code as the only agent (Codex support was removed on 2026-11-10). API credentials, account identity, project choices, repositories, agent sign-in profiles, and runtime profiles belong in editable application settings; do not request them in chat. The user works inside Orca and wants agents visible there when chosen.
 
 ## Product Purpose
 
@@ -22,7 +22,7 @@ Replace checking issue trackers, copying issue details into terminals, and coord
 
 ## Operating Context
 
-Fetch assigned issues; have Jev rank them so the user picks what to run first; run each chosen issue in its own Git worktree; ask the user questions and seek approval in the dashboard; review test recordings and proposed pull requests. Codex and Claude Code are installed. Orbit is configured in Claude Code.
+Fetch assigned issues; have Jev rank them so the user picks what to run first; run each chosen issue in its own Git worktree; ask the user questions and seek approval in the dashboard; review test recordings and proposed pull requests. Claude Code is installed. Orbit is configured in Claude Code.
 
 ## Capabilities and Constraints
 

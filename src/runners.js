@@ -1,9 +1,7 @@
-import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { resolveCommand, stopTree } from './processes.js';
+import { resolveCommand } from './processes.js';
 
 export function existingMcpConnections(sourcePath, configDirectory = process.env.CLAUDE_CONFIG_DIR) {
   let connections = {};
@@ -20,114 +18,6 @@ export function existingMcpConnections(sourcePath, configDirectory = process.env
     connections = { ...connections, ...data.mcpServers };
   }
   return connections;
-}
-
-export function codexAnswer(method, request, answer) {
-  const accepted = answer.action === 'accept';
-  if (method === 'mcpServer/elicitation/request') return { action: answer.action, content: accepted ? answer.content || {} : null, _meta: null };
-  if (method === 'item/tool/requestUserInput' || method === 'tool/requestUserInput') {
-    return { answers: Object.fromEntries((request.questions || []).map(question => [question.id,
-      { answers: accepted ? [String(answer.content?.[question.id] ?? '')] : [] }])) };
-  }
-  if (method === 'item/permissions/requestApproval') return { permissions: accepted ? request.permissions : {}, scope: 'turn' };
-  return { decision: accepted ? 'accept' : answer.action === 'cancel' ? 'cancel' : 'decline' };
-}
-
-export class CodexRunner {
-  constructor({ run, cwd, token, mcpUrl, model, ask, event, signal, sourcePath, agentEnv }) {
-    Object.assign(this, { run, cwd, token, mcpUrl, model, ask, event, signal, sourcePath, agentEnv });
-    this.pending = new Map(); this.sequence = 0; this.closed = false;
-  }
-  async start(prompt) {
-    const executable = resolveCommand('codex');
-    const args = [...executable.args, 'app-server', '--listen', 'stdio://',
-      '-c', 'mcp_servers.rex_desk.enabled=false',
-      '-c', `mcp_servers.rex_desk_run.url=${JSON.stringify(this.mcpUrl)}`,
-      '-c', 'mcp_servers.rex_desk_run.bearer_token_env_var="REX_AGENT_TOKEN"',
-      '-c', 'mcp_servers.rex_desk_run.tool_timeout_sec=86400'];
-    this.child = spawn(executable.command, args, { cwd: this.cwd, env: { ...(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl },
-      windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    const completed = new Promise((resolve, reject) => { this.resolveTurn = resolve; this.rejectTurn = reject; });
-    // Attach immediately, so early process errors never become unhandled rejections.
-    completed.catch(() => {});
-    this.child.once('error', error => this.rejectTurn(error));
-    this.child.once('close', code => {
-      this.closed = true;
-      const error = new Error(`Codex process exited (${code ?? 'signal'}).`);
-      for (const item of this.pending.values()) { clearTimeout(item.timer); item.reject(error); }
-      this.pending.clear(); this.rejectTurn(error);
-    });
-    this.child.stderr.on('data', data => this.event('process', { text: data.toString().slice(-10000) }));
-    createInterface({ input: this.child.stdout }).on('line', line => {
-      try { this.receive(JSON.parse(line)); } catch (error) { this.event('protocol-error', { message: error.message }); }
-    });
-    this.abort = () => this.close();
-    this.signal.addEventListener('abort', this.abort, { once: true });
-    try {
-      await this.request('initialize', { clientInfo: { name: 'rex_desk', title: 'Rex Desk', version: '0.1.0' }, capabilities: { experimentalApi: true } });
-      this.send({ method: 'initialized', params: {} });
-      const params = { cwd: this.cwd, approvalPolicy: 'on-request', sandbox: this.run.role === 'worker' ? 'workspace-write' : 'read-only',
-        ...(this.model ? { model: this.model } : {}) };
-      const response = this.run.sessionId
-        ? await this.request('thread/resume', { ...params, threadId: this.run.sessionId })
-        : await this.request('thread/start', params);
-      this.threadId = response.thread.id;
-      this.event('session', { sessionId: this.threadId });
-      const result = await this.request('turn/start', { threadId: this.threadId, input: [{ type: 'text', text: prompt, text_elements: [] }] });
-      this.turnId = result.turn.id;
-      return await completed;
-    } finally { this.signal.removeEventListener('abort', this.abort); this.close(); }
-  }
-  send(value) { if (!this.closed && this.child.stdin.writable) this.child.stdin.write(JSON.stringify(value) + '\n'); }
-  request(method, params) {
-    const requestId = ++this.sequence;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(requestId); reject(new Error(`Codex ${method} timed out.`)); }, 90000);
-      this.pending.set(requestId, { resolve, reject, timer });
-      this.send({ id: requestId, method, params });
-    });
-  }
-  receive(message) {
-    if (message.id !== undefined && !message.method) {
-      const item = this.pending.get(message.id);
-      if (!item) return;
-      this.pending.delete(message.id); clearTimeout(item.timer);
-      if (message.error) item.reject(new Error(message.error.message)); else item.resolve(message.result);
-      return;
-    }
-    if (message.id !== undefined && message.method) { void this.serverRequest(message); return; }
-    const { method, params = {} } = message;
-    if (method === 'turn/completed') {
-      if (params.turn?.status === 'failed') this.rejectTurn(new Error(params.turn.error?.message || 'Codex turn failed.'));
-      else this.resolveTurn({ status: params.turn?.status || 'completed' });
-    }
-    if (method === 'serverRequest/resolved') this.event('request-resolved', { requestId: params.requestId });
-    if (method === 'item/started' || method === 'item/completed') {
-      const item = params.item || {};
-      if (item.type !== 'reasoning') this.event('agent-operation', { method, item });
-    }
-    if (method === 'item/commandExecution/outputDelta') this.event('command-output', { text: params.delta?.slice(-20000) });
-  }
-  async serverRequest(message) {
-    const { method, params, id: requestId } = message;
-    const recognized = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval',
-      'item/tool/requestUserInput', 'tool/requestUserInput', 'mcpServer/elicitation/request'];
-    if (!recognized.includes(method)) { this.send({ id: requestId, error: { code: -32601, message: `Rex Desk does not handle ${method}.` } }); return; }
-    const tool = method === 'mcpServer/elicitation/request' && params._meta?.codex_approval_kind === 'mcp_tool_call' && params.serverName === 'rex_desk_run'
-      ? String(params.message || '').match(/tool "([^"]+)"/)?.[1] : '';
-    if (tool && quietRexTool(`mcp__rex_desk__${tool}`)) { this.send({ id: requestId, result: codexAnswer(method, params, { action: 'accept' }) }); return; }
-    try {
-      const answer = await this.ask({ kind: /Approval/.test(method) ? 'approval' : 'question',
-        title: params.message || params.reason || (params.command ? 'Approve command' : 'Agent needs your input'),
-        request: params, method, nativeId: requestId });
-      this.send({ id: requestId, result: codexAnswer(method, params, answer) });
-    } catch (error) { this.send({ id: requestId, result: codexAnswer(method, params, { action: 'cancel' }) }); }
-  }
-  async interrupt() {
-    if (this.threadId && this.turnId) await this.request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }).catch(() => {});
-    this.close();
-  }
-  close() { if (!this.closed) { this.closed = true; stopTree(this.child); } }
 }
 
 // Rex Desk's own tools read tasks, label them, message the dashboard, or act inside the run's worktree. desk_status,
@@ -149,34 +39,56 @@ export function subscriptionEnv(env) {
   if (result.REX_AGENT_API_KEY !== '1') for (const name of apiKeyVariables) delete result[name];
   return result;
 }
+// Maps the mode picked in the chat input to the SDK. Manual is the SDK's own default. Rex Desk agents start in Dangerous mode (no permission prompts) unless another is picked.
+const sdkMode = mode => ({ manual: 'default' }[mode] || mode || 'bypassPermissions');
+// What a tool call shows in the chat: its name and a few short fields, never file contents.
+const hiddenInput = new Set(['content', 'new_string', 'old_string', 'text', 'body']);
+const toolInput = input => Object.fromEntries(Object.entries(input || {}).slice(0, 8).filter(([key, value]) => !hiddenInput.has(key) && ['string', 'number', 'boolean'].includes(typeof value)).map(([key, value]) => [key, typeof value === 'string' ? value.slice(0, key === 'command' ? 2000 : 240) : value]));
+// A shell command's output, for the terminal view in the chat: colour codes removed, obvious secrets hidden, long output cut in the middle.
+const ansiCodes = /\u001b\[[0-9;?]*[A-Za-z]/g;
+const secretLine = /(api[_-]?key|secret|passw(?:or)?d|passphrase|token|authorization|bearer)\s*[:=]\s*\S+/gi;
+const terminalText = value => {
+  const raw = (Array.isArray(value) ? value.map(part => part.text || '').join('\n') : String(value || '')).replace(ansiCodes, '').replace(secretLine, '$1: [redacted]');
+  return raw.length > 6000 ? `${raw.slice(0, 3000)}\n… ${raw.length - 6000} characters left out …\n${raw.slice(-3000)}` : raw;
+};
+const isShell = name => name === 'Bash' || name === 'PowerShell';
+const sessionId = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '')) ? String(value) : '';
 
 export class ClaudeRunner {
   constructor(options) { Object.assign(this, options); }
   async start(prompt) {
-    const { query } = await import('@anthropic-ai/claude-agent-sdk');
+    const { query } = this.sdk || await import('@anthropic-ai/claude-agent-sdk');
     const env = { ...subscriptionEnv(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
     delete env.CLAUDECODE;
     const executable = resolveCommand('claude');
     const connections = existingMcpConnections(this.sourcePath, env.CLAUDE_CONFIG_DIR), allowedTools = new Set();
     delete connections.rex_desk;
+    const mode = sdkMode(this.run.permissionMode), resume = sessionId(this.run.sessionId);
+    // Dangerous mode skips every permission prompt, so what the prompts used to refuse is refused by a hook instead.
+    // A specialist reads its project but never writes in the original checkout: code changes happen in a task worktree.
+    const writesProject = input => this.run.role === 'specialist' && this.projectDirectory && ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(input.tool_name)
+      && path.resolve(String(input.tool_input?.file_path || input.tool_input?.notebook_path || '/')).toLowerCase().startsWith(`${path.resolve(this.projectDirectory).toLowerCase()}${path.sep}`);
+    const refuseClaudeHome = async input => writesProject(input) ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'You read this project here. Code changes happen on a task in its own worktree, after the person assigns the task.' } }
+      : this.run.role !== 'coordinator' && writesClaudeHome(input.tool_name, input.tool_input)
+      ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Rex Desk agents do not write Claude memory, instructions, or settings. Say what you learned in desk_message instead, and continue the task.' } } : {};
     const options = { cwd: this.cwd, env, abortController: this.controller,
-      permissionMode: this.run.role === 'worker' ? 'acceptEdits' : 'default',
-      ...(this.artifactDirectory ? { additionalDirectories: [this.artifactDirectory] } : {}),
+      permissionMode: mode, ...(mode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
+      ...(this.run.effort ? { effort: this.run.effort } : {}),
+      // Claude Code's own question prompt would not reach the dashboard; the agent asks through desk_ask instead.
+      disallowedTools: ['AskUserQuestion'],
+      additionalDirectories: [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
       settingSources: ['user', 'project', 'local'],
+      hooks: { PreToolUse: [{ hooks: [refuseClaudeHome] }] },
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
-      ...(this.model ? { model: this.model } : {}), ...(this.run.sessionId ? { resume: this.run.sessionId } : {}),
+      ...(this.model ? { model: this.model } : {}), ...(resume ? { resume } : {}),
       strictMcpConfig: true,
       mcpServers: { ...connections, rex_desk: { type: 'http', url: this.mcpUrl, headers: { Authorization: `Bearer ${this.token}` }, alwaysLoad: true } },
       onElicitation: async request => {
         const answer = await this.ask({ kind: 'question', title: request.message, request, method: 'elicitation' });
         return { action: answer.action, ...(answer.action === 'accept' ? { content: answer.content || {} } : {}) };
       },
+      // Only reached in modes that ask: each request becomes an approval card in the chat.
       canUseTool: async (name, input, context) => {
-        if (name === 'AskUserQuestion') {
-          const answer = await this.ask({ kind: 'question', title: 'Claude needs your input', request: input, method: 'claude-question' });
-          if (answer.action !== 'accept') return { behavior: 'deny', message: 'User declined the question.' };
-          return { behavior: 'allow', updatedInput: { ...input, answers: answer.content || {} } };
-        }
         if (this.run.role !== 'coordinator' && writesClaudeHome(name, input)) return { behavior: 'deny', message: 'Rex Desk agents do not write Claude memory, instructions, or settings. Say what you learned in desk_message instead, and continue the task.' };
         if (quietRexTool(name) || allowedTools.has(name)) return { behavior: 'allow', updatedInput: input };
         const answer = await this.ask({ kind: 'approval', title: `Approve ${name}`, request: { tool: name, input, suggestions: context.suggestions, allowAlways: true }, method: 'claude-permission' });
@@ -190,9 +102,20 @@ export class ClaudeRunner {
       if (message.type === 'system' && message.subtype === 'init') { this.apiKeySource = message.apiKeySource; this.event('session', { sessionId: message.session_id, apiKeySource: message.apiKeySource }); }
       if (message.type === 'assistant') {
         const content = message.message?.content?.filter(block => block.type !== 'thinking' && block.type !== 'redacted_thinking');
+        // What the agent says shows in the chat; its tool calls stay in the journal.
+        const text = (content || []).filter(block => block.type === 'text').map(block => block.text).join('\n').trim();
+        if (text) this.event('agent-text', { text });
+        for (const block of content || []) if (block.type === 'tool_use') { if (isShell(block.name)) (this.terminals ||= new Set()).add(block.id); this.event('agent-tool', { id: block.id, tool: String(block.name).replace(/^mcp__[a-z0-9_]+?__/i, ''), input: toolInput(block.input) }); }
         this.event('agent-operation', { type: 'assistant', content });
       }
-      if (message.type === 'user') this.event('agent-operation', { type: 'tool-result', content: message.message?.content });
+      if (message.type === 'user') {
+        for (const block of Array.isArray(message.message?.content) ? message.message.content : []) {
+          if (block.type !== 'tool_result') continue;
+          if (this.terminals?.has(block.tool_use_id)) this.event('agent-tool-result', { id: block.tool_use_id, text: terminalText(block.content), failed: Boolean(block.is_error) });
+          else if (block.is_error) this.event('agent-tool', { tool: 'result', failed: true, text: (Array.isArray(block.content) ? block.content.map(part => part.text || '').join(' ') : String(block.content || '')).slice(0, 300) });
+        }
+        this.event('agent-operation', { type: 'tool-result', content: message.message?.content });
+      }
       if (message.type === 'result') {
         this.event('agent-result', { result: message.result, errors: message.errors, subtype: message.subtype, cost: message.total_cost_usd, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });
         // The CLI reports a signed-out profile as an ordinary result. Surface it as a setup problem, not agent output.

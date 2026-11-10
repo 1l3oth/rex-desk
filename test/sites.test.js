@@ -105,17 +105,17 @@ test('the older single test account becomes the first entry of the sign-in list'
     { id: 'site', site: '', username: 'qa@example.com', password: 'site-pass' },
     { id: 'local', site: '127.0.0.1', username: 'local@example.com', password: 'local-pass' }]);
   assert.equal(store.config().testAccount, undefined, 'The old field is gone once it has been carried over');
-  assert.equal(store.config().execution, 'orca', 'A saved headless choice is dropped');
+  assert.equal(store.config().execution, 'headless', 'Runs start without a terminal');
   store.close();
 });
 
-test('every run opens in an Orca terminal; nothing starts out of sight', async () => {
+test('every run starts headless, with no terminal to get stuck in', async () => {
   const { store, desk } = workspace();
   desk.drain = async () => {};
-  assert.equal(store.config().execution, 'orca');
+  assert.equal(store.config().execution, 'headless');
   store.saveConfig({ ...store.publicConfig(), execution: 'rex' });
-  assert.equal(store.config().execution, 'orca', 'Headless cannot be chosen any more');
+  assert.equal(store.config().execution, 'headless', 'There is one way to run');
   const run = await desk.startTask({ taskId: 'done-1' });
-  assert.equal(run.execution, 'orca');
+  assert.equal(run.execution, 'headless');
   await settle(); await desk.shutdown(); store.close();
 });

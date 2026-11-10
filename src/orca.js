@@ -68,9 +68,9 @@ export class OrcaRunner {
     const directory = path.join(this.dataDirectory, 'runtimes', this.run.id, 'orca');
     mkdirSync(directory, { recursive: true });
     const spec = path.join(directory, `agent-${Date.now()}.json`);
-    const env = this.agentEnv || process.env, key = this.run.provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME';
-    writeFileSync(spec, JSON.stringify({ runId: this.run.id, provider: this.run.provider, cwd: this.cwd, prompt, token: this.token, mcpUrl: this.mcpUrl, model: this.model, addDir: this.artifactDirectory || '', resumeSessionId: this.resumeSessionId || '',
-      executable: this.executable || resolveCommand(this.run.provider), env: { ...(env[key] ? { [key]: env[key] } : {}), ...(this.javaEnv || {}) }, unset: [...(env[key] ? [] : [key]), ...(this.run.provider === 'claude' && env.REX_AGENT_API_KEY !== '1' ? apiKeyVariables : [])] }), { mode: 0o600 });
+    const env = this.agentEnv || process.env, key = 'CLAUDE_CONFIG_DIR';
+    writeFileSync(spec, JSON.stringify({ runId: this.run.id, provider: this.run.provider, cwd: this.cwd, prompt, token: this.token, mcpUrl: this.mcpUrl, model: this.model, effort: this.run.effort || '', permissionMode: this.run.permissionMode || '', addDir: this.artifactDirectory || '', uploadsDir: path.join(this.dataDirectory, 'uploads'), resumeSessionId: this.resumeSessionId || '',
+      executable: this.executable || resolveCommand(this.run.provider), env: { ...(env[key] ? { [key]: env[key] } : {}), ...(this.javaEnv || {}) }, unset: [...(env[key] ? [] : [key]), ...(env.REX_AGENT_API_KEY !== '1' ? apiKeyVariables : [])] }), { mode: 0o600 });
     const command = `node "${launcher}" "${spec}"`;
     let terminal;
     try { terminal = await orcaJson(['terminal', 'create', '--worktree', `path:${this.cwd}`, '--title', `Rex · ${String(this.run.title).slice(0, 40)}`, '--command', command], this.orca); }
@@ -90,7 +90,7 @@ export class OrcaRunner {
     }
     while (!this.signal.aborted) {
       await new Promise(resolve => setTimeout(resolve, this.pollMs || 2500));
-      try { this.session?.track(); } catch { /* the session file appears a moment after the terminal starts */ }
+      try { this.session?.track(); for (const text of this.session?.texts() || []) this.event('agent-text', { text }); } catch { /* the session file appears a moment after the terminal starts */ }
       if (this.isDone?.()) return { status: 'completed' };
       let shown;
       try { shown = await orcaJson(['terminal', 'show', '--terminal', this.handle], this.orca); }
@@ -104,12 +104,12 @@ export class OrcaRunner {
   close() {}
 }
 
-// Finds the session log an Orca agent writes (Claude Code: <config>/projects/<cwd>/<id>.jsonl; Codex: <home>/sessions/.../rollout-*.jsonl).
+// Finds the session log an Orca agent writes (Claude Code: <config>/projects/<cwd>/<id>.jsonl).
 // Rex Desk does not read what is in it: the file name carries the session id, which is what reopens that session for a follow-up.
 export class AgentSession {
   constructor({ provider, cwd, configDirectory, since, state = {}, persist = () => {} }) {
     Object.assign(this, { provider, cwd, configDirectory, since: Date.parse(since || 0) || 0, persist });
-    this.file = state.file || '';
+    this.file = state.file || ''; this.offset = Number.isFinite(state.offset) ? state.offset : undefined;
   }
   locate() {
     const recent = file => { try { return statSync(file).mtimeMs >= this.since - 60000; } catch { return false; } };
@@ -118,22 +118,34 @@ export class AgentSession {
       const files = existsSync(folder) ? readdirSync(folder).filter(name => name.endsWith('.jsonl')).map(name => path.join(folder, name)).filter(recent) : [];
       return files.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0] || '';
     }
-    const root = path.join(this.configDirectory || path.join(os.homedir(), '.codex'), 'sessions');
-    const days = [0, 1].map(back => { const day = new Date(Date.now() - back * 86400000); return path.join(root, String(day.getFullYear()), String(day.getMonth() + 1).padStart(2, '0'), String(day.getDate()).padStart(2, '0')); });
-    for (const folder of days.filter(existsSync)) for (const name of readdirSync(folder).filter(item => item.endsWith('.jsonl')).sort().reverse()) {
-      const file = path.join(folder, name);
-      if (!recent(file)) continue;
-      const head = readFirstLine(file);
-      try { if (path.resolve(JSON.parse(head).payload?.cwd || '') === path.resolve(this.cwd)) return file; } catch {}
-    }
     return '';
   }
   // Called while the run is alive: the log appears a moment after the terminal starts.
   track() {
     if (this.file && existsSync(this.file)) return this.file;
     const found = this.locate();
-    if (found && found !== this.file) { this.file = found; this.persist({ file: found }); }
+    if (found && found !== this.file) { this.file = found; this.offset = undefined; this.persist({ file: found }); }
     return this.file;
+  }
+  // The text the agent wrote since the last call, from its own session log. A log that began with this turn is read from its start;
+  // a reopened session starts at its current end, so earlier turns are not replayed. Only whole lines are consumed.
+  texts() {
+    if (!this.file) return [];
+    let info; try { info = statSync(this.file); } catch { return []; }
+    if (this.offset === undefined) { this.offset = info.birthtimeMs >= this.since - 60000 ? 0 : info.size; this.persist({ file: this.file, offset: this.offset }); }
+    if (info.size <= this.offset) return [];
+    const handle = openSync(this.file, 'r'); let chunk;
+    try { chunk = Buffer.alloc(info.size - this.offset); readSync(handle, chunk, 0, chunk.length, this.offset); } finally { closeSync(handle); }
+    const end = chunk.lastIndexOf(10); if (end < 0) return [];
+    this.offset += end + 1; this.persist({ file: this.file, offset: this.offset });
+    const found = [];
+    for (const line of chunk.subarray(0, end).toString('utf8').split('\n')) {
+      let item; try { item = JSON.parse(line); } catch { continue; }
+      const parts = item.type === 'assistant' && Array.isArray(item.message?.content) ? item.message.content.filter(block => block.type === 'text').map(block => block.text)
+        : [];
+      const text = parts.join('\n').trim(); if (text) found.push(text);
+    }
+    return found;
   }
 }
 function readFirstLine(file) {
@@ -153,7 +165,12 @@ export async function sendToOrca(run, text, options) {
     // a plain retry would type the message twice, so without an ID the failure is passed on unchanged.
     const id = requestId(error);
     if (!id) throw error;
-    return orcaJson([...args, '--retry-request', id, '--wait-submit', '10'], options);
+    try { return await orcaJson([...args, '--retry-request', id, '--wait-submit', '10'], options); }
+    catch (again) {
+      // Still blocked after the retry: the agent is stopped at a permission or trust prompt in its terminal, and typing a message there would answer the prompt.
+      if (/agent_prompt_blocked/.test(`${again?.code} ${again?.message}`)) throw new Error('The agent is waiting for a permission in its Orca terminal, so it cannot take a message yet. Open its terminal tab, answer the prompt (press 2 to allow for this session), then send again.');
+      throw again;
+    }
   }
 }
 const requestPattern = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;

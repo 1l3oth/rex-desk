@@ -128,7 +128,7 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(10000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
-  await page.goto(app.address);
+  await page.goto(`${app.address}/classic`);
   // A new workspace opens the guided setup; the agent step reads the injected sign-in status.
   await page.getByRole('heading', { name: 'Set up Rex Desk', exact: true }).waitFor();
   await page.locator('.setup-step[data-step="agent"].done').waitFor();

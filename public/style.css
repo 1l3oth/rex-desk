@@ -731,3 +731,5 @@ dialog.viewer .viewer-head .actions{margin:0 0 0 auto;flex-wrap:nowrap;justify-c
 .anywhere-card h2{display:flex;align-items:center;gap:6px;font-size:13px}
 .anywhere-card p{margin-top:2px;max-width:70ch}
 .anywhere-card kbd{font:600 11px var(--mono);padding:1px 5px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;background:var(--raised)}
+
+a.activity-button{display:grid;place-items:center;text-decoration:none;color:inherit}.chat-back .count{display:none}

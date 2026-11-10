@@ -1,7 +1,8 @@
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, createReadStream, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, createReadStream, createWriteStream, rmSync, statSync } from 'node:fs';
 import { Store } from './store.js';
 import { Accounts, cleanEmail } from './accounts.js';
 import { findCloudWorkspace } from './turso.js';
@@ -26,6 +27,7 @@ import { Computer } from './computer.js';
 import { Voice } from './voice.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
+import { scanRoots } from './placement.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -83,7 +85,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   async function openSession(entry, vaultKey, { staySignedIn = false } = {}) {
     const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
     const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher });
-    if (address) { desk.mcpUrl = `${address}/mcp`; desk.reattachOrca(); void desk.findPullRequests(); }
+    if (address) startDesk(desk, store);
     desk.computer = computer;
     desk.commander = new Commander(computer, { apiKey: () => desk.jev.apiKey(), model: () => store.config().jev?.model, settings: () => store.config().control || {},
       env: () => desk.agents.environment('claude'), cwd: path.join(store.directory, 'coordinator') });
@@ -103,6 +105,12 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       else if (store.cloud.enabled) session.cloud = { pulled: false, reason: status.error || 'Cloud backup is offline; working from this computer’s copy.' };
     } else void store.cloud.open();
     notify(); return session;
+  }
+  // Once the server has its address: reconnect agents' terminals, resume interrupted runs, and get the agents ready.
+  function startDesk(desk, store) {
+    desk.mcpUrl = `${address}/mcp`; desk.reattachOrca(); void desk.findPullRequests();
+    void desk.resumeInterrupted(); desk.notifier.start(); void desk.fillEnglishNames(); desk.memory.ensure(); desk.rooms.cleanup(); desk.specialists.normalizeModels(); desk.specialists.ensureMain();
+    if (!process.env.NODE_TEST_CONTEXT) void desk.refreshModels().catch(error => store.event('', 'models-error', { message: error.message }));
   }
   async function closeSession({ forget = false } = {}) {
     if (!session) return;
@@ -246,7 +254,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/agents' && request.method === 'GET') return json(response, 200, await desk.agents.overview({ refresh: url.searchParams.has('refresh') }));
       if (url.pathname === '/api/agents/profile' && request.method === 'POST') {
         const input = await body(request);
-        if (!['claude', 'codex'].includes(input.provider)) throw new Error('Choose Claude Code or Codex.');
+        input.provider = 'claude';
         const config = store.publicConfig();
         store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [input.provider]: input.profile ?? null } });
         desk.agents.invalidate(input.provider);
@@ -254,10 +262,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       }
       if (url.pathname === '/api/agents/mcp' && request.method === 'POST') {
         const { provider } = await body(request);
-        if (!['claude', 'codex'].includes(provider)) throw new Error('Choose Claude Code or Codex.');
+        if (provider !== 'claude') throw new Error('Rex Desk runs Claude Code.');
         const command = resolveCommand(provider), proxy = path.join(root, 'src', 'stdio.js');
-        const args = provider === 'claude' ? [...command.args, 'mcp', 'add', '--scope', 'user', 'rex_desk', '--', process.execPath, proxy]
-          : [...command.args, 'mcp', 'add', 'rex_desk', '--', process.execPath, proxy];
+        const args = [...command.args, 'mcp', 'add', '--scope', 'user', 'rex_desk', '--', process.execPath, proxy];
         // An agent started from any profile folder, in any directory, must be able to read tasks, so every profile
         // this computer has gets the entry, not only the one Rex Desk's own runs use.
         const profiles = discoverProfiles(provider, { configured: desk.agents.selected(provider) });
@@ -290,7 +297,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       }
       if (url.pathname === '/api/setup-prompt' && request.method === 'POST') {
         const input = await body(request);
-        return json(response, 200, { prompt: setupPrompt({ target: input.target, root, dataDirectory: store.directory, mcpUrl: desk.mcpUrl, profiles: { claude: desk.agents.selected('claude'), codex: desk.agents.selected('codex') } }) });
+        return json(response, 200, { prompt: setupPrompt({ target: input.target, root, dataDirectory: store.directory, mcpUrl: desk.mcpUrl, profiles: { claude: desk.agents.selected('claude') } }) });
       }
       if (url.pathname === '/api/sources/connect' && request.method === 'POST') {
         const source = store.saveConnection(await body(request));
@@ -307,11 +314,10 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/demo' && request.method === 'DELETE') { for (const task of store.list('task')) if (task.demo) store.delete('task', task.id); return json(response, 200, { removed: true }); }
       if (url.pathname === '/api/mcp-config' && request.method === 'POST') {
         return json(response, 200, { url: desk.mcpUrl, token: store.token,
-          codex: `[mcp_servers.rex_desk]\nurl = "${desk.mcpUrl}"\nbearer_token_env_var = "REX_DESK_TOKEN"\ntool_timeout_sec = 86400`,
           claude: { mcpServers: { rex_desk: { type: 'http', url: desk.mcpUrl, headers: { Authorization: 'Bearer ${REX_DESK_TOKEN}' } } } } });
       }
       if (url.pathname === '/api/diagnostics') {
-        const results = await Promise.all(['claude', 'codex', 'git', 'gh'].map(async name => {
+        const results = await Promise.all(['claude', 'git', 'gh'].map(async name => {
           const command = resolveCommand(name);
           try { const { stdout } = await exec(command.command, [...command.args, '--version'], { windowsHide: true, timeout: 10000 }); return { name, available: true, version: stdout.split('\n')[0] }; }
           catch (error) { return { name, available: false, error: error.message }; }
@@ -347,12 +353,69 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         if (request.method === 'POST') {
           const input = await body(request);
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
-          if (action === 'say') return json(response, 200, await desk.say(runId, input.text));
+          if (action === 'say') return json(response, 200, await desk.say(runId, input.text, input));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));
           if (action === 'verify') return json(response, 200, await desk.verify(runId));
           if (action === 'publish') return json(response, 200, await desk.publish(runId, { ...input, approved: true }));
           if (action === 'orca') { const run = desk.run(runId); if (!run.worktree) throw new Error('This run has no worktree to open.'); return json(response, 200, await openInOrca(run)); }
         }
+      }
+      if (url.pathname === '/api/specialists' && request.method === 'GET') return json(response, 200, desk.specialists.list());
+      if (url.pathname === '/api/specialists' && request.method === 'POST') return json(response, 200, desk.specialists.create({ ...(await body(request)), by: 'you' }));
+      const lessonMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)\/lessons\/(\d+)$/);
+      if (lessonMatch && request.method === 'DELETE') return json(response, 200, desk.specialists.forget(lessonMatch[1], Number(lessonMatch[2])));
+      const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say))?$/);
+      if (specialistMatch) {
+        const [, specialistId, part] = specialistMatch;
+        if (request.method === 'PUT' && !part) return json(response, 200, desk.specialists.update(specialistId, await body(request)));
+        if (request.method === 'POST' && part === 'rename') return json(response, 200, desk.specialists.rename(specialistId, (await body(request)).name));
+        if (request.method === 'POST' && part === 'duplicate') return json(response, 200, desk.specialists.duplicate(specialistId, (await body(request)).name));
+        if (request.method === 'POST' && part === 'say') return json(response, 200, await desk.specialistTurn(specialistId, { prompt: String((await body(request)).text || '').slice(0, 4000) }));
+        if (request.method === 'POST' && part === 'assign') return json(response, 200, await desk.assignTask({ specialistId, ...(await body(request)) }));
+        if (request.method === 'DELETE' && !part) return json(response, 200, desk.specialists.remove(specialistId));
+      }
+      if (url.pathname === '/api/uploads' && request.method === 'POST') {
+        const name = path.basename(String(url.searchParams.get('name') || 'file')).replace(/[^\p{L}\p{N}._ -]+/gu, '_').slice(0, 120) || 'file', folder = path.join(store.directory, 'uploads', randomUUID()), target = path.join(folder, name);
+        mkdirSync(folder, { recursive: true }); let size = 0; const out = createWriteStream(target);
+        try { for await (const chunk of request) { size += chunk.length; if (size > 25 * 1024 * 1024) throw new Error('A file can be at most 25 MB.'); if (!out.write(chunk)) await new Promise(resolve => out.once('drain', resolve)); } await new Promise((resolve, reject) => { out.end(); out.once('finish', resolve); out.once('error', reject); }); }
+        catch (error) { out.destroy(); rmSync(folder, { recursive: true, force: true }); throw error; }
+        return json(response, 200, { path: target, name, size });
+      }
+      if (url.pathname === '/api/presence' && request.method === 'POST') { desk.presence = { focused: Boolean((await body(request)).focused), at: Date.now() }; return json(response, 200, { ok: true }); }
+      const taskNameMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/name$/);
+      if (taskNameMatch && request.method === 'POST') return json(response, 200, { name: await desk.englishName(taskNameMatch[1]) });
+      if (url.pathname === '/api/main' && request.method === 'POST') return json(response, 200, await desk.startMain(await body(request)));
+      if (url.pathname === '/api/memory' && request.method === 'GET') return json(response, 200, { directory: desk.memory.directory, projects: desk.memory.list(), scannedAt: desk.memory.state().scannedAt || null });
+      if (url.pathname === '/api/memory/page' && request.method === 'GET') return json(response, 200, { page: url.searchParams.get('name') || 'index', text: desk.memory.readDoc(url.searchParams.get('name') || 'index') });
+      if (url.pathname === '/api/memory/scan' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.memory.scan({ roots: Array.isArray(input.roots) && input.roots.length ? input.roots : scanRoots(store, root) })); }
+      if (url.pathname === '/api/memory/user' && request.method === 'PUT') return json(response, 200, desk.memory.setUser((await body(request)).text));
+      if (url.pathname === '/api/rooms' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.rooms.create(input.name, input.members)); }
+      const roomOnly = url.pathname.match(/^\/api\/rooms\/([^/]+)$/);
+      if (roomOnly && request.method === 'PUT') return json(response, 200, desk.rooms.rename(roomOnly[1], (await body(request)).name));
+      if (roomOnly && request.method === 'DELETE') return json(response, 200, desk.rooms.remove(roomOnly[1]));
+      const roomImage = url.pathname.match(/^\/api\/rooms\/([^/]+)\/image$/);
+      if (roomImage && request.method === 'GET') {
+        const room = desk.rooms.room(roomImage[1]), file = room.image && path.join(store.directory, 'room-images', path.basename(room.image));
+        if (!file || !existsSync(file)) return json(response, 404, { error: 'This room has no picture.' });
+        return serveFile(request, response, file, { cache: 'no-cache' });
+      }
+      if (roomImage && request.method === 'POST') {
+        const ext = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' }[String(request.headers['content-type'] || '').split(';')[0]];
+        if (!ext) throw new Error('Choose a PNG, JPEG, WebP or GIF picture.');
+        const room = desk.rooms.room(roomImage[1]), folder = path.join(store.directory, 'room-images'), chunks = []; let size = 0;
+        for await (const chunk of request) { size += chunk.length; if (size > 5 * 1024 * 1024) throw new Error('The picture can be at most 5 MB.'); chunks.push(chunk); }
+        mkdirSync(folder, { recursive: true });
+        if (room.image && room.image !== room.id + ext) rmSync(path.join(folder, path.basename(room.image)), { force: true });
+        writeFileSync(path.join(folder, room.id + ext), Buffer.concat(chunks));
+        return json(response, 200, desk.rooms.setImage(room.id, room.id + ext));
+      }
+      const roomMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/(messages|members)(?:\/([^/]+))?$/);
+      if (roomMatch) {
+        const [, roomId, part, extra] = roomMatch;
+        if (part === 'messages' && request.method === 'GET') return json(response, 200, desk.rooms.messages(roomId, { after: Number(url.searchParams.get('after')) || 0 }));
+        if (part === 'messages' && request.method === 'POST') { const input = await body(request); return json(response, 200, await desk.rooms.post(roomId, { text: input.text, to: input.to, replyTo: input.replyTo || '' })); }
+        if (part === 'members' && request.method === 'POST') return json(response, 200, desk.rooms.addMember(roomId, (await body(request)).agentId));
+        if (part === 'members' && request.method === 'DELETE') return json(response, 200, desk.rooms.removeMember(roomId, extra));
       }
       const artifactMatch = url.pathname.match(/^\/artifacts\/([a-f0-9-]+)\/([^/]+)$/);
       if (artifactMatch) {
@@ -363,7 +426,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html', download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js' };
       // three.js ships from the installed package; the page loads no remote scripts.
       const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });
@@ -375,7 +438,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); }); }
   catch (error) { await closeSession(); unlinkSync(lockPath); throw error; }
   address = `http://127.0.0.1:${server.address().port}`;
-  if (session) { session.desk.mcpUrl = `${address}/mcp`; session.desk.reattachOrca(); void session.desk.findPullRequests(); }
+  if (session) startDesk(session.desk, session.store);
   let lastSync = Date.now(), ticks = 0;
   const timer = setInterval(() => {
     if (!session) return;

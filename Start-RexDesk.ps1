@@ -1,5 +1,5 @@
 ﻿param([switch]$NoBrowser, [switch]$App)
-# Agent sign-in profiles are saved in Rex Desk Settings, so this launcher needs no CLAUDE_CONFIG_DIR or CODEX_HOME.
+# Agent sign-in profiles are saved in Rex Desk Settings, so this launcher needs no CLAUDE_CONFIG_DIR.
 $ErrorActionPreference = 'Stop'
 $rexProject = $PSScriptRoot
 $rexAddress = 'http://127.0.0.1:4317'

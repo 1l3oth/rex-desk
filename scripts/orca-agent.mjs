@@ -20,15 +20,12 @@ if (spec.provider === 'claude') {
   cleanup = () => rmSync(config, { force: true });
   // Claude Code's own question prompt would appear only in this terminal, where the dashboard cannot show it or
   // record the answer, so it is turned off and the agent asks through desk_ask instead.
-  args = [...spec.executable.args, '--mcp-config', config, '--disallowed-tools', 'AskUserQuestion',
-    ...(resume ? ['--resume', resume] : []), ...(spec.addDir ? ['--add-dir', spec.addDir] : []), ...(spec.model ? ['--model', spec.model] : []), spec.prompt];
+  args = [...spec.executable.args, '--allowedTools', 'mcp__rex_desk_run', ...(spec.effort ? ['--effort', spec.effort] : []), ...(spec.permissionMode && spec.permissionMode !== 'manual' ? ['--permission-mode', spec.permissionMode] : []), '--mcp-config', config, '--disallowed-tools', 'AskUserQuestion',
+    ...(resume ? ['--resume', resume] : []), ...(spec.addDir ? ['--add-dir', spec.addDir, ...(spec.uploadsDir ? [spec.uploadsDir] : [])] : []), ...(spec.model ? ['--model', spec.model] : []), spec.prompt];
 } else {
-  args = [...spec.executable.args, ...(resume ? ['resume'] : []),
-    '-c', 'mcp_servers.rex_desk.enabled=false', '-c', `mcp_servers.rex_desk_run.url=${JSON.stringify(spec.mcpUrl)}`,
-    '-c', 'mcp_servers.rex_desk_run.bearer_token_env_var="REX_AGENT_TOKEN"', '-c', 'mcp_servers.rex_desk_run.tool_timeout_sec=86400',
-    ...(spec.model ? ['-m', spec.model] : []), ...(resume ? [resume] : []), spec.prompt];
+  console.error('Rex Desk runs Claude Code only. Resume this run to continue with Claude Code.'); process.exit(2);
 }
-console.log(`Rex Desk run ${spec.runId}: starting ${spec.provider === 'claude' ? 'Claude Code' : 'Codex'} in ${spec.cwd}`);
+console.log(`Rex Desk run ${spec.runId}: starting Claude Code in ${spec.cwd}`);
 const child = spawn(spec.executable.command, args, { cwd: spec.cwd, env, stdio: 'inherit', windowsHide: false });
 const finish = code => { cleanup(); console.log(`\nRex Desk agent exited (code ${code ?? 'signal'}). Run ${spec.runId}.`); process.exit(code ?? 1); };
 child.once('error', error => { console.error(error.message); finish(127); });

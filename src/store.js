@@ -17,9 +17,9 @@ export const deskStatus = value => (deskStatusLabels[String(value || '').trim().
 export const now = () => new Date().toISOString();
 export const id = () => randomUUID();
 export const defaults = {
-  name: 'Rex', provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
+  name: 'Rex', notify: true, provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
   syncMinutes: 5, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
-  models: { claude: '', codex: '' }, agentProfiles: { claude: null, codex: null }, tourDismissed: false, execution: 'orca',
+  models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, execution: 'headless',
   schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], fix: true, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
   // Computer control: on for the person here, with a yes asked before shutdown-like actions; agents only when allowed.
   control: { enabled: true, confirm: true, agents: false, language: 'en' },
@@ -157,7 +157,7 @@ export class Store extends EventEmitter {
   migrateConfig() {
     const config = this.get('config', 'main');
     if (!config) return;
-    if (config.execution !== 'orca') this.put('config', 'main', { ...config, execution: 'orca' });
+    if (config.execution !== 'headless') this.put('config', 'main', { ...config, execution: 'headless' });
     if (Array.isArray(config.testAccounts)) return;
     const legacy = config.testAccount || {}, accounts = [];
     const carry = (from, to) => { const saved = this.get('secret', from); if (saved) this.put('secret', `test-account:${to}`, saved); };
@@ -182,7 +182,6 @@ export class Store extends EventEmitter {
   }
   saveConfig(input) {
     const secretUpdates = [];
-    if (!['claude', 'codex'].includes(input.provider)) throw new Error('Choose Claude Code or Codex.');
     if (!Number.isInteger(input.concurrency) || input.concurrency < 1 || input.concurrency > 6) throw new Error('Concurrency must be 1–6.');
     if (!Number.isFinite(input.syncMinutes) || input.syncMinutes < 0 || input.syncMinutes > 1440) throw new Error('Sync interval must be 0–1440 minutes.');
     if (!Array.isArray(input.sources) || !Array.isArray(input.repositories)) throw new Error('Sources and repositories must be lists.');
@@ -211,11 +210,11 @@ export class Store extends EventEmitter {
     const accounts = (Array.isArray(input.testAccounts) ? input.testAccounts : []).map(account => ({
       id: String(account.id || id()), site: String(account.site || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').slice(0, 200),
       username: String(account.username || '').trim().slice(0, 200) })).filter(account => account.username);
-    const config = { ...defaults, name: String(input.name || 'Rex'), provider: input.provider,
+    const config = { ...defaults, name: String(input.name || 'Rex'), notify: input.notify !== false, provider: 'claude',
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
-      syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex) }, sources, repositories,
-      agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
-      tourDismissed: Boolean(input.tourDismissed), execution: 'orca', testAccounts: accounts,
+      syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), models: { claude: modelName('claude', input.models?.claude) }, sources, repositories,
+      agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code') },
+      tourDismissed: Boolean(input.tourDismissed), execution: 'headless', testAccounts: accounts,
       schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false, versions: String(input.jev?.versions || '').trim().slice(0, 300) },
       control: { enabled: input.control?.enabled !== false, confirm: input.control?.confirm !== false, agents: input.control?.agents === true, language: ['km', 'en', 'ko'].includes(input.control?.language) ? input.control.language : 'en' } };
     for (const account of accounts) {
