@@ -320,6 +320,37 @@ test('a run opens a pull request into a second branch, built from that branch', 
   store.close();
 });
 
+test('work done in a group chat publishes: its worktree becomes a run, and the person telling the agent to open the PR is the yes', async () => {
+  const directory = temporary('room-pr'), origin = path.join(directory, 'origin.git'), repository = path.join(directory, 'repo'), tree = path.join(directory, 'repo-worktrees', '49760');
+  mkdirSync(repository); mkdirSync(origin);
+  await git(repository, ['init', '-b', 'global/release']);
+  await git(repository, ['config', 'user.name', 'Test']); await git(repository, ['config', 'user.email', 'test@example.invalid']);
+  writeFileSync(path.join(repository, 'app.txt'), 'first\n'); await git(repository, ['add', '.']); await git(repository, ['commit', '-m', 'First']);
+  await git(origin, ['init', '--bare', '-b', 'global/release']);
+  await git(repository, ['branch', 'global/develop']);
+  await git(repository, ['remote', 'add', 'origin', origin]); await git(repository, ['push', '-q', 'origin', 'global/release', 'global/develop']);
+  await git(repository, ['worktree', 'add', '-q', '-b', 'temp/rex/49760-subtask', tree, 'HEAD']);
+  writeFileSync(path.join(tree, 'fix.txt'), 'the fix\n'); await git(tree, ['add', '.']); await git(tree, ['commit', '-m', 'fix: keep the parent link']);
+  const store = new Store(temporary('room-pr-store'));
+  store.saveConfig({ ...defaults, repositories: [{ id: 'repository-1', name: 'flow-was', path: repository, baseBranch: 'global/release', targetBranch: 'global/release' }] });
+  const desk = new Desk(store, { root: temporary('room-pr-root') }), created = [];
+  desk.gh = async args => { created.push(args); return { stdout: 'https://github.com/x/y/pull/7\n' }; };
+  store.put('task', 'task-1', { id: 'task-1', title: 'Subtask parent link disappears', active: true, sourceName: 'Morningmate', externalId: '49760', roomWork: { agentId: 'bot', roomId: 'room-1', at: now() } });
+  store.put('run', 'room-session', { id: 'room-session', role: 'specialist', specialistId: 'bot', roomAgent: 'bot', roomOf: 'room-1', state: 'running', createdAt: now() });
+  desk.personAskedToPublish = () => true;
+  const result = await desk.requestPublish('room-session', { worktree: tree });
+  assert.equal(result.url, 'https://github.com/x/y/pull/7');
+  assert.equal(created[0][created[0].indexOf('--head') + 1], 'temp/rex/49760-subtask');
+  assert.equal(created[0][created[0].indexOf('--base') + 1], 'global/release');
+  const adopted = store.list('run').find(item => item.adoptedFrom === path.resolve(tree));
+  assert.equal(adopted.taskId, 'task-1', 'the task given in the room'); assert.equal(adopted.state, 'published');
+  desk.personAskedToPublish = () => false; let asked = false;
+  desk.ask = async () => { asked = true; return { action: 'decline' }; };
+  assert.deepEqual(await desk.requestPublish('room-session', { worktree: tree, targetBranch: 'global/develop' }), { declined: true });
+  assert.ok(asked, 'without the person asking in the room, the dashboard asks');
+  store.close();
+});
+
 test('a connection syncs the issues of every account it watches, not only the first', async () => {
   const store = new Store(temporary('accounts')), filters = [];
   store.saveConfig({ ...defaults, repositories: [], sources: [{ ...source, apiKey: 'fixture-key', userId: ' 1l3oth@flow.team , globalDev@flow.team ,1l3oth@flow.team ' }] });

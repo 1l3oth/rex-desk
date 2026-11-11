@@ -919,7 +919,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const brief = [`The person gave you this task to do here in the room: #${number} ${name}.`,
       task.url ? `Tracker link: ${task.url}` : '', `What it says:\n${String(task.description || task.title || '').slice(0, 4000)}`, instructions ? `Notes from the person: ${instructions}` : '',
       `Do the work in this session and talk about it in this room. Never change the main checkout at ${project}. Work in a git worktree beside it: in ${project} run \`git worktree add "${project}-worktrees/${String(number).toLowerCase()}" -b ${branch} ${base}\` (or reuse it if it exists), then change, run and test the code there.`,
-      'Post a short note in the room when you start, when something important happens, and when you are done (what changed and how you tested it). Share each test result with desk_share_evidence (a screenshot, a recording or the test output) so it shows in the room and on the task. Commit in the worktree when it works. Ask the person here before pushing, opening a pull request, or anything that touches a live site or other people.',
+      'Post a short note in the room when you start, when something important happens, and when you are done (what changed and how you tested it). Share each test result with desk_share_evidence (a screenshot, a recording or the test output) so it shows in the room and on the task. Commit in the worktree when it works. Ask the person here before pushing or opening a pull request; when they tell you to (\"open the PR\", \"push it\"), do it at once with desk_publish, passing worktree (your worktree folder) and taskId: their message is the yes, so do not ask again or tell them to start a run. Ask first before anything that touches a live site or other people.',
       this.memory.workflowText(agent.projectSlug)].filter(Boolean).join('\n\n');
     await this.rooms.post(roomId, { system: true, text: `${agent.name} is now working on #${number} ${name} here in the room.`, instruction: brief, to: [agent.slug] });
     return { inRoom: true, agentId: agent.id, roomId, taskId };
@@ -1120,7 +1120,51 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       this.message(runId, `Draft pull request created: ${url} (${head.branch} into ${plan.target})`); return { url };
     } finally { if (head.temporary) await this.removeWorktree(run, head.worktree); }
   }
+  // Did the person just tell this agent, in its room, to open the pull request or push? Then that message is their yes.
+  personAskedToPublish(run) {
+    const roomId = run.roomTurn?.roomId || run.roomOf || ''; if (!roomId) return false;
+    const agentId = run.roomAgent || run.specialistId || ''; const agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
+    const last = this.rooms.messages(roomId).filter(item => item.from.type === 'human').at(-1);
+    if (!last || Date.now() - Date.parse(last.at) > 30 * 60000) return false;
+    const toAgent = last.to.includes(agentId) || (agent && last.to.includes(agent.slug)) || (agent && new RegExp(`@${agent.slug}\\b`, 'i').test(last.text));
+    return Boolean(toAgent && /\b(pr|pull request|push|publish)\b/i.test(last.text));
+  }
+  // Work done in a group chat lives in a worktree the agent made, not in a Rex Desk run. To publish it, Rex Desk makes a run for that
+  // worktree and branch (marked as work from the room), so the push and the pull request go through the same route as every other run.
+  async adoptRoomWork(runId, { worktree, taskId = '', targetBranch = '' } = {}) {
+    const session = this.run(runId), agentId = session.roomAgent || session.specialistId || '';
+    if (!worktree) throw new Error('This chat has no Rex Desk run. Pass worktree: the folder of the git worktree you worked in.');
+    const folder = path.resolve(worktree); if (!existsSync(folder)) throw new Error(`${folder} does not exist.`);
+    const branch = (await git(folder, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    if (!branch || branch === 'HEAD') throw new Error(`${folder} is not on a branch. Check out the work branch first.`);
+    const common = path.resolve(folder, (await git(folder, ['rev-parse', '--git-common-dir'])).trim()).toLowerCase();
+    const repository = this.store.config().repositories.find(item => [path.join(path.resolve(item.path), '.git').toLowerCase(), path.resolve(item.path).toLowerCase()].includes(common));
+    if (!repository) throw new Error(`${folder} is not a worktree of a project Rex Desk knows. Add the project in Settings first.`);
+    const roomId = session.roomTurn?.roomId || session.roomOf || '';
+    const task = taskId ? this.store.get('task', taskId) : this.store.list('task').filter(item => item.roomWork?.agentId === agentId && (!roomId || item.roomWork.roomId === roomId)).sort((left, right) => String(right.roomWork.at).localeCompare(String(left.roomWork.at)))[0];
+    if (!task) throw new Error('Pass taskId: which task this work is for (see desk_tasks).');
+    const existing = this.store.list('run').find(item => item.adoptedFrom === folder && item.branch === branch);
+    const target = targetBranch || existing?.targetBranch || repository.targetBranch || repository.baseBranch;
+    const baseCommit = (await git(folder, ['merge-base', 'HEAD', `origin/${repository.baseBranch || target}`]).catch(() => git(folder, ['merge-base', 'HEAD', `origin/${target}`]))).trim();
+    // The person asked for it in the room; Rex Desk did not run the tests itself, and the pull request says so.
+    const verification = { fingerprint: await fingerprint(folder), command: '', result: 'not run by Rex Desk', at: now(), fromRoom: true };
+    const record = { ...(existing || { id: id(), createdAt: now(), provider: session.provider, execution: 'headless', role: 'worker', specialistId: agentId === 'main' ? '' : agentId, roomId }),
+      title: existing?.title || `${task.taskNumber || task.externalId || ''} ${task.title || ''}`.trim(), state: 'ready_for_review', phase: 'review', worktree: folder, branch, baseCommit,
+      repositoryId: repository.id, taskId: task.id, taskIds: [task.id], targetBranch: target, adoptedFrom: folder, verification,
+      summary: existing?.summary || `Work done in a group chat by ${agentId === 'main' ? 'Rex Agent' : this.store.get('specialist', agentId)?.name || 'an agent'}. Rex Desk did not run the tests for this pull request.` };
+    this.store.put('run', record.id, record);
+    return record.id;
+  }
   async requestPublish(runId, options = {}) {
+    if (!this.run(runId).worktree) {
+      const session = this.run(runId), asked = this.personAskedToPublish(session);
+      const adopted = await this.adoptRoomWork(runId, options);
+      if (asked) return this.publish(adopted, { ...options, approved: true });
+      runId = adopted;
+    } else if (this.personAskedToPublish(this.run(runId))) {
+      await this.publishChecks(this.run(runId), options.targetBranch);
+      return this.publish(runId, { ...options, approved: true });
+    }
     const run = this.run(runId);
     const plan = await this.publishChecks(run, options.targetBranch);
     if (!plan.additional && automaticPrAllowed(this.store.config(), run, await fingerprint(run.worktree))) return this.publish(runId, { ...options, approved: true });
