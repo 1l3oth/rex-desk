@@ -1171,3 +1171,11 @@ code.md-file{cursor:pointer;text-decoration:underline dotted;text-underline-offs
 .fw-rs-n,.fw-rs-s{left:10px;right:10px;height:6px;cursor:ns-resize}.fw-rs-n{top:-3px}.fw-rs-s{bottom:-3px}
 .fw-rs-e,.fw-rs-w{top:10px;bottom:10px;width:6px;cursor:ew-resize}.fw-rs-e{right:-3px}.fw-rs-w{left:-3px}
 .fw-rs-ne,.fw-rs-nw,.fw-rs-se,.fw-rs-sw{width:18px;height:18px}.fw-rs-ne{top:0;right:0;cursor:nesw-resize}.fw-rs-sw{bottom:0;left:0;cursor:nesw-resize}.fw-rs-nw{top:0;left:0;cursor:nwse-resize}.fw-rs-se{bottom:0;right:0;cursor:nwse-resize}
+
+/* Split view: two panes side by side, the one the toolbar works on marked */
+.fw-body.two{flex-direction:row}.fw-pane{flex:1 1 0;min-width:0;min-height:0;display:flex;flex-direction:column;position:relative}.fw-pane.hidden{display:none}
+.fw-pane.split{flex-direction:row}.fw-pane.split>.fw-editor,.fw-pane.split>.fw-view{flex:1 1 50%;min-width:0}.fw-pane.split>.fw-view{border-left:1px solid var(--line)}
+.fw-body.two>.fw-pane+.fw-pane{border-left:1px solid var(--line)}.fw-body.two>.fw-pane.on{box-shadow:inset 0 2px 0 var(--accent)}
+.fw-tab.twin .fw-tab-name{color:var(--ink)}.fw-tab.twin{box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--accent) 45%,transparent)}
+.fw-drop{display:none;position:absolute;top:0;right:0;bottom:0;width:50%;z-index:5;place-items:center;border:2px dashed var(--accent);border-radius:10px;background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--ink);font-weight:600;pointer-events:none}
+.fw-body.dropping .fw-drop{display:grid}

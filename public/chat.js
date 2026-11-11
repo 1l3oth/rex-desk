@@ -458,7 +458,8 @@ function openPage(src, title = 'Explanation') {
   view.addEventListener('click', event => { if (event.target.closest('[data-pv-close]')) view.remove(); });
   view.addEventListener('keydown', event => { if (event.key === 'Escape') view.remove(); });
 }
-document.addEventListener('click', event => { const button = event.target.closest?.('[data-page-open]'); if (!button) return; event.preventDefault(); event.stopPropagation(); openPage(button.dataset.pageOpen, button.textContent.trim() || 'Explanation'); }, true);
+// An explanation page an agent made opens as a tab of the file window, on its preview (Code shows its source).
+document.addEventListener('click', event => { const button = event.target.closest?.('[data-page-open]'); if (!button) return; event.preventDefault(); event.stopPropagation(); if (window.rexOpenFile) void window.rexOpenFile(button.dataset.pageOpen, { view: 'preview' }); else openPage(button.dataset.pageOpen, button.textContent.trim() || 'Explanation'); }, true);
 document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="m-rail"]')) return; event.stopPropagation(); document.querySelector('.chat-shell')?.classList.toggle('show-rail'); }, true);
 document.addEventListener('click', event => { const head = event.target.closest?.('[data-action="agent-group"]'); if (!head) return; event.stopPropagation(); toggleGroup(head.dataset.project); renderAll(); }, true);
 // The back and forward buttons, and a pasted address, move between screens.
