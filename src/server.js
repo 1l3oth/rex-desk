@@ -550,7 +550,15 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         catch (error) { out.destroy(); rmSync(folder, { recursive: true, force: true }); throw error; }
         return json(response, 200, { path: target, name, size });
       }
-      if (url.pathname === '/api/presence' && request.method === 'POST') { desk.presence = { focused: Boolean((await body(request)).focused), at: Date.now() }; return json(response, 200, { ok: true }); }
+      if (url.pathname === '/api/presence' && request.method === 'POST') {
+        const input = await body(request), view = String(input.view ?? desk.presence.view ?? '').slice(0, 200);
+        desk.presence = { focused: Boolean(input.focused), view, at: Date.now() };
+        // The chat on screen in a window the person is looking at is read.
+        if (desk.presence.focused && view) desk.notifier.read({ key: view });
+        return json(response, 200, { ok: true });
+      }
+      if (url.pathname === '/api/notices/read' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.notifier.read({ key: String(input.key || ''), all: input.all === true })); }
+      if (url.pathname === '/api/notices/mute' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.notifier.mute(String(input.key || ''), input.on !== false)); }
       const taskNameMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/name$/);
       if (taskNameMatch && request.method === 'POST') return json(response, 200, { name: await desk.englishName(taskNameMatch[1]) });
       if (url.pathname === '/api/main' && request.method === 'POST') return json(response, 200, await desk.startMain(await body(request)));
@@ -603,7 +611,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-notices.js': 'chat-notices.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
       // three.js ships from the installed package; the page loads no remote scripts.
       const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });
