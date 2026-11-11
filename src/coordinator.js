@@ -9,7 +9,7 @@ import { EFFORTS, MODES, modesFor, runOptions, modelList } from './choices.js';
 import { fetchModels } from './models.js';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdirSync, writeFileSync, existsSync, statSync, copyFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, statSync, copyFileSync, readFileSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -20,6 +20,7 @@ import { OrcaRunner, AgentSession, sendToOrca, showWorktreesInOrca } from './orc
 import { Evidence } from './browser.js';
 import { Monitor } from './monitor.js';
 import { Files } from './files.js';
+import { agentTools } from './agent-tools.js';
 import { randomUUID } from 'node:crypto';
 import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
@@ -79,11 +80,21 @@ export function validateAnswer(interaction, answer) {
 const providerLabel = name => name === 'codex' ? 'Codex' : 'Claude Code';
 // "/teach sql injection" typed in a Rex Desk chat runs that skill. Rex Desk puts its own notes in front of the message, so the agent
 // would read the slash as plain text; it is spelled out instead. Rex Desk's own commands (/clear, /loop) never reach here.
-export function skillCall(text) {
+export function skillCall(text, tools = null) {
   const match = String(text || '').trim().match(/^\/([a-z][\w:-]{1,60})(?:\s+([\s\S]*))?$/i);
   if (!match || ['clear', 'loop'].includes(match[1].toLowerCase())) return text;
-  return `The person ran the /${match[1]} skill${match[2] ? ` with: ${match[2].trim()}` : ''}.
-Run it now: if a skill has that name, use the Skill tool (skill "${match[1]}", or its plugin name such as "pstack:${match[1]}"). If not, it is a slash command: find ${match[1]}.md in ~/.claude/commands, the project's .claude/commands or the project's command folder, and do what it says, with what they wrote as its $ARGUMENTS. Follow its own instructions instead of your usual way of answering.`;
+  const name = match[1], args = (match[2] || '').trim(), lower = name.toLowerCase();
+  // A slash command Rex Desk found for this agent: its text goes straight in, with what they wrote as $ARGUMENTS, as Claude Code does.
+  const command = tools?.commands?.find(item => item.name.toLowerCase() === lower && item.file);
+  if (command) {
+    let body = ''; try { body = readFileSync(command.file, 'utf8').replace(/^---[\s\S]*?---\s*/, ''); } catch { /* fall back to the plain request below */ }
+    const local = (tools?.skills || []).filter(item => item.notInstalled).map(item => `- the ${item.name} skill is not installed: read ${item.file} with the Read tool instead of the Skill tool`).join('\n');
+    if (body) return `The person ran /${name}${args ? ` ${args}` : ''}. Follow this command now (from ${command.file}):\n\n${body.replaceAll('$ARGUMENTS', args || '(nothing given)')}${local ? `\n\nWhere its skills are:\n${local}` : ''}`;
+  }
+  // A skill: named exactly as the agent's Skill tool lists it (a plugin's skills carry the plugin name).
+  const skill = tools?.skills?.find(item => item.name.toLowerCase() === lower) || tools?.skills?.find(item => item.name.toLowerCase().endsWith(`:${lower}`));
+  if (skill) return `The person ran the /${name} skill${args ? ` with: ${args}` : ''}.\nLoad it now with the Skill tool (skill "${skill.name}"), pass what they wrote as its arguments, and follow its instructions instead of your usual way of answering.`;
+  return `The person ran /${name}${args ? ` with: ${args}` : ''}.\nRun it now: if a skill has that name, use the Skill tool (skill "${name}", or its plugin name such as "pstack:${name}"). If not, it is a slash command: find ${name}.md in ~/.claude/commands, the project's .claude/commands or the project's command folder, and do what it says, with what they wrote as its $ARGUMENTS. Follow its own instructions instead of your usual way of answering.`;
 }
 export class Desk {
   constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, orcaOptions, memoryDirectory, peerTransport } = {}) {
@@ -216,7 +227,7 @@ export class Desk {
       return { sent: true };
     }
     if (this.live.has(runId)) {
-      this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), skillCall(line)], updatedAt: now() });
+      this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
       this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
       return { queued: true };
     }
@@ -994,10 +1005,10 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: String(prompt).replace(/\s+/g, ' ').trim(), via: 'rex' }, true);
     // After /clear the next message starts a fresh session that reads the handoff; the message itself goes in as it is.
     if (run.handoffFile && !run.sessionId) {
-      this.patchRun(runId, { state: 'queued', provider, followUp: skillCall(String(prompt).trim()), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), execution: 'headless' });
+      this.patchRun(runId, { state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), execution: 'headless' });
       void this.drain(); return this.run(runId);
     }
-    this.patchRun(runId, { state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim()) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', profile: '', permissionMode: 'manual' } : {}), mirror: sameProvider ? run.mirror : undefined,
+    this.patchRun(runId, { state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', profile: '', permissionMode: 'manual' } : {}), mirror: sameProvider ? run.mirror : undefined,
       ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}),
       instructions: run.role === 'specialist' ? `${run.instructions || ''}${carried}` : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
       ...runOptions({ ...picked, provider }, this.store), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
@@ -1113,6 +1124,12 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       if (!seen.has(folder)) seen.set(folder, { name: item.name || path.basename(folder), path: folder });
     }
     return [...seen.values()];
+  }
+  // The skills and commands this run's agent has, found the same way the / menu finds them.
+  slashTools(run) {
+    const agentId = run.specialistId || (run.roomAgent && run.roomAgent !== 'main' ? run.roomAgent : '');
+    const agent = agentId ? this.store.get('specialist', agentId) : null;
+    try { return agentTools({ profile: this.accountFor(run) || agent?.profile || this.agents.selected(run.provider || 'claude') || '', projectPath: agent?.projectPath || run.projectPath || '' }); } catch { return null; }
   }
   // The usage of each signed-in account: the share of its 5-hour and weekly limits used, and when each resets. Claude Code and
   // Codex report it while they work, so it is as fresh as the account's last turn. Kept per account, never the sign-in itself.

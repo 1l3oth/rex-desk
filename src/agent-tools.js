@@ -17,7 +17,7 @@ function skillsIn(folder, source) {
       const file = path.join(folder, entry.name, 'SKILL.md');
       if (!existsSync(file)) continue;
       const meta = frontmatter(readFileSync(file, 'utf8').slice(0, 4000));
-      found.push({ name: meta.name || entry.name, description: meta.description.slice(0, 240), source });
+      found.push({ name: meta.name || entry.name, description: meta.description.slice(0, 240), source, file });
     }
   } catch {}
   return found;
@@ -29,7 +29,7 @@ function commandsIn(folder, source) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
       const text = readFileSync(path.join(folder, entry.name), 'utf8').slice(0, 3000), meta = frontmatter(text);
       const first = text.replace(/^---[\s\S]*?---/, '').trim().split('\n')[0] || '';
-      found.push({ name: entry.name.replace(/\.md$/, ''), description: (meta.description || first).replace(/^#+\s*/, '').slice(0, 200), source });
+      found.push({ name: entry.name.replace(/\.md$/, ''), description: (meta.description || first).replace(/^#+\s*/, '').slice(0, 200), source, file: path.join(folder, entry.name) });
     }
   } catch {}
   return found;
@@ -55,7 +55,9 @@ function pluginTools(home) {
 
 export function agentTools({ profile = '', projectPath = '', extra = {} } = {}) {
   const home = profile || path.join(os.homedir(), '.claude'), plugins = pluginTools(home);
-  const skills = [...skillsIn(path.join(home, 'skills'), 'account'), ...(projectPath ? skillsIn(path.join(projectPath, '.claude', 'skills'), 'project') : []), ...plugins.skills];
+  // A project may also carry its own skill that is not installed (studybook's skill/SKILL.md): listed with its file, so the agent reads it.
+  const ownSkill = projectPath ? [...skillsIn(path.join(projectPath, 'skill'), 'project'), ...skillsIn(path.join(projectPath, 'skills'), 'project')].map(item => ({ ...item, notInstalled: true })) : [];
+  const skills = [...ownSkill, ...skillsIn(path.join(home, 'skills'), 'account'), ...(projectPath ? skillsIn(path.join(projectPath, '.claude', 'skills'), 'project') : []), ...plugins.skills];
   // A project may keep its own commands in a command/ folder (studybook's /teach-me): the agent runs them when asked.
   const commands = [...commandsIn(path.join(home, 'commands'), 'account'), ...(projectPath ? [...commandsIn(path.join(projectPath, '.claude', 'commands'), 'project'), ...commandsIn(path.join(projectPath, 'command'), 'project'), ...commandsIn(path.join(projectPath, 'commands'), 'project')] : []), ...plugins.commands];
   let servers = {};
