@@ -1209,3 +1209,6 @@ body.fw-alone{margin:0;background:var(--panel);overflow:hidden}
 body.fw-alone .fw{inset:0;width:auto;height:auto;border:0;border-radius:0;box-shadow:none}
 body.fw-alone .fw-rs,body.fw-alone [data-fw="hide"],body.fw-alone [data-fw="big"],body.fw-alone [data-fw="popout"]{display:none}
 body.fw-alone .fw-head{cursor:default}
+
+/* The file window keeps its scrolling to itself */
+.fw,.fw-view,.fw-table-wrap,.fw .CodeMirror-scroll,.pcard,.nt-pane{overscroll-behavior:contain}

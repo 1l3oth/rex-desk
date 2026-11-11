@@ -121,6 +121,16 @@ function shell() {
   box.addEventListener('click', onClick);
   box.addEventListener('pointerdown', startMove);
   box.addEventListener('pointerdown', focusPane);
+  // Scrolling over the window scrolls the window: when the part under the mouse cannot scroll further, the page behind stays still.
+  box.addEventListener('wheel', event => {
+    for (let node = event.target; node && node !== box; node = node.parentElement) {
+      const style = getComputedStyle(node), down = event.deltaY > 0, right = event.deltaX > 0;
+      const canY = /(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1 && (down ? node.scrollTop + node.clientHeight < node.scrollHeight - 1 : node.scrollTop > 0);
+      const canX = /(auto|scroll)/.test(style.overflowX) && node.scrollWidth > node.clientWidth + 1 && (right ? node.scrollLeft + node.clientWidth < node.scrollWidth - 1 : node.scrollLeft > 0);
+      if ((event.deltaY && canY) || (event.deltaX && canX)) return;
+    }
+    event.preventDefault();
+  }, { passive: false });
   // Drag a tab onto the right half of the window to see it next to the one open now.
   const body = box.querySelector('.fw-body');
   box.addEventListener('dragstart', event => { const name = event.target.closest?.('.fw-tab-name'); if (!name) return; event.dataTransfer.setData('text/x-fw-tab', name.dataset.index); event.dataTransfer.effectAllowed = 'move'; });
