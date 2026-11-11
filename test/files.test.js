@@ -68,3 +68,11 @@ test('a short path finds the file deep in the project, and a group chat looks in
   assert.equal(files.open('notes.md', '', 'room-1').path, path.join(worktree, 'notes.md'), 'the worktree of the room run');
   assert.throws(() => files.open('notes.md', '', 'room-2'), /No file named/);
 });
+
+test('a picture someone attached opens, by its path or its upload link', () => {
+  const { files, store } = setup();
+  const dir = path.join(store, 'uploads', '0f8fad5b-d9cb-469f-a165-70867728950e'); mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'shot.png'); writeFileSync(file, Buffer.from([137, 80, 78, 71]));
+  assert.equal(files.open(file).kind, 'image');
+  assert.equal(files.open(`/api/uploads/file?path=${encodeURIComponent(file)}`).path, file);
+});

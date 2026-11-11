@@ -32,7 +32,7 @@ export class Files {
   constructor(desk) { this.desk = desk; }
   // Folders the window may open: home, every project, the agents' worktrees, project memory, the notes vault, shared evidence.
   roots() {
-    const config = this.desk.store.config(), roots = [os.homedir(), this.desk.worktreeRoot, this.desk.memory?.directory, path.join(this.desk.store.directory, 'artifacts')];
+    const config = this.desk.store.config(), roots = [os.homedir(), this.desk.worktreeRoot, this.desk.memory?.directory, path.join(this.desk.store.directory, 'artifacts'), path.join(this.desk.store.directory, 'uploads')];
     // Every project Rex Desk knows: the ones set up, the ones it found on this computer, and Rex Desk itself.
     for (const repo of [...(config.repositories || []), ...(this.desk.store.list?.('repository') || [])]) roots.push(repo.path);
     roots.push(this.desk.root);
@@ -42,8 +42,9 @@ export class Files {
   }
   // The app's own data folder holds encrypted keys and sign-ins: never open it, except the evidence agents shared.
   check(file) {
-    const full = path.resolve(file), store = path.resolve(this.desk.store.directory), evidence = path.join(store, 'artifacts');
-    if (inside(full, store) && !inside(full, evidence)) throw new Error('That file is part of Rex Desk\'s private data (keys and sign-ins), so it does not open here.');
+    const full = path.resolve(file), store = path.resolve(this.desk.store.directory), shared = [path.join(store, 'artifacts'), path.join(store, 'uploads')];
+    // Shared evidence and the files people attached open; the rest of the data folder (keys, sign-ins) never does.
+    if (inside(full, store) && !shared.some(folder => inside(full, folder))) throw new Error('That file is part of Rex Desk\'s private data (keys and sign-ins), so it does not open here.');
     if (SECRET.test(full)) throw new Error('That looks like a private key or a sign-in file, so it does not open here.');
     if (!this.roots().some(root => inside(full, root))) throw new Error('Rex Desk opens files in your home folder, your projects, the agents\' worktrees and your notes vault. That file is outside them.');
     return full;
@@ -72,9 +73,11 @@ export class Files {
     const hash = text.match(/#L(\d+)(?:-L?\d+)?$/); if (hash) { line = Number(hash[1]); text = text.slice(0, hash.index); }
     const colon = text.match(/:(\d+)(?::\d+)?$/); if (colon && !/^[A-Za-z]:$/.test(text.slice(0, colon.index))) { line = Number(colon[1]); text = text.slice(0, colon.index); }
     if (!text) throw new Error('Name a file to open.');
+    // A file someone attached is linked as /api/uploads/file?path=<the file>.
+    const upload = text.match(/^\/api\/uploads\/file\?path=(.+)$/); if (upload) text = upload[1];
     // Evidence an agent shared is linked as /artifacts/<run>/<name>.
-    const shared = text.match(/^\/artifacts\/([\w-]+)\/([^/\\]+)$/);
-    if (shared) return { file: this.check(path.join(this.desk.store.directory, 'artifacts', shared[1], shared[2])), line };
+    const sharedLink = text.match(/^\/artifacts\/([\w-]+)\/([^/\\]+)$/);
+    if (sharedLink) return { file: this.check(path.join(this.desk.store.directory, 'artifacts', sharedLink[1], sharedLink[2])), line };
     if (path.isAbsolute(text)) return { file: this.check(text), line };
     const bases = this.bases(runId, roomId);
     for (const base of bases) { const full = path.resolve(base, text); if (existsSync(full)) return { file: this.check(full), line }; }
