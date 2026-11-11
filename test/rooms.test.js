@@ -508,3 +508,10 @@ test('a renamed agent shows its new name on its old messages', async () => {
   store.put('specialist', dara.id, { ...store.get('specialist', dara.id), name: 'Sokha' });
   assert.equal(desk.rooms.messages(room.id).find(item => item.text === 'Old news').from.label, 'Sokha');
 });
+
+test('Rex Agent in a group chat gets its own instructions, not the old issue dispatcher', () => {
+  const { desk, room } = setup();
+  const text = desk.prompt({ id: 'main-room', role: 'coordinator', roomAgent: 'main', roomOf: room.id, taskIds: [] });
+  assert.match(text, /You are the main agent of Rex Desk/);
+  assert.ok(!/selected IDs/.test(text));
+});
