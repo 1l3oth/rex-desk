@@ -45,10 +45,10 @@ async function codeMirror(ext) {
 // ---------- opening ----------
 const extOf = name => { const lower = name.toLowerCase(); return lower === 'dockerfile' ? 'dockerfile' : lower.includes('.') ? lower.split('.').pop() : ''; };
 const remember = () => { try { localStorage.setItem('rex-desk-files', JSON.stringify({ paths: state.tabs.map(tab => tab.path), active: state.active, shown: state.shown })); } catch { /* private window */ } };
-export async function openFile(ctx, input, { line = 0, run = '' } = {}) {
+export async function openFile(ctx, input, { line = 0, run = '', room = '' } = {}) {
   state.ctx = ctx;
   try {
-    const info = await ctx.api(`/files/open?path=${encodeURIComponent(input)}${run ? `&run=${encodeURIComponent(run)}` : ''}`);
+    const info = await ctx.api(`/files/open?path=${encodeURIComponent(input)}${run ? `&run=${encodeURIComponent(run)}` : ''}${room ? `&room=${encodeURIComponent(room)}` : ''}`);
     let index = state.tabs.findIndex(tab => tab.path === info.path);
     if (index < 0) { state.tabs.push({ ...info, saved: info.text, view: info.kind === 'html' || info.kind === 'csv' ? 'code' : info.kind === 'markdown' ? 'preview' : 'code' }); index = state.tabs.length - 1; }
     const tab = state.tabs[index]; tab.line = line || info.line || 0;
@@ -213,7 +213,7 @@ export function wireFiles(ctx) {
   document.addEventListener('click', event => {
     const target = event.target.closest?.('[data-file-open]'); if (!target) return;
     event.preventDefault(); event.stopPropagation();
-    void openFile(ctx, target.dataset.fileOpen, { run: target.dataset.fileRun || ctx.currentRunId?.() || '' });
+    void openFile(ctx, target.dataset.fileOpen, { run: target.dataset.fileRun || ctx.currentRunId?.() || '', room: ctx.ui.view.type === 'room' ? ctx.ui.view.id : '' });
   }, true);
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && state.shown && document.querySelector('.fw')?.contains(document.activeElement) && !document.querySelector('.CodeMirror-dialog')) { state.shown = false; remember(); draw(); }

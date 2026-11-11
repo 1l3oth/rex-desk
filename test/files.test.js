@@ -13,9 +13,9 @@ function setup() {
   writeFileSync(path.join(worktree, 'notes.md'), '# Hi\n');
   writeFileSync(path.join(store, 'secrets.json'), '{}');
   writeFileSync(path.join(store, 'artifacts', 'run-1', 'shot.png'), Buffer.from([137, 80, 78, 71]));
-  const runs = { 'run-1': { id: 'run-1', worktree, repositoryId: 'r1' } };
+  const runs = { 'run-1': { id: 'run-1', worktree, repositoryId: 'r1', roomId: 'room-1' } };
   const desk = { worktreeRoot: path.join(root, 'worktrees'), memory: null,
-    store: { directory: store, config: () => ({ repositories: [{ id: 'r1', path: repo }] }), get: (kind, id) => (kind === 'run' ? runs[id] : null) } };
+    store: { directory: store, config: () => ({ repositories: [{ id: 'r1', path: repo }] }), get: (kind, id) => (kind === 'run' ? runs[id] : null), list: kind => (kind === 'run' ? Object.values(runs) : []) } };
   return { root, repo, store, worktree, files: new Files(desk) };
 }
 
@@ -56,4 +56,15 @@ test('Prettier formats by the file type', async () => {
 test('kinds come from the extension, and unknown files with zero bytes are binary', () => {
   assert.equal(kindOf('a.xlsx'), 'sheet'); assert.equal(kindOf('a.docx'), 'doc'); assert.equal(kindOf('a.MP4'), 'video'); assert.equal(kindOf('a.pdf'), 'pdf');
   assert.equal(kindOf('a.yaml', Buffer.from('a: 1')), 'text'); assert.equal(kindOf('a.dat', Buffer.from([1, 0, 2])), 'binary');
+});
+
+test('a short path finds the file deep in the project, and a group chat looks in the worktrees of its work', async () => {
+  const { files, repo, worktree } = setup();
+  const { execFileSync } = await import('node:child_process');
+  mkdirSync(path.join(repo, 'web', 'apiCall', 'task'), { recursive: true }); writeFileSync(path.join(repo, 'web', 'apiCall', 'task', 'index.js'), 'x');
+  execFileSync('git', ['init', '-q', repo]);
+  assert.equal(files.open('apiCall/task/index.js:5').path, path.join(repo, 'web', 'apiCall', 'task', 'index.js'));
+  assert.equal(files.open('apiCall/task/index.js:5').line, 5);
+  assert.equal(files.open('notes.md', '', 'room-1').path, path.join(worktree, 'notes.md'), 'the worktree of the room run');
+  assert.throws(() => files.open('notes.md', '', 'room-2'), /No file named/);
 });

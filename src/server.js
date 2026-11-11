@@ -518,7 +518,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         }
       }
       // The file window: open, view, save, format, and open in another program.
-      if (url.pathname === '/api/files/open' && request.method === 'GET') return json(response, 200, desk.files.open(url.searchParams.get('path'), url.searchParams.get('run') || ''));
+      if (url.pathname === '/api/files/open' && request.method === 'GET') return json(response, 200, desk.files.open(url.searchParams.get('path'), url.searchParams.get('run') || '', url.searchParams.get('room') || ''));
       if (url.pathname === '/api/files/raw' && request.method === 'GET') {
         const file = desk.files.check(url.searchParams.get('path') || ''), kind = kindOf(file);
         if (!existsSync(file) || statSync(file).isDirectory()) return json(response, 404, { error: 'No such file.' });

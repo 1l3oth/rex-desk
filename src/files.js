@@ -2,7 +2,7 @@
 // and turn Excel and Word files into something a browser can show. Only folders Rex Desk works with are open to it,
 // and the app's own data folder (where the keys live) and private key files never are.
 import { readFileSync, writeFileSync, statSync, existsSync, openSync, readSync, closeSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -48,8 +48,25 @@ export class Files {
     if (!this.roots().some(root => inside(full, root))) throw new Error('Rex Desk opens files in your home folder, your projects, the agents\' worktrees and your notes vault. That file is outside them.');
     return full;
   }
-  // "src/server.js:42", "file:///F:/x.md", "F:\\x\\y.ts#L10": the path and the line. A relative path is looked up in the run's worktree, then each project.
-  resolve(input, runId = '') {
+  // The folders a chat works in: the run's worktree and project; in a group chat, the worktrees and projects of the work done in that room.
+  bases(runId = '', roomId = '') {
+    const runs = this.desk.store.list('run'), repos = [...(this.desk.store.config().repositories || []), ...(this.desk.store.list('repository') || [])];
+    const mine = runs.filter(run => (runId && run.id === runId) || (roomId && (run.roomId === roomId || run.roomOf === roomId || this.desk.store.list('task').some(task => task.roomWork?.roomId === roomId && run.taskIds?.includes(task.id)))));
+    mine.sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
+    const own = mine.flatMap(run => [run.worktree, repos.find(repo => repo.id === run.repositoryId)?.path, run.projectPath]);
+    return [...new Set([...own, ...repos.map(repo => repo.path), this.desk.memory?.directory].filter(Boolean).map(base => path.resolve(base)))];
+  }
+  // Every file git tracks in a folder, kept for a minute, so a path written short (`apiCall/task/index.js`) is found deep in a project.
+  tracked(base) {
+    this.cache ||= new Map(); const hit = this.cache.get(base);
+    if (hit && Date.now() - hit.at < 60000) return hit.files;
+    let files = [];
+    try { files = execFileSync('git', ['-C', base, 'ls-files', '--cached', '--others', '--exclude-standard'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: 15000 }).split('\n').filter(Boolean); } catch { /* not a git folder */ }
+    this.cache.set(base, { at: Date.now(), files }); return files;
+  }
+  // "src/server.js:42", "file:///F:/x.md", "F:\\x\\y.ts#L10": the path and the line. A relative path is looked up in the chat's worktrees and projects:
+  // first as written, then as the end of a longer path.
+  resolve(input, runId = '', roomId = '') {
     let text = String(input || '').trim().replace(/^file:\/\/\/?/i, '').replace(/^["'`]|["'`]$/g, ''), line = 0;
     try { text = decodeURIComponent(text); } catch { /* keep as is */ }
     const hash = text.match(/#L(\d+)(?:-L?\d+)?$/); if (hash) { line = Number(hash[1]); text = text.slice(0, hash.index); }
@@ -59,13 +76,17 @@ export class Files {
     const shared = text.match(/^\/artifacts\/([\w-]+)\/([^/\\]+)$/);
     if (shared) return { file: this.check(path.join(this.desk.store.directory, 'artifacts', shared[1], shared[2])), line };
     if (path.isAbsolute(text)) return { file: this.check(text), line };
-    const run = runId ? this.desk.store.get('run', runId) : null, repos = this.desk.store.config().repositories || [];
-    const bases = [run?.worktree, repos.find(repo => repo.id === run?.repositoryId)?.path, ...repos.map(repo => repo.path), this.desk.memory?.directory].filter(Boolean);
+    const bases = this.bases(runId, roomId);
     for (const base of bases) { const full = path.resolve(base, text); if (existsSync(full)) return { file: this.check(full), line }; }
-    throw new Error(`No file named ${text} in this chat's worktree or your projects.`);
+    const tail = `/${text.replace(/\\/g, '/').replace(/^\.?\//, '')}`;
+    for (const base of bases) {
+      const found = this.tracked(base).filter(file => `/${file}`.endsWith(tail));
+      if (found.length) return { file: this.check(path.join(base, found.sort((left, right) => left.length - right.length)[0])), line };
+    }
+    throw new Error(`No file named ${text} in this chat's worktrees or your projects.`);
   }
-  open(input, runId) {
-    const { file, line } = this.resolve(input, runId);
+  open(input, runId, roomId) {
+    const { file, line } = this.resolve(input, runId, roomId);
     if (!existsSync(file)) throw new Error(`${file} does not exist.`);
     const stat = statSync(file); if (stat.isDirectory()) throw new Error(`${file} is a folder. Name a file in it.`);
     const head = Buffer.alloc(Math.min(stat.size, 8192)); if (head.length) { const fd = openSync(file, 'r'); try { readSync(fd, head, 0, head.length, 0); } finally { closeSync(fd); } }
