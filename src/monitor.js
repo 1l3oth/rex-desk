@@ -29,7 +29,10 @@ export function classify(list, { selfPid = process.pid } = {}) {
   const under = item => ancestors(item).some(parent => parent.pid === selfPid);
   const inAgent = item => ancestors(item).some(parent => /^claude(\.exe)?$/i.test(parent.name));
   const tree = item => { const all = [item]; for (let index = 0; index < all.length; index++) for (const child of children.get(all[index].pid) || []) all.push(child); return all; };
-  const origin = item => { for (const parent of ancestors(item)) for (const [pattern, label] of APPS) if (pattern.test(parent.name) && label) return label; return 'unknown app'; };
+  // Which app opened it. When the app has closed but its terminal lives on, say which kind of terminal.
+  const SHELLS = [[/^(sh|bash)(\.exe)?$/i, 'a Git Bash terminal'], [/^(powershell|pwsh)(\.exe)?$/i, 'a PowerShell terminal'], [/^cmd(\.exe)?$/i, 'a Command Prompt']];
+  const origin = item => { const chain = ancestors(item); for (const parent of chain) for (const [pattern, label] of APPS) if (pattern.test(parent.name) && label) return label;
+    for (const parent of chain) for (const [pattern, label] of SHELLS) if (pattern.test(parent.name)) return `${label} (its window app already closed)`; return 'an app that already closed'; };
   const groups = { agents: [], previews: [], browsers: [], terminals: [], leftovers: [], servers: [] };
   for (const item of list) {
     if (item.pid === selfPid) continue;

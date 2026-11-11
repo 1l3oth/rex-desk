@@ -954,14 +954,14 @@ button.cn-main{cursor:pointer}
 .tok{margin-top:4px;font-size:11px;color:var(--muted);opacity:.8}
 .rstop{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 8px 44px}
 /* Monitor */
-.monitor{display:flex;flex-direction:column;gap:14px;max-width:1080px}
+.page.monitor{max-width:none;margin:0;padding:22px clamp(16px,2.5vw,36px) 36px;display:flex;flex-direction:column;gap:14px}
 .mo-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
 .mo-free{margin:0;font-size:15px}.mo-free b{font-size:22px}
 .mo-low{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;color:var(--bad);border:1px solid currentColor}
 .mo-actions{display:flex;gap:8px}
 .mo-bar{display:block;width:100%;height:12px;margin:12px 0 10px}
 .mo-auto{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin:0 0 6px}.mo-auto input{width:16px;height:16px;flex:none;margin:0;accent-color:var(--accent)}
-.mo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:14px;align-items:start}
+.mo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:14px;align-items:start}
 .mo-sec header{display:flex;justify-content:space-between;align-items:baseline;gap:10px}.mo-sec h3{margin:0}
 .mo-sec.desk{border-top:3px solid var(--accent)}.mo-sec.outside{border-top:3px solid var(--warn)}.mo-sec.left{border-top:3px solid var(--muted)}
 .mo-sec h4{margin:12px 0 6px;font-size:13px;color:var(--muted);font-weight:600}.mo-sec h4 span{font-weight:400}
@@ -979,3 +979,5 @@ button.cn-main{cursor:pointer}
 .mo-plain{list-style:none;margin:8px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px}.mo-plain li{display:flex;justify-content:space-between;padding:6px 10px;border:1px solid var(--line);border-radius:10px;font-size:13px}
 .mo-log{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}.mo-log li{font-size:13px;color:var(--muted)}
 @media(max-width:640px){.mo-row{grid-template-columns:1fr auto}.mo-badge{grid-column:1/-1;justify-self:start}}
+.feed-inner:has(> .page.monitor){max-width:none;padding-left:0;padding-right:0}
+.page.monitor .mo-auto{flex-direction:row;font-size:13px;color:var(--ink)}
