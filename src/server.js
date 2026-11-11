@@ -627,6 +627,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         const [, roomId, part, extra] = roomMatch;
         if (part === 'messages' && request.method === 'GET') return json(response, 200, desk.rooms.messages(roomId, { after: Number(url.searchParams.get('after')) || 0 }));
         if (part === 'messages' && request.method === 'POST') { const input = await body(request); return json(response, 200, await desk.rooms.post(roomId, { text: input.text, to: input.to, replyTo: input.replyTo || '' })); }
+        if (part === 'messages' && extra && request.method === 'DELETE') return json(response, 200, desk.rooms.deleteMessage(roomId, extra));
         if (part === 'members' && request.method === 'POST') return json(response, 200, desk.rooms.addMember(roomId, (await body(request)).agentId));
         if (part === 'members' && request.method === 'DELETE') return json(response, 200, desk.rooms.removeMember(roomId, extra));
       }

@@ -112,6 +112,14 @@ export class Rooms {
   taskLine(taskId) { const task = this.store.get('task', taskId); return task ? `#${task.taskNumber || task.externalId} ${task.titleEn || task.title}` : ''; }
 
   // system: a note from Rex Desk itself (away mode), shown in the room as a note; instruction goes to the agent only.
+  // The person deletes a message from the room: it goes for everyone, and replies to it show that it was deleted.
+  deleteMessage(roomId, messageId) {
+    const message = this.store.get('roommsg', messageId);
+    if (!message || message.roomId !== roomId) throw new Error('That message is not in this room.');
+    this.store.delete('roommsg', messageId);
+    this.store.emit?.('change', { kind: 'room', roomId });
+    return { deleted: true };
+  }
   async post(roomId, { fromAgentId = '', text, replyTo = '', to, system = false, instruction = '' } = {}) {
     let room = this.room(roomId); const body = String(text || '').trim().slice(0, 8000);
     if (!body) throw new Error('Write a message first.');

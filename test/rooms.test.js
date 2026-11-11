@@ -484,3 +484,11 @@ test('the person naming agents and a task assigns it to them; agents add teammat
   assert.ok(!store.list('run').some(run => run.role === 'worker'), 'no separate run was started');
   assert.match(desk.rooms.promptFor(desk.rooms.room(room.id), desk.rooms.messages(room.id).at(-1), dara.id), /desk_task_team/);
 });
+
+test('the person deletes a message from a room', async () => {
+  const { desk, room } = setup();
+  const message = await desk.rooms.post(room.id, { text: 'typo here', to: [] });
+  assert.deepEqual(desk.rooms.deleteMessage(room.id, message.id), { deleted: true });
+  assert.ok(!desk.rooms.messages(room.id).some(item => item.id === message.id));
+  assert.throws(() => desk.rooms.deleteMessage('other-room', message.id), /not in this room/);
+});

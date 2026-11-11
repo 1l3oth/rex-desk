@@ -686,6 +686,28 @@ document.addEventListener('click', event => {
   if (jump) { const target = document.querySelector(`[data-msg="${CSS.escape(jump.dataset.jump)}"]`); if (target) { target.scrollIntoView({ block: 'center', behavior: 'smooth' }); target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1200); } }
 });
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && ui.reply && event.target.id === 'draft' && !ui.menu) { ui.reply = null; drawReplyBar(); } });
+// Ctrl+Up in the message box replies to the message above (again: the one before it); Ctrl+Down goes back down, past the newest stops replying.
+document.addEventListener('keydown', event => {
+  if (!event.ctrlKey || !['ArrowUp', 'ArrowDown'].includes(event.key) || event.target.id !== 'draft' || ui.view.type !== 'room') return;
+  const list = (ui.snap.messages || []).filter(item => item.roomId === ui.view.id && item.from.type !== 'system').sort((left, right) => left.seq - right.seq);
+  if (!list.length) return;
+  event.preventDefault();
+  const at = ui.reply?.roomId === ui.view.id ? list.findIndex(item => item.id === ui.reply.id) : list.length;
+  const next = event.key === 'ArrowUp' ? Math.max((at < 0 ? list.length : at) - 1, 0) : (at < 0 ? list.length : at) + 1;
+  if (next >= list.length) { ui.reply = null; drawReplyBar(); return; }
+  const message = list[next], plain = String(message.text).replace(/\s+/g, ' ').trim();
+  ui.reply = { roomId: message.roomId, id: message.id, name: message.from.label, text: plain.length > 80 ? `${plain.slice(0, 80)}…` : plain };
+  drawReplyBar();
+  const row = document.querySelector(`[data-msg="${CSS.escape(message.id)}"]`); if (row) { row.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 900); }
+});
+// Delete a message in a group chat.
+document.addEventListener('click', async event => {
+  const button = event.target.closest?.('[data-msg-delete]'); if (!button) return;
+  event.stopPropagation();
+  const message = (ui.snap.messages || []).find(item => item.id === button.dataset.msgDelete); if (!message) return;
+  if (!event.shiftKey && !confirm('Delete this message for everyone in the room? (Shift+click deletes without asking.)')) return;
+  try { await api(`/rooms/${message.roomId}/messages/${message.id}`, { method: 'DELETE' }); if (ui.reply?.id === message.id) { ui.reply = null; drawReplyBar(); } await refresh(); } catch (error) { toast(error.message, true); }
+});
 
 // ---------- a personal chat with an agent: its profile and what was shared, on the right ----------
 function personalAgent(run) {

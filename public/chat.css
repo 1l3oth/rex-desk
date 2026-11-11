@@ -1179,3 +1179,5 @@ code.md-file{cursor:pointer;text-decoration:underline dotted;text-underline-offs
 .fw-tab.twin .fw-tab-name{color:var(--ink)}.fw-tab.twin{box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--accent) 45%,transparent)}
 .fw-drop{display:none;position:absolute;top:0;right:0;bottom:0;width:50%;z-index:5;place-items:center;border:2px dashed var(--accent);border-radius:10px;background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--ink);font-weight:600;pointer-events:none}
 .fw-body.dropping .fw-drop{display:grid}
+
+.rreply.rdel:hover{color:var(--bad)}
