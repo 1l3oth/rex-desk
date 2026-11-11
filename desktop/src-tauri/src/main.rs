@@ -5,6 +5,7 @@ use std::{
     net::{SocketAddr, TcpStream},
     path::PathBuf,
     process::Command,
+    sync::atomic::{AtomicUsize, Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -23,6 +24,32 @@ fn show_window(app: &tauri::AppHandle) {
 }
 
 const ADDRESS: &str = "127.0.0.1:4317";
+static OPENED: AtomicUsize = AtomicUsize::new(0);
+
+// A link Rex Desk opens in a new window: its own pages open in a child window of the app (same sign-in);
+// anything else opens in the person's browser.
+fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::NewWindowFeatures) -> tauri::webview::NewWindowResponse<tauri::Wry> {
+    let own = url.host_str() == Some("127.0.0.1") && url.port() == Some(4317);
+    if !own {
+        if matches!(url.scheme(), "http" | "https" | "mailto") {
+            let mut command = Command::new("cmd");
+            command.args(["/c", "start", "", url.as_str()]);
+            let _ = hidden(&mut command).spawn();
+        }
+        return tauri::webview::NewWindowResponse::Deny;
+    }
+    let label = format!("page-{}", OPENED.fetch_add(1, Ordering::Relaxed));
+    let built = WebviewWindowBuilder::new(app, label, WebviewUrl::External("about:blank".parse().unwrap()))
+        .window_features(features)
+        .title("Rex Desk")
+        .inner_size(1200.0, 820.0)
+        .on_document_title_changed(|window, title| { let _ = window.set_title(&title); })
+        .build();
+    match built {
+        Ok(window) => tauri::webview::NewWindowResponse::Create { window },
+        Err(_) => tauri::webview::NewWindowResponse::Deny,
+    }
+}
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 fn server_running() -> bool {
@@ -119,7 +146,9 @@ fn main() {
         // Opening Rex Desk again brings the existing window back instead of starting a second copy.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
         .setup(|app| {
+            let handle = app.handle().clone();
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .on_new_window(move |url, features| open_link(&handle, url, features))
                 .title("Rex Desk")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(900.0, 600.0)
