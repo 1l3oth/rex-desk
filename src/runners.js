@@ -3,6 +3,14 @@ import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
 import { carrySession } from './agents.js';
+// Which other project a tool call reaches into, by any spelling of its folder (F:\x, F:/x, or /f/x in Git Bash).
+const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function projectIn(toolInput, otherProjects = []) {
+  if (!otherProjects.length) return null;
+  // In JSON a backslash is written twice: both spellings become a forward slash.
+  const text = JSON.stringify(toolInput || {}).toLowerCase().replace(/\\\\/g, '/').replace(/\\"/g, '"').replace(/(^|[\s"'=(])\/([a-z])\//g, (_, before, drive) => `${before}${drive}:/`);
+  return otherProjects.find(project => new RegExp(`${escapeRegExp(project.path)}(?=$|[/"'\\s:;&|)])`).test(text)) || null;
+}
 // What one reply cost in tokens: new input, output, and the part of the context read from or written to the prompt cache.
 export const tokensOf = usage => usage ? { input: usage.input_tokens || 0, output: usage.output_tokens || 0, cacheRead: usage.cache_read_input_tokens || 0, cacheWrite: usage.cache_creation_input_tokens || 0 } : null;
 
@@ -94,6 +102,9 @@ export class ClaudeRunner {
     // A specialist reads its project but never writes in the original checkout: code changes happen in a task worktree.
     const writesProject = input => this.run.role === 'specialist' && this.projectDirectory && ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(input.tool_name)
       && path.resolve(String(input.tool_input?.file_path || input.tool_input?.notebook_path || '/')).toLowerCase().startsWith(`${path.resolve(this.projectDirectory).toLowerCase()}${path.sep}`);
+    // A project agent stays in its project: another project's folder (by any spelling: F:\\x, F:/x, /f/x) is refused, in files and commands.
+    const elsewhere = input => projectIn(input.tool_input, this.otherProjects);
+    const refuseElsewhere = async input => { const project = elsewhere(input); return project ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `${project.name} is another project, not yours. Stay in your own project: do not read its files, git history or chats. If the person wants it, tell them its agent handles it.` } } : {}; };
     const refuseClaudeHome = async input => writesProject(input) ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'You read this project here. Code changes happen on a task in its own worktree, after the person assigns the task.' } }
       : this.run.role !== 'coordinator' && writesClaudeHome(input.tool_name, input.tool_input)
       ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Rex Desk agents do not write Claude memory, instructions, or settings. Say what you learned in desk_message instead, and continue the task.' } } : {};
@@ -104,7 +115,7 @@ export class ClaudeRunner {
       disallowedTools: ['AskUserQuestion'],
       additionalDirectories: [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
       settingSources: ['user', 'project', 'local'],
-      hooks: { PreToolUse: [{ hooks: [refuseClaudeHome] }], PostToolUse: [{ hooks: [async () => {
+      hooks: { PreToolUse: [{ hooks: [refuseClaudeHome, refuseElsewhere] }], PostToolUse: [{ hooks: [async () => {
         // New messages for this agent arrived while it worked: hand them over now, between steps.
         const news = this.inbox?.() || '';
         return news ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: `New messages arrived while you were working. Read them now; they may change what you are doing. Answer them in your reply.
