@@ -23,6 +23,7 @@ import { autostartStatus, setAutostart } from './autostart.js';
 import { issueBranch } from './branches.js';
 import { profileEnvironment, discoverProfiles } from './agents.js';
 import { kindOf, mimeOf } from './files.js';
+import { speak, NEURAL_VOICES } from './voice-out.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
@@ -526,6 +527,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         }
       }
       // The file window: open, view, save, format, and open in another program.
+      // Read a reply aloud with a neural voice (Microsoft's Edge voices, as studybook uses): the MP3 comes back as the response.
+      if (url.pathname === '/api/speak' && request.method === 'POST') { const input = await body(request); const audio = await speak(input.text, { lang: input.lang, voice: input.voice }); response.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store', 'Content-Length': audio.length }); response.end(audio); return; }
+      if (url.pathname === '/api/speak/voices' && request.method === 'GET') return json(response, 200, NEURAL_VOICES);
       // Opens one of Rex Desk's own pages in the normal browser, for when the app cannot open a window itself.
       if (url.pathname === '/api/open-page' && request.method === 'POST') {
         const target = String((await body(request)).path || '');

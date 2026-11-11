@@ -4,7 +4,7 @@
 let playing = null;
 const SPEAKER = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 6h2l3-2.5v9L5 10H3z" fill="currentColor"/><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12 3.8a6 6 0 0 1 0 8.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
 const STOP = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>';
-export const speakButton = (extraClass = '') => ('speechSynthesis' in window ? `<button type="button" class="speak ${extraClass}" data-speak title="Listen" aria-label="Listen to this message">${SPEAKER}</button>` : '');
+export const speakButton = (extraClass = '') => (true ? `<button type="button" class="speak ${extraClass}" data-speak title="Listen" aria-label="Listen to this message">${SPEAKER}</button>` : '');
 
 // What a person would hear: the words, without code, link addresses, the token line or the "to …" line.
 function spokenText(message) {
@@ -40,18 +40,15 @@ function pieces(text) {
   return out;
 }
 function stop() {
-  speechSynthesis.cancel();
-  if (playing) { playing.button.innerHTML = SPEAKER; playing.button.classList.remove('on'); playing.button.title = 'Listen'; }
+  speechSynthesis.cancel?.();
+  if (playing?.audio) { playing.audio.pause(); URL.revokeObjectURL(playing.audio.src); }
+  if (playing) { playing.button.innerHTML = SPEAKER; playing.button.classList.remove('on', 'loading'); playing.button.title = 'Listen'; }
   playing = null;
 }
-async function play(button) {
-  const message = button.closest('.bubble')?.querySelector('.md'); if (!message) return;
-  const text = spokenText(message); if (!text) return;
-  stop();
-  const lang = language(text), voice = await voiceFor(lang), parts = pieces(text);
+// The computer's own voices: used when the neural voice cannot be reached, or when the person picked one in Settings.
+async function playLocal(text, lang, mine) {
+  const voice = await voiceFor(lang), parts = pieces(text);
   if (!voice && lang === 'en') ctxToast?.('No English voice is installed on this computer. Add one in Windows Settings, Time & language, Speech.');
-  playing = { button }; button.innerHTML = STOP; button.classList.add('on'); button.title = 'Stop';
-  const mine = playing;
   parts.forEach((part, index) => {
     const utterance = new SpeechSynthesisUtterance(part);
     utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice;
@@ -61,11 +58,39 @@ async function play(button) {
     speechSynthesis.speak(utterance);
   });
 }
+async function play(button) {
+  const message = button.closest('.bubble')?.querySelector('.md'); if (!message) return;
+  const text = spokenText(message); if (!text) return;
+  stop();
+  const lang = language(text), chosen = chosenVoice(lang);
+  playing = { button }; button.innerHTML = STOP; button.classList.add('on', 'loading'); button.title = 'Stop';
+  const mine = playing;
+  // A neural voice (Microsoft's Edge voices, the same studybook uses) unless the person chose one of the computer's voices.
+  if (!chosen || /Neural$/.test(chosen)) {
+    // Short pieces, so the first one plays within a moment while the next is fetched behind it.
+    const parts = [];
+    for (const piece of pieces(text)) { const last = parts.at(-1); if (last && (last + piece).length < 380) parts[parts.length - 1] = `${last} ${piece}`; else parts.push(piece); }
+    const fetchPart = part => fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text: part, lang, voice: chosen }) })
+      .then(async response => { if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'The voice service did not answer.'); return URL.createObjectURL(await response.blob()); });
+    try {
+      let next = fetchPart(parts[0]);
+      for (let index = 0; index < parts.length; index += 1) {
+        const url = await next; if (playing !== mine) { URL.revokeObjectURL(url); return; }
+        next = index + 1 < parts.length ? fetchPart(parts[index + 1]) : null;
+        const audio = new Audio(url); mine.audio = audio; button.classList.remove('loading');
+        await new Promise((resolve, reject) => { audio.onended = resolve; audio.onerror = () => reject(new Error('The sound could not play.')); audio.play().catch(reject); });
+        URL.revokeObjectURL(url); if (playing !== mine) return;
+      }
+      if (playing === mine) stop(); return;
+    } catch (error) { if (playing !== mine) return; button.classList.remove('loading'); ctxToast?.(`Using this computer's voice: ${error.message}`, true); }
+  }
+  button.classList.remove('loading');
+  if ('speechSynthesis' in window) await playLocal(text, lang, mine); else stop();
+}
 let ctxToast = null;
 export function wireSpeak(toast) {
   ctxToast = toast;
-  if (!('speechSynthesis' in window)) return;
-  speechSynthesis.getVoices(); speechSynthesis.addEventListener?.('voiceschanged', () => speechSynthesis.getVoices());
+  if ('speechSynthesis' in window) { speechSynthesis.getVoices(); speechSynthesis.addEventListener?.('voiceschanged', () => speechSynthesis.getVoices()); }
   document.addEventListener('click', event => {
     const button = event.target.closest?.('[data-speak]'); if (!button) return;
     event.preventDefault(); event.stopPropagation();
