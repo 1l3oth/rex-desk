@@ -83,7 +83,7 @@ export function skillCall(text) {
   const match = String(text || '').trim().match(/^\/([a-z][\w:-]{1,60})(?:\s+([\s\S]*))?$/i);
   if (!match || ['clear', 'loop'].includes(match[1].toLowerCase())) return text;
   return `The person ran the /${match[1]} skill${match[2] ? ` with: ${match[2].trim()}` : ''}.
-Run it now with the Skill tool (skill "${match[1]}", or its plugin name such as "pstack:${match[1]}" if that is how it is listed), pass what they wrote as its arguments, and follow the skill's own instructions instead of your usual way of answering.`;
+Run it now: if a skill has that name, use the Skill tool (skill "${match[1]}", or its plugin name such as "pstack:${match[1]}"). If not, it is a slash command: find ${match[1]}.md in ~/.claude/commands, the project's .claude/commands or the project's command folder, and do what it says, with what they wrote as its $ARGUMENTS. Follow its own instructions instead of your usual way of answering.`;
 }
 export class Desk {
   constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, orcaOptions, memoryDirectory, peerTransport } = {}) {
