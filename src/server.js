@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto';
 import { Desk } from './coordinator.js';
 import { handleMcp } from './mcp.js';
 import { git, resolveCommand } from './processes.js';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { inspectRepository, pickRepositoryFolder, cloneRepository, discoverRepositories } from './repositories.js';
 import { githubAccounts, startGithubLogin, cancelGithubLogin, switchGithubAccount } from './github.js';
@@ -526,6 +526,15 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         }
       }
       // The file window: open, view, save, format, and open in another program.
+      // Opens one of Rex Desk's own pages in the normal browser, for when the app cannot open a window itself.
+      if (url.pathname === '/api/open-page' && request.method === 'POST') {
+        const target = String((await body(request)).path || '');
+        if (!/^\/(files|jev)(?:[#?].*)?$/.test(target)) return json(response, 400, { error: 'Only Rex Desk pages open this way.' });
+        const address = `http://127.0.0.1:${request.socket.localPort}${target}`;
+        const [command, args] = process.platform === 'win32' ? ['cmd.exe', ['/c', 'start', '""', address.replace(/&/g, '^&')]] : process.platform === 'darwin' ? ['open', [address]] : ['xdg-open', [address]];
+        spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+        return json(response, 200, { opened: true });
+      }
       if (url.pathname === '/api/files/open' && request.method === 'GET') return json(response, 200, desk.files.open(url.searchParams.get('path'), url.searchParams.get('run') || '', url.searchParams.get('room') || ''));
       if (url.pathname === '/api/files/raw' && request.method === 'GET') {
         const file = desk.files.check(url.searchParams.get('path') || ''), kind = kindOf(file);

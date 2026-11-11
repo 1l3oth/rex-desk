@@ -304,8 +304,10 @@ async function onClick(event) {
       // The open files move to a window of their own; unsaved edits stay here until saved.
       const unsaved = state.tabs.filter(dirty); if (unsaved.length) { toast(`Save ${unsaved.map(item => item.name).join(', ')} first, then open in its own window.`, true); return; }
       const paths = state.tabs.map(item => item.page || item.path), active = state.tabs[state.active]?.page || state.tabs[state.active]?.path || '';
-      const opened = window.open(`/files#${encodeURIComponent(JSON.stringify({ paths, active }))}`, `rexfiles-${Date.now()}`, 'popup,width=1200,height=820');
-      if (!opened) { toast('The window was blocked. Allow pop-ups for Rex Desk.', true); return; }
+      const page = `/files#${encodeURIComponent(JSON.stringify({ paths, active }))}`;
+      const opened = window.open(page, `rexfiles-${Date.now()}`, 'popup,width=1200,height=820');
+      // Where windows are blocked (an older desktop app, a strict browser), the page opens in the normal browser instead.
+      if (!opened) { try { await api('/open-page', { method: 'POST', data: { path: page } }); toast('Opened in your browser.'); } catch (error) { toast(error.message, true); return; } }
       for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.second = -1; state.shown = false; remember(); draw();
     }
     else if (act === 'split') split();
