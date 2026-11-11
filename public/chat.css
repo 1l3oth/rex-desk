@@ -1165,3 +1165,9 @@ code.md-file{cursor:pointer;text-decoration:underline dotted;text-underline-offs
 .dialog .acct-list label.acct-row.on{border-color:color-mix(in srgb,var(--good) 55%,var(--line));background:color-mix(in srgb,var(--good) 6%,transparent)}
 .acct-list .acct-name{flex-direction:row}.acct-list .acct-badge{flex-direction:row;align-self:center}.acct-list .acct-pic{display:inline-grid}.acct-list .acct-plan,.acct-list .acct-use{display:inline-block}
 .st-chips{display:flex;flex-wrap:wrap;gap:6px}.st-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 4px 3px 10px;border:1px solid var(--line);border-radius:999px;font-size:12.5px;color:var(--ink)}.st-chip .ag-x{width:20px;height:20px}
+/* Moving and resizing the file window */
+.fw-head{cursor:grab;user-select:none}.fw.moving{user-select:none;transition:none}.fw.moving .fw-head{cursor:grabbing}.fw.moving iframe{pointer-events:none}
+.fw-rs{position:absolute;z-index:4}.fw.big .fw-rs{display:none}
+.fw-rs-n,.fw-rs-s{left:10px;right:10px;height:6px;cursor:ns-resize}.fw-rs-n{top:-3px}.fw-rs-s{bottom:-3px}
+.fw-rs-e,.fw-rs-w{top:10px;bottom:10px;width:6px;cursor:ew-resize}.fw-rs-e{right:-3px}.fw-rs-w{left:-3px}
+.fw-rs-ne,.fw-rs-nw,.fw-rs-se,.fw-rs-sw{width:18px;height:18px}.fw-rs-ne{top:0;right:0;cursor:nesw-resize}.fw-rs-sw{bottom:0;left:0;cursor:nesw-resize}.fw-rs-nw{top:0;left:0;cursor:nwse-resize}.fw-rs-se{bottom:0;right:0;cursor:nwse-resize}

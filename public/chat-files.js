@@ -103,10 +103,59 @@ function shell() {
   let box = document.querySelector('.fw'); if (box) return box;
   box = document.createElement('section'); box.className = 'fw'; box.setAttribute('aria-label', 'Files');
   box.innerHTML = '<div class="fw-head"><div class="fw-tabs" role="tablist"></div><div class="fw-wins"><button type="button" class="fw-ic" data-fw="big" title="Bigger or smaller (window)" aria-label="Bigger or smaller"></button><button type="button" class="fw-ic" data-fw="hide" title="Hide (your tabs stay)" aria-label="Hide the file window">&#8211;</button><button type="button" class="fw-ic" data-fw="close-all" title="Close all files" aria-label="Close all files">&#215;</button></div></div><div class="fw-bar"></div><div class="fw-body"></div>';
+  box.insertAdjacentHTML('beforeend', ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map(edge => `<div class="fw-rs fw-rs-${edge}" data-edge="${edge}" aria-hidden="true"></div>`).join(''));
   document.body.append(box);
   box.addEventListener('click', onClick);
+  box.addEventListener('pointerdown', startMove);
+  box.querySelector('.fw-head').addEventListener('dblclick', event => { if (!event.target.closest('button')) { state.big = !state.big; place(); drawChrome(); editors.get(state.tabs[state.active]?.path)?.cm?.refresh(); } });
+  place();
   return box;
 }
+
+// ---------- moving and resizing ----------
+// Drag the top bar to move the window; drag an edge or a corner to resize it. Where it was is remembered.
+const MIN_W = 420, MIN_H = 260;
+function loadGeo() { try { return JSON.parse(localStorage.getItem('rex-desk-files-geo') || 'null'); } catch { return null; } }
+function saveGeo(geo) { try { localStorage.setItem('rex-desk-files-geo', JSON.stringify(geo)); } catch { /* private window */ } }
+function fit(geo) {
+  const width = Math.min(Math.max(geo.w, MIN_W), window.innerWidth - 16), height = Math.min(Math.max(geo.h, MIN_H), window.innerHeight - 16);
+  return { w: width, h: height, x: Math.min(Math.max(geo.x, 8 - width + 120), window.innerWidth - 120), y: Math.min(Math.max(geo.y, 0), window.innerHeight - 40) };
+}
+function place() {
+  const box = document.querySelector('.fw'); if (!box) return;
+  const geo = state.big || window.innerWidth < 640 ? null : loadGeo();
+  for (const key of ['left', 'top', 'width', 'height', 'right', 'bottom']) box.style[key] = '';
+  if (!geo) return;
+  const at = fit(geo);
+  Object.assign(box.style, { left: `${at.x}px`, top: `${at.y}px`, width: `${at.w}px`, height: `${at.h}px`, right: 'auto', bottom: 'auto' });
+}
+function startMove(event) {
+  if (event.button !== 0 || state.big || window.innerWidth < 640) return;
+  const box = event.currentTarget, edge = event.target.closest('.fw-rs')?.dataset.edge || '';
+  const grab = !edge && event.target.closest('.fw-head') && !event.target.closest('button,a,input,summary');
+  if (!edge && !grab) return;
+  event.preventDefault();
+  const start = box.getBoundingClientRect(), from = { x: event.clientX, y: event.clientY };
+  box.classList.add('moving'); box.setPointerCapture(event.pointerId);
+  const move = next => {
+    const dx = next.clientX - from.x, dy = next.clientY - from.y;
+    let { left: x, top: y, width: w, height: h } = start;
+    if (grab) { x += dx; y += dy; }
+    if (edge.includes('e')) w += dx;
+    if (edge.includes('s')) h += dy;
+    if (edge.includes('w')) { const width = Math.max(w - dx, MIN_W); x += w - width; w = width; }
+    if (edge.includes('n')) { const height = Math.max(h - dy, MIN_H); y += h - height; h = height; }
+    const at = fit({ x, y, w, h });
+    Object.assign(box.style, { left: `${at.x}px`, top: `${at.y}px`, width: `${at.w}px`, height: `${at.h}px`, right: 'auto', bottom: 'auto' });
+    editors.get(state.tabs[state.active]?.path)?.cm?.refresh();
+  };
+  const stop = () => {
+    box.classList.remove('moving'); box.removeEventListener('pointermove', move); box.removeEventListener('pointerup', stop); box.removeEventListener('pointercancel', stop);
+    const rect = box.getBoundingClientRect(); saveGeo({ x: rect.left, y: rect.top, w: rect.width, h: rect.height });
+  };
+  box.addEventListener('pointermove', move); box.addEventListener('pointerup', stop); box.addEventListener('pointercancel', stop);
+}
+window.addEventListener('resize', () => place());
 function pill() {
   let button = document.querySelector('.fw-pill');
   if (!state.tabs.length || state.shown) { button?.remove(); return; }
@@ -194,7 +243,7 @@ async function onClick(event) {
     else if (act === 'tab-close') closeTab(Number(target.dataset.index));
     else if (act === 'hide') { state.shown = false; remember(); draw(); }
     else if (act === 'show') { state.shown = true; remember(); draw(); }
-    else if (act === 'big') { state.big = !state.big; drawChrome(); editors.get(tab?.path)?.cm?.refresh(); }
+    else if (act === 'big') { state.big = !state.big; place(); drawChrome(); editors.get(tab?.path)?.cm?.refresh(); }
     else if (act === 'close-all') { const unsaved = state.tabs.filter(dirty); if (unsaved.length && !confirm(`${unsaved.map(item => item.name).join(', ')} not saved. Close all anyway?`)) return; for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.shown = false; remember(); draw(); }
     else if (act === 'view') { tab.view = target.dataset.view; drawChrome(); drawBody(); }
     else if (act === 'sheet') { tab.sheet = Number(target.dataset.index); drawBody(); }
