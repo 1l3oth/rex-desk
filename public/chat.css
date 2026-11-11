@@ -1219,3 +1219,6 @@ body.fw-alone .fw-head{cursor:default}
 
 /* Dropping files: a quiet frame and a hint where they will go */
 body.dropping-files::after{content:attr(data-drop-hint);position:fixed;inset:10px;z-index:90;display:grid;place-items:center;border:2px dashed var(--accent);border-radius:16px;background:color-mix(in srgb,var(--accent) 7%,transparent);color:var(--ink);font-size:15px;font-weight:600;pointer-events:none}
+
+/* Actions under an agent's reply in a personal chat (listen) */
+.msg-acts{display:flex;gap:2px;margin-top:2px;min-height:22px}.msg-acts .speak{margin-left:-4px}

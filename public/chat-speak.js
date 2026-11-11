@@ -10,7 +10,9 @@ export const speakButton = (extraClass = '') => ('speechSynthesis' in window ? `
 function spokenText(message) {
   const copy = message.cloneNode(true);
   copy.querySelectorAll('.tok,.to,.rquote,.md-code,pre,.speak,button').forEach(node => node.replaceWith(node.matches?.('.md-code,pre') ? ' (code) ' : ''));
-  return copy.innerText.replace(/https?:\/\/\S+/g, 'a link').replace(/[*_`#>|]+/g, ' ').replace(/\s+\n/g, '\n').replace(/[ \t]+/g, ' ').trim();
+  // A copy outside the page has no layout, so its lines are joined by hand: each paragraph, list item and heading ends with a pause.
+  copy.querySelectorAll('p,li,h1,h2,h3,h4,h5,h6,tr,div,br').forEach(node => node.append('\n'));
+  return copy.textContent.replace(/https?:\/\/\S+/g, 'a link').replace(/[*_`#>|]+/g, ' ').replace(/\s+\n/g, '\n').replace(/[ \t]+/g, ' ').trim();
 }
 // The language with the most letters wins, so a Korean name in an English reply is still read in English.
 function language(text) {
