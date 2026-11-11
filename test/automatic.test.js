@@ -76,8 +76,10 @@ test('commands come from the project files, and Settings values override them', 
 
 test('with nothing set or detected, the worker proposes a test command that the human approves once', async () => {
   const { original } = await repository(), { store, desk } = workspace(original);
+  store.saveConfig({ ...store.config(), autonomy: false });
   store.put('run', 'run-v', { id: 'run-v', role: 'worker', taskId: 'task-1', repositoryId: 'repo', worktree: original, port: 1, state: 'running', createdAt: now() });
-  await assert.rejects(desk.verify('run-v'), /No test command is set or detected/);
+  const none = await desk.verify('run-v');
+  assert.equal(none.passed, true); assert.equal(none.noTests, true, 'a project with no tests passes the check and says so');
   const command = 'node -e "process.exit(0)"', pending = desk.verify('run-v', { command });
   let request;
   for (let attempt = 0; attempt < 50 && !request; attempt++) { request = store.list('interaction').find(item => item.state === 'pending' && item.method === 'test-command'); if (!request) await new Promise(resolve => setTimeout(resolve, 20)); }

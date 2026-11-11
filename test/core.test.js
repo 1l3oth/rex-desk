@@ -309,7 +309,7 @@ test('a run opens a pull request into a second branch, built from that branch', 
   assert.ok(!existsSync(path.join(store.directory, 'publish', slug(head, 120))), 'the branch Rex Desk built is removed once the pull request exists');
   await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/release' }), /already open/);
   writeFileSync(path.join(tree, 'fix.txt'), 'edited after the pull requests\n');
-  await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/hotfix' }), /Commit the verified changes first/, 'uncommitted edits are the one thing that waits');
+  await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/hotfix' }), /not committed yet/, 'uncommitted edits are the one thing that waits');
   store.close();
 });
 

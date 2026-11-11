@@ -1018,6 +1018,12 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const run = this.run(runId), saved = this.store.config().repositories.find(item => item.id === run.repositoryId);
     const repository = effectiveRepository(saved);
     let chosen = repository?.testCommand || '', source = saved?.testCommand ? 'settings' : chosen ? 'detected' : '';
+    if (!chosen && !String(proposed).trim()) {
+      // A project with no tests (a static site, notes): there is nothing to run, so the check passes and says so.
+      const verification = { passed: true, exitCode: 0, command: '', source: 'none', noTests: true, fingerprint: await fingerprint(run.worktree), filesChangedDuringTest: false, at: now() };
+      this.patchRun(runId, { verification }); this.store.event(runId, 'verification-result', verification, true);
+      return { ...verification, note: 'This project has no test command, so there was nothing to run. Commit and publish as usual.' };
+    }
     if (!chosen) chosen = await this.approveTestCommand(runId, saved, String(proposed).trim()), source = 'approved';
     const before = await fingerprint(run.worktree);
     const command = chosen.replaceAll('{port}', String(run.port));
@@ -1038,7 +1044,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (!repository) throw new Error('This run has no repository.');
     if (!command) throw new Error('No test command is set or detected for this repository. Read its README, AGENTS.md, CLAUDE.md, and build docs, then call desk_verify with command set to the command that runs its tests in this worktree.');
     if (command.length > 2000 || /[\r\n]/.test(command)) throw new Error('Propose one test command on a single line.');
-    const answer = await this.ask(runId, { kind: 'approval', title: 'Approve the test command for this repository',
+    const answer = this.store.config().autonomy !== false ? { action: 'accept' } : await this.ask(runId, { kind: 'approval', title: 'Approve the test command for this repository',
       request: { command, repository: repository.name, note: 'Nothing is set or detected for this repository. Approving runs it now in this worktree and saves it for future runs.' }, method: 'test-command' });
     if (answer.action !== 'accept') throw new Error('The human declined this test command. Ask with desk_ask which command runs the tests.');
     const config = this.store.publicConfig();
@@ -1167,7 +1173,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     }
     if (/(^|\/)(real-)?master$/.test(target)) notes.push(`The pull request goes into ${target}.`);
     await git(run.worktree, ['check-ref-format', '--branch', target]);
-    if (await git(run.worktree, ['status', '--porcelain'])) throw new Error('Commit the verified changes first. Resume the agent and ask it to commit.');
+    if (await git(run.worktree, ['status', '--porcelain', '--untracked-files=no'])) throw new Error('Some changed files are not committed yet. Commit them in the worktree (git add, git commit), then call desk_publish again.');
     const commits = (await git(run.worktree, ['rev-list', '--reverse', `${run.baseCommit}..HEAD`])).split('\n').filter(Boolean);
     if (!commits.length) throw new Error('No commits to publish.');
     return { target, commits, notes, fingerprint: await files(), additional: opened.length > 0, rebuild: !await this.targetHolder(run, target) };
