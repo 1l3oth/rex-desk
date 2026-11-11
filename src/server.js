@@ -320,6 +320,12 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         if (control.enabled === false) return json(response, 403, { error: 'Computer control is off. Turn it on in Settings → Computer control.' });
         if (url.pathname === '/api/computer/anywhere' && request.method === 'POST') return json(response, 200, await anywhere.set((await body(request)).on === true));
         if (url.pathname === '/api/computer/do' && request.method === 'POST') return json(response, 200, await desk.commander.perform((await body(request)).text));
+        // "Yes, always": these actions stop asking. Only actions that normally ask can be added.
+        if (url.pathname === '/api/computer/allow' && request.method === 'POST') {
+          const input = await body(request), config = store.config(), allow = new Set(config.control?.allow || []);
+          for (const action of [].concat(input.actions || [])) { if (!desk.commander.actionOf(action)?.confirm) continue; if (input.on === false) allow.delete(action); else allow.add(action); }
+          store.saveConfig({ ...config, control: { ...config.control, allow: [...allow] } }); return json(response, 200, { allow: [...allow] });
+        }
         if (url.pathname === '/api/computer/run' && request.method === 'POST') {
           const input = await body(request), steps = (Array.isArray(input.steps) ? input.steps : []).slice(0, 8).map(step => ({ action: String(step.action), params: step.params || {} }));
           return json(response, 200, await desk.commander.runSteps(steps));

@@ -31,7 +31,8 @@ export const defaults = {
   models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, execution: 'headless',
   schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], fix: true, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
   // Computer control: on for the person here, with a yes asked before shutdown-like actions; agents only when allowed.
-  control: { enabled: true, confirm: true, agents: false, language: 'en' },
+  // allow: actions that run without asking even though they normally ask (the person chose "Yes, always"). Closing an app is simple and asks no more.
+  control: { enabled: true, confirm: true, agents: false, language: 'en', allow: ['quit_app'] },
 };
 // Claude Code accepts family aliases (opus, sonnet, haiku, fable) or full IDs such as claude-opus-5-5. Typed shorthand is normalized.
 export function modelName(provider, value) {
@@ -213,7 +214,7 @@ export class Store extends EventEmitter {
     const saved = this.get('secret', `source:${sourceId}`);
     return saved ? this.decrypt(saved) : '';
   }
-  config() { return { ...defaults, ...this.get('config', 'main') }; }
+  config() { const saved = this.get('config', 'main') || {}; return { ...defaults, ...saved, control: { ...defaults.control, ...(saved.control || {}) } }; }
   publicConfig() {
     const config = this.config();
     return { ...config, sources: config.sources.map(source => ({ ...source, hasKey: Boolean(this.credential(source.id)) })), jev: { ...defaults.jev, ...config.jev, hasKey: Boolean(this.get('secret', 'openrouter')) }, testAccounts: (config.testAccounts || []).map(account => ({ ...account, hasPassword: Boolean(this.get('secret', `test-account:${account.id}`)) })) };
@@ -259,7 +260,7 @@ export class Store extends EventEmitter {
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
       tourDismissed: Boolean(input.tourDismissed), execution: 'headless', testAccounts: accounts,
       schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false, versions: String(input.jev?.versions || '').trim().slice(0, 300) },
-      control: { enabled: input.control?.enabled !== false, confirm: input.control?.confirm !== false, agents: input.control?.agents === true, language: ['km', 'en', 'ko'].includes(input.control?.language) ? input.control.language : 'en' } };
+      control: { enabled: input.control?.enabled !== false, confirm: input.control?.confirm !== false, agents: input.control?.agents === true, language: ['km', 'en', 'ko'].includes(input.control?.language) ? input.control.language : 'en', allow: Array.isArray(input.control?.allow) ? [...new Set(input.control.allow.map(String).filter(item => /^[a-z_]{2,40}$/.test(item)))].slice(0, 60) : defaults.control.allow } };
     for (const account of accounts) {
       const password = String((input.testAccounts || []).find(item => item.id === account.id)?.password || '');
       if (password) this.put('secret', `test-account:${account.id}`, this.encrypt(password));

@@ -113,17 +113,20 @@ export class Commander {
     const plan = parsePlan(await this.plan(request, describeActions(chosen ? [chosen] : available)), known);
     return { ...plan, via: chosen ? `${via}+planner` : 'planner' };
   }
-  needsConfirm(steps) {
-    if (this.settings().confirm === false) return [];
-    return steps.filter(step => this.actionOf(step.action).confirm).map(step => this.actionOf(step.action).title);
+  // Steps that wait for the person's yes: actions marked confirm, unless confirmations are off or the person said "Yes, always" to that action.
+  asking(steps) {
+    const settings = this.settings(), allow = new Set(settings.allow || []);
+    if (settings.confirm === false) return [];
+    return steps.filter(step => this.actionOf(step.action).confirm && !allow.has(step.action));
   }
+  needsConfirm(steps) { return this.asking(steps).map(step => this.actionOf(step.action).title); }
   // Understand, then run unless something needs the person's yes first.
   async perform(text) {
     const plan = await this.understand(text);
     if (!plan.steps.length) return { ...plan, done: false, results: [] };
     plan.steps.forEach(step => { step.params = checkParams(this.actionOf(step.action), step.params); });
     const confirm = this.needsConfirm(plan.steps);
-    if (confirm.length) return { ...plan, done: false, needsConfirm: confirm, results: [] };
+    if (confirm.length) return { ...plan, done: false, needsConfirm: confirm, confirmActions: [...new Set(this.asking(plan.steps).map(step => step.action))], results: [] };
     return { ...plan, ...await this.runSteps(plan.steps) };
   }
   actionOf(id) { return id === webAction.id ? webAction : this.computer.action(id); }

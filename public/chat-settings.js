@@ -16,6 +16,7 @@ const SECTIONS = [
   ['backup', 'Backup and updates', 'Cloud copy, app updates'],
   ['connect', 'Connect another AI', 'Let another assistant use Rex Desk'],
 ];
+const ASKS = { quit_app: 'Close an app', hibernate: 'Hibernate', shutdown: 'Shut down', restart: 'Restart', sign_out: 'Sign out', stop_program: 'Stop a program', empty_trash: 'Empty the Recycle Bin' };
 const LANGS = [['en', 'English'], ['km', 'Khmer'], ['ko', 'Korean']];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -69,6 +70,7 @@ export function openSettings(ctx, section = 'general') {
       ${check('control.enabled', config().control?.enabled !== false, 'Let Jev control this computer when I ask')}
       ${check('control.confirm', config().control?.confirm !== false, 'Ask me before shutting down, restarting, signing out, closing apps or emptying the Recycle Bin')}
       ${check('control.agents', config().control?.agents, 'Let agents control this computer too')}
+      ${(config().control?.allow || []).length ? `<div class="st-field"><span>Done without asking</span><div class="st-chips">${config().control.allow.map(action => `<span class="st-chip">${esc(ASKS[action] || action.replaceAll('_', ' '))}<button type="button" class="ag-x" data-st-allow-off="${esc(action)}" aria-label="Ask again before this">×</button></span>`).join('')}</div><small>Press × to have Jev ask you again first. "Yes, always" on a Jev question adds one here.</small></div>` : ''}
       ${field('Voice language', `<select name="control.language">${LANGS.map(([value, label]) => `<option value="${value}" ${(config().control?.language || 'en') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
       <div class="st-actions"><button type="button" class="btn" data-st-open="voice">Voice engine and compare</button></div>`,
     schedule: () => { const schedule = config().schedule || {}; const days = schedule.days || [1, 2, 3, 4, 5]; return `<h2>Schedule</h2><p class="muted">At the set time Rex Desk syncs, Rex Agent sorts new issues, and it starts work up to your daily limit. Questions wait in Needs you.</p>
@@ -115,6 +117,7 @@ export function openSettings(ctx, section = 'general') {
       const open = target.closest('[data-st-open]'); if (open) { back.remove(); document.body.insertAdjacentHTML('beforeend', `<button hidden data-action="${open.dataset.stOpen === 'accounts' ? 'accounts' : open.dataset.stOpen === 'sources' ? 'task-connect' : 'st-voice'}" id="st-opener"></button>`); document.getElementById('st-opener').click(); document.getElementById('st-opener')?.remove(); return; }
       const go = target.closest('[data-st-go]'); if (go) { back.remove(); ctx.open(go.dataset.stGo); return; }
       if (target.closest('[data-st-signout]')) { if (!confirm('Sign out of Rex Desk on this computer? Running agents of this account stop.')) return; await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; return; }
+      const allowOff = target.closest('[data-st-allow-off]'); if (allowOff) { await api('/computer/allow', { method: 'POST', data: { actions: [allowOff.dataset.stAllowOff], on: false } }); await refresh(); draw(); return; }
       if (target.closest('[data-st-prompt]')) { state.extra.prompt = (await api('/setup-prompt', { method: 'POST', data: { target: 'claude' } })).prompt; draw(); return; }
       if (target.closest('[data-st-copy-prompt]')) { await navigator.clipboard.writeText(state.extra.prompt); toast('Copied.'); return; }
       if (target.closest('[data-st-signin-add]')) { await api('/config', { method: 'PUT', data: { ...config(), testAccounts: [...(config().testAccounts || []), { id: crypto.randomUUID(), site: '', username: '' }] } }); await refresh(); draw(); return; }

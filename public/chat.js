@@ -819,7 +819,7 @@ void loadAccounts().then(() => { if (ui.snap) renderAll(); });
 function jevStage() {
   const log = ui.jevLog || [];
   const examples = ['Turn the volume down to 30', 'Open Bluetooth settings', 'Turn on dark mode', 'Find the cheapest flight from Phnom Penh to Seoul next Friday', 'Take a screenshot', 'What is using my memory?'];
-  const entry = item => `<li class="jv-item"><div class="jv-said"><b>${esc(item.text)}</b><small>${esc(item.at)}</small></div>${item.busy ? '<p class="muted">Working…</p>' : ''}${item.error ? `<p class="bad">${esc(item.error)}</p>` : ''}${item.say ? `<p>${esc(item.say)}</p>` : ''}${(item.results || []).map(step => `<p class="jv-step ${step.ok ? 'ok' : 'bad'}">${step.ok ? '✓' : '✗'} ${esc(step.title)}${step.ok ? (step.result?.url ? ` · <a href="${esc(step.result.url)}">open its chat</a>` : step.result?.text ? ` · ${esc(String(step.result.text).slice(0, 160))}` : '') + jevDetail(step.result) : ` · ${esc(step.error)}`}</p>`).join('')}${item.confirm ? `<div class="jv-confirm"><span>Do this? <b>${esc(item.confirm.join(', '))}</b></span><button class="btn small primary" data-jev-yes="${item.id}">Yes</button><button class="btn small" data-jev-no="${item.id}">Cancel</button></div>` : ''}</li>`;
+  const entry = item => `<li class="jv-item"><div class="jv-said"><b>${esc(item.text)}</b><small>${esc(item.at)}</small></div>${item.busy ? '<p class="muted">Working…</p>' : ''}${item.error ? `<p class="bad">${esc(item.error)}</p>` : ''}${item.say ? `<p>${esc(item.say)}</p>` : ''}${(item.results || []).map(step => `<p class="jv-step ${step.ok ? 'ok' : 'bad'}">${step.ok ? '✓' : '✗'} ${esc(step.title)}${step.ok ? (step.result?.url ? ` · <a href="${esc(step.result.url)}">open its chat</a>` : step.result?.text ? ` · ${esc(String(step.result.text).slice(0, 160))}` : '') + jevDetail(step.result) : ` · ${esc(step.error)}`}</p>`).join('')}${item.confirm ? `<div class="jv-confirm"><span>Do this? <b>${esc(item.confirm.join(', '))}</b></span><button class="btn small primary" data-jev-yes="${item.id}">Yes</button><button class="btn small" data-jev-yes="${item.id}" data-always="1" title="Do it now, and never ask again for ${esc(item.confirm.join(', '))}">Yes, always</button><button class="btn small quiet" data-jev-no="${item.id}">Cancel</button></div>` : ''}</li>`;
   return { title: 'Jev', meta: 'Control this computer and websites', top: true,
     feed: `<div class="page jv"><section class="jv-hero"><h2>What should Jev do?</h2><p class="muted">On this computer: apps, settings, sound, screen, Wi-Fi and Bluetooth, files, typing and clicking. On the web: search, compare and book with a browser agent that asks before paying. Khmer, English or Korean. Hold Space in the box below to talk. From any app, press <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>J</kbd>.</p>
       <div class="jv-examples">${examples.map(text => `<button class="chip-btn" data-jev-try="${esc(text)}">${esc(text)}</button>`).join('')}</div></section>
@@ -831,7 +831,7 @@ async function jevDo(text) {
   ui.jevLog = [...(ui.jevLog || []), item].slice(-30); renderAll();
   try {
     const answer = await api('/computer/do', { method: 'POST', data: { text } });
-    Object.assign(item, { busy: false, say: answer.say, results: answer.results || [], steps: answer.steps, confirm: answer.needsConfirm?.length ? answer.needsConfirm : null, error: !answer.steps?.length ? (answer.say || 'Jev did not find something to do for that. Try other words.') : '' });
+    Object.assign(item, { busy: false, say: answer.say, results: answer.results || [], steps: answer.steps, confirm: answer.needsConfirm?.length ? answer.needsConfirm : null, confirmActions: answer.confirmActions || [], error: !answer.steps?.length ? (answer.say || 'Jev did not find something to do for that. Try other words.') : '' });
     if (item.error === item.say) item.say = '';
   } catch (error) { Object.assign(item, { busy: false, error: error.message }); }
   renderAll();
@@ -842,6 +842,8 @@ document.addEventListener('click', async event => {
   event.stopPropagation(); const item = (ui.jevLog || []).find(entry => entry.id === (yes || no).dataset[yes ? 'jevYes' : 'jevNo']); if (!item) return;
   item.confirm = null;
   if (no) { item.say = 'Cancelled.'; return renderAll(); }
+  // "Yes, always": these actions stop asking from now on (Settings, Jev and voice, lists them).
+  if (yes.dataset.always && item.confirmActions?.length) await api('/computer/allow', { method: 'POST', data: { actions: item.confirmActions } }).then(() => toast('Jev will do that without asking from now on.')).catch(error => toast(error.message, true));
   item.busy = true; renderAll();
   try { const answer = await api('/computer/run', { method: 'POST', data: { steps: item.steps } }); Object.assign(item, { busy: false, results: answer.results || [] }); } catch (error) { Object.assign(item, { busy: false, error: error.message }); }
   renderAll();

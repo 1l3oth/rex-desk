@@ -192,7 +192,7 @@ export function createMcp(desk, scope) {
       if (fromScreenshot) for (const [x, y] of [['x', 'y'], ['fromX', 'fromY'], ['toX', 'toY']]) if (values[x] !== undefined && values[y] !== undefined) {
         const point = computer.fromScreenshot(Number(values[x]), Number(values[y])); values[x] = point.x; values[y] = point.y;
       }
-      if (entry.confirm && desk.store.config().control?.confirm !== false) {
+      if (entry.confirm && desk.store.config().control?.confirm !== false && !(desk.store.config().control?.allow || []).includes(action)) {
         if (!scope.runId) throw new Error(`${entry.title} needs the person's approval, which only a run-scoped agent can ask for.`);
         const answer = await desk.ask(scope.runId, { kind: 'approval', method: 'computer', title: `Computer: ${entry.title}`, request: { action, params: values } });
         if (answer.action !== 'accept') return { declined: true };

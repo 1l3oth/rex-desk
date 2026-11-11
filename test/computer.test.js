@@ -82,6 +82,9 @@ test('shutdown-like actions wait for a yes unless confirmations are off', async 
   assert.equal(result.results.length, 0);
   const trusting = new Commander(computer, { planner: plan, settings: () => ({ confirm: false }) });
   assert.equal((await trusting.perform('shut the computer down')).results[0].ok, true);
+  assert.deepEqual(result.confirmActions, ['shutdown'], 'the card knows which action "Yes, always" allows');
+  const allowed = new Commander(computer, { planner: plan, settings: () => ({ confirm: true, allow: ['shutdown'] }) });
+  assert.equal((await allowed.perform('shut the computer down')).results[0].ok, true, 'an action said "Yes, always" to runs without asking');
 });
 
 test('everyday commands in English, Korean, and Khmer run at once, without a model', async () => {
