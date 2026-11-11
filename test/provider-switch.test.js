@@ -16,9 +16,9 @@ function setup(role = 'worker') {
   return { store, desk };
 }
 
-test('an older Codex run resumes as Claude Code and is handed the recorded chat', async () => {
+test('a Codex run switched to Claude Code is handed the recorded chat', async () => {
   const { store, desk } = setup();
-  await desk.resume('run-1', { prompt: 'Go on.' });
+  await desk.resume('run-1', { prompt: 'Go on.', provider: 'claude' });
   const run = store.get('run', 'run-1');
   assert.equal(run.provider, 'claude');
   assert.equal(run.sessionId, undefined, 'the other CLI cannot reopen the old session');
@@ -42,7 +42,7 @@ test('resuming a Claude Code run keeps the session and adds no handover', async 
 
 test('a main agent that switches provider gets the handover and the follow-up in its prompt', async () => {
   const { store, desk } = setup('coordinator');
-  await desk.resume('run-1', { prompt: 'Only dispatch the Gmail issue.' });
+  await desk.resume('run-1', { prompt: 'Only dispatch the Gmail issue.', provider: 'claude' });
   const run = store.get('run', 'run-1');
   assert.match(run.prompt, /Dispatch the issues\./);
   assert.match(run.prompt, /conversation so far/);
@@ -55,4 +55,13 @@ test('a follow-up sent on resume appears in the chat history', async () => {
   const events = store.events('run-1', { visible: true });
   assert.equal(events.at(-1).kind, 'human-message');
   assert.equal(events.at(-1).text, 'Please also check the Safari case.');
+});
+
+test('a Codex run resumes as Codex and keeps its own session', async () => {
+  const { store, desk } = setup();
+  store.put('run', 'run-1', { ...store.get('run', 'run-1'), sessionId: '019a0000-0000-7000-8000-000000000001' });
+  await desk.resume('run-1', { prompt: 'Go on.' });
+  const run = store.get('run', 'run-1');
+  assert.equal(run.provider, 'codex');
+  assert.equal(run.sessionId, '019a0000-0000-7000-8000-000000000001');
 });

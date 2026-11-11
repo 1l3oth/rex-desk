@@ -23,6 +23,12 @@ export function resolveCommand(name) {
   // leave one install with only claude.exe.old.* files, so the first folder holding the binary wins.
   const folders = [...new Set([path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData/Roaming'), 'npm'), path.dirname(process.execPath),
     ...String(process.env.PATH || '').split(path.delimiter).filter(Boolean)].map(folder => path.resolve(folder).toLowerCase()))];
+  if (name === 'codex') {
+    const native = folders.map(folder => path.join(folder, 'codex.exe')).find(target => existsSync(target));
+    if (native) return { command: native, args: [] };
+    const entry = folders.map(folder => path.join(folder, 'node_modules', '@openai', 'codex', 'bin', 'codex.js')).find(target => existsSync(target));
+    if (entry) return { command: process.execPath, args: [entry] };
+  }
   const packages = { claude: '@anthropic-ai/claude-code/bin/claude.exe' };
   const found = packages[name] && folders.map(folder => path.join(folder, 'node_modules', packages[name])).find(target => existsSync(target));
   if (found) return { command: found, args: [] };

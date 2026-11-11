@@ -17,20 +17,24 @@ function saved() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); }
 function remember(patch) { try { localStorage.setItem(KEY, JSON.stringify({ ...saved(), ...patch })); } catch { /* private window */ } }
 
 // What the pickers show: the run's own choice when it has one, else what the person last picked, else the defaults.
+// The AI a chat runs on: the one picked for it here, else the run's own, else the default in Settings.
+function providerOf(ctx, run) { const picked = ctx.ui.providerPick?.[ctx.draftKey()]; return picked || run?.provider || ctx.ui.snap?.config?.provider || 'claude'; }
+function choicesFor(ctx, provider) { const all = ctx.ui.snap?.choices || { models: [], efforts: [], modes: [] }; return all.providers?.[provider] || all; }
 export function currentOptions(ctx) {
-  const { ui } = ctx, choices = ui.snap?.choices || { models: [], efforts: [], modes: [] }, run = ui.view.type === 'main' ? ctx.mainRun() : ui.view.type === 'run' ? ctx.runById(ui.view.id) : null, last = saved();
-  const configured = ui.snap?.config?.models?.claude;
+  const { ui } = ctx, run = ui.view.type === 'main' ? ctx.mainRun() : ui.view.type === 'run' ? ctx.runById(ui.view.id) : null, last = saved(), provider = providerOf(ctx, run), choices = choicesFor(ctx, provider);
+  const configured = ui.snap?.config?.models?.[provider];
   // Only a model that is on the current list is shown and sent; anything else falls back to the first one (the recommended default).
   const ids = choices.models.map(item => item.id), model = [run?.model, last.model, configured].find(value => value && ids.includes(value)) || ids[0] || '';
-  return { model, effort: run?.effort || last.effort || 'medium', permissionMode: run?.permissionMode || last.permissionMode || DEFAULT_MODE };
+  const modeIds = choices.modes.map(item => item.id), mode = [run?.permissionMode, last.permissionMode, DEFAULT_MODE].find(value => value && modeIds.includes(value)) || modeIds[0];
+  return { provider, model, effort: run?.effort || last.effort || 'medium', permissionMode: mode };
 }
 export function pickedOptions(ctx) {
   const read = id => document.getElementById(id)?.value || '';
-  return { model: read('opt-model') || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
+  return { provider: read('opt-provider') || undefined, model: read('opt-model') || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
 }
 
 export function composerHtml(ctx, model) {
-  const { ui, esc } = ctx, choices = ui.snap?.choices || { models: [], efforts: [], modes: [] }, now = currentOptions(ctx), working = Boolean(model.working);
+  const { ui, esc } = ctx, now = currentOptions(ctx), choices = choicesFor(ctx, now.provider), working = Boolean(model.working);
   const select = (id, label, items, value) => pickerHtml(ctx, { id, label, compact: true, value, items: items.map(item => ({ value: item.id, label: item.label, hint: item.hint })) });
   const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? 'Dangerous' : item.label, hint: MODE_HINT[item.id] }));
   return `<div class="composer" id="composer"><div class="composer-inner">
@@ -43,7 +47,7 @@ export function composerHtml(ctx, model) {
       <input type="file" id="file-input" multiple hidden>
     </div>
     <div class="foot"><span class="hint">Type / for commands · hold Space to talk${model.composer.mentions?.length ? ' · @ to mention · # for a task' : ''}</span><span class="spacer"></span>
-      ${model.composer.noPickers ? '' : `${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
+      ${model.composer.noPickers ? '' : `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude subscription' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT subscription' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
       <span class="ring ${working ? 'busy' : ''}" title="${working ? 'The agent is working' : 'Idle'}" aria-hidden="true"></span>`}</div>
   </div></div>`;
 }
@@ -225,6 +229,8 @@ export function initComposer(ctx) {
   });
   document.addEventListener('change', event => {
     if (event.target.id === 'file-input') { for (const file of event.target.files) void upload(ctx, file); event.target.value = ''; return; }
+    // Switching the AI shows that AI's models and modes; the next message goes to it, with the chat so far handed over.
+    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : 'Claude Code'}.`); return; }
     if (event.target.id === 'opt-model') remember({ model: event.target.value });
     if (event.target.id === 'opt-effort') remember({ effort: event.target.value });
     if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast('Dangerous: the agent runs tools without asking.'); }

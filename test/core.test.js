@@ -269,8 +269,8 @@ test('the session a follow-up reopens comes from the provider log, and a provide
   assert.deepEqual(store.get('run', 'r1').mirror, { file, offset: 2 }, 'The same provider keeps its session');
   await settle();
   store.put('run', 'r1', { ...run, provider: 'codex', state: 'needs_evidence' });
-  await desk.resume('r1', { prompt: 'try again' });
-  assert.equal(store.get('run', 'r1').mirror, undefined, 'An older Codex run cannot be reopened by Claude Code, so it starts fresh');
+  await desk.resume('r1', { prompt: 'try again', provider: 'claude' });
+  assert.equal(store.get('run', 'r1').mirror, undefined, 'A Codex run switched to Claude Code cannot reopen its Codex session, so it starts fresh');
   assert.equal(store.get('run', 'r1').provider, 'claude');
   await settle(); await desk.shutdown(); store.close();
 });

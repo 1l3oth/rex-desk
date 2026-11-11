@@ -1056,3 +1056,7 @@ button.cn-main{cursor:pointer}
 .nt-pop:hover .nt-life,.nt-pop:focus-within .nt-life{animation-play-state:paused}
 @keyframes nt-life{to{transform:scaleX(0)}}
 @media (prefers-reduced-motion:reduce){.nt-pop{animation:none}.nt-life{display:none}}
+
+/* AI accounts dialog */
+.acct-default{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:13px}
+.acct-tabs{width:100%}.acct-tabs .tab{flex:1;justify-content:center}

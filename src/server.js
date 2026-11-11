@@ -1,3 +1,4 @@
+import { aiProvider } from './codex.js';
 import http from 'node:http';
 import { tailscaleAddresses } from './peers.js';
 import QRCode from 'qrcode';
@@ -95,7 +96,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     if (address) startDesk(desk, store);
     desk.computer = computer;
     desk.commander = new Commander(computer, { apiKey: () => desk.jev.apiKey(), model: () => store.config().jev?.model, settings: () => store.config().control || {},
-      env: () => desk.agents.environment('claude'), cwd: path.join(store.directory, 'coordinator'), webTask: text => desk.startWebTask(text) });
+      env: () => desk.agents.environment(store.config().provider), cwd: path.join(store.directory, 'coordinator'), webTask: text => desk.startWebTask(text) });
     // The real app (not tests) scans this computer's checkouts for Jev and catches up with tracker moves made while it was off.
     if (catchUp) {
       void desk.scanRepositories().catch(error => store.event('', 'repository-scan-error', { message: error.message }));
@@ -349,20 +350,20 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         const input = await body(request);
         return json(response, 200, { branch: issueBranch(input.pattern, { prefix: input.prefix || 'temp/rex' }) });
       }
-      if (url.pathname === '/api/config' && request.method === 'PUT') { const saved = store.saveConfig(await body(request)); desk.agents.invalidate(); return json(response, 200, saved); }
+      if (url.pathname === '/api/config' && request.method === 'PUT') { const saved = store.saveConfig(await body(request)); desk.agents.invalidate(); void desk.refreshModels().catch(() => {}); return json(response, 200, saved); }
       // The skills, commands and MCP servers an agent has (or Rex Agent, with agent=main), for the / menu and its profile.
       if (url.pathname === '/api/agents/tools' && request.method === 'GET') {
         const id = url.searchParams.get('agent') || 'main', agent = id === 'main' ? null : store.get('specialist', id);
         return json(response, 200, agentTools({ profile: agent?.profile || desk.agents.selected('claude') || '', projectPath: agent?.projectPath || '', extra: desk.orbitAccountMcp() }));
       }
-      if (url.pathname === '/api/agents/login' && request.method === 'POST') return json(response, 200, desk.agents.login('claude', String((await body(request)).profile || '')));
-      if (url.pathname === '/api/agents/add' && request.method === 'POST') { const created = desk.agents.addProfile('claude', (await body(request)).name); return json(response, 200, { ...created, ...desk.agents.login('claude', created.profile) }); }
+      if (url.pathname === '/api/agents/login' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.agents.login(aiProvider(input.provider || 'claude'), String(input.profile || ''))); }
+      if (url.pathname === '/api/agents/add' && request.method === 'POST') { const input = await body(request), provider = aiProvider(input.provider || 'claude'); const created = desk.agents.addProfile(provider, input.name); return json(response, 200, { ...created, ...desk.agents.login(provider, created.profile) }); }
       if (url.pathname === '/api/accounts/auto' && request.method === 'GET') return json(response, 200, { on: !store.get('accounts', 'auto')?.off });
       if (url.pathname === '/api/accounts/auto' && request.method === 'POST') { const on = (await body(request)).on !== false; store.put('accounts', 'auto', { id: 'auto', off: !on }); return json(response, 200, { on }); }
       if (url.pathname === '/api/agents' && request.method === 'GET') return json(response, 200, await desk.agents.overview({ refresh: url.searchParams.has('refresh') }));
       if (url.pathname === '/api/agents/profile' && request.method === 'POST') {
         const input = await body(request);
-        input.provider = 'claude';
+        input.provider = aiProvider(input.provider || 'claude');
         const config = store.publicConfig();
         store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [input.provider]: input.profile ?? null } });
         desk.agents.invalidate(input.provider);
@@ -370,9 +371,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       }
       if (url.pathname === '/api/agents/mcp' && request.method === 'POST') {
         const { provider } = await body(request);
-        if (provider !== 'claude') throw new Error('Rex Desk runs Claude Code.');
+        aiProvider(provider);
         const command = resolveCommand(provider), proxy = path.join(root, 'src', 'stdio.js');
-        const args = [...command.args, 'mcp', 'add', '--scope', 'user', 'rex_desk', '--', process.execPath, proxy];
+        const args = [...command.args, 'mcp', 'add', ...(provider === 'claude' ? ['--scope', 'user'] : []), 'rex_desk', '--', process.execPath, proxy];
         // An agent started from any profile folder, in any directory, must be able to read tasks, so every profile
         // this computer has gets the entry, not only the one Rex Desk's own runs use.
         const profiles = discoverProfiles(provider, { configured: desk.agents.selected(provider) });
@@ -457,7 +458,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
           claude: { mcpServers: { rex_desk: { type: 'http', url: desk.mcpUrl, headers: { Authorization: 'Bearer ${REX_DESK_TOKEN}' } } } } });
       }
       if (url.pathname === '/api/diagnostics') {
-        const results = await Promise.all(['claude', 'git', 'gh'].map(async name => {
+        const results = await Promise.all(['claude', 'codex', 'git', 'gh'].map(async name => {
           const command = resolveCommand(name);
           try { const { stdout } = await exec(command.command, [...command.args, '--version'], { windowsHide: true, timeout: 10000 }); return { name, available: true, version: stdout.split('\n')[0] }; }
           catch (error) { return { name, available: false, error: error.message }; }

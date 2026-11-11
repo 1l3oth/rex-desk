@@ -1,3 +1,4 @@
+import { codexText } from './codex.js';
 // A sentence typed by the human ("my tasks", "JP tasks from 48000 to 48100", "new tasks not assigned to me") becomes a
 // fixed, checked intent; Rex Desk then asks the trackers live with it. The model only fills the intent: it never sees
 // an API key and never calls the tracker, and every value it returns is checked against what the tracker offers.
@@ -56,6 +57,7 @@ export async function askSmallModel(prompt, input, { apiKey, fetcher = fetch, en
     if (!response.ok) throw new Error(`The query model failed (${response.status}).`);
     return (await response.json())?.choices?.[0]?.message?.content || '';
   }
+  if (env.REX_AI_PROVIDER === 'codex') return codexText(`${prompt}\n\n${input}`, { env, cwd });
   const executable = resolveCommand('claude'), clean = { ...env }; delete clean.CLAUDECODE;
   return new Promise((resolve, reject) => run(executable.command, [...executable.args, '-p', '--model', 'haiku', '--max-turns', '1', `${prompt}\n\n${input}`],
     { env: clean, cwd, timeout: 90000, windowsHide: true, maxBuffer: 1 << 20 }, (error, stdout) => error ? reject(new Error('Claude Code could not read the request. Add an OpenRouter key in Settings → Jev, or sign in Claude Code.')) : resolve(stdout)));

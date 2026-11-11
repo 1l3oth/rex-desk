@@ -23,7 +23,7 @@ export const tokenText = tokens => tokens ? [`${kilo((tokens.input || 0) + (toke
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`; };
-const provider = name => name === 'codex' ? 'Codex (retired)' : name === 'claude' ? 'Claude Code' : 'Agent';
+const provider = name => name === 'codex' ? 'Codex' : name === 'claude' ? 'Claude Code' : 'Agent';
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value), tokenText,
   render: () => renderAll(), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
@@ -699,7 +699,7 @@ function personalSide(run, agent, items, shells) {
     <div class="rhero">${avatarHtml(ctx, { name: agent.name, size: 'xl' })}<h2 class="pname">${esc(agent.name)}</h2><p class="rsub"><span class="dot ${stateTone(run) === 'working' ? 'working' : 'good'}"></span> ${esc(agent.status?.label || stateLabel(run))}${agent.main ? '' : ` on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>`}</p></div>
     ${agent.purpose ? `<h3>About</h3><p class="pabout">${esc(agent.purpose)}</p>` : ''}
     ${sharedBox}
-    ${agent.main ? '' : `<h3>Claude account</h3>${pickerHtml(ctx, { id: 'pp-profile', label: 'Claude account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.claude?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}<button type="button" class="btn small quiet" data-action="accounts">Manage accounts</button>`}
+    ${agent.main ? '' : `<h3>${agent.provider === 'codex' ? 'Codex' : 'Claude'} account</h3>${pickerHtml(ctx, { id: 'pp-profile', label: 'Account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.[agent.provider === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}<button type="button" class="btn small quiet" data-action="accounts">Manage accounts</button>`}
     ${toolsHtml(agent.main ? 'main' : agent.id)}
     ${agent.main ? '' : `<h3>Tasks come from</h3><p class="pabout">${esc(sources.join(', ') || 'Not set yet')}</p>`}
     ${(agent.lessons || []).length ? `<h3>Lessons learned <span>${agent.lessons.length}</span></h3><ul class="plessons">${agent.lessons.slice(-4).map(lesson => `<li>${esc(lesson.text)}</li>`).join('')}</ul>` : ''}
@@ -738,41 +738,49 @@ document.addEventListener('click', async event => {
 
 // ---------- Claude accounts: which subscription the agents run on ----------
 function accountChip() {
-  const claude = ui.accounts?.claude, current = claude?.profiles?.find(item => item.profile === claude.selected) || claude?.profiles?.[0];
-  return `<span class="acct-dot ${current?.loggedIn ? 'good' : 'bad'}"></span><span class="acct-text"><b>Claude</b> ${esc(current ? (current.account || current.label) : 'account')}</span>`;
+  const name = ui.snap?.config?.provider === 'codex' ? 'codex' : 'claude', list = ui.accounts?.[name], current = list?.profiles?.find(item => item.profile === list.selected) || list?.profiles?.[0];
+  return `<span class="acct-dot ${current?.loggedIn ? 'good' : 'bad'}"></span><span class="acct-text"><b>${name === 'codex' ? 'Codex' : 'Claude'}</b> ${esc(current ? (current.account || current.label) : 'account')}</span>`;
 }
 async function loadAccounts(refreshStatus = false) { try { ui.accounts = await api(`/agents${refreshStatus ? '?refresh=1' : ''}`); ui.accountsAuto = (await api('/accounts/auto')).on; } catch {} }
 async function accountsDialog() {
   document.querySelector('.dialog-back.accounts')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back accounts'; document.body.append(back);
+  const NAMES = { claude: ['Claude', 'Claude Code', 'Claude'], codex: ['Codex', 'Codex', 'ChatGPT'] };
+  const tab = () => ui.acctTab === 'codex' ? 'codex' : ui.acctTab === 'claude' ? 'claude' : (ui.snap?.config?.provider === 'codex' ? 'codex' : 'claude');
   const draw = () => {
-    const claude = ui.accounts?.claude || { profiles: [] };
-    back.innerHTML = `<form class="dialog acct-dialog"><h2>Claude account</h2><p class="muted">Agents run on the Claude Code sign-in you pick here. Each profile can be a different subscription; when one runs out, switch to the other. An agent pinned to an account on its card keeps that one.</p>
-      <div class="acct-list">${claude.profiles.map(item => `<label class="${item.loggedIn ? '' : 'off'}"><input type="radio" name="profile" value="${esc(item.profile)}" ${item.profile === claude.selected ? 'checked' : ''} ${item.loggedIn ? '' : 'disabled'}><span><b>${esc(item.account || item.label)}</b><small>${esc([item.label, item.plan && `${item.plan} plan`, item.loggedIn ? 'signed in' : 'not signed in'].filter(Boolean).join(' · '))}</small></span>${item.loggedIn ? '' : `<button type="button" class="btn small primary acct-signin" data-acct-login="${esc(item.profile)}">Sign in</button>`}</label>`).join('') || '<p class="muted">No Claude Code profiles found.</p>'}</div>
+    const name = tab(), [short, product, service] = NAMES[name], list = ui.accounts?.[name] || { profiles: [] }, defaultAi = ui.snap?.config?.provider === 'codex' ? 'codex' : 'claude';
+    back.innerHTML = `<form class="dialog acct-dialog"><h2>AI accounts</h2>
+      <div class="acct-default"><span>New agents and chats use</span><div class="pseg">${Object.entries(NAMES).map(([key, [, title]]) => `<button type="button" class="tab ${defaultAi === key ? 'on' : ''}" data-acct-default="${key}">${title}</button>`).join('')}</div></div>
+      <div class="pseg acct-tabs">${Object.entries(NAMES).map(([key, [label]]) => `<button type="button" class="tab ${name === key ? 'on' : ''}" data-acct-tab="${key}">${label} accounts</button>`).join('')}</div>
+      <p class="muted">Agents on ${product} run on the ${service} sign-in you pick here. Each one can be a different subscription; when one runs out, switch to another. An agent pinned to an account on its card keeps that one.</p>
+      <div class="acct-list">${list.profiles.map(item => `<label class="${item.loggedIn ? '' : 'off'}"><input type="radio" name="profile" value="${esc(item.profile)}" ${item.profile === list.selected ? 'checked' : ''} ${item.loggedIn ? '' : 'disabled'}><span><b>${esc(item.account || item.label)}</b><small>${esc([item.label, item.plan && `${item.plan} plan`, item.method, item.loggedIn ? 'signed in' : 'not signed in'].filter(Boolean).join(' · '))}</small></span>${item.loggedIn ? '' : `<button type="button" class="btn small primary acct-signin" data-acct-login="${esc(item.profile)}">Sign in</button>`}</label>`).join('') || `<p class="muted">No ${product} profiles found${name === 'codex' ? '. Install the Codex CLI (npm install -g @openai/codex), then add an account here.' : '.'}</p>`}</div>
       <label class="acct-auto"><input type="checkbox" data-acct-auto ${ui.accountsAuto !== false ? 'checked' : ''}><span>When an account hits its usage limit, switch to another signed-in one and continue</span></label>
-      <div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="Name for the new account, like work or personal" aria-label="Name for the new account"><button type="button" class="btn small primary" data-acct-create>Create and sign in</button><button type="button" class="btn small" data-acct-cancel>Cancel</button>` : '<button type="button" class="btn small" data-acct-new>+ Add a Claude account</button>'}</div>
-      ${ui.acctWaiting ? `<p class="acct-wait"><span class="dot working"></span> Finish signing in to Claude in the browser window that opened. This list updates by itself when you are done.</p>` : ''}
+      <div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="Name for the new account, like work or personal" aria-label="Name for the new account"><button type="button" class="btn small primary" data-acct-create>Create and sign in</button><button type="button" class="btn small" data-acct-cancel>Cancel</button>` : `<button type="button" class="btn small" data-acct-new>+ Add a ${short} account</button>`}</div>
+      ${ui.acctWaiting ? `<p class="acct-wait"><span class="dot working"></span> Finish signing in to ${service} in the window that opened. This list updates by itself when you are done.</p>` : ''}
       <div class="row"><button type="button" class="btn" data-acct-refresh>Check again</button><span class="spacer"></span><button type="button" class="btn primary" data-close>Done</button></div></form>`;
   };
-  if (!ui.accounts) { back.innerHTML = '<div class="dialog"><p class="muted">Checking your Claude accounts…</p></div>'; await loadAccounts(true); }
+  if (!ui.accounts) { back.innerHTML = '<div class="dialog"><p class="muted">Checking your AI accounts…</p></div>'; await loadAccounts(true); }
   draw();
   back.addEventListener('click', async event => {
     if (event.target === back || event.target.closest('[data-close]')) { back.remove(); renderAll(); return; }
+    const switchTab = event.target.closest('[data-acct-tab]'); if (switchTab) { ui.acctTab = switchTab.dataset.acctTab; ui.acctAdding = false; draw(); return; }
+    const pickDefault = event.target.closest('[data-acct-default]');
+    if (pickDefault) { try { await api('/config', { method: 'PUT', data: { ...ui.snap.config, provider: pickDefault.dataset.acctDefault } }); await refresh(); ui.acctTab = pickDefault.dataset.acctDefault; toast(`New agents and chats use ${pickDefault.dataset.acctDefault === 'codex' ? 'Codex' : 'Claude Code'}.`); draw(); } catch (error) { toast(error.message, true); } return; }
     if (event.target.closest('[data-acct-refresh]')) { back.querySelector('[data-acct-refresh]').textContent = 'Checking…'; await loadAccounts(true); draw(); }
     if (event.target.closest('[data-acct-new]')) { ui.acctAdding = true; draw(); back.querySelector('[data-acct-name]')?.focus(); }
     if (event.target.closest('[data-acct-cancel]')) { ui.acctAdding = false; draw(); }
     const login = event.target.closest('[data-acct-login]'), create = event.target.closest('[data-acct-create]');
     if (login || create) {
-      event.preventDefault();
+      event.preventDefault(); const name = tab(), signedIn = () => (ui.accounts?.[name]?.profiles || []).filter(item => item.loggedIn).length;
       try {
-        if (create) { const name = back.querySelector('[data-acct-name]').value.trim(); if (!name) return toast('Give the account a name first.', true); await api('/agents/add', { method: 'POST', data: { name } }); ui.acctAdding = false; }
-        else await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin } });
+        if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast('Give the account a name first.', true); await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; }
+        else await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin, provider: name } });
         ui.acctWaiting = true; await loadAccounts(true); draw();
         // Sign-in happens in the browser; look again every few seconds for up to three minutes.
         for (let tries = 0; tries < 60 && ui.acctWaiting && document.body.contains(back); tries++) {
           await new Promise(resolve => setTimeout(resolve, 3000));
-          const before = (ui.accounts?.claude?.profiles || []).filter(item => item.loggedIn).length; await loadAccounts(true);
-          if ((ui.accounts?.claude?.profiles || []).filter(item => item.loggedIn).length > before) { ui.acctWaiting = false; toast('Signed in. You can pick this account now.'); }
+          const before = signedIn(); await loadAccounts(true);
+          if (signedIn() > before) { ui.acctWaiting = false; toast('Signed in. You can pick this account now.'); }
           if (document.body.contains(back)) draw();
         }
         ui.acctWaiting = false; if (document.body.contains(back)) draw();
@@ -782,7 +790,7 @@ async function accountsDialog() {
   back.addEventListener('keydown', event => { if (event.target.matches('[data-acct-name]') && event.key === 'Enter') { event.preventDefault(); back.querySelector('[data-acct-create]')?.click(); } });
   back.addEventListener('change', async event => {
     try {
-      if (event.target.name === 'profile') { await api('/agents/profile', { method: 'POST', data: { provider: 'claude', profile: event.target.value } }); await loadAccounts(); toast('Agents now use this Claude account from their next reply.'); draw(); }
+      if (event.target.name === 'profile') { const name = tab(); await api('/agents/profile', { method: 'POST', data: { provider: name, profile: event.target.value } }); await loadAccounts(); toast(`Agents on ${NAMES[name][1]} now use this account from their next reply.`); draw(); }
       if (event.target.matches('[data-acct-auto]')) { ui.accountsAuto = (await api('/accounts/auto', { method: 'POST', data: { on: event.target.checked } })).on; }
     } catch (error) { toast(error.message, true); }
   });

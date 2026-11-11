@@ -1,3 +1,4 @@
+import { aiProvider } from './codex.js';
 // What the person can pick in the chat input for an agent: the model, how hard it thinks, and how it handles permissions.
 // These apply when the agent starts or resumes; a running terminal session keeps the choices it started with.
 export const MODELS = [
@@ -17,13 +18,15 @@ export const MODES = [
 ];
 
 // The models offered: the list the signed-in Claude Code reported (kept in the store), or the built-in one until it has.
-export const modelList = store => { const saved = store?.get?.('models', 'list')?.items; return Array.isArray(saved) && saved.length ? saved : MODELS; };
+export const modelList = (store, provider = 'claude') => { const saved = store?.get?.('models', provider === 'claude' ? 'list' : provider)?.items; return Array.isArray(saved) && saved.length ? saved : provider === 'claude' ? MODELS : []; };
+export const modesFor = provider => provider === 'codex' ? [{ id: 'bypassPermissions', label: 'Dangerous' }, { id: 'manual', label: 'Workspace' }, { id: 'plan', label: 'Read only' }] : MODES;
 
 // Only values from the lists above are accepted; anything else is refused instead of being passed to the CLI.
 export function runOptions(input = {}, store) {
-  const out = {};
-  if (input.model) { if (!modelList(store).some(item => item.id === input.model)) throw new Error('Choose one of the listed models.'); out.model = input.model; }
+  const provider = aiProvider(input.provider || store?.config?.().provider || 'claude');
+  const out = input.provider ? { provider } : {};
+  if (input.model) { if (!modelList(store, provider).some(item => item.id === input.model)) throw new Error('Choose one of the listed models.'); out.model = input.model; }
   if (input.effort) { if (!EFFORTS.includes(input.effort)) throw new Error('Choose low, medium, high, xhigh or max effort.'); out.effort = input.effort; }
-  if (input.permissionMode) { if (!MODES.some(item => item.id === input.permissionMode)) throw new Error('Choose Dangerous, Manual, Auto, Plan or Accept edits.'); out.permissionMode = input.permissionMode; }
+  if (input.permissionMode) { if (!modesFor(provider).some(item => item.id === input.permissionMode)) throw new Error('Choose Dangerous, Manual, Auto, Plan or Accept edits.'); out.permissionMode = input.permissionMode; }
   return out;
 }
