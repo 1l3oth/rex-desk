@@ -1,6 +1,8 @@
 // Notifications: everything agents said or asked while you were elsewhere, newest first, with unread counts on each chat.
-// A new one for a chat you are not looking at pops up for a few seconds; click it to go there. Chats can be muted.
-const KIND = { ask: 'Needs you', reply: 'Replied', room: 'Group chat', failed: 'Stopped' };
+// A new one pops up at the bottom right with a sound (both can be turned off), and you can open it or answer it from there.
+// The settings decide what counts, how it reaches you, and when Rex Desk stays quiet.
+const KIND = { ask: ['Needs you', 'ask'], reply: ['Replied', 'reply'], room: ['Group chat', 'room'], mention: ['To you', 'ask'], failed: ['Stopped', 'failed'] };
+const TONES = [['chime', 'Chime'], ['soft', 'Soft'], ['pop', 'Pop'], ['bell', 'Bell']];
 
 // The key of the chat on screen, the same key the server gives each notification.
 export function noticeKey(view) {
@@ -10,60 +12,133 @@ export function noticeKey(view) {
   return '';
 }
 export const unreadFor = (ui, key) => ui.snap?.notices?.byKey?.[key] || 0;
-
-const openOf = target => target.type === 'inbox' ? ['inbox', ''] : target.type === 'main' ? ['main', ''] : [target.type, target.id];
 const when = at => { const minutes = Math.round((Date.now() - Date.parse(at)) / 60000); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes} min` : minutes < 1440 ? `${Math.round(minutes / 60)} h` : new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric' }); };
+const initials = text => (String(text || '').match(/[\p{L}\p{N}]/gu) || ['R']).slice(0, 2).join('').toUpperCase();
+const hue = text => [...String(text || 'Rex')].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7) % 8;
+const who = item => item.from || String(item.title || '').replace(/ (replied|stopped|in .*|asked you.*)$/, '').replace(/^(Needs your (OK|answer) · )/, '') || 'Rex Desk';
 
+// ---------- sounds, made in the page (no files) ----------
+let audio = null;
+export function playTone(tone = 'chime', kind = 'reply', volume = 0.6) {
+  try {
+    audio ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === 'suspended') void audio.resume();
+    const notes = kind === 'ask' || kind === 'mention' ? [[784, 0], [988, 0.11], [1319, 0.22]] : kind === 'failed' ? [[392, 0], [294, 0.16]]
+      : { chime: [[880, 0], [1319, 0.12]], soft: [[660, 0]], pop: [[520, 0], [780, 0.06]], bell: [[1047, 0], [1568, 0.02]] }[tone] || [[880, 0]];
+    const start = audio.currentTime + 0.01, master = audio.createGain(); master.gain.value = Math.max(0, Math.min(1, volume)) * 0.35; master.connect(audio.destination);
+    for (const [frequency, offset] of notes) {
+      const osc = audio.createOscillator(), gain = audio.createGain(), length = tone === 'bell' ? 0.9 : tone === 'pop' ? 0.12 : 0.32;
+      osc.type = tone === 'pop' ? 'triangle' : 'sine'; osc.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.0001, start + offset); gain.gain.exponentialRampToValueAtTime(1, start + offset + 0.012); gain.gain.exponentialRampToValueAtTime(0.0001, start + offset + length);
+      osc.connect(gain); gain.connect(master); osc.start(start + offset); osc.stop(start + offset + length + 0.05);
+    }
+  } catch { /* no sound on this device */ }
+}
+
+// ---------- the Notifications screen ----------
 export function noticesStage(ctx) {
-  const { ui, esc } = ctx, data = ui.snap.notices || { recent: [], unread: 0, mutes: [] }, mutes = new Set(data.mutes || []);
+  const { ui, esc } = ctx, data = ui.snap.notices || { recent: [], unread: 0, mutes: [], prefs: {} }, prefs = data.prefs || {}, mutes = new Set(data.mutes || []);
   const filter = ui.noticeFilter === 'unread' ? 'unread' : 'all', list = data.recent.filter(item => filter === 'all' || !item.read);
-  const row = item => `<li class="nt-row${item.read ? '' : ' unread'}"><button type="button" class="nt-open" data-action="nt-open" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}">
-      <span class="nt-kind ${esc(item.kind)}">${esc(KIND[item.kind] || 'Update')}</span><span class="nt-text"><b>${esc(item.title)}</b><small>${esc(item.body)}</small></span><span class="nt-when">${esc(when(item.at))}</span></button></li>`;
+  const row = item => { const [label, tone] = KIND[item.kind] || ['Update', 'reply'], name = who(item);
+    return `<li class="nt-row${item.read ? '' : ' unread'}"><button type="button" class="nt-open" data-action="nt-open" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}">
+      <span class="nt-av h${hue(name)}">${esc(initials(name))}</span><span class="nt-text"><span class="nt-top"><b>${esc(item.title)}</b><span class="nt-kind ${tone}">${esc(label)}</span></span><small>${esc(item.body)}</small></span><span class="nt-when">${esc(when(item.at))}${item.read ? '' : '<i class="nt-dot"></i>'}</span></button></li>`; };
   const chats = [{ key: 'main:', name: 'Rex Agent' }, ...(ui.snap.rooms || []).map(room => ({ key: `room:${room.id}`, name: room.name, sub: 'Group chat' })),
     ...(ui.snap.specialists || []).filter(agent => agent.runId).map(agent => ({ key: `run:${agent.runId}`, name: agent.name, sub: agent.projectSlug }))];
-  const muteRow = chat => `<li><span><b>${esc(chat.name)}</b>${chat.sub ? `<small>${esc(chat.sub)}</small>` : ''}</span><button type="button" class="btn small${mutes.has(chat.key) ? '' : ' quiet'}" data-action="nt-mute" data-key="${esc(chat.key)}" data-on="${mutes.has(chat.key) ? '0' : '1'}">${mutes.has(chat.key) ? 'Muted · Unmute' : 'Mute'}</button></li>`;
-  const pops = ui.snap.config?.notify !== false;
+  const toggle = (name, on, label, help = '') => `<label class="nt-switch"><input type="checkbox" data-nt-pref="${name}" ${on ? 'checked' : ''}><span class="nt-track" aria-hidden="true"></span><span class="nt-lbl"><b>${label}</b>${help ? `<small>${help}</small>` : ''}</span></label>`;
+  const select = (name, value, options) => `<select data-nt-pref="${name}">${options.map(([key, label]) => `<option value="${key}" ${String(value) === String(key) ? 'selected' : ''}>${label}</option>`).join('')}</select>`;
+  const kinds = prefs.kinds || {}, quiet = prefs.quiet || {}, dnd = prefs.dndUntil && prefs.dndUntil > Date.now();
+  const settings = `<aside class="nt-side">
+    <section class="card nt-card"><h3>Do not disturb</h3>
+      ${dnd ? `<p class="nt-dnd on">Quiet until ${esc(new Date(prefs.dndUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</p><button type="button" class="btn small" data-action="nt-dnd" data-minutes="0">Turn off</button>`
+        : `<div class="nt-chips">${[[30, '30 min'], [60, '1 hour'], [180, '3 hours'], [720, 'Until tomorrow']].map(([minutes, label]) => `<button type="button" class="btn small" data-action="nt-dnd" data-minutes="${minutes}">${label}</button>`).join('')}</div>`}
+      ${toggle('quiet.on', quiet.on, 'Quiet hours every day', 'Kept in the list, but no pop-ups and no sound.')}
+      <div class="nt-row2"><label>From<input type="time" data-nt-pref="quiet.from" value="${esc(quiet.from || '22:00')}"></label><label>To<input type="time" data-nt-pref="quiet.to" value="${esc(quiet.to || '08:00')}"></label></div>
+      ${prefs.quietNow && !dnd ? '<p class="muted small">Quiet hours are on now.</p>' : ''}</section>
+    <section class="card nt-card"><h3>What to tell you</h3>
+      ${toggle('kinds.ask', kinds.ask !== false, 'Questions and approvals', 'An agent waits for your answer or OK.')}
+      ${toggle('kinds.reply', kinds.reply !== false, 'Replies in personal chats', 'An agent finished answering you.')}
+      ${toggle('kinds.failed', kinds.failed !== false, 'Stopped or failed work')}
+      <label class="nt-field"><span><b>Group chats</b><small>Messages that @mention you always count, unless this is Off.</small></span>${select('kinds.room', kinds.room || 'all', [['all', 'Every message'], ['mentions', 'Only messages to me'], ['off', 'Off']])}</label>
+      <label class="nt-field"><span><b>Busy group chats</b><small>How often one room may pop up.</small></span>${select('roomGap', prefs.roomGap ?? 60, [[0, 'Every message'], [60, 'At most once a minute'], [300, 'Every 5 minutes'], [900, 'Every 15 minutes']])}</label></section>
+    <section class="card nt-card"><h3>How it reaches you</h3>
+      ${toggle('inapp', prefs.inapp !== false, 'Pop-up inside Rex Desk', 'Bottom right, for chats you are not looking at.')}
+      ${toggle('windows', prefs.windows !== false, 'Windows pop-ups', 'When Rex Desk is not the window in front.')}
+      ${toggle('preview', prefs.preview !== false, 'Show the message in pop-ups', 'Off: pop-ups only say who wrote.')}
+      ${toggle('sound', prefs.sound !== false, 'Sound')}
+      <div class="nt-row2"><label>Tone${select('tone', prefs.tone || 'chime', TONES)}</label><label>Volume<input type="range" min="0" max="1" step="0.05" data-nt-pref="volume" value="${esc(prefs.volume ?? 0.6)}"></label></div>
+      <div class="nt-chips"><button type="button" class="btn small" data-action="nt-hear">Play</button><button type="button" class="btn small primary" data-action="nt-test">Send a test notification</button></div>
+      <p class="muted small">Questions use a rising three-note sound, stops a falling one, so you can tell them apart without looking.</p></section>
+    <section class="card nt-card"><h3>Mute a chat</h3><p class="muted small">No pop-ups, no sound and no unread count. Its messages stay in the list.</p>
+      <ul class="nt-mutes">${chats.map(chat => `<li><span class="nt-av sm h${hue(chat.name)}">${esc(initials(chat.name))}</span><span class="nt-mname"><b>${esc(chat.name)}</b>${chat.sub ? `<small>${esc(chat.sub)}</small>` : ''}</span><button type="button" class="btn small${mutes.has(chat.key) ? ' on' : ' quiet'}" data-action="nt-mute" data-key="${esc(chat.key)}" data-on="${mutes.has(chat.key) ? '0' : '1'}">${mutes.has(chat.key) ? 'Muted' : 'Mute'}</button></li>`).join('')}</ul></section>
+  </aside>`;
   const feed = `<div class="page notices">
     <div class="nt-main">
       <div class="nt-bar"><div class="pseg"><button type="button" class="tab ${filter === 'all' ? 'on' : ''}" data-action="nt-filter" data-tab="all">All</button><button type="button" class="tab ${filter === 'unread' ? 'on' : ''}" data-action="nt-filter" data-tab="unread">Unread${data.unread ? `<span class="tcount">${data.unread}</span>` : ''}</button></div><span class="spacer"></span>${data.unread ? '<button type="button" class="btn small" data-action="nt-readall">Mark all as read</button>' : ''}</div>
       ${list.length ? `<ul class="nt-list">${list.map(row).join('')}</ul>` : `<div class="empty"><h2>${filter === 'unread' ? 'All caught up' : 'Nothing yet'}</h2><p>When an agent replies, asks you something or stops, it shows here.</p></div>`}
-    </div>
-    <aside class="nt-side card"><h3>How you are told</h3>
-      <label class="nt-check"><input type="checkbox" data-nt-pops ${pops ? 'checked' : ''}><span>Windows pop-ups when Rex Desk is not the window in front</span></label>
-      <p class="muted small">Inside Rex Desk, a new message for another chat pops up at the bottom for a few seconds. Busy group chats pop up at most once a minute.</p>
-      <h3>Mute a chat</h3><p class="muted small">A muted chat stays quiet: no pop-ups and no unread count. Its messages are still here.</p>
-      <ul class="nt-mutes">${chats.map(muteRow).join('')}</ul></aside>
+    </div>${settings}
   </div>`;
-  return { title: 'Notifications', meta: data.unread ? `${data.unread} unread` : 'All caught up', feed, top: true };
+  return { title: 'Notifications', meta: `${data.unread ? `${data.unread} unread` : 'All caught up'}${dnd ? ' · Do not disturb' : prefs.quietNow ? ' · Quiet hours' : ''}`, feed, top: true };
 }
 
+async function savePref(ctx, name, value) {
+  const [group, key] = name.split('.'), data = key ? { [group]: { [key]: value } } : { [group]: value };
+  try { await ctx.api('/notices/prefs', { method: 'POST', data }); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); }
+}
 export async function noticesAction(ctx, action, target) {
-  const { api, ui, refresh, open } = ctx;
+  const { api, ui, refresh, open } = ctx, prefs = ui.snap.notices?.prefs || {};
   if (action === 'nt-filter') { ui.noticeFilter = target.dataset.tab; ctx.render(); return; }
   if (action === 'nt-readall') { await api('/notices/read', { method: 'POST', data: { all: true } }); await refresh(); return; }
   if (action === 'nt-mute') { await api('/notices/mute', { method: 'POST', data: { key: target.dataset.key, on: target.dataset.on === '1' } }); await refresh(); return; }
-  if (action === 'nt-open') { await api('/notices/read', { method: 'POST', data: { key: target.dataset.key } }).catch(() => {}); hidePop(); open(target.dataset.type === 'inbox' ? 'inbox' : target.dataset.type, target.dataset.id || ''); }
+  if (action === 'nt-dnd') { await api('/notices/prefs', { method: 'POST', data: { dndMinutes: Number(target.dataset.minutes) } }); await refresh(); return; }
+  if (action === 'nt-hear') { playTone(prefs.tone, 'reply', prefs.volume ?? 0.6); return; }
+  if (action === 'nt-test') { await api('/notices/test', { method: 'POST', data: {} }); await refresh(); return; }
+  if (action === 'nt-read') { await api('/notices/read', { method: 'POST', data: { key: target.dataset.key } }).catch(() => {}); target.closest('.nt-pop')?.remove(); await refresh(); return; }
+  if (action === 'nt-open') { await api('/notices/read', { method: 'POST', data: { key: target.dataset.key } }).catch(() => {}); target.closest('.nt-pop')?.remove(); open(target.dataset.type === 'inbox' ? 'inbox' : target.dataset.type, target.dataset.id || ''); }
 }
+document.addEventListener('change', event => {
+  const name = event.target.dataset?.ntPref; if (!name || !window.__rexCtx) return;
+  const value = event.target.type === 'checkbox' ? event.target.checked : event.target.type === 'range' ? Number(event.target.value) : event.target.value;
+  void savePref(window.__rexCtx, name, value);
+  if (name === 'tone' || name === 'volume') { const prefs = window.__rexCtx.ui.snap.notices?.prefs || {}; playTone(name === 'tone' ? value : prefs.tone, 'reply', name === 'volume' ? value : prefs.volume ?? 0.6); }
+});
 
-// ---------- the pop-up inside Rex Desk ----------
-let seen = null, popTimer = 0;
-function hidePop() { document.querySelector('.nt-pop')?.remove(); clearTimeout(popTimer); }
+// ---------- the pop-ups, stacked at the bottom right ----------
+let seen = null;
+function stack() { let box = document.querySelector('.nt-stack'); if (!box) { box = document.createElement('div'); box.className = 'nt-stack'; box.setAttribute('aria-live', 'polite'); document.body.append(box); } return box; }
+function popUp(ctx, item, more) {
+  const { esc } = ctx, prefs = ctx.ui.snap.notices?.prefs || {}, [label, tone] = KIND[item.kind] || ['Update', 'reply'], name = who(item);
+  const chat = item.target.type === 'room' ? (ctx.ui.snap.rooms || []).find(room => room.id === item.target.id)?.name : '';
+  const canReply = ['room', 'run', 'main'].includes(item.target.type);
+  const card = document.createElement('div'); card.className = `nt-pop ${tone}`; card.setAttribute('role', 'status');
+  card.innerHTML = `<div class="nt-pop-head"><span class="nt-av h${hue(name)}">${esc(initials(name))}</span><span class="nt-pop-who"><b>${esc(name)}</b><small>${esc([chat, label].filter(Boolean).join(' · '))} · now</small></span><button type="button" class="nt-pop-x" aria-label="Dismiss" title="Dismiss">×</button></div>
+    <button type="button" class="nt-pop-body" data-action="nt-open" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}">${prefs.preview === false ? '<em>New message</em>' : esc(item.body)}${more ? `<span class="nt-more">+${more} more</span>` : ''}</button>
+    ${canReply ? `<form class="nt-reply" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}"><input type="text" placeholder="Reply…" aria-label="Reply" maxlength="4000"><button type="submit" class="btn small primary">Send</button></form>` : ''}
+    <div class="nt-pop-acts"><button type="button" class="btn small quiet" data-action="nt-read" data-key="${esc(item.key)}">Mark read</button><button type="button" class="btn small" data-action="nt-open" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}">Open</button></div>
+    <i class="nt-life" aria-hidden="true"></i>`;
+  const box = stack(); box.prepend(card); while (box.children.length > 3) box.lastElementChild.remove();
+  let timer = 0; const arm = () => { clearTimeout(timer); timer = setTimeout(() => card.remove(), 8000); };
+  card.addEventListener('mouseenter', () => clearTimeout(timer)); card.addEventListener('mouseleave', () => { if (!card.contains(document.activeElement)) arm(); });
+  card.addEventListener('focusin', () => clearTimeout(timer));
+  card.querySelector('.nt-pop-x').addEventListener('click', () => card.remove());
+  card.querySelector('.nt-reply')?.addEventListener('submit', async event => {
+    event.preventDefault(); const form = event.target, text = form.querySelector('input').value.trim(); if (!text) return;
+    try {
+      const type = form.dataset.type, id = form.dataset.id;
+      if (type === 'room') await ctx.api(`/rooms/${id}/messages`, { method: 'POST', data: { text } });
+      else { const runId = type === 'main' ? (ctx.ui.snap.runs || []).find(run => run.main)?.id : id; if (runId) await ctx.api(`/runs/${runId}/say`, { method: 'POST', data: { text } }); }
+      await ctx.api('/notices/read', { method: 'POST', data: { key: form.dataset.key } }).catch(() => {});
+      card.remove(); ctx.toast('Sent.'); await ctx.refresh();
+    } catch (error) { ctx.toast(error.message, true); }
+  });
+  arm();
+}
 export function watchNotices(ctx) {
-  const { ui, esc } = ctx, recent = ui.snap?.notices?.recent || [];
+  const { ui } = ctx, recent = ui.snap?.notices?.recent || [], prefs = ui.snap?.notices?.prefs || {};
   const key = noticeKey(ui.view); if (window.rexView !== key) { window.rexView = key; window.rexPresence?.(); }
   if (!seen) { seen = new Set(recent.map(item => item.id)); return; }
-  const here = noticeKey(ui.view), fresh = recent.filter(item => !seen.has(item.id) && !item.read && item.key !== here);
+  const fresh = recent.filter(item => !seen.has(item.id) && item.alert && !item.read && item.key !== key);
   for (const item of recent) seen.add(item.id);
-  if (!fresh.length) return;
-  const item = fresh[0], more = fresh.length - 1;
-  hidePop();
-  const pop = document.createElement('div'); pop.className = 'nt-pop'; pop.setAttribute('role', 'status');
-  pop.innerHTML = `<button type="button" class="nt-pop-open" data-action="nt-open" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}"><b>${esc(item.title)}</b><small>${esc(item.body)}</small>${more ? `<em>and ${more} more</em>` : ''}</button><button type="button" class="nt-pop-x" aria-label="Dismiss">×</button>`;
-  pop.querySelector('.nt-pop-x').addEventListener('click', hidePop);
-  document.body.append(pop); popTimer = setTimeout(hidePop, 6000);
+  if (!fresh.length || prefs.inapp === false) return;
+  popUp(ctx, fresh[0], fresh.length - 1);
+  if (prefs.sound !== false) playTone(prefs.tone, fresh[0].kind, prefs.volume ?? 0.6);
 }
-document.addEventListener('change', async event => {
-  if (!event.target.matches?.('[data-nt-pops]')) return;
-  const ctx = window.__rexCtx; if (!ctx) return;
-  try { await ctx.api('/config', { method: 'PUT', data: { ...ctx.ui.snap.config, notify: event.target.checked } }); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); }
-});

@@ -558,6 +558,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return json(response, 200, { ok: true });
       }
       if (url.pathname === '/api/notices/read' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.notifier.read({ key: String(input.key || ''), all: input.all === true })); }
+      if (url.pathname === '/api/notices/prefs' && request.method === 'POST') return json(response, 200, desk.notifier.setPrefs(await body(request)));
+      if (url.pathname === '/api/notices/test' && request.method === 'POST') return json(response, 200, desk.notifier.test());
       if (url.pathname === '/api/notices/mute' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.notifier.mute(String(input.key || ''), input.on !== false)); }
       const taskNameMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/name$/);
       if (taskNameMatch && request.method === 'POST') return json(response, 200, { name: await desk.englishName(taskNameMatch[1]) });
