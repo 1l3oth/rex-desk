@@ -6,6 +6,8 @@ import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync } from 'node:f
 import path from 'node:path';
 import os from 'node:os';
 const EXPLAINER = path.join(os.homedir(), '.agents', 'skills', 'code-explainer-page');
+// Explaining an idea, a cause or how something works: a picture page in eli5 style, the way the person likes to learn.
+export const ELI5_RULE = 'When you explain to the person how something works, why something broke, what a choice means, or anything longer than a few lines, explain like they are five: big pictures, few words. Make one self-contained HTML page named eli5-<short-topic>.html in your work folder (inline CSS and inline SVG drawings only, no external files, no emoji; a few numbered picture steps, each with one or two plain sentences; light and dark friendly), never open it yourself, and show it with desk_show_page beside a two or three line answer in the chat. For your own code changes use the code explainer page instead. Short answers and yes/no questions stay plain chat.';
 // When the person asks what you changed, they get a page to read, not a wall of text.
 const EXPLAIN_RULE = existsSync(path.join(EXPLAINER, 'scripts', 'render.mjs'))
   ? ` When the person asks what you changed or to explain your changes or the code, make a code explainer page: follow ${path.join(EXPLAINER, 'SKILL.md')} (read it first), render the page with \`node "${path.join(EXPLAINER, 'scripts', 'render.mjs')}" <spec.json> --out <folder>/code-explainer-<slug>.html\` (never --open), then show it with desk_show_page and write two or three plain lines beside it.`

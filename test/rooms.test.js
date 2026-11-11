@@ -395,3 +395,12 @@ test('each reply shows the tokens it used: on the run and under the agent\'s roo
   const run = store.get('run', store.get('specialist', dara.id).roomRunId);
   assert.equal(run.tokensTotal.output, 340);
 });
+
+test('every agent is told to explain with eli5 picture pages and to show code changes with an explainer page', async () => {
+  const { desk, turns } = setup();
+  await desk.rooms.post(room0(desk), { text: 'Morning' });
+  await waitFor(() => turns.length === 1);
+  assert.match(turns[0].prompt, /explain like they are five/);
+  assert.match(turns[0].prompt, /desk_show_page/);
+});
+function room0(desk) { return desk.store.list('room')[0].id; }
