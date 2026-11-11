@@ -453,3 +453,13 @@ test('a sub-agent an agent starts shows as its own steps: noted in the room, and
   const runId = store.get('specialist', dara.id).roomRunId;
   assert.ok(store.events(runId, { visible: true }).some(event => event.kind === 'subagent-done'), 'the chat can show the card');
 });
+
+test('an agent who @mentions someone who is not in the room is told so, with where that agent is', async () => {
+  const { desk, dara, vanna, room } = setup();
+  const other = desk.rooms.create('Billing', [vanna.id]);
+  desk.rooms.removeMember(room.id, vanna.id);
+  await desk.rooms.post(room.id, { fromAgentId: dara.id, text: '@vanna can you check the invoice?' });
+  const note = desk.rooms.messages(room.id).find(item => item.from.type === 'system' && /@vanna is not in this room/.test(item.text));
+  assert.ok(note, 'a note in the room'); assert.match(note.text, /Vanna is in Billing/);
+  assert.ok(other);
+});

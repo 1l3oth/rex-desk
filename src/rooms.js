@@ -88,6 +88,11 @@ export class Rooms {
     const names = [...String(text).matchAll(/(?<![\p{L}\p{N}_@])@([\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/gu)].map(match => match[1].toLowerCase() === 'main' ? 'rex' : match[1]).filter(name => known.has(name.toLowerCase()));
     return this.resolveTargets(room, names);
   }
+  // Agents that exist but are not members of this room, named with @ in a message.
+  outsidersIn(room, text) {
+    const members = new Set(room.members), names = [...String(text).matchAll(/(?<![\p{L}\p{N}_@])@([\p{L}\p{N}_-]+)/gu)].map(match => match[1].toLowerCase());
+    return [...new Set(names)].map(name => this.store.list('specialist').find(agent => agent.id !== 'main' && (String(agent.slug).toLowerCase() === name || String(agent.name).toLowerCase() === name))).filter(agent => agent && !members.has(agent.id));
+  }
   // #49760 names a task by its tracker number.
   tasksIn(text) {
     // #49760 is a tracker number; #L4 is a Rex Desk task.
@@ -129,6 +134,9 @@ export class Rooms {
     const message = { id: randomUUID(), roomId, seq, threadId: parent ? (parent.threadId || parent.id) : '', replyTo, from, text: body, to: paused ? targets.filter(target => target === HUMAN) : (targets.length ? targets : [HUMAN]),
       tasks: this.tasksIn(body), hops, paused, at: now(), ...(instruction ? { instruction: String(instruction).slice(0, 4000) } : {}) };
     this.store.put('room', roomId, { ...this.room(roomId), seq }); this.store.put('roommsg', message.id, message);
+    // An @mention of an agent who is not in this room reaches nobody: say so, and where that agent is, so nobody waits for an answer.
+    const outsiders = this.outsidersIn(room, body);
+    if (outsiders.length) this.system(roomId, outsiders.map(agent => { const rooms = this.roomsOf(agent.id).map(item => item.name); return `@${agent.slug} is not in this room, so ${agent.name} did not get that.${rooms.length ? ` ${agent.name} is in ${rooms.join(', ')}.` : ''} Add ${agent.name} here with Add people, or ask there.`; }).join(' '));
     if (paused) this.system(roomId, `Thread paused after ${room.away?.on ? AWAY_HOPS : MAX_HOPS} agent-to-agent replies. Reply here to let it continue.`);
     // In auto timing, the lead says when it wants the next check-in.
     if (fromAgentId && room.away?.on && room.away.every === 'auto' && fromAgentId === this.lead(room)) { const next = /next check-?in:?\s*(\d{1,3})\s*(h|hour|min)/i.exec(body); if (next) this.store.put('room', roomId, { ...this.room(roomId), away: { ...this.room(roomId).away, nextMinutes: Math.min(240, Math.max(5, Number(next[1]) * (/^h/i.test(next[2]) ? 60 : 1))) } }); }
@@ -159,7 +167,7 @@ export class Rooms {
     const tasks = message.tasks.map(id => { const task = this.store.get('task', id); return task ? `- ${this.taskLine(id)} (${task.statusName || task.status || 'no status'}; ${task.projectName || 'no project'})${task.url ? ` ${task.url}` : ''}\n  ${clip(task.description, 700)}` : ''; }).filter(Boolean);
         // Who else is answering or working in this room right now, so replies build on each other instead of clashing.
     const alsoWorking = room.members.filter(id => id !== agentId).map(id => this.member(id)).filter(member => ['replying', 'busy', 'waiting'].includes(member.state));
-    return [`Group chat "${room.name}". Members: ${room.members.map(id => `${this.member(id).name} (@${this.member(id).handle}, ${this.member(id).project})`).join(', ')}, and the person. You are ${agent?.name}.`,
+    return [`Group chat "${room.name}". Members: ${room.members.map(id => `${this.member(id).name} (@${this.member(id).handle}, ${this.member(id).project})`).join(', ')}, and the person. You are ${agent?.name}. Mention only these members with @: anyone else does not get the message.`,
       alsoWorking.length ? `Also working in this room right now: ${alsoWorking.map(member => `${member.name} (${member.label})`).join(', ')}. They may post while you work.` : '',
       here.length ? `The conversation so far (read it before you answer):\n${here.map(line).join('\n')}` : 'Nothing new in this room before this message.',
       others.length ? `News from your other rooms (read more with desk_room_history):\n${others.map(({ other, news }) => `[${other.name}]\n${news.map(line).join('\n')}`).join('\n')}` : '',
