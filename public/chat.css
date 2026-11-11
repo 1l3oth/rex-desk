@@ -1084,3 +1084,17 @@ button.cn-main{cursor:pointer}
 .acct-out .acct-main b{font-weight:500}
 .dialog label.acct-auto{flex-direction:row;align-items:flex-start;gap:8px;color:var(--ink);font-size:13px}
 .acct-foot{display:flex;justify-content:flex-end;gap:8px}
+
+/* Phone pushes */
+.nt-steps{margin:0;padding-left:20px;font-size:13px;display:flex;flex-direction:column;gap:3px}
+.nt-qr{display:grid;place-items:center;padding:10px;border-radius:12px;background:#fff;width:180px;height:180px;margin:0 auto}.nt-qr svg{width:160px;height:160px}
+.nt-topic{display:flex;align-items:center;gap:8px}.nt-topic code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;padding:6px 8px;border-radius:8px;background:var(--bg);border:1px solid var(--line)}
+.nt-adv summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.nt-adv input{width:100%;margin:6px 0 4px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
+
+/* Places as small tiles under Rex Agent */
+.tiles{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;margin:6px 0 2px;padding:0}
+.tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 2px 5px;border:0;border-radius:10px;background:none;color:var(--muted)}
+.tile:hover{background:var(--raised);color:var(--ink)}.tile.active{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--ink)}
+.tile .av{width:28px;height:28px}.tile .tname{font-size:10.5px;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbadge{position:absolute;top:1px;right:2px;min-width:17px;height:17px;padding:0 5px;border-radius:9px;background:var(--accent);color:var(--accent-ink);font-size:10.5px;font-weight:700;line-height:17px;text-align:center;box-shadow:0 0 0 2px var(--panel)}
+.tbadge.warn{background:var(--warn);color:#fff}

@@ -63,6 +63,12 @@ const runTitle = run => { const task = run?.taskId ? ui.snap?.tasks?.find(item =
 const roomById = id => ui.snap.rooms.find(room => room.id === id);
 
 // ---------- rail ----------
+const TILE_NAMES = { notices: 'Alerts', inbox: 'Needs', tasks: 'Tasks', jev: 'Jev', person: 'You', monitor: 'RAM', devices: 'PCs' };
+// A small square button for a place (Notifications, Tasks, Monitor…), with its name and state in the tooltip and a badge when something waits.
+function tile(type, avatar, name, sub, badge = 0, warn = false) {
+  const active = ui.view.type === type;
+  return `<button class="tile ${active ? 'active' : ''}" data-open="${type}" data-id="" title="${esc(`${name} · ${sub}`)}" aria-label="${esc(`${name}, ${sub}`)}">${avatar}${badge ? `<span class="tbadge ${warn ? 'warn' : ''}">${badge > 99 ? '99+' : badge}</span>` : ''}<span class="tname">${esc(TILE_NAMES[type] || name)}</span></button>`;
+}
 function railItem(type, id, { dot = '', avatar = '', name, sub = '', badge = 0, warn = false }) {
   const active = (ui.view.type === type && (ui.view.id || '') === (id || '')) || (type === 'specialist' && ui.view.type === 'run' && (ui.snap?.specialists || []).some(agent => agent.id === id && agent.runId === ui.view.id));
   return `<button class="item ${active ? 'active' : ''}" data-open="${type}" data-id="${esc(id || '')}">${avatar || (dot ? `<span class="dot ${dot}"></span>` : '')}<span class="name">${esc(name)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span>${badge ? `<span class="badge ${warn ? 'warn' : ''}">${badge}</span>` : ''}</button>`;
@@ -99,13 +105,15 @@ function renderRail() {
   return `<div class="rail-head"><span class="brand">${iconAv('main', 'brandmark')}<strong>Rex Desk</strong></span><span class="spacer"></span><button class="btn small" data-action="sync" title="Sync issues from the tracker">Sync</button></div><div class="rail-scroll">
     <div class="sec-body top">
       ${railItem('main', '', { avatar: withDot(iconAv('main', 'accent'), main ? stateTone(main) : ''), name: 'Rex Agent', sub: main ? stateLabel(main) : 'Not started', badge: unreadFor(ui, 'main:') })}
-      ${railItem('notices', '', { avatar: iconAv('bell', snap.notices?.unread ? 'warn' : ''), name: 'Notifications', sub: snap.notices?.unread ? `${snap.notices.unread} unread` : 'All caught up', badge: snap.notices?.unread || 0 })}
-      ${railItem('inbox', '', { avatar: iconAv('inbox', asks ? 'warn' : ''), name: 'Needs you', sub: asks ? `${asks} waiting` : 'Nothing waiting', badge: asks, warn: true })}
-      ${railItem('person', '', { avatar: ui.profile?.photo ? `<img class="av sm photo" src="${photoUrl()}" alt="">` : iconAv('person'), name: 'About you', sub: ui.profile?.name || 'What the agents learned' })}
-      ${railItem('jev', '', { avatar: iconAv('mic', 'accent'), name: 'Jev', sub: 'Control this computer and websites' })}
-      ${railItem('tasks', '', { avatar: iconAv('tasks'), name: 'Tasks', sub: busy ? `${busy} being worked on` : `${tasks.length} tasks · ${1 + (snap.config?.sources || []).length} connectors` })}
-      ${railItem('monitor', '', { avatar: iconAv('monitor'), name: 'Monitor', sub: ui.monitor ? `${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free · ${ui.monitor.liveRuns.length} working` : 'Memory and what uses it' })}
-      ${railItem('devices', '', { avatar: iconAv('devices'), name: 'Devices', sub: (snap.devices?.peers || []).length ? `${(snap.devices.peers.filter(peer => peer.online).length + 1)} of ${snap.devices.peers.length + 1} on` : 'Only this computer' })}
+      <div class="tiles" role="toolbar" aria-label="Places">${[
+        tile('notices', iconAv('bell', snap.notices?.unread ? 'warn' : ''), 'Notifications', snap.notices?.unread ? `${snap.notices.unread} unread` : 'All caught up', snap.notices?.unread || 0, true),
+        tile('inbox', iconAv('inbox', asks ? 'warn' : ''), 'Needs you', asks ? `${asks} waiting` : 'Nothing waiting', asks, true),
+        tile('tasks', iconAv('tasks'), 'Tasks', busy ? `${busy} being worked on` : `${tasks.length} tasks`, 0),
+        tile('jev', iconAv('mic', 'accent'), 'Jev', 'Control this computer and websites', 0),
+        tile('person', ui.profile?.photo ? `<img class="av sm photo" src="${photoUrl()}" alt="">` : iconAv('person'), 'About you', ui.profile?.name || 'What the agents learned', 0),
+        tile('monitor', iconAv('monitor'), 'Monitor', ui.monitor ? `${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : 'Memory and what uses it', 0),
+        tile('devices', iconAv('devices'), 'Devices', (snap.devices?.peers || []).length ? `${(snap.devices.peers.filter(peer => peer.online).length + 1)} of ${snap.devices.peers.length + 1} on` : 'Only this computer', 0),
+      ].join('')}</div>
     </div>
     ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })).join('') : '<p class="rail-empty">No rooms yet.</p>')}
     ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentGroups(ctx, agents, (agent, grouped) => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: grouped ? agent.status?.label || 'Idle' : `${agent.status?.state === 'idle' || !agent.status ? agent.projectSlug : agent.status.label}`, badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}

@@ -68,3 +68,19 @@ test('every notification is kept with an unread count per chat; a chat on screen
   assert.equal(shown.length, before, 'muted: no toast'); assert.equal(notifier.summary().unread, 0, 'muted: kept as read');
   assert.ok(notifier.summary().recent.some(item => item.body === 'Again.'), 'still in the list');
 });
+
+test('a phone push goes to the private ntfy topic with the title and priority, only when it is on', async () => {
+  const { store, notifier } = setup(); const sent = [];
+  notifier.fetch = async (url, options) => { sent.push({ url, options }); return { ok: true, status: 200 }; };
+  const topic = notifier.prefs().push.topic;
+  assert.match(topic, /^rexdesk-[0-9a-f]{24}$/);
+  store.put('interaction', 'q9', { id: 'q9', runId: 'r1', kind: 'question', title: 'Which branch?', state: 'pending', createdAt: now() });
+  assert.equal(sent.length, 0, 'off by default');
+  notifier.setPrefs({ push: { on: true } });
+  store.put('interaction', 'q10', { id: 'q10', runId: 'r1', kind: 'question', title: '어느 브랜치?', state: 'pending', createdAt: now() });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(sent.length, 1); assert.equal(sent[0].url, `https://ntfy.sh/${topic}`);
+  assert.equal(sent[0].options.headers.Priority, '4'); const title = sent[0].options.headers.Title.replace(/^=\?UTF-8\?B\?(.*)\?=$/, (_, b64) => Buffer.from(b64, 'base64').toString('utf8')); assert.match(title, /^Needs your answer · Rex Agent/);
+  assert.equal(sent[0].options.body, '어느 브랜치?');
+  notifier.setPrefs({ push: { newTopic: true } }); assert.notEqual(notifier.prefs().push.topic, topic);
+});

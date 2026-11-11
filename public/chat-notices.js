@@ -47,7 +47,20 @@ export function noticesStage(ctx) {
   const toggle = (name, on, label, help = '') => `<label class="nt-switch"><input type="checkbox" data-nt-pref="${name}" ${on ? 'checked' : ''}><span class="nt-track" aria-hidden="true"></span><span class="nt-lbl"><b>${label}</b>${help ? `<small>${help}</small>` : ''}</span></label>`;
   const select = (name, value, options) => `<select data-nt-pref="${name}">${options.map(([key, label]) => `<option value="${key}" ${String(value) === String(key) ? 'selected' : ''}>${label}</option>`).join('')}</select>`;
   const kinds = prefs.kinds || {}, quiet = prefs.quiet || {}, dnd = prefs.dndUntil && prefs.dndUntil > Date.now();
+  // Phone pushes through the ntfy app: subscribe once to this computer's private topic.
+  const push = prefs.push || {};
+  if (!ui.pushQr && !ui.pushQrLoading && push.topic) { ui.pushQrLoading = true; ctx.api('/notices/push-qr').then(result => { ui.pushQr = result; ui.pushQrLoading = false; ctx.render(); }).catch(() => { ui.pushQrLoading = false; }); }
+  const phone = `<section class="card nt-card nt-phone"><h3>Phone</h3>
+      ${toggle('push.on', push.on, 'Push to my phone', 'Through the free ntfy app. Arrives even when Rex Desk is closed on the phone.')}
+      <ol class="nt-steps"><li>Install <b>ntfy</b> from the App Store or Google Play.</li><li>In ntfy press <b>+</b>, then scan this code or paste the topic.</li><li>Press <b>Send a test push</b>.</li></ol>
+      <div class="nt-qr">${ui.pushQr?.svg || '<span class="muted small">Making the code…</span>'}</div>
+      <div class="nt-topic"><code>${esc(push.topic || '')}</code><button type="button" class="btn small" data-action="nt-copy-topic">Copy</button></div>
+      ${toggle('push.always', push.always, 'Also while I am at this computer', 'Off: the phone gets it only when Rex Desk is not the window in front.')}
+      <div class="nt-chips"><button type="button" class="btn small primary" data-action="nt-push-test">Send a test push</button><button type="button" class="btn small quiet" data-action="nt-new-topic" title="Use if someone else got this topic">New private topic</button></div>
+      ${prefs.pushError ? `<p class="small warn-text">Last push failed: ${esc(prefs.pushError)}</p>` : ''}
+      <details class="nt-adv"><summary>Own ntfy server</summary><input type="url" data-nt-pref="push.server" value="${esc(push.server || 'https://ntfy.sh')}" aria-label="ntfy server address"><small class="muted">Anyone with the topic name can read the pushes on ntfy.sh. Turn off "Show the message in pop-ups" to send only who wrote.</small></details></section>`;
   const settings = `<aside class="nt-side">
+    ${phone}
     <section class="card nt-card"><h3>Do not disturb</h3>
       ${dnd ? `<p class="nt-dnd on">Quiet until ${esc(new Date(prefs.dndUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</p><button type="button" class="btn small" data-action="nt-dnd" data-minutes="0">Turn off</button>`
         : `<div class="nt-chips">${[[30, '30 min'], [60, '1 hour'], [180, '3 hours'], [720, 'Until tomorrow']].map(([minutes, label]) => `<button type="button" class="btn small" data-action="nt-dnd" data-minutes="${minutes}">${label}</button>`).join('')}</div>`}
@@ -91,6 +104,9 @@ export async function noticesAction(ctx, action, target) {
   if (action === 'nt-mute') { await api('/notices/mute', { method: 'POST', data: { key: target.dataset.key, on: target.dataset.on === '1' } }); await refresh(); return; }
   if (action === 'nt-dnd') { await api('/notices/prefs', { method: 'POST', data: { dndMinutes: Number(target.dataset.minutes) } }); await refresh(); return; }
   if (action === 'nt-hear') { playTone(prefs.tone, 'reply', prefs.volume ?? 0.6); return; }
+  if (action === 'nt-push-test') { try { await api('/notices/push-test', { method: 'POST', data: {} }); ctx.toast('Test push sent. Check your phone.'); } catch (error) { ctx.toast(error.message, true); } await refresh(); return; }
+  if (action === 'nt-copy-topic') { await navigator.clipboard.writeText(prefs.push?.topic || ''); ctx.toast('Topic copied.'); return; }
+  if (action === 'nt-new-topic') { if (!confirm('Make a new private topic? Your phone stops getting pushes until you subscribe to the new one.')) return; await api('/notices/prefs', { method: 'POST', data: { push: { newTopic: true } } }); ui.pushQr = null; await refresh(); return; }
   if (action === 'nt-test') { await api('/notices/test', { method: 'POST', data: {} }); await refresh(); return; }
   if (action === 'nt-read') { await api('/notices/read', { method: 'POST', data: { key: target.dataset.key } }).catch(() => {}); target.closest('.nt-pop')?.remove(); await refresh(); return; }
   if (action === 'nt-open') { await api('/notices/read', { method: 'POST', data: { key: target.dataset.key } }).catch(() => {}); target.closest('.nt-pop')?.remove(); open(target.dataset.type === 'inbox' ? 'inbox' : target.dataset.type, target.dataset.id || ''); }

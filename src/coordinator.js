@@ -90,6 +90,8 @@ export class Desk {
       store.event(runId, kind, data);
     }, () => this.mcpUrl);
     this.peers = new Peers(this, { transport: peerTransport });
+    // A phone push opens Rex Desk on the phone when it can reach this computer (Tailscale and remote access on).
+    this.notifier.pushClick = () => this.peers.settings().remote && this.port ? this.peers.addresses(this.port)[0] || '' : '';
     this.worktreeRoot = path.join(path.dirname(store.directory), 'worktrees');
     mkdirSync(this.worktreeRoot, { recursive: true });
     mkdirSync(path.join(store.directory, 'coordinator'), { recursive: true });

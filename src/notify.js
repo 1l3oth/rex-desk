@@ -5,8 +5,10 @@ const clip = (value, size) => { const text = String(value ?? '').replace(/\s+/g,
 const working = new Set(['queued', 'starting', 'running', 'verifying', 'waiting']);
 const settled = new Set(['finished', 'needs_evidence', 'failed']);
 const KEEP = 300;
+// HTTP headers carry ASCII only; anything else (Korean, emoji) goes in as RFC 2047, which ntfy reads.
+const header = text => /^[ -~]*$/.test(text) ? text : `=?UTF-8?B?${Buffer.from(text, 'utf8').toString('base64')}?=`;
 export const TONES = ['chime', 'soft', 'pop', 'bell'];
-const DEFAULTS = { windows: true, inapp: true, sound: true, volume: 0.6, tone: 'chime', preview: true, roomGap: 60, dndUntil: 0,
+const DEFAULTS = { windows: true, inapp: true, sound: true, volume: 0.6, tone: 'chime', preview: true, roomGap: 60, dndUntil: 0, push: { on: false, server: 'https://ntfy.sh', topic: '', always: false },
   kinds: { ask: true, reply: true, room: 'all', failed: true }, quiet: { on: false, from: '22:00', to: '08:00' } };
 
 // A Windows toast. The text goes in through the environment, never into the script, so nothing in an agent's message can run as a command.
@@ -42,7 +44,13 @@ export class Notifier {
     this.store.on('change', event => { try { this.onChange(event); } catch { /* a notification never breaks the app */ } });
     return this;
   }
-  prefs() { const saved = this.store.get('prefs', 'notify') || {}; return { ...DEFAULTS, ...saved, kinds: { ...DEFAULTS.kinds, ...(saved.kinds || {}) }, quiet: { ...DEFAULTS.quiet, ...(saved.quiet || {}) }, mutes: saved.mutes || [] }; }
+  prefs() {
+    const saved = this.store.get('prefs', 'notify') || {};
+    const prefs = { ...DEFAULTS, ...saved, kinds: { ...DEFAULTS.kinds, ...(saved.kinds || {}) }, quiet: { ...DEFAULTS.quiet, ...(saved.quiet || {}) }, push: { ...DEFAULTS.push, ...(saved.push || {}) }, mutes: saved.mutes || [] };
+    // A private topic name, made once: whoever knows it can read the pushes, so it is long and random.
+    if (!prefs.push.topic) { prefs.push.topic = `rexdesk-${randomUUID().replaceAll('-', '').slice(0, 24)}`; this.store.put('prefs', 'notify', { ...saved, id: 'notify', push: prefs.push }); }
+    return prefs;
+  }
   // What the person chose on the Notifications screen. Only known settings are kept.
   setPrefs(input = {}) {
     const prefs = this.prefs(), next = { ...prefs, id: 'notify' }, time = value => /^\d{2}:\d{2}$/.test(String(value)) ? String(value) : null;
@@ -52,6 +60,14 @@ export class Notifier {
     if (input.roomGap !== undefined) next.roomGap = [0, 60, 300, 900].includes(Number(input.roomGap)) ? Number(input.roomGap) : 60;
     if (input.kinds) for (const [kind, value] of Object.entries(input.kinds)) if (kind in DEFAULTS.kinds) next.kinds[kind] = kind === 'room' ? (['all', 'mentions', 'off'].includes(value) ? value : 'all') : Boolean(value);
     if (input.quiet) next.quiet = { on: input.quiet.on !== undefined ? Boolean(input.quiet.on) : prefs.quiet.on, from: time(input.quiet.from) || prefs.quiet.from, to: time(input.quiet.to) || prefs.quiet.to };
+    if (input.push) {
+      const push = { ...prefs.push };
+      if (input.push.on !== undefined) push.on = Boolean(input.push.on);
+      if (input.push.always !== undefined) push.always = Boolean(input.push.always);
+      if (input.push.server !== undefined) { const url = String(input.push.server).trim().replace(/\/+$/, ''); if (!/^https?:\/\/[^\s/]+(\/[^\s]*)?$/.test(url)) throw new Error('Type the ntfy server address, like https://ntfy.sh.'); push.server = url; }
+      if (input.push.newTopic) push.topic = `rexdesk-${randomUUID().replaceAll('-', '').slice(0, 24)}`;
+      next.push = push;
+    }
     if (input.dndMinutes !== undefined) next.dndUntil = Number(input.dndMinutes) > 0 ? Date.now() + Number(input.dndMinutes) * 60000 : 0;
     this.store.put('prefs', 'notify', next); return next;
   }
@@ -89,7 +105,7 @@ export class Notifier {
       const message = this.store.get('roommsg', id);
       if (!message || this.seen.has(`msg:${id}`)) return; this.seen.add(`msg:${id}`);
       if (message.from?.type !== 'agent') return;
-      const room = this.store.get('room', message.roomId), toYou = (message.to || []).includes('you') || /(^|[^\w@])@you\b/i.test(String(message.text || ''));
+      const room = this.store.get('room', message.roomId), toYou = /(^|[^\w@])@you\b/i.test(String(message.text || '')); // only an explicit @you: an agent's ordinary reply is not a question to you
       // In a busy room, one pop-up per chosen gap; every message still counts as unread. A message to you always pops up.
       const gap = this.prefs().roomGap * 1000, quiet = !toYou && gap > 0 && Date.now() - (this.roomToast.get(message.roomId) || 0) < gap;
       if (!quiet) this.roomToast.set(message.roomId, Date.now());
@@ -105,10 +121,23 @@ export class Notifier {
     const alert = toast && wanted && !muted && !quiet && !looking;
     const notice = { id: randomUUID(), at: new Date().toISOString(), kind, title: clip(title, 120), body: clip(body, 400), target, key, from, read: looking || muted || !wanted, alert };
     this.store.put('notice', notice.id, notice); this.prune();
+    // A push to the phone (ntfy) when the person is away from this window, or always if they chose that.
+    if (alert && prefs.push.on && (prefs.push.always || !this.focused()) && this.enabled()) void this.push({ kind, title, body: prefs.preview ? body : 'Open Rex Desk to read it.' });
     if (!alert || !prefs.windows || !this.enabled() || this.focused()) return notice;
     const now = Date.now(); if (now - this.lastAt < this.minGapMs) return notice; this.lastAt = now;
     this.show(title, prefs.preview ? body : 'Open Rex Desk to read it.', { sound: prefs.sound ? (kind === 'ask' || kind === 'mention' ? 'Reminder' : kind === 'failed' ? 'Default' : 'IM') : '' }); return notice;
   }
+  async push({ kind = 'reply', title, body, test = false }) {
+    const { push } = this.prefs();
+    try {
+      const response = await (this.fetch || fetch)(`${push.server}/${push.topic}`, { method: 'POST', body: clip(body, 1000), signal: AbortSignal.timeout(10000),
+        headers: { Title: header(clip(title, 120)), Priority: kind === 'ask' || kind === 'mention' || kind === 'failed' ? '4' : '3', Tags: kind === 'failed' ? 'warning' : kind === 'ask' || kind === 'mention' ? 'raising_hand' : 'speech_balloon', ...(this.pushClick?.() ? { Click: this.pushClick() } : {}) } });
+      this.pushError = response.ok ? '' : `ntfy answered ${response.status}.`;
+    } catch (error) { this.pushError = error.message; }
+    if (test && this.pushError) throw new Error(`The phone push did not go out: ${this.pushError}`);
+    return { sent: !this.pushError };
+  }
+  testPush() { return this.push({ kind: 'reply', title: 'Rex Desk', body: 'Phone notifications work. You will get one when an agent replies, asks or stops.', test: true }); }
   test() { return this.notify({ kind: 'reply', title: 'Rex Desk', body: 'This is how a notification looks and sounds.', target: { type: 'notices', id: '' } }); }
   prune() { const all = this.store.list('notice').sort((a, b) => String(b.at).localeCompare(String(a.at))); for (const old of all.slice(KEEP)) this.store.delete('notice', old.id); }
   read({ key = '', all = false } = {}) {
@@ -119,6 +148,6 @@ export class Notifier {
   summary() {
     const all = this.store.list('notice').sort((a, b) => String(b.at).localeCompare(String(a.at))), unread = all.filter(item => !item.read);
     const byKey = {}; for (const item of unread) byKey[item.key] = (byKey[item.key] || 0) + 1;
-    const prefs = this.prefs(); return { unread: unread.length, byKey, recent: all.slice(0, 60), mutes: prefs.mutes, prefs: { ...prefs, quietNow: this.quietNow() } };
+    const prefs = this.prefs(); return { unread: unread.length, byKey, recent: all.slice(0, 60), mutes: prefs.mutes, prefs: { ...prefs, quietNow: this.quietNow(), pushError: this.pushError || '' } };
   }
 }
