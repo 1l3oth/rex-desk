@@ -57,6 +57,12 @@ function drawChips(ctx) {
   const host = document.getElementById('attach-chips'); if (!host) return;
   host.innerHTML = ctx.ui.attachments.map((file, index) => `<span class="attach ${file.error ? 'bad' : ''}">${ICON.file}<span class="nm">${ctx.esc(file.name)}</span>${file.path ? '' : '<span class="sp"></span>'}<button type="button" data-remove-attach="${index}" aria-label="Remove">×</button></span>`).join('');
 }
+// Saves a dropped or pasted file in Rex Desk and gives back where it is, without attaching it to a message.
+async function store(file) {
+  const response = await fetch(`/api/uploads?name=${encodeURIComponent(file.name || 'dropped-file')}`, { method: 'POST', headers: { 'x-rex-desk': '1' }, body: file });
+  const body = await response.json(); if (!response.ok) throw new Error(body.error || 'Upload failed.');
+  return body;
+}
 async function upload(ctx, file) {
   const entry = { name: file.name || 'pasted-file', path: '' }; ctx.ui.attachments.push(entry); drawChips(ctx);
   try {
@@ -260,10 +266,36 @@ export function initComposer(ctx) {
     const files = [...(event.clipboardData?.files || [])]; if (!files.length) return;
     event.preventDefault(); for (const file of files) void upload(ctx, file);
   });
-  document.addEventListener('dragover', event => { if (event.target.closest?.('#composer')) event.preventDefault(); });
-  document.addEventListener('drop', event => {
-    if (!event.target.closest?.('#composer')) return;
-    event.preventDefault(); for (const file of event.dataTransfer?.files || []) void upload(ctx, file);
+  // Files can be dropped anywhere: on a chat they are attached to the message, on another text box their saved path is typed in,
+  // and on the file window they open there. Nothing dropped ever makes the page leave Rex Desk.
+  const carriesFiles = event => [...(event.dataTransfer?.types || [])].includes('Files');
+  const field = target => target?.closest?.('input:not([type]),input[type="text"],input[type="url"],input[type="search"],textarea');
+  let hide = 0;
+  document.addEventListener('dragover', event => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    const where = event.target.closest?.('.fw') ? 'Open in the file window' : field(event.target) && event.target.id !== 'draft' ? 'Put its path here' : document.getElementById('draft') ? 'Attach to your message' : '';
+    document.body.classList.toggle('dropping-files', Boolean(where)); document.body.dataset.dropHint = where;
+    clearTimeout(hide); hide = setTimeout(() => document.body.classList.remove('dropping-files'), 300);
+  });
+  document.addEventListener('drop', async event => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault(); document.body.classList.remove('dropping-files');
+    const files = [...(event.dataTransfer?.files || [])]; if (!files.length) return;
+    const input = field(event.target);
+    if (event.target.closest?.('.fw')) { for (const file of files) { try { const saved = await store(file); await window.rexOpenFile?.(saved.path); } catch (error) { ctx.toast(error.message, true); } } return; }
+    if (input && input.id !== 'draft') {
+      try {
+        const paths = []; for (const file of files) paths.push((await store(file)).path);
+        const start = input.selectionStart ?? input.value.length, end = input.selectionEnd ?? start, text = paths.join(input.tagName === 'TEXTAREA' ? '\n' : ' ');
+        input.value = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`; input.focus(); input.selectionStart = input.selectionEnd = start + text.length;
+        input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (error) { ctx.toast(error.message, true); }
+      return;
+    }
+    if (!document.getElementById('draft')) { ctx.toast('Open a chat to attach files.', true); return; }
+    for (const file of files) void upload(ctx, file);
+    document.getElementById('draft')?.focus();
   });
 }
 export const redrawAttachments = drawChips;

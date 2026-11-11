@@ -1216,3 +1216,6 @@ body.fw-alone .fw-head{cursor:default}
 /* Listen to a message */
 .speak{display:inline-grid;place-items:center;width:24px;height:22px;margin-left:6px;border:0;border-radius:6px;background:none;color:var(--muted);cursor:pointer;vertical-align:middle;opacity:.55}
 .msg:hover .speak,.rmsg:hover .speak,.speak:focus-visible,.speak.on{opacity:1}.speak:hover{background:var(--raised);color:var(--ink)}.speak.on{color:var(--accent)}
+
+/* Dropping files: a quiet frame and a hint where they will go */
+body.dropping-files::after{content:attr(data-drop-hint);position:fixed;inset:10px;z-index:90;display:grid;place-items:center;border:2px dashed var(--accent);border-radius:16px;background:color-mix(in srgb,var(--accent) 7%,transparent);color:var(--ink);font-size:15px;font-weight:600;pointer-events:none}
