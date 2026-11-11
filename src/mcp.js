@@ -134,7 +134,10 @@ export function createMcp(desk, scope) {
     { taskId: z.string(), instructions: z.string().max(4000).optional() }, input => {
       const agent = agentOf(); if (!agent) throw new Error('Only a project agent takes its own tasks.');
       if (!desk.specialists.ownTasks(agent).some(task => task.id === input.taskId)) throw new Error('That task is not one of yours. Read yours with desk_tasks.');
-      return desk.assignTask({ specialistId: agent.id, taskId: input.taskId, instructions: input.instructions || '' });
+      // Asked in a room, the agent does it right there in the room.
+      const run = scope.runId ? desk.store.get('run', scope.runId) : null, task = desk.store.get('task', input.taskId);
+      const roomId = run?.roomAgent ? run.roomTurn?.roomId || (task?.roomWork?.agentId === agent.id ? task.roomWork.roomId : '') : '';
+      return desk.assignTask({ specialistId: agent.id, taskId: input.taskId, roomId, instructions: input.instructions || '' });
     });
   tool('desk_question', 'Poll a dashboard question created with desk_ask wait=false.', { questionId: z.string() }, ({ questionId }) => {
     const interaction = desk.store.get('interaction', questionId);

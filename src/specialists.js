@@ -157,7 +157,7 @@ export class Specialists {
   }
   tasksText(agent) {
     const names = this.sourceNames(agent);
-    return names.length ? `Your tasks come from: ${names.join(' and ')}. Read them with desk_tasks; it lists only those. Create and update Rex Desk tasks with desk_create_task and desk_update_task.`
+    return names.length ? `Your tasks come from: ${names.join(' and ')}. Read them with desk_tasks; it lists only those. Create and update Rex Desk tasks with desk_create_task and desk_update_task. To work on one of your tasks (or start it again after a failed run), start it yourself with desk_take_task; in a room you then do it right there in the room. Never ask Rex Agent or the person to start a run for you.`
       : 'Nobody has told you where this project keeps its tasks yet. Before looking for tasks, ask the person (desk_ask) whether they live in a connected tracker, in Rex Desk tasks, or somewhere else, and save the answer with desk_set_task_sources. Never assume Flow or Morningmate.';
   }
   // Each agent's own loop: every so often it looks at its own tasks and starts work, following its project's workflow.
