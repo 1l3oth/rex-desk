@@ -370,3 +370,17 @@ test('a model the Claude account cannot use: the turn runs again on the default 
   assert.equal(seen[1], undefined, 'the second try uses the account default');
   assert.equal(store.get('specialist', dara.id).model, '', 'the agent no longer asks for that model');
 });
+
+test('an agent shows an explanation page of its changes in the chat, and only HTML counts as a page', async () => {
+  const { store, desk, turns, dara } = setup({ replies: ['Done.'] });
+  await desk.specialistTurn(dara.id, { prompt: 'Explain your changes' });
+  await waitFor(() => turns.length === 1);
+  const runId = store.get('specialist', dara.id).runId, folder = temporary('page');
+  const page = path.join(folder, 'code-explainer-cart.html'); writeFileSync(page, '<!doctype html><p>Cart fix</p>');
+  const shown = desk.shareEvidence(runId, { file: page, title: 'Cart total fix', note: 'The discount is now in the total.', page: true });
+  assert.equal(shown.where, 'chat');
+  assert.ok(store.list('artifact').find(item => item.runId === runId && item.page), 'kept as a page');
+  assert.ok(store.events(runId, { visible: true }).some(event => event.kind === 'message' && event.text.includes(`[Open the explanation](${shown.url})`)));
+  const shot = path.join(folder, 'a.png'); writeFileSync(shot, 'x');
+  assert.throws(() => desk.shareEvidence(runId, { file: shot, title: 'x', page: true }), /\.html file/);
+});

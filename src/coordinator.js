@@ -709,22 +709,23 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   // An agent tested something and shares the proof: a screenshot, a recording or the test output. The file is kept with the run's evidence,
   // belongs to the task, and is posted where the agent is talking (its room, or its personal chat), so it also shows in that chat's Media tab.
-  shareEvidence(runId, { file, title, taskId = '', result = 'info', note = '' }) {
+  shareEvidence(runId, { file, title, taskId = '', result = 'info', note = '', page = false }) {
     const run = this.run(runId), source = path.resolve(String(file || ''));
     if (!existsSync(source) || !statSync(source).isFile()) throw new Error(`No file at ${source}. Give the full path of a file on this computer.`);
     if (statSync(source).size > 200 * 1024 * 1024) throw new Error('That file is over 200 MB. Share a shorter recording or a screenshot.');
     const extension = path.extname(source).toLowerCase(), type = EVIDENCE_TYPES[extension];
     if (!type) throw new Error(`Share a picture, a video, a PDF or a text, HTML, JSON or ZIP file, not ${extension || 'a file without an extension'}.`);
+    if (page && type !== 'text/html') throw new Error('An explanation page is an .html file.');
     const agentId = run.roomAgent || run.specialistId || '';
     const owned = taskId || run.taskId || (agentId ? this.store.list('task').filter(item => item.roomWork?.agentId === agentId).sort((left, right) => String(right.roomWork.at).localeCompare(String(left.roomWork.at)))[0]?.id : '') || '';
     if (owned && !this.store.get('task', owned)) throw new Error('No task has that taskId. Read it from desk_tasks.');
     const directory = this.evidence.directory(runId), name = `${Date.now()}-${path.basename(source).replace(/[^\w.-]+/g, '-').slice(-80)}`;
     copyFileSync(source, path.join(directory, name));
     const label = String(title || '').trim() || path.basename(source), mark = { passed: 'Passed', failed: 'Failed' }[result] || '';
-    const artifact = this.evidence.attach(runId, name, label, type, { ...(owned ? { taskId: owned } : {}), result, note: String(note || '').slice(0, 2000), shared: true, from: agentId ? this.specialists.get(agentId)?.name || '' : '' });
+    const artifact = this.evidence.attach(runId, name, label, type, { ...(owned ? { taskId: owned } : {}), result, note: String(note || '').slice(0, 2000), shared: true, ...(page ? { page: true } : {}), from: agentId ? this.specialists.get(agentId)?.name || '' : '' });
     const url = `/artifacts/${runId}/${encodeURIComponent(name)}`, task = owned ? this.store.get('task', owned) : null;
     const media = /^(image|video)\//.test(type) ? `![${label.replace(/[[\]]/g, '')}](${url})` : `[Open ${label.replace(/[[\]]/g, '')}](${url})`;
-    const text = [`**Test evidence${task ? ` for #${task.taskNumber || task.externalId}` : ''}: ${label}**${mark ? ` (${mark})` : ''}`, String(note || '').trim(), media].filter(Boolean).join('\n');
+    const text = page ? [`**Explanation${task ? ` of #${task.taskNumber || task.externalId}` : ''}: ${label}**`, String(note || '').trim(), `[Open the explanation](${url})`].filter(Boolean).join('\n') : [`**Test evidence${task ? ` for #${task.taskNumber || task.externalId}` : ''}: ${label}**${mark ? ` (${mark})` : ''}`, String(note || '').trim(), media].filter(Boolean).join('\n');
     // A room session posts in the room of its current turn, else in the room the task was given in.
     const roomId = run.roomTurn?.roomId || (task?.roomWork?.agentId === agentId ? task.roomWork.roomId : '') || (run.role === 'worker' ? run.roomId : '');
     if (run.roomAgent && roomId) void this.rooms.post(roomId, { fromAgentId: agentId, text }).catch(() => {});

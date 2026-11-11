@@ -2,9 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { modelName, thisComputer } from './store.js';
 import { modelList } from './choices.js';
 import { redactText } from './memory.js';
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
-export const EVIDENCE_RULE = 'Whenever you test something (run the tests, check it in a browser or the app), share the proof with desk_share_evidence: a screenshot or a short screen recording of what you saw, or the test output file, marked passed or failed, with one line on what you tested. It is posted in the chat you are talking in and kept on the task, so the person can check your work without asking.';
+import os from 'node:os';
+const EXPLAINER = path.join(os.homedir(), '.agents', 'skills', 'code-explainer-page');
+// When the person asks what you changed, they get a page to read, not a wall of text.
+const EXPLAIN_RULE = existsSync(path.join(EXPLAINER, 'scripts', 'render.mjs'))
+  ? ` When the person asks what you changed or to explain your changes or the code, make a code explainer page: follow ${path.join(EXPLAINER, 'SKILL.md')} (read it first), render the page with \`node "${path.join(EXPLAINER, 'scripts', 'render.mjs')}" <spec.json> --out <folder>/code-explainer-<slug>.html\` (never --open), then show it with desk_show_page and write two or three plain lines beside it.`
+  : ' When the person asks what you changed or to explain your changes or the code, make one self-contained HTML page (inline CSS and JS, no internet) with the changed code, plain notes beside the lines and a short picture of the idea, then show it with desk_show_page and write two or three plain lines beside it.';
+export const EVIDENCE_RULE = 'Whenever you test something (run the tests, check it in a browser or the app), share the proof with desk_share_evidence: a screenshot or a short screen recording of what you saw, or the test output file, marked passed or failed, with one line on what you tested. It is posted in the chat you are talking in and kept on the task, so the person can check your work without asking.' + EXPLAIN_RULE;
 
 const now = () => new Date().toISOString();
 const slugOf = name => String(name).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 40);

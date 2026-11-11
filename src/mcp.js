@@ -126,6 +126,10 @@ export function createMcp(desk, scope) {
     { runId, file: z.string().min(3).describe('Full path of the file on this computer: .png .jpg .gif .webp .webm .mp4 .mov .pdf .txt .log .json .html or .zip.'), title: z.string().min(1).max(120).describe('What it shows, in English, like "Upper task link after the fix".'),
       taskId: z.string().optional().describe('The task it is evidence for. Omit it when you work on one task: that task is used.'), result: z.enum(['passed', 'failed', 'info']).default('info'), note: z.string().max(2000).optional().describe('One or two lines: what was tested and what you saw.') },
     input => { requireEnglish(`${input.title} ${input.note || ''}`, 'the title and note'); return desk.shareEvidence(resolveRun(input.runId), input); });
+  tool('desk_show_page', 'Show the person an HTML page you made, most often a code explainer page of your changes. It is posted in the chat you are talking in (your room, or your personal chat) as a button that opens the page full screen inside Rex Desk, and kept on the task.',
+    { runId, file: z.string().min(3).describe('Full path of the .html file on this computer.'), title: z.string().min(1).max(120).describe('What the page explains, in English.'),
+      taskId: z.string().optional().describe('The task it belongs to. Omit it when you work on one task.'), note: z.string().max(2000).optional().describe('Two or three plain lines: what changed and why.') },
+    input => { requireEnglish(`${input.title} ${input.note || ''}`, 'the title and note'); return desk.shareEvidence(resolveRun(input.runId), { ...input, page: true }); });
   tool('desk_question', 'Poll a dashboard question created with desk_ask wait=false.', { questionId: z.string() }, ({ questionId }) => {
     const interaction = desk.store.get('interaction', questionId);
     if (!interaction) throw new Error('Question not found.'); desk.authorize(scope, interaction.runId);

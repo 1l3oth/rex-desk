@@ -396,6 +396,16 @@ document.addEventListener('scroll', event => { if (event.target.id === 'feed') u
 initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx;
 // On a phone the side panels start closed, and the menu button opens the list of chats.
 if (window.matchMedia('(max-width: 760px)').matches) { ui.infoOpen = false; ui.chatInfo = false; ui.termOpen = false; }
+// A page an agent made (an explanation of its changes) opens full screen over the chat, in a sandbox with no access to Rex Desk.
+function openPage(src, title = 'Explanation') {
+  document.querySelector('.page-view')?.remove();
+  const view = document.createElement('div'); view.className = 'page-view'; view.setAttribute('role', 'dialog'); view.setAttribute('aria-label', title);
+  view.innerHTML = `<div class="pv-bar"><b>${esc(title)}</b><span class="spacer"></span><a class="btn small" href="${esc(src)}" target="_blank" rel="noopener noreferrer">Open in a new window</a><button type="button" class="btn small" data-pv-close>Close</button></div><iframe class="pv-frame" sandbox="allow-scripts" src="${esc(src)}" title="${esc(title)}"></iframe>`;
+  document.body.append(view); view.querySelector('[data-pv-close]').focus();
+  view.addEventListener('click', event => { if (event.target.closest('[data-pv-close]')) view.remove(); });
+  view.addEventListener('keydown', event => { if (event.key === 'Escape') view.remove(); });
+}
+document.addEventListener('click', event => { const button = event.target.closest?.('[data-page-open]'); if (!button) return; event.preventDefault(); event.stopPropagation(); openPage(button.dataset.pageOpen, button.textContent.trim() || 'Explanation'); }, true);
 document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="m-rail"]')) return; event.stopPropagation(); document.querySelector('.chat-shell')?.classList.toggle('show-rail'); }, true);
 document.addEventListener('click', event => { const head = event.target.closest?.('[data-action="agent-group"]'); if (!head) return; event.stopPropagation(); toggleGroup(head.dataset.project); renderAll(); }, true);
 // The back and forward buttons, and a pasted address, move between screens.

@@ -9,6 +9,8 @@ function inline(text, mentions = [], tasks = {}) {
   // Evidence and uploads kept by Rex Desk itself show in place: a picture, or a video that plays in the chat.
   html = html.replace(/!\[([^\]\n]*)\]\((\/(?:artifacts|api\/uploads)\/[^\s)"'<>]+)\)/g, (_, alt, src) => /\.(webm|mp4|mov)$/i.test(src.split('?')[0])
     ? `<video class="md-media" src="${src}" controls preload="metadata" aria-label="${alt}"></video>` : `<a class="md-media-link" href="${src}" ${LINK}><img class="md-media" src="${src}" alt="${alt}" loading="lazy"></a>`);
+  // A page an agent made (an explanation of its changes) opens full screen inside Rex Desk.
+  html = html.replace(/\[([^\]\n]+)\]\((\/artifacts\/[^\s)"'<>]+\.html?)\)/gi, '<button type="button" class="md-page" data-page-open="$2"><span class="md-page-icon" aria-hidden="true"></span>$1</button>');
   html = html.replace(/\[([^\]\n]+)\]\((\/(?:artifacts|api\/uploads)\/[^\s)"'<>]+)\)/g, `<a href="$2" ${LINK}>$1</a>`);
   html = html.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g, `<a href="$2" ${LINK}>$1</a>`);
   html = html.replace(/(^|[\s(])(https?:\/\/[^\s<)]*[^\s<).,;:!?])/g, `$1<a href="$2" ${LINK}>$2</a>`);
