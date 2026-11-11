@@ -127,6 +127,7 @@ export class CodexRunner {
       const news = this.inbox?.();
       if (news && this.turnId) void this.client.request('turn/steer', { threadId: this.threadId, expectedTurnId: this.turnId, input: [{ type: 'text', text: news }] }).catch(error => this.event('error', { message: error.message }));
     }
+    if (method === 'account/rateLimits/updated' && params?.rateLimits) this.event('rate-limit', { codex: params.rateLimits });
     if (method === 'thread/tokenUsage/updated') {
       const usage = params.tokenUsage?.last || {};
       this.tokens = { input: usage.inputTokens || 0, output: usage.outputTokens || 0, cacheRead: usage.cachedInputTokens || 0, cacheWrite: 0 };

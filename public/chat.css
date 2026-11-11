@@ -1181,3 +1181,9 @@ code.md-file{cursor:pointer;text-decoration:underline dotted;text-underline-offs
 .fw-body.dropping .fw-drop{display:grid}
 
 .rreply.rdel:hover{color:var(--bad)}
+
+/* Account usage: a bar per limit with the share used and when it resets */
+.acct-list .acct-usage{display:flex;flex-direction:column;gap:3px;margin-top:6px}.acct-list .acct-usage.none{display:block;font-size:11.5px;color:var(--muted)}
+.acct-list .acct-limit{display:grid;grid-template-columns:86px minmax(80px,1fr) 42px auto;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.acct-limit meter{width:100%;height:8px}.acct-lval{font-variant-numeric:tabular-nums;color:var(--ink);text-align:right}.acct-limit.hot .acct-lval{color:var(--bad);font-weight:700}
+.acct-lreset{font-size:11.5px;white-space:nowrap}.acct-list .acct-asof{font-size:10.5px;color:var(--muted)}

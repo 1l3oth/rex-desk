@@ -373,3 +373,16 @@ test('a connection syncs the issues of every account it watches, not only the fi
   assert.deepEqual(store.list('task').map(task => task.title).sort(), ['Issue 10', 'Issue 11']);
   store.close();
 });
+
+test('account usage is kept per account from what Claude Code and Codex report', async () => {
+  const store = new Store(temporary('usage')); const desk = new Desk(store, { root: temporary('usage-root') });
+  desk.recordUsage('claude', 'third', { rateLimitType: 'five_hour', utilization: 0.42, resetsAt: 1794400000, status: 'allowed' });
+  desk.recordUsage('claude', 'third', { rateLimitType: 'seven_day', utilization: 0.1, resetsAt: 1794900000 });
+  desk.recordUsage('codex', 'main', { codex: { primary: { usedPercent: 63, windowDurationMins: 300, resetsAt: 1794401000 }, secondary: { usedPercent: 20, windowDurationMins: 10080, resetsAt: 1794950000 } } });
+  const claude = store.get('usage', 'claude:third'), codex = store.get('usage', 'codex:main');
+  assert.equal(claude.windows.five_hour.used, 42); assert.equal(claude.windows.five_hour.resetsAt, 1794400000000);
+  assert.equal(claude.windows.seven_day.used, 10);
+  assert.equal(codex.windows.five_hour.used, 63); assert.equal(codex.windows.seven_day.used, 20);
+  assert.ok(desk.snapshot().usage.length === 2);
+  store.close();
+});

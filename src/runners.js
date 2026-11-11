@@ -132,6 +132,8 @@ ${news}` } } : {};
     this.query = query({ prompt, options });
     for await (const message of this.query) {
       if (message.type === 'system' && message.subtype === 'init') { this.apiKeySource = message.apiKeySource; this.event('session', { sessionId: message.session_id, apiKeySource: message.apiKeySource }); }
+      // How much of the account's 5-hour and weekly limits is used, as Claude Code reports it during a turn.
+      if (message.type === 'rate_limit_event' && message.rate_limit_info) this.event('rate-limit', { ...message.rate_limit_info });
       if (message.type === 'assistant') {
         const content = message.message?.content?.filter(block => block.type !== 'thinking' && block.type !== 'redacted_thinking');
         // What the agent says shows in the chat; its tool calls stay in the journal.

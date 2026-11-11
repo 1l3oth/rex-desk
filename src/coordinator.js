@@ -107,7 +107,7 @@ export class Desk {
   }
   snapshot() {
     return { computer: thisComputer(), config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
-      notices: this.notifier.summary(), shownFile: this.shownFile,
+      notices: this.notifier.summary(), usage: this.store.list('usage'), shownFile: this.shownFile,
       runs: [...this.store.list('run'), ...this.peers.remoteRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       devices: this.peers.status(this.port),
@@ -434,8 +434,9 @@ export class Desk {
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
+          if (kind === 'rate-limit') { this.recordUsage(run.provider, this.accountFor(run) || this.agents.selected(run.provider), data); return; }
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
-          this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result', 'subagent-text', 'subagent-done'].includes(kind));
+          this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result', 'subagent-text', 'subagent-done', 'agent-result'].includes(kind));
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
@@ -1076,6 +1077,24 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // The same preconditions run before the human is asked and again after they approve, so nobody approves a pull
   // request that is then refused, and nothing that changed in between slips through. A run that already has an approved
   // pull request is judged against that one: the human took these commits once, so the proof is not asked for twice.
+  // The usage of each signed-in account: the share of its 5-hour and weekly limits used, and when each resets. Claude Code and
+  // Codex report it while they work, so it is as fresh as the account's last turn. Kept per account, never the sign-in itself.
+  recordUsage(provider, profile, data = {}) {
+    const key = `${provider}:${profile || 'default'}`, saved = this.store.get('usage', key) || { id: key, provider, profile: profile || '', windows: {} };
+    const percent = value => value === undefined || value === null ? null : Math.round(Number(value) <= 1.5 ? Number(value) * 100 : Number(value));
+    const when = value => value ? (Number(value) < 1e12 ? Number(value) * 1000 : Number(value)) : null;
+    const windows = { ...saved.windows };
+    if (data.codex) {
+      for (const [slot, name] of [['primary', 'five_hour'], ['secondary', 'seven_day']]) {
+        const limit = data.codex[slot]; if (!limit) continue;
+        windows[limit.windowDurationMins >= 1440 ? 'seven_day' : name] = { used: percent(limit.usedPercent), resetsAt: when(limit.resetsAt), minutes: limit.windowDurationMins || null, at: now() };
+      }
+    } else {
+      const type = data.rateLimitType || 'five_hour';
+      windows[type] = { used: percent(data.utilization), resetsAt: when(data.resetsAt), status: data.status || '', at: now() };
+    }
+    this.store.put('usage', key, { ...saved, windows, at: now() });
+  }
   async publishChecks(run, targetBranch) {
     const target = targetBranch || run.targetBranch;
     const opened = this.pullRequests(run), already = opened.find(item => item.target === target);
