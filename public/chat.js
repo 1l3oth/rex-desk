@@ -6,13 +6,13 @@ import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, room
 import { collectShared, sharedTabsHtml } from '/chat-media.js';
 import { devicesStage, devicesAction, initDevices } from '/chat-devices.js';
 import { monitorStage, monitorAction } from '/chat-monitor.js';
-import { noticesStage, noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
+import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
 import { openSettings } from '/chat-settings.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
 // Which screen is open lives in the address (#/room/ID) and is also saved, so a refresh or a restart comes back to the same place.
-const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'jev', 'monitor', 'notices'];
+const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'jev', 'monitor'];
 const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
 function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash); return match && SCREENS.includes(match[1]) ? { type: match[1], id: match[2] ? decodeURIComponent(match[2]) : '' } : null; }
 function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
@@ -26,7 +26,7 @@ const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new 
 const provider = name => name === 'codex' ? 'Codex' : name === 'claude' ? 'Claude Code' : 'Agent';
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value), tokenText,
-  render: () => renderAll(), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
+  render: () => renderAll(), openSettings: section => openSettings(ctx, section), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
   commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), clear: () => clearAgent().catch(error => toast(error.message, true)), loop: () => loopNow().catch(error => toast(error.message, true)), settings: () => openSettings(ctx) }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
@@ -66,8 +66,9 @@ const roomById = id => ui.snap.rooms.find(room => room.id === id);
 const TILE_NAMES = { notices: 'Alerts', inbox: 'Needs', tasks: 'Tasks', jev: 'Jev', person: 'You', monitor: 'RAM', devices: 'PCs' };
 // A small square button for a place (Notifications, Tasks, Monitor…), with its name and state in the tooltip and a badge when something waits.
 function tile(type, avatar, name, sub, badge = 0, warn = false) {
-  const active = ui.view.type === type;
-  return `<button class="tile ${active ? 'active' : ''}" data-open="${type}" data-id="" title="${esc(`${name} · ${sub}`)}" aria-label="${esc(`${name}, ${sub}`)}">${avatar}${badge ? `<span class="tbadge ${warn ? 'warn' : ''}">${badge > 99 ? '99+' : badge}</span>` : ''}<span class="tname">${esc(TILE_NAMES[type] || name)}</span></button>`;
+  // The bell opens a dropdown list instead of a screen.
+  const active = type === 'notices' ? Boolean(document.querySelector('.nt-pane')) : ui.view.type === type, how = type === 'notices' ? 'data-action="nt-panel"' : `data-open="${type}" data-id=""`;
+  return `<button class="tile ${active ? 'active' : ''}" ${how} title="${esc(`${name} · ${sub}`)}" aria-label="${esc(`${name}, ${sub}`)}">${avatar}${badge ? `<span class="tbadge ${warn ? 'warn' : ''}">${badge > 99 ? '99+' : badge}</span>` : ''}<span class="tname">${esc(TILE_NAMES[type] || name)}</span></button>`;
 }
 function railItem(type, id, { dot = '', avatar = '', name, sub = '', badge = 0, warn = false }) {
   const active = (ui.view.type === type && (ui.view.id || '') === (id || '')) || (type === 'specialist' && ui.view.type === 'run' && (ui.snap?.specialists || []).some(agent => agent.id === id && agent.runId === ui.view.id));
@@ -234,7 +235,6 @@ function stageModel() {
   if (type === 'specialist') return agentStage(ctx);
   if (type === 'devices') return devicesStage(ctx);
   if (type === 'monitor') return monitorStage(ctx);
-  if (type === 'notices') return noticesStage(ctx);
   if (type === 'jev') return jevStage();
   if (type === 'person') return { title: 'About you', meta: 'Your profile, from what the agents learned', feed: personPage(), top: true };
   if (type === 'project') {

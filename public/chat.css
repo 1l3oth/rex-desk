@@ -1098,3 +1098,11 @@ button.cn-main{cursor:pointer}
 .tile .av{width:28px;height:28px}.tile .tname{font-size:10.5px;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tbadge{position:absolute;top:1px;right:2px;min-width:17px;height:17px;padding:0 5px;border-radius:9px;background:var(--accent);color:var(--accent-ink);font-size:10.5px;font-weight:700;line-height:17px;text-align:center;box-shadow:0 0 0 2px var(--panel)}
 .tbadge.warn{background:var(--warn);color:#fff}
+
+/* Notifications: a dropdown under the bell; its settings live in Settings */
+.nt-pane{position:fixed;z-index:60;width:min(400px,calc(100vw - 16px));max-height:min(560px,calc(100vh - 80px));display:flex;flex-direction:column;padding:12px 12px 8px;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 18px 48px rgba(0,0,0,.28)}
+.nt-pane-head{display:flex;align-items:center;gap:8px;margin:0 2px 8px}.nt-pane-head h2{margin:0;font-size:15px}
+.nt-gear{display:grid;place-items:center;width:30px;height:30px;border:0;border-radius:8px;background:none;color:var(--muted)}.nt-gear:hover{background:var(--raised);color:var(--ink)}
+.nt-pane .nt-bar{margin-bottom:8px}.nt-pane .nt-list{overflow-y:auto;min-height:0;flex:1;gap:4px}
+.nt-empty{display:flex;flex-direction:column;gap:4px;align-items:center;text-align:center;padding:28px 12px;color:var(--muted)}.nt-empty b{color:var(--ink)}
+.nt-settings{display:flex;flex-direction:column;gap:14px}.nt-settings .nt-card{margin:0}

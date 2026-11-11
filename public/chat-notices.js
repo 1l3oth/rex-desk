@@ -35,13 +35,46 @@ export function playTone(tone = 'chime', kind = 'reply', volume = 0.6) {
   } catch { /* no sound on this device */ }
 }
 
-// ---------- the Notifications screen ----------
-export function noticesStage(ctx) {
-  const { ui, esc } = ctx, data = ui.snap.notices || { recent: [], unread: 0, mutes: [], prefs: {} }, prefs = data.prefs || {}, mutes = new Set(data.mutes || []);
+// ---------- the list, a dropdown under the bell ----------
+function noticeListHtml(ctx) {
+  const { ui, esc } = ctx, data = ui.snap?.notices || { recent: [], unread: 0, prefs: {} }, prefs = data.prefs || {};
   const filter = ui.noticeFilter === 'unread' ? 'unread' : 'all', list = data.recent.filter(item => filter === 'all' || !item.read);
+  const dnd = prefs.dndUntil && prefs.dndUntil > Date.now();
   const row = item => { const [label, tone] = KIND[item.kind] || ['Update', 'reply'], name = who(item);
     return `<li class="nt-row${item.read ? '' : ' unread'}"><button type="button" class="nt-open" data-action="nt-open" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}">
       <span class="nt-av h${hue(name)}">${esc(initials(name))}</span><span class="nt-text"><span class="nt-top"><b>${esc(item.title)}</b><span class="nt-kind ${tone}">${esc(label)}</span></span><small>${esc(item.body)}</small></span><span class="nt-when">${esc(when(item.at))}${item.read ? '' : '<i class="nt-dot"></i>'}</span></button></li>`; };
+  return `<div class="nt-pane-head"><h2>Notifications</h2>${dnd ? '<span class="nt-kind">Do not disturb</span>' : prefs.quietNow ? '<span class="nt-kind">Quiet hours</span>' : ''}<span class="spacer"></span>
+      <button type="button" class="nt-gear" data-action="nt-settings" title="Notification settings" aria-label="Notification settings"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></button></div>
+    <div class="nt-bar"><div class="pseg"><button type="button" class="tab ${filter === 'all' ? 'on' : ''}" data-action="nt-filter" data-tab="all">All</button><button type="button" class="tab ${filter === 'unread' ? 'on' : ''}" data-action="nt-filter" data-tab="unread">Unread${data.unread ? `<span class="tcount">${data.unread}</span>` : ''}</button></div><span class="spacer"></span>${data.unread ? '<button type="button" class="btn small quiet" data-action="nt-readall">Mark all as read</button>' : ''}</div>
+    ${list.length ? `<ul class="nt-list">${list.map(row).join('')}</ul>` : `<div class="nt-empty"><b>${filter === 'unread' ? 'All caught up' : 'Nothing yet'}</b><small>When an agent replies, asks you something or stops, it shows here.</small></div>`}`;
+}
+let pane = null, paneHtml = '';
+function placePane() {
+  if (!pane) return;
+  const bell = document.querySelector('.tile[data-action="nt-panel"]'), box = bell?.getBoundingClientRect(), narrow = window.innerWidth < 640;
+  pane.style.left = narrow || !box ? '8px' : `${Math.round(box.left)}px`;
+  pane.style.top = narrow || !box ? '56px' : `${Math.round(box.bottom + 6)}px`;
+}
+function drawPane(ctx) {
+  if (!pane) return;
+  const html = noticeListHtml(ctx);
+  if (html !== paneHtml) { const top = pane.querySelector('.nt-list')?.scrollTop || 0; paneHtml = html; pane.innerHTML = html; const next = pane.querySelector('.nt-list'); if (next) next.scrollTop = top; }
+  placePane();
+}
+export function closeNoticePane() { pane?.remove(); pane = null; paneHtml = ''; document.querySelector('.tile[data-action="nt-panel"]')?.classList.remove('active'); }
+export function toggleNoticePane(ctx) {
+  if (pane) return closeNoticePane();
+  pane = document.createElement('div'); pane.className = 'nt-pane'; pane.setAttribute('role', 'dialog'); pane.setAttribute('aria-label', 'Notifications');
+  document.body.append(pane); drawPane(ctx); document.querySelector('.tile[data-action="nt-panel"]')?.classList.add('active');
+  pane.querySelector('.tab.on')?.focus();
+}
+document.addEventListener('mousedown', event => { if (pane && !event.target.closest?.('.nt-pane,.tile[data-action="nt-panel"],.nt-stack')) closeNoticePane(); });
+document.addEventListener('keydown', event => { if (pane && event.key === 'Escape') closeNoticePane(); });
+window.addEventListener('resize', placePane);
+
+// ---------- the notification settings (a tab in Settings) ----------
+export function noticeSettingsHtml(ctx) {
+  const { ui, esc } = ctx, data = ui.snap.notices || { recent: [], unread: 0, mutes: [], prefs: {} }, prefs = data.prefs || {}, mutes = new Set(data.mutes || []);
   const chats = [{ key: 'main:', name: 'Rex Agent' }, ...(ui.snap.rooms || []).map(room => ({ key: `room:${room.id}`, name: room.name, sub: 'Group chat' })),
     ...(ui.snap.specialists || []).filter(agent => agent.runId).map(agent => ({ key: `run:${agent.runId}`, name: agent.name, sub: agent.projectSlug }))];
   const toggle = (name, on, label, help = '') => `<label class="nt-switch"><input type="checkbox" data-nt-pref="${name}" ${on ? 'checked' : ''}><span class="nt-track" aria-hidden="true"></span><span class="nt-lbl"><b>${label}</b>${help ? `<small>${help}</small>` : ''}</span></label>`;
@@ -49,7 +82,7 @@ export function noticesStage(ctx) {
   const kinds = prefs.kinds || {}, quiet = prefs.quiet || {}, dnd = prefs.dndUntil && prefs.dndUntil > Date.now();
   // Phone pushes through the ntfy app: subscribe once to this computer's private topic.
   const push = prefs.push || {};
-  if (!ui.pushQr && !ui.pushQrLoading && push.topic) { ui.pushQrLoading = true; ctx.api('/notices/push-qr').then(result => { ui.pushQr = result; ui.pushQrLoading = false; ctx.render(); }).catch(() => { ui.pushQrLoading = false; }); }
+  if (!ui.pushQr && !ui.pushQrLoading && push.topic) { ui.pushQrLoading = true; ctx.api('/notices/push-qr').then(result => { ui.pushQr = result; ui.pushQrLoading = false; window.__rexNoticeSettingsRedraw?.(); }).catch(() => { ui.pushQrLoading = false; }); }
   const phone = `<section class="card nt-card nt-phone"><h3>Phone</h3>
       ${toggle('push.on', push.on, 'Push to my phone', 'Through the free ntfy app. Arrives even when Rex Desk is closed on the phone.')}
       <ol class="nt-steps"><li>Install <b>ntfy</b> from the App Store or Google Play.</li><li>In ntfy press <b>+</b>, then scan this code or paste the topic.</li><li>Press <b>Send a test push</b>.</li></ol>
@@ -59,7 +92,7 @@ export function noticesStage(ctx) {
       <div class="nt-chips"><button type="button" class="btn small primary" data-action="nt-push-test">Send a test push</button><button type="button" class="btn small quiet" data-action="nt-new-topic" title="Use if someone else got this topic">New private topic</button></div>
       ${prefs.pushError ? `<p class="small warn-text">Last push failed: ${esc(prefs.pushError)}</p>` : ''}
       <details class="nt-adv"><summary>Own ntfy server</summary><input type="url" data-nt-pref="push.server" value="${esc(push.server || 'https://ntfy.sh')}" aria-label="ntfy server address"><small class="muted">Anyone with the topic name can read the pushes on ntfy.sh. Turn off "Show the message in pop-ups" to send only who wrote.</small></details></section>`;
-  const settings = `<aside class="nt-side">
+  return `<div class="nt-settings">
     ${phone}
     <section class="card nt-card"><h3>Do not disturb</h3>
       ${dnd ? `<p class="nt-dnd on">Quiet until ${esc(new Date(prefs.dndUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</p><button type="button" class="btn small" data-action="nt-dnd" data-minutes="0">Turn off</button>`
@@ -83,14 +116,7 @@ export function noticesStage(ctx) {
       <p class="muted small">Questions use a rising three-note sound, stops a falling one, so you can tell them apart without looking.</p></section>
     <section class="card nt-card"><h3>Mute a chat</h3><p class="muted small">No pop-ups, no sound and no unread count. Its messages stay in the list.</p>
       <ul class="nt-mutes">${chats.map(chat => `<li><span class="nt-av sm h${hue(chat.name)}">${esc(initials(chat.name))}</span><span class="nt-mname"><b>${esc(chat.name)}</b>${chat.sub ? `<small>${esc(chat.sub)}</small>` : ''}</span><button type="button" class="btn small${mutes.has(chat.key) ? ' on' : ' quiet'}" data-action="nt-mute" data-key="${esc(chat.key)}" data-on="${mutes.has(chat.key) ? '0' : '1'}">${mutes.has(chat.key) ? 'Muted' : 'Mute'}</button></li>`).join('')}</ul></section>
-  </aside>`;
-  const feed = `<div class="page notices">
-    <div class="nt-main">
-      <div class="nt-bar"><div class="pseg"><button type="button" class="tab ${filter === 'all' ? 'on' : ''}" data-action="nt-filter" data-tab="all">All</button><button type="button" class="tab ${filter === 'unread' ? 'on' : ''}" data-action="nt-filter" data-tab="unread">Unread${data.unread ? `<span class="tcount">${data.unread}</span>` : ''}</button></div><span class="spacer"></span>${data.unread ? '<button type="button" class="btn small" data-action="nt-readall">Mark all as read</button>' : ''}</div>
-      ${list.length ? `<ul class="nt-list">${list.map(row).join('')}</ul>` : `<div class="empty"><h2>${filter === 'unread' ? 'All caught up' : 'Nothing yet'}</h2><p>When an agent replies, asks you something or stops, it shows here.</p></div>`}
-    </div>${settings}
   </div>`;
-  return { title: 'Notifications', meta: `${data.unread ? `${data.unread} unread` : 'All caught up'}${dnd ? ' · Do not disturb' : prefs.quietNow ? ' · Quiet hours' : ''}`, feed, top: true };
 }
 
 async function savePref(ctx, name, value) {
@@ -99,7 +125,9 @@ async function savePref(ctx, name, value) {
 }
 export async function noticesAction(ctx, action, target) {
   const { api, ui, refresh, open } = ctx, prefs = ui.snap.notices?.prefs || {};
-  if (action === 'nt-filter') { ui.noticeFilter = target.dataset.tab; ctx.render(); return; }
+  if (action === 'nt-panel') { toggleNoticePane(ctx); return; }
+  if (action === 'nt-settings') { closeNoticePane(); ctx.openSettings('notify'); return; }
+  if (action === 'nt-filter') { ui.noticeFilter = target.dataset.tab; drawPane(ctx); return; }
   if (action === 'nt-readall') { await api('/notices/read', { method: 'POST', data: { all: true } }); await refresh(); return; }
   if (action === 'nt-mute') { await api('/notices/mute', { method: 'POST', data: { key: target.dataset.key, on: target.dataset.on === '1' } }); await refresh(); return; }
   if (action === 'nt-dnd') { await api('/notices/prefs', { method: 'POST', data: { dndMinutes: Number(target.dataset.minutes) } }); await refresh(); return; }
@@ -109,7 +137,12 @@ export async function noticesAction(ctx, action, target) {
   if (action === 'nt-new-topic') { if (!confirm('Make a new private topic? Your phone stops getting pushes until you subscribe to the new one.')) return; await api('/notices/prefs', { method: 'POST', data: { push: { newTopic: true } } }); ui.pushQr = null; await refresh(); return; }
   if (action === 'nt-test') { await api('/notices/test', { method: 'POST', data: {} }); await refresh(); return; }
   if (action === 'nt-read') { await api('/notices/read', { method: 'POST', data: { key: target.dataset.key } }).catch(() => {}); target.closest('.nt-pop')?.remove(); await refresh(); return; }
-  if (action === 'nt-open') { await api('/notices/read', { method: 'POST', data: { key: target.dataset.key } }).catch(() => {}); target.closest('.nt-pop')?.remove(); open(target.dataset.type === 'inbox' ? 'inbox' : target.dataset.type, target.dataset.id || ''); }
+  if (action === 'nt-open') {
+    await api('/notices/read', { method: 'POST', data: { key: target.dataset.key } }).catch(() => {}); target.closest('.nt-pop')?.remove();
+    // A test notification points at the list itself.
+    if (target.dataset.type === 'notices') { if (!pane) toggleNoticePane(ctx); await refresh(); return; }
+    closeNoticePane(); open(target.dataset.type === 'inbox' ? 'inbox' : target.dataset.type, target.dataset.id || '');
+  }
 }
 document.addEventListener('change', event => {
   const name = event.target.dataset?.ntPref; if (!name || !window.__rexCtx) return;
@@ -150,6 +183,7 @@ function popUp(ctx, item, more) {
 }
 export function watchNotices(ctx) {
   const { ui } = ctx, recent = ui.snap?.notices?.recent || [], prefs = ui.snap?.notices?.prefs || {};
+  drawPane(ctx); window.__rexNoticeSettingsRedraw?.();
   const key = noticeKey(ui.view); if (window.rexView !== key) { window.rexView = key; window.rexPresence?.(); }
   if (!seen) { seen = new Set(recent.map(item => item.id)); return; }
   const fresh = recent.filter(item => !seen.has(item.id) && item.alert && !item.read && item.key !== key);

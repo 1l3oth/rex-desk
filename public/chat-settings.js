@@ -1,8 +1,10 @@
 import { pickerHtml } from '/chat-pick.js';
+import { noticeSettingsHtml } from '/chat-notices.js';
 // Settings, as a popup over the chat: the sections on the left, one section's settings on the right. Each section saves on its own,
 // so a change never waits for the rest. It replaces the old "Issues & settings" page.
 const SECTIONS = [
   ['general', 'General', 'Your name, theme, start with Windows'],
+  ['notify', 'Notifications', 'Pop-ups, sound, phone, quiet hours'],
   ['agents', 'Agents', 'Workers, model, branches, pull requests'],
   ['accounts', 'Claude accounts', 'Which subscription agents use'],
   ['projects', 'Projects', 'Repositories, branches and commands'],
@@ -31,8 +33,8 @@ export function openSettings(ctx, section = 'general') {
       ${ui.snap.account?.email ? `<div class="st-account"><span class="si-avatar">${esc(ui.snap.account.email[0].toUpperCase())}</span><span><b>${esc(ui.snap.account.email)}</b><small>${ui.snap.account.role === 'superadmin' ? 'Superadmin' : 'Member'} · this computer</small></span><button type="button" class="btn small" data-st-signout>Sign out</button></div>` : ''}
       ${field('Your name', input('name', config().name, 'maxlength="60"'), 'Agents call you by this name.')}
       ${field('Theme', `<select name="theme">${[['system', 'Follow Windows'], ['dark', 'Dark'], ['light', 'Light']].map(([value, label]) => `<option value="${value}" ${(window.rexTheme?.preference || 'system') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
-      ${check('autostart', state.extra.autostart?.enabled, 'Start Rex Desk when I sign in to Windows', 'So schedules, away mode and your phone keep working without opening the app.')}
-      ${check('notify', config().notify !== false, 'Show Windows notifications', 'When an agent needs you or finishes.')}`,
+      ${check('autostart', state.extra.autostart?.enabled, 'Start Rex Desk when I sign in to Windows', 'So schedules, away mode and your phone keep working without opening the app.')}`,
+    notify: () => `<h2>Notifications</h2><p class="muted">Changes save as you make them.</p>${noticeSettingsHtml(ctx)}`,
     agents: () => `<h2>Agents</h2>
       <div class="st-row">${field('Agents working at once', input('concurrency', config().concurrency, 'type="number" min="1" max="6"'), '1 to 6. Each runs in its own copy of the project.')}
       ${field('Sync tasks every', `<span class="st-unit">${input('syncMinutes', config().syncMinutes, 'type="number" min="0" max="1440"')}<em>minutes</em></span>`, '0 syncs only when you press Sync.')}</div>
@@ -96,7 +98,7 @@ export function openSettings(ctx, section = 'general') {
   const checked = name => Boolean(back.querySelector(`[name="${name}"]`)?.checked);
   async function save() {
     const base = JSON.parse(JSON.stringify(config())), v = values(), next = { ...base };
-    if (state.section === 'general') { next.name = v.name; next.notify = checked('notify'); window.rexTheme?.set(v.theme); await api('/autostart', { method: 'POST', data: { enabled: checked('autostart') } }).catch(() => {}); }
+    if (state.section === 'general') { next.name = v.name; window.rexTheme?.set(v.theme); await api('/autostart', { method: 'POST', data: { enabled: checked('autostart') } }).catch(() => {}); }
     if (state.section === 'agents') Object.assign(next, { concurrency: Number(v.concurrency), syncMinutes: Number(v.syncMinutes), branchPrefix: v.branchPrefix, autoPrLowRisk: checked('autoPrLowRisk'), reportToOrbit: checked('reportToOrbit'), saver: checked('saver'), models: { ...base.models, claude: back.querySelector('#st-model')?.value ?? base.models?.claude } });
     if (state.section === 'projects') next.repositories = base.repositories.map((repo, index) => ({ ...repo, ...Object.fromEntries(['baseBranch', 'targetBranch', 'setupCommand', 'devCommand', 'testCommand'].map(key => [key, v[`repo.${index}.${key}`] ?? repo[key]])) }));
     if (state.section === 'jev') { next.jev = { ...base.jev, apiKey: v['jev.apiKey'] || '', clearKey: checked('jev.clearKey'), model: v['jev.model'], versions: v['jev.versions'], auto: checked('jev.auto') }; next.control = { enabled: checked('control.enabled'), confirm: checked('control.confirm'), agents: checked('control.agents'), language: v['control.language'] }; }
@@ -129,5 +131,13 @@ export function openSettings(ctx, section = 'general') {
   });
   back.addEventListener('keydown', event => { if (event.key === 'Escape') back.remove(); });
   if (section === 'general') void api('/autostart').then(result => { state.extra.autostart = result; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
+  // The Notifications tab saves on change; redraw it when its settings come back changed, keeping the scroll.
+  let noticeHtml = '';
+  window.__rexNoticeSettingsRedraw = () => {
+    if (!document.body.contains(back)) { window.__rexNoticeSettingsRedraw = null; return; }
+    if (state.section !== 'notify') return;
+    const html = panels.notify(); if (html === noticeHtml) return; noticeHtml = html;
+    const panel = back.querySelector('[data-st-panel]'), top = panel?.scrollTop || 0; if (panel) { panel.innerHTML = html; panel.scrollTop = top; }
+  };
   draw(); back.querySelector('.st-nav button.on')?.focus();
 }
