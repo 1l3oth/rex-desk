@@ -254,7 +254,7 @@ export class Store extends EventEmitter {
       username: String(account.username || '').trim().slice(0, 200) })).filter(account => account.username);
     const config = { ...defaults, name: String(input.name || 'Rex'), notify: input.notify !== false, provider: 'claude',
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
-      syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), saver: input.saver !== false, models: { claude: modelName('claude', input.models?.claude) }, sources, repositories,
+      syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), saver: input.saver !== false, autoFree: input.autoFree !== false, models: { claude: modelName('claude', input.models?.claude) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code') },
       tourDismissed: Boolean(input.tourDismissed), execution: 'headless', testAccounts: accounts,
       schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false, versions: String(input.jev?.versions || '').trim().slice(0, 300) },

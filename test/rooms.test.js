@@ -411,14 +411,14 @@ test('each agent runs its own loop: it checks its tasks on schedule, skips when 
   assert.equal(desk.specialists.loopOf(store.get('specialist', dara.id)).on, true, 'on by default');
   const created = desk.localTasks.create({ title: 'Fix the cart total', project: 'shop' });
   assert.ok(desk.specialists.ownTasks(store.get('specialist', dara.id)).some(task => task.id === created.id));
-  await desk.loopTick(Date.now());
+  await desk.loopTick(Date.now(), { memory: false });
   await waitFor(() => turns.some(turn => /Loop check/.test(turn.prompt)));
   const loopTurn = turns.find(turn => /Loop check/.test(turn.prompt));
   assert.match(loopTurn.prompt, /desk_take_task/); assert.match(loopTurn.prompt, /shop workflow/);
   assert.ok(!store.events(loopTurn.run.id, { visible: true }).some(event => event.kind === 'human-message' && /Loop check/.test(event.text)), 'the loop prompt is not shown as the person talking');
   await waitFor(() => desk.specialists.status(store.get('specialist', dara.id)).state === 'idle');
   const count = turns.length;
-  await desk.loopTick(Date.now() + 61 * 60000);
+  await desk.loopTick(Date.now() + 61 * 60000, { memory: false });
   assert.equal(turns.length, count, 'nothing changed, so the next check does not wake the agent');
   desk.specialists.update(dara.id, { loop: { on: false, every: 15 } });
   assert.equal(store.get('specialist', dara.id).loop.every, 15);

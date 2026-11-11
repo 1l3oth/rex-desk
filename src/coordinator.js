@@ -7,6 +7,7 @@ import { Notifier } from './notify.js';
 import { EFFORTS, MODES, runOptions, modelList } from './choices.js';
 import { fetchModels } from './models.js';
 import path from 'node:path';
+import os from 'node:os';
 import { mkdirSync, writeFileSync, existsSync, statSync, copyFileSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
@@ -16,6 +17,7 @@ import { Sources } from './providers.js';
 import { AgentProfiles } from './agents.js';
 import { OrcaRunner, AgentSession, sendToOrca, showWorktreesInOrca } from './orca.js';
 import { Evidence } from './browser.js';
+import { Monitor } from './monitor.js';
 import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
 import { inspectRepository } from './repositories.js';
@@ -82,6 +84,7 @@ export class Desk {
     this.sources = new Sources(store, { fetcher, onSynced: () => { void this.fillEnglishNames(); if (this.store.config().jev?.auto !== false && this.jev.apiKey()) void this.jev.prioritize().catch(error => store.event('', 'jev-error', { message: error.message })); } }); this.live = new Map(); this.waiters = new Map(); this.tokens = new Map();
     this.query = new TrackerQuery(store, this.sources, { apiKey: () => this.jev.apiKey(), env: () => this.agents.environment('claude'), cwd: path.join(store.directory, 'coordinator'), ...(queryModel ? { model: queryModel } : {}) });
     this.presence = { focused: false, at: 0 }; this.notifier = new Notifier(store, { focused: () => this.presence.focused && Date.now() - this.presence.at < 45000, enabled: () => !process.env.NODE_TEST_CONTEXT && this.store.config().notify !== false }); this.rooms = new Rooms(this); this.memory = new Memory(memoryDirectory); this.specialists = new Specialists(this); this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
+    this.monitor = new Monitor(this);
     this.evidence = new Evidence(store, runId => this.run(runId), (runId, kind, data) => {
       store.event(runId, kind, data);
     }, () => this.mcpUrl);
@@ -834,7 +837,9 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   // Every agent runs its own loop: on its schedule it looks at its own tasks and starts on one, following its project's workflow.
   // A check whose tasks have not changed since the last one is skipped without waking the agent, so a quiet loop costs nothing.
-  async loopTick(at = Date.now()) {
+  async loopTick(at = Date.now(), { memory = true } = {}) {
+    // When memory runs low, loops wait: a working agent and its tools take several hundred MB.
+    if (memory && this.store.config().autoFree !== false && os.freemem() / os.totalmem() < 0.15) return;
     for (const agent of this.store.list('specialist').filter(item => item.id !== 'main' && this.peers.owns(item.id))) {
       const loop = this.specialists.loopOf(agent);
       if (!loop.on || at - (Date.parse(loop.lastAt || 0) || 0) < loop.every * 60000) continue;
