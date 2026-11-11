@@ -680,17 +680,20 @@ function personalAgent(run) {
   return (ui.snap.specialists || []).find(agent => agent.id === run.specialistId && agent.runId === run.id) || null;
 }
 function personalSide(run, agent, items, shells) {
-  const tab = ['media', 'files', 'links', 'terminal'].includes(ui.chatTab) && (ui.chatTab !== 'terminal' || shells.length) ? ui.chatTab : 'profile';
+  // Two tabs, like a messenger's chat info: Profile (with what was shared in the chat) and the agent's Terminal.
+  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : 'profile', part = ['media', 'files', 'links'].includes(ui.chatShared) ? ui.chatShared : 'media';
   const entries = items.filter(item => item.role === 'human' || item.role === 'agent').map(item => ({ from: item.role === 'human' ? 'You' : agent.name, at: item.at, text: item.text }));
   const shared = collectShared(entries, (ui.snap.artifacts || []).filter(item => item.runId === run.id).map(item => ({ ...item, from: agent.name })));
-  const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">Profile</button>${sharedTabButtons(shared, tab, 'chat-tab')}${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">Terminal<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span><button type="button" class="btn small" data-action="chat-info-close" aria-label="Close the side panel">Close</button></div>`;
+  const close = '<button type="button" class="side-x" data-action="chat-info-close" aria-label="Close the side panel" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
+  const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">Profile</button>${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">Terminal<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span>${close}</div>`;
   if (tab === 'terminal') return tabs + terminalHtml(shells, { esc, hhmm }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="side-body)/, '');
-  if (tab !== 'profile') return `${tabs}<div class="side-body shared">${sharedTabsHtml(ctx, shared, tab)}</div>`;
+  const sharedBox = `<h3>Media, files and links</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
   const sources = (agent.taskSources || []).map(id => id === 'local' ? 'Rex Desk tasks' : (ui.snap.config?.sources || []).find(source => source.id === id)?.name).filter(Boolean);
   const rooms = (ui.snap.rooms || []).filter(room => room.members.some(member => member.id === agent.id));
   return `${tabs}<div class="side-body rinfo pinfo">
     <div class="rhero">${avatarHtml(ctx, { name: agent.name, size: 'xl' })}<h2 class="pname">${esc(agent.name)}</h2><p class="rsub"><span class="dot ${stateTone(run) === 'working' ? 'working' : 'good'}"></span> ${esc(agent.status?.label || stateLabel(run))}${agent.main ? '' : ` on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>`}</p></div>
     ${agent.purpose ? `<h3>About</h3><p class="pabout">${esc(agent.purpose)}</p>` : ''}
+    ${sharedBox}
     ${agent.main ? '' : `<h3>Claude account</h3>${pickerHtml(ctx, { id: 'pp-profile', label: 'Claude account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.claude?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}<button type="button" class="btn small quiet" data-action="accounts">Manage accounts</button>`}
     ${toolsHtml(agent.main ? 'main' : agent.id)}
     ${agent.main ? '' : `<h3>Tasks come from</h3><p class="pabout">${esc(sources.join(', ') || 'Not set yet')}</p>`}
@@ -700,10 +703,11 @@ function personalSide(run, agent, items, shells) {
   </div>`;
 }
 document.addEventListener('click', event => {
-  const target = event.target.closest?.('[data-action="chat-tab"],[data-action="chat-info-close"],[data-action="chat-info"],[data-copy]'); if (!target) return;
+  const target = event.target.closest?.('[data-action="chat-tab"],[data-action="chat-shared"],[data-action="chat-info-close"],[data-action="chat-info"],[data-copy]'); if (!target) return;
   event.stopPropagation();
   if (target.dataset.copy !== undefined) { void navigator.clipboard?.writeText(target.dataset.copy).then(() => toast('Path copied.'), () => toast('Could not copy.', true)); return; }
   if (target.dataset.action === 'chat-tab') ui.chatTab = target.dataset.tab;
+  else if (target.dataset.action === 'chat-shared') ui.chatShared = target.dataset.tab;
   else ui.chatInfo = target.dataset.action === 'chat-info';
   renderAll();
 }, true);
