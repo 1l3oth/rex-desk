@@ -130,6 +130,9 @@ export function createMcp(desk, scope) {
     { runId, file: z.string().min(3).describe('Full path of the .html file on this computer.'), title: z.string().min(1).max(120).describe('What the page explains, in English.'),
       taskId: z.string().optional().describe('The task it belongs to. Omit it when you work on one task.'), note: z.string().max(2000).optional().describe('Two or three plain lines: what changed and why.') },
     input => { requireEnglish(`${input.title} ${input.note || ''}`, 'the title and note'); return desk.shareEvidence(resolveRun(input.runId), { ...input, page: true }); });
+  tool('desk_show_file', 'Open a file in front of the person, in the file window of Rex Desk, at a line if you give one. Use it when they ask to see a file, or to point at the exact code you mean. Any kind opens: code and text (they can edit and save it), Markdown and HTML with a preview, pictures, videos, PDFs, Excel and Word files.',
+    { runId, file: z.string().min(1).describe('Full path, or a path inside your worktree or project, like src/server.js.'), line: z.number().int().min(0).optional().describe('Line to scroll to.'), note: z.string().max(300).optional().describe('One short line on why you show it.') },
+    input => desk.showFile(resolveRun(input.runId), input));
   tool('desk_take_task', 'Start working on one of your own tasks (from desk_tasks): it gets its own run, worktree and branch in your name, like when the person assigns it to you. Use it in a loop check, or when the person asks you to pick up your next task.',
     { taskId: z.string(), instructions: z.string().max(4000).optional() }, input => {
       const agent = agentOf(); if (!agent) throw new Error('Only a project agent takes its own tasks.');

@@ -8,6 +8,7 @@ import { devicesStage, devicesAction, initDevices } from '/chat-devices.js';
 import { monitorStage, monitorAction } from '/chat-monitor.js';
 import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
 import { openSettings } from '/chat-settings.js';
+import { wireFiles, watchShownFile } from '/chat-files.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
@@ -26,7 +27,7 @@ const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new 
 const provider = name => name === 'codex' ? 'Codex' : name === 'claude' ? 'Claude Code' : 'Agent';
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value), tokenText,
-  render: () => renderAll(), openSettings: section => openSettings(ctx, section), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
+  render: () => renderAll(), currentRunId: () => (ui.view.type === 'main' ? mainRun()?.id : ui.view.type === 'run' ? ui.view.id : '') || '', openSettings: section => openSettings(ctx, section), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
   commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), clear: () => clearAgent().catch(error => toast(error.message, true)), loop: () => loopNow().catch(error => toast(error.message, true)), settings: () => openSettings(ctx) }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
@@ -328,7 +329,7 @@ async function refresh({ full = false } = {}) {
   if (busy) { again = true; return; } busy = true;
   try {
     ui.snap = await api('/state'); ui.memory = await api('/memory').catch(() => ui.memory); ui.profile = await api('/profile').catch(() => ui.profile);
-    await loadView(); renderAll(full); watchNotices(ctx);
+    await loadView(); renderAll(full); watchNotices(ctx); watchShownFile(ctx);
   } finally { busy = false; if (again) { again = false; void refresh(); } }
 }
 function open(type, id = '') {
@@ -445,7 +446,7 @@ document.addEventListener('submit', async event => {
 });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
 
-initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx;
+initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx);
 // On a phone the side panels start closed, and the menu button opens the list of chats.
 if (window.matchMedia('(max-width: 760px)').matches) { ui.infoOpen = false; ui.chatInfo = false; ui.termOpen = false; }
 // A page an agent made (an explanation of its changes) opens full screen over the chat, in a sandbox with no access to Rex Desk.

@@ -21,9 +21,13 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.0",
     "@libsql/client": "^0.18.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "codemirror": "^5.65.18",
+    "mammoth": "^1.8.0",
     "playwright": "^1.0.0",
+    "prettier": "^3.3.3",
     "qrcode": "^1.5.4",
     "three": "0.186.1",
+    "xlsx": "^0.18.5",
     "zod": "^4.0.0"
   },
   "bin": {

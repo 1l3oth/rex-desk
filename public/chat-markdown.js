@@ -2,6 +2,9 @@
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const LINK = 'target="_blank" rel="noopener noreferrer"';
 const CODE = '\u0000';
+// A path to a file (`src/server.js:42`, `F:\x\notes.md`) in a chat opens in the file window when clicked.
+const FILE_PATH = /^(?:[A-Za-z]:[\\/]|~[\\/]|\.{1,2}[\\/]|\/)?(?:[\w@.()+-]+[\\/])*[\w@()+-][\w@.()+-]*\.[A-Za-z][A-Za-z0-9]{0,7}(?::\d+(?::\d+)?|#L\d+(?:-L?\d+)?)?$/;
+const isFile = code => FILE_PATH.test(code) && !/^\d+(\.\d+)+$/.test(code) && !/^[\w-]+\.(com|org|net|io|dev|ai|app|kr)$/i.test(code);
 
 function inline(text, mentions = [], tasks = {}) {
   const codes = [];
@@ -20,7 +23,7 @@ function inline(text, mentions = [], tasks = {}) {
   // Highlighted wherever the mention sits (in bold, after a bracket) and when a full stop or colon follows it.
   for (const name of mentions) html = html.replace(new RegExp(`(^|[^\\p{L}\\p{N}_@])@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_-]|\\.[\\p{L}\\p{N}])`, 'giu'), `$1<span class="mention">@${esc(name)}</span>`);
   html = html.replace(/(^|[\s(])#(\d{2,})(?![\w])/g, (match, before, number) => (tasks[number] ? `${before}<span class="taskref" title="${esc(tasks[number])}">#${number} ${esc(tasks[number])}</span>` : match));
-  return html.replace(new RegExp(`${CODE}(\\d+)${CODE}`, 'g'), (_, index) => `<code>${codes[Number(index)]}</code>`);
+  return html.replace(new RegExp(`${CODE}(\\d+)${CODE}`, 'g'), (_, index) => { const code = codes[Number(index)]; return isFile(code) ? `<code class="md-file" data-file-open="${code}" role="button" tabindex="0" title="Open in the file window">${code}</code>` : `<code>${code}</code>`; });
 }
 
 const cells = row => row.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, '|'));

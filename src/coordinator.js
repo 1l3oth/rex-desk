@@ -19,6 +19,8 @@ import { AgentProfiles } from './agents.js';
 import { OrcaRunner, AgentSession, sendToOrca, showWorktreesInOrca } from './orca.js';
 import { Evidence } from './browser.js';
 import { Monitor } from './monitor.js';
+import { Files } from './files.js';
+import { randomUUID } from 'node:crypto';
 import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
 import { inspectRepository } from './repositories.js';
@@ -85,7 +87,7 @@ export class Desk {
     this.sources = new Sources(store, { fetcher, onSynced: () => { void this.fillEnglishNames(); if (this.store.config().jev?.auto !== false && this.jev.apiKey()) void this.jev.prioritize().catch(error => store.event('', 'jev-error', { message: error.message })); } }); this.live = new Map(); this.waiters = new Map(); this.tokens = new Map();
     this.query = new TrackerQuery(store, this.sources, { apiKey: () => this.jev.apiKey(), env: () => this.agents.environment(this.store.config().provider), cwd: path.join(store.directory, 'coordinator'), ...(queryModel ? { model: queryModel } : {}) });
     this.presence = { focused: false, at: 0 }; this.notifier = new Notifier(store, { focused: () => this.presence.focused && Date.now() - this.presence.at < 45000, viewing: () => this.presence.view || '', enabled: () => !process.env.NODE_TEST_CONTEXT && this.store.config().notify !== false }); this.rooms = new Rooms(this); this.memory = new Memory(memoryDirectory); this.specialists = new Specialists(this); this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
-    this.monitor = new Monitor(this);
+    this.monitor = new Monitor(this); this.files = new Files(this); this.shownFile = null;
     this.evidence = new Evidence(store, runId => this.run(runId), (runId, kind, data) => {
       store.event(runId, kind, data);
     }, () => this.mcpUrl);
@@ -105,7 +107,7 @@ export class Desk {
   }
   snapshot() {
     return { computer: thisComputer(), config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
-      notices: this.notifier.summary(),
+      notices: this.notifier.summary(), shownFile: this.shownFile,
       runs: [...this.store.list('run'), ...this.peers.remoteRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       devices: this.peers.status(this.port),
@@ -733,6 +735,14 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   // An agent tested something and shares the proof: a screenshot, a recording or the test output. The file is kept with the run's evidence,
   // belongs to the task, and is posted where the agent is talking (its room, or its personal chat), so it also shows in that chat's Media tab.
+  // An agent puts a file in front of the person: it opens in their file window, at the line given.
+  showFile(runId, { file, line = 0, note = '' }) {
+    const opened = this.files.open(line ? `${file}:${line}` : file, runId);
+    this.shownFile = { id: randomUUID(), path: opened.path, line: opened.line, note: String(note || '').slice(0, 300), runId, at: new Date().toISOString() };
+    this.store.event(runId, 'file-shown', { path: opened.path, line: opened.line });
+    this.store.emit('change', { kind: 'file' });
+    return { shown: true, path: opened.path, kind: opened.kind };
+  }
   shareEvidence(runId, { file, title, taskId = '', result = 'info', note = '', page = false }) {
     const run = this.run(runId), source = path.resolve(String(file || ''));
     if (!existsSync(source) || !statSync(source).isFile()) throw new Error(`No file at ${source}. Give the full path of a file on this computer.`);

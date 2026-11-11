@@ -22,6 +22,7 @@ import { githubAccounts, startGithubLogin, cancelGithubLogin, switchGithubAccoun
 import { autostartStatus, setAutostart } from './autostart.js';
 import { issueBranch } from './branches.js';
 import { profileEnvironment, discoverProfiles } from './agents.js';
+import { kindOf, mimeOf } from './files.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
@@ -50,12 +51,14 @@ async function body(request) {
   for await (const chunk of request) { input += chunk; if (Buffer.byteLength(input) > 2 * 1024 * 1024) throw new Error('Request exceeds 2 MB.'); }
   try { return input ? JSON.parse(input) : {}; } catch { throw new Error('Request body must be JSON.'); }
 }
-function serveFile(request, response, file, { sandbox = false, download = false, cache = 'no-store' } = {}) {
-  const stat = statSync(file), type = mime[path.extname(file)] || 'application/octet-stream';
+function serveFile(request, response, file, { sandbox = false, download = false, cache = 'no-store', frame = false, type: forced = '' } = {}) {
+  const stat = statSync(file), type = forced || mime[path.extname(file).toLowerCase()] || 'application/octet-stream';
   const headers = { 'Content-Type': type, 'Cache-Control': cache, 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff' };
   // A page an agent made to explain its work may run its own inline script, but stays in a sandbox with no origin: it cannot reach Rex Desk or the network.
   if (sandbox === 'scripts') headers['Content-Security-Policy'] = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src data:;";
   else if (sandbox) headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self';";
+  // The file window shows PDFs and media in a frame of this page; the dashboard's own pages may not be framed.
+  else if (frame) headers['Content-Security-Policy'] = "frame-ancestors 'self'";
   if (download) headers['Content-Disposition'] = `attachment; filename="${path.basename(file).replaceAll('"', '')}"`;
   const range = request.headers.range?.match(/^bytes=(\d+)-(\d*)$/);
   if (range) {
@@ -514,6 +517,20 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
           if (action === 'orca') { const run = desk.run(runId); if (!run.worktree) throw new Error('This run has no worktree to open.'); return json(response, 200, await openInOrca(run)); }
         }
       }
+      // The file window: open, view, save, format, and open in another program.
+      if (url.pathname === '/api/files/open' && request.method === 'GET') return json(response, 200, desk.files.open(url.searchParams.get('path'), url.searchParams.get('run') || ''));
+      if (url.pathname === '/api/files/raw' && request.method === 'GET') {
+        const file = desk.files.check(url.searchParams.get('path') || ''), kind = kindOf(file);
+        if (!existsSync(file) || statSync(file).isDirectory()) return json(response, 404, { error: 'No such file.' });
+        // HTML runs in a sandbox with no origin; SVG can carry script, so it gets the strict one; everything else may sit in a frame.
+        const ext = path.extname(file).toLowerCase(), textual = !['image', 'video', 'audio', 'pdf'].includes(kind);
+        return serveFile(request, response, file, { sandbox: kind === 'html' ? 'scripts' : ext === '.svg' ? true : false, frame: !['html'].includes(kind) && ext !== '.svg', download: url.searchParams.has('download'), type: kind === 'html' ? '' : textual ? 'text/plain; charset=utf-8' : mimeOf(file) || '' });
+      }
+      if (url.pathname === '/api/files/sheet' && request.method === 'GET') return json(response, 200, await desk.files.sheet(url.searchParams.get('path') || ''));
+      if (url.pathname === '/api/files/doc' && request.method === 'GET') { const html = await desk.files.doc(url.searchParams.get('path') || ''); response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:;" }); response.end(html); return; }
+      if (url.pathname === '/api/files/save' && request.method === 'POST') { const input = await body(request); try { return json(response, 200, desk.files.save(input.path, input)); } catch (error) { return json(response, error.status || 400, { error: error.message, conflict: error.status === 409 }); } }
+      if (url.pathname === '/api/files/format' && request.method === 'POST') { const input = await body(request); return json(response, 200, await desk.files.format(input.path, input.text)); }
+      if (url.pathname === '/api/files/reveal' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.files.reveal(input.path, input.how)); }
       if (url.pathname === '/api/monitor' && request.method === 'GET') return json(response, 200, await desk.monitor.snapshot({ fresh: url.searchParams.has('fresh') }));
       if (url.pathname === '/api/monitor/clean' && request.method === 'POST') return json(response, 200, await desk.monitor.clean({ reason: 'you pressed Free memory' }));
       if (url.pathname === '/api/monitor/end' && request.method === 'POST') return json(response, 200, await (async input => desk.monitor.end(input.pid, { outside: input.outside === true }))(await body(request)));
@@ -616,10 +633,12 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-notices.js': 'chat-notices.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
       // three.js ships from the installed package; the page loads no remote scripts.
       const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });
+      const editorFile = url.pathname.match(/^\/vendor\/codemirror\/((?:lib|mode\/[a-z0-9-]+|addon\/[a-z]+)\/[a-z0-9-]+\.(?:js|css))$/);
+      if (editorFile) return serveFile(request, response, path.join(root, 'node_modules', 'codemirror', ...editorFile[1].split('/')), { cache: 'public, max-age=604800' });
       const file = publicFiles[url.pathname];
       if (!file || !existsSync(path.join(root, 'public', file))) return json(response, 404, { error: 'Page not found.' });
       return serveFile(request, response, path.join(root, 'public', file));
