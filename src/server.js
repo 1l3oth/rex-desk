@@ -503,6 +503,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         return serveFile(request, response, image, { cache: 'private, max-age=604800' });
       }
       if (interactionMatch && request.method === 'POST') { const owner = !store.get('interaction', interactionMatch[1]) && desk.peers.interactionOwner(interactionMatch[1]); return json(response, 200, owner ? await desk.peers.forward(owner, 'POST', url.pathname, await body(request)) : desk.answer(interactionMatch[1], await body(request))); }
+      const unsendMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/messages\/(\d+)$/);
+      if (unsendMatch && request.method === 'DELETE') return json(response, 200, desk.unsend(unsendMatch[1], unsendMatch[2]));
       const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|orca|say|fresh))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;

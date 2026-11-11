@@ -146,6 +146,14 @@ export class Desk {
   // one that is idle takes it right now, resuming its session with the whole chat behind it.
   // Messages sent to a working agent wait in its queue; after each tool call it is handed what arrived, so it can change course
   // at once instead of after its whole turn. What it was handed is not sent again when the turn ends.
+  // Unsend: the message leaves the chat. If the agent has not picked it up yet, it never sees it.
+  unsend(runId, sequence) {
+    const run = this.run(runId), message = this.store.unsendEvent(runId, sequence);
+    if (!message) throw new Error('Only your own messages can be unsent.');
+    const queued = run.queued || [], at = queued.indexOf(message.text);
+    if (at >= 0) { this.store.put('run', runId, { ...run, queued: queued.filter((_, index) => index !== at) }); return { unsent: true, seen: false }; }
+    return { unsent: true, seen: this.live.has(runId) || !['queued'].includes(run.state) };
+  }
   takeInbox(runId) {
     const run = this.store.get('run', runId); if (!run?.queued?.length) return '';
     this.store.put('run', runId, { ...run, queued: [] });
@@ -437,7 +445,7 @@ export class Desk {
           if (kind === 'rate-limit') { this.recordUsage(run.provider, this.accountFor(run) || this.agents.selected(run.provider), data); return; }
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
           // The event log hides fields named like secrets ("tokens" among them), so the token counts travel as usage.
-          if (kind === 'agent-result' && data.tokens) data = { ...data, usage: data.tokens };
+          if (kind === 'agent-result') data = { ...data, ...(data.tokens ? { usage: data.tokens } : {}), paidByApi: data.billedToApiKey === true };
           this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result', 'subagent-text', 'subagent-done', 'agent-result'].includes(kind));
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);

@@ -136,6 +136,7 @@ export class Rooms {
   deleteMessage(roomId, messageId) {
     const message = this.store.get('roommsg', messageId);
     if (!message || message.roomId !== roomId) throw new Error('That message is not in this room.');
+    if (message.from?.type !== 'human') throw new Error('Only your own messages can be unsent.');
     this.store.delete('roommsg', messageId);
     this.store.emit?.('change', { kind: 'room', roomId });
     return { deleted: true };

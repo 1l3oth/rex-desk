@@ -1187,3 +1187,7 @@ code.md-file{cursor:pointer;text-decoration:underline dotted;text-underline-offs
 .acct-list .acct-limit{display:grid;grid-template-columns:86px minmax(80px,1fr) 42px auto;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
 .acct-limit meter{width:100%;height:8px}.acct-lval{font-variant-numeric:tabular-nums;color:var(--ink);text-align:right}.acct-limit.hot .acct-lval{color:var(--bad);font-weight:700}
 .acct-lreset{font-size:11.5px;white-space:nowrap}.acct-list .acct-asof{font-size:10.5px;color:var(--muted)}
+
+/* Unsend your own message: a trash button that shows when you point at it */
+.msg.mine{position:relative}.msg.mine .unsend{position:absolute;left:-30px;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:26px;height:26px;border:0;border-radius:7px;background:none;color:var(--muted);opacity:0;cursor:pointer}
+.msg.mine:hover .unsend,.msg.mine .unsend:focus-visible{opacity:1}.msg.mine .unsend:hover{color:var(--bad);background:var(--raised)}

@@ -135,7 +135,7 @@ function renderItems(items, run, live) {
     if (item.role === 'tool') { group.push(item); continue; }
     flush(false);
     out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
-      : item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), voice: item.voice, html: markdown(item.text) })
+      : item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), voice: item.voice, html: markdown(item.text), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="Tokens this reply used">${esc(tokenText(item.tokens))}</div>` : '') })
       : item.role === 'subagent' ? subagentHtml(item, live)
       : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div></div>`
@@ -179,12 +179,12 @@ function transcript(events) {
     if (event.kind === 'subagent-text') continue;
     if (event.kind === 'subagent-done') { const sub = subs.get(event.id); if (sub) Object.assign(sub, { done: true, failed: event.failed, result: event.text, endedAt: event.createdAt }); continue; }
     if (['command-output', 'dev-output'].includes(event.kind)) continue;
-    if (event.kind === 'human-message') { const said = spokenText(event.text); items.push({ role: 'human', text: said.text, voice: said.voice, at: event.createdAt }); }
+    if (event.kind === 'human-message') { const said = spokenText(event.text); items.push({ role: 'human', text: said.text, voice: said.voice, at: event.createdAt, sequence: event.sequence }); }
     else if (event.kind === 'turn-start') items.push({ role: 'status', text: `${event.resumed ? 'Resumed' : 'Started'} with ${provider(event.provider)}`, at: event.createdAt });
     else if (event.kind === 'loop-check') items.push({ role: 'status', text: event.text || 'Loop check', at: event.createdAt });
     // The tokens of a reply show under the reply itself, like in a group chat.
     else if (event.kind === 'agent-result' && typeof event.usage === 'object' && tokenText(event.usage) && lastReply(items)) lastReply(items).tokens = event.usage;
-    else if (event.kind === 'agent-result') items.push({ role: 'status', text: `Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${typeof event.usage === 'object' && tokenText(event.usage) ? ` · ${tokenText(event.usage)}` : ''}${event.cost && event.billedToApiKey ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
+    else if (event.kind === 'agent-result') items.push({ role: 'status', text: `Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${typeof event.usage === 'object' && tokenText(event.usage) ? ` · ${tokenText(event.usage)}` : ''}${event.cost && event.paidByApi === true ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
     else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
     else if (event.kind === 'agent-tool' && ['desk_ask', 'desk_message', 'desk_elicit'].includes(event.tool)) continue; // shown as chat messages already
     else if (event.kind === 'agent-tool-result') continue;
@@ -194,7 +194,8 @@ function transcript(events) {
   }
   return items;
 }
-const bubble = ({ mine, name, time, html, voice = false }) => `<div class="msg ${mine ? 'mine' : ''}"><div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}${voice ? ` ${micIcon()}` : ''}</span></div><div class="md">${html}</div></div></div>`;
+const UNSEND_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const bubble = ({ mine, name, time, html, voice = false, unsend = '' }) => `<div class="msg ${mine ? 'mine' : ''}">${unsend ? `<button type="button" class="unsend" data-unsend="${unsend}" title="Unsend" aria-label="Unsend this message">${UNSEND_ICON}</button>` : ''}<div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}${voice ? ` ${micIcon()}` : ''}</span></div><div class="md">${html}</div></div></div>`;
 const typing = (name, caption = '') => `<div class="msg" aria-live="polite" aria-label="${esc(name)} is typing"><div class="avatar">${esc(initials(name))}</div><div class="bubble typing"><span class="dots"><i></i><i></i><i></i></span>${caption ? `<span class="cap">${esc(caption)}</span>` : ''}</div></div>`;
 const note = text => `<div class="note">${text}</div>`;
 // Runs that are over. Any other run that is not working can still be closed, so a stuck run never blocks its task.
@@ -705,12 +706,31 @@ document.addEventListener('keydown', event => {
   drawReplyBar();
   const row = document.querySelector(`[data-msg="${CSS.escape(message.id)}"]`); if (row) { row.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 900); }
 });
-// Delete a message in a group chat.
+// Ctrl+Alt on its own (pressed and let go, with no other key) puts the cursor in the message box.
+const chord = { ctrl: false, alt: false, other: false };
+document.addEventListener('keydown', event => {
+  if (event.key === 'Control') chord.ctrl = true; else if (event.key === 'Alt') chord.alt = true; else chord.other = true;
+}, true);
+document.addEventListener('keyup', event => {
+  if (!['Control', 'Alt'].includes(event.key)) return;
+  if (chord.ctrl && chord.alt && !chord.other) { const box = document.getElementById('draft'); if (box) { event.preventDefault(); box.focus(); box.selectionStart = box.selectionEnd = box.value.length; } }
+  if (!event.ctrlKey && !event.altKey) { chord.ctrl = chord.alt = chord.other = false; }
+}, true);
+window.addEventListener('blur', () => { chord.ctrl = chord.alt = chord.other = false; });
+// Unsend your own message in a personal chat.
+document.addEventListener('click', async event => {
+  const button = event.target.closest?.('[data-unsend]'); if (!button) return;
+  event.stopPropagation();
+  const [runId, sequence] = button.dataset.unsend.split(':');
+  if (!event.shiftKey && !confirm('Unsend this message? (Shift+click unsends without asking.)')) return;
+  try { const result = await api(`/runs/${runId}/messages/${sequence}`, { method: 'DELETE' }); toast(result.seen ? 'Unsent. The agent had already read it.' : 'Unsent before the agent read it.'); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
+});
+// Unsend your own message in a group chat.
 document.addEventListener('click', async event => {
   const button = event.target.closest?.('[data-msg-delete]'); if (!button) return;
   event.stopPropagation();
   const message = (ui.snap.messages || []).find(item => item.id === button.dataset.msgDelete); if (!message) return;
-  if (!event.shiftKey && !confirm('Delete this message for everyone in the room? (Shift+click deletes without asking.)')) return;
+  if (!event.shiftKey && !confirm('Unsend this message? (Shift+click unsends without asking.)')) return;
   try { await api(`/rooms/${message.roomId}/messages/${message.id}`, { method: 'DELETE' }); if (ui.reply?.id === message.id) { ui.reply = null; drawReplyBar(); } await refresh(); } catch (error) { toast(error.message, true); }
 });
 

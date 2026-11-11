@@ -175,6 +175,14 @@ export class Store extends EventEmitter {
     this.cloud?.schedule();
     this.emit('change', { kind: 'event', runId });
   }
+  // The person unsends one of their own messages in a personal chat.
+  unsendEvent(runId, sequence) {
+    const row = this.db.prepare("SELECT value FROM events WHERE run_id=? AND sequence=? AND kind='human-message'").get(runId, Number(sequence));
+    if (!row) return null;
+    this.db.prepare('DELETE FROM events WHERE run_id=? AND sequence=?').run(runId, Number(sequence));
+    this.emit('change', { kind: 'event', runId });
+    return JSON.parse(row.value);
+  }
   events(runId, { visible = false, after = 0, limit = 500 } = {}) {
     return this.db.prepare(`SELECT * FROM events WHERE run_id=? AND sequence>? ${visible ? 'AND visible=1' : ''} ORDER BY sequence DESC LIMIT ?`)
       .all(runId, after, limit).reverse().map(row => ({ sequence: row.sequence, kind: row.kind, visible: Boolean(row.visible), ...JSON.parse(row.value), createdAt: row.created_at }));

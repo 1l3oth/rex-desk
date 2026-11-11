@@ -386,3 +386,16 @@ test('account usage is kept per account from what Claude Code and Codex report',
   assert.ok(desk.snapshot().usage.length === 2);
   store.close();
 });
+
+test('the person unsends their own message in a personal chat; a queued one is never seen', async () => {
+  const store = new Store(temporary('unsend')); const desk = new Desk(store, { root: temporary('unsend-root') });
+  store.put('run', 'chat-1', { id: 'chat-1', role: 'specialist', state: 'queued', queued: ['typo message'], createdAt: now() });
+  store.event('chat-1', 'human-message', { text: 'typo message' }, true);
+  store.event('chat-1', 'agent-text', { text: 'an agent reply' }, true);
+  const [mine, theirs] = store.events('chat-1', { visible: true });
+  assert.throws(() => desk.unsend('chat-1', theirs.sequence), /Only your own messages/);
+  assert.deepEqual(desk.unsend('chat-1', mine.sequence), { unsent: true, seen: false });
+  assert.deepEqual(store.get('run', 'chat-1').queued, []);
+  assert.deepEqual(store.events('chat-1', { visible: true }).map(event => event.kind), ['agent-text']);
+  store.close();
+});
