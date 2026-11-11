@@ -273,7 +273,7 @@ export class Desk {
     // A task the person gave to an agent stays that agent's: the caller is told who owns it instead of starting a second run.
     const owner = this.store.list('run').filter(item => item.specialistId && item.taskId === task.id && !['stopped', 'failed', 'cancelled'].includes(item.state)).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
     const caller = this.store.get('run', parentRunId);
-    if (owner && owner.specialistId !== (caller?.specialistId || caller?.roomAgent)) { const agent = this.store.get('specialist', owner.specialistId); throw new Error(`This task is already given to ${agent?.name || 'another agent'}. Do not start your own run: @mention them in the room, or ask the person.`); }
+    if (owner && owner.specialistId !== (caller?.specialistId || caller?.roomAgent)) { const agent = this.store.get('specialist', owner.specialistId); throw new Error(`This task is already given to ${agent?.name || 'another agent'}. Do not start your own run: to work on it together, add yourself or others with desk_task_team, or pass it on.`); }
     // A task on a project that has its own agent goes to that agent, not to a new nameless run: in a room it works right there in the room.
     const roomId = caller?.roomTurn?.roomId || '', projectAgent = this.projectAgentFor(task, input.repositoryId);
     if (projectAgent && !owner) {
@@ -281,6 +281,7 @@ export class Desk {
       throw new Error(self ? `This is your own task. Start it with desk_take_task (taskId ${task.id})${roomId ? ': you do it here in the room' : ''}; do not ask for a new run.`
         : `${projectAgent.name} is the agent for this project. Give it to them with desk_assign_task (specialistId ${projectAgent.id}, taskId ${task.id}${roomId ? `, roomId ${roomId}` : ''})${roomId ? ' so they work on it here in the room' : ''}. Do not start a new run, and do not take it yourself.`);
     }
+    if (caller?.roomAgent) throw new Error(`In a group chat nothing new is started. Work on it here: give it to an agent, add teammates or pass it on with desk_task_team (task ${task.taskNumber || task.externalId || task.id}).`);
     const answer = await this.ask(parentRunId, { kind: 'approval', title: `Start work on “${task.title}”?`,
       request: { taskId: task.id, issue: task.title, provider: 'claude', note: 'An agent asked to start this run. It starts only if you approve.' }, method: 'dispatch' });
     if (answer.action !== 'accept') throw new Error('The human did not approve starting this run. Do not start it another way.');
@@ -904,24 +905,43 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // Gives a task to an agent: a run on that task in the agent's name. While it runs, the agent shows as busy on that task, and what it reports goes to the room it was given in.
   async assignTask({ specialistId, taskId, roomId = '', instructions = '' }) {
     const agent = this.specialists.get(specialistId);
+    // In a room the agent does the task right there, in its room session, and talks about it in the room: no separate run.
+    if (roomId) return this.shareTask({ taskId, add: [agent.id], roomId, instructions });
     if (this.specialists.status(agent).state === 'busy') throw new Error(`${agent.name} is already working on a task. Ask ${agent.name} to finish, or duplicate the agent.`);
     const name = await this.englishName(taskId);
-    // In a room the agent does the task right there, in its room session, and talks about it in the room: no separate run.
-    if (roomId) return this.workInRoom({ agent, taskId, roomId, name, instructions });
     return this.startTask({ taskId, repositoryId: agent.repositoryId || undefined, instructions, specialistId, roomId });
   }
-  async workInRoom({ agent, taskId, roomId, name, instructions = '' }) {
+  // Who works on a task: the agent who leads it, and the agents added to work on it with them, all in the room.
+  taskTeam(task) { return [...new Set([task?.roomWork?.agentId, ...(task?.team || [])].filter(Boolean))].filter(id => this.store.get('specialist', id)); }
+  // Give a task to agents, add teammates, or pass it on. Nothing is started: each one works on it in its room session, in the same worktree.
+  // quiet: the person's own message already told them (an @mention with the task in it), so no brief is posted.
+  async shareTask({ taskId, add = [], pass = '', from = '', roomId = '', instructions = '', by = 'The person', quiet = false }) {
+    const task = this.task(taskId), room = roomId || task.roomWork?.roomId || '';
+    if (!room) throw new Error('Name the group chat (roomId) where they work on it together.');
+    let team = this.taskTeam(task); const before = new Set(team);
+    if (pass) { team = team.filter(id => id !== from); team = [pass, ...team.filter(id => id !== pass)]; }
+    for (const id of add) if (!team.includes(id)) team.push(id);
+    const lead = pass || (team.includes(task.roomWork?.agentId) ? task.roomWork.agentId : team[0]);
+    this.store.put('task', taskId, { ...this.task(taskId), roomWork: { agentId: lead, roomId: room, at: now() }, team });
+    const fresh = team.filter(id => !before.has(id));
+    for (const id of fresh) if (!this.rooms.room(room).members.includes(id)) this.rooms.addMember(room, id);
+    if (!quiet) for (const id of fresh) await this.workInRoom({ agent: this.specialists.get(id), taskId, roomId: room, name: await this.englishName(taskId), instructions, lead: this.specialists.get(lead), team, by });
+    return { inRoom: true, taskId, roomId: room, lead: this.specialists.get(lead)?.name, team: team.map(id => this.specialists.get(id)?.name) };
+  }
+  async workInRoom({ agent, taskId, roomId, name, instructions = '', lead = agent, team = [agent.id], by = 'The person' }) {
     const task = this.task(taskId), number = task.taskNumber || task.externalId || '', config = this.store.config();
-    const repository = config.repositories.find(item => item.id === agent.repositoryId) || config.repositories.find(item => agent.projectPath && path.resolve(item.path).toLowerCase() === path.resolve(agent.projectPath).toLowerCase());
-    const base = repository?.baseBranch || 'main', project = repository?.path || agent.projectPath || '';
+    // The team shares one worktree and branch, in the project of the agent who leads the task.
+    const owner = lead || agent;
+    const repository = config.repositories.find(item => item.id === owner.repositoryId) || config.repositories.find(item => owner.projectPath && path.resolve(item.path).toLowerCase() === path.resolve(owner.projectPath).toLowerCase());
+    const base = repository?.baseBranch || 'main', project = repository?.path || owner.projectPath || '';
     const branch = `${config.branchPrefix || 'temp/rex'}/${String(number).toLowerCase()}-${slug(name).slice(0, 40)}`.replace(/\/+/g, '/');
-    this.store.put('task', taskId, { ...task, roomWork: { agentId: agent.id, roomId, at: now() } });
-    const brief = [`The person gave you this task to do here in the room: #${number} ${name}.`,
+    const others = team.filter(id => id !== agent.id).map(id => this.specialists.get(id)?.name).filter(Boolean);
+    const brief = [`${by} gave you this task to do here in the room: #${number} ${name}.${others.length ? ` You work on it together with ${others.join(', ')}${owner.id !== agent.id ? ` (${owner.name} leads it)` : ''}: split the work in the room, and say what you take before you start.` : ''}`,
       task.url ? `Tracker link: ${task.url}` : '', `What it says:\n${String(task.description || task.title || '').slice(0, 4000)}`, instructions ? `Notes from the person: ${instructions}` : '',
       `Do the work in this session and talk about it in this room. Never change the main checkout at ${project}. Work in a git worktree beside it: in ${project} run \`git worktree add "${project}-worktrees/${String(number).toLowerCase()}" -b ${branch} ${base}\` (or reuse it if it exists), then change, run and test the code there.`,
       'Post a short note in the room when you start, when something important happens, and when you are done (what changed and how you tested it). Share each test result with desk_share_evidence (a screenshot, a recording or the test output) so it shows in the room and on the task. Commit in the worktree when it works. Ask the person here before pushing or opening a pull request; when they tell you to (\"open the PR\", \"push it\"), do it at once with desk_publish, passing worktree (your worktree folder) and taskId: their message is the yes, so do not ask again or tell them to start a run. Ask first before anything that touches a live site or other people.',
       this.memory.workflowText(agent.projectSlug)].filter(Boolean).join('\n\n');
-    await this.rooms.post(roomId, { system: true, text: `${agent.name} is now working on #${number} ${name} here in the room.`, instruction: brief, to: [agent.slug] });
+    await this.rooms.post(roomId, { system: true, text: others.length ? `${agent.name} joins ${others.join(', ')} on #${number} ${name} here in the room.` : `${agent.name} is now working on #${number} ${name} here in the room.`, instruction: brief, to: [agent.slug] });
     return { inRoom: true, agentId: agent.id, roomId, taskId };
   }
   async stop(runId) {

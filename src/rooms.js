@@ -105,7 +105,8 @@ export class Rooms {
     for (const run of this.store.list('run').filter(item => item.specialistId && item.taskId && !['stopped', 'failed', 'cancelled'].includes(item.state)).sort((left, right) => left.createdAt.localeCompare(right.createdAt))) owners.set(run.taskId, run);
     const lines = [...owners].map(([taskId, run]) => `- ${this.taskLine(taskId)}: ${this.member(run.specialistId).name} (@${this.member(run.specialistId).handle}, ${String(run.state).replaceAll('_', ' ')})`).filter(line => !line.startsWith('- :'));
     // Tasks being done in a room, by an agent's room session.
-    for (const task of this.store.list('task').filter(item => item.roomWork?.agentId && !owners.has(item.id) && this.agent(item.roomWork.agentId))) lines.push(`- ${this.taskLine(task.id)}: ${this.member(task.roomWork.agentId).name} (@${this.member(task.roomWork.agentId).handle}, working in the room)`);
+    for (const task of this.store.list('task').filter(item => item.roomWork?.agentId && !owners.has(item.id) && this.agent(item.roomWork.agentId) && (item.team || []).length > 1)) lines.push(`- ${this.taskLine(task.id)}: ${this.desk.taskTeam(task).map(id => `${this.member(id).name} (@${this.member(id).handle})`).join(', ')}, working on it together in the room`);
+    for (const task of this.store.list('task').filter(item => item.roomWork?.agentId && !owners.has(item.id) && this.agent(item.roomWork.agentId) && (item.team || []).length <= 1)) lines.push(`- ${this.taskLine(task.id)}: ${this.member(task.roomWork.agentId).name} (@${this.member(task.roomWork.agentId).handle}, working in the room)`);
     return lines;
   }
   taskLine(taskId) { const task = this.store.get('task', taskId); return task ? `#${task.taskNumber || task.externalId} ${task.titleEn || task.title}` : ''; }
@@ -134,6 +135,9 @@ export class Rooms {
     const message = { id: randomUUID(), roomId, seq, threadId: parent ? (parent.threadId || parent.id) : '', replyTo, from, text: body, to: paused ? targets.filter(target => target === HUMAN) : (targets.length ? targets : [HUMAN]),
       tasks: this.tasksIn(body), hops, paused, at: now(), ...(instruction ? { instruction: String(instruction).slice(0, 4000) } : {}) };
     this.store.put('room', roomId, { ...this.room(roomId), seq }); this.store.put('roommsg', message.id, message);
+    // The person naming agents and a task in one message gives them that task: the first one named leads, the rest work on it with them.
+    const named = !fromAgentId && !system ? message.to.filter(target => target !== HUMAN && target !== 'main' && this.desk.store.get('specialist', target)) : [];
+    if (named.length && message.tasks.length && this.desk.shareTask) for (const taskId of message.tasks) await this.desk.shareTask({ taskId, add: named, roomId, quiet: true }).catch(() => {});
     // An @mention of an agent who is not in this room reaches nobody: say so, and where that agent is, so nobody waits for an answer.
     const outsiders = this.outsidersIn(room, body);
     if (outsiders.length) this.system(roomId, outsiders.map(agent => { const rooms = this.roomsOf(agent.id).map(item => item.name); return `@${agent.slug} is not in this room, so ${agent.name} did not get that.${rooms.length ? ` ${agent.name} is in ${rooms.join(', ')}.` : ''} Add ${agent.name} here with Add people, or ask there.`; }).join(' '));
@@ -169,7 +173,7 @@ export class Rooms {
     return [`Group chat "${room.name}". Members: ${room.members.map(id => `${this.member(id).name} (@${this.member(id).handle}, ${this.member(id).project})`).join(', ')}, and the person. You are ${agent?.name}. Mention only these members with @: anyone else does not get the message. Talk only about this group chat: never bring up what was said in another group chat or in your personal chat, unless the person asks for it here.`,
       alsoWorking.length ? `Also working in this room right now: ${alsoWorking.map(member => `${member.name} (${member.label})`).join(', ')}. They may post while you work.` : '',
       here.length ? `The conversation so far (read it before you answer):\n${here.map(line).join('\n')}` : 'Nothing new in this room before this message.',
-      owners.length ? `Tasks already given to agents (the person decided this; never start your own run on one of them: @mention its owner, or ask the person first):\n${owners.join('\n')}` : '',
+      owners.length ? `Who works on which task (the person decided this). Work on tasks here in the room; never start a new run for one. To hand a task to another agent, or to add agents to work on it with you, use desk_task_team:\n${owners.join('\n')}` : '',
       room.away?.on ? awayRules(room.away) : '',
       `New message from ${who(message)} to ${message.to.map(id => id === HUMAN ? 'the person' : this.member(id).name).join(', ')}:\n${message.instruction || message.text}`,
       since.length ? `Already answered after that message (do not repeat it; build on it or say you agree in a few words):\n${since.map(line).join('\n')}` : '',

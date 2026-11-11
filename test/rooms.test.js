@@ -92,7 +92,7 @@ test('a task given in a room is done by the agent right there, in its room sessi
   const directory = store.get('specialist', dara.id).projectPath;
   store.put('config', 'main', { ...store.config(), branchPrefix: 'temp/rex', repositories: [{ id: 'repository-1', name: 'shop', path: directory, baseBranch: 'develop', targetBranch: 'develop' }] });
   const result = await desk.assignTask({ specialistId: dara.id, taskId: 't1', roomId: room.id });
-  assert.deepEqual(result, { inRoom: true, agentId: dara.id, roomId: room.id, taskId: 't1' });
+  assert.deepEqual(result, { inRoom: true, taskId: 't1', roomId: room.id, lead: 'Dara', team: ['Dara'] });
   assert.ok(!store.list('run').some(run => run.role === 'worker'), 'no separate task run');
   assert.ok(desk.rooms.messages(room.id).some(item => item.from.type === 'system' && /Dara is now working on #49760 Cart total is wrong here in the room/.test(item.text)));
   await waitFor(() => turns.some(item => item.run.roomAgent === dara.id && item.prompt.includes('gave you this task')));
@@ -467,4 +467,19 @@ test('an agent who @mentions someone who is not in the room is told so, with whe
   const note = desk.rooms.messages(room.id).find(item => item.from.type === 'system' && /@vanna is not in this room/.test(item.text));
   assert.ok(note, 'a note in the room'); assert.match(note.text, /Vanna is in Billing/);
   assert.ok(other);
+});
+
+test('the person naming agents and a task assigns it to them; agents add teammates or pass it on, and nothing new is started', async () => {
+  const { desk, store, dara, vanna, room } = setup({ replies: ['On it.', 'On it too.', 'Taking the tests.'] });
+  await desk.rooms.post(room.id, { text: '@dara please check #49760' });
+  let task = store.get('task', 't1');
+  assert.equal(task.roomWork.agentId, dara.id, 'Dara leads it'); assert.deepEqual(desk.taskTeam(task), [dara.id]);
+  const added = await desk.shareTask({ taskId: 't1', add: [vanna.id], from: dara.id, roomId: room.id, by: 'Dara' });
+  assert.deepEqual(added.team, ['Dara', 'Vanna']);
+  assert.ok(desk.rooms.messages(room.id).some(item => /Vanna joins Dara on #49760/.test(item.text)), 'the room hears who joined');
+  await desk.shareTask({ taskId: 't1', pass: vanna.id, from: dara.id, roomId: room.id, by: 'Dara' });
+  task = store.get('task', 't1');
+  assert.equal(task.roomWork.agentId, vanna.id, 'Vanna leads it now'); assert.deepEqual(desk.taskTeam(task), [vanna.id]);
+  assert.ok(!store.list('run').some(run => run.role === 'worker'), 'no separate run was started');
+  assert.match(desk.rooms.promptFor(desk.rooms.room(room.id), desk.rooms.messages(room.id).at(-1), dara.id), /desk_task_team/);
 });
