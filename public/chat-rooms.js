@@ -102,11 +102,17 @@ function activityHtml(ctx, room) {
   return `<div class="side-body ractivity" id="side-body"><h3>Now</h3>${now}<h3>Recent</h3>${rows.length ? `<ul class="alist">${rows.slice(-80).map(row).join('')}</ul>` : '<p class="muted small">Nothing yet. Mention an agent and its work shows here.</p>'}</div>`;
 }
 // The right side of a room: Activity and Chat info, as tabs.
+// Two tabs, like a messenger's chat info: Chat info (members, and the media, files and links shared here) and Activity (what the agents are doing).
 function roomSideHtml(ctx, room) {
-  const tab = ['info', 'media', 'files', 'links'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'activity', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
+  const tab = ctx.ui.sideTab === 'activity' ? 'activity' : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
+  const close = '<button type="button" class="side-x" data-action="info-toggle" aria-label="Close the side panel" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
+  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : activityHtml(ctx, room)}`;
+}
+function roomSharedHtml(ctx, room) {
   const messages = (ctx.ui.snap.messages || []).filter(message => message.roomId === room.id && message.from.type !== 'system'), runs = new Set(roomRunIds(ctx.ui, room));
   const shared = collectShared(messages.map(message => ({ from: message.from.type === 'human' ? 'You' : message.from.label, at: message.at, text: message.text })), (ctx.ui.snap.artifacts || []).filter(item => runs.has(item.runId)));
-  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button>${sharedTabButtons(shared, tab)}<span class="spacer"></span><button type="button" class="btn small" data-action="info-toggle" aria-label="Close the side panel">Close</button></div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'activity' ? activityHtml(ctx, room) : `<div class="side-body shared">${sharedTabsHtml(ctx, shared, tab)}</div>`}`;
+  const part = ['media', 'files', 'links'].includes(ctx.ui.roomShared) ? ctx.ui.roomShared : 'media';
+  return `<h3>Media, files and links</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'room-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
 }
 function roomInfoHtml(ctx, room) {
   const { ui, esc } = ctx, messages = (ui.snap.messages || []).filter(message => message.roomId === room.id);
@@ -120,6 +126,7 @@ function roomInfoHtml(ctx, room) {
       <h3>Members <span>${room.members.length + 1}</span></h3>
       <ul class="rmembers"><li class="rperson me"><span class="rperson-main">${avatarHtml(ctx, { name: 'You', size: 'sm' })}<span class="rperson-text"><b>You</b><small>The person</small></span></span></li>${room.members.map(member).join('')}</ul>
       ${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: 'Add people', placeholder: '+ Add people', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || 'Idle'}` })) }) : ''}
+      ${roomSharedHtml(ctx, room)}
       <h3>Tasks in this chat <span>${mentioned.length}</span></h3>
       ${mentioned.length ? `<ul class="rtasks">${mentioned.map(task => `<li><button class="rtask" data-open="task" data-id="${esc(task.id)}"><span class="tnum">#${esc(taskNumber(task))}</span><span>${esc(taskName(task))}</span></button></li>`).join('')}</ul>` : '<p class="muted small">None yet. Type # in the message box to mention a task.</p>'}
       <div class="rdanger"><button class="btn danger small" data-action="room-delete">Delete this room</button></div>
@@ -265,6 +272,7 @@ export function initRoomInfo(ctx) {
 export async function roomAction(ctx, action, target) {
   const { ui, api, toast, refresh } = ctx;
   if (action === 'side-tab') { ui.sideTab = target.dataset.tab; ctx.render(); return; }
+  if (action === 'room-shared') { ui.roomShared = target.dataset.tab; ctx.render(); return; }
   if (action === 'info-toggle') { ui.infoOpen = ui.infoOpen === false; ctx.render(); return; }
   if (action === 'room-image') { document.getElementById('room-image-input')?.click(); return; }
   if (action === 'room-delete') {

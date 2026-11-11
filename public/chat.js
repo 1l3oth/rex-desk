@@ -300,7 +300,7 @@ async function loadView() {
       const events = await api(`/runs/${run.id}/messages`); ui.events.set(run.id, events);
     } else if (type === 'room') {
       const room = ui.snap.rooms.find(item => item.id === id);
-      if (room && ui.infoOpen !== false && ui.sideTab !== 'info') await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
+      if (room && ui.infoOpen !== false && ui.sideTab === 'activity') await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
     } else if (type === 'monitor') { ui.monitor = await api('/monitor'); 
     } else if (type === 'person') { ui.page = (await api('/memory/page?name=user')).text; }
     else if (type === 'project') ui.page = (await api(`/memory/page?name=${encodeURIComponent(id)}`)).text;
@@ -392,7 +392,7 @@ document.addEventListener('click', async event => {
     else if (action === 'new-room') newRoomDialog();
     else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
     else if (action === 'term-open') { ui.termOpen = true; renderAll(); }
-    else if (['room-stop', 'room-remove', 'task-assign', 'info-toggle', 'room-image', 'room-delete', 'side-tab'].includes(action)) await roomAction(ctx, action, target);
+    else if (['room-shared', 'room-stop', 'room-remove', 'task-assign', 'info-toggle', 'room-image', 'room-delete', 'side-tab'].includes(action)) await roomAction(ctx, action, target);
     else if (action?.startsWith('dev-')) await devicesAction(ctx, action, target);
     else if (action?.startsWith('mo-')) await monitorAction(ctx, action, target);
     else if (action === 'brain-setup') { const found = ui.snap.memory?.brainCandidates?.[0]; const text = `Help me set up my second brain for all agents.${found ? ` I think it is at ${found}.` : ''} Ask me how I want you to use it.`; if (mainRun()) await api(`/runs/${mainRun().id}/${workingStates.includes(mainRun().state) ? 'say' : 'resume'}`, { method: 'POST', data: workingStates.includes(mainRun().state) ? { text } : { prompt: text } }); else await api('/main', { method: 'POST', data: { prompt: text } }); open('main'); }
