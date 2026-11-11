@@ -55,6 +55,9 @@ export class Files {
     const hash = text.match(/#L(\d+)(?:-L?\d+)?$/); if (hash) { line = Number(hash[1]); text = text.slice(0, hash.index); }
     const colon = text.match(/:(\d+)(?::\d+)?$/); if (colon && !/^[A-Za-z]:$/.test(text.slice(0, colon.index))) { line = Number(colon[1]); text = text.slice(0, colon.index); }
     if (!text) throw new Error('Name a file to open.');
+    // Evidence an agent shared is linked as /artifacts/<run>/<name>.
+    const shared = text.match(/^\/artifacts\/([\w-]+)\/([^/\\]+)$/);
+    if (shared) return { file: this.check(path.join(this.desk.store.directory, 'artifacts', shared[1], shared[2])), line };
     if (path.isAbsolute(text)) return { file: this.check(text), line };
     const run = runId ? this.desk.store.get('run', runId) : null, repos = this.desk.store.config().repositories || [];
     const bases = [run?.worktree, repos.find(repo => repo.id === run?.repositoryId)?.path, ...repos.map(repo => repo.path), this.desk.memory?.directory].filter(Boolean);
