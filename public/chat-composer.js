@@ -179,25 +179,29 @@ async function startHold(ctx) {
   micButton()?.classList.add('rec'); document.body.classList.add('ptt');
   if (hold.releasedEarly) { hold.releasedEarly = false; hold.active = false; document.body.classList.remove('ptt'); void finishMic(ctx); }
 }
-function insertSpace(box) {
-  const start = box.selectionStart ?? box.value.length, end = box.selectionEnd ?? start;
-  box.value = `${box.value.slice(0, start)} ${box.value.slice(end)}`; box.selectionStart = box.selectionEnd = start + 1;
-  box.dispatchEvent(new Event('input', { bubbles: true }));
-}
 function initPushToTalk(ctx) {
   document.addEventListener('keydown', event => {
     if (event.code !== 'Space' || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || !holdable(event.target) || ctx.ui.menu) return;
     if (event.repeat || hold.timer || hold.active) { event.preventDefault(); return; }
     if (!micButton() || transcribing) return;
-    event.preventDefault();
-    hold.timer = setTimeout(() => { hold.timer = 0; void startHold(ctx); }, HOLD_MS);
+    // In the message box the space is typed at once, so fast typing never comes out of order ("explaint he").
+    // Only when Space stays down past the hold time does it become talking, and that one space is taken back out.
+    const box = event.target.id === 'draft' ? event.target : null;
+    if (!box) event.preventDefault();
+    const at = box ? (box.selectionStart ?? box.value.length) : -1;
+    hold.timer = setTimeout(() => {
+      hold.timer = 0;
+      if (box && box.value[at] === ' ') { box.value = `${box.value.slice(0, at)}${box.value.slice(at + 1)}`; box.selectionStart = box.selectionEnd = at; box.dispatchEvent(new Event('input', { bubbles: true })); }
+      void startHold(ctx);
+    }, HOLD_MS);
   });
+  // Any other key while Space waits means the person is typing, not talking.
+  document.addEventListener('keydown', event => { if (event.code !== 'Space' && hold.timer) { clearTimeout(hold.timer); hold.timer = 0; } }, true);
   document.addEventListener('keyup', event => {
     if (event.code !== 'Space') return;
     if (hold.timer) {
-      // Let go before the hold time: it was a normal space.
+      // Let go before the hold time: it was a normal space, already typed.
       clearTimeout(hold.timer); hold.timer = 0;
-      if (event.target.id === 'draft') insertSpace(event.target);
       return;
     }
     if (!hold.active) return;

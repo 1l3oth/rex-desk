@@ -492,3 +492,12 @@ test('the person deletes a message from a room', async () => {
   assert.ok(!desk.rooms.messages(room.id).some(item => item.id === message.id));
   assert.throws(() => desk.rooms.deleteMessage('other-room', message.id), /not in this room/);
 });
+
+test('a group chat made from a personal chat brings the agent and the recent talk along', async () => {
+  const { desk, dara, vanna } = setup();
+  const room = desk.rooms.fromChat({ agentId: dara.id, name: 'Cart fix', members: [vanna.id], history: [{ from: 'The person', text: 'The cart total is wrong', at: now() }, { from: 'Dara', text: 'It skips the discount.', at: now() }] });
+  assert.deepEqual(room.members.sort(), [dara.id, vanna.id].sort());
+  const texts = desk.rooms.messages(room.id).map(item => `${item.from.label}: ${item.text}`);
+  assert.equal(texts[0], 'You: The cart total is wrong'); assert.equal(texts[1], 'Dara: It skips the discount.');
+  assert.match(texts.at(-1), /Started from your personal chat with Dara/);
+});

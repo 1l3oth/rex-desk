@@ -600,6 +600,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/profile/photo' && request.method === 'POST') { const result = desk.memory.setPhotoData((await body(request)).data, 'upload'); notify(); return json(response, 200, result); }
       if (url.pathname === '/api/profile/photo' && request.method === 'DELETE') { const result = desk.memory.removePhoto(); notify(); return json(response, 200, result); }
       if (url.pathname === '/api/memory/user' && request.method === 'PUT') return json(response, 200, desk.memory.setUser((await body(request)).text));
+      if (url.pathname === '/api/rooms/from-chat' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.rooms.fromChat({ agentId: input.agentId, name: input.name, members: input.members || [], history: desk.personalChat(input.agentId, Math.min(Number(input.limit) || 20, 60)) })); }
       if (url.pathname === '/api/rooms' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.rooms.create(input.name, input.members)); }
       const roomOnly = url.pathname.match(/^\/api\/rooms\/([^/]+)$/);
       if (roomOnly && request.method === 'PUT') return json(response, 200, desk.rooms.rename(roomOnly[1], (await body(request)).name));

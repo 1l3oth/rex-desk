@@ -133,15 +133,15 @@ function roomInfoHtml(ctx, room) {
     </div>`;
 }
 
-export function newRoomDialog(ctx) {
-  const { ui, esc, toast, api, refresh, open } = ctx, agents = ui.snap.specialists || [];
+export function newRoomDialog(ctx, from = null) {
+  const { ui, esc, toast, api, refresh, open } = ctx, agents = (ui.snap.specialists || []).filter(agent => agent.id !== from?.id);
   const back = document.createElement('div'); back.className = 'dialog-back';
-  back.innerHTML = `<form class="dialog"><h2>New room</h2><label>Name<input type="text" name="name" placeholder="Checkout bug" required maxlength="80"></label><label>Agents in the room</label><label class="pick"><input type="checkbox" name="member" value="main"> Rex Agent <span class="muted">· knows every project</span></label>${agents.length ? agents.map(agent => `<label class="pick"><input type="checkbox" name="member" value="${esc(agent.id)}"> ${esc(agent.name)} <span class="muted">· ${esc(agent.projectSlug)}</span></label>`).join('') : '<p class="muted">No agents yet. Create one with the + next to Agents, then add it to a room.</p>'}<div class="row"><button class="btn primary">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`;
+  back.innerHTML = `<form class="dialog"><h2>${from ? `Group chat from your chat with ${esc(from.name)}` : 'New room'}</h2>${from ? `<p class="muted small">${esc(from.name)} comes along, and the last 20 messages are copied in, so everyone carries on with the same topic.</p>` : ''}<label>Name<input type="text" name="name" placeholder="Checkout bug" required maxlength="80" value="${from ? esc(`${from.name} and team`) : ''}"></label><label>Agents in the room</label>${from?.id === 'main' ? '' : '<label class="pick"><input type="checkbox" name="member" value="main"> Rex Agent <span class="muted">· knows every project</span></label>'}${agents.length ? agents.map(agent => `<label class="pick"><input type="checkbox" name="member" value="${esc(agent.id)}"> ${esc(agent.name)} <span class="muted">· ${esc(agent.projectSlug)}</span></label>`).join('') : '<p class="muted">No agents yet. Create one with the + next to Agents, then add it to a room.</p>'}<div class="row"><button class="btn primary">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`;
   document.body.append(back); back.querySelector('input').focus();
   back.addEventListener('click', event => { if (event.target === back || event.target.dataset.close !== undefined) back.remove(); });
   back.querySelector('form').addEventListener('submit', async event => {
     event.preventDefault(); const form = new FormData(event.target);
-    try { const room = await api('/rooms', { method: 'POST', data: { name: form.get('name'), members: form.getAll('member') } }); back.remove(); await refresh(); open('room', room.id); }
+    try { const room = from ? await api('/rooms/from-chat', { method: 'POST', data: { agentId: from.id, name: form.get('name'), members: form.getAll('member') } }) : await api('/rooms', { method: 'POST', data: { name: form.get('name'), members: form.getAll('member') } }); back.remove(); await refresh(); open('room', room.id); }
     catch (error) { toast(error.message, true); }
   });
 }

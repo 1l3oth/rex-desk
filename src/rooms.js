@@ -57,6 +57,22 @@ export class Rooms {
     for (const id of members) this.addMember(room.id, id);
     return this.room(room.id);
   }
+  // A group chat made from a personal chat: the agent and the people added, and the recent talk copied in, so the topic carries on.
+  fromChat({ agentId, name, members = [], history = [] }) {
+    const agent = this.member(agentId);
+    // The talk is copied first, so it reads before the "joined" notes.
+    const room = this.create(name || `${agent.name} and team`, []);
+    let seq = 0;
+    for (const item of history) {
+      seq += 1; const mine = item.from === 'The person';
+      this.store.put('roommsg', randomUUID(), { id: randomUUID(), roomId: room.id, seq, threadId: '', replyTo: '', from: mine ? { type: 'human', id: HUMAN, label: 'You' } : { type: 'agent', id: agentId, label: agent.name },
+        text: String(item.text || '').slice(0, 8000), to: [], tasks: this.tasksIn(String(item.text || '')), hops: 0, paused: false, at: item.at || now(), copied: true });
+    }
+    this.store.put('room', room.id, { ...this.room(room.id), seq });
+    for (const id of new Set([agentId, ...members])) this.addMember(room.id, id);
+    this.system(room.id, `Started from your personal chat with ${agent.name}${history.length ? `: the last ${history.length} messages are above` : ''}. Everyone here can read them.`);
+    return this.room(room.id);
+  }
   addMember(roomId, agentId) {
     if (agentId === 'main') this.desk.specialists.ensureMain();
     const room = this.room(roomId); this.desk.specialists.get(agentId);
