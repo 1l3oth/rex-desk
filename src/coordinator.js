@@ -764,7 +764,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const directory = path.join(this.store.directory, 'handoffs'); mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `${runId}-${Date.now()}.md`); writeFileSync(file, handoff);
     this.patchRun(runId, { sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
-    this.store.event(runId, 'message', { text: `Conversation cleared. ${name} starts fresh with your next message and reads a handoff of what was said first.` }, true);
+    this.store.event(runId, 'chat-cleared', { text: `${name} starts fresh with your next message and reads a handoff of what was said before.` }, true);
     return { cleared: true, handoff: file };
   }
   // An agent tested something and shares the proof: a screenshot, a recording or the test output. The file is kept with the run's evidence,

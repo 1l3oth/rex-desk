@@ -139,6 +139,7 @@ function renderItems(items, run, live) {
     out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
       : item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), voice: item.voice, html: markdown(item.text), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="Tokens this reply used">${esc(tokenText(item.tokens))}</div>` : '') })
+      : item.role === 'cleared' ? `<div class="cleared"><span>Chat cleared · ${esc(item.text)}</span>${item.earlier ? '<button type="button" class="btn small quiet" data-action="show-earlier">Show earlier messages</button>' : ''}</div>`
       : item.role === 'subagent' ? subagentHtml(item, live)
       : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div></div>`
       : note(`${esc(item.text)} · ${hhmm(item.at)}`));
@@ -172,9 +173,13 @@ function answerHtml(item) {
     : item.approval ? '<em>Approved</em>' : item.rows.length > 1 ? item.rows.map(row => `<div class="qa-ans"><span class="qa-l">${esc(row.label)}</span><br>${esc(String(row.value))}</div>`).join('') : item.rows.length ? esc(String(item.rows[0].value)) : '<em>Sent</em>';
   return bubble({ mine: true, name: 'You', time: hhmm(item.at), html: body });
 }
-function transcript(events) {
+function transcript(all, runId = '') {
+  // After /clear the chat starts empty again; what came before stays one click away.
+  const cut = all.map(event => event.kind).lastIndexOf('chat-cleared');
+  const events = cut >= 0 && !ui.showEarlier?.[runId] ? all.slice(cut) : all;
   const items = [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event])), subs = new Map();
   for (const event of events) {
+    if (event.kind === 'chat-cleared') { items.push({ role: 'cleared', text: event.text, at: event.createdAt, earlier: cut > 0 && !ui.showEarlier?.[runId] }); continue; }
     // A sub-agent shows as one card: what it was asked, its steps, and what it reported back.
     if (event.kind === 'agent-tool' && event.tool === 'Agent') { const sub = { role: 'subagent', id: event.id, input: event.input || {}, steps: [], text: '', done: false, failed: false, at: event.createdAt }; subs.set(event.id, sub); if (!subs.has(event.parent)) items.push(sub); else subs.get(event.parent).steps.push({ tool: 'Agent', input: { description: sub.input.description } }); continue; }
     if (event.parent && subs.has(event.parent)) { const sub = subs.get(event.parent); if (event.kind === 'agent-tool') sub.steps.push(event); else if (event.kind === 'subagent-text') sub.text = event.text; continue; }
@@ -251,7 +256,8 @@ function stageModel() {
   const run = type === 'main' ? mainRun() : runById(id);
   if (!run && type === 'main') return welcomeStage();
   if (!run) return emptyStage('That run is gone.');
-  const items = [...transcript(ui.events.get(run.id) || []), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state);
+  const shown = ui.events.get(run.id) || [], cleared = ui.showEarlier?.[run.id] ? '' : [...shown].reverse().find(event => event.kind === 'chat-cleared')?.createdAt || '';
+  const items = [...transcript(shown, run.id), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && (!cleared || String(item.createdAt || item.at || '') >= cleared) && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state);
   const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`)
     + pending(run.id).map(item => `<div class="msg qfloat"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
   const shells = terminalItems(items), stop = (shells.length && !ui.termOpen ? `<button class="btn small" data-action="term-open">Terminal (${shells.length})</button> ` : '') + (live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : !FINISHED.includes(run.state) ? '<button class="btn small danger" data-action="stop" title="This run is not working. Close it so the task can get a new run.">Close run</button>' : '');
@@ -410,6 +416,7 @@ document.addEventListener('click', async event => {
     if (action?.startsWith('spec-')) await agentAction(ctx, action, target);
     else if (action === 'send') await send();
     else if (action === 'new-room') newRoomDialog();
+    else if (action === 'show-earlier') { ui.showEarlier = { ...(ui.showEarlier || {}), [ui.view.type === 'main' ? mainRun()?.id : ui.view.id]: true }; renderAll(true); }
     else if (action === 'chat-to-room') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id), agent = personalAgent(run); if (agent) openRoomDialog(ctx, { id: agent.id, name: agent.name }); }
     else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
     else if (action === 'term-open') { ui.termOpen = true; renderAll(); }
