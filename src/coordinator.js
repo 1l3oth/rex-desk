@@ -1131,7 +1131,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       await git(head.worktree, ['push', '-u', 'origin', head.branch]);
       const task = this.task(run.taskId);
       const file = path.join(this.evidence.directory(runId), `pull-request-${slug(plan.target, 40)}.md`);
-      writeFileSync(file, `${body || run.summary || ''}\n${run.verification?.command ? `\nVerification: ${run.verification.command}\nResult: passed` : ''}\nTask: ${task.sourceName} ${task.externalId}\n${head.branch === run.branch ? '' : `\nThis branch was cut from ${plan.target} and holds only this run's ${plan.commits.length} commit${plan.commits.length === 1 ? '' : 's'}.\n`}\nRecordings and test output are available in Rex Desk on this computer.\n`);
+      // Work from a group chat: the body is exactly what the agent wrote by the repo's rules, with nothing added by Rex Desk.
+      if (run.adoptedFrom) writeFileSync(file, `${body || ''}\n`); else writeFileSync(file, `${body || run.summary || ''}\n${run.verification?.command ? `\nVerification: ${run.verification.command}\nResult: passed` : ''}\nTask: ${task.sourceName} ${task.externalId}\n${head.branch === run.branch ? '' : `\nThis branch was cut from ${plan.target} and holds only this run's ${plan.commits.length} commit${plan.commits.length === 1 ? '' : 's'}.\n`}\nRecordings and test output are available in Rex Desk on this computer.\n`);
       const { stdout } = await this.gh(['pr', 'create', '--draft', '--base', plan.target, '--head', head.branch,
         '--title', title || run.title, '--body-file', file], { cwd: head.worktree });
       const url = String(stdout).trim();
@@ -1144,10 +1145,10 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   personAskedToPublish(run) {
     const roomId = run.roomTurn?.roomId || run.roomOf || ''; if (!roomId) return false;
     const agentId = run.roomAgent || run.specialistId || ''; const agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
-    const last = this.rooms.messages(roomId).filter(item => item.from.type === 'human').at(-1);
-    if (!last || Date.now() - Date.parse(last.at) > 30 * 60000) return false;
-    const toAgent = last.to.includes(agentId) || (agent && last.to.includes(agent.slug)) || (agent && new RegExp(`@${agent.slug}\\b`, 'i').test(last.text));
-    return Boolean(toAgent && /\b(pr|pull request|push|publish)\b/i.test(last.text));
+    // Any of the person's messages in the last half hour counts, so a later "WTF?" does not undo their "open the pr".
+    const recent = this.rooms.messages(roomId).filter(item => item.from.type === 'human' && Date.now() - Date.parse(item.at) <= 30 * 60000);
+    const toAgent = item => item.to.includes(agentId) || (agent && item.to.includes(agent.slug)) || (agent && new RegExp(`@${agent.slug}\\b`, 'i').test(item.text));
+    return recent.some(item => toAgent(item) && /\b(pr|pull request|push|publish)\b/i.test(item.text));
   }
   // Work done in a group chat lives in a worktree the agent made, not in a Rex Desk run. To publish it, Rex Desk makes a run for that
   // worktree and branch (marked as work from the room), so the push and the pull request go through the same route as every other run.
@@ -1171,7 +1172,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const record = { ...(existing || { id: id(), createdAt: now(), provider: session.provider, execution: 'headless', role: 'worker', specialistId: agentId === 'main' ? '' : agentId, roomId }),
       title: existing?.title || `${task.taskNumber || task.externalId || ''} ${task.title || ''}`.trim(), state: 'ready_for_review', phase: 'review', worktree: folder, branch, baseCommit,
       repositoryId: repository.id, taskId: task.id, taskIds: [task.id], targetBranch: target, adoptedFrom: folder, verification,
-      summary: existing?.summary || `Work done in a group chat by ${agentId === 'main' ? 'Rex Agent' : this.store.get('specialist', agentId)?.name || 'an agent'}. Rex Desk did not run the tests for this pull request.` };
+      // The pull request body is what the agent writes, following the repo's own rules; Rex Desk adds nothing to it.
+      summary: existing?.summary || '' };
     this.store.put('run', record.id, record);
     return record.id;
   }
