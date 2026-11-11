@@ -37,6 +37,14 @@ export class TursoSync {
     this.enqueue('INSERT INTO rex_shared(kind,id,value,deleted,v,node) VALUES(?,?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value,deleted=excluded.deleted,v=excluded.v,node=excluded.node WHERE excluded.v > rex_shared.v',
       [kind, id, deleted ? '' : JSON.stringify(value), deleted ? 1 : 0, deleted ? this.store.stamp() : value._v, this.store.nodeId]);
   }
+  // Each computer says it is on, every half minute, with how its agents are doing. A computer that cannot reach another one
+  // directly (no Tailscale) still knows it is on, and messages for its agents go through this database.
+  async presence(name, agents) {
+    if (!this.ready || this.closed) return null;
+    await this.client.execute({ sql: 'INSERT INTO rex_presence(node,name,at,agents) VALUES(?,?,?,?) ON CONFLICT(node) DO UPDATE SET name=excluded.name,at=excluded.at,agents=excluded.agents', args: [this.store.nodeId, name, Date.now(), JSON.stringify(agents)] });
+    const result = await this.client.execute({ sql: 'SELECT node,name,at,agents FROM rex_presence WHERE node != ?', args: [this.store.nodeId] });
+    return result.rows.map(row => ({ node: row.node, name: row.name, at: Number(row.at), agents: JSON.parse(row.agents || '{}') }));
+  }
   async pullShared(since, limit = 400) {
     if (!this.ready || this.closed) return null;
     const result = await this.client.execute({ sql: 'SELECT kind,id,value,deleted,v FROM rex_shared WHERE v > ? AND node != ? ORDER BY v LIMIT ?', args: [since, this.store.nodeId, limit] });
@@ -73,6 +81,7 @@ export class TursoSync {
         'CREATE TABLE IF NOT EXISTS rex_records (workspace TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(workspace,kind,id))',
         'CREATE TABLE IF NOT EXISTS rex_shared (kind TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, v TEXT NOT NULL, node TEXT NOT NULL, PRIMARY KEY(kind,id))',
         'CREATE INDEX IF NOT EXISTS rex_shared_v ON rex_shared(v)',
+        'CREATE TABLE IF NOT EXISTS rex_presence (node TEXT PRIMARY KEY, name TEXT NOT NULL, at INTEGER NOT NULL, agents TEXT NOT NULL)',
         'CREATE TABLE IF NOT EXISTS rex_events (workspace TEXT NOT NULL, sequence INTEGER NOT NULL, run_id TEXT, kind TEXT, visible INTEGER, value TEXT, created_at TEXT, PRIMARY KEY(workspace,sequence))',
         'CREATE TABLE IF NOT EXISTS rex_workspaces (workspace TEXT PRIMARY KEY, name TEXT NOT NULL, kdf TEXT NOT NULL, sealed_key TEXT NOT NULL, updated_at TEXT)',
       ], 'write');

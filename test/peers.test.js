@@ -113,3 +113,18 @@ test('a computer with another key is refused, and only Tailscale addresses are l
   assert.deepEqual(tailscaleAddresses({ eth: [{ family: 'IPv4', address: '192.168.1.5', internal: false }], ts: [{ family: 'IPv4', address: '100.101.2.3', internal: false }, { family: 'IPv4', address: '100.200.1.1', internal: false }] }), ['100.101.2.3']);
   assert.ok(a.desk.peers.checkSession(`x=1; rexdesk=${a.desk.peers.session()}`)); assert.ok(!a.desk.peers.checkSession('rexdesk=nope'));
 });
+
+test('a computer that says it is on through Turso counts as on, even when it cannot be reached over Tailscale', async () => {
+  const { a, b } = computers();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  b.desk.store.put('specialist', dara.id, { ...a.desk.store.get('specialist', dara.id) });
+  const copy = b.desk.store.get('specialist', dara.id);
+  assert.match(b.desk.specialists.status(copy).label, /has not checked in/, 'never seen at all: it says so, not that it is off');
+  b.desk.store.cloud = { ready: true, record() {}, remove() {}, event() {}, schedule() {}, shared() {}, enqueue() {}, presence: async () => [{ node: a.desk.store.nodeId, name: 'Home laptop', at: Date.now(), agents: { [dara.id]: { state: 'replying', label: 'Replying in a room…' } } }] };
+  await b.desk.peers.presence();
+  assert.equal(b.desk.specialists.status(copy).state, 'replying', 'its status comes from the database');
+  assert.equal(b.desk.peers.deviceName(a.desk.store.nodeId), 'Home laptop');
+  assert.ok(b.desk.peers.status().peers.some(peer => peer.name === 'Home laptop' && peer.online && peer.via === 'turso'), 'Devices lists it');
+  const sent = await b.desk.peers.command(copy, 'say', { text: 'hi' });
+  assert.match(sent.message, /through the shared database/);
+});

@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync,
 import { HUMAN } from './rooms.js';
 
 const now = () => new Date().toISOString();
-const ONLINE_MS = 15000, PAGE = 400, QUEUE_DAYS = 7;
+const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7;
 // Tailscale gives every device an address in 100.64.0.0/10.
 export const tailscaleAddresses = (interfaces = os.networkInterfaces()) => Object.values(interfaces).flat().filter(item => item && item.family === 'IPv4' && !item.internal)
   .map(item => item.address).filter(address => { const [first, second] = address.split('.').map(Number); return first === 100 && second >= 64 && second <= 127; });
@@ -36,22 +36,28 @@ export class Peers {
 
   // ---------- what the screen shows ----------
   byNode(nodeId) { return this.settings().peers.find(peer => peer.id === nodeId); }
-  online(nodeId) { const live = this.live.get(nodeId); return Boolean(live && Date.now() - live.at < ONLINE_MS); }
-  deviceName(nodeId) { if (!nodeId || nodeId === this.self.id) return this.self.name; return this.byNode(nodeId)?.name || 'another computer'; }
+  // Reached directly over Tailscale.
+  direct(nodeId) { const live = this.live.get(nodeId); return Boolean(live && Date.now() - live.at < ONLINE_MS); }
+  // On: reached directly, or it said so in the shared Turso database in the last 90 seconds.
+  seen(nodeId) { const seen = this.cloudSeen?.get(nodeId); return Boolean(seen && Date.now() - seen.at < CLOUD_MS); }
+  online(nodeId) { return this.direct(nodeId) || this.seen(nodeId); }
+  deviceName(nodeId) { if (!nodeId || nodeId === this.self.id) return this.self.name; return this.byNode(nodeId)?.name || this.cloudSeen?.get(nodeId)?.name || 'another computer'; }
   isRemote(agent) { return Boolean(agent && agent.kind !== 'main' && agent.node && agent.node !== this.self.id); }
   statusOf(agent) {
-    if (!this.online(agent.node)) return { state: 'offline', label: `Offline · ${this.deviceName(agent.node)} is off` };
-    return this.live.get(agent.node).agents?.[agent.id] || { state: 'idle', label: 'Idle' };
+    if (this.direct(agent.node)) return this.live.get(agent.node).agents?.[agent.id] || { state: 'idle', label: 'Idle' };
+    if (this.seen(agent.node)) return this.cloudSeen.get(agent.node).agents?.[agent.id] || { state: 'idle', label: 'Idle' };
+    return { state: 'offline', label: this.cloudSeen?.has(agent.node) || this.byNode(agent.node) ? `Offline · ${this.deviceName(agent.node)} is off` : `Offline · ${this.deviceName(agent.node)} has not checked in` };
   }
   // Runs and questions of agents on the other computers, shown as if they were here.
-  remoteRuns() { return [...this.live].filter(([node]) => this.online(node)).flatMap(([node, live]) => (live.runs || []).map(run => ({ ...run, remote: node }))); }
-  remoteInteractions() { return [...this.live].filter(([node]) => this.online(node)).flatMap(([node, live]) => (live.interactions || []).map(item => ({ ...item, remote: node }))); }
+  remoteRuns() { return [...this.live].filter(([node]) => this.direct(node)).flatMap(([node, live]) => (live.runs || []).map(run => ({ ...run, remote: node }))); }
+  remoteInteractions() { return [...this.live].filter(([node]) => this.direct(node)).flatMap(([node, live]) => (live.interactions || []).map(item => ({ ...item, remote: node }))); }
   runOwner(runId) { return [...this.live].find(([, live]) => (live.runs || []).some(run => run.id === runId))?.[0] || ''; }
   interactionOwner(id) { return [...this.live].find(([, live]) => (live.interactions || []).some(item => item.id === id))?.[0] || ''; }
   status(port) {
     const settings = this.settings();
     return { self: { ...this.self, addresses: port ? this.addresses(port) : [] }, remote: Boolean(settings.remote), key: this.key(), tailscale: tailscaleAddresses().length > 0,
-      peers: settings.peers.map(peer => ({ id: peer.id, name: peer.name, url: peer.url, online: this.online(peer.id), lastSeen: this.live.get(peer.id)?.at ? new Date(this.live.get(peer.id).at).toISOString() : peer.lastSeen || '', error: peer.error || '' })) };
+      peers: [...settings.peers.map(peer => ({ id: peer.id, name: peer.name, url: peer.url, online: this.online(peer.id), via: this.direct(peer.id) ? 'tailscale' : this.seen(peer.id) ? 'turso' : '', lastSeen: this.live.get(peer.id)?.at ? new Date(this.live.get(peer.id).at).toISOString() : peer.lastSeen || '', error: peer.error || '' })),
+        ...[...(this.cloudSeen || new Map()).values()].filter(row => !settings.peers.some(peer => peer.id === row.node)).map(row => ({ id: row.node, name: row.name, url: 'through Turso', online: this.seen(row.node), via: 'turso', lastSeen: new Date(row.at).toISOString(), error: '' }))] };
   }
 
   // ---------- settings the person changes ----------
@@ -168,24 +174,26 @@ export class Peers {
   offlineNote(roomId, agent) {
     const key = `${roomId}:${agent.id}`; if (Date.now() - (this.notes.get(key) || 0) < 10 * 60000) return;
     this.notes.set(key, Date.now());
-    this.desk.rooms.system(roomId, `${agent.name} is offline: ${this.deviceName(agent.node)} is off. The message waits, and ${agent.name} answers when it is back.`);
+    const known = this.cloudSeen?.has(agent.node) || this.byNode(agent.node);
+    this.desk.rooms.system(roomId, known ? `${agent.name} is offline: ${this.deviceName(agent.node)} is off. The message waits, and ${agent.name} answers when it is back.`
+      : `${agent.name} works on another computer that has not checked in here yet. The message waits in the shared chat. If that computer is on, update Rex Desk there and use the same Turso database (or add it under Devices).`);
   }
 
   // ---------- doing something with an agent on another computer ----------
   async forward(nodeId, method, route, data) {
     const peer = this.byNode(nodeId);
-    if (!peer || !this.online(nodeId)) throw new Error(`${this.deviceName(nodeId)} is off. Try again when it is on.`);
+    if (!peer || !this.direct(nodeId)) throw new Error(`${this.deviceName(nodeId)} is off. Try again when it is on.`);
     return this.transport(peer, method, route, data);
   }
   // A message or a task for an agent whose computer is off waits as a command; that computer runs it when it is back.
   async command(agent, action, input) {
-    if (this.online(agent.node)) {
+    if (this.direct(agent.node) && this.byNode(agent.node)) {
       const route = action === 'say' ? `/api/specialists/${agent.id}/say` : `/api/specialists/${agent.id}/assign`;
       return this.forward(agent.node, 'POST', route, input);
     }
     const id = randomUUID();
     this.store.put('peercmd', id, { id, target: agent.node, action, agentId: agent.id, input, at: now(), done: false });
-    return { queued: true, message: `${agent.name} is offline: ${this.deviceName(agent.node)} is off. It gets this when it is back.` };
+    return { queued: true, message: this.seen(agent.node) ? `Sent to ${agent.name} on ${this.deviceName(agent.node)} through the shared database. It starts in a few seconds.` : `${agent.name} is offline: ${this.deviceName(agent.node)} is off. It gets this when it is back.` };
   }
   async runCommand(command) {
     if (!command || command.done || command.target !== this.self.id || this.running?.has(command.id)) return;
@@ -218,6 +226,16 @@ export class Peers {
       if (newest > (settings.tursoAt || 0)) this.save({ tursoAt: newest });
     } catch { /* Turso shows its own state in Settings */ }
   }
+  async presence() {
+    if (!this.store.cloud?.ready) return;
+    try {
+      const mine = this.store.list('specialist').filter(agent => agent.kind !== 'main' && !this.isRemote(agent));
+      const rows = await this.store.cloud.presence(this.self.name, Object.fromEntries(mine.map(agent => [agent.id, this.desk.specialists.status(agent)])));
+      const before = new Set([...(this.cloudSeen || new Map())].filter(([node]) => this.seen(node)).map(([node]) => node));
+      this.cloudSeen = new Map((rows || []).map(row => [row.node, row]));
+      if ([...this.cloudSeen.keys()].some(node => this.seen(node) !== before.has(node))) this.store.emit?.('change', { kind: 'peers' });
+    } catch { /* Turso shows its own state in Settings */ }
+  }
   // ---------- the loop ----------
   start() {
     this.pendingCommands();
@@ -225,9 +243,10 @@ export class Peers {
       for (const peer of this.settings().peers) {
         if (this.timers.get(peer.id) > Date.now()) continue;
         await this.pullFrom(peer);
-        this.timers.set(peer.id, Date.now() + (this.online(peer.id) ? 2500 : 10000));
+        this.timers.set(peer.id, Date.now() + (this.direct(peer.id) ? 2500 : 10000));
       }
       if ((this.timers.get('turso') || 0) <= Date.now()) { await this.pullTurso(); this.timers.set('turso', Date.now() + 5000); }
+      if ((this.timers.get('presence') || 0) <= Date.now()) { this.timers.set('presence', Date.now() + 30000); await this.presence(); }
     };
     this.loop = setInterval(() => { if (!this.ticking) { this.ticking = true; void tick().finally(() => { this.ticking = false; }); } }, 1000);
     this.loop.unref?.();
