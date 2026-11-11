@@ -425,8 +425,9 @@ export class Desk {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
-          this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result'].includes(kind));
+          this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result', 'subagent-text', 'subagent-done'].includes(kind));
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
+          if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
       const resumeSessionId = this.agentSessionId(run);
       const runner = this.runnerFactory ? this.runnerFactory(options)
@@ -812,6 +813,15 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     }
     if (this.live.has(run.id)) { this.store.put('run', run.id, { ...run, roomTurn: turn || run.roomTurn, ...(turn ? { roomPosted: false } : {}) }); await this.say(run.id, prompt, {}, { raw: true }); return run; }
     await this.resume(run.id, { prompt, silent: Boolean(roomId) || quiet, roomTurn: turn }); return this.run(run.id);
+  }
+  // In a group chat, a sub-agent an agent starts (a QA reviewer, a researcher) is said in one line when it starts and when it is done.
+  subagentNote(runId, kind, data) {
+    const run = this.store.get('run', runId), roomId = run?.roomTurn?.roomId || (run?.role === 'worker' ? run.roomId : '');
+    const agentId = run?.roomAgent || run?.specialistId || ''; if (!roomId || !agentId) return;
+    const name = agentId === 'main' ? 'Rex Agent' : this.store.get('specialist', agentId)?.name || 'An agent';
+    if (kind === 'agent-tool') { (this.subNames ||= new Map()).set(data.id, data.input || {}); return void this.rooms.system(roomId, `${name} started a sub-agent${data.input?.type ? ` (${data.input.type}${data.input.model ? `, ${data.input.model}` : ''})` : ''}: ${data.input?.description || 'a side task'}.`); }
+    const input = this.subNames?.get(data.id); if (!input) return; this.subNames.delete(data.id);
+    this.rooms.system(roomId, `${name}'s sub-agent ${data.failed ? 'failed' : 'finished'}: ${input.description || input.type || 'side task'}.`);
   }
   // During a room turn, each piece of text the agent writes is posted to the room as it comes, so the person never waits for the whole turn.
   streamToRoom(runId, text) {

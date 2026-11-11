@@ -433,3 +433,23 @@ test('a task on a project with its own agent goes to that agent, never to a new 
   store.put('run', 'dara-room', { id: 'dara-room', role: 'specialist', specialistId: dara.id, roomAgent: dara.id, state: 'running', createdAt: now(), roomTurn: { roomId: room.id } });
   await assert.rejects(desk.dispatch('dara-room', { taskId: 't1' }), /This is your own task\. Start it with desk_take_task/);
 });
+
+test('a sub-agent an agent starts shows as its own steps: noted in the room, and its words never post as the agent\'s reply', async () => {
+  const { store, desk, dara, room } = setup();
+  desk.runnerFactory = options => ({ start: async () => {
+    options.event('session', { sessionId: SESSION });
+    options.event('agent-tool', { id: 'tu1', tool: 'Agent', input: { description: 'Review the cart fix', type: 'qa-reviewer', model: 'opus', prompt: 'Review it' } });
+    options.event('agent-tool', { id: 'tu2', tool: 'Read', parent: 'tu1', input: { file_path: 'cart.js' } });
+    options.event('subagent-text', { parent: 'tu1', text: 'APPROVE: looks right.' });
+    options.event('subagent-done', { id: 'tu1', failed: false, text: 'APPROVE: looks right.' });
+    options.event('agent-text', { text: 'The reviewer approved it.' });
+  }, interrupt() {}, close() {} });
+  await desk.rooms.post(room.id, { text: '@dara review it' });
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id));
+  const texts = desk.rooms.messages(room.id).map(item => item.text);
+  assert.ok(texts.some(text => /Dara started a sub-agent \(qa-reviewer, opus\): Review the cart fix/.test(text)));
+  assert.ok(texts.some(text => /sub-agent finished: Review the cart fix/.test(text)));
+  assert.ok(!desk.rooms.messages(room.id).some(item => item.from.id === dara.id && /APPROVE/.test(item.text)), 'the sub-agent\'s words stay in its card');
+  const runId = store.get('specialist', dara.id).roomRunId;
+  assert.ok(store.events(runId, { visible: true }).some(event => event.kind === 'subagent-done'), 'the chat can show the card');
+});

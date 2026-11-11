@@ -122,12 +122,23 @@ function renderItems(items, run, live) {
     out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
       : item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), voice: item.voice, html: markdown(item.text) })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) })
+      : item.role === 'subagent' ? subagentHtml(item, live)
       : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div></div>`
       : note(`${esc(item.text)} · ${hhmm(item.at)}`));
   }
   flush(true);
   return out.join('');
 }
+// A sub-agent the agent started: who it is, what it was asked, how far it got. Open it to see each step and its report.
+function subagentHtml(item, live) {
+  const input = item.input, state = item.done ? (item.failed ? 'failed' : 'done') : live ? 'working' : 'stopped';
+  const label = { working: 'Working…', done: 'Done', failed: 'Failed', stopped: 'Stopped' }[state];
+  const took = item.endedAt ? Math.max(1, Math.round((Date.parse(item.endedAt) - Date.parse(item.at)) / 1000)) : 0;
+  const step = event => `<li><b>${esc(event.tool)}</b> ${esc(Object.values(event.input || {}).filter(value => typeof value === 'string').join(' · ').slice(0, 140))}</li>`;
+  return `<details class="subagent ${state}"${ui.openSubs?.has(item.id) ? ' open' : ''} data-sub="${esc(item.id)}"><summary><span class="sa-dot ${state}"></span><span class="sa-main"><b>Sub-agent${input.description ? `: ${esc(input.description)}` : ''}</b><small>${esc([input.type, input.model, `${item.steps.length} step${item.steps.length === 1 ? '' : 's'}`, took ? `${took < 60 ? `${took}s` : `${Math.round(took / 60)} min`}` : ''].filter(Boolean).join(' · '))}</small></span><span class="sa-state">${label}</span></summary>
+    <div class="sa-body">${input.prompt ? `<p class="sa-h">Asked</p><div class="md sa-text">${markdown(input.prompt)}</div>` : ''}${item.steps.length ? `<p class="sa-h">Steps</p><ol class="sa-steps">${item.steps.slice(-40).map(step).join('')}</ol>` : ''}${item.result || item.text ? `<p class="sa-h">Reported back</p><div class="md sa-text">${markdown(item.result || item.text)}</div>` : ''}</div></details>`;
+}
+document.addEventListener('toggle', event => { const box = event.target; if (!box.matches?.('details.subagent')) return; ui.openSubs ||= new Set(); if (box.open) ui.openSubs.add(box.dataset.sub); else ui.openSubs.delete(box.dataset.sub); }, true);
 // A question that was answered stays in the chat as two messages: the agent asking, and the person answering.
 function answeredItem(item) {
   const properties = item.request?.requestedSchema?.properties || {}, content = item.answer?.content || {}, action = item.answer?.action || (item.state === 'expired' ? 'expired' : 'cancel');
@@ -145,8 +156,13 @@ function answerHtml(item) {
   return bubble({ mine: true, name: 'You', time: hhmm(item.at), html: body });
 }
 function transcript(events) {
-  const items = [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event]));
+  const items = [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event])), subs = new Map();
   for (const event of events) {
+    // A sub-agent shows as one card: what it was asked, its steps, and what it reported back.
+    if (event.kind === 'agent-tool' && event.tool === 'Agent') { const sub = { role: 'subagent', id: event.id, input: event.input || {}, steps: [], text: '', done: false, failed: false, at: event.createdAt }; subs.set(event.id, sub); if (!subs.has(event.parent)) items.push(sub); else subs.get(event.parent).steps.push({ tool: 'Agent', input: { description: sub.input.description } }); continue; }
+    if (event.parent && subs.has(event.parent)) { const sub = subs.get(event.parent); if (event.kind === 'agent-tool') sub.steps.push(event); else if (event.kind === 'subagent-text') sub.text = event.text; continue; }
+    if (event.kind === 'subagent-text') continue;
+    if (event.kind === 'subagent-done') { const sub = subs.get(event.id); if (sub) Object.assign(sub, { done: true, failed: event.failed, result: event.text, endedAt: event.createdAt }); continue; }
     if (['command-output', 'dev-output'].includes(event.kind)) continue;
     if (event.kind === 'human-message') { const said = spokenText(event.text); items.push({ role: 'human', text: said.text, voice: said.voice, at: event.createdAt }); }
     else if (event.kind === 'turn-start') items.push({ role: 'status', text: `${event.resumed ? 'Resumed' : 'Started'} with ${provider(event.provider)}`, at: event.createdAt });

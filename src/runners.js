@@ -136,13 +136,20 @@ ${news}` } } : {};
         const content = message.message?.content?.filter(block => block.type !== 'thinking' && block.type !== 'redacted_thinking');
         // What the agent says shows in the chat; its tool calls stay in the journal.
         const text = (content || []).filter(block => block.type === 'text').map(block => block.text).join('\n').trim();
-        if (text) this.event('agent-text', { text });
-        for (const block of content || []) if (block.type === 'tool_use') { if (isShell(block.name)) (this.terminals ||= new Set()).add(block.id); this.event('agent-tool', { id: block.id, tool: String(block.name).replace(/^mcp__[a-z0-9_]+?__/i, ''), input: toolInput(block.input), ...(fileChange(block.name, block.input) ? { change: fileChange(block.name, block.input) } : {}) }); }
+        // A sub-agent's own words and steps belong to its card in the chat, not to the agent's reply.
+        const parent = message.parent_tool_use_id || null;
+        if (text) this.event(parent ? 'subagent-text' : 'agent-text', parent ? { parent, text: text.slice(0, 4000) } : { text });
+        for (const block of content || []) if (block.type === 'tool_use') {
+          if (isShell(block.name)) (this.terminals ||= new Set()).add(block.id);
+          if (/^(Task|Agent)$/.test(block.name)) { (this.subagents ||= new Set()).add(block.id); this.event('agent-tool', { id: block.id, tool: 'Agent', ...(parent ? { parent } : {}), input: { description: String(block.input?.description || '').slice(0, 200), type: String(block.input?.subagent_type || 'general-purpose'), model: String(block.input?.model || ''), prompt: String(block.input?.prompt || '').slice(0, 1500) } }); continue; }
+          this.event('agent-tool', { id: block.id, tool: String(block.name).replace(/^mcp__[a-z0-9_]+?__/i, ''), ...(parent ? { parent } : {}), input: toolInput(block.input), ...(fileChange(block.name, block.input) ? { change: fileChange(block.name, block.input) } : {}) });
+        }
         this.event('agent-operation', { type: 'assistant', content });
       }
       if (message.type === 'user') {
         for (const block of Array.isArray(message.message?.content) ? message.message.content : []) {
           if (block.type !== 'tool_result') continue;
+          if (this.subagents?.has(block.tool_use_id)) { const said = Array.isArray(block.content) ? block.content.map(part => part.text || '').join('\n') : String(block.content || ''); this.event('subagent-done', { id: block.tool_use_id, failed: Boolean(block.is_error), text: said.slice(0, 3000) }); continue; }
           if (this.terminals?.has(block.tool_use_id)) this.event('agent-tool-result', { id: block.tool_use_id, text: terminalText(block.content), failed: Boolean(block.is_error) });
           else if (block.is_error) this.event('agent-tool', { tool: 'result', failed: true, text: (Array.isArray(block.content) ? block.content.map(part => part.text || '').join(' ') : String(block.content || '')).slice(0, 300) });
         }
