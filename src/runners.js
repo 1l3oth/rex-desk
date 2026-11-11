@@ -3,6 +3,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
 import { carrySession } from './agents.js';
+// What one reply cost in tokens: new input, output, and the part of the context read from or written to the prompt cache.
+export const tokensOf = usage => usage ? { input: usage.input_tokens || 0, output: usage.output_tokens || 0, cacheRead: usage.cache_read_input_tokens || 0, cacheWrite: usage.cache_creation_input_tokens || 0 } : null;
 
 export function existingMcpConnections(sourcePath, configDirectory = process.env.CLAUDE_CONFIG_DIR) {
   let connections = {};
@@ -147,7 +149,7 @@ ${news}` } } : {};
         this.event('agent-operation', { type: 'tool-result', content: message.message?.content });
       }
       if (message.type === 'result') {
-        this.event('agent-result', { result: message.result, errors: message.errors, subtype: message.subtype, cost: message.total_cost_usd, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });
+        this.event('agent-result', { result: message.result, errors: message.errors, subtype: message.subtype, cost: message.total_cost_usd, tokens: tokensOf(message.usage), steps: message.num_turns || 0, durationMs: message.duration_ms || 0, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });
         // The CLI reports a signed-out profile as an ordinary result. Surface it as a setup problem, not agent output.
         if (/not logged in|please run \/login/i.test(String(message.result || ''))) throw new Error(`Claude Code profile ${env.CLAUDE_CONFIG_DIR || '~/.claude'} is not signed in. Open Setup, choose a signed-in Claude Code profile, then continue this run.`);
         if (message.is_error) throw new Error(message.errors?.join('\n') || message.result || `Claude ended with ${message.subtype}.`);

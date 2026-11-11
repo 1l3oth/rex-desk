@@ -951,3 +951,5 @@ button.cn-main{cursor:pointer}
 .pv-bar{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}.pv-bar b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pv-bar .spacer{flex:1}
 .pv-frame{flex:1;width:100%;border:0;background:#fff}
+.tok{margin-top:4px;font-size:11px;color:var(--muted);opacity:.8}
+.rstop{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 8px 44px}

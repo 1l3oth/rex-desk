@@ -45,6 +45,7 @@ const webAgentPrompt = task => [
 // What Claude Code says when an account has used up its plan for now.
 const LIMIT = /usage limit|limit reached|out of (extra )?usage|credit balance is too low|weekly limit|5-hour limit|rate_limit_error|reached your .{0,20}limit/i;
 const firstTaskReview = project => `This is the first task on ${project} whose workflow the person has not checked yet. When the work is done and verified, before your final report: write the workflow you actually followed as a short numbered list (where you branched from, how you set it up, how you tested and verified, where the pull request goes, who reviews, anything you avoided touching). Ask the person with desk_ask whether to change anything, with the options "Looks right" and "Change something" plus a text box for what to change. Save each step they confirm or correct with desk_learn_workflow (one short rule each), then call desk_confirm_workflow so every agent on ${project} follows it from now on and nobody asks again.`;
+const addTokens = (total = {}, more = {}) => Object.fromEntries(['input', 'output', 'cacheRead', 'cacheWrite'].map(key => [key, (total?.[key] || 0) + (more?.[key] || 0)]));
 const MODEL_MISSING = /issue with the selected model|may not have access to it|model[^.]{0,40}(does not exist|not found|is not available)/i;
 const terminalStates = new Set(['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked']);
 
@@ -405,6 +406,7 @@ export class Desk {
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
+          if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
           this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result'].includes(kind));
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);

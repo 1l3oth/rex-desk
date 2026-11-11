@@ -30,7 +30,7 @@ export function roomStage(ctx) {
     if (message.from.type === 'system') { previous = null; return note(esc(message.text)); }
     const to = message.from.type === 'human' && message.to.some(id => id !== 'you') ? message.to.filter(id => id !== 'you').map(id => names.get(id)).filter(Boolean) : [];
     const shown = message.from.type === 'human' ? String(message.text).replace(/\s*\(Sent by voice: [^)]*\)\s*$/, '') : message.text;
-    const html = markdown(shown, { mentions: ['you', ...handles], tasks }) + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '');
+    const html = markdown(shown, { mentions: ['you', ...handles], tasks }) + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '') + (message.tokens ? `<div class="tok" title="Tokens this reply used">${esc(ctx.tokenText(message.tokens))}</div>` : '');
     const same = previous && previous.from.id === message.from.id && Date.parse(message.at) - Date.parse(previous.at) < 5 * 60000; previous = message;
     if (message.from.type === 'human') return bubble({ mine: true, name: 'You', time: hhmm(message.at), voice: shown !== message.text, html: quote(message) + html }).replace('<div class="msg mine', `<div data-msg="${esc(message.id)}" class="msg mine`);
     return `<div class="msg rmsg ${same ? 'cont' : ''}" data-msg="${esc(message.id)}"><div class="ravcol">${same ? '' : ctx.avatar({ name: message.from.label, size: 'sm' })}</div><div class="bubble"><div class="who rwho"><strong class="nc${nameHash(message.from.label)}">${esc(message.from.label)}</strong><span>${esc(hhmm(message.at))}</span><button type="button" class="rreply" data-reply="${esc(message.id)}" title="Reply to ${esc(message.from.label)}" aria-label="Reply to ${esc(message.from.label)}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 4L2 8l4 4M2 8h8a4 4 0 0 1 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Reply</button></div>${quote(message)}<div class="md">${html}</div></div></div>`;
@@ -39,6 +39,9 @@ export function roomStage(ctx) {
   // One typing line for everyone answering in the room, like a messenger; work on a task shows in the Activity tab instead.
   const replying = room.members.filter(member => member.state === 'replying').map(member => member.name);
   const doing = replying.length ? typing(replying[0], replying.length === 1 ? `${replying[0]} is replying…` : replying.length === 2 ? `${replying[0]} and ${replying[1]} are replying…` : `${replying[0]} and ${replying.length - 1} others are replying…`) : '';
+  // Anyone working in the room can be stopped from here; a message sent while they work reaches them between steps.
+  const working = room.members.filter(member => ['replying', 'busy'].includes(member.state) && member.runId);
+  const stopBar = working.length ? `<div class="rstop">${working.map(member => `<button type="button" class="btn small danger" data-action="room-stop" data-run="${esc(member.runId)}" title="Stop ${esc(member.name)} now">Stop ${esc(member.name)}</button>`).join('')}<span class="muted small">Or just write: they read new messages between steps.</span></div>` : '';
   const free = [{ id: 'main', name: 'Rex Agent', projectSlug: 'all projects', status: { label: 'Knows every project' } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
   const chip = member => `<span class="chip member ${esc(member.state)}"><button class="member-open" data-open="${member.runId ? 'run' : 'specialist'}" data-id="${esc(member.runId || member.id)}" title="Open ${esc(member.name)}"><span class="dot ${dotFor(member.state)}"></span><strong>${esc(member.name)}</strong><span class="mlabel">${esc(member.label)}</span></button><button class="btn small x" data-action="room-remove" data-id="${esc(member.id)}" title="Remove from the room">×</button></span>`;
   const awayBanner = room.away?.on ? `<div class="away-banner"><span class="dot working"></span><span><b>Away mode</b> · the agents keep working${room.away.goal ? ` on ${esc(room.away.goal)}` : ''} · ${room.away.every === 'auto' ? `next check-in in about ${room.away.nextMinutes || 30} min (auto)` : `check-in every ${room.away.every} min`}${room.away.until ? ` · until ${esc(new Date(room.away.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}` : ' · until you are back'}. Write here to end it.</span></div>` : '';
@@ -47,7 +50,7 @@ export function roomStage(ctx) {
     side: ui.infoOpen === false ? '' : roomSideHtml(ctx, room), sideClass: 'info',
     actions: `${room.away?.on ? '<button class="btn small away-on" data-action="away-stop">Away mode on · Stop</button>' : '<button class="btn small" data-action="away-start" title="Let the agents keep working while you are away">Away mode</button>'} ${ui.infoOpen === false ? '<button class="btn small" data-action="info-toggle">Info</button>' : ''}`,
     members: ui.infoOpen !== false ? '' : `<div class="members">${room.members.map(chip).join('')}${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: 'Add an agent to this room', placeholder: '+ Add agent', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || 'Idle'}` })) }) : ''}</div>`,
-    feed: `${messages.length ? messages.map(render).join('') : empty}${asks(ctx, room)}${doing}` };
+    feed: `${messages.length ? messages.map(render).join('') : empty}${asks(ctx, room)}${doing}${stopBar}` };
 }
 
 // Questions and approvals from the members' sessions in this room show in the room, from the agent who asked.
@@ -269,6 +272,7 @@ export async function roomAction(ctx, action, target) {
     if (room && confirm(`Delete the room "${room.name}" and its messages? The agents and their sessions stay.`)) { await api(`/rooms/${room.id}`, { method: 'DELETE' }); ctx.open('main'); }
     return;
   }
+  if (action === 'room-stop') { await api(`/runs/${target.dataset.run}/stop`, { method: 'POST', data: {} }); toast('Stopped.'); await refresh(); return; }
   if (action === 'room-remove') { await api(`/rooms/${ui.view.id}/members/${target.dataset.id}`, { method: 'DELETE' }); await refresh(); }
   else if (action === 'task-assign') {
     const agentId = document.getElementById('assign-agent')?.value, roomId = document.getElementById('assign-room')?.value || '';

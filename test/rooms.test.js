@@ -384,3 +384,14 @@ test('an agent shows an explanation page of its changes in the chat, and only HT
   const shot = path.join(folder, 'a.png'); writeFileSync(shot, 'x');
   assert.throws(() => desk.shareEvidence(runId, { file: shot, title: 'x', page: true }), /\.html file/);
 });
+
+test('each reply shows the tokens it used: on the run and under the agent\'s room message', async () => {
+  const { store, desk, dara, room } = setup();
+  desk.runnerFactory = options => ({ start: async () => { options.event('session', { sessionId: SESSION }); options.event('agent-text', { text: 'On it.' }); options.event('agent-result', { subtype: 'success', tokens: { input: 1200, output: 340, cacheRead: 45000, cacheWrite: 800 }, steps: 3 }); }, interrupt() {}, close() {} });
+  await desk.rooms.post(room.id, { text: '@dara status?' });
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id && item.tokens));
+  const reply = desk.rooms.messages(room.id).find(item => item.from.id === dara.id);
+  assert.deepEqual(reply.tokens, { input: 1200, output: 340, cacheRead: 45000, cacheWrite: 800, steps: 3, at: reply.tokens.at });
+  const run = store.get('run', store.get('specialist', dara.id).roomRunId);
+  assert.equal(run.tokensTotal.output, 340);
+});
