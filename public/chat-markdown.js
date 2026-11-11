@@ -6,6 +6,10 @@ const CODE = '\u0000';
 function inline(text, mentions = [], tasks = {}) {
   const codes = [];
   let html = esc(text).replace(/`([^`\n]+)`/g, (_, code) => { codes.push(code); return `${CODE}${codes.length - 1}${CODE}`; });
+  // Evidence and uploads kept by Rex Desk itself show in place: a picture, or a video that plays in the chat.
+  html = html.replace(/!\[([^\]\n]*)\]\((\/(?:artifacts|api\/uploads)\/[^\s)"'<>]+)\)/g, (_, alt, src) => /\.(webm|mp4|mov)$/i.test(src.split('?')[0])
+    ? `<video class="md-media" src="${src}" controls preload="metadata" aria-label="${alt}"></video>` : `<a class="md-media-link" href="${src}" ${LINK}><img class="md-media" src="${src}" alt="${alt}" loading="lazy"></a>`);
+  html = html.replace(/\[([^\]\n]+)\]\((\/(?:artifacts|api\/uploads)\/[^\s)"'<>]+)\)/g, `<a href="$2" ${LINK}>$1</a>`);
   html = html.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g, `<a href="$2" ${LINK}>$1</a>`);
   html = html.replace(/(^|[\s(])(https?:\/\/[^\s<)]*[^\s<).,;:!?])/g, `$1<a href="$2" ${LINK}>$2</a>`);
   html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>').replace(/__([^_\n]+)__/g, '<strong>$1</strong>');

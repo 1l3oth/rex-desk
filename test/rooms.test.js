@@ -325,3 +325,22 @@ test('away check-ins skip a quiet room and wait longer each time, and room chat 
   store.saveConfig({ ...store.publicConfig(), saver: false });
   assert.equal(desk.saverModel(roomRun), '');
 });
+
+test('an agent shares test evidence: it is posted in its room, kept on the task and shown in the chat', async () => {
+  const { store, desk, turns, dara, room } = setup();
+  await desk.rooms.post(room.id, { text: '@dara can you look at #49760?' });
+  await waitFor(() => turns.some(item => item.run.specialistId === dara.id));
+  const roomRun = store.get('run', store.get('specialist', dara.id).roomRunId);
+  store.put('task', 't1', { ...store.get('task', 't1'), roomWork: { agentId: dara.id, roomId: room.id, at: now() } });
+  const shot = path.join(temporary('shot'), 'after fix.png'); writeFileSync(shot, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const shared = desk.shareEvidence(roomRun.id, { file: shot, title: 'Cart total after the fix', result: 'passed', note: 'Discount applied in the total.' });
+  assert.equal(shared.taskId, 't1', 'the task the agent works on in the room');
+  assert.equal(shared.where, 'room');
+  const artifact = store.list('artifact').find(item => item.runId === roomRun.id);
+  assert.equal(artifact.taskId, 't1'); assert.equal(artifact.result, 'passed'); assert.equal(artifact.type, 'image/png');
+  await waitFor(() => desk.rooms.messages(room.id).some(item => /Test evidence for #49760: Cart total after the fix/.test(item.text)));
+  assert.ok(desk.rooms.messages(room.id).some(item => item.text.includes(`![Cart total after the fix](${shared.url})`)), 'the picture is in the room message');
+  assert.throws(() => desk.shareEvidence(roomRun.id, { file: path.join(path.dirname(shot), 'missing.png'), title: 'x' }), /No file at/);
+  const script = path.join(path.dirname(shot), 'run.exe'); writeFileSync(script, 'x');
+  assert.throws(() => desk.shareEvidence(roomRun.id, { file: script, title: 'x' }), /Share a picture/);
+});

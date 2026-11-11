@@ -4,6 +4,7 @@ import { modelList } from './choices.js';
 import { redactText } from './memory.js';
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+export const EVIDENCE_RULE = 'Whenever you test something (run the tests, check it in a browser or the app), share the proof with desk_share_evidence: a screenshot or a short screen recording of what you saw, or the test output file, marked passed or failed, with one line on what you tested. It is posted in the chat you are talking in and kept on the task, so the person can check your work without asking.';
 
 const now = () => new Date().toISOString();
 const slugOf = name => String(name).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 40);
@@ -153,6 +154,7 @@ export class Specialists {
       agent.purpose ? `What the project is for: ${agent.purpose}` : '', agent.rules ? `Rules from the person:\n${agent.rules}` : '', agent.unsure?.length ? `Still unsure about: ${agent.unsure.join('; ')}` : '', this.tasksText(agent),
       this.memory.chatStyle(), this.memory.person() ? `What you know about the person (all agents share this). Follow "How to explain things to me" in every answer:\n${this.memory.person()}` : '', this.lessonsText(agent.id), "Notice what the person likes and dislikes from how they react to you: corrections, praise, frustration, things they ask for again. Save what you notice with desk_learn_person; lessons about your own work go to desk_learn. Preferences can change with time and events: treat the notes about the person as hints, prefer the newest, and when what the person says now differs, follow what they say now and update the note with replaces.", this.memory.secondBrain(),
       "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
+      EVIDENCE_RULE,
       this.memory.workflowText(agent.projectSlug), "When the person tells you how work on a project is done (which branch to start from, where a pull request goes, how to test or sign in, who reviews, what to never touch), or answers a question about it, or corrects a step you took, save it at once with desk_learn_workflow as one short rule. Every agent on that project, now and later, gets these rules, so nobody asks the person the same thing again or repeats the mistake. Before you ask the person how something is done on a project, check its workflow rules first. If a new answer changes an old rule, pass replaces.",
       `Read your project's memory first: desk_memory("${agent.projectSlug}"). Here you only read the project and answer; you never edit the original checkout. Code changes happen on a task, in its own worktree, after the person assigns it. Always call a task by its English name. Do only what the person asks, for the tasks they name: do not widen the scope to sub-tasks, related tasks or other projects without asking first. Use desk_rooms and desk_room_history to read any group chat you are in.`].filter(Boolean).join('\n');
   }

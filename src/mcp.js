@@ -122,6 +122,10 @@ export function createMcp(desk, scope) {
       const target = path.join(folder, path.basename(cached)); copyFileSync(cached, target);
       return { path: target, type: path.extname(target).slice(1) };
     }, true);
+  tool('desk_share_evidence', 'Share proof of a test with the person: a screenshot, a screen recording, or the test output. Use it every time you test something (passing or failing). The file is kept as evidence of the task, posted in the chat you are talking in (your room, or your personal chat), and shown in that chat\'s Media tab and on the task.',
+    { runId, file: z.string().min(3).describe('Full path of the file on this computer: .png .jpg .gif .webp .webm .mp4 .mov .pdf .txt .log .json .html or .zip.'), title: z.string().min(1).max(120).describe('What it shows, in English, like "Upper task link after the fix".'),
+      taskId: z.string().optional().describe('The task it is evidence for. Omit it when you work on one task: that task is used.'), result: z.enum(['passed', 'failed', 'info']).default('info'), note: z.string().max(2000).optional().describe('One or two lines: what was tested and what you saw.') },
+    input => { requireEnglish(`${input.title} ${input.note || ''}`, 'the title and note'); return desk.shareEvidence(resolveRun(input.runId), input); });
   tool('desk_question', 'Poll a dashboard question created with desk_ask wait=false.', { questionId: z.string() }, ({ questionId }) => {
     const interaction = desk.store.get('interaction', questionId);
     if (!interaction) throw new Error('Question not found.'); desk.authorize(scope, interaction.runId);

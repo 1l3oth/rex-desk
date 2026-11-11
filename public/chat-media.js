@@ -28,8 +28,8 @@ export function collectShared(entries, artifacts = []) {
   }
   for (const artifact of artifacts) {
     const url = `/artifacts/${artifact.runId}/${encodeURIComponent(artifact.file)}`, meta = { from: artifact.from || 'Agent', at: artifact.createdAt || '' };
-    if (/^(image|video)\//.test(artifact.type || '') || IMAGE.test(artifact.file) || VIDEO.test(artifact.file)) add(media, `a:${url}`, { ...meta, name: artifact.file, url, video: /^video\//.test(artifact.type || '') || VIDEO.test(artifact.file) });
-    else add(files, `a:${url}`, { ...meta, name: artifact.file, path: '', url });
+    if (/^(image|video)\//.test(artifact.type || '') || IMAGE.test(artifact.file) || VIDEO.test(artifact.file)) add(media, `m:${url}`, { ...meta, name: artifact.file, url, video: /^video\//.test(artifact.type || '') || VIDEO.test(artifact.file) });
+    else add(files, `f:${url}`, { ...meta, name: artifact.file, path: '', url });
   }
   const newest = (left, right) => String(right.at).localeCompare(String(left.at));
   return { media: media.sort(newest), files: files.sort(newest), links: links.sort(newest) };

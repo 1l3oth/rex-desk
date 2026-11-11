@@ -18,7 +18,9 @@ export class Evidence {
   }
   directory(runId) { const directory = path.join(this.store.directory, 'artifacts', runId); mkdirSync(directory, { recursive: true }); return directory; }
   attach(runId, file, title, type, metadata = {}) {
-    const artifact = { id: randomUUID(), runId, file: path.basename(file), title, type, createdAt: now(), ...metadata };
+    // Evidence belongs to the task the run works on, so each task shows its own evidence.
+    let run = null; try { run = this.getRun(runId); } catch { run = null; }
+    const artifact = { id: randomUUID(), runId, file: path.basename(file), title, type, createdAt: now(), ...(run?.taskId ? { taskId: run.taskId } : {}), ...metadata };
     this.store.put('artifact', artifact.id, artifact); return artifact;
   }
   async start(runId, { url } = {}) {

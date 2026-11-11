@@ -1,13 +1,13 @@
 import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
 import { Memory } from './memory.js';
-import { Specialists } from './specialists.js';
+import { Specialists, EVIDENCE_RULE } from './specialists.js';
 import { ClaudeRunner } from './runners.js';
 import { Notifier } from './notify.js';
 import { EFFORTS, MODES, runOptions, modelList } from './choices.js';
 import { fetchModels } from './models.js';
 import path from 'node:path';
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, statSync, copyFileSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -30,6 +30,7 @@ import { assessRisk, automaticPrAllowed } from './risk.js';
 import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from './processes.js';
 
 const exec = promisify(execFile);
+const EVIDENCE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.pdf': 'application/pdf', '.txt': 'text/plain', '.log': 'text/plain', '.json': 'application/json', '.html': 'text/html', '.zip': 'application/zip' };
 // qa_* belong to QA checks, which Rex Desk no longer runs; they stay listed so older runs still count as finished.
 // What a browser agent is told: use a real browser, keep the person informed, and stop before anything that costs money or cannot be undone.
 const webAgentPrompt = task => [
@@ -511,7 +512,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const project = this.projectOf(run), workflow = project ? this.memory.workflowText(project) : '';
     // The first task an agent finishes on a project ends with the person checking the workflow it followed, once.
     const review = project && !this.memory.workflowConfirmed(project) ? `${firstTaskReview(project)}\n` : '';
-    return `${common}\n${who}${workflow ? `${workflow}\n` : ''}${review}${"When the person tells you how work on a project is done (which branch to start from, where a pull request goes, how to test or sign in, who reviews, what to never touch), or answers a question about it, or corrects a step you took, save it at once with desk_learn_workflow as one short rule. Every agent on that project, now and later, gets these rules, so nobody asks the person the same thing again or repeats the mistake. Before you ask the person how something is done on a project, check its workflow rules first. If a new answer changes an old rule, pass replaces."}\n${this.taskPrompt(run, task, lessons)}`;
+    return `${common}\n${who}${EVIDENCE_RULE}\n${workflow ? `${workflow}\n` : ''}${review}${"When the person tells you how work on a project is done (which branch to start from, where a pull request goes, how to test or sign in, who reviews, what to never touch), or answers a question about it, or corrects a step you took, save it at once with desk_learn_workflow as one short rule. Every agent on that project, now and later, gets these rules, so nobody asks the person the same thing again or repeats the mistake. Before you ask the person how something is done on a project, check its workflow rules first. If a new answer changes an old rule, pass replaces."}\n${this.taskPrompt(run, task, lessons)}`;
   }
   // What an agent is told when an issue is fired at it: the issue itself, where its code lives, and that the job is to
   // find the cause and report it. Fixing comes after the human reads that report and says so.
@@ -672,6 +673,30 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (run.role === 'worker' && run.roomId && run.specialistId) void this.rooms.post(run.roomId, { fromAgentId: run.specialistId, text: String(text).slice(0, 8000) }).catch(() => {});
     return { delivered: true };
   }
+  // An agent tested something and shares the proof: a screenshot, a recording or the test output. The file is kept with the run's evidence,
+  // belongs to the task, and is posted where the agent is talking (its room, or its personal chat), so it also shows in that chat's Media tab.
+  shareEvidence(runId, { file, title, taskId = '', result = 'info', note = '' }) {
+    const run = this.run(runId), source = path.resolve(String(file || ''));
+    if (!existsSync(source) || !statSync(source).isFile()) throw new Error(`No file at ${source}. Give the full path of a file on this computer.`);
+    if (statSync(source).size > 200 * 1024 * 1024) throw new Error('That file is over 200 MB. Share a shorter recording or a screenshot.');
+    const extension = path.extname(source).toLowerCase(), type = EVIDENCE_TYPES[extension];
+    if (!type) throw new Error(`Share a picture, a video, a PDF or a text, HTML, JSON or ZIP file, not ${extension || 'a file without an extension'}.`);
+    const agentId = run.roomAgent || run.specialistId || '';
+    const owned = taskId || run.taskId || (agentId ? this.store.list('task').filter(item => item.roomWork?.agentId === agentId).sort((left, right) => String(right.roomWork.at).localeCompare(String(left.roomWork.at)))[0]?.id : '') || '';
+    if (owned && !this.store.get('task', owned)) throw new Error('No task has that taskId. Read it from desk_tasks.');
+    const directory = this.evidence.directory(runId), name = `${Date.now()}-${path.basename(source).replace(/[^\w.-]+/g, '-').slice(-80)}`;
+    copyFileSync(source, path.join(directory, name));
+    const label = String(title || '').trim() || path.basename(source), mark = { passed: 'Passed', failed: 'Failed' }[result] || '';
+    const artifact = this.evidence.attach(runId, name, label, type, { ...(owned ? { taskId: owned } : {}), result, note: String(note || '').slice(0, 2000), shared: true, from: agentId ? this.specialists.get(agentId)?.name || '' : '' });
+    const url = `/artifacts/${runId}/${encodeURIComponent(name)}`, task = owned ? this.store.get('task', owned) : null;
+    const media = /^(image|video)\//.test(type) ? `![${label.replace(/[[\]]/g, '')}](${url})` : `[Open ${label.replace(/[[\]]/g, '')}](${url})`;
+    const text = [`**Test evidence${task ? ` for #${task.taskNumber || task.externalId}` : ''}: ${label}**${mark ? ` (${mark})` : ''}`, String(note || '').trim(), media].filter(Boolean).join('\n');
+    // A room session posts in the room of its current turn, else in the room the task was given in.
+    const roomId = run.roomTurn?.roomId || (task?.roomWork?.agentId === agentId ? task.roomWork.roomId : '') || (run.role === 'worker' ? run.roomId : '');
+    if (run.roomAgent && roomId) void this.rooms.post(roomId, { fromAgentId: agentId, text }).catch(() => {});
+    else this.message(runId, text);
+    return { shared: true, url, taskId: owned || null, where: run.roomAgent && roomId ? 'room' : 'chat' };
+  }
   // Headless agents live in this process, so a restart ends their turn. Each one that was cut off a moment ago picks its session up again by itself.
   async resumeInterrupted() {
     for (const run of this.store.list('run')) {
@@ -788,7 +813,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const brief = [`The person gave you this task to do here in the room: #${number} ${name}.`,
       task.url ? `Tracker link: ${task.url}` : '', `What it says:\n${String(task.description || task.title || '').slice(0, 4000)}`, instructions ? `Notes from the person: ${instructions}` : '',
       `Do the work in this session and talk about it in this room. Never change the main checkout at ${project}. Work in a git worktree beside it: in ${project} run \`git worktree add "${project}-worktrees/${String(number).toLowerCase()}" -b ${branch} ${base}\` (or reuse it if it exists), then change, run and test the code there.`,
-      'Post a short note in the room when you start, when something important happens, and when you are done (what changed and how you tested it). Commit in the worktree when it works. Ask the person here before pushing, opening a pull request, or anything that touches a live site or other people.',
+      'Post a short note in the room when you start, when something important happens, and when you are done (what changed and how you tested it). Share each test result with desk_share_evidence (a screenshot, a recording or the test output) so it shows in the room and on the task. Commit in the worktree when it works. Ask the person here before pushing, opening a pull request, or anything that touches a live site or other people.',
       this.memory.workflowText(agent.projectSlug)].filter(Boolean).join('\n\n');
     await this.rooms.post(roomId, { system: true, text: `${agent.name} is now working on #${number} ${name} here in the room.`, instruction: brief, to: [agent.slug] });
     return { inRoom: true, agentId: agent.id, roomId, taskId };

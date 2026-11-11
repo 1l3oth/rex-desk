@@ -191,6 +191,18 @@ export function tasksStage(ctx) {
     feed: `<div class="page tk">${side}<div class="tk-main">${add}${shown.length ? `<div class="tk-list">${head}${groups}</div>` : empty}</div></div>` };
 }
 
+// The test evidence of one task: what agents shared and what their runs on it recorded, newest first.
+function evidenceHtml(ctx, task) {
+  const { ui, esc } = ctx, runs = new Set((ui.snap.runs || []).filter(run => run.taskId === task.id).map(run => run.id));
+  const items = (ui.snap.artifacts || []).filter(item => item.taskId === task.id || runs.has(item.runId)).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+  const when = at => at ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const card = item => {
+    const url = `/artifacts/${item.runId}/${encodeURIComponent(item.file)}`, type = item.type || '', result = item.result || (/^Passing/.test(item.title || '') ? 'passed' : /^Failing/.test(item.title || '') ? 'failed' : '');
+    const look = /^image\//.test(type) ? `<img src="${esc(url)}" alt="${esc(item.title)}" loading="lazy">` : /^video\//.test(type) ? `<video src="${esc(url)}" preload="metadata" muted></video>` : '';
+    return `<li><a class="${look ? 'ev-thumb' : 'ev-file'}" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${look || esc((item.file.split('.').pop() || 'file').toUpperCase())}</a>${result === 'passed' || result === 'failed' ? `<span class="ev-res ${result}">${result === 'passed' ? 'Passed' : 'Failed'}</span>` : ''}<b>${esc(item.title || item.file)}</b>${item.note ? `<small>${esc(item.note)}</small>` : ''}<small>${esc([item.from, when(item.createdAt)].filter(Boolean).join(' · '))}</small></li>`;
+  };
+  return `<section class="tp-sec lt-sec"><h3>Test evidence${items.length ? ` <span>${items.length}</span>` : ''}</h3>${items.length ? `<ul class="tp-ev">${items.slice(0, 60).map(card).join('')}</ul>` : '<p class="muted small">Nothing yet. When an agent tests this task, its screenshots, recordings and test results show here.</p>'}</section>`;
+}
 export function taskStage(ctx) {
   const { ui, esc, markdown } = ctx, task = (ui.snap.tasks || []).find(item => item.id === ui.view.id);
   if (!task) return { title: 'Task', meta: '', feed: '<div class="empty"><h2>That task is gone.</h2></div>' };
@@ -223,6 +235,7 @@ export function taskStage(ctx) {
   const main = `<div class="tp-main"><div class="tp-head"><span class="tnum">#${esc(taskNumber(task))}</span><h1>${esc(taskName(task))}</h1>${task.titleEn && task.titleEn !== task.title ? `<p class="orig">${esc(task.title)}</p>` : ''}</div>
     ${jev?.summary || jev?.reason ? `<p class="tp-jev">${esc(jev.summary || jev.reason)}</p>` : ''}
     <section class="tp-sec"><h3>Description</h3><div class="md tp-desc">${markdown(String(task.description || 'No description.').slice(0, 12000))}</div></section>
+    ${evidenceHtml(ctx, task)}
     ${comments.length ? `<section class="tp-sec"><h3>Comments <span>${comments.length}</span></h3><ol class="lt-comments">${comments.slice(-30).map(item => `<li><div><strong>${esc(item.author || item.by || item.name || 'Someone')}</strong> <time>${esc(when(item.createdAt || item.at || item.date))}</time></div><div class="md">${markdown(String(item.text || item.content || item.body).slice(0, 3000))}</div></li>`).join('')}</ol></section>` : ''}</div>`;
   return { title: `#${taskNumber(task)} ${taskName(task)}`, meta: task.statusName || task.status || '', top: true, feed: `<div class="page tp">${main}${side}</div>` };
 }
@@ -291,7 +304,7 @@ function localTaskStage(ctx, task) {
   const work = on?.agent ? `<p class="assigned"><span class="dot working"></span><strong>${esc(on.agent.name)}</strong> is working on this. <button class="btn small" data-open="run" data-id="${esc(on.run.id)}">Open the work</button></p>`
     : task.assignee && agents.some(agent => agent.id === task.assignee) ? `<p class="lt-start"><button class="btn primary small" data-action="lt-start" data-id="${esc(task.id)}">Start ${esc(agents.find(agent => agent.id === task.assignee).name)} on this</button></p>` : '';
   const main = `<div class="lt-main"><textarea id="lt-title" class="lt-title" rows="1" maxlength="200" aria-label="Task title">${esc(task.title)}</textarea>
-    ${work}<section class="lt-sec"><h3>Description</h3><textarea id="lt-desc" class="lt-desc" placeholder="What needs doing, and how to tell it is done.">${esc(task.description || '')}</textarea></section>${checklist}${links}${comments}</div>`;
+    ${work}<section class="lt-sec"><h3>Description</h3><textarea id="lt-desc" class="lt-desc" placeholder="What needs doing, and how to tell it is done.">${esc(task.description || '')}</textarea></section>${checklist}${evidenceHtml(ctx, task)}${links}${comments}</div>`;
   return { title: `#${task.taskNumber} ${task.title}`, meta: `Rex Desk task · ${task.statusName}`, top: true, feed: `<div class="page lt" data-lt="${esc(task.id)}">${main}${side}</div>` };
 }
 // Every change saves at once: pickers when chosen, text when you leave the field.

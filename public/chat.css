@@ -913,3 +913,13 @@ button.cn-main{cursor:pointer}
   #banner>*{font-size:13.5px}
 }
 @media (max-width:760px){.dialog input[type=checkbox],.dialog input[type=radio]{width:20px;height:20px;flex:none}.dialog .pick{min-height:40px;font-size:15px}}
+.md-media{display:block;max-width:min(100%,420px);max-height:320px;margin:6px 0;border-radius:10px;border:1px solid var(--line);background:var(--bg)}
+.md-media-link{display:inline-block}
+.tp-ev{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:0;padding:0;list-style:none}
+.tp-ev li{display:flex;flex-direction:column;gap:4px;padding:8px;border:1px solid var(--line);border-radius:12px;min-width:0}
+.tp-ev .ev-thumb{display:block;aspect-ratio:16/10;border-radius:8px;overflow:hidden;background:var(--bg);border:1px solid var(--line)}
+.tp-ev .ev-thumb img,.tp-ev .ev-thumb video{width:100%;height:100%;object-fit:cover;display:block}
+.tp-ev .ev-file{display:grid;place-items:center;aspect-ratio:16/10;border-radius:8px;border:1px dashed var(--line);font-weight:600;color:var(--muted)}
+.tp-ev b{font-size:13px;overflow-wrap:anywhere}.tp-ev small{color:var(--muted);font-size:12px}
+.ev-res{align-self:flex-start;font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;border:1px solid var(--line)}
+.ev-res.passed{color:var(--good,#2f9e5b);border-color:currentColor}.ev-res.failed{color:var(--bad,#d0453a);border-color:currentColor}
