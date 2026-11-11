@@ -1151,7 +1151,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   async publishChecks(run, targetBranch) {
     const target = targetBranch || run.targetBranch;
-    const opened = this.pullRequests(run), already = opened.find(item => item.target === target);
+    const opened = this.pullRequests(run).filter(item => !item.direct), already = opened.find(item => item.target === target);
     if (already) throw new Error(`A pull request from this run into ${target} is already open: ${already.url}. For one into another branch, call desk_publish again with targetBranch set to that branch.`);
     // The files are hashed only once, and only when a check needs them: a run with no worktree is refused before that.
     let hashed; const files = async () => (hashed ??= await fingerprint(run.worktree));
@@ -1198,10 +1198,19 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   async removeWorktree(run, directory) {
     try { await git(this.repositoryFor(run).path, ['worktree', 'remove', '--force', directory]); } catch {}
   }
-  async publish(runId, { title, body, targetBranch, approved = false } = {}) {
+  async publish(runId, { title, body, targetBranch, approved = false, direct = false } = {}) {
     const run = this.run(runId);
     if (!approved) throw new Error('Publishing requires explicit approval from the dashboard.');
     const plan = await this.publishChecks(run, targetBranch);
+    // The person said no pull request: the commits go onto the target branch itself, only as a fast-forward (nothing on it is overwritten).
+    if (direct) {
+      try { await git(run.worktree, ['push', 'origin', `HEAD:refs/heads/${plan.target}`]); }
+      catch (error) { throw new Error(/non-fast-forward|rejected|fetch first/i.test(String(error.message)) ? `${plan.target} has commits this branch does not have. Rebase onto origin/${plan.target} (git fetch, then git rebase origin/${plan.target}), then push again.` : String(error.message).split('\n')[0]); }
+      const pushed = { url: '', target: plan.target, head: plan.target, direct: true, commits: plan.commits.length, fingerprint: plan.fingerprint, createdAt: now() };
+      this.patchRun(runId, { state: 'published', targetBranch: plan.target, pullRequests: [...this.pullRequests(run), pushed] });
+      this.message(runId, `Pushed ${plan.commits.length} commit${plan.commits.length === 1 ? '' : 's'} straight to ${plan.target}, without a pull request.`);
+      return { pushed: true, target: plan.target, commits: plan.commits.length };
+    }
     const head = plan.rebuild ? await this.rebuildForTarget(run, plan) : { branch: run.branch, worktree: run.worktree };
     try {
       await git(head.worktree, ['push', '-u', 'origin', head.branch]);
@@ -1218,14 +1227,20 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     } finally { if (head.temporary) await this.removeWorktree(run, head.worktree); }
   }
   // Did the person just tell this agent, in its room, to open the pull request or push? Then that message is their yes.
-  personAskedToPublish(run) {
-    const roomId = run.roomTurn?.roomId || run.roomOf || ''; if (!roomId) return false;
-    const agentId = run.roomAgent || run.specialistId || ''; const agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
-    // Any of the person's messages in the last half hour counts, so a later "WTF?" does not undo their "open the pr".
-    const recent = this.rooms.messages(roomId).filter(item => item.from.type === 'human' && Date.now() - Date.parse(item.at) <= 30 * 60000);
-    const toAgent = item => item.to.includes(agentId) || (agent && item.to.includes(agent.slug)) || (agent && new RegExp(`@${agent.slug}\\b`, 'i').test(item.text));
-    return recent.some(item => toAgent(item) && /\b(pr|pull request|push|publish)\b/i.test(item.text));
+  // What the person told this agent in the last half hour: in its group chat (messages to it), or in its personal chat.
+  // Any of them counts, so a later "WTF?" does not undo their "open the pr".
+  recentAsks(run) {
+    const since = Date.now() - 30 * 60000, roomId = run.roomTurn?.roomId || run.roomOf || '';
+    if (roomId) {
+      const agentId = run.roomAgent || run.specialistId || ''; const agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
+      const toAgent = item => item.to.includes(agentId) || (agent && item.to.includes(agent.slug)) || (agent && new RegExp(`@${agent.slug}\\b`, 'i').test(item.text));
+      return this.rooms.messages(roomId).filter(item => item.from.type === 'human' && Date.parse(item.at) >= since && toAgent(item)).map(item => item.text);
+    }
+    return this.store.events(run.id, { visible: true, limit: 200 }).filter(event => event.kind === 'human-message' && Date.parse(event.createdAt) >= since).map(event => String(event.text || ''));
   }
+  personAskedToPublish(run) { return this.recentAsks(run).some(text => /\b(pr|pull request|push|publish)\b/i.test(text)); }
+  // "No PR", "push to main", "push it directly": the person wants the commits on the branch itself, without a pull request.
+  personAskedDirect(run) { return this.recentAsks(run).some(text => /\b(no (need (for |of )?)?(a )?pr|without (a )?(pr|pull request)|no pull request|push (it )?(straight|directly|direct)|direct push|push (it )?(in)?to (main|master|develop|release|global\/\S+))\b/i.test(text)); }
   // Work done in a group chat lives in a worktree the agent made, not in a Rex Desk run. To publish it, Rex Desk makes a run for that
   // worktree and branch (marked as work from the room), so the push and the pull request go through the same route as every other run.
   async adoptRoomWork(runId, { worktree, taskId = '', targetBranch = '' } = {}) {
@@ -1254,6 +1269,16 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     return record.id;
   }
   async requestPublish(runId, options = {}) {
+    // A direct push (no pull request) happens only when the person said so.
+    // A project set to "push straight to the branch" goes out without a pull request; anywhere else, when the person says "no PR".
+    const project = this.store.config().repositories.find(item => item.id === this.run(runId).repositoryId);
+    if (project?.push === 'direct' || (!options.direct && this.personAskedDirect(this.run(runId)))) options = { ...options, direct: true, byProject: project?.push === 'direct' };
+    if (options.direct) {
+      const session = this.run(runId);
+      if (!options.byProject && !this.personAskedDirect(session)) throw new Error('A direct push needs the person to say so (like "no PR" or "push to main"). Open a draft pull request instead, or ask them.');
+      const target = session.worktree ? runId : await this.adoptRoomWork(runId, options);
+      return this.publish(target, { ...options, approved: true, direct: true });
+    }
     if (!this.run(runId).worktree) {
       const session = this.run(runId), asked = this.personAskedToPublish(session);
       const adopted = await this.adoptRoomWork(runId, options);

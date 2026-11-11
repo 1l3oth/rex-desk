@@ -407,3 +407,31 @@ test('a /skill typed in a chat asks the agent to run that skill; Rex Desk comman
   assert.equal(skillCall('hello /teach'), 'hello /teach');
   assert.equal(skillCall('/'), '/');
 });
+
+test('a project set to push straight, or the person saying "no PR", pushes the commits onto the branch without a pull request', async () => {
+  const directory = temporary('direct'), origin = path.join(directory, 'origin.git'), repository = path.join(directory, 'repo'), tree = path.join(directory, 'tree');
+  mkdirSync(repository); mkdirSync(origin);
+  await git(repository, ['init', '-b', 'main']);
+  await git(repository, ['config', 'user.name', 'Test']); await git(repository, ['config', 'user.email', 'test@example.invalid']);
+  writeFileSync(path.join(repository, 'app.txt'), 'first\n'); await git(repository, ['add', '.']); await git(repository, ['commit', '-m', 'First']);
+  await git(origin, ['init', '--bare', '-b', 'main']);
+  await git(repository, ['remote', 'add', 'origin', origin]); await git(repository, ['push', '-q', 'origin', 'main']);
+  await git(repository, ['worktree', 'add', '-q', '-b', 'temp/rex/fix', tree, 'HEAD']);
+  const baseCommit = await git(tree, ['rev-parse', 'HEAD']);
+  writeFileSync(path.join(tree, 'fix.txt'), 'fix\n'); await git(tree, ['add', '.']); await git(tree, ['commit', '-m', 'fix: it']);
+  const store = new Store(temporary('direct-store'));
+  store.saveConfig({ ...defaults, repositories: [{ id: 'repo-1', name: 'studybook', path: repository, baseBranch: 'main', targetBranch: 'main', push: 'direct' }] });
+  const desk = new Desk(store, { root: temporary('direct-root') }); let prs = 0;
+  desk.gh = async () => { prs += 1; return { stdout: 'https://github.com/x/y/pull/1\n' }; };
+  store.put('task', 'task-1', { id: 'task-1', title: 'Fix', active: true, sourceName: 'Rex Desk', externalId: '1' });
+  store.put('run', 'run-1', { id: 'run-1', role: 'worker', state: 'ready_for_review', taskId: 'task-1', repositoryId: 'repo-1', branch: 'temp/rex/fix', worktree: tree, baseCommit, targetBranch: 'main', createdAt: now() });
+  const result = await desk.requestPublish('run-1', {});
+  assert.deepEqual(result, { pushed: true, target: 'main', commits: 1 });
+  assert.equal(prs, 0, 'no pull request');
+  assert.equal(await git(origin, ['log', '-1', '--format=%s', 'main']), 'fix: it');
+  assert.equal(store.get('run', 'run-1').state, 'published');
+  store.saveConfig({ ...store.config(), repositories: [{ ...store.config().repositories[0], push: 'pr' }] });
+  assert.equal(store.config().repositories[0].push, 'pr');
+  await assert.rejects(desk.requestPublish('run-1', { direct: true }), /needs the person to say so/);
+  store.close();
+});

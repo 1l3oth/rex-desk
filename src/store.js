@@ -258,7 +258,7 @@ export class Store extends EventEmitter {
       issueBranch(branchPattern, { prefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, '') });
       return { id: repository.id || id(), name: repository.name || path.basename(repository.path), path: path.resolve(repository.path),
         baseBranch: repository.baseBranch || 'develop', targetBranch: repository.targetBranch || repository.baseBranch || 'develop',
-        branchPattern, flowRuntime: validateFlowRuntime(repository.flowRuntime), electronRuntime: validateElectronRuntime(repository.electronRuntime), ...commands, browserPath: repository.browserPath || '/' };
+        branchPattern, flowRuntime: validateFlowRuntime(repository.flowRuntime), electronRuntime: validateElectronRuntime(repository.electronRuntime), ...commands, browserPath: repository.browserPath || '/', push: repository.push === 'direct' ? 'direct' : 'pr' };
     });
     // One sign-in per site. A blank site is the fallback used wherever no site matches.
     const accounts = (Array.isArray(input.testAccounts) ? input.testAccounts : []).map(account => ({
