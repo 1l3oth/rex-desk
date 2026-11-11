@@ -515,7 +515,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       }
       if (url.pathname === '/api/monitor' && request.method === 'GET') return json(response, 200, await desk.monitor.snapshot({ fresh: url.searchParams.has('fresh') }));
       if (url.pathname === '/api/monitor/clean' && request.method === 'POST') return json(response, 200, await desk.monitor.clean({ reason: 'you pressed Free memory' }));
-      if (url.pathname === '/api/monitor/end' && request.method === 'POST') return json(response, 200, await desk.monitor.end((await body(request)).pid));
+      if (url.pathname === '/api/monitor/end' && request.method === 'POST') return json(response, 200, await (async input => desk.monitor.end(input.pid, { outside: input.outside === true }))(await body(request)));
       if (url.pathname === '/api/specialists' && request.method === 'GET') return json(response, 200, desk.specialists.list());
       if (url.pathname === '/api/specialists' && request.method === 'POST') return json(response, 200, desk.specialists.create({ ...(await body(request)), by: 'you' }));
       const lessonMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)\/lessons\/(\d+)$/);

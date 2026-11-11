@@ -17,9 +17,11 @@ test('the monitor sorts processes: working agents with their tools, previews, le
     { pid: 70, ppid: 1, name: 'explorer.exe', mb: 90, cmd: 'explorer' },
   ];
   const groups = classify(list, { selfPid: self });
-  assert.deepEqual(groups.agents.map(item => item.pid).sort(), [200, 201]);
+  assert.deepEqual(groups.agents.map(item => item.pid), [200]);
+  assert.equal(groups.agents[0].mb, 340, 'an agent counts with its tools'); assert.equal(groups.agents[0].helpers, 1);
   assert.deepEqual(groups.previews.map(item => item.pid).sort(), [300, 301]);
   assert.deepEqual(groups.terminals.map(item => item.pid), [400], 'your own Claude Code is never a leftover');
+  assert.equal(groups.terminals[0].app, 'Windows Terminal', 'it says which app opened it');
   assert.deepEqual(groups.leftovers.map(item => item.pid).sort(), [500, 501], 'a helper whose app closed, and its child');
   assert.deepEqual(groups.servers.map(item => item.pid), [600]);
 });

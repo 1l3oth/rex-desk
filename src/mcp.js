@@ -139,6 +139,18 @@ export function createMcp(desk, scope) {
       const roomId = run?.roomAgent ? run.roomTurn?.roomId || (task?.roomWork?.agentId === agent.id ? task.roomWork.roomId : '') : '';
       return desk.assignTask({ specialistId: agent.id, taskId: input.taskId, roomId, instructions: input.instructions || '' });
     });
+  tool('desk_monitor', 'Main agent only: what uses this computer\'s memory right now: Rex Desk agents working, previews, test browsers, things left behind, Claude Code opened outside Rex Desk, and the biggest other programs, each with its pid, size and whether it is busy.', {}, async () => { desk.authorize(scope, null, { coordinator: true }); return { text: await desk.monitor.summary() }; }, true);
+  tool('desk_free_memory', 'Main agent only: free memory nobody uses: previews and test browsers of runs that are not working, leftover tool servers and old Rex Desk servers. Never stops a working agent or anything the person opened.', {}, async () => { desk.authorize(scope, null, { coordinator: true }); return desk.monitor.clean({ reason: 'Rex Agent freed memory' }); });
+  tool('desk_end_process', 'Main agent only: end one process from desk_monitor by its pid. A Rex Desk agent is stopped. Claude Code opened outside Rex Desk is ended only after the person approves it here.',
+    { pid: z.number().int().positive(), reason: z.string().min(3).max(300).describe('Why, in one plain line, shown to the person.') }, async (input, extra) => {
+      desk.authorize(scope, null, { coordinator: true });
+      const value = await desk.monitor.snapshot({ fresh: true }), outside = value.groups.terminals.find(item => item.pid === input.pid);
+      if (outside) {
+        const answer = await desk.beginAsk(resolveRun(), { kind: 'approval', title: `End ${outside.label} (${outside.detail}, ${outside.mb} MB)? ${input.reason}`, request: { requestedSchema: { type: 'object', properties: {}, required: [] } }, method: 'desk' }).promise;
+        if (answer?.action !== 'accept') return { ended: false, note: 'The person said no.' };
+      }
+      return desk.monitor.end(input.pid, { outside: Boolean(outside) });
+    });
   tool('desk_question', 'Poll a dashboard question created with desk_ask wait=false.', { questionId: z.string() }, ({ questionId }) => {
     const interaction = desk.store.get('interaction', questionId);
     if (!interaction) throw new Error('Question not found.'); desk.authorize(scope, interaction.runId);
