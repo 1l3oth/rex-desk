@@ -205,6 +205,19 @@ export function createMcp(desk, scope) {
       return { content: [{ type: 'image', data: readFileSync(shot.path).toString('base64'), mimeType: 'image/jpeg' }, { type: 'text', text: JSON.stringify({ width: shot.width, height: shot.height, note: 'Positions in this picture go to desk_computer with fromScreenshot: true.' }) }] };
     } catch (error) { return { ...reply({ error: error.message }), isError: true }; }
   });
+  tool('desk_room_manage', 'Change a group chat the way the person asks: add agents, remove agents, or rename it. Do it at once and say in one line what changed. Without roomId it is the group chat you are answering in.',
+    { roomId: z.string().optional(), add: z.array(z.string()).max(12).optional().describe('Agent names or handles to add.'), remove: z.array(z.string()).max(12).optional().describe('Agent names or handles to remove.'), name: z.string().min(1).max(80).optional().describe('New name for the room.') },
+    input => {
+      const run = scope.runId ? desk.store.get('run', scope.runId) : null, roomId = input.roomId || run?.roomTurn?.roomId || run?.roomOf || '';
+      if (!roomId) throw new Error('Pass roomId (see desk_rooms).');
+      const find = text => { const key = String(text || '').replace(/^@/, '').toLowerCase(); if (['rex', 'rex agent', 'main'].includes(key)) return 'main'; const agent = desk.specialists.list().find(item => [item.id, item.name, item.slug].some(value => String(value || '').toLowerCase() === key)); if (!agent) throw new Error(`No agent "${text}". Read desk_specialists.`); return agent.id; };
+      const added = (input.add || []).map(find), removed = (input.remove || []).map(find);
+      for (const id of added) if (!desk.rooms.room(roomId).members.includes(id)) desk.rooms.addMember(roomId, id);
+      for (const id of removed) if (desk.rooms.room(roomId).members.includes(id)) desk.rooms.removeMember(roomId, id);
+      if (input.name) desk.rooms.rename(roomId, input.name);
+      const room = desk.rooms.room(roomId);
+      return { room: room.name, members: room.members.map(id => desk.rooms.member(id).name), added: added.length, removed: removed.length };
+    });
   tool('desk_update_agent', 'Change an agent the way the person asks: rename it, or change its rules, model or AI. Do it at once when they ask; tell them in one line what changed.',
     { agent: z.string().describe('Agent name, handle or id.'), name: z.string().min(1).max(40).optional().describe('New name.'), rules: z.string().max(4000).optional(), model: z.string().optional(), provider: z.enum(['claude', 'codex']).optional() },
     input => {

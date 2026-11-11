@@ -86,7 +86,8 @@ export class Rooms {
   }
   removeMember(roomId, agentId) {
     const room = this.room(roomId);
-    this.store.put('room', roomId, { ...room, members: room.members.filter(id => id !== agentId) }); return this.room(roomId);
+    if (!room.members.includes(agentId)) return room;
+    this.store.put('room', roomId, { ...room, members: room.members.filter(id => id !== agentId) }); this.system(roomId, `${this.member(agentId).name} left the room.`); return this.room(roomId);
   }
 
   // Names in `to` (an agent's handle or name, or "you") become agent ids. An unknown name is an error, so a typo never silently wakes nobody.
