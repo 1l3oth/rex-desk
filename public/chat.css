@@ -1212,3 +1212,7 @@ body.fw-alone .fw-head{cursor:default}
 
 /* The file window keeps its scrolling to itself */
 .fw,.fw-view,.fw-table-wrap,.fw .CodeMirror-scroll,.pcard,.nt-pane{overscroll-behavior:contain}
+
+/* Listen to a message */
+.speak{display:inline-grid;place-items:center;width:24px;height:22px;margin-left:6px;border:0;border-radius:6px;background:none;color:var(--muted);cursor:pointer;vertical-align:middle;opacity:.55}
+.msg:hover .speak,.rmsg:hover .speak,.speak:focus-visible,.speak.on{opacity:1}.speak:hover{background:var(--raised);color:var(--ink)}.speak.on{color:var(--accent)}
