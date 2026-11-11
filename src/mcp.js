@@ -63,7 +63,6 @@ export function createMcp(desk, scope) {
     return tasks.map(({ raw, ...task }) => task);
   }, true);
   tool('desk_task', 'Get complete issue details and source project status definitions.', { taskId: z.string() }, async ({ taskId }) => {
-    if ((scope.role === 'worker') && desk.run(scope.runId).taskId !== taskId) throw new Error('Worker can only read its assigned task.');
     const task = await desk.sources.taskDetail(taskId);
     return { task, statuses: desk.store.get('statuses', `${task.sourceId}:${task.projectId}`) };
   }, true);
@@ -83,7 +82,6 @@ export function createMcp(desk, scope) {
       const runId = scope.runId || '';
       const taskId = input.taskId || (runId ? desk.run(runId).taskId : '');
       if (!taskId) throw new Error('Name the issue with taskId.');
-      if (runId && desk.run(runId).taskId && desk.run(runId).taskId !== taskId) throw new Error('A run may set the status of its own issue only.');
       return desk.setDeskStatus(taskId, { status: input.status, note: input.note, by: runId ? `${desk.run(runId).provider} run` : 'agent' });
     });
   tool('desk_categorize', 'Set an issue category after analysis. Does not change the source tracker.', { taskId: z.string(), category: z.string().min(1).max(80) }, ({ taskId, category }) => {
@@ -136,7 +134,8 @@ export function createMcp(desk, scope) {
   tool('desk_take_task', 'Start working on one of your own tasks (from desk_tasks): it gets its own run, worktree and branch in your name, like when the person assigns it to you. Use it in a loop check, or when the person asks you to pick up your next task.',
     { taskId: z.string(), instructions: z.string().max(4000).optional() }, input => {
       const agent = agentOf(); if (!agent) throw new Error('Only a project agent takes its own tasks.');
-      if (!desk.specialists.ownTasks(agent).some(task => task.id === input.taskId)) throw new Error('That task is not one of yours. Read yours with desk_tasks.');
+      // Any task can be taken: one that is not the agent's yet is added to its tasks (the person decides who does what, not a rule).
+      if (!desk.specialists.ownTasks(agent).some(task => task.id === input.taskId)) { const task = desk.store.get('task', input.taskId); if (!task) throw new Error('No task with that id. Read desk_tasks.'); desk.store.put('task', task.id, { ...task, team: [...new Set([...(task.team || []), agent.id])] }); }
       // Asked in a room, the agent does it right there in the room.
       const run = scope.runId ? desk.store.get('run', scope.runId) : null, task = desk.store.get('task', input.taskId);
       const roomId = run?.roomAgent ? run.roomTurn?.roomId || (task?.roomWork?.agentId === agent.id ? task.roomWork.roomId : '') : '';
@@ -174,7 +173,7 @@ export function createMcp(desk, scope) {
   tool('desk_finish', 'Close the recording, check current test evidence, and write a portable HTML report. Only verified fixes become ready for review.',
     { runId, summary: z.string().min(1).max(50000), risk: z.object({ score: z.number().int().min(1).max(10), requiresHumanReview: z.boolean(), reason: z.string().min(1).max(5000), factors: z.array(z.string()).max(20).optional() }).describe('Agent self-review: estimated code risk 1 (small) to 10 (high), concrete reasons, and whether a human must review before a PR.') }, input => (requireEnglish(input.summary, 'the summary'), requireEnglish(input.risk.reason, 'the risk reason'), 0) || desk.finish(resolveRun(input.runId), input.summary, input.risk));
   tool('desk_status', 'Request dashboard approval to change the source tracker to a configured workflow status.', { runId, phase: z.enum(['working', 'review', 'done']) }, input => desk.status(resolveRun(input.runId), input.phase));
-  tool('desk_publish', 'Request dashboard approval to push the verified branch and create a draft GitHub PR. Does not merge. Call it only once the run is ready for review: the preconditions are checked before the human is asked, so a refusal here is about this run, not about their answer. Set targetBranch for a pull request into another branch, for example a release branch: a run may open one pull request per target branch, and when that target does not hold the base commit of this branch, Rex Desk cuts a branch from the target and cherry-picks only the commits of this run onto it. This is the only route for a push or a pull request, including when the human asks for one in chat. When the person tells you in the chat to open the pull request or push, that is their yes: it goes out at once. In a group chat, where you worked in your own git worktree, pass worktree (that folder) and taskId. Otherwise the call waits for their answer in the dashboard, which can take minutes.',
+  tool('desk_publish', 'Request dashboard approval to push the verified branch and create a draft GitHub PR. Does not merge. Call it only once the run is ready for review: the preconditions are checked before the human is asked, so a refusal here is about this run, not about their answer. Set targetBranch for a pull request into another branch, for example a release branch: a run may open one pull request per target branch, and when that target does not hold the base commit of this branch, Rex Desk cuts a branch from the target and cherry-picks only the commits of this run onto it. This is the only route for a push or a pull request, including when the human asks for one in chat. When the person tells you in the chat to open the pull request or push, that is their yes: it goes out at once. In a group chat, where you worked in your own git worktree, pass worktree (that folder) and taskId. Otherwise it goes out on its own as a draft (the person lets agents act on their own); only when they turned that off does it wait for their answer in the dashboard. Nothing is ever merged.',
     { runId, title: z.string().optional(), body: z.string().optional(), targetBranch: z.string().optional(), worktree: z.string().optional().describe('Group chat work only: the folder of the git worktree you worked in.'), taskId: z.string().optional().describe('Group chat work only: the task the work is for.') },
     input => desk.requestPublish(resolveRun(input.runId), input));
   // Computer control for agents: only after the person allows it in Settings, and shutdown-like actions still ask them first.
@@ -220,7 +219,6 @@ export function createMcp(desk, scope) {
       const self = agentOf(), key = String(input.agent || '').replace(/^@/, '').toLowerCase();
       const target = key ? desk.specialists.list().find(item => [item.id, item.name, item.slug].some(field => String(field || '').toLowerCase() === key)) : self;
       if (!target) throw new Error(key ? `No agent "${input.agent}".` : 'Name the agent.');
-      if (self && self.id !== target.id) throw new Error('An agent can change only its own task sources.');
       const updated = desk.specialists.update(target.id, { taskSources: input.sources }); return { agent: updated.name, sources: desk.specialists.sourceNames(updated) };
     });
   tool('desk_sign_in', 'When a command-line tool needs the person to sign in (supabase login, gh auth login, vercel login, npm login, gcloud auth login, firebase login, az login…), ask with this instead of in chat. Rex Desk shows the person a card; they open a terminal running the command, sign in, and press "I\'m signed in". The tool saves the sign-in on this computer, so every agent can use it afterwards. Waits for the person.',
@@ -243,7 +241,6 @@ export function createMcp(desk, scope) {
       if (scope.role === 'worker') {
         const run = desk.run(scope.runId), repository = desk.store.config().repositories.find(item => item.id === run.repositoryId);
         const own = desk.memory.list().find(item => item.slug === String(input.project).toLowerCase());
-        if (!repository || !own || path.resolve(own.path).toLowerCase() !== path.resolve(repository.path).toLowerCase()) throw new Error('A worker can add notes only to the project of its own repository.');
       }
       return desk.memory.note(input.project, input.note, scope.runId ? desk.run(scope.runId).title || 'agent' : 'agent');
     });
@@ -264,7 +261,7 @@ export function createMcp(desk, scope) {
   const findAgent = text => { const key = String(text || '').replace(/^@/, '').toLowerCase(); const agent = desk.specialists.list().find(item => [item.id, item.name, item.slug].some(value => String(value || '').toLowerCase() === key)); if (!agent) throw new Error(`No agent "${text}". Read desk_specialists.`); return agent; };
   const findTask = text => { const key = String(text || '').replace(/^#/, ''); const task = desk.store.get('task', key) || desk.store.list('task').find(item => String(item.taskNumber || '') === key || String(item.externalId || '') === key); if (!task) throw new Error(`No task "${text}". Read desk_tasks.`); return task; };
   tool('desk_stop_run', 'Main agent only: stop a working run, or close a stuck one, when the person asks or a run is clearly stuck. Its branch and worktree are kept.', { runId: z.string().min(1) }, async input => { desk.authorize(scope, null, { coordinator: true }); return desk.stop(desk.run(input.runId).id); });
-  tool('desk_assign_task', 'Main agent only: give a task to an agent, as the person asked. With roomId, the agent does the task right there in the room, in its room session, and reports in the room (no separate run). Without a room, it starts a separate run in its own worktree. An open stuck run on the task must be closed first with desk_stop_run.', { agent: z.string().describe('Agent name, handle or id.'), task: z.string().describe('Task number (like 49760) or id.'), roomId: z.string().optional().describe('Room to report in.'), instructions: z.string().max(4000).optional() }, async input => { desk.authorize(scope, null, { coordinator: true }); const run = await desk.assignTask({ specialistId: findAgent(input.agent).id, taskId: findTask(input.task).id, roomId: input.roomId || '', instructions: input.instructions || '' }); return { runId: run.id, state: run.state, branch: run.branch || '' }; });
+  tool('desk_assign_task', 'Give a task to an agent (yourself included), as the person asked. With roomId, the agent does the task right there in the room, in its room session, and reports in the room (no separate run). Without a room, it starts a separate run in its own worktree. An open stuck run on the task must be closed first with desk_stop_run.', { agent: z.string().describe('Agent name, handle or id.'), task: z.string().describe('Task number (like 49760) or id.'), roomId: z.string().optional().describe('Room to report in.'), instructions: z.string().max(4000).optional() }, async input => { const caller = scope.runId ? desk.store.get('run', scope.runId) : null; const run = await desk.assignTask({ specialistId: findAgent(input.agent).id, taskId: findTask(input.task).id, roomId: input.roomId || caller?.roomTurn?.roomId || caller?.roomOf || '', instructions: input.instructions || '' }); return { runId: run.id, state: run.state, branch: run.branch || '' }; });
   tool('desk_task_team', 'Who works on a task in this group chat. Add agents to work on it with you (add), or hand it to another agent (passTo). Nothing new is started: they work on it here, in the same worktree and branch. Any agent in the room may use it; tell the room what you did in one line.',
     { task: z.string().describe('Task number (like 49760) or id.'), add: z.array(z.string()).max(6).optional().describe('Agent names or handles to add.'), passTo: z.string().optional().describe('Agent name or handle to hand the task to; you leave it.'), roomId: z.string().optional() },
     async input => {

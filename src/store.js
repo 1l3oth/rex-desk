@@ -33,6 +33,8 @@ export const defaults = {
   // Computer control: on for the person here, with a yes asked before shutdown-like actions; agents only when allowed.
   // allow: actions that run without asking even though they normally ask (the person chose "Yes, always"). Closing an app is simple and asks no more.
   control: { enabled: true, confirm: true, agents: false, language: 'en', allow: ['quit_app'] },
+  // Agents act on their own: start work and open draft pull requests without asking. Nothing is ever merged.
+  autonomy: true,
 };
 // Claude Code accepts family aliases (opus, sonnet, haiku, fable) or full IDs such as claude-opus-5-5. Typed shorthand is normalized.
 export function modelName(provider, value) {
@@ -254,7 +256,7 @@ export class Store extends EventEmitter {
     const accounts = (Array.isArray(input.testAccounts) ? input.testAccounts : []).map(account => ({
       id: String(account.id || id()), site: String(account.site || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').slice(0, 200),
       username: String(account.username || '').trim().slice(0, 200) })).filter(account => account.username);
-    const config = { ...defaults, name: String(input.name || 'Rex'), notify: input.notify !== false, provider: aiProvider(input.provider || 'claude'),
+    const config = { ...defaults, name: String(input.name || 'Rex'), notify: input.notify !== false, autonomy: input.autonomy !== false, provider: aiProvider(input.provider || 'claude'),
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
       syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), saver: input.saver !== false, autoFree: input.autoFree !== false, models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },

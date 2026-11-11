@@ -273,7 +273,9 @@ export class Desk {
     // A task the person gave to an agent stays that agent's: the caller is told who owns it instead of starting a second run.
     const owner = this.store.list('run').filter(item => item.specialistId && item.taskId === task.id && !['stopped', 'failed', 'cancelled'].includes(item.state)).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
     const caller = this.store.get('run', parentRunId);
-    if (owner && owner.specialistId !== (caller?.specialistId || caller?.roomAgent)) { const agent = this.store.get('specialist', owner.specialistId); throw new Error(`This task is already given to ${agent?.name || 'another agent'}. Do not start your own run: to work on it together, add yourself or others with desk_task_team, or pass it on.`); }
+    const callerAgent = caller?.roomAgent || caller?.specialistId || '';
+    // In a group chat the caller works on it right there, with whoever already has it.
+    if ((caller?.roomTurn?.roomId || caller?.roomOf) && callerAgent && callerAgent !== 'main') return this.shareTask({ taskId: task.id, add: [callerAgent], roomId: caller.roomTurn?.roomId || caller.roomOf, by: 'You' });
     // A task on a project that has its own agent goes to that agent, not to a new nameless run: in a room it works right there in the room.
     const roomId = caller?.roomTurn?.roomId || '', projectAgent = this.projectAgentFor(task, input.repositoryId);
     if (projectAgent && !owner) {
@@ -282,6 +284,7 @@ export class Desk {
         : `${projectAgent.name} is the agent for this project. Give it to them with desk_assign_task (specialistId ${projectAgent.id}, taskId ${task.id}${roomId ? `, roomId ${roomId}` : ''})${roomId ? ' so they work on it here in the room' : ''}. Do not start a new run, and do not take it yourself.`);
     }
     if (caller?.roomAgent) throw new Error(`In a group chat nothing new is started. Work on it here: give it to an agent, add teammates or pass it on with desk_task_team (task ${task.taskNumber || task.externalId || task.id}).`);
+    if (this.store.config().autonomy !== false) return this.startTask({ ...input, parentRunId });
     const answer = await this.ask(parentRunId, { kind: 'approval', title: `Start work on “${task.title}”?`,
       request: { taskId: task.id, issue: task.title, provider: 'claude', note: 'An agent asked to start this run. It starts only if you approve.' }, method: 'dispatch' });
     if (answer.action !== 'accept') throw new Error('The human did not approve starting this run. Do not start it another way.');
@@ -939,7 +942,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const brief = [`${by} gave you this task to do here in the room: #${number} ${name}.${others.length ? ` You work on it together with ${others.join(', ')}${owner.id !== agent.id ? ` (${owner.name} leads it)` : ''}: split the work in the room, and say what you take before you start.` : ''}`,
       task.url ? `Tracker link: ${task.url}` : '', `What it says:\n${String(task.description || task.title || '').slice(0, 4000)}`, instructions ? `Notes from the person: ${instructions}` : '',
       `Do the work in this session and talk about it in this room. Never change the main checkout at ${project}. Work in a git worktree beside it: in ${project} run \`git worktree add "${project}-worktrees/${String(number).toLowerCase()}" -b ${branch} ${base}\` (or reuse it if it exists), then change, run and test the code there.`,
-      'Post a short note in the room when you start, when something important happens, and when you are done (what changed and how you tested it). Share each test result with desk_share_evidence (a screenshot, a recording or the test output) so it shows in the room and on the task. Commit in the worktree when it works. Ask the person here before pushing or opening a pull request; when they tell you to (\"open the PR\", \"push it\"), do it at once with desk_publish, passing worktree (your worktree folder) and taskId: their message is the yes, so do not ask again or tell them to start a run. Ask first before anything that touches a live site or other people.',
+      'Post a short note in the room when you start, when something important happens, and when you are done (what changed and how you tested it). Share each test result with desk_share_evidence (a screenshot, a recording or the test output) so it shows in the room and on the task. Commit in the worktree when it works. When the work is done and committed, open a draft pull request yourself with desk_publish (worktree and taskId) and post its link here; do not wait to be asked. When the person tells you to (\"open the PR\", \"push it\"), do it at once with desk_publish, passing worktree (your worktree folder) and taskId: their message is the yes, so do not ask again or tell them to start a run. Ask first before anything that touches a live site or other people.',
       this.memory.workflowText(agent.projectSlug)].filter(Boolean).join('\n\n');
     await this.rooms.post(roomId, { system: true, text: others.length ? `${agent.name} joins ${others.join(', ')} on #${number} ${name} here in the room.` : `${agent.name} is now working on #${number} ${name} here in the room.`, instruction: brief, to: [agent.slug] });
     return { inRoom: true, agentId: agent.id, roomId, taskId };
@@ -1079,22 +1082,22 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (already) throw new Error(`A pull request from this run into ${target} is already open: ${already.url}. For one into another branch, call desk_publish again with targetBranch set to that branch.`);
     // The files are hashed only once, and only when a check needs them: a run with no worktree is refused before that.
     let hashed; const files = async () => (hashed ??= await fingerprint(run.worktree));
-    const published = opened.at(-1);
+    // What is missing (tests, evidence, a target that is master) is said, never refused: the person and the agent decide.
+    const notes = [], published = opened.at(-1);
     if (!published) {
-      if (run.state === 'needs_evidence') throw new Error(`This run cannot open a pull request yet: ${this.missingEvidence(run)}. Put that right, then run desk_verify and desk_finish again before desk_publish.`);
-      if (run.state !== 'ready_for_review') throw new Error(`Finish verified work before creating a PR. This run is ${run.state}; commit the fix, run desk_verify, then desk_finish, and publish once it is ready for review.`);
-      if (run.verification?.fingerprint !== await files()) throw new Error('Files changed after verification. Run verification again.');
+      if (run.state === 'needs_evidence') notes.push(`Evidence missing: ${this.missingEvidence(run)}.`);
+      else if (run.state !== 'ready_for_review') notes.push(`Not run through desk_verify and desk_finish (the run is ${String(run.state).replaceAll('_', ' ')}).`);
+      else if (run.verification?.fingerprint !== await files()) notes.push('Files changed after the last verification.');
     } else {
       const stamp = published.fingerprint || run.verification?.fingerprint;
-      if (!stamp) throw new Error(`Rex Desk cannot tell whether the files still match the pull request into ${published.target}. Run desk_verify and desk_finish, then publish into ${target}.`);
-      if (stamp !== await files()) throw new Error(`The files changed after the pull request into ${published.target} was approved. Run desk_verify and desk_finish again, then publish into ${target}.`);
+      if (stamp && stamp !== await files()) notes.push(`Files changed after the pull request into ${published.target}.`);
     }
-    if (/(^|\/)(real-)?master$/.test(target)) throw new Error(`Rex Desk never opens a pull request into ${target}. Choose the develop branch, or release when that is intended.`);
+    if (/(^|\/)(real-)?master$/.test(target)) notes.push(`The pull request goes into ${target}.`);
     await git(run.worktree, ['check-ref-format', '--branch', target]);
     if (await git(run.worktree, ['status', '--porcelain'])) throw new Error('Commit the verified changes first. Resume the agent and ask it to commit.');
     const commits = (await git(run.worktree, ['rev-list', '--reverse', `${run.baseCommit}..HEAD`])).split('\n').filter(Boolean);
     if (!commits.length) throw new Error('No commits to publish.');
-    return { target, commits, fingerprint: await files(), additional: opened.length > 0, rebuild: !await this.targetHolder(run, target) };
+    return { target, commits, notes, fingerprint: await files(), additional: opened.length > 0, rebuild: !await this.targetHolder(run, target) };
   }
   // A pull request into a branch that does not hold this run's base is opened from a branch made for it: Rex Desk cuts
   // one from the target itself and cherry-picks this run's own commits onto it, so the pull request carries nothing else.
@@ -1189,6 +1192,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     }
     const run = this.run(runId);
     const plan = await this.publishChecks(run, options.targetBranch);
+    // Agents help instead of asking for every step: a draft pull request goes out on its own, unless the person turned that off.
+    if (this.store.config().autonomy !== false) return this.publish(runId, { ...options, approved: true });
     if (!plan.additional && automaticPrAllowed(this.store.config(), run, await fingerprint(run.worktree))) return this.publish(runId, { ...options, approved: true });
     const answer = await this.ask(runId, { kind: 'approval', method: 'publish',
       title: plan.additional ? `Create another draft pull request, into ${plan.target}` : 'Create a draft pull request',

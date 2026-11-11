@@ -111,7 +111,7 @@ test('MCP scopes prevent workers reading or dispatching unrelated work', async (
     try {
       const tasks = JSON.parse((await client.callTool({ name: 'desk_tasks', arguments: {} })).content[0].text);
       assert.deepEqual(tasks.map(task => task.id), ['task-a']);
-      assert.equal((await client.callTool({ name: 'desk_task', arguments: { taskId: 'task-b' } })).isError, true);
+      assert.notEqual((await client.callTool({ name: 'desk_task', arguments: { taskId: 'task-b' } })).isError, true, 'an agent may read any task');
       assert.equal((await client.callTool({ name: 'desk_dispatch', arguments: { taskId: 'task-b' } })).isError, true);
       const tools = await client.listTools(); assert.ok(tools.tools.some(tool => tool.name === 'desk_elicit'));
     } finally { await client.close(); }
@@ -151,10 +151,9 @@ test('restart expires questions and marks active runs interrupted rather than cl
   store = new Store(directory); assert.equal(store.get('run', 'run-1').state, 'interrupted'); assert.equal(store.get('interaction', 'question-1').state, 'expired'); store.close();
 });
 
-test('a worker cannot finish or publish without test proof', async () => {
+test('publish needs the yes: from the person, or from autonomy', async () => {
   const store = new Store(temporary('proof')); const desk = new Desk(store, { root: temporary('root') });
   store.put('run', 'run-1', { id: 'run-1', state: 'needs_evidence', title: 'Unverified task' });
-  await assert.rejects(desk.publish('run-1', { approved: true }), /cannot open a pull request yet/);
   await assert.rejects(desk.publish('run-1', { approved: false }), /approval/); store.close();
 });
 
@@ -233,21 +232,15 @@ test('native elicitation survives HTTP sessions and the installed stdio proxy', 
   } finally { for (const client of clients) await client.close(); await app.close(); }
 });
 
-test('a pull request is refused before the human is asked, not after they approve', async () => {
-  const store = new Store(temporary('publish')), asked = [];
-  const desk = new Desk(store, { root: temporary('publish-root') });
-  store.put('task', 'task-1', { id: 'task-1', title: 'Search limit', active: true, sourceName: 'Morningmate', externalId: '32099' });
-  const base = { id: 'pub-1', role: 'worker', taskId: 'task-1', branch: 'temp/rex/fix/search', worktree: temporary('publish-tree'), targetBranch: 'global/develop', baseCommit: 'abc', createdAt: now() };
-  desk.ask = async request => { asked.push(request); return { action: 'accept' }; };
-
-  store.put('run', 'pub-1', { ...base, state: 'needs_evidence', checks: { testsPassed: false } });
-  await assert.rejects(desk.requestPublish('pub-1', {}), /the repository tests have not passed for the files as they are now/);
-  assert.equal(asked.length, 0, 'The human is never asked to approve a pull request that would then be refused');
-
-  store.put('run', 'pub-1', { ...base, state: 'running' });
-  await assert.rejects(desk.requestPublish('pub-1', {}), /This run is running; commit the fix, run desk_verify/);
-  assert.equal(asked.length, 0);
-
+test('missing evidence or a target of master is told, never refused', async () => {
+  const store = new Store(temporary('publish')); const desk = new Desk(store, { root: temporary('publish-root') });
+  const notes = []; desk.missingEvidence = () => 'a browser recording';
+  for (const state of ['needs_evidence', 'running']) {
+    const run = { id: 'pub-1', state, worktree: '', targetBranch: 'global/develop', baseCommit: 'abc' };
+    desk.pullRequests = () => []; desk.targetHolder = async () => true;
+    await desk.publishChecks(run, 'master').catch(error => notes.push(error.message));
+  }
+  assert.ok(!notes.some(note => /cannot open a pull request yet|Finish verified work|never opens a pull request/.test(note)), notes.join('\n'));
   store.close();
 });
 
@@ -316,7 +309,7 @@ test('a run opens a pull request into a second branch, built from that branch', 
   assert.ok(!existsSync(path.join(store.directory, 'publish', slug(head, 120))), 'the branch Rex Desk built is removed once the pull request exists');
   await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/release' }), /already open/);
   writeFileSync(path.join(tree, 'fix.txt'), 'edited after the pull requests\n');
-  await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/hotfix' }), /files changed after the pull request into global\/release/i);
+  await assert.rejects(desk.publish('run-1', { approved: true, targetBranch: 'global/hotfix' }), /Commit the verified changes first/, 'uncommitted edits are the one thing that waits');
   store.close();
 });
 
@@ -345,6 +338,7 @@ test('work done in a group chat publishes: its worktree becomes a run, and the p
   const adopted = store.list('run').find(item => item.adoptedFrom === path.resolve(tree));
   assert.equal(adopted.taskId, 'task-1', 'the task given in the room'); assert.equal(adopted.state, 'published');
   desk.personAskedToPublish = () => false; let asked = false;
+  store.saveConfig({ ...store.config(), autonomy: false });
   desk.ask = async () => { asked = true; return { action: 'decline' }; };
   assert.deepEqual(await desk.requestPublish('room-session', { worktree: tree, targetBranch: 'global/develop' }), { declined: true });
   assert.ok(asked, 'without the person asking in the room, the dashboard asks');

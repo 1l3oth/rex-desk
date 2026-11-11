@@ -144,8 +144,9 @@ test('a new run gets an English branch name that describes the QA issue, or the 
   }
 });
 
-test('an agent cannot start a run on an issue until the human approves the card that names it', async () => {
+test('with "Let agents act on their own" off, an agent cannot start a run until the human approves the card that names it', async () => {
   const { original } = await repository(), { store, desk } = workspace(original);
+  store.saveConfig({ ...store.config(), autonomy: false });
   store.put('run', 'agent', { id: 'agent', role: 'coordinator', title: 'External AI', state: 'running', createdAt: now() });
   const pending = desk.dispatch('agent', { taskId: 'task-1', repositoryId: 'repo' });
   let card;
