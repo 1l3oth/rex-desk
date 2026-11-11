@@ -77,7 +77,7 @@ function commands(ctx) {
     { name: 'agent', hint: 'Create an agent for a project', run: c.agent },
     ...(ui.view.type === 'room' ? [{ name: 'assign', hint: 'Give a task to an agent: /assign @agent #task', run: c.assign }] : []),
     { name: 'main', hint: 'Go to Rex Agent', run: c.main },
-    ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }, { name: 'clear', hint: 'Fresh start: the agent gets a handoff of this chat and a clean session', run: c.clear }] : []),
+    ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }, { name: 'clear', hint: 'Fresh start: the agent gets a handoff of this chat and a clean session', run: c.clear }, { name: 'loop', hint: 'Check its own tasks now and start on one', run: c.loop }] : []),
     { name: 'voice', hint: 'Voice engine and language: compare which one understands you', run: () => voiceDialog(ctx) },
     { name: 'settings', hint: 'Open settings', run: c.settings },
     // The agent's own skills and commands, like typing / in Claude Code: choosing one puts it in the box to send to the agent.

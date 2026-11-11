@@ -404,3 +404,22 @@ test('every agent is told to explain with eli5 picture pages and to show code ch
   assert.match(turns[0].prompt, /desk_show_page/);
 });
 function room0(desk) { return desk.store.list('room')[0].id; }
+
+test('each agent runs its own loop: it checks its tasks on schedule, skips when nothing changed, and can take a task itself', async () => {
+  const { store, desk, turns, dara } = setup();
+  store.put('specialist', dara.id, { ...store.get('specialist', dara.id), taskSources: ['local'] });
+  assert.equal(desk.specialists.loopOf(store.get('specialist', dara.id)).on, true, 'on by default');
+  const created = desk.localTasks.create({ title: 'Fix the cart total', project: 'shop' });
+  assert.ok(desk.specialists.ownTasks(store.get('specialist', dara.id)).some(task => task.id === created.id));
+  await desk.loopTick(Date.now());
+  await waitFor(() => turns.some(turn => /Loop check/.test(turn.prompt)));
+  const loopTurn = turns.find(turn => /Loop check/.test(turn.prompt));
+  assert.match(loopTurn.prompt, /desk_take_task/); assert.match(loopTurn.prompt, /shop workflow/);
+  assert.ok(!store.events(loopTurn.run.id, { visible: true }).some(event => event.kind === 'human-message' && /Loop check/.test(event.text)), 'the loop prompt is not shown as the person talking');
+  await waitFor(() => desk.specialists.status(store.get('specialist', dara.id)).state === 'idle');
+  const count = turns.length;
+  await desk.loopTick(Date.now() + 61 * 60000);
+  assert.equal(turns.length, count, 'nothing changed, so the next check does not wake the agent');
+  desk.specialists.update(dara.id, { loop: { on: false, every: 15 } });
+  assert.equal(store.get('specialist', dara.id).loop.every, 15);
+});

@@ -1,4 +1,4 @@
-import { agentStage, agentAction, agentGroups, initAgentCard, toggleGroup } from '/chat-agents.js';
+import { agentStage, agentAction, agentGroups, initAgentCard, toggleGroup, wireLoop } from '/chat-agents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
 import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.js';
@@ -25,7 +25,7 @@ const provider = name => name === 'codex' ? 'Codex (retired)' : name === 'claude
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value), tokenText,
   render: () => renderAll(), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
-  commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), clear: () => clearAgent().catch(error => toast(error.message, true)), settings: () => openSettings(ctx) }, get initials() { return initials; } };
+  commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), clear: () => clearAgent().catch(error => toast(error.message, true)), loop: () => loopNow().catch(error => toast(error.message, true)), settings: () => openSettings(ctx) }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
 async function api(path, { method = 'GET', data, retry = false } = {}) {
@@ -147,6 +147,7 @@ function transcript(events) {
     if (['command-output', 'dev-output'].includes(event.kind)) continue;
     if (event.kind === 'human-message') { const said = spokenText(event.text); items.push({ role: 'human', text: said.text, voice: said.voice, at: event.createdAt }); }
     else if (event.kind === 'turn-start') items.push({ role: 'status', text: `${event.resumed ? 'Resumed' : 'Started'} with ${provider(event.provider)}`, at: event.createdAt });
+    else if (event.kind === 'loop-check') items.push({ role: 'status', text: event.text || 'Loop check', at: event.createdAt });
     else if (event.kind === 'agent-result') items.push({ role: 'status', text: `Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${tokenText(event.tokens) ? ` · ${tokenText(event.tokens)}` : ''}${event.cost && event.billedToApiKey ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
     else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
     else if (event.kind === 'agent-tool' && ['desk_ask', 'desk_message', 'desk_elicit'].includes(event.tool)) continue; // shown as chat messages already
@@ -263,9 +264,10 @@ function renderAll(full = false) {
   queueMicrotask(drawReplyBar);
   if (!ui.snap) return;
   // On a phone Rex Desk opens on the list, like a messaging app; a chat slides in over it and the back arrow returns.
-  if (!document.getElementById('rail')) app.innerHTML = `<div class="chat-shell${phone() && !location.hash ? ' show-rail' : ''}"><aside class="rail" id="rail"></aside><main class="stage" id="stage"></main></div>`;
+  if (!document.getElementById('rail')) ui.railHtml = '', app.innerHTML = `<div class="chat-shell${phone() && !location.hash ? ' show-rail' : ''}"><aside class="rail" id="rail"></aside><main class="stage" id="stage"></main></div>`;
   const rail = document.getElementById('rail'), scroll = rail.querySelector('.rail-scroll')?.scrollTop || 0;
-  rail.innerHTML = renderRail(); const restored = rail.querySelector('.rail-scroll'); if (restored) restored.scrollTop = scroll;
+  // The sidebar is rebuilt only when something in it changed.
+  const railHtml = renderRail(); if (railHtml !== ui.railHtml) { ui.railHtml = railHtml; rail.innerHTML = railHtml; const restored = rail.querySelector('.rail-scroll'); if (restored) restored.scrollTop = scroll; }
   renderStage(full);
 }
 
@@ -283,8 +285,13 @@ async function loadView() {
     else if (type === 'project') ui.page = (await api(`/memory/page?name=${encodeURIComponent(id)}`)).text;
   } catch (error) { if (type === 'project') ui.page = error.message; }
 }
-let busy = false, again = false;
+let busy = false, again = false, lastTyped = 0, typingHold = 0;
+// While the person types, the page is not redrawn: a redraw of a long chat takes the main thread and the letters lag.
+// Updates wait until they pause for a moment, then everything catches up at once.
+document.addEventListener('input', event => { if (event.target.id === 'draft' || event.target.closest?.('#composer')) lastTyped = performance.now(); }, true);
 async function refresh({ full = false } = {}) {
+  const sinceTyping = performance.now() - lastTyped;
+  if (!full && sinceTyping < 1200) { clearTimeout(typingHold); typingHold = setTimeout(() => void refresh().catch(() => {}), 1250 - sinceTyping); return; }
   if (busy) { again = true; return; } busy = true;
   try {
     ui.snap = await api('/state'); ui.memory = await api('/memory').catch(() => ui.memory); ui.profile = await api('/profile').catch(() => ui.profile);
@@ -331,6 +338,13 @@ async function assignFromRoom(roomId, command) {
 async function syncIssues() { toast('Syncing issues…'); await api('/sync', { method: 'POST', data: {} }); toast('Issues synced.'); await refresh(); }
 async function scanProjects() { toast('Scanning this computer for projects…'); const result = await api('/memory/scan', { method: 'POST', data: {} }); toast(`Found ${result.count} projects.`); await refresh(); }
 // /clear: the agent writes nothing itself; Rex Desk saves a handoff of the conversation and the next message starts a fresh session that reads it.
+// /loop: the agent looks at its own tasks now, the same as its scheduled check.
+async function loopNow() {
+  const run = ui.view.type === 'run' ? runById(ui.view.id) : null, agentId = run?.specialistId;
+  if (!agentId) return toast('Open an agent\'s chat to run its loop.', true);
+  const box = document.getElementById('draft'); if (box) { box.value = ''; ui.drafts.set(draftKey(), ''); }
+  await api(`/specialists/${agentId}/loop`, { method: 'POST', data: {} }); toast('Checking its tasks now.'); await refresh();
+}
 async function clearAgent() {
   const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast('No agent conversation here.', true);
   if (!confirm('Clear this conversation? The agent starts a fresh session with your next message and reads a handoff of what was said. The messages stay on screen.')) return;
@@ -396,7 +410,7 @@ document.addEventListener('submit', async event => {
 });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
 
-initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx;
+initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx;
 // On a phone the side panels start closed, and the menu button opens the list of chats.
 if (window.matchMedia('(max-width: 760px)').matches) { ui.infoOpen = false; ui.chatInfo = false; ui.termOpen = false; }
 // A page an agent made (an explanation of its changes) opens full screen over the chat, in a sandbox with no access to Rex Desk.
@@ -464,7 +478,7 @@ document.addEventListener('keydown', event => {
 try {
   await refresh({ full: true });
   const stream = new EventSource('/api/events'); let timer;
-  stream.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(() => void refresh().catch(() => {}), 300); });
+  stream.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(() => void refresh().catch(() => {}), 700); });
   setInterval(() => void refresh().catch(() => {}), 15000);
 } catch (error) { app.innerHTML = `<div class="boot"><h2>Rex Desk is unavailable</h2><p>${esc(error.message)}</p><p>Start it with <code>npm start</code>, then reload.</p></div>`; }
 

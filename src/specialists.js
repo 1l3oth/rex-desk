@@ -7,6 +7,9 @@ import path from 'node:path';
 import os from 'node:os';
 const EXPLAINER = path.join(os.homedir(), '.agents', 'skills', 'code-explainer-page');
 // Explaining an idea, a cause or how something works: a picture page in eli5 style, the way the person likes to learn.
+export const LOOP_EVERY = [15, 30, 60, 120, 240, 1440];
+const LOOP_DEFAULT = { on: true, every: 60, prompt: '' };
+const cleanLoop = loop => ({ ...(loop.on !== undefined ? { on: Boolean(loop.on) } : {}), ...(loop.every !== undefined ? { every: LOOP_EVERY.includes(Number(loop.every)) ? Number(loop.every) : 60 } : {}), ...(loop.prompt !== undefined ? { prompt: String(loop.prompt || '').slice(0, 2000) } : {}) });
 export const ELI5_RULE = 'When you explain to the person how something works, why something broke, what a choice means, or anything longer than a few lines, explain like they are five: big pictures, few words. Make one self-contained HTML page named eli5-<short-topic>.html in your work folder (inline CSS and inline SVG drawings only, no external files, no emoji; a few numbered picture steps, each with one or two plain sentences; light and dark friendly), never open it yourself, and show it with desk_show_page beside a two or three line answer in the chat. For your own code changes use the code explainer page instead. Short answers and yes/no questions stay plain chat.';
 // When the person asks what you changed, they get a page to read, not a wall of text.
 const EXPLAIN_RULE = existsSync(path.join(EXPLAINER, 'scripts', 'render.mjs'))
@@ -67,13 +70,13 @@ export class Specialists {
     const repository = this.store.config().repositories.find(item => path.resolve(item.path).toLowerCase() === path.resolve(project.path).toLowerCase());
     const item = { id: randomUUID(), name: clean, slug, projectSlug: project.slug, projectPath: project.path, repositoryId: repository?.id || '', purpose: project.purpose || '',
       rules: String(rules).slice(0, 4000), unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12),
-      provider: 'claude', model: this.cleanModel(model, { strict: true }), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, createdAt: now(), updatedAt: now() };
+      provider: 'claude', model: this.cleanModel(model, { strict: true }), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, loop: { ...LOOP_DEFAULT }, createdAt: now(), updatedAt: now() };
     this.store.put('specialist', item.id, item); this.writeCard(item); return item;
   }
-  update(id, { rules, unsure, provider, model, taskSources, profile }) {
+  update(id, { rules, unsure, provider, model, taskSources, profile, loop }) {
     const item = this.get(id);
     const updated = { ...item, ...(rules !== undefined ? { rules: String(rules).slice(0, 4000) } : {}), ...(unsure !== undefined ? { unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12) } : {}),
-      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true }) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), ...(profile !== undefined ? { profile: String(profile || '').slice(0, 500) } : {}), updatedAt: now() };
+      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true }) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), ...(profile !== undefined ? { profile: String(profile || '').slice(0, 500) } : {}), ...(loop !== undefined ? { loop: { ...this.loopOf(item), ...cleanLoop(loop) } } : {}), updatedAt: now() };
     this.store.put('specialist', id, updated); this.writeCard(updated); return updated;
   }
   // Renaming moves the card too; the run history and the project stay as they are.
@@ -156,6 +159,14 @@ export class Specialists {
     const names = this.sourceNames(agent);
     return names.length ? `Your tasks come from: ${names.join(' and ')}. Read them with desk_tasks; it lists only those. Create and update Rex Desk tasks with desk_create_task and desk_update_task.`
       : 'Nobody has told you where this project keeps its tasks yet. Before looking for tasks, ask the person (desk_ask) whether they live in a connected tracker, in Rex Desk tasks, or somewhere else, and save the answer with desk_set_task_sources. Never assume Flow or Morningmate.';
+  }
+  // Each agent's own loop: every so often it looks at its own tasks and starts work, following its project's workflow.
+  loopOf(agent) { return { ...LOOP_DEFAULT, ...(agent?.loop || {}) }; }
+  // The tasks that are this agent's to look at: from the sources chosen for its project, Rex Desk tasks given to it or to nobody on its project, never done ones.
+  ownTasks(agent) {
+    const sources = agent.taskSources || [];
+    return this.store.list('task').filter(task => !task.demo && (task.active || task.local) && task.status !== 'done')
+      .filter(task => task.local ? sources.includes('local') && (task.assignee === agent.id || (!task.assignee && (!task.projectSlug || task.projectSlug === agent.projectSlug))) : sources.includes(task.sourceId));
   }
   identity(agent) {
     return [`You are ${agent.name}, the specialist agent for the project "${agent.projectSlug}" at ${agent.projectPath}. You keep one conversation of your own, and you take part in the person's group chats when you are mentioned.`,

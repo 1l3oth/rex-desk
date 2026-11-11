@@ -41,10 +41,18 @@ export function agentStage(ctx) {
   const lessonList = lessons.length ? `<ul class="ag-lessons">${lessons.map((lesson, index) => `<li><span>${esc(lesson.text)}</span><button type="button" class="ag-x" data-action="spec-forget" data-index="${index}" title="Forget this lesson" aria-label="Forget this lesson"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>` : `<p class="ag-help">None yet. When you correct ${esc(agent.name)}, it keeps the lesson here.</p>`;
   const chosen = new Set(agent.taskSources || []), options = [['local', 'Rex Desk tasks', 'Kept here, made by you or the agents'], ...(ui.snap.config?.sources || []).map(source => [source.id, source.name, source.type === 'flow' ? 'Flow tracker' : 'Morningmate tracker'])];
   const taskSources = `<div class="ag-sources">${options.map(([id, label, hint]) => `<label><input type="checkbox" data-task-source="${esc(id)}" ${chosen.has(id) ? 'checked' : ''}><span>${esc(label)}<small>${esc(hint)}</small></span></label>`).join('')}</div>${chosen.size ? '' : `<p class="ag-help">Not set. ${esc(agent.name)} asks you before it looks for tasks.</p>`}`;
+  // The agent's own loop: how often it looks at its tasks by itself, and what it does on each look.
+  const loop = { on: true, every: 60, prompt: '', ...(agent.loop || {}) }, everyLabel = minutes => minutes >= 1440 ? 'Once a day' : minutes >= 60 ? `Every ${minutes / 60} hour${minutes === 60 ? '' : 's'}` : `Every ${minutes} minutes`;
+  const loopBox = `<section class="ag-sec ag-loop"><h2>Own loop</h2>
+    <label class="ag-loop-on"><input type="checkbox" data-loop-on ${loop.on ? 'checked' : ''}><span>${esc(agent.name)} checks its own tasks and starts work by itself</span></label>
+    <div class="ag-loop-row"><select data-loop-every aria-label="How often">${[15, 30, 60, 120, 240, 1440].map(minutes => `<option value="${minutes}" ${Number(loop.every) === minutes ? 'selected' : ''}>${everyLabel(minutes)}</option>`).join('')}</select><button type="button" class="btn small" data-action="spec-loop-now">Check now</button></div>
+    <textarea data-loop-prompt rows="3" maxlength="2000" placeholder="What to do on each check (optional). For example: pick up QA issues first and test them in the browser.">${esc(loop.prompt || '')}</textarea>
+    <p class="ag-help">${loop.lastAt ? `Last check ${esc(new Date(loop.lastAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}. ` : ''}A check is skipped, using nothing, when its tasks have not changed. It follows the ${esc(agent.projectSlug)} workflow and asks you before anything risky.</p></section>`;
   const side = `<aside class="ag-side">
     <section class="ag-sec"><h2>What ${esc(agent.projectSlug)} is for</h2><p>${esc(agent.purpose || 'Not recorded yet.')}</p></section>
     <section class="ag-sec"><h2>Lessons learned</h2>${lessonList}</section>
     <section class="ag-sec"><h2>Tasks come from</h2>${taskSources}</section>
+    ${loopBox}
     <section class="ag-sec"><h2>Claude account</h2>${pickerHtml(ctx, { id: 'sp-profile', label: 'Claude account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.claude?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}</section>
     <section class="ag-sec"><h2>Model</h2>${pickerHtml(ctx, { id: 'sp-model', label: 'Model', value: agent.model || '', items: models })}</section>
     <section class="ag-sec ag-meta"><p>Created by ${esc(agent.createdBy || 'you')}${origin ? `, copied from ${esc(origin.name)}` : ''}.</p><button class="btn small danger" data-action="spec-remove">Remove ${esc(agent.name)}</button></section>
@@ -64,6 +72,17 @@ function dialog(ctx, { title, nameValue = '', projects = null, submit }) {
   });
 }
 
+// The loop settings save as soon as they change.
+let loopWired = false;
+export function wireLoop(ctx) {
+  if (loopWired) return; loopWired = true;
+  const save = async data => { const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return; try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { loop: data } }); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); } };
+  document.addEventListener('change', event => {
+    if (event.target.matches?.('[data-loop-on]')) void save({ on: event.target.checked });
+    else if (event.target.matches?.('[data-loop-every]')) void save({ every: Number(event.target.value) });
+  });
+  document.addEventListener('focusout', event => { if (event.target.matches?.('[data-loop-prompt]')) { const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (agent && event.target.value !== (agent.loop?.prompt || '')) void save({ prompt: event.target.value }); } });
+}
 export async function agentAction(ctx, action, target = null) {
   const { ui, api, toast, refresh, open } = ctx, value = id => document.getElementById(id)?.value ?? '';
   const agent = (ui.snap.specialists || []).find(item => item.id === ui.view.id);
@@ -88,6 +107,7 @@ export async function agentAction(ctx, action, target = null) {
     let runId = agent.runId; if (!runId) { await agentAction(ctx, 'spec-chat'); return; }
     ui.drafts.set(`run:${runId}`, `About "${question}": `); open('run', runId); setTimeout(() => { const box = document.getElementById('draft'); if (box) { box.value = `About "${question}": `; box.focus(); } }, 50); return;
   }
+  if (action === 'spec-loop-now') { await api(`/specialists/${agent.id}/loop`, { method: 'POST', data: {} }); toast(`${agent.name} is checking its tasks.`); await refresh(); return; }
   if (action === 'spec-settled') {
     const unsure = (agent.unsure || []).filter(Boolean).filter((_, index) => index !== Number(target.dataset.index));
     await api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: agent.rules, unsure, model: agent.model || '' } }); await refresh(); return;

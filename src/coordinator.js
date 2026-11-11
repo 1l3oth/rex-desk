@@ -771,7 +771,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   // One turn in an agent's own session: a group chat message, or anything else that needs the agent. The session is made the first time and kept after that,
   // so the agent remembers everything it has been told, in every room.
-  async specialistTurn(agentId, { prompt, roomId = '', messageId = '' }) {
+  async specialistTurn(agentId, { prompt, roomId = '', messageId = '', quiet = false }) {
     const agent = this.specialists.get(agentId), turn = roomId ? { roomId, messageId } : null;
     // Every agent has two sessions: a personal chat with the person, and one session for all its rooms. Room messages never land in the personal chat;
     // each session can read the other with tools when it needs to.
@@ -790,11 +790,11 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
         title: roomId ? `${agent.name} · rooms` : agent.name, provider: 'claude', state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home,
         projectPath: agent.projectPath || '', repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}) };
       this.store.put('run', created.id, created); this.store.put('specialist', agent.id, { ...this.specialists.get(agentId), [key]: created.id });
-      if (!roomId) this.store.event(created.id, 'human-message', { text: String(prompt).trim(), via: 'rex' }, true);
+      if (!roomId && !quiet) this.store.event(created.id, 'human-message', { text: String(prompt).trim(), via: 'rex' }, true);
       void this.drain(); return created;
     }
     if (this.live.has(run.id)) { this.store.put('run', run.id, { ...run, roomTurn: turn || run.roomTurn, ...(turn ? { roomPosted: false } : {}) }); await this.say(run.id, prompt, {}, { raw: true }); return run; }
-    await this.resume(run.id, { prompt, silent: Boolean(roomId), roomTurn: turn }); return this.run(run.id);
+    await this.resume(run.id, { prompt, silent: Boolean(roomId) || quiet, roomTurn: turn }); return this.run(run.id);
   }
   // During a room turn, each piece of text the agent writes is posted to the room as it comes, so the person never waits for the whole turn.
   streamToRoom(runId, text) {
@@ -831,6 +831,32 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (!run) return [];
     return this.store.events(run.id, { visible: true, limit: 400 }).filter(event => ['human-message', 'agent-text', 'message'].includes(event.kind))
       .map(event => ({ from: event.kind === 'human-message' ? 'The person' : agent.name, at: event.createdAt, text: String(event.text || event.message || '').slice(0, 2000) })).slice(-limit);
+  }
+  // Every agent runs its own loop: on its schedule it looks at its own tasks and starts on one, following its project's workflow.
+  // A check whose tasks have not changed since the last one is skipped without waking the agent, so a quiet loop costs nothing.
+  async loopTick(at = Date.now()) {
+    for (const agent of this.store.list('specialist').filter(item => item.id !== 'main' && this.peers.owns(item.id))) {
+      const loop = this.specialists.loopOf(agent);
+      if (!loop.on || at - (Date.parse(loop.lastAt || 0) || 0) < loop.every * 60000) continue;
+      if (this.specialists.status(agent).state !== 'idle') continue;
+      const tasks = this.specialists.ownTasks(agent), key = createHash('sha256').update(JSON.stringify(tasks.map(task => [task.id, task.status, task.statusName, task.updatedAt, task.assignee]).sort())).digest('hex').slice(0, 16);
+      if (key === loop.lastKey || !tasks.length) { this.store.put('specialist', agent.id, { ...agent, loop: { ...loop, lastAt: new Date(at).toISOString(), lastKey: key } }); continue; }
+      await this.runLoop(agent.id, { key, at });
+      return; // one agent per tick, so several loops never start all at once
+    }
+  }
+  async runLoop(agentId, { key = '', at = Date.now() } = {}) {
+    const agent = this.specialists.get(agentId), loop = this.specialists.loopOf(agent), every = loop.every >= 60 ? `${loop.every / 60} hour${loop.every === 60 ? '' : 's'}` : `${loop.every} minutes`;
+    this.store.put('specialist', agentId, { ...agent, loop: { ...loop, lastAt: new Date(at).toISOString(), ...(key ? { lastKey: key } : {}) } });
+    const prompt = [`Loop check: your own regular look at your work (every ${every}).`,
+      loop.prompt ? `What the person wants you to do on each check: ${loop.prompt}` : '',
+      `1. Read your tasks with desk_tasks. Yours are the Rex Desk tasks given to you or to nobody on ${agent.projectSlug}, and the issues from your task sources.`,
+      '2. Skip tasks that are done, blocked, waiting for the person, or already given to another agent.',
+      `3. If one needs work, pick the most important (priority, then due date) and start it with desk_take_task: it gets its own worktree and branch, and you do it there following the ${agent.projectSlug} workflow, testing it and sharing the evidence.`,
+      '4. If nothing needs you, reply exactly "Nothing new." and stop. In a loop check, ask the person only when a task cannot move without them.'].filter(Boolean).join('\n');
+    const run = await this.specialistTurn(agentId, { prompt, quiet: true });
+    this.store.event(run.id, 'loop-check', { text: 'Loop check: looking at my tasks' }, true);
+    return { started: true, runId: run.id };
   }
   // Gives a task to an agent: a run on that task in the agent's name. While it runs, the agent shows as busy on that task, and what it reports goes to the room it was given in.
   async assignTask({ specialistId, taskId, roomId = '', instructions = '' }) {
