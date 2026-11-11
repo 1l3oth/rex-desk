@@ -205,6 +205,17 @@ export function createMcp(desk, scope) {
       return { content: [{ type: 'image', data: readFileSync(shot.path).toString('base64'), mimeType: 'image/jpeg' }, { type: 'text', text: JSON.stringify({ width: shot.width, height: shot.height, note: 'Positions in this picture go to desk_computer with fromScreenshot: true.' }) }] };
     } catch (error) { return { ...reply({ error: error.message }), isError: true }; }
   });
+  tool('desk_update_agent', 'Change an agent the way the person asks: rename it, or change its rules, model or AI. Do it at once when they ask; tell them in one line what changed.',
+    { agent: z.string().describe('Agent name, handle or id.'), name: z.string().min(1).max(40).optional().describe('New name.'), rules: z.string().max(4000).optional(), model: z.string().optional(), provider: z.enum(['claude', 'codex']).optional() },
+    input => {
+      const key = String(input.agent || '').replace(/^@/, '').toLowerCase();
+      const agent = desk.specialists.list().find(item => [item.id, item.name, item.slug].some(value => String(value || '').toLowerCase() === key));
+      if (!agent) throw new Error(`No agent "${input.agent}". Read desk_specialists.`);
+      if (input.name && input.name !== agent.name) desk.specialists.rename(agent.id, input.name);
+      const changes = Object.fromEntries(['rules', 'model', 'provider'].filter(field => input[field] !== undefined).map(field => [field, input[field]]));
+      const updated = Object.keys(changes).length ? desk.specialists.update(agent.id, changes) : desk.specialists.get(agent.id);
+      return { agent: updated.name, handle: updated.slug, was: agent.name };
+    });
   tool('desk_specialists', 'List the specialist agents (one per project) with their identity cards: name, project, rules, and what they are still unsure about.', {}, () => desk.specialists.list().map(({ id, name, projectSlug, purpose, rules, unsure, provider, model, cloneOf }) => ({ id, name, project: projectSlug, purpose, rules, unsure, provider, model, duplicateOf: cloneOf || undefined })), true);
   const author = () => { const agent = agentOf(); const run = scope.runId && desk.store.get('run', scope.runId); return agent?.name || (run?.main ? 'Rex Agent' : 'agent'); };
   tool('desk_create_task', 'Create a Rex Desk task (kept here, not in a tracker): for personal projects, work the person describes in chat, or a piece you split off your own task. Returns its number, like #L4. Ask the person before creating more than three at once.',

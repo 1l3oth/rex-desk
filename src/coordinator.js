@@ -436,6 +436,8 @@ export class Desk {
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           if (kind === 'rate-limit') { this.recordUsage(run.provider, this.accountFor(run) || this.agents.selected(run.provider), data); return; }
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
+          // The event log hides fields named like secrets ("tokens" among them), so the token counts travel as usage.
+          if (kind === 'agent-result' && data.tokens) data = { ...data, usage: data.tokens };
           this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result', 'subagent-text', 'subagent-done', 'agent-result'].includes(kind));
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
