@@ -6,7 +6,7 @@ import { markdown } from '/chat-markdown.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 // second: the tab in the other pane when the window is split (-1: one pane); focusRight: the active tab is in the right pane.
-const state = { tabs: [], active: -1, second: -1, focusRight: false, shown: false, big: false, ctx: null, lastShown: null };
+const state = { tabs: [], active: -1, second: -1, focusRight: false, shown: false, big: false, ctx: null, lastShown: null, standalone: false };
 const editors = new Map();
 const PREVIEW = new Set(['markdown', 'html', 'csv']);
 
@@ -45,7 +45,7 @@ async function codeMirror(ext) {
 
 // ---------- opening ----------
 const extOf = name => { const lower = name.toLowerCase(); return lower === 'dockerfile' ? 'dockerfile' : lower.includes('.') ? lower.split('.').pop() : ''; };
-const remember = () => { try { localStorage.setItem('rex-desk-files', JSON.stringify({ paths: state.tabs.map(tab => tab.path), active: state.active, shown: state.shown })); } catch { /* private window */ } };
+const remember = () => { if (state.standalone) return; try { localStorage.setItem('rex-desk-files', JSON.stringify({ paths: state.tabs.map(tab => tab.path), active: state.active, shown: state.shown })); } catch { /* private window */ } };
 export async function openFile(ctx, input, { line = 0, run = '', room = '', view = '' } = {}) {
   state.ctx = ctx;
   try {
@@ -74,7 +74,7 @@ function closeTab(index) {
   if (state.second > index) state.second -= 1;
   if (state.active > index) state.active -= 1;
   if (state.active >= state.tabs.length) state.active = state.tabs.length - 1;
-  if (!state.tabs.length) state.shown = false;
+  if (!state.tabs.length) { state.shown = false; if (state.standalone) { window.close(); return; } }
   remember(); draw();
 }
 const dirty = tab => { const editor = editors.get(tab.path)?.cm; return Boolean(editor && tab.editable && editor.getValue() !== tab.saved); };
@@ -115,7 +115,7 @@ const ICON = { image: 'IMG', video: 'VID', audio: 'AUD', pdf: 'PDF', sheet: 'XLS
 function shell() {
   let box = document.querySelector('.fw'); if (box) return box;
   box = document.createElement('section'); box.className = 'fw'; box.setAttribute('aria-label', 'Files');
-  box.innerHTML = '<div class="fw-head"><div class="fw-tabs" role="tablist"></div><div class="fw-wins"><button type="button" class="fw-ic" data-fw="big" title="Bigger or smaller (window)" aria-label="Bigger or smaller"></button><button type="button" class="fw-ic" data-fw="hide" title="Hide (your tabs stay)" aria-label="Hide the file window">&#8211;</button><button type="button" class="fw-ic" data-fw="close-all" title="Close all files" aria-label="Close all files">&#215;</button></div></div><div class="fw-bar"></div><div class="fw-body"></div>';
+  box.innerHTML = '<div class="fw-head"><div class="fw-tabs" role="tablist"></div><div class="fw-wins"><button type="button" class="fw-ic" data-fw="popout" title="Open in its own window" aria-label="Open in its own window">&#10697;</button><button type="button" class="fw-ic" data-fw="big" title="Bigger or smaller (window)" aria-label="Bigger or smaller"></button><button type="button" class="fw-ic" data-fw="hide" title="Hide (your tabs stay)" aria-label="Hide the file window">&#8211;</button><button type="button" class="fw-ic" data-fw="close-all" title="Close all files" aria-label="Close all files">&#215;</button></div></div><div class="fw-bar"></div><div class="fw-body"></div>';
   box.insertAdjacentHTML('beforeend', ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map(edge => `<div class="fw-rs fw-rs-${edge}" data-edge="${edge}" aria-hidden="true"></div>`).join(''));
   document.body.append(box);
   box.addEventListener('click', onClick);
@@ -288,6 +288,9 @@ async function editorFor(tab, pane) {
     item.cm.on('change', () => { drawChrome(); pill(); if (tab.view === 'split') { const view = wrap.parentElement?.querySelector(':scope > .fw-view'); if (view && tab.kind === 'markdown') view.innerHTML = preview(tab); } });
   }
   if (!item.cm) return;
+  // The editor may finish loading after the person moved on to another tab: then it stays out of sight.
+  const holder = item.wrap.parentElement;
+  if (!holder || holder.dataset.path !== tab.path || tab.view === 'preview') { item.wrap.classList.add('hidden'); return; }
   item.wrap.classList.remove('hidden'); item.cm.refresh();
   if (tab.line) { const line = tab.line - 1; item.cm.setCursor({ line, ch: 0 }); item.cm.scrollIntoView({ line, ch: 0 }, 120); item.cm.addLineClass(line, 'background', 'fw-hit'); setTimeout(() => item.cm?.removeLineClass(line, 'background', 'fw-hit'), 2400); tab.line = 0; }
   item.cm.focus();
@@ -297,13 +300,21 @@ async function onClick(event) {
   const tab = state.tabs[state.active], act = target.dataset.fw, { api, toast } = state.ctx;
   try {
     if (act === 'tab') { show(Number(target.dataset.index)); remember(); draw(); }
+    else if (act === 'popout') {
+      // The open files move to a window of their own; unsaved edits stay here until saved.
+      const unsaved = state.tabs.filter(dirty); if (unsaved.length) { toast(`Save ${unsaved.map(item => item.name).join(', ')} first, then open in its own window.`, true); return; }
+      const paths = state.tabs.map(item => item.page || item.path), active = state.tabs[state.active]?.page || state.tabs[state.active]?.path || '';
+      const opened = window.open(`/files#${encodeURIComponent(JSON.stringify({ paths, active }))}`, `rexfiles-${Date.now()}`, 'popup,width=1200,height=820');
+      if (!opened) { toast('The window was blocked. Allow pop-ups for Rex Desk.', true); return; }
+      for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.second = -1; state.shown = false; remember(); draw();
+    }
     else if (act === 'split') split();
     else if (act === 'unsplit') { state.second = -1; state.focusRight = false; remember(); draw(); }
     else if (act === 'tab-close') closeTab(Number(target.dataset.index));
     else if (act === 'hide') { state.shown = false; remember(); draw(); }
     else if (act === 'show') { state.shown = true; remember(); draw(); }
     else if (act === 'big') { state.big = !state.big; place(); drawChrome(); editors.get(tab?.path)?.cm?.refresh(); }
-    else if (act === 'close-all') { const unsaved = state.tabs.filter(dirty); if (unsaved.length && !confirm(`${unsaved.map(item => item.name).join(', ')} not saved. Close all anyway?`)) return; for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.shown = false; remember(); draw(); }
+    else if (act === 'close-all') { const unsaved = state.tabs.filter(dirty); if (unsaved.length && !confirm(`${unsaved.map(item => item.name).join(', ')} not saved. Close all anyway?`)) return; if (state.standalone) { window.close(); return; } for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.shown = false; remember(); draw(); }
     else if (act === 'view') { tab.view = target.dataset.view; drawChrome(); drawBody(); }
     else if (act === 'sheet') { tab.sheet = Number(target.dataset.index); drawBody(); }
     else if (act === 'save') await save(tab);
@@ -316,6 +327,16 @@ async function onClick(event) {
 
 // ---------- wiring ----------
 // A path in a chat (`src/server.js:42`) opens here; so does any element with data-file-open.
+// The file window as a page of its own, opened by Pop out: it fills the window and keeps its own tabs.
+export async function standaloneFiles(ctx, { paths = [], active = '' } = {}) {
+  state.ctx = ctx; state.standalone = true; state.big = true; document.body.classList.add('fw-alone');
+  window.rexOpenFile = (path, options) => openFile(ctx, path, options);
+  window.addEventListener('beforeunload', event => { if (state.tabs.some(dirty)) { event.preventDefault(); event.returnValue = ''; } });
+  for (const path of paths) await openFile(ctx, path, /^\/artifacts\//.test(path) ? { view: 'preview' } : {});
+  const index = state.tabs.findIndex(tab => (tab.page || tab.path) === active); if (index >= 0) { show(index); draw(); }
+  const update = () => { document.title = state.tabs[state.active] ? `${state.tabs[state.active].name.replace(/^[0-9]{10,}-/, '')} · Rex Desk` : 'Files · Rex Desk'; };
+  update(); document.addEventListener('click', () => setTimeout(update), true);
+}
 export function wireFiles(ctx) {
   state.ctx = ctx;
   document.addEventListener('click', event => {

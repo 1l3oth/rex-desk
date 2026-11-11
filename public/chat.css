@@ -1203,3 +1203,9 @@ code.md-file{cursor:pointer;text-decoration:underline dotted;text-underline-offs
 .pc-rows{display:flex;flex-direction:column;gap:7px}.pc-rows label{display:grid;grid-template-columns:72px 1fr;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
 .pc-rows select{width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
 .pc-acts{display:flex;gap:6px;justify-content:flex-end}
+
+/* The file window in a window of its own */
+body.fw-alone{margin:0;background:var(--panel);overflow:hidden}
+body.fw-alone .fw{inset:0;width:auto;height:auto;border:0;border-radius:0;box-shadow:none}
+body.fw-alone .fw-rs,body.fw-alone [data-fw="hide"],body.fw-alone [data-fw="big"],body.fw-alone [data-fw="popout"]{display:none}
+body.fw-alone .fw-head{cursor:default}
