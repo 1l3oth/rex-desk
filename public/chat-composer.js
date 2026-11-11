@@ -48,7 +48,7 @@ export function composerHtml(ctx, model) {
     </div>
     <div class="foot"><span class="hint">Type / for commands · hold Space to talk${model.composer.mentions?.length ? ' · @ to mention · # for a task' : ''}</span><span class="spacer"></span>
       ${model.composer.noPickers ? '' : `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude subscription' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT subscription' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
-      <span class="ring ${working ? 'busy' : ''}" title="${working ? 'The agent is working' : 'Idle'}" aria-hidden="true"></span>`}</div>
+      ${contextRing(ctx, working)}`}</div>
   </div></div>`;
 }
 
@@ -76,6 +76,15 @@ export const attachmentText = ctx => {
   const ready = ctx.ui.attachments.filter(file => file.path);
   return ready.length ? `\n\nAttached files (read them from these paths):\n${ready.map(file => `- ${file.path}`).join('\n')}` : '';
 };
+
+// The ring by the message box: how full this chat's context is (what the agent holds in mind). Near full, /clear starts fresh.
+function contextRing(ctx, working) {
+  const { ui } = ctx, view = ui.view, run = view.type === 'main' ? ctx.mainRun() : view.type === 'run' ? ctx.runById(view.id) : null;
+  const used = Number(run?.contextUsed || 0), window = Number(run?.contextWindow || 200000), share = Math.min(1, used / window), round = 2 * Math.PI * 7;
+  const kilo = value => value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value);
+  const title = run ? (used ? `Context: ${kilo(used)} of ${kilo(window)} (${Math.round(share * 100)}%).${share > 0.7 ? ' Getting full: /clear starts fresh with a summary.' : ''}` : 'Context: empty. It fills as you talk.') : 'Context shows in a chat with one agent.';
+  return `<span class="ring ctx ${share > 0.85 ? 'full' : share > 0.6 ? 'mid' : ''} ${working ? 'busy' : ''}" title="${ctx.esc(title)}" aria-label="${ctx.esc(title)}" role="img"><svg viewBox="0 0 18 18" width="18" height="18"><circle cx="9" cy="9" r="7" class="ring-bg"/><circle cx="9" cy="9" r="7" class="ring-fill" stroke-dasharray="${(share * round).toFixed(2)} ${round.toFixed(2)}" transform="rotate(-90 9 9)"/></svg></span>`;
+}
 
 // ---------- menus: slash commands and @ mentions share one list ----------
 function commands(ctx) {

@@ -461,6 +461,8 @@ export class Desk {
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
+          // How full the chat's context is, for the ring by the message box. A 1M-context model says so in its name.
+          if (kind === 'context') { const window = data.window || (/\[1m\]|-1m\b|1m-context/i.test(`${run.model || ''} ${data.model || ''}`) ? 1000000 : 200000); this.patchRun(runId, { contextUsed: data.used, contextWindow: window, contextAt: now() }); return; }
           if (kind === 'rate-limit') { this.recordUsage(run.provider, this.accountFor(run) || this.agents.selected(run.provider), data); return; }
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
           // The event log hides fields named like secrets ("tokens" among them), so the token counts travel as usage.
@@ -763,7 +765,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       `## The conversation so far (oldest first, recent part)\n${recent || 'Nothing was said yet.'}`].filter(Boolean).join('\n\n');
     const directory = path.join(this.store.directory, 'handoffs'); mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `${runId}-${Date.now()}.md`); writeFileSync(file, handoff);
-    this.patchRun(runId, { sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
+    this.patchRun(runId, { contextUsed: 0, sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
     this.store.event(runId, 'chat-cleared', { text: `${name} starts fresh with your next message and reads a handoff of what was said before.` }, true);
     return { cleared: true, handoff: file };
   }

@@ -146,6 +146,8 @@ ${news}` } } : {};
       // How much of the account's 5-hour and weekly limits is used, as Claude Code reports it during a turn.
       if (message.type === 'rate_limit_event' && message.rate_limit_info) this.event('rate-limit', { ...message.rate_limit_info });
       if (message.type === 'assistant') {
+        // How full the conversation is: everything the model read for this step (new, cached and cache-written input).
+        const used = message.message?.usage; if (used && !message.parent_tool_use_id) this.event('context', { used: (used.input_tokens || 0) + (used.cache_read_input_tokens || 0) + (used.cache_creation_input_tokens || 0), model: message.message?.model || '' });
         const content = message.message?.content?.filter(block => block.type !== 'thinking' && block.type !== 'redacted_thinking');
         // What the agent says shows in the chat; its tool calls stay in the journal.
         const text = (content || []).filter(block => block.type === 'text').map(block => block.text).join('\n').trim();

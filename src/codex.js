@@ -130,6 +130,7 @@ export class CodexRunner {
     if (method === 'account/rateLimits/updated' && params?.rateLimits) this.event('rate-limit', { codex: params.rateLimits });
     if (method === 'thread/tokenUsage/updated') {
       const usage = params.tokenUsage?.last || {};
+      this.event('context', { used: usage.inputTokens || 0, window: params.tokenUsage?.modelContextWindow || 0 });
       this.tokens = { input: usage.inputTokens || 0, output: usage.outputTokens || 0, cacheRead: usage.cachedInputTokens || 0, cacheWrite: 0 };
     }
     if (method === 'turn/completed') {

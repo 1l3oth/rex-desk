@@ -1225,3 +1225,8 @@ body.dropping-files::after{content:attr(data-drop-hint);position:fixed;inset:10p
 
 /* /clear: the chat starts again under a quiet line */
 .cleared{display:flex;flex-direction:column;align-items:center;gap:6px;margin:10px 0 18px;color:var(--muted);font-size:12.5px}.cleared span{padding:4px 12px;border-radius:999px;background:var(--raised)}
+
+/* The context ring: how full this chat is */
+.ring.ctx{display:inline-grid;place-items:center;width:20px;height:20px;border:0;background:none;animation:none;cursor:help}
+.ring.ctx .ring-bg{fill:none;stroke:var(--line);stroke-width:2.4}.ring.ctx .ring-fill{fill:none;stroke:var(--muted);stroke-width:2.4;stroke-linecap:round}
+.ring.ctx.mid .ring-fill{stroke:var(--warn)}.ring.ctx.full .ring-fill{stroke:var(--bad)}.ring.ctx.busy .ring-fill{stroke:var(--accent)}
