@@ -49,26 +49,31 @@ test('what an agent says in its turn is posted to the room, and its session is k
   await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.type === 'agent'));
   const reply = desk.rooms.messages(room.id).find(item => item.from.type === 'agent');
   assert.equal(reply.from.label, 'Dara'); assert.match(reply.text, /Looks like a bug/); assert.deepEqual(reply.to, ['you']);
-  const firstRun = store.get('specialist', dara.id).roomRunId; assert.ok(firstRun);
+  const firstRun = store.get('specialist', dara.id).roomRuns[room.id]; assert.ok(firstRun);
   await desk.rooms.post(room.id, { text: '@vanna did you see that?' });
   await waitFor(() => turns.length === 2);
   await desk.rooms.post(room.id, { text: '@dara and now?' });
   await waitFor(() => turns.length === 3);
-  assert.equal(store.get('specialist', dara.id).roomRunId, firstRun, 'one room session per agent, for every room');
+  assert.equal(store.get('specialist', dara.id).roomRuns[room.id], firstRun, 'the room keeps its session for the next mention');
   assert.equal(turns[2].run.id, firstRun);
   assert.match(turns[2].prompt, /Vanna: |The person: @vanna did you see that/, 'the second mention carries what happened since the agent last looked');
   assert.ok(!/You are Dara, the specialist agent/.test(turns[2].prompt), 'a resumed session is given only what is new');
   assert.ok(vanna.id);
 });
 
-test('an agent catches up on its other rooms when it is mentioned', async () => {
-  const { desk, turns, dara, vanna, room } = setup();
+test('what is said in one group chat never reaches another: each room has its own session and prompt', async () => {
+  const { desk, store, turns, dara, vanna, room } = setup();
   const other = desk.rooms.create('Billing sync', [dara.id, vanna.id]);
-  await desk.rooms.post(other.id, { text: 'The invoice export is failing on refunds' });
+  await desk.rooms.post(other.id, { text: '@dara the invoice export is failing on refunds' });
+  await waitFor(() => turns.some(item => item.run.roomOf === other.id));
   await desk.rooms.post(room.id, { text: '@dara anything I should know?' });
-  await waitFor(() => turns.some(item => item.run.specialistId === dara.id));
-  const asked = turns.find(item => item.run.specialistId === dara.id);
-  assert.match(asked.prompt, /News from your other rooms/); assert.match(asked.prompt, /\[Billing sync\]/); assert.match(asked.prompt, /invoice export is failing/);
+  await waitFor(() => turns.some(item => item.run.roomOf === room.id));
+  const asked = turns.find(item => item.run.roomOf === room.id), billing = turns.find(item => item.run.roomOf === other.id);
+  assert.ok(!/invoice export|Billing sync/.test(asked.prompt), 'no news from the other room');
+  assert.match(asked.prompt, /never bring up what was said in another group chat/);
+  const sessions = store.get('specialist', dara.id).roomRuns;
+  assert.ok(sessions[room.id] && sessions[other.id] && sessions[room.id] !== sessions[other.id], 'one session per room');
+  assert.notEqual(asked.run.id, billing.run.id);
 });
 
 test('agent-to-agent threads pause after the hop limit and a person resets the count', async () => {
@@ -159,7 +164,7 @@ test('an agent keeps its personal chat apart from its room session, and the room
   await desk.specialistTurn(dara.id, { prompt: 'Just between us: how are you?' });
   await waitFor(() => turns.length === 2);
   const agent = store.get('specialist', dara.id);
-  assert.ok(agent.runId && agent.roomRunId && agent.runId !== agent.roomRunId, 'two separate sessions');
+  assert.ok(agent.runId && agent.roomRuns?.[room.id] && agent.runId !== agent.roomRuns[room.id], 'two separate sessions');
   assert.equal(turns[1].run.id, agent.runId); assert.ok(!turns[1].run.roomAgent);
   const personal = store.events(agent.runId, { visible: true }).map(event => event.text || '').join(' ');
   assert.ok(!personal.includes('status of the cart'), 'room messages never land in the personal chat');
@@ -254,7 +259,7 @@ test('an agent that already saw the room is sent only what is new, not the histo
 test('a message for an agent that is working is handed to it between steps, once', async () => {
   const { desk, store, vanna, room } = setup();
   store.put('run', 'vanna-room', { id: 'vanna-room', role: 'specialist', specialistId: vanna.id, roomAgent: vanna.id, state: 'running', createdAt: now() });
-  store.put('specialist', vanna.id, { ...store.get('specialist', vanna.id), roomRunId: 'vanna-room' });
+  store.put('specialist', vanna.id, { ...store.get('specialist', vanna.id), roomRuns: { [room.id]: 'vanna-room' } });
   desk.live.set('vanna-room', { runner: { interrupt() {} } });
   desk.rooms.quietSettle = 10;
   await desk.rooms.post(room.id, { text: '@vanna stop, use Sydney not Seoul' });
@@ -330,7 +335,7 @@ test('an agent shares test evidence: it is posted in its room, kept on the task 
   const { store, desk, turns, dara, room } = setup();
   await desk.rooms.post(room.id, { text: '@dara can you look at #49760?' });
   await waitFor(() => turns.some(item => item.run.specialistId === dara.id));
-  const roomRun = store.get('run', store.get('specialist', dara.id).roomRunId);
+  const roomRun = store.get('run', store.get('specialist', dara.id).roomRuns[room.id]);
   store.put('task', 't1', { ...store.get('task', 't1'), roomWork: { agentId: dara.id, roomId: room.id, at: now() } });
   const shot = path.join(temporary('shot'), 'after fix.png'); writeFileSync(shot, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   const shared = desk.shareEvidence(roomRun.id, { file: shot, title: 'Cart total after the fix', result: 'passed', note: 'Discount applied in the total.' });
@@ -392,7 +397,7 @@ test('each reply shows the tokens it used: on the run and under the agent\'s roo
   await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id && item.tokens));
   const reply = desk.rooms.messages(room.id).find(item => item.from.id === dara.id);
   assert.deepEqual(reply.tokens, { input: 1200, output: 340, cacheRead: 45000, cacheWrite: 800, steps: 3, at: reply.tokens.at });
-  const run = store.get('run', store.get('specialist', dara.id).roomRunId);
+  const run = store.get('run', store.get('specialist', dara.id).roomRuns[room.id]);
   assert.equal(run.tokensTotal.output, 340);
 });
 
@@ -450,7 +455,7 @@ test('a sub-agent an agent starts shows as its own steps: noted in the room, and
   assert.ok(texts.some(text => /Dara started a sub-agent \(qa-reviewer, opus\): Review the cart fix/.test(text)));
   assert.ok(texts.some(text => /sub-agent finished: Review the cart fix/.test(text)));
   assert.ok(!desk.rooms.messages(room.id).some(item => item.from.id === dara.id && /APPROVE/.test(item.text)), 'the sub-agent\'s words stay in its card');
-  const runId = store.get('specialist', dara.id).roomRunId;
+  const runId = store.get('specialist', dara.id).roomRuns[room.id];
   assert.ok(store.events(runId, { visible: true }).some(event => event.kind === 'subagent-done'), 'the chat can show the card');
 });
 

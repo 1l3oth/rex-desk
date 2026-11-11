@@ -56,7 +56,7 @@ export function roomStage(ctx) {
 // Questions and approvals from the members' sessions in this room show in the room, from the agent who asked.
 function asks(ctx, room) {
   const owner = new Map();
-  for (const member of room.members) for (const id of roomRunIds(ctx.ui, { members: [member] })) owner.set(id, member.name);
+  for (const member of room.members) for (const id of roomRunIds(ctx.ui, { id: room.id, members: [member] })) owner.set(id, member.name);
   return ctx.pending().filter(item => owner.has(item.runId)).map(item => `<div class="msg rmsg"><div class="ravcol">${ctx.avatar({ name: owner.get(item.runId), size: 'sm' })}</div>${ctx.decisionCard(item)}</div>`).join('');
 }
 // The room's info on the right, like a messenger: picture, name, who is in it and what they are doing, and the tasks talked about.
@@ -65,7 +65,7 @@ export function roomRunIds(ui, room) {
   const ids = [];
   for (const member of room.members) {
     const agent = member.id === 'main' ? null : (ui.snap.specialists || []).find(item => item.id === member.id);
-    const roomRun = member.id === 'main' ? (ui.snap.runs || []).find(run => run.roomAgent === 'main')?.id : agent?.roomRunId;
+    const roomRun = member.id === 'main' ? (ui.snap.runs || []).find(run => run.roomAgent === 'main' && run.roomOf === room.id)?.id : agent?.roomRuns?.[room.id];
     if (roomRun) ids.push(roomRun);
     if (member.state === 'busy' && member.runId) ids.push(member.runId);
   }
@@ -75,7 +75,7 @@ const HIDDEN_STEPS = ['desk_ask', 'desk_message', 'desk_elicit', 'desk_room_post
 // What everyone in the room is doing, newest at the bottom: their steps, the commands they ran (with output), and when they replied.
 function activityHtml(ctx, room) {
   const { ui, esc, hhmm } = ctx, names = new Map(room.members.map(member => [member.id, member.name])), owner = new Map();
-  for (const member of room.members) for (const id of roomRunIds(ui, { members: [member] })) owner.set(id, member.name);
+  for (const member of room.members) for (const id of roomRunIds(ui, { id: room.id, members: [member] })) owner.set(id, member.name);
   const rows = [];
   for (const [runId, who] of owner) {
     const events = ui.events.get(runId) || [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event]));

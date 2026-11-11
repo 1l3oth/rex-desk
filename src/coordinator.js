@@ -803,27 +803,25 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     try { for (const task of this.store.list('task').filter(item => item.active && !item.demo && !item.titleEn).slice(0, limit)) await this.englishName(task.id).catch(() => {}); }
     finally { this.namingBusy = false; }
   }
-  // One turn in an agent's own session: a group chat message, or anything else that needs the agent. The session is made the first time and kept after that,
-  // so the agent remembers everything it has been told, in every room.
+  // One turn in an agent's own session: a group chat message, or anything else that needs the agent. The session is made the first time and kept after that.
   async specialistTurn(agentId, { prompt, roomId = '', messageId = '', quiet = false }) {
     const agent = this.specialists.get(agentId), turn = roomId ? { roomId, messageId } : null;
-    // Every agent has two sessions: a personal chat with the person, and one session for all its rooms. Room messages never land in the personal chat;
-    // each session can read the other with tools when it needs to.
-    const key = roomId ? 'roomRunId' : 'runId';
+    // Every agent has a personal chat with the person and its own session in each group chat. A group chat never sees what was said
+    // in another one: one shared session made agents carry one room's talk into the next, and a reply could land in the wrong room.
     if (!roomId && agent.kind === 'main') {
       const main = latestLocalMain(this.store.list('run'));
       if (!main) return this.startMain({ prompt });
       if (this.live.has(main.id)) { await this.say(main.id, prompt, {}, { raw: true }); return main; }
       await this.resume(main.id, { prompt, silent: true }); return this.run(main.id);
     }
-    const run = agent[key] ? this.store.get('run', agent[key]) : null;
+    const runId = roomId ? agent.roomRuns?.[roomId] : agent.runId, run = runId ? this.store.get('run', runId) : null;
     if (!run) {
       const home = agent.kind === 'main' ? path.join(this.store.directory, 'coordinator') : this.specialists.homeDirectory(agent); mkdirSync(home, { recursive: true });
       const model = this.specialists.cleanModel(agent.model, { provider: agent.provider });
-      const created = { id: id(), role: agent.kind === 'main' ? 'coordinator' : 'specialist', ...(agent.kind === 'main' ? {} : { specialistId: agent.id }), ...(roomId ? { roomAgent: agent.id } : {}),
-        title: roomId ? `${agent.name} · rooms` : agent.name, provider: aiProvider(agent.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home,
+      const created = { id: id(), role: agent.kind === 'main' ? 'coordinator' : 'specialist', ...(agent.kind === 'main' ? {} : { specialistId: agent.id }), ...(roomId ? { roomAgent: agent.id, roomOf: roomId } : {}),
+        title: roomId ? `${agent.name} · ${this.rooms.room(roomId)?.name || 'group chat'}` : agent.name, provider: aiProvider(agent.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home,
         projectPath: agent.projectPath || '', repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}) };
-      this.store.put('run', created.id, created); this.store.put('specialist', agent.id, { ...this.specialists.get(agentId), [key]: created.id });
+      this.store.put('run', created.id, created); const fresh = this.specialists.get(agentId); this.store.put('specialist', agent.id, roomId ? { ...fresh, roomRuns: { ...(fresh.roomRuns || {}), [roomId]: created.id } } : { ...fresh, runId: created.id });
       if (!roomId && !quiet) this.store.event(created.id, 'human-message', { text: String(prompt).trim(), via: 'rex' }, true);
       void this.drain(); return created;
     }

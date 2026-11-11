@@ -154,7 +154,7 @@ export class Rooms {
   // Everything an agent needs to answer as if it had been in the room all along.
   promptFor(room, message, agentId) {
     // A room session that does not exist yet starts with the rooms' recent history, not only what is new.
-    const agent = this.agent(agentId), seen = agent?.roomRunId && this.store.get('run', agent.roomRunId) ? (agent.roomSeen || {}) : {};
+    const agent = this.agent(agentId), session = agent?.roomRuns?.[room.id], seen = session && this.store.get('run', session) ? (agent.roomSeen || {}) : {};
     const who = item => item.from.type === 'human' ? 'The person' : item.from.type === 'agent' ? this.member(item.from.id).name : 'Rex Desk';
     const line = item => `${who(item)}: ${clip(item.text, 500)}`;
     // Only what is new since the agent last looked: its room session already holds everything before that, so sending it again
@@ -163,14 +163,12 @@ export class Rooms {
     // Replies posted after this message (another agent answered first) are part of the conversation too.
     const since = this.messages(room.id, { after: message.seq }).filter(item => item.from.type === 'agent' && item.from.id !== agentId).slice(-10);
     const owners = this.taskOwners();
-    const others = this.roomsOf(agentId).filter(other => other.id !== room.id).map(other => ({ other, news: this.messages(other.id, { after: seen[other.id] || 0 }).filter(item => item.from.type !== 'system').slice(-8) })).filter(entry => entry.news.length);
     const tasks = message.tasks.map(id => { const task = this.store.get('task', id); return task ? `- ${this.taskLine(id)} (${task.statusName || task.status || 'no status'}; ${task.projectName || 'no project'})${task.url ? ` ${task.url}` : ''}\n  ${clip(task.description, 700)}` : ''; }).filter(Boolean);
         // Who else is answering or working in this room right now, so replies build on each other instead of clashing.
     const alsoWorking = room.members.filter(id => id !== agentId).map(id => this.member(id)).filter(member => ['replying', 'busy', 'waiting'].includes(member.state));
-    return [`Group chat "${room.name}". Members: ${room.members.map(id => `${this.member(id).name} (@${this.member(id).handle}, ${this.member(id).project})`).join(', ')}, and the person. You are ${agent?.name}. Mention only these members with @: anyone else does not get the message.`,
+    return [`Group chat "${room.name}". Members: ${room.members.map(id => `${this.member(id).name} (@${this.member(id).handle}, ${this.member(id).project})`).join(', ')}, and the person. You are ${agent?.name}. Mention only these members with @: anyone else does not get the message. Talk only about this group chat: never bring up what was said in another group chat or in your personal chat, unless the person asks for it here.`,
       alsoWorking.length ? `Also working in this room right now: ${alsoWorking.map(member => `${member.name} (${member.label})`).join(', ')}. They may post while you work.` : '',
       here.length ? `The conversation so far (read it before you answer):\n${here.map(line).join('\n')}` : 'Nothing new in this room before this message.',
-      others.length ? `News from your other rooms (read more with desk_room_history):\n${others.map(({ other, news }) => `[${other.name}]\n${news.map(line).join('\n')}`).join('\n')}` : '',
       owners.length ? `Tasks already given to agents (the person decided this; never start your own run on one of them: @mention its owner, or ask the person first):\n${owners.join('\n')}` : '',
       room.away?.on ? awayRules(room.away) : '',
       `New message from ${who(message)} to ${message.to.map(id => id === HUMAN ? 'the person' : this.member(id).name).join(', ')}:\n${message.instruction || message.text}`,
@@ -188,7 +186,7 @@ export class Rooms {
       const peers = this.desk.peers;
       if (peers && !peers.owns(agentId, message)) { if (peers.isRemote(agent) && !peers.online(agent.node)) peers.offlineNote(room.id, agent); return; }
       // An agent already working in its room session gets the message handed to it between steps, as one short line.
-      const working = agent.roomRunId && this.desk.live?.has(agent.roomRunId);
+      const session = agent.roomRuns?.[room.id], working = session && this.desk.live?.has(session);
       const sender = message.from.type === 'human' ? 'The person' : message.from.label;
       const prompt = working ? `[Room "${room.name}"] ${sender} → you: ${message.instruction || message.text}` : this.promptFor(this.room(room.id), message, agentId);
       // The agent has now seen the room up to this message, whatever else happens with its turn.
