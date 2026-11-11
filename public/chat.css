@@ -1191,3 +1191,15 @@ code.md-file{cursor:pointer;text-decoration:underline dotted;text-underline-offs
 /* Unsend your own message: a trash button that shows when you point at it */
 .msg.mine{position:relative}.msg.mine .unsend{position:absolute;left:-30px;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:26px;height:26px;border:0;border-radius:7px;background:none;color:var(--muted);opacity:0;cursor:pointer}
 .msg.mine:hover .unsend,.msg.mine .unsend:focus-visible{opacity:1}.msg.mine .unsend:hover{color:var(--bad);background:var(--raised)}
+
+/* An agent's small profile card */
+[data-agent-card]{cursor:pointer}strong[data-agent-card]:hover{text-decoration:underline}
+.pcard{position:fixed;z-index:65;width:320px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 18px 48px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:10px}
+.pc-head{display:flex;gap:10px;align-items:flex-start}.pc-who{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.pc-who small{color:var(--muted);font-size:12px}
+.pc-name{display:flex;align-items:center;gap:6px}.pc-name b{font-size:15px}.pc-name input{flex:1;min-width:0;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+.pc-edit,.pc-x{border:0;background:none;color:var(--muted);cursor:pointer;border-radius:6px;padding:2px 6px}.pc-edit:hover,.pc-x:hover{background:var(--raised);color:var(--ink)}.pc-x{font-size:16px}
+.pc-state{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}.pc-state i{width:7px;height:7px;border-radius:50%;background:var(--muted)}.pc-state.busy i,.pc-state.replying i{background:var(--good)}.pc-state.waiting i{background:var(--warn)}
+.pc-about{margin:0;font-size:12.5px;color:var(--muted);line-height:1.45}
+.pc-rows{display:flex;flex-direction:column;gap:7px}.pc-rows label{display:grid;grid-template-columns:72px 1fr;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
+.pc-rows select{width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
+.pc-acts{display:flex;gap:6px;justify-content:flex-end}

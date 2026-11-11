@@ -9,6 +9,7 @@ import { monitorStage, monitorAction } from '/chat-monitor.js';
 import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
 import { openSettings } from '/chat-settings.js';
 import { wireFiles, watchShownFile } from '/chat-files.js';
+import { wireAgentCards } from '/chat-card.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
@@ -452,7 +453,7 @@ document.addEventListener('submit', async event => {
 });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
 
-initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx);
+initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx); wireAgentCards(ctx);
 // On a phone the side panels start closed, and the menu button opens the list of chats.
 if (window.matchMedia('(max-width: 760px)').matches) { ui.infoOpen = false; ui.chatInfo = false; ui.termOpen = false; }
 // A page an agent made (an explanation of its changes) opens full screen over the chat, in a sandbox with no access to Rex Desk.
