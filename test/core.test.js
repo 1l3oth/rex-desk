@@ -399,3 +399,11 @@ test('the person unsends their own message in a personal chat; a queued one is n
   assert.deepEqual(store.events('chat-1', { visible: true }).map(event => event.kind), ['agent-text']);
   store.close();
 });
+
+test('a /skill typed in a chat asks the agent to run that skill; Rex Desk commands and plain text pass through', async () => {
+  const { skillCall } = await import('../src/coordinator.js');
+  assert.match(skillCall('/teach sql injection in my company'), /The person ran the \/teach skill with: sql injection in my company\.\nRun it now with the Skill tool \(skill "teach"/);
+  assert.equal(skillCall('/clear'), '/clear');
+  assert.equal(skillCall('hello /teach'), 'hello /teach');
+  assert.equal(skillCall('/'), '/');
+});

@@ -77,6 +77,14 @@ export function validateAnswer(interaction, answer) {
 }
 
 const providerLabel = name => name === 'codex' ? 'Codex' : 'Claude Code';
+// "/teach sql injection" typed in a Rex Desk chat runs that skill. Rex Desk puts its own notes in front of the message, so the agent
+// would read the slash as plain text; it is spelled out instead. Rex Desk's own commands (/clear, /loop) never reach here.
+export function skillCall(text) {
+  const match = String(text || '').trim().match(/^\/([a-z][\w:-]{1,60})(?:\s+([\s\S]*))?$/i);
+  if (!match || ['clear', 'loop'].includes(match[1].toLowerCase())) return text;
+  return `The person ran the /${match[1]} skill${match[2] ? ` with: ${match[2].trim()}` : ''}.
+Run it now with the Skill tool (skill "${match[1]}", or its plugin name such as "pstack:${match[1]}" if that is how it is listed), pass what they wrote as its arguments, and follow the skill's own instructions instead of your usual way of answering.`;
+}
 export class Desk {
   constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, orcaOptions, memoryDirectory, peerTransport } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher; this.orcaOptions = orcaOptions;
@@ -208,7 +216,7 @@ export class Desk {
       return { sent: true };
     }
     if (this.live.has(runId)) {
-      this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), line], updatedAt: now() });
+      this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), skillCall(line)], updatedAt: now() });
       this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
       return { queued: true };
     }
@@ -986,10 +994,10 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: String(prompt).replace(/\s+/g, ' ').trim(), via: 'rex' }, true);
     // After /clear the next message starts a fresh session that reads the handoff; the message itself goes in as it is.
     if (run.handoffFile && !run.sessionId) {
-      this.patchRun(runId, { state: 'queued', provider, followUp: String(prompt).trim(), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), execution: 'headless' });
+      this.patchRun(runId, { state: 'queued', provider, followUp: skillCall(String(prompt).trim()), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), execution: 'headless' });
       void this.drain(); return this.run(runId);
     }
-    this.patchRun(runId, { state: 'queued', provider, followUp: sameProvider ? String(prompt).trim() : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', profile: '', permissionMode: 'manual' } : {}), mirror: sameProvider ? run.mirror : undefined,
+    this.patchRun(runId, { state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim()) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', profile: '', permissionMode: 'manual' } : {}), mirror: sameProvider ? run.mirror : undefined,
       ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}),
       instructions: run.role === 'specialist' ? `${run.instructions || ''}${carried}` : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
       ...runOptions({ ...picked, provider }, this.store), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
