@@ -1,5 +1,6 @@
 import { pickerHtml } from '/chat-pick.js';
 import { noticeSettingsHtml } from '/chat-notices.js';
+import { voicesFor, chosenVoice } from '/chat-speak.js';
 // Settings, as a popup over the chat: the sections on the left, one section's settings on the right. Each section saves on its own,
 // so a change never waits for the rest. It replaces the old "Issues & settings" page.
 const SECTIONS = [
@@ -34,6 +35,7 @@ export function openSettings(ctx, section = 'general') {
       ${ui.snap.account?.email ? `<div class="st-account"><span class="si-avatar">${esc(ui.snap.account.email[0].toUpperCase())}</span><span><b>${esc(ui.snap.account.email)}</b><small>${ui.snap.account.role === 'superadmin' ? 'Superadmin' : 'Member'} · this computer</small></span><button type="button" class="btn small" data-st-signout>Sign out</button></div>` : ''}
       ${field('Your name', input('name', config().name, 'maxlength="60"'), 'Agents call you by this name.')}
       ${field('Theme', `<select name="theme">${[['system', 'Follow Windows'], ['dark', 'Dark'], ['light', 'Light']].map(([value, label]) => `<option value="${value}" ${(window.rexTheme?.preference || 'system') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
+      ${['en', 'ko', 'km'].map(lang => field(`Reading voice, ${{ en: 'English', ko: 'Korean', km: 'Khmer' }[lang]}`, `<select data-st-voice="${lang}"><option value="">Best one found</option>${(state.extra.voices?.[lang] || []).map(voice => `<option value="${esc(voice.name)}" ${chosenVoice(lang) === voice.name ? 'selected' : ''}>${esc(voice.name)}</option>`).join('')}</select>`, lang === 'en' ? 'Used by the speaker button on agent messages. More voices: Windows Settings, Time & language, Speech.' : '')).join('')}
       ${check('autostart', state.extra.autostart?.enabled, 'Start Rex Desk when I sign in to Windows', 'So schedules, away mode and your phone keep working without opening the app.')}`,
     notify: () => `<h2>Notifications</h2><p class="muted">Changes save as you make them.</p>${noticeSettingsHtml(ctx)}`,
     agents: () => `<h2>Agents</h2>
@@ -134,6 +136,9 @@ export function openSettings(ctx, section = 'general') {
     } catch (error) { toast(error.message, true); back.querySelector('[data-st-save]')?.removeAttribute('disabled'); }
   });
   back.addEventListener('keydown', event => { if (event.key === 'Escape') back.remove(); });
+  // The voices on this computer, for the reading voice choices.
+  if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); if (state.section === 'general' && document.body.contains(back)) draw(); });
+  back.addEventListener('change', event => { const lang = event.target.dataset?.stVoice; if (!lang) return; try { if (event.target.value) localStorage.setItem(`rex-desk-voice-${lang}`, event.target.value); else localStorage.removeItem(`rex-desk-voice-${lang}`); } catch { /* private window */ } toast('Reading voice saved.'); });
   if (section === 'general') void api('/autostart').then(result => { state.extra.autostart = result; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
   // The Notifications tab saves on change; redraw it when its settings come back changed, keeping the scroll.
   let noticeHtml = '';

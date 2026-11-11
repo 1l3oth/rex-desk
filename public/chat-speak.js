@@ -12,10 +12,23 @@ function spokenText(message) {
   copy.querySelectorAll('.tok,.to,.rquote,.md-code,pre,.speak,button').forEach(node => node.replaceWith(node.matches?.('.md-code,pre') ? ' (code) ' : ''));
   return copy.innerText.replace(/https?:\/\/\S+/g, 'a link').replace(/[*_`#>|]+/g, ' ').replace(/\s+\n/g, '\n').replace(/[ \t]+/g, ' ').trim();
 }
-function language(text) { return /[ក-៿]/.test(text) ? 'km' : /[가-힯]/.test(text) ? 'ko' : 'en'; }
-function voiceFor(lang) {
-  const voices = speechSynthesis.getVoices().filter(voice => voice.lang.toLowerCase().startsWith(lang));
-  return voices.find(voice => /natural|online|neural/i.test(voice.name)) || voices.find(voice => voice.localService) || voices[0] || null;
+// The language with the most letters wins, so a Korean name in an English reply is still read in English.
+function language(text) {
+  const count = pattern => (text.match(pattern) || []).length;
+  const counts = { km: count(/[ក-៿]/g), ko: count(/[가-힯ᄀ-ᇿ㄰-㆏]/g), en: count(/[A-Za-z]/g) };
+  return Object.entries(counts).sort((left, right) => right[1] - left[1])[0][0];
+}
+// The voice list arrives a moment after the page opens; asking before that gave the computer's default voice (Korean on a Korean
+// Windows) for English text.
+function voices() {
+  const now = speechSynthesis.getVoices(); if (now.length) return Promise.resolve(now);
+  return new Promise(resolve => { const done = () => resolve(speechSynthesis.getVoices()); speechSynthesis.addEventListener?.('voiceschanged', done, { once: true }); setTimeout(done, 1500); });
+}
+export const chosenVoice = lang => { try { return localStorage.getItem(`rex-desk-voice-${lang}`) || ''; } catch { return ''; } };
+export async function voicesFor(lang) { return (await voices()).filter(voice => voice.lang.toLowerCase().replace('_', '-').startsWith(lang)); }
+async function voiceFor(lang) {
+  const list = await voicesFor(lang), picked = chosenVoice(lang);
+  return list.find(voice => voice.name === picked) || list.find(voice => /natural|online|neural/i.test(voice.name) && /en-us|ko-kr|km-kh/i.test(voice.lang)) || list.find(voice => /natural|online|neural/i.test(voice.name)) || list.find(voice => /en-us/i.test(voice.lang)) || list[0] || null;
 }
 // Pieces of about two sentences: browsers stop very long utterances part way.
 function pieces(text) {
@@ -29,11 +42,12 @@ function stop() {
   if (playing) { playing.button.innerHTML = SPEAKER; playing.button.classList.remove('on'); playing.button.title = 'Listen'; }
   playing = null;
 }
-function play(button) {
+async function play(button) {
   const message = button.closest('.bubble')?.querySelector('.md'); if (!message) return;
   const text = spokenText(message); if (!text) return;
   stop();
-  const lang = language(text), voice = voiceFor(lang), parts = pieces(text);
+  const lang = language(text), voice = await voiceFor(lang), parts = pieces(text);
+  if (!voice && lang === 'en') ctxToast?.('No English voice is installed on this computer. Add one in Windows Settings, Time & language, Speech.');
   playing = { button }; button.innerHTML = STOP; button.classList.add('on'); button.title = 'Stop';
   const mine = playing;
   parts.forEach((part, index) => {
@@ -45,7 +59,9 @@ function play(button) {
     speechSynthesis.speak(utterance);
   });
 }
-export function wireSpeak() {
+let ctxToast = null;
+export function wireSpeak(toast) {
+  ctxToast = toast;
   if (!('speechSynthesis' in window)) return;
   speechSynthesis.getVoices(); speechSynthesis.addEventListener?.('voiceschanged', () => speechSynthesis.getVoices());
   document.addEventListener('click', event => {
