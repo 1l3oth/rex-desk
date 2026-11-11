@@ -45,6 +45,7 @@ const webAgentPrompt = task => [
 // What Claude Code says when an account has used up its plan for now.
 const LIMIT = /usage limit|limit reached|out of (extra )?usage|credit balance is too low|weekly limit|5-hour limit|rate_limit_error|reached your .{0,20}limit/i;
 const firstTaskReview = project => `This is the first task on ${project} whose workflow the person has not checked yet. When the work is done and verified, before your final report: write the workflow you actually followed as a short numbered list (where you branched from, how you set it up, how you tested and verified, where the pull request goes, who reviews, anything you avoided touching). Ask the person with desk_ask whether to change anything, with the options "Looks right" and "Change something" plus a text box for what to change. Save each step they confirm or correct with desk_learn_workflow (one short rule each), then call desk_confirm_workflow so every agent on ${project} follows it from now on and nobody asks again.`;
+const MODEL_MISSING = /issue with the selected model|may not have access to it|model[^.]{0,40}(does not exist|not found|is not available)/i;
 const terminalStates = new Set(['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked']);
 
 export function validateAnswer(interaction, answer) {
@@ -400,7 +401,7 @@ export class Desk {
       token = this.scopeToken(runId);
       const options = { run, cwd: run.cwd || run.worktree || path.join(this.store.directory, 'coordinator'), projectDirectory: run.projectPath || '', token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
-        mcpUrl: this.mcpUrl, model: run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
+        mcpUrl: this.mcpUrl, model: run.modelFallback ? undefined : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
@@ -429,7 +430,8 @@ export class Desk {
       const project = reopened ? this.projectOf(run) : '', workflow = project ? this.memory.workflowText(project) : '', workflowKey = workflow ? createHash('sha256').update(workflow).digest('hex').slice(0, 16) : '';
       const workflowUpdate = workflow && run.workflowSeen !== workflowKey ? `${workflow.replace(':\n', ' (updated):\n')}` : '';
       if (workflowKey && run.workflowSeen !== workflowKey) this.patchRun(runId, { workflowSeen: workflowKey });
-      const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, reopened && owner ? this.specialists.lessonsText(owner) : '', reopened && chat ? '(Reply like a teammate in a chat: short, plain, answer first; no code or long lists unless asked. When corrected, save the lesson with desk_learn.)' : ''].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : this.prompt(run);
+      const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, reopened && owner ? this.specialists.lessonsText(owner) : '', reopened && chat ? '(Reply like a teammate in a chat: short, plain, answer first; no code or long lists unless asked. When corrected, save the lesson with desk_learn.)' : ''].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : [this.prompt(run), run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
+      if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
       await runner.start(digest ? `${digest}
 
 ${message}` : message);
@@ -438,6 +440,14 @@ ${message}` : message);
       if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' ? 'finished' : 'needs_evidence', endedAt: now() });
     } catch (error) {
       if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) return;
+      // The chosen model is not available on this Claude account: the turn runs again once on the account's default model, and the agent stops asking for that model.
+      if (!controller.signal.aborted && MODEL_MISSING.test(error.message) && !run.modelFallback) {
+        const agentId = run.roomAgent || run.specialistId, agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
+        if (agent?.model) this.store.put('specialist', agentId, { ...agent, model: '' });
+        this.patchRun(runId, { modelFallback: true, model: undefined, state: 'queued', followUp: run.followUp || '', error: '', endedAt: null });
+        this.store.event(runId, 'message', { text: `The model this agent was set to is not available on this Claude account, so it now uses the account's default model. Pick another one on the agent's card if you want.` }, true);
+        return;
+      }
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: error.message, endedAt: now() });
       this.store.event(runId, 'error', { message: error.message }, true);
     } finally {
@@ -673,6 +683,30 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (run.role === 'worker' && run.roomId && run.specialistId) void this.rooms.post(run.roomId, { fromAgentId: run.specialistId, text: String(text).slice(0, 8000) }).catch(() => {});
     return { delivered: true };
   }
+  // /clear in a chat: the conversation so far is written to a handoff file, the agent's session is dropped, and the next message
+  // starts a fresh session that reads the handoff first. The chat history stays on screen; only the agent's context is new.
+  async freshStart(runId) {
+    const run = this.run(runId);
+    if (run.external) throw new Error('This conversation lives in another app.');
+    if (this.live.has(runId)) await this.stop(runId);
+    const agentId = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
+    const name = agentId === 'main' ? 'Rex Agent' : agentId ? this.specialists.get(agentId)?.name || 'the agent' : run.title || 'the agent';
+    const lines = this.store.events(runId, { visible: true, limit: 600 }).filter(event => ['human-message', 'message', 'agent-text'].includes(event.kind) && (event.text || event.message))
+      .map(event => `**${event.kind === 'human-message' ? 'The person' : name}** (${String(event.createdAt || '').slice(0, 16).replace('T', ' ')}): ${String(event.text || event.message).trim().slice(0, 3000)}`);
+    let recent = '';
+    for (const line of lines.reverse()) { if (recent.length + line.length > 24000) break; recent = `${line}\n\n${recent}`; }
+    const task = run.taskId ? this.store.get('task', run.taskId) : null;
+    const handoff = [`# Handoff for ${name}`, `Written ${now()} when the person cleared the conversation (/clear). Read it, then continue from here.`,
+      task ? `## Task\n#${task.taskNumber || task.externalId} ${task.titleEn || task.title}${task.url ? `\n${task.url}` : ''}` : '',
+      run.worktree ? `## Where the work is\nWorktree: ${run.worktree}${run.branch ? `\nBranch: ${run.branch}` : ''}` : '',
+      agentId && agentId !== 'main' ? `## What you learned\n${this.specialists.lessonsText(agentId) || 'Nothing saved yet.'}` : '',
+      `## The conversation so far (oldest first, recent part)\n${recent || 'Nothing was said yet.'}`].filter(Boolean).join('\n\n');
+    const directory = path.join(this.store.directory, 'handoffs'); mkdirSync(directory, { recursive: true });
+    const file = path.join(directory, `${runId}-${Date.now()}.md`); writeFileSync(file, handoff);
+    this.patchRun(runId, { sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
+    this.store.event(runId, 'message', { text: `Conversation cleared. ${name} starts fresh with your next message and reads a handoff of what was said first.` }, true);
+    return { cleared: true, handoff: file };
+  }
   // An agent tested something and shares the proof: a screenshot, a recording or the test output. The file is kept with the run's evidence,
   // belongs to the task, and is posted where the agent is talking (its room, or its personal chat), so it also shows in that chat's Media tab.
   shareEvidence(runId, { file, title, taskId = '', result = 'info', note = '' }) {
@@ -844,6 +878,11 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (!sameProvider) this.store.event(runId, 'provider-switch', { text: `Switched from ${providerLabel(run.provider)} to ${providerLabel(provider)}. The earlier conversation was handed over.`, from: run.provider, to: provider }, true);
     // The follow-up is part of the conversation: it shows in the chat the moment it is sent.
     if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: String(prompt).replace(/\s+/g, ' ').trim(), via: 'rex' }, true);
+    // After /clear the next message starts a fresh session that reads the handoff; the message itself goes in as it is.
+    if (run.handoffFile && !run.sessionId) {
+      this.patchRun(runId, { state: 'queued', provider, followUp: String(prompt).trim(), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions(picked, this.store), execution: 'headless' });
+      void this.drain(); return this.run(runId);
+    }
     this.patchRun(runId, { state: 'queued', provider, followUp: sameProvider ? String(prompt).trim() : '', sessionId: sameProvider ? run.sessionId : undefined, mirror: sameProvider ? run.mirror : undefined,
       ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}),
       instructions: run.role === 'specialist' ? run.instructions : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,

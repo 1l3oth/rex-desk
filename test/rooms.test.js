@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store, now } from '../src/store.js';
@@ -343,4 +343,30 @@ test('an agent shares test evidence: it is posted in its room, kept on the task 
   assert.throws(() => desk.shareEvidence(roomRun.id, { file: path.join(path.dirname(shot), 'missing.png'), title: 'x' }), /No file at/);
   const script = path.join(path.dirname(shot), 'run.exe'); writeFileSync(script, 'x');
   assert.throws(() => desk.shareEvidence(roomRun.id, { file: script, title: 'x' }), /Share a picture/);
+});
+
+test('/clear writes a handoff, and the next message starts a fresh session that reads it first', async () => {
+  const { store, desk, turns, dara } = setup({ replies: ['The cart bug is in totals.js.'] });
+  await desk.specialistTurn(dara.id, { prompt: 'Where is the cart bug?' });
+  await waitFor(() => turns.length === 1 && store.get('run', store.get('specialist', dara.id).runId)?.state === 'finished');
+  const runId = store.get('specialist', dara.id).runId;
+  assert.ok(store.get('run', runId).sessionId, 'the first turn made a session');
+  const { handoff } = await desk.freshStart(runId);
+  assert.match(readFileSync(handoff, 'utf8'), /The cart bug is in totals\.js/);
+  assert.equal(store.get('run', runId).sessionId, undefined, 'the session is dropped');
+  await desk.specialistTurn(dara.id, { prompt: 'Fix it now.' });
+  await waitFor(() => turns.length === 2);
+  assert.match(turns[1].prompt, /read the handoff .*\.md with the Read tool/);
+  assert.match(turns[1].prompt, /Fix it now\./);
+  assert.match(turns[1].prompt, /You are Dara/, 'a fresh session gets its whole identity again');
+});
+
+test('a model the Claude account cannot use: the turn runs again on the default model and the agent drops it', async () => {
+  const { store, desk, dara } = setup(); const seen = [];
+  store.put('specialist', dara.id, { ...store.get('specialist', dara.id), model: 'claude-opus-5-5' });
+  desk.runnerFactory = options => ({ start: async () => { seen.push(options.model); if (seen.length === 1) throw new Error("There's an issue with the selected model (Opus 5.5). It may not exist or you may not have access to it."); options.event('session', { sessionId: SESSION }); options.event('agent-text', { text: 'Hello' }); }, interrupt() {}, close() {} });
+  await desk.specialistTurn(dara.id, { prompt: 'Hi' });
+  await waitFor(() => seen.length === 2);
+  assert.equal(seen[1], undefined, 'the second try uses the account default');
+  assert.equal(store.get('specialist', dara.id).model, '', 'the agent no longer asks for that model');
 });

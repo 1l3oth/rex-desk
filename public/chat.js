@@ -22,7 +22,7 @@ const provider = name => name === 'codex' ? 'Codex (retired)' : name === 'claude
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value),
   render: () => renderAll(), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
-  commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), settings: () => openSettings(ctx) }, get initials() { return initials; } };
+  commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), clear: () => clearAgent().catch(error => toast(error.message, true)), settings: () => openSettings(ctx) }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
 async function api(path, { method = 'GET', data, retry = false } = {}) {
@@ -32,7 +32,7 @@ async function api(path, { method = 'GET', data, retry = false } = {}) {
   if (response.status === 401 && body.signIn) {
     const auth = retry ? null : await fetch('/api/auth', { headers: { 'x-rex-desk': '1' } }).then(reply => reply.json()).catch(() => null);
     if (auth?.current) return api(path, { method, data, retry: true });
-    location.href = '/classic'; throw new Error('Sign in to Rex Desk.');
+    location.href = '/signin'; throw new Error('Sign in to Rex Desk.');
   }
   if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
   return body;
@@ -327,6 +327,13 @@ async function assignFromRoom(roomId, command) {
 }
 async function syncIssues() { toast('Syncing issues…'); await api('/sync', { method: 'POST', data: {} }); toast('Issues synced.'); await refresh(); }
 async function scanProjects() { toast('Scanning this computer for projects…'); const result = await api('/memory/scan', { method: 'POST', data: {} }); toast(`Found ${result.count} projects.`); await refresh(); }
+// /clear: the agent writes nothing itself; Rex Desk saves a handoff of the conversation and the next message starts a fresh session that reads it.
+async function clearAgent() {
+  const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast('No agent conversation here.', true);
+  if (!confirm('Clear this conversation? The agent starts a fresh session with your next message and reads a handoff of what was said. The messages stay on screen.')) return;
+  const box = document.getElementById('draft'); if (box) { box.value = ''; ui.drafts.set(draftKey(), ''); }
+  await api(`/runs/${run.id}/fresh`, { method: 'POST', data: {} }); toast('Cleared. Your next message starts a fresh session.'); await refresh();
+}
 async function stopAgent() { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast('No agent to stop here.', true); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
 function newRoomDialog() { openRoomDialog(ctx); }
 document.addEventListener('click', async event => {
