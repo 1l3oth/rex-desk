@@ -18,7 +18,11 @@ export class Rooms {
   room(roomId) { const room = this.store.get('room', roomId); if (!room) throw new Error('Room not found.'); return room; }
   list() { return this.store.list('room').sort((left, right) => right.createdAt.localeCompare(left.createdAt)); }
   messages(roomId, { after = 0, limit = 200 } = {}) {
-    return this.store.list('roommsg').filter(item => item.roomId === roomId && item.seq > after).sort((left, right) => left.seq - right.seq).slice(-limit);
+    // An agent that was renamed shows its current name on its old messages too; a removed agent keeps the name it had.
+    const names = new Map();
+    const current = id => { if (!names.has(id)) names.set(id, this.agent(id)?.name || ''); return names.get(id); };
+    return this.store.list('roommsg').filter(item => item.roomId === roomId && item.seq > after).sort((left, right) => left.seq - right.seq).slice(-limit)
+      .map(item => item.from?.type === 'agent' && current(item.from.id) && current(item.from.id) !== item.from.label ? { ...item, from: { ...item.from, label: current(item.from.id) } } : item);
   }
   agent(id) { return this.store.get('specialist', id); }
   member(id) {

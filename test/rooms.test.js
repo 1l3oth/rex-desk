@@ -501,3 +501,10 @@ test('a group chat made from a personal chat brings the agent and the recent tal
   assert.equal(texts[0], 'You: The cart total is wrong'); assert.equal(texts[1], 'Dara: It skips the discount.');
   assert.match(texts.at(-1), /Started from your personal chat with Dara/);
 });
+
+test('a renamed agent shows its new name on its old messages', async () => {
+  const { desk, store, dara, room } = setup();
+  await desk.rooms.post(room.id, { fromAgentId: dara.id, text: 'Old news', to: [] });
+  store.put('specialist', dara.id, { ...store.get('specialist', dara.id), name: 'Sokha' });
+  assert.equal(desk.rooms.messages(room.id).find(item => item.text === 'Old news').from.label, 'Sokha');
+});
