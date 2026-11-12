@@ -102,11 +102,9 @@ function toggleSection(key) { if (collapsed.has(key)) collapsed.delete(key); els
 const agentDot = state => ({ busy: 'working', replying: 'working', waiting: 'warn', idle: 'good', offline: 'off' })[state] || '';
 
 function renderRail() {
-  const snap = ui.snap, runs = snap.runs.filter(run => run.role !== 'coordinator' && run.role !== 'specialist' && !run.setupSourceId), asks = pending().length;
-  const group = name => runs.filter(run => stateGroup(run) === name);
-  const line = run => railItem('run', run.id, { avatar: withDot(iconAv('run'), stateTone(run)), name: runTitle(run), sub: `${stateLabel(run)} · ${ago(run.updatedAt || run.createdAt)}`, badge: pending(run.id).length, warn: true });
+  // No Runs list: agents work in their own chats and rooms, the way the person tells them. An old run still opens from its task.
+  const snap = ui.snap, asks = pending().length;
   const main = mainRun(), agents = snap.specialists || [], tasks = (snap.tasks || []).filter(task => task.active && !task.demo), busy = agents.filter(agent => agent.status?.state === 'busy').length;
-  const working = group('working'), review = group('review'), done = group('done'), shownDone = ui.done ? done : done.slice(0, 4);
   const plus = (action, label) => `<button class="sec-add" data-action="${action}" title="${label}" aria-label="${label}">+</button>`;
   return `<div class="rail-head"><span class="brand">${iconAv('main', 'brandmark')}<strong>Rex Desk</strong></span><span class="spacer"></span><button class="btn small" data-action="sync" title="Sync issues from the tracker">Sync</button></div><div class="rail-scroll">
     <div class="sec-body top">
@@ -123,7 +121,6 @@ function renderRail() {
     </div>
     ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })).join('') : '<p class="rail-empty">No rooms yet.</p>')}
     ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentGroups(ctx, agents, (agent, grouped) => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: grouped ? agent.status?.label || 'Idle' : `${agent.status?.state === 'idle' || !agent.status ? agent.projectSlug : agent.status.label}`, badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
-    ${working.length || review.length || done.length ? section('runs', 'Runs', working.length || '', '', `${working.map(line).join('')}${review.length ? `<p class="rail-label">To review</p>${review.map(line).join('')}` : ''}${done.length ? `<p class="rail-label">Done</p>${shownDone.map(line).join('')}${done.length > 4 ? `<button class="item more" data-action="toggle-done"><span class="name sub">${ui.done ? 'Show fewer' : `Show all ${done.length}`}</span></button>` : ''}` : ''}`) : ''}
   </div>${phoneTabs(asks)}<div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button><button class="btn small" data-action="theme">Theme</button></div>`;
 }
 
@@ -433,7 +430,6 @@ document.addEventListener('click', async event => {
     else if (action === 'brain-setup') { const found = ui.snap.memory?.brainCandidates?.[0]; const text = `Help me set up my second brain for all agents.${found ? ` I think it is at ${found}.` : ''} Ask me how I want you to use it.`; if (mainRun()) await api(`/runs/${mainRun().id}/${workingStates.includes(mainRun().state) ? 'say' : 'resume'}`, { method: 'POST', data: workingStates.includes(mainRun().state) ? { text } : { prompt: text } }); else await api('/main', { method: 'POST', data: { prompt: text } }); open('main'); }
     else if (action === 'quick') { await api('/main', { method: 'POST', data: { prompt: target.dataset.text } }); await refresh(); }
     else if (action === 'sync') await syncIssues();
-    else if (action === 'toggle-done') { ui.done = !ui.done; renderAll(); }
     else if (action === 'sec-toggle') toggleSection(target.dataset.sec);
     else if (action === 'settings-open') openSettings(ctx);
     else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
