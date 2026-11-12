@@ -157,7 +157,10 @@ export class AgentProfiles {
   // Signs a profile in to a Claude account: Claude Code opens the browser, the person signs in, and the profile is ready.
   login(provider, profile) {
     const executable = cli(provider), env = profileEnvironment(provider, profile);
+    if (provider === 'gemini' && executable.command === 'agy' && process.platform === 'win32') throw new Error('The Antigravity CLI (agy) is not installed on this computer. Install it with: winget install Google.AntigravityCLI');
     const child = spawn(executable.command, [...executable.args, ...loginArgs[provider]], { env, windowsHide: false, detached: true, stdio: 'ignore' });
+    // A sign-in program that is not installed must never stop Rex Desk: the failure is only remembered for the status.
+    child.on('error', error => { this.loginError = { provider, message: error.code === 'ENOENT' ? `${executable.command} is not installed on this computer.` : error.message, at: Date.now() }; this.invalidate(provider); });
     child.unref(); this.invalidate(provider);
     return { started: true, profile, label: profileLabel(provider, profile) };
   }
