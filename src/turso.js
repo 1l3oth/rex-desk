@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { SHARED } from './store.js';
+import { FileBackup } from './file-backup.js';
 
 // Local transactions and their cloud outbox commit together. Failed uploads can be retried without losing work.
 export class TursoSync {
@@ -14,6 +15,7 @@ export class TursoSync {
     const workspaceFile = path.join(store.directory, 'workspace.id');
     if (!existsSync(workspaceFile)) writeFileSync(workspaceFile, randomUUID(), { flag: 'wx', mode: 0o600 });
     this.workspace = readFileSync(workspaceFile, 'utf8').trim();
+    this.files = new FileBackup(this);
     store.db.exec('CREATE TABLE IF NOT EXISTS cloud_outbox (sequence INTEGER PRIMARY KEY AUTOINCREMENT, destination TEXT NOT NULL, sql TEXT NOT NULL, args TEXT NOT NULL)');
     if (existsSync(this.connectionFile)) {
       try { this.connection = JSON.parse(store.decrypt(readFileSync(this.connectionFile, 'utf8'))); }
@@ -24,7 +26,7 @@ export class TursoSync {
   status() {
     return { configured: this.enabled, url: this.connection?.url || '', state: this.state, error: this.error,
       pending: this.enabled ? Number(this.store.db.prepare('SELECT COUNT(*) AS total FROM cloud_outbox WHERE destination=?').get(this.connection.url).total) : 0,
-      lastSyncedAt: this.lastSyncedAt || '', workspace: this.workspace };
+      lastSyncedAt: this.lastSyncedAt || '', workspace: this.workspace, files: { error: this.files.error || '', restored: this.files.lastRestored || 0 } };
   }
   enqueue(sql, args) {
     if (!this.enabled) return;
@@ -52,6 +54,7 @@ export class TursoSync {
   }
   record(kind, id, value) { this.shared(kind, id, value); this.enqueue('INSERT INTO rex_records(workspace,kind,id,value) VALUES(?,?,?,?) ON CONFLICT(workspace,kind,id) DO UPDATE SET value=excluded.value', [this.workspace, kind, id, JSON.stringify(value)]); }
   remove(kind, id) { this.shared(kind, id, null, true); this.enqueue('DELETE FROM rex_records WHERE workspace=? AND kind=? AND id=?', [this.workspace, kind, id]); }
+  removeEvent(sequence) { this.enqueue('DELETE FROM rex_events WHERE workspace=? AND sequence=?', [this.workspace, Number(sequence)]); }
   event(row) { this.enqueue('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,sequence) DO UPDATE SET run_id=excluded.run_id,kind=excluded.kind,visible=excluded.visible,value=excluded.value,created_at=excluded.created_at', [this.workspace, Number(row.sequence), row.run_id, row.kind, row.visible, row.value, row.created_at]); }
   schedule() {
     if (!this.ready || this.timer || this.closed) return;
@@ -83,6 +86,7 @@ export class TursoSync {
         'CREATE INDEX IF NOT EXISTS rex_shared_v ON rex_shared(v)',
         'CREATE TABLE IF NOT EXISTS rex_presence (node TEXT PRIMARY KEY, name TEXT NOT NULL, at INTEGER NOT NULL, agents TEXT NOT NULL)',
         'CREATE TABLE IF NOT EXISTS rex_events (workspace TEXT NOT NULL, sequence INTEGER NOT NULL, run_id TEXT, kind TEXT, visible INTEGER, value TEXT, created_at TEXT, PRIMARY KEY(workspace,sequence))',
+        'CREATE TABLE IF NOT EXISTS rex_files (workspace TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, updated_at TEXT, PRIMARY KEY(workspace,path))',
         'CREATE TABLE IF NOT EXISTS rex_workspaces (workspace TEXT PRIMARY KEY, name TEXT NOT NULL, kdf TEXT NOT NULL, sealed_key TEXT NOT NULL, updated_at TEXT)',
       ], 'write');
       // Another computer finds this workspace by name; only the passphrase unseals its key.
@@ -94,9 +98,14 @@ export class TursoSync {
       this.ready = true; this.error = '';
       await this.flush();
       if (this.state === 'connected') writeFileSync(this.marker, JSON.stringify({ url: this.connection.url, workspace: this.workspace }), { mode: 0o600 });
+      // Then the files the chats point to: missing ones come back first (a restore), then new ones go up.
+      // A restore waits for its files, so the chats open with their pictures.
+      if (this.state === 'connected' && this.restoring) { this.restoring = false; try { this.files.lastRestored = (await this.files.restoreMissing()).restored; } catch (error) { this.files.error = String(error.message || error); } }
+      if (this.state === 'connected') void this.files.run();
     } catch (error) { this.ready = false; this.fail(error); }
     // Retry even when the first connection fails, so an offline start catches up without a restart.
     if (!this.retryTimer && !this.closed) { this.retryTimer = setInterval(() => void this.retry(), this.retryMs); this.retryTimer.unref(); }
+    if (!this.filesTimer && !this.closed) { this.filesTimer = setInterval(() => void this.files.run(), Math.max(this.retryMs, 120000)); this.filesTimer.unref(); }
     return this.status();
   }
   seed() {
@@ -127,6 +136,7 @@ export class TursoSync {
   async restoreIfAvailable() {
     const records = await this.client.execute({ sql: 'SELECT kind,id,value FROM rex_records WHERE workspace=?', args: [this.workspace] });
     if (!records.rows.length) return;
+    this.restoring = true;
     const token = records.rows.find(row => row.kind === 'secret' && row.id === 'mcp-token');
     if (token) this.store.decrypt(JSON.parse(token.value));
     const events = await this.client.execute({ sql: 'SELECT * FROM rex_events WHERE workspace=? ORDER BY sequence', args: [this.workspace] });
@@ -151,7 +161,8 @@ export class TursoSync {
     this.connection = { url, authToken: token }; this.ready = false;
     writeFileSync(this.connectionFile, this.store.encrypt(JSON.stringify(this.connection)), { mode: 0o600 });
     // Changing destinations gets a complete snapshot; pending writes for an older destination remain durable.
-    this.seed();
+    // A fresh workspace (a reinstall, a cleared data folder, a new computer) first takes its backup, so its empty defaults never overwrite it.
+    if (!this.store.fresh) this.seed();
     return this.open();
   }
   async flush() {
@@ -186,7 +197,8 @@ export class TursoSync {
     return { matched: hash(local) === hash(remote.rows) && localEvents === remoteEvents, localRecords: local.length, remoteRecords: remote.rows.length, localEvents, remoteEvents };
   }
   async close() {
-    clearTimeout(this.timer); clearInterval(this.retryTimer);
+    clearTimeout(this.timer); clearInterval(this.retryTimer); clearInterval(this.filesTimer);
+    if (this.files.running) await this.files.running.catch(() => {});
     if (this.opening) await this.opening;
     if (this.ready) await this.flush();
     this.closed = true; this.client?.close();

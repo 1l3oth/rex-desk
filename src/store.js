@@ -181,7 +181,8 @@ export class Store extends EventEmitter {
   unsendEvent(runId, sequence) {
     const row = this.db.prepare("SELECT value FROM events WHERE run_id=? AND sequence=? AND kind='human-message'").get(runId, Number(sequence));
     if (!row) return null;
-    this.db.prepare('DELETE FROM events WHERE run_id=? AND sequence=?').run(runId, Number(sequence));
+    this.transaction(() => { this.db.prepare('DELETE FROM events WHERE run_id=? AND sequence=?').run(runId, Number(sequence)); this.cloud?.removeEvent(sequence); });
+    this.cloud?.schedule();
     this.emit('change', { kind: 'event', runId });
     return JSON.parse(row.value);
   }
@@ -200,6 +201,17 @@ export class Store extends EventEmitter {
     const cipher = createDecipheriv('aes-256-gcm', this.key, nonce);
     cipher.setAuthTag(tag);
     return Buffer.concat([cipher.update(data), cipher.final()]).toString('utf8');
+  }
+  // Files in the cloud backup are sealed with the same vault key.
+  encryptBytes(bytes) {
+    const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', this.key, nonce);
+    const encrypted = Buffer.concat([cipher.update(bytes), cipher.final()]);
+    return Buffer.concat([nonce, cipher.getAuthTag(), encrypted]).toString('base64');
+  }
+  decryptBytes(text) {
+    const data = Buffer.from(text, 'base64'), cipher = createDecipheriv('aes-256-gcm', this.key, data.subarray(0, 12));
+    cipher.setAuthTag(data.subarray(12, 28));
+    return Buffer.concat([cipher.update(data.subarray(28)), cipher.final()]);
   }
   // Every saved sign-in with its password. Only the recorded browser calls this; the dashboard sees publicConfig.
   testAccounts() {
