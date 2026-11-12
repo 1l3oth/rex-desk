@@ -35,6 +35,7 @@ import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
 import { orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
+import { Awake } from './awake.js';
 import { scanRoots } from './placement.js';
 
 const exec = promisify(execFile);
@@ -71,7 +72,7 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory } = {}) {
+export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
   const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataRoot, 'runtime.lock');
@@ -88,6 +89,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   const updates = new Updates(dataRoot, updateOptions);
   // One computer and one voice engine for every account on it: the models are large, so they live beside the accounts.
   const computer = computerFactory ? computerFactory() : new Computer({ directory: path.join(dataRoot, 'screens') });
+  // A plain data folder (tests, scripts) never holds the computer awake.
+  const awake = awakeFactory ? awakeFactory() : new Awake(dataDirectory ? { platform: 'none' } : {});
   const voice = voiceFactory ? voiceFactory() : new Voice(process.env.REX_VOICE_DIR || path.join(dataRoot, 'voice'));
   const anywhere = anywhereFactory ? anywhereFactory() : new Anywhere({ root, dataRoot });
   const clients = new Set();
@@ -682,7 +685,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   if (session) startDesk(session.desk, session.store);
   let lastSync = Date.now(), ticks = 0;
   const timer = setInterval(() => {
-    if (!session) return;
+    if (!session) { awake.set(false); return; }
     const { store, desk } = session;
     const minutes = store.config().syncMinutes;
     if (minutes && Date.now() - lastSync >= minutes * 60000 && !desk.sources.syncing) {
@@ -693,6 +696,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     void desk.loopTick().catch(error => store.event('', 'loop-error', { message: error.message }, true));
     if (++ticks % 8 === 0) void desk.findPullRequests();
     if (ticks % 4 === 0) remoteOpen(); // Tailscale may start after Rex Desk
+    // The computer stays awake (the screen may still lock) while an agent works or other devices may connect.
+    awake.set(desk.live.size > 0 || Boolean(desk.peers.settings().remote));
     if (ticks % 12 === 0) void desk.monitor.tick().catch(error => store.event('', 'monitor-error', { message: error.message }, true));
   }, 15000);
   timer.unref();
@@ -701,7 +706,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   const firstCheck = updates.state.supported ? setTimeout(() => void updates.check().then(notify), 30000) : null;
   updateTimer?.unref(); firstCheck?.unref();
   const handle = { server, address, accounts, updates, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
-    computer.stop(); voice.stopAll(); clearInterval(timer); for (const item of remoteServers) item.close(); clearInterval(updateTimer); clearTimeout(firstCheck); await closeSession(); for (const client of clients) client.end();
+    awake.set(false); computer.stop(); voice.stopAll(); clearInterval(timer); for (const item of remoteServers) item.close(); clearInterval(updateTimer); clearTimeout(firstCheck); await closeSession(); for (const client of clients) client.end();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); unlinkSync(lockPath);
   } };
   return handle;

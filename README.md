@@ -34,7 +34,7 @@ npm install --prefix desktop
 npm run build --prefix desktop
 ```
 
-The build stages this Node runtime and the server into the installer (`desktop/stage.mjs`). On launch the window starts that bundled server if nothing answers on port 4317; a development build without the payload falls back to a checkout (`REX_DESK_HOME`, the folder it was built from, then `F:\rex-desk`) and the system Node. `rex-desk.exe --background` starts the server without a window, which Start Rex Desk when I sign in to Windows uses. Closing the window leaves the server running, so agent runs continue. The dashboard page gets no Tauri APIs. `Start-RexDesk.ps1 -App` opens the dashboard as an Edge app window instead.
+The build stages this Node runtime and the server into the installer (`desktop/stage.mjs`). On launch the window starts that bundled server if nothing answers on port 4317; a development build without the payload falls back to a checkout (`REX_DESK_HOME`, the folder it was built from, then `F:\rex-desk`) and the system Node. `rex-desk.exe --background` starts the server without a window, which Start Rex Desk when I sign in to Windows uses. Closing the window leaves the server running, so agent runs continue. While an agent is working, or connecting from other devices is on, Rex Desk keeps the computer from going to sleep (Windows and macOS); the screen can still lock and turn off, and agents keep going behind the lock screen. Closing a laptop lid still follows the Windows lid setting. The dashboard page gets no Tauri APIs. `Start-RexDesk.ps1 -App` opens the dashboard as an Edge app window instead.
 
 ## Accounts
 
