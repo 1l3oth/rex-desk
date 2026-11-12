@@ -216,7 +216,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       const localHost = ['127.0.0.1', 'localhost', '[::1]'].includes(hostname);
       const publicMcp = process.env.REX_PUBLIC_MCP_HOST && hostname === process.env.REX_PUBLIC_MCP_HOST && request.url?.split('?')[0] === '/mcp';
       // A request that came in over Tailscale (the person's other computers and phone) needs the shared key, or a browser signed in with it.
-      const remoteSocket = !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress);
+      // Tailscale's https address (https://<computer>.<tailnet>.ts.net, made with "tailscale serve") reaches this server from this
+      // computer itself, but it is the phone or another device asking: it needs the key the same way.
+      const remoteSocket = !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress) || (/\.ts\.net$/i.test(hostname) && !publicMcp);
       if (!localHost && !publicMcp && !remoteSocket) return json(response, 403, { error: 'Use the local dashboard address.' });
       const url = new URL(request.url, `http://${host}`);
       let peerSignedIn = false;
@@ -254,7 +256,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         await handleMcp(desk, scope, request, response, request.method === 'POST' ? await body(request) : undefined); return;
       }
       const origin = request.headers.origin;
-      if (origin && origin !== `http://${host}`) return json(response, 403, { error: 'Cross-origin dashboard requests are blocked.' });
+      if (origin && origin !== `http://${host}` && origin !== `https://${host}`) return json(response, 403, { error: 'Cross-origin dashboard requests are blocked.' });
       if (request.method !== 'GET' && request.headers['x-rex-desk'] !== '1') return json(response, 403, { error: 'Missing dashboard request header.' });
       if (url.pathname === '/api/auth' || url.pathname.startsWith('/api/auth/')) return await handleAuth(request, response, url);
       // Everything else that touches a workspace needs this window's sign-in.

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { HUMAN } from './rooms.js';
+import { execFile } from 'node:child_process';
 
 const now = () => new Date().toISOString();
 const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000, PICTURE_BYTES = 2 * 1024 * 1024, CARRY_BYTES = 8 * 1024 * 1024;
@@ -36,7 +37,16 @@ export class Peers {
   checkKey(value) { return same(value, this.key()); }
   session() { return createHmac('sha256', this.key()).update('rex-desk-session').digest('base64url'); }
   checkSession(cookie) { const value = /(?:^|;\s*)rexdesk=([^;]+)/.exec(String(cookie || ''))?.[1]; return same(value, this.session()); }
-  addresses(port) { return tailscaleAddresses().map(address => `http://${address}:${port}`); }
+  // The private https address "tailscale serve" gives this computer comes first: phones need https for the microphone.
+  addresses(port) { return [...(this.secure ? [this.secure] : []), ...tailscaleAddresses().map(address => `http://${address}:${port}`)]; }
+  refreshSecure() {
+    const command = process.platform === 'win32' && existsSync('C:\\Program Files\\Tailscale\\tailscale.exe') ? 'C:\\Program Files\\Tailscale\\tailscale.exe' : 'tailscale';
+    execFile(command, ['serve', 'status', '--json'], { windowsHide: true, timeout: 8000 }, (error, stdout) => {
+      let found = '';
+      try { const web = JSON.parse(String(stdout || '{}')).Web || {}; const host = Object.keys(web).find(key => this.port && JSON.stringify(web[key]).includes(`:${this.port}`)); found = host ? `https://${host.replace(/:443$/, '')}` : ''; } catch { found = ''; }
+      if (!error || found !== this.secure) this.secure = found;
+    });
+  }
 
   // ---------- what the screen shows ----------
   byNode(nodeId) { return this.settings().peers.find(peer => peer.id === nodeId); }
@@ -396,7 +406,7 @@ export class Peers {
 
   // ---------- the loop ----------
   start() {
-    this.pendingCommands(); this.watchChats();
+    this.pendingCommands(); this.watchChats(); this.refreshSecure();
     const tick = async () => {
       for (const peer of this.settings().peers) {
         if (this.timers.get(peer.id) > Date.now()) continue;
@@ -405,12 +415,13 @@ export class Peers {
       }
       if ((this.timers.get('turso') || 0) <= Date.now()) { await this.pullTurso(); this.timers.set('turso', Date.now() + 5000); }
       if ((this.timers.get('presence') || 0) <= Date.now()) { this.timers.set('presence', Date.now() + 30000); await this.presence(); }
+      if ((this.timers.get('secure') || 0) <= Date.now()) { this.timers.set('secure', Date.now() + 300000); this.refreshSecure(); }
     };
     this.loop = setInterval(() => { if (!this.ticking) { this.ticking = true; void tick().finally(() => { this.ticking = false; }); } }, 1000);
     this.loop.unref?.();
   }
   stop() { clearInterval(this.loop); }
-  selfUrl() { return this.port ? this.addresses(this.port)[0] || '' : ''; }
+  selfUrl() { return this.port ? this.addresses(this.port).find(address => address.startsWith('http://')) || '' : ''; }
   async http(peer, method, route, data) {
     const response = await fetch(`${peer.url}${route}`, { method, signal: AbortSignal.timeout(6000),
       headers: { 'content-type': 'application/json', 'x-rex-desk': '1', 'x-rex-peer-key': this.key(), 'x-rex-peer-node': this.self.id, 'x-rex-peer-name': encodeURIComponent(this.self.name), 'x-rex-peer-url': this.selfUrl() },

@@ -107,3 +107,21 @@ test('the same account opens on another computer from its own Turso database and
     assert.ok(tasks.includes('task-work'), 'Home picks up what was done at work');
   } finally { await again.close(); }
 });
+
+test('the Tailscale https address (tailscale serve) is treated like another device: it needs the device key', async () => {
+  const http = await import('node:http');
+  const app = await accountApp(temporary('tsnet'));
+  const owner = browser(app);
+  const ask = (route, headers = {}) => new Promise((resolve, reject) => {
+    const request = http.request(app.address + route, { headers: { Host: 'mylaptop.tail1234.ts.net', 'x-rex-desk': '1', ...headers } }, response => { response.resume(); resolve({ status: response.statusCode, location: response.headers.location }); });
+    request.on('error', reject); request.end();
+  });
+  try {
+    await owner('/api/auth/create', { method: 'POST', data: { email: 'owner@example.com', passphrase } });
+    assert.equal((await ask('/api/state')).status, 401, 'no key, no data');
+    assert.equal((await ask('/')).location, '/login', 'the page asks for the key');
+    assert.equal((await ask('/manifest.webmanifest')).status, 200, 'what installing needs is open');
+    const key = app.desk.peers.key();
+    assert.equal((await ask('/api/state', { 'x-rex-peer-key': key })).status, 200, 'with the key it works');
+  } finally { await app.close(); }
+});
