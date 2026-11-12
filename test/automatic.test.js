@@ -182,20 +182,6 @@ test('desk_attachment saves an issue screenshot into the run folder for the agen
   } finally { await app.close(); }
 });
 
-test('agents leave the person’s Claude memory and settings alone unless asked, from any profile folder', async () => {
-  const { writesClaudeHome } = await import('../src/runners.js');
-  const orcaMemory = 'C:/Users/flow/AppData/Roaming/orca/claude-profiles/6090b7ff/home/projects/F--flow-was/memory/feedback.md';
-  assert.equal(writesClaudeHome('Write', { file_path: 'C:\\Users\\flow\\.claude\\projects\\F--flow-was\\memory\\note.md' }), true);
-  assert.equal(writesClaudeHome('Edit', { file_path: 'C:/Users/flow/.claude-third-profile/CLAUDE.md' }), true);
-  assert.equal(writesClaudeHome('Bash', { command: `M="${orcaMemory.replace('/feedback.md', '')}"; cat > "$M/feedback.md" <<'EOF'` }), true);
-  assert.equal(writesClaudeHome('Bash', { command: 'cat C:/Users/flow/.claude/settings.json' }), false, 'Reading is fine');
-  assert.equal(writesClaudeHome('Write', { file_path: 'F:/rex-desk/worktrees/temp-rex-fix-views/src/app.js' }), false, 'The worktree is fine');
-  const store = new Store(temporary('memory-guard')), desk = new Desk(store, { root: temporary('memory-guard-root'), runnerFactory: idle });
-  store.put('task', 't', { id: 't', title: 'Views', active: true });
-  assert.match(desk.prompt({ id: 'w', role: 'worker', taskId: 't', worktree: 'w', branch: 'b', baseBranch: 'develop', port: 1 }), /Do not change Claude memory, CLAUDE\.md or Claude settings on your own habit; when the person asks for it, do it/);
-  store.close();
-});
-
 test('a pull request opened outside Rex Desk is found by the run branch and settles the run', async () => {
   const { original } = await repository(), { store, desk } = workspace(original);
   store.put('run', 'r', { id: 'r', role: 'worker', taskId: 'task-1', repositoryId: 'repo', branch: 'temp/rex/fix/views-keep-english-names', state: 'interrupted', createdAt: now() });

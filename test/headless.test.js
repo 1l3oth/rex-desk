@@ -16,7 +16,7 @@ const turn = [{ type: 'system', subtype: 'init', session_id: SESSION },
 const runnerFor = (run, seen, events = []) => new ClaudeRunner({ sdk: fakeSdk(turn, seen), run: { id: 'r', role: 'worker', ...run }, cwd: 'x', token: 't', mcpUrl: 'http://127.0.0.1:1/mcp',
   event: (kind, data) => events.push([kind, data]), ask: async () => ({ action: 'accept' }), controller: new AbortController(), uploadsDirectory: 'UP' });
 
-test('headless Claude Code starts dangerous, speaks in the chat, and a hook still refuses Claude-home writes', async () => {
+test('headless Claude Code starts dangerous, speaks in the chat, and Rex Desk refuses no tool: the agent decides or asks the person', async () => {
   const seen = [], events = [];
   await runnerFor({ effort: 'high' }, seen, events).start('Go');
   const { options } = seen[0];
@@ -25,9 +25,7 @@ test('headless Claude Code starts dangerous, speaks in the chat, and a hook stil
   assert.equal(options.resume, undefined);
   assert.ok(events.some(([kind, data]) => kind === 'agent-text' && data.text === 'Hello there'), 'what the agent says reaches the chat');
   assert.ok(events.some(([kind, data]) => kind === 'session' && data.sessionId === SESSION));
-  const hook = options.hooks.PreToolUse[0].hooks[0];
-  assert.equal((await hook({ tool_name: 'Write', tool_input: { file_path: 'C:/Users/flow/.claude/CLAUDE.md' } })).hookSpecificOutput.permissionDecision, 'deny');
-  assert.deepEqual(await hook({ tool_name: 'Write', tool_input: { file_path: 'F:/project/a.txt' } }), {});
+  assert.equal(options.hooks.PreToolUse, undefined, 'no tool is refused before it runs');
 });
 
 test('Manual mode asks through the dashboard, and only a real session id is resumed', async () => {

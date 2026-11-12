@@ -3,14 +3,6 @@ import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
 import { carrySession } from './agents.js';
-// Which other project a tool call reaches into, by any spelling of its folder (F:\x, F:/x, or /f/x in Git Bash).
-const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-export function projectIn(toolInput, otherProjects = []) {
-  if (!otherProjects.length) return null;
-  // In JSON a backslash is written twice: both spellings become a forward slash.
-  const text = JSON.stringify(toolInput || {}).toLowerCase().replace(/\\\\/g, '/').replace(/\\"/g, '"').replace(/(^|[\s"'=(])\/([a-z])\//g, (_, before, drive) => `${before}${drive}:/`);
-  return otherProjects.find(project => new RegExp(`${escapeRegExp(project.path)}(?=$|[/"'\\s:;&|)])`).test(text)) || null;
-}
 // What one reply cost in tokens: new input, output, and the part of the context read from or written to the prompt cache.
 export const tokensOf = usage => usage ? { input: usage.input_tokens || 0, output: usage.output_tokens || 0, cacheRead: usage.cache_read_input_tokens || 0, cacheWrite: usage.cache_creation_input_tokens || 0 } : null;
 
@@ -34,14 +26,6 @@ export function existingMcpConnections(sourcePath, configDirectory = process.env
 // Rex Desk's own tools read tasks, label them, message the dashboard, or act inside the run's worktree. desk_status,
 // desk_publish, and desk_dispatch carry their own dashboard approval, so none needs the agent's permission prompt too.
 const quietRexTool = name => name.startsWith('mcp__rex_desk__desk_');
-// The person's Claude memory, instructions, settings, agents, skills, and hooks, in any profile folder (~/.claude*, Orca's claude-profiles/<id>/home).
-const claudeHome = /(?:[\\/]\.claude[^\\/]*|claude-profiles[\\/][^\\/]+[\\/]home)[\\/](?:projects[\\/][^\\/]+[\\/]memory|settings(?:\.local)?\.json|CLAUDE\.md|agents|skills|hooks|commands)\b/i;
-export function writesClaudeHome(name, input = {}) {
-  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(name)) return claudeHome.test(String(input.file_path || input.notebook_path || ''));
-  if (name === 'Bash' || name === 'PowerShell') { const command = String(input.command || ''); return claudeHome.test(command) && /(>|\btee\b|\bcp\b|\bmv\b|\brm\b|sed\s+-i|Set-Content|Out-File|Add-Content|New-Item|Remove-Item|Copy-Item|Move-Item)/i.test(command); }
-  return false;
-}
-
 // Agents run on the Claude Code profile's claude.ai sign-in, so they use the person's Claude subscription. An API key
 // left in the environment would quietly switch every run to pay-per-token billing, so it is removed unless asked for.
 export const apiKeyVariables = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
@@ -98,15 +82,7 @@ export class ClaudeRunner {
     delete connections.rex_desk;
     const mode = sdkMode(this.run.permissionMode), resume = sessionId(this.run.sessionId);
     if (resume) { try { carrySession(resume, this.cwd, env.CLAUDE_CONFIG_DIR || ''); } catch { /* the resume reports it if the conversation is really gone */ } }
-    // Rex Desk does not stand between the person and their agents: an agent edits its own project, and goes into another project or
-    // the person's Claude settings when the person asks for it. Only what nobody asked for is turned back: an agent wandering into
-    // another project's files on its own, or writing Claude memory and settings on its own habit.
-    const asked = () => (this.personAsks?.() || []).join('\n');
-    const elsewhere = input => projectIn(input.tool_input, typeof this.otherProjects === 'function' ? this.otherProjects() : this.otherProjects);
-    const refuseElsewhere = async input => { const project = elsewhere(input); return project ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `${project.name} is another project and the person has not asked you to work in it. Stay in your own project unless they ask; when they name it, you may.` } } : {}; };
-    const claudeAsked = () => /\b(memory|remember|claude\.md|settings?|skills?|hooks?|commands?|agents? file|instructions?)\b/i.test(asked());
-    const refuseClaudeHome = async input => this.run.role !== 'coordinator' && writesClaudeHome(input.tool_name, input.tool_input) && !claudeAsked()
-      ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'The person has not asked you to change Claude memory, instructions or settings. Save what you learned with desk_learn instead, unless they ask for the file itself.' } } : {};
+    // Rex Desk refuses nothing here: every team works its own way, so the agent decides from what the person says, and asks them when unsure.
     const options = { cwd: this.cwd, env, abortController: this.controller,
       permissionMode: mode, ...(mode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
       ...(this.run.effort ? { effort: this.run.effort } : {}),
@@ -114,7 +90,7 @@ export class ClaudeRunner {
       disallowedTools: ['AskUserQuestion'],
       additionalDirectories: [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
       settingSources: ['user', 'project', 'local'],
-      hooks: { PreToolUse: [{ hooks: [refuseClaudeHome, refuseElsewhere] }], PostToolUse: [{ hooks: [async () => {
+      hooks: { PostToolUse: [{ hooks: [async () => {
         // New messages for this agent arrived while it worked: hand them over now, between steps.
         const news = this.inbox?.() || '';
         return news ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: `New messages arrived while you were working. Read them now; they may change what you are doing. Answer them in your reply.
