@@ -88,7 +88,7 @@ export function openSettings(ctx, section = 'general') {
     devices: () => `<h2>Devices and phone</h2><p class="muted">Use Rex Desk on your phone and your other computers over Tailscale. The Devices page has the QR code for your phone.</p><button type="button" class="btn primary" data-st-go="devices">Open Devices</button>`,
     backup: () => { const database = ui.snap.database || {}, update = ui.snap.update || {}; return `<h2>Backup and updates</h2>
       <h3>Cloud backup</h3><p>${esc({ connected: 'Copied to your Turso database.', syncing: 'Uploading to Turso…', connecting: 'Connecting to Turso…', offline: 'Turso is offline; changes wait and upload later.', error: 'Turso needs attention.' }[database.state] || 'Kept on this computer only.')}${database.pending ? ` ${Number(database.pending)} changes waiting.` : ''}</p>
-      <a class="btn" href="/classic#cloud-backup">Connect or change the database</a>
+      ${database.configured ? '' : `<p class="muted">New to Turso? Sign in with GitHub or Google and Rex Desk makes your own free database. You never type an address or a key.</p><button type="button" class="btn primary" data-st-turso ${state.extra.turso ? 'disabled' : ''}>${esc(state.extra.turso || 'Set up cloud backup for me')}</button> `}<a class="btn" href="/classic#cloud-backup">${database.configured ? 'Connect or change the database' : 'I already have a database'}</a>
       <h3>App updates</h3><p>${esc(update.ready ? `Version ${update.available?.version} is downloaded and checked.` : update.available ? `Version ${update.available.version} is available.` : 'Rex Desk is up to date, or updates are not used in this copy.')}</p>${update.ready ? '<button type="button" class="btn primary" data-action="update-install">Install and restart</button>' : ''}`; },
     connect: () => `<h2>Connect another AI</h2><p class="muted">Give this to another Claude Code session (or another assistant) so it can read your tasks and ask you questions through Rex Desk. No key is needed on this computer.</p>
       <button type="button" class="btn" data-st-prompt>Show the setup text</button>${state.extra.prompt ? `<pre class="st-prompt">${esc(state.extra.prompt)}</pre><button type="button" class="btn small" data-st-copy-prompt>Copy</button>` : ''}`,
@@ -122,6 +122,18 @@ export function openSettings(ctx, section = 'general') {
       const go = target.closest('[data-st-go]'); if (go) { back.remove(); ctx.open(go.dataset.stGo); return; }
       if (target.closest('[data-st-signout]')) { if (!confirm('Sign out of Rex Desk on this computer? Running agents of this account stop.')) return; await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; return; }
       const allowOff = target.closest('[data-st-allow-off]'); if (allowOff) { await api('/computer/allow', { method: 'POST', data: { actions: [allowOff.dataset.stAllowOff], on: false } }); await refresh(); draw(); return; }
+      if (target.closest('[data-st-turso]')) {
+        // One click: Turso's sign-in opens in the browser; Rex Desk then makes the person's own database and connects it.
+        state.extra.turso = 'Opening Turso sign-in…'; draw();
+        try {
+          const { url } = await api('/database/turso-start', { method: 'POST' }); window.open(url, '_blank', 'noopener');
+          state.extra.turso = 'Waiting for you to sign in to Turso in the browser…'; draw();
+          const status = await api('/database/turso-finish', { method: 'POST' });
+          toast(status.state === 'connected' ? 'Cloud backup is on. Your own Turso database was made and your history was uploaded.' : `Database made. Turso is ${status.state}; changes wait and upload later.`, status.state !== 'connected');
+          await refresh();
+        } finally { state.extra.turso = ''; draw(); }
+        return;
+      }
       if (target.closest('[data-st-prompt]')) { state.extra.prompt = (await api('/setup-prompt', { method: 'POST', data: { target: 'claude' } })).prompt; draw(); return; }
       if (target.closest('[data-st-copy-prompt]')) { await navigator.clipboard.writeText(state.extra.prompt); toast('Copied.'); return; }
       if (target.closest('[data-st-signin-add]')) { await api('/config', { method: 'PUT', data: { ...config(), testAccounts: [...(config().testAccounts || []), { id: crypto.randomUUID(), site: '', username: '' }] } }); await refresh(); draw(); return; }

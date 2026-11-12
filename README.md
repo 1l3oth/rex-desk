@@ -220,6 +220,8 @@ Other paths are rejected for the public hostname. Keep HTTPS and bearer authenti
 
 **Settings → Cloud backup** connects a Turso database. Every local change commits together with an entry in a local outbox, which uploads in order; if Turso is offline, entries wait and retry automatically every 30 seconds. A SQLite backup is saved under `.local/backups/` before connecting. **Upload now & verify** compares every record and the event count with Turso. A fresh workspace with the same `workspace.id`, `vault.key`, and `turso.connection` restores its records, history, and token from Turso; restored active runs become **Interrupted** and need an explicit resume.
 
+**Set up cloud backup for me** (Settings → Backup and updates) needs no Turso knowledge: it opens Turso's own sign-in page (the one the Turso CLI uses) in the browser on this computer, takes the sign-in key Turso sends back to a local address, makes a `rex-desk` database in the person's own Turso account (and a `default` group near them if the account has none), and connects it with that database's own key. The sign-in key is used once and never saved (`src/turso-setup.js`).
+
 The dashboard blocks cross-origin requests, requires a custom header for mutations, validates local hosts, serves an explicit file allowlist, and sends a CSP that allows no remote scripts or images. HTTP MCP calls require a token; managed worker tokens are limited to their run. Restart expires unresolved questions and marks active runs interrupted. A per-data-directory lock prevents two servers from sharing one database.
 
 ## Verification

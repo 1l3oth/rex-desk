@@ -38,6 +38,7 @@ import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
 import { Awake } from './awake.js';
 import { scanRoots } from './placement.js';
+import { tursoSignIn, provisionDatabase } from './turso-setup.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -103,7 +104,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   const anywhere = anywhereFactory ? anywhereFactory() : new Anywhere({ root, dataRoot });
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
-  let session = null, address = '';
+  let session = null, address = '', tursoPending = null;
   const cloud = cloudClientFactory ? { clientFactory: cloudClientFactory, retryMs: 50 } : undefined;
   async function openSession(entry, vaultKey, { staySignedIn = false } = {}) {
     const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
@@ -281,6 +282,14 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         throw new Error('Unknown action.');
       }
       if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: updates.status(), account: { email: session.email, role: role() }, code: codeVersion(), ...(role() === 'superadmin' ? {} : { database: null }) }); }
+      // One-click cloud backup: start opens Turso's sign-in page in the browser; finish waits for it, makes the database and connects it.
+      if (url.pathname === '/api/database/turso-start' && request.method === 'POST') { tursoPending?.cancel(); tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
+      if (url.pathname === '/api/database/turso-finish' && request.method === 'POST') {
+        if (!tursoPending) throw new Error('Start the Turso sign-in first.');
+        const pending = tursoPending;
+        try { const made = await provisionDatabase(await pending.token); return json(response, 200, { ...await store.cloud.connect({ url: made.url, authToken: made.authToken }), database: made.database }); }
+        finally { if (tursoPending === pending) tursoPending = null; }
+      }
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));

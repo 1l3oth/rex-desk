@@ -1,0 +1,64 @@
+import http from 'node:http';
+import { randomBytes } from 'node:crypto';
+
+// One-click cloud backup: the person signs in to Turso in the browser, and Rex Desk makes their own database and its key.
+// The sign-in is the same browser page the Turso CLI uses: Turso sends a sign-in key back to a small local address.
+// That key is used once to make the database and is then dropped; only the database's own key is kept (encrypted, by TursoSync).
+const API = 'https://api.turso.tech';
+const DONE_PAGE = '<!doctype html><meta charset="utf-8"><title>Rex Desk</title><body style="font:18px system-ui;padding:40px">Signed in to Turso. You can close this tab and go back to Rex Desk.</body>';
+
+export function tursoSignIn({ timeoutMs = 270000, base = API } = {}) {
+  const state = randomBytes(16).toString('hex');
+  let finish, fail; const result = new Promise((resolve, reject) => { finish = resolve; fail = reject; }); result.catch(() => {});
+  const server = http.createServer((request, response) => {
+    const query = new URL(request.url, 'http://localhost').searchParams;
+    if (query.get('state') !== state || !query.get('jwt')) { response.writeHead(400).end(); return; }
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(DONE_PAGE);
+    finish(query.get('jwt'));
+  });
+  const timer = setTimeout(() => fail(new Error('The Turso sign-in took too long. Try again.')), timeoutMs);
+  const close = () => { clearTimeout(timer); server.close(); };
+  result.then(close, close);
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, () => {
+      const url = new URL(base); url.search = new URLSearchParams({ port: String(server.address().port), redirect: 'true', type: 'cli', state }).toString();
+      resolve({ url: url.toString(), token: result, cancel: () => { fail(new Error('The Turso sign-in was cancelled.')); } });
+    });
+  });
+}
+
+async function call(fetcher, token, method, path, body) {
+  const response = await fetcher(`${API}${path}`, { method, headers: { authorization: `Bearer ${token}`, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const data = await response.json().catch(() => ({}));
+  return { status: response.status, ok: response.ok, data };
+}
+const failed = (what, answer) => new Error(`Turso could not ${what}: ${answer.data?.error || `HTTP ${answer.status}`}`);
+
+// Makes (or finds) the "rex-desk" database in the person's own Turso account and returns its address and a key for it.
+export async function provisionDatabase(platformToken, { fetcher = fetch, name = 'rex-desk' } = {}) {
+  const orgs = await call(fetcher, platformToken, 'GET', '/v1/organizations');
+  if (!orgs.ok) throw failed('read your account', orgs);
+  const list = Array.isArray(orgs.data) ? orgs.data : orgs.data.organizations || [];
+  const org = list.find(item => item.type === 'personal') || list[0];
+  if (!org?.slug) throw new Error('Turso did not return an account to put the database in.');
+  const at = `/v1/organizations/${encodeURIComponent(org.slug)}`;
+  // A database lives in a group. A new account may have none yet, so one is made near this computer.
+  const groups = await call(fetcher, platformToken, 'GET', `${at}/groups`);
+  if (!groups.ok) throw failed('read your groups', groups);
+  let group = (groups.data.groups || [])[0]?.name;
+  if (!group) {
+    const near = await fetcher('https://region.turso.io').then(response => response.json()).catch(() => ({}));
+    const made = await call(fetcher, platformToken, 'POST', `${at}/groups`, { name: 'default', location: near.server || near.client || 'aws-us-east-1' });
+    if (!made.ok && made.status !== 409) throw failed('make a group for the database', made);
+    group = 'default';
+  }
+  let database = await call(fetcher, platformToken, 'POST', `${at}/databases`, { name, group });
+  if (database.status === 409) database = await call(fetcher, platformToken, 'GET', `${at}/databases/${name}`);
+  if (!database.ok) throw failed('make the database', database);
+  const hostname = database.data.database?.Hostname || database.data.database?.hostname;
+  if (!hostname) throw new Error('Turso made the database but did not say where it is.');
+  const key = await call(fetcher, platformToken, 'POST', `${at}/databases/${name}/auth/tokens?authorization=full-access`);
+  if (!key.ok || !key.data.jwt) throw failed('make a key for the database', key);
+  return { url: `libsql://${hostname}`, authToken: key.data.jwt, organization: org.slug, database: name };
+}

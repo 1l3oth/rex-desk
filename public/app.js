@@ -775,8 +775,9 @@ function renderDatabase() {
   const tone = { connected: 'finished', syncing: 'running', connecting: 'running', offline: 'waiting', error: 'failed', local: '' }[database.state] || '';
   return `<div class="settings-card"><div class="database-status"><span class="tag ${tone}">${esc(labels[database.state] || database.state || 'Local only')}</span><dl><div><dt>Pending uploads</dt><dd>${Number(database.pending || 0)}</dd></div><div><dt>Last upload</dt><dd>${database.lastSyncedAt ? `${esc(time(database.lastSyncedAt))} · ${esc(relative(database.lastSyncedAt))}` : 'Not yet'}</dd></div><div><dt>Workspace</dt><dd class="mono">${esc(String(database.workspace || '').slice(0, 8))}</dd></div></dl></div>
     ${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}
+    ${database.configured ? '' : `<div class="turso-auto"><p>New to Turso? Sign in with GitHub or Google and Rex Desk makes your own free database. You never type an address or a key.</p>${button(`${icon('sync')} Set up cloud backup for me`, 'turso-auto', 'primary', 'type="button"')}</div><details class="turso-manual"><summary>I already have a Turso database</summary>`}
     <div class="field-row"><label class="field"><span>Database URL</span><input id="database-url" value="${esc(database.url || '')}" placeholder="libsql://your-database.turso.io" autocomplete="off" spellcheck="false"></label><label class="field"><span>${database.configured ? 'Database token · saved' : 'Database token'}</span><input id="database-token" type="password" autocomplete="new-password" placeholder="${database.configured ? 'Leave blank to keep the saved token' : 'Paste a Turso database token'}"></label></div>
-    <div class="actions">${button(database.configured ? 'Save connection' : 'Connect Turso', 'database-connect', '', 'type="button"')}${database.configured ? button(`${icon('sync')} Upload now & verify`, 'database-sync', 'primary', 'type="button"') : ''}</div>
+    <div class="actions">${button(database.configured ? 'Save connection' : 'Connect Turso', 'database-connect', '', 'type="button"')}${database.configured ? button(`${icon('sync')} Upload now & verify`, 'database-sync', 'primary', 'type="button"') : ''}</div>${database.configured ? '' : '</details>'}
     <small class="muted">The token is encrypted on this computer and never shown again. A local SQLite backup is saved before any database change.</small></div>`;
 }
 function renderSourceSettings(source, index) {
@@ -1315,6 +1316,19 @@ document.addEventListener('click', event => {
   }
   if (name === 'open-orca') {
     void action(async () => { await api(`/runs/${ui.selectedRun}/orca`, { method: 'POST' }); toast('Opened a terminal for this worktree in Orca.'); }); return;
+  }
+  if (name === 'turso-auto') {
+    const label = target.innerHTML; target.disabled = true; target.textContent = 'Opening Turso sign-in…';
+    void action(async () => {
+      try {
+        const { url } = await api('/database/turso-start', { method: 'POST' });
+        window.open(url, '_blank', 'noopener');
+        target.textContent = 'Waiting for you to sign in to Turso in the browser…';
+        ui.snapshot.database = await api('/database/turso-finish', { method: 'POST' });
+        toast(ui.snapshot.database.state === 'connected' ? 'Cloud backup is on. Your own Turso database was made and your history was uploaded.' : `Database made. Turso is ${ui.snapshot.database.state}; changes wait in the local outbox.`, ui.snapshot.database.state !== 'connected');
+      } finally { const element = document.querySelector('[data-database]'); if (element) element.innerHTML = renderDatabase(); else if (target.isConnected) { target.disabled = false; target.innerHTML = label; } }
+    });
+    return;
   }
   if (name === 'database-connect' || name === 'database-sync') {
     const label = target.innerHTML; target.disabled = true; target.textContent = name === 'database-sync' ? 'Uploading…' : 'Connecting…';
