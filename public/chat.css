@@ -9,7 +9,21 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 code,pre{font-family:var(--mono);font-size:12px}
 *{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
-.boot{padding:40px;color:var(--muted)}
+/* Loading screen: the mark breathes over a thin running bar. If the page cannot start, the same spot becomes a card that says why and retries. */
+.boot{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;background:var(--bg);color:var(--muted);font-size:13px;text-align:center}
+.boot-mark{width:44px;height:44px;border-radius:11px;animation:boot-breathe 1.8s ease-in-out infinite}
+.boot-bar{position:relative;display:block;width:120px;height:2px;border-radius:2px;background:var(--line);overflow:hidden}
+.boot-bar::after{content:"";position:absolute;inset:0 auto 0 0;width:40%;border-radius:2px;background:var(--accent);animation:boot-run 1.2s ease-in-out infinite}
+@keyframes boot-breathe{50%{transform:scale(.94);opacity:.75}}
+@keyframes boot-run{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
+.boot:has(h2){gap:0}
+.boot h2,.boot p{max-width:420px}
+.boot:has(h2)>*{width:min(420px,100%)}
+.boot h2{margin:0 0 8px;font-size:16px;color:var(--ink)}
+.boot p{margin:0 0 10px;line-height:1.5}
+.boot .boot-why{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--bad);background:var(--raised);border:1px solid var(--line);border-radius:8px;padding:8px 10px;word-break:break-word;text-align:left}
+.boot .boot-actions{display:flex;justify-content:center;align-items:center;gap:12px;margin-top:6px}
+@media (prefers-reduced-motion:reduce){.boot-mark,.boot-bar::after{animation:none}}
 .hidden{display:none!important}
 
 .chat-shell{display:grid;grid-template-columns:300px minmax(0,1fr);height:100dvh}

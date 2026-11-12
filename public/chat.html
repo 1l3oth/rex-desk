@@ -16,10 +16,24 @@
   <script src="/presence.js"></script>
   <script src="/pwa.js"></script>
   <link rel="stylesheet" href="/chat.css">
+  <script>
+    // If a page file is broken or missing (often someone's edit in progress), say so instead of a blank "Opening" screen, and try again by itself.
+    (() => {
+      let reason = '';
+      addEventListener('error', event => { reason ||= event.message ? `${event.message}${event.filename ? ` in ${event.filename.replace(location.origin, '')}${event.lineno ? `:${event.lineno}` : ''}` : ''}` : (event.target?.src ? `Could not load ${event.target.src.replace(location.origin, '')}` : ''); }, true);
+      setTimeout(() => {
+        const boot = document.querySelector('#app > .boot'); if (!boot || boot.querySelector('h2')) return;
+        boot.innerHTML = '<img class="boot-mark" src="/favicon.svg" alt=""><h2>Rex Desk could not open</h2><p class="boot-why"></p><p>A page file may be mid-edit, or the server may be updating.</p><div class="boot-actions"><button type="button" class="btn primary">Reload now</button><span class="boot-count"></span></div>';
+        boot.querySelector('.boot-why').textContent = reason || 'The page script did not start.';
+        boot.querySelector('button').onclick = () => location.reload();
+        let left = 10; const count = boot.querySelector('.boot-count'), tick = () => { count.textContent = `Trying again in ${left}s`; if (left-- <= 0) location.reload(); else setTimeout(tick, 1000); }; tick();
+      }, 8000);
+    })();
+  </script>
   <script type="module" src="/chat.js"></script>
 </head>
 <body>
-  <div id="app"><div class="boot">Opening Rex Desk…</div></div>
+  <div id="app"><div class="boot"><img class="boot-mark" src="/favicon.svg" alt=""><span>Opening Rex Desk…</span><i class="boot-bar"></i></div></div>
   <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
