@@ -19,6 +19,8 @@ export const MODES = [
 
 // The models offered: the list the signed-in Claude Code reported (kept in the store), or the built-in one until it has.
 export const modelList = (store, provider = 'claude') => { const saved = store?.get?.('models', provider === 'claude' ? 'list' : provider)?.items; return Array.isArray(saved) && saved.length ? saved : provider === 'claude' ? MODELS : []; };
+// The pickers also show the models this account refused (a higher plan only), greyed out, so the person sees why one is missing.
+export const pickerModels = (store, provider = 'claude') => { const refused = store?.get?.('models', provider === 'claude' ? 'list' : provider)?.refusedItems || []; return [...modelList(store, provider), ...refused.map(item => ({ ...item, hint: 'Not on your plan: it needs a higher one', disabled: true }))]; };
 export const modesFor = provider => provider === 'codex' ? [{ id: 'bypassPermissions', label: 'Dangerous' }, { id: 'manual', label: 'Workspace' }, { id: 'plan', label: 'Read only' }] : MODES;
 
 // Only values from the lists above are accepted; anything else is refused instead of being passed to the CLI.

@@ -517,3 +517,21 @@ test('Rex Agent in a group chat gets its own instructions, not the old issue dis
   assert.match(text, /You are the main agent of Rex Desk/);
   assert.ok(!/selected IDs/.test(text));
 });
+
+test('a Codex model the plan cannot run is greyed out, the turn retries on a usable model, and a newly picked model is used again', async () => {
+  const { store, desk, dara } = setup(); const seen = [];
+  store.put('specialist', dara.id, { ...store.get('specialist', dara.id), provider: 'codex', model: 'gpt-sol' });
+  store.put('models', 'codex', { id: 'codex', items: [{ id: 'gpt-sol', label: 'Sol' }, { id: 'gpt-luna', label: 'Luna' }, { id: 'gpt-terra', label: 'Terra' }] });
+  desk.runnerFactory = options => ({ start: async () => { seen.push(options.model); if (options.model === 'gpt-sol') throw new Error(`{"error":{"message":"The 'gpt-sol' model is not supported when using Codex with a ChatGPT account.","code":"model_not_found"}}`); options.event('session', { sessionId: SESSION }); options.event('agent-text', { text: 'Hello' }); }, interrupt() {}, close() {} });
+  await desk.specialistTurn(dara.id, { prompt: 'Hi' });
+  await waitFor(() => seen.length === 2);
+  assert.equal(seen[1], 'gpt-luna', 'the retry uses the first model the plan can run, not the Codex default');
+  const picker = desk.snapshot().choices.providers.codex.models;
+  assert.deepEqual(picker.map(item => [item.id, Boolean(item.disabled)]), [['gpt-luna', false], ['gpt-terra', false], ['gpt-sol', true]]);
+  assert.match(picker[2].hint, /higher/);
+  const runId = store.get('specialist', dara.id).runId;
+  await waitFor(() => !['queued', 'running'].includes(store.get('run', runId).state));
+  await desk.resume(runId, { prompt: 'Again', provider: 'codex', model: 'gpt-terra' });
+  await waitFor(() => seen.length === 3);
+  assert.equal(seen[2], 'gpt-terra', 'a model picked after the fallback is used');
+});

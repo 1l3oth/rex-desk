@@ -6,7 +6,7 @@ import { Memory } from './memory.js';
 import { Specialists, EVIDENCE_RULE, ELI5_RULE } from './specialists.js';
 import { ClaudeRunner } from './runners.js';
 import { Notifier } from './notify.js';
-import { EFFORTS, MODES, modesFor, runOptions, modelList } from './choices.js';
+import { EFFORTS, MODES, modesFor, runOptions, modelList, pickerModels } from './choices.js';
 import { fetchModels } from './models.js';
 import path from 'node:path';
 import os from 'node:os';
@@ -140,7 +140,7 @@ export class Desk {
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       devices: this.peers.status(this.port),
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
-      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, choices: { models: modelList(this.store, this.store.config().provider), efforts: EFFORTS, modes: modesFor(this.store.config().provider), providers: Object.fromEntries(AI_PROVIDERS.map(provider => [provider, { models: modelList(this.store, provider), efforts: EFFORTS, modes: modesFor(provider) }])) }, specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent), device: this.peers.deviceName(agent.node), remote: this.peers.isRemote(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
+      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, choices: { models: modelList(this.store, this.store.config().provider), efforts: EFFORTS, modes: modesFor(this.store.config().provider), providers: Object.fromEntries(AI_PROVIDERS.map(provider => [provider, { models: pickerModels(this.store, provider), efforts: EFFORTS, modes: modesFor(provider) }])) }, specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent), device: this.peers.deviceName(agent.node), remote: this.peers.isRemote(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
   }
   // Run keys are kept as hashes in the database, so an agent still working in an Orca terminal keeps its connection through a restart.
   scopeToken(runId) {
@@ -483,7 +483,7 @@ export class Desk {
       if (!attach) token = this.scopeToken(runId);
       const options = { run, cwd: run.cwd || run.worktree || path.join(this.store.directory, 'coordinator'), projectDirectory: run.projectPath || '', token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
-        mcpUrl: this.mcpUrl, model: run.modelFallback ? undefined : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
+        mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
@@ -546,7 +546,7 @@ ${message}` : message);
         if (agent?.model) this.store.put('specialist', agentId, { ...agent, model: '' });
         // The account's model list can offer a model its plan cannot run (Codex lists them for ChatGPT accounts too): drop it from the pickers.
         const refused = error.message.match(/The '([^']+)' model/)?.[1], listKey = run.provider === 'claude' || !run.provider ? 'list' : run.provider, saved = this.store.get('models', listKey);
-        if (refused && saved?.items?.some(item => item.id === refused)) this.store.put('models', listKey, { ...saved, items: saved.items.filter(item => item.id !== refused), refused: [...new Set([...(saved.refused || []), refused])] });
+        if (refused && saved?.items?.some(item => item.id === refused)) this.store.put('models', listKey, { ...saved, items: saved.items.filter(item => item.id !== refused), refused: [...new Set([...(saved.refused || []), refused])], refusedItems: [...(saved.refusedItems || []).filter(item => item.id !== refused), saved.items.find(item => item.id === refused)] });
         this.patchRun(runId, { modelFallback: true, model: undefined, state: 'queued', followUp: run.followUp || '', error: '', endedAt: null });
         this.store.event(runId, 'message', { text: `The model this agent was set to is not available on this ${run.provider === 'codex' ? 'Codex (ChatGPT)' : run.provider === 'gemini' ? 'Antigravity (Google)' : 'Claude'} account, so it now uses the account's default model. Pick another one on the agent's card if you want.` }, true);
         return;
@@ -939,7 +939,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (!items.length) return modelList(this.store, selected);
     const key = selected === 'claude' ? 'list' : selected, refused = this.store.get('models', key)?.refused || [];
     const usable = items.filter(item => !refused.includes(item.id));
-    this.store.put('models', key, { id: key, items: usable, refused, at: now() });
+    this.store.put('models', key, { id: key, items: usable, refused, refusedItems: items.filter(item => refused.includes(item.id)), at: now() });
     this.specialists.normalizeModels();
     return usable;
   }
@@ -1124,10 +1124,10 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: String(prompt).replace(/\s+/g, ' ').trim(), via: 'rex' }, true);
     // After /clear the next message starts a fresh session that reads the handoff; the message itself goes in as it is.
     if (run.handoffFile && !run.sessionId) {
-      this.patchRun(runId, { state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), execution: 'headless' });
+      this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), execution: 'headless' });
       void this.drain(); return this.run(runId);
     }
-    this.patchRun(runId, { state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', profile: '', permissionMode: 'manual' } : {}), mirror: sameProvider ? run.mirror : undefined,
+    this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', profile: '', permissionMode: 'manual' } : {}), mirror: sameProvider ? run.mirror : undefined,
       ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}),
       instructions: run.role === 'specialist' ? `${run.instructions || ''}${carried}` : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
       ...runOptions({ ...picked, provider }, this.store), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
