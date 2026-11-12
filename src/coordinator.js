@@ -779,10 +779,10 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // An agent tested something and shares the proof: a screenshot, a recording or the test output. The file is kept with the run's evidence,
   // belongs to the task, and is posted where the agent is talking (its room, or its personal chat), so it also shows in that chat's Media tab.
   // An agent puts a file in front of the person: it opens in their file window, at the line given.
-  showFile(runId, { file, line = 0, note = '' }) {
-    const opened = this.files.open(line ? `${file}:${line}` : file, runId);
-    this.shownFile = { id: randomUUID(), path: opened.path, line: opened.line, note: String(note || '').slice(0, 300), runId, at: new Date().toISOString() };
-    this.store.event(runId, 'file-shown', { path: opened.path, line: opened.line });
+  showFile(runId, { file, line = 0, endLine = 0, note = '' }) {
+    const opened = this.files.open(line ? `${file}:${line}${endLine > line ? `-${endLine}` : ''}` : file, runId);
+    this.shownFile = { id: randomUUID(), path: opened.path, line: opened.line, endLine: opened.endLine || 0, note: String(note || '').slice(0, 300), runId, at: new Date().toISOString() };
+    this.store.event(runId, 'file-shown', { path: opened.path, line: opened.line, endLine: opened.endLine || 0 });
     this.store.emit('change', { kind: 'file' });
     return { shown: true, path: opened.path, kind: opened.kind };
   }
@@ -1157,7 +1157,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // A project agent works in its own project like a person on that team: it reads, changes, runs, commits and pushes there when asked.
   ownProjectRule(agent) {
     const folder = agent?.projectPath || '';
-    return [`Your project${folder ? ` is at ${folder}` : ''}. You work in it directly: read it, change the code, run it, test it, commit, and push or open a pull request when the person asks (desk_publish with worktree set to the folder you worked in, or git yourself). Work the way the person says (straight in the folder, on a branch, or in a worktree); when they say nothing, use a branch in the project folder and leave others' uncommitted changes alone.`, WORKTREE_RULE,
+    return [`Your project${folder ? ` is at ${folder}` : ''}. You work in it directly: read it, change the code, run it, test it, commit, and push or open a pull request when the person asks (desk_publish with worktree set to the folder you worked in, or git yourself). Work the way the person says (straight in the folder, on a branch, or in a worktree); when they say nothing, use a branch in the project folder and leave others' uncommitted changes alone.`, WORKTREE_RULE, 'When you point the person at code, write it as `path:start-end` in backticks (like `src/server.js:42-58`): a click opens the file with those lines highlighted.',
       'Answer from your project and from this chat. Do not bring other projects or other chats into your answers on your own. When the person asks you to look at or change another project or folder, do it.'].join(' ');
   }
   // The skills and commands this run's agent has, found the same way the / menu finds them.

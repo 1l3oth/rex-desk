@@ -76,3 +76,14 @@ test('a picture someone attached opens, by its path or its upload link', () => {
   assert.equal(files.open(file).kind, 'image');
   assert.equal(files.open(`/api/uploads/file?path=${encodeURIComponent(file)}`).path, file);
 });
+
+test('a code reference with a line range opens the file with the range', () => {
+  const folder = mkdtempSync(path.join(os.tmpdir(), 'rex-desk-range-')), file = path.join(folder, 'a.js');
+  writeFileSync(file, Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join('\n'));
+  const files = new Files({ store: { directory: folder, list: () => [], get: () => null, config: () => ({ repositories: [] }) } });
+  const check = files.check; files.check = value => value; // the folder is a temporary one, not a project
+  for (const [input, line, endLine] of [[`${file}:42-58`, 42, 58], [`${file}#L10-L20`, 10, 20], [`${file}:7`, 7, 0], [`${file}:7:3`, 7, 0], [`${file}:9-4`, 9, 0]]) {
+    const opened = files.open(input); assert.equal(opened.line, line, input); assert.equal(opened.endLine, endLine, input);
+  }
+  files.check = check;
+});

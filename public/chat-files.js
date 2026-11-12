@@ -46,7 +46,7 @@ async function codeMirror(ext) {
 // ---------- opening ----------
 const extOf = name => { const lower = name.toLowerCase(); return lower === 'dockerfile' ? 'dockerfile' : lower.includes('.') ? lower.split('.').pop() : ''; };
 const remember = () => { if (state.standalone) return; try { localStorage.setItem('rex-desk-files', JSON.stringify({ paths: state.tabs.map(tab => tab.path), active: state.active, shown: state.shown })); } catch { /* private window */ } };
-export async function openFile(ctx, input, { line = 0, run = '', room = '', view = '' } = {}) {
+export async function openFile(ctx, input, { line = 0, endLine = 0, run = '', room = '', view = '' } = {}) {
   state.ctx = ctx;
   try {
     const info = await ctx.api(`/files/open?path=${encodeURIComponent(input)}${run ? `&run=${encodeURIComponent(run)}` : ''}${room ? `&room=${encodeURIComponent(room)}` : ''}`);
@@ -54,7 +54,9 @@ export async function openFile(ctx, input, { line = 0, run = '', room = '', view
     const page = /^\/artifacts\//.test(input) ? input : '';
     if (index < 0) { state.tabs.push({ ...info, saved: info.text, page, view: view || (page || info.kind === 'markdown' ? 'preview' : 'code') }); index = state.tabs.length - 1; }
     else if (view) state.tabs[index].view = view;
-    const tab = state.tabs[index]; tab.line = line || info.line || 0;
+    const tab = state.tabs[index]; tab.line = line || info.line || 0; tab.endLine = (line ? endLine : info.endLine) || 0;
+    // A file opened again in code view, so the lines show highlighted.
+    if (tab.line && tab.view === 'preview' && !page) tab.view = 'code';
     show(index); state.shown = true; remember(); draw();
   } catch (error) { ctx.toast(error.message, true); }
 }
@@ -302,7 +304,15 @@ async function editorFor(tab, pane) {
   const holder = item.wrap.parentElement;
   if (!holder || holder.dataset.path !== tab.path || tab.view === 'preview') { item.wrap.classList.add('hidden'); return; }
   item.wrap.classList.remove('hidden'); item.cm.refresh();
-  if (tab.line) { const line = tab.line - 1; item.cm.setCursor({ line, ch: 0 }); item.cm.scrollIntoView({ line, ch: 0 }, 120); item.cm.addLineClass(line, 'background', 'fw-hit'); setTimeout(() => item.cm?.removeLineClass(line, 'background', 'fw-hit'), 2400); tab.line = 0; }
+  if (tab.line) {
+    // One line flashes; a range the agent pointed at stays marked until the file is opened again.
+    const first = tab.line - 1, last = Math.max(first, (tab.endLine || tab.line) - 1), cm = item.cm;
+    for (const marked of item.marked || []) cm.removeLineClass(marked, 'background', 'fw-hit'); item.marked = [];
+    for (let at = first; at <= last && at < cm.lineCount(); at++) { cm.addLineClass(at, 'background', 'fw-hit'); item.marked.push(at); }
+    cm.setCursor({ line: first, ch: 0 }); cm.scrollIntoView({ from: { line: first, ch: 0 }, to: { line: Math.min(last, first + 30), ch: 0 } }, 120);
+    if (last === first) setTimeout(() => cm.removeLineClass(first, 'background', 'fw-hit'), 2400);
+    tab.line = 0; tab.endLine = 0;
+  }
   item.cm.focus();
 }
 async function onClick(event) {
@@ -375,5 +385,5 @@ export function watchShownFile(ctx) {
   if (!shown?.id) return;
   if (shown.id === state.lastShown) return;
   state.lastShown = shown.id;
-  void openFile(ctx, shown.path, { line: shown.line });
+  void openFile(ctx, shown.path, { line: shown.line, endLine: shown.endLine || 0 });
 }

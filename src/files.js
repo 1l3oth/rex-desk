@@ -65,36 +65,37 @@ export class Files {
     try { files = execFileSync('git', ['-C', base, 'ls-files', '--cached', '--others', '--exclude-standard'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: 15000 }).split('\n').filter(Boolean); } catch { /* not a git folder */ }
     this.cache.set(base, { at: Date.now(), files }); return files;
   }
-  // "src/server.js:42", "file:///F:/x.md", "F:\\x\\y.ts#L10": the path and the line. A relative path is looked up in the chat's worktrees and projects:
+  // "src/server.js:42", "src/server.js:42-58", "file:///F:/x.md", "F:\\x\\y.ts#L10-L20": the path and the line, or a range of lines to highlight. A relative path is looked up in the chat's worktrees and projects:
   // first as written, then as the end of a longer path.
   resolve(input, runId = '', roomId = '') {
-    let text = String(input || '').trim().replace(/^file:\/\/\/?/i, '').replace(/^["'`]|["'`]$/g, ''), line = 0;
+    let text = String(input || '').trim().replace(/^file:\/\/\/?/i, '').replace(/^["'`]|["'`]$/g, ''), line = 0, endLine = 0;
     try { text = decodeURIComponent(text); } catch { /* keep as is */ }
-    const hash = text.match(/#L(\d+)(?:-L?\d+)?$/); if (hash) { line = Number(hash[1]); text = text.slice(0, hash.index); }
-    const colon = text.match(/:(\d+)(?::\d+)?$/); if (colon && !/^[A-Za-z]:$/.test(text.slice(0, colon.index))) { line = Number(colon[1]); text = text.slice(0, colon.index); }
+    const hash = text.match(/#L(\d+)(?:-L?(\d+))?$/); if (hash) { line = Number(hash[1]); endLine = Number(hash[2] || 0); text = text.slice(0, hash.index); }
+    const colon = text.match(/:(\d+)(?:-(\d+)|:\d+)?$/); if (colon && !/^[A-Za-z]:$/.test(text.slice(0, colon.index))) { line = Number(colon[1]); endLine = Number(colon[2] || 0); text = text.slice(0, colon.index); }
+    endLine = endLine > line ? endLine : 0;
     if (!text) throw new Error('Name a file to open.');
     // A file someone attached is linked as /api/uploads/file?path=<the file>.
     const upload = text.match(/^\/api\/uploads\/file\?path=(.+)$/); if (upload) text = upload[1];
     // Evidence an agent shared is linked as /artifacts/<run>/<name>.
     const sharedLink = text.match(/^\/artifacts\/([\w-]+)\/([^/\\]+)$/);
-    if (sharedLink) return { file: this.check(path.join(this.desk.store.directory, 'artifacts', sharedLink[1], sharedLink[2])), line };
-    if (path.isAbsolute(text)) return { file: this.check(text), line };
+    if (sharedLink) return { file: this.check(path.join(this.desk.store.directory, 'artifacts', sharedLink[1], sharedLink[2])), line, endLine };
+    if (path.isAbsolute(text)) return { file: this.check(text), line, endLine };
     const bases = this.bases(runId, roomId);
-    for (const base of bases) { const full = path.resolve(base, text); if (existsSync(full)) return { file: this.check(full), line }; }
+    for (const base of bases) { const full = path.resolve(base, text); if (existsSync(full)) return { file: this.check(full), line, endLine }; }
     const tail = `/${text.replace(/\\/g, '/').replace(/^\.?\//, '')}`;
     for (const base of bases) {
       const found = this.tracked(base).filter(file => `/${file}`.endsWith(tail));
-      if (found.length) return { file: this.check(path.join(base, found.sort((left, right) => left.length - right.length)[0])), line };
+      if (found.length) return { file: this.check(path.join(base, found.sort((left, right) => left.length - right.length)[0])), line, endLine };
     }
     throw new Error(`No file named ${text} in this chat's worktrees or your projects.`);
   }
   open(input, runId, roomId) {
-    const { file, line } = this.resolve(input, runId, roomId);
+    const { file, line, endLine } = this.resolve(input, runId, roomId);
     if (!existsSync(file)) throw new Error(`${file} does not exist.`);
     const stat = statSync(file); if (stat.isDirectory()) throw new Error(`${file} is a folder. Name a file in it.`);
     const head = Buffer.alloc(Math.min(stat.size, 8192)); if (head.length) { const fd = openSync(file, 'r'); try { readSync(fd, head, 0, head.length, 0); } finally { closeSync(fd); } }
     const kind = kindOf(file, head), ext = path.extname(file).toLowerCase(), textual = ['text', 'markdown', 'html', 'csv'].includes(kind) || (kind === 'image' && ext === '.svg');
-    const result = { path: file, name: path.basename(file), ext, kind, size: stat.size, mtime: stat.mtimeMs, line, formattable: PRETTIER.includes(ext), editable: textual && stat.size <= TEXT_MAX };
+    const result = { path: file, name: path.basename(file), ext, kind, size: stat.size, mtime: stat.mtimeMs, line, endLine, formattable: PRETTIER.includes(ext), editable: textual && stat.size <= TEXT_MAX };
     if (result.editable) result.text = readFileSync(file, 'utf8');
     return result;
   }

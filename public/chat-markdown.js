@@ -3,7 +3,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&a
 const LINK = 'target="_blank" rel="noopener noreferrer"';
 const CODE = '\u0000';
 // A path to a file (`src/server.js:42`, `F:\x\notes.md`) in a chat opens in the file window when clicked.
-const FILE_PATH = /^(?:[A-Za-z]:[\\/]|~[\\/]|\.{1,2}[\\/]|\/)?(?:[\w@.()+-]+[\\/])*[\w@()+-][\w@.()+-]*\.[A-Za-z][A-Za-z0-9]{0,7}(?::\d+(?::\d+)?|#L\d+(?:-L?\d+)?)?$/;
+const FILE_PATH = /^(?:[A-Za-z]:[\\/]|~[\\/]|\.{1,2}[\\/]|\/)?(?:[\w@.()+-]+[\\/])*[\w@()+-][\w@.()+-]*\.[A-Za-z][A-Za-z0-9]{0,7}(?::\d+(?:-\d+|:\d+)?|#L\d+(?:-L?\d+)?)?$/;
 const isFile = code => FILE_PATH.test(code) && !/^\d+(\.\d+)+$/.test(code) && !/^[\w-]+\.(com|org|net|io|dev|ai|app|kr)$/i.test(code);
 
 function inline(text, mentions = [], tasks = {}) {
