@@ -54,7 +54,8 @@ const webAgentPrompt = task => [
 const LIMIT = /usage limit|limit reached|out of (extra )?usage|credit balance is too low|weekly limit|5-hour limit|rate_limit_error|reached your .{0,20}limit/i;
 const firstTaskReview = project => `This is the first task on ${project} whose workflow the person has not checked yet. When the work is done and verified, before your final report: write the workflow you actually followed as a short numbered list (where you branched from, how you set it up, how you tested and verified, where the pull request goes, who reviews, anything you avoided touching). Ask the person with desk_ask whether to change anything, with the options "Looks right" and "Change something" plus a text box for what to change. Save each step they confirm or correct with desk_learn_workflow (one short rule each), then call desk_confirm_workflow so every agent on ${project} follows it from now on and nobody asks again.`;
 const addTokens = (total = {}, more = {}) => Object.fromEntries(['input', 'output', 'cacheRead', 'cacheWrite'].map(key => [key, (total?.[key] || 0) + (more?.[key] || 0)]));
-const MODEL_MISSING = /issue with the selected model|may not have access to it|model[^.]{0,40}(does not exist|not found|is not available)/i;
+// Codex on a ChatGPT plan says "The '<model>' model is not supported when using Codex with a ChatGPT account" (model_not_found).
+const MODEL_MISSING = /issue with the selected model|may not have access to it|model[^.]{0,40}(does not exist|not found|is not available|is not supported)|model_not_found/i;
 const terminalStates = new Set(['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked']);
 
 export function validateAnswer(interaction, answer) {
@@ -536,8 +537,11 @@ ${message}` : message);
       if (!controller.signal.aborted && MODEL_MISSING.test(error.message) && !run.modelFallback) {
         const agentId = run.roomAgent || run.specialistId, agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
         if (agent?.model) this.store.put('specialist', agentId, { ...agent, model: '' });
+        // The account's model list can offer a model its plan cannot run (Codex lists them for ChatGPT accounts too): drop it from the pickers.
+        const refused = error.message.match(/The '([^']+)' model/)?.[1], listKey = run.provider === 'codex' ? 'codex' : 'list', saved = this.store.get('models', listKey);
+        if (refused && saved?.items?.some(item => item.id === refused)) this.store.put('models', listKey, { ...saved, items: saved.items.filter(item => item.id !== refused), refused: [...new Set([...(saved.refused || []), refused])] });
         this.patchRun(runId, { modelFallback: true, model: undefined, state: 'queued', followUp: run.followUp || '', error: '', endedAt: null });
-        this.store.event(runId, 'message', { text: `The model this agent was set to is not available on this Claude account, so it now uses the account's default model. Pick another one on the agent's card if you want.` }, true);
+        this.store.event(runId, 'message', { text: `The model this agent was set to is not available on this ${run.provider === 'codex' ? 'Codex (ChatGPT)' : 'Claude'} account, so it now uses the account's default model. Pick another one on the agent's card if you want.` }, true);
         return;
       }
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: error.message, endedAt: now() });
@@ -552,6 +556,8 @@ ${message}` : message);
       this.cancelQuestions(runId);
       this.live.delete(runId); void this.drain();
       void this.rooms.turnFinished(runId).catch(error => this.store.event(runId, 'error', { message: error.message }));
+      // A chat whose context is nearly full hands over to a fresh session by itself (and waits with queued messages until then).
+      if (!this.closed && await this.autoHandoff(runId).catch(error => { this.store.event(runId, 'error', { message: `Automatic handoff failed: ${error.message}` }, true); return false; })) return;
       // Messages that came in while the agent was busy go in now, as the next turn.
       const waiting = this.store.get('run', runId);
       if (waiting?.queued?.length && ['needs_evidence', 'finished'].includes(waiting.state) && !this.closed) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
@@ -778,9 +784,34 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (run.role === 'worker' && run.roomId && run.specialistId) void this.rooms.post(run.roomId, { fromAgentId: run.specialistId, text: String(text).slice(0, 8000) }).catch(() => {});
     return { delivered: true };
   }
+  // Automatic handoff. When a turn ends with the context past the threshold (config autoHandoff, 0.85 by default; false turns it off),
+  // the agent first writes its own short handoff in one quiet turn; when that turn ends, the chat starts fresh with that note and the
+  // recent conversation, and the next message (or one already waiting) goes to the fresh session. A room agent skips the note, so the
+  // room does not fill with it. Returns true when it took over the end of the turn.
+  async autoHandoff(runId) {
+    const run = this.store.get('run', runId), limit = this.store.config().autoHandoff ?? 0.85;
+    if (run?.autoHandoff && run.state === 'stopped') this.patchRun(runId, { autoHandoff: undefined });
+    if (!run || run.external || run.execution === 'orca' || limit === false || run.state === 'stopped') return false;
+    if (run.autoHandoff === 'writing') {
+      const note = this.store.events(runId, { visible: true, limit: 400 }).filter(event => event.kind === 'agent-text' && String(event.createdAt || '') >= String(run.turnStartedAt || '')).map(event => event.text).join('\n\n');
+      this.patchRun(runId, { autoHandoff: undefined });
+      await this.freshStart(runId, { note, reason: `automatically, because the conversation filled ${Math.round(100 * (run.handoffShare || limit))}% of the context` });
+      const waiting = this.store.get('run', runId);
+      if (waiting?.queued?.length && !this.closed) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
+      return true;
+    }
+    const share = Number(run.contextUsed || 0) / Number(run.contextWindow || 200000);
+    if (!(share >= Number(limit)) || !['finished', 'needs_evidence'].includes(run.state)) return false;
+    if (run.roomAgent) { await this.freshStart(runId, { reason: `automatically, because the conversation filled ${Math.round(100 * share)}% of the context` }); return false; }
+    this.patchRun(runId, { autoHandoff: 'writing', handoffShare: share });
+    this.store.event(runId, 'phase', { text: `Context ${Math.round(100 * share)}% full: writing a handoff for a fresh session` }, true);
+    await this.resume(runId, { silent: true, prompt: 'Your context is nearly full, so this chat moves to a fresh session after this reply. Write the handoff for your successor now, as your whole reply: what the person asked for and what is done, what you are in the middle of, decisions and rules the person gave, files and branches involved, and the next step. Plain English, short lists, no greetings. Do not start new work.' });
+    return true;
+  }
   // /clear in a chat: the conversation so far is written to a handoff file, the agent's session is dropped, and the next message
   // starts a fresh session that reads the handoff first. The chat history stays on screen; only the agent's context is new.
-  async freshStart(runId) {
+  // note: the agent's own handoff (automatic handoff); reason: why it starts fresh, for the handoff and the chat.
+  async freshStart(runId, { note = '', reason = '' } = {}) {
     const run = this.run(runId);
     if (run.external) throw new Error('This conversation lives in another app.');
     if (this.live.has(runId)) await this.stop(runId);
@@ -791,7 +822,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     let recent = '';
     for (const line of lines.reverse()) { if (recent.length + line.length > 24000) break; recent = `${line}\n\n${recent}`; }
     const task = run.taskId ? this.store.get('task', run.taskId) : null;
-    const handoff = [`# Handoff for ${name}`, `Written ${now()} when the person cleared the conversation (/clear). Read it, then continue from here.`,
+    const handoff = [`# Handoff for ${name}`, `Written ${now()} ${reason || 'when the person cleared the conversation (/clear)'}. Read it, then continue from here.`,
+      note ? `## Your own handoff, written just before the fresh start\n${String(note).trim().slice(0, 12000)}` : '',
       task ? `## Task\n#${task.taskNumber || task.externalId} ${task.titleEn || task.title}${task.url ? `\n${task.url}` : ''}` : '',
       run.worktree ? `## Where the work is\nWorktree: ${run.worktree}${run.branch ? `\nBranch: ${run.branch}` : ''}` : '',
       agentId && agentId !== 'main' ? `## What you learned\n${this.specialists.lessonsText(agentId) || 'Nothing saved yet.'}` : '',
@@ -799,7 +831,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const directory = path.join(this.store.directory, 'handoffs'); mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `${runId}-${Date.now()}.md`); writeFileSync(file, handoff);
     this.patchRun(runId, { contextUsed: 0, sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
-    this.store.event(runId, 'chat-cleared', { text: `${name} starts fresh with your next message and reads a handoff of what was said before.` }, true);
+    this.store.event(runId, 'chat-cleared', { text: reason ? `${name}'s context was nearly full, so it starts fresh with your next message and reads a handoff of this chat first.` : `${name} starts fresh with your next message and reads a handoff of what was said before.`, auto: Boolean(reason) }, true);
     return { cleared: true, handoff: file };
   }
   // An agent tested something and shares the proof: a screenshot, a recording or the test output. The file is kept with the run's evidence,
@@ -896,10 +928,11 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const selected = provider || this.store.config().provider;
     const items = selected === 'codex' ? await codexModels({ env: this.agents.environment(selected) }) : await fetchModels({ env: this.agents.environment(selected), sdk });
     if (!items.length) return modelList(this.store, selected);
-    const key = selected === 'claude' ? 'list' : selected;
-    this.store.put('models', key, { id: key, items, at: now() });
+    const key = selected === 'claude' ? 'list' : selected, refused = this.store.get('models', key)?.refused || [];
+    const usable = items.filter(item => !refused.includes(item.id));
+    this.store.put('models', key, { id: key, items: usable, refused, at: now() });
     this.specialists.normalizeModels();
-    return items;
+    return usable;
   }
   async fillEnglishNames(limit = 40) {
     if (!this.jev.apiKey() || this.namingBusy) return; this.namingBusy = true;

@@ -142,6 +142,10 @@ Orca shows these worktrees only when the repository's external-worktree visibili
 
 Each agent reply runs in a small process of its own (`src/agent-host.js`), not inside the Rex Desk server. It runs the same Agent SDK code, writes every step in order to a journal under `.local/hosts/`, and takes answers, new messages and Stop over a private local port. When Rex Desk restarts (for an update, or by hand), the agents keep working; the new server reads each journal from where it stopped, asks again any question an agent was still waiting on, and settles the reply when it ends. The process ends with its reply (about 60 MB while it works). An agent tool call made during the few seconds the server is down fails and the agent tries again. Set `agentHost: false` in the config to run agents inside the server as before.
 
+## Automatic handoff
+
+When an agent's reply ends with its context more than 85% full (the ring by the message box), it writes its own short handoff in one more quiet turn: what you asked, what is done, what it is in the middle of, your rules, the files involved and the next step. The chat then starts fresh, like `/clear`: your next message (or one already waiting) goes to a new session that reads that note and the recent conversation first. Agents in group chats skip the note and hand over the conversation only. Set `autoHandoff` in the config to another share (0.5 to 0.98) or to `false` to turn it off.
+
 ## File window
 
 The file window moves out of the way while you type: when it lies over the conversation or the message box, focusing the message box moves it over the side panel (or shrinks it to the **Files** button when there is no side panel), and clicking it brings it back where it was. The arrows button in its top bar turns this on or off. Agents place it for you: `desk_show_file` takes `place` (side, right, left, top, center, corner or big), and `desk_file_window` moves, hides, shows or closes it, or closes one file; files with unsaved edits are never closed.
