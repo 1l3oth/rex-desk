@@ -1027,8 +1027,9 @@ function earlierChats(agent) {
 // Messages on their way to an agent on another computer. One leaves the list when that computer's copy of the chat has it.
 function outboxHtml(run, shown) {
   const waiting = ui.outbox?.get(run.id); if (!waiting?.length) return '';
-  const arrived = item => shown.some(event => event.kind === 'human-message' && String(event.createdAt || '') >= item.at.slice(0, 19) && String(event.text || '').includes(item.text.slice(0, 300)))
-    || shown.some(event => event.kind === 'human-message' && String(event.text || '') === item.text && Date.parse(event.createdAt || 0) > Date.parse(item.at) - 120000);
+  // The words the person sees, without the hidden voice note; a few minutes of leeway for the two computers' clocks.
+  const words = text => spokenText(String(text || '')).text.replace(/\s+/g, ' ').trim().slice(0, 200);
+  const arrived = item => shown.some(event => event.kind === 'human-message' && Date.parse(event.createdAt || 0) > Date.parse(item.at) - 300000 && words(event.text).includes(words(item.text)));
   const left = waiting.filter(item => !arrived(item)); ui.outbox.set(run.id, left);
   const agent = personalAgent(run), where = agent?.device || 'the other computer', off = agent?.status?.state === 'offline';
   return left.map(item => {

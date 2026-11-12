@@ -207,6 +207,7 @@ export class Peers {
       if (command.action === 'say') result = await this.desk.specialistTurn(command.agentId, { prompt: String(command.input?.text || '').slice(0, 4000) });
       else if (command.action === 'assign') result = await this.desk.assignTask({ specialistId: command.agentId, ...this.localTask(command.input) });
       else if (command.action === 'chat-stop') result = await this.desk.stop(command.runId);
+      else if (command.action === 'answer') result = this.desk.answer(command.input?.interactionId, command.input?.answer || {});
       else if (command.action === 'chat-say') {
         // Written on another computer in this agent's personal chat: said to the agent while it works, or it picks the chat up again.
         const run = this.store.get('run', command.runId), text = String(command.input?.text || '');
@@ -269,13 +270,16 @@ export class Peers {
     }
     events.splice(0, Math.max(0, events.length - COPY_KEEP));
     const slim = Object.fromEntries(Object.entries(run).filter(([key, value]) => !['queued', 'mirror', 'prompt'].includes(key) && JSON.stringify(value ?? '').length < 4000));
-    this.store.put('chatcopy', runId, { id: runId, agentId: run.specialistId, run: slim, events, at: now() });
+    // Questions and approvals waiting for the person travel with the chat, so they can be answered from any computer.
+    const asks = this.store.list('interaction').filter(item => item.runId === runId && item.state === 'pending')
+      .map(item => Object.fromEntries(Object.entries(item).filter(([, value]) => JSON.stringify(value ?? '').length < 20000)));
+    this.store.put('chatcopy', runId, { id: runId, agentId: run.specialistId, run: slim, events, asks, at: now() });
   }
   watchChats() {
     if (this.watching) return; this.watching = true;
     const waiting = new Map();
     this.store.on?.('change', event => {
-      const runId = event.kind === 'event' ? event.runId : event.kind === 'run' ? event.id : '';
+      const runId = event.kind === 'event' ? event.runId : event.kind === 'run' ? event.id : event.kind === 'interaction' ? this.store.get('interaction', event.id)?.runId || '' : '';
       if (!runId || waiting.has(runId)) return;
       const timer = setTimeout(() => { waiting.delete(runId); try { this.copyChat(runId); } catch { /* the next change tries again */ } }, 1500);
       timer.unref?.(); waiting.set(runId, timer);
@@ -295,6 +299,21 @@ export class Peers {
     const direct = new Set(this.remoteRuns().map(run => run.id));
     return this.store.list('chatcopy').filter(copy => copy.node && copy.node !== this.self.id && copy.run && !direct.has(copy.id) && !this.store.get('run', copy.id))
       .map(copy => ({ ...copy.run, remote: copy.node, cloudCopy: true }));
+  }
+  cloudInteractions() {
+    const direct = new Set(this.remoteInteractions().map(item => item.id));
+    return this.store.list('chatcopy').filter(copy => copy.node && copy.node !== this.self.id && !this.store.get('run', copy.id) && !this.runOwner(copy.id))
+      .flatMap(copy => (copy.asks || []).filter(item => !direct.has(item.id) && !(this.answered ||= new Set()).has(item.id)).map(item => ({ ...item, remote: copy.node, cloudCopy: true })));
+  }
+  askCopy(interactionId) {
+    if (this.store.get('interaction', interactionId) || this.interactionOwner(interactionId)) return null;
+    return this.store.list('chatcopy').find(copy => copy.node && copy.node !== this.self.id && (copy.asks || []).some(item => item.id === interactionId)) || null;
+  }
+  answerAsk(copy, interactionId, answer) {
+    const id = randomUUID();
+    this.store.put('peercmd', id, { id, target: copy.node, action: 'answer', runId: copy.id, agentId: copy.agentId, input: { interactionId, answer }, at: now(), done: false });
+    (this.answered ||= new Set()).add(interactionId);
+    return { queued: true, message: this.online(copy.node) ? `Answer sent to ${this.deviceName(copy.node)}.` : `${this.deviceName(copy.node)} is off. The answer reaches it when it is back on.` };
   }
   // The person writes in a chat whose agent is on another computer: straight there when it is reached directly, otherwise
   // as a command in the shared database that the agent's computer runs within seconds (or when it is back on).

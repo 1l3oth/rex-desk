@@ -175,3 +175,23 @@ test('the same message to an agent on another computer is sent once, and its cha
   const events = a.desk.store.get('chatcopy', runId).events;
   assert.equal(events.filter(event => event.text === 'Introduce yourself.').length, 1);
 });
+
+test('a question an agent on another computer is waiting on shows here and is answered from here', async () => {
+  const { a, b } = computers();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  await a.desk.specialistTurn(dara.id, { prompt: 'Hello' });
+  const runId = a.desk.store.get('specialist', dara.id).runId;
+  await waitFor(() => !['starting', 'running'].includes(a.desk.store.get('run', runId).state));
+  const answered = a.desk.ask(runId, { kind: 'approval', method: 'approval', title: 'Restart Rex Desk?', request: { command: 'restart' } });
+  await waitFor(() => a.desk.store.list('interaction').some(item => item.runId === runId && item.state === 'pending'));
+  a.desk.peers.copyChat(runId);
+  const carry = (from, to, kinds) => to.desk.peers.applyAll(kinds.flatMap(kind => from.desk.store.list(kind).map(value => ({ kind, id: value.id, value }))));
+  carry(a, b, ['specialist', 'chatcopy']);
+  const ask = b.desk.snapshot().interactions.find(item => item.runId === runId);
+  assert.equal(ask?.title, 'Restart Rex Desk?', 'the question shows on the home laptop');
+  b.desk.peers.answerAsk(b.desk.peers.askCopy(ask.id), ask.id, { action: 'accept', content: {} });
+  assert.ok(!b.desk.snapshot().interactions.some(item => item.id === ask.id), 'answered here, so it leaves the list at once');
+  carry(b, a, ['peercmd']);
+  const answer = await answered;
+  assert.equal(answer.action, 'accept');
+});
