@@ -195,3 +195,18 @@ test('a question an agent on another computer is waiting on shows here and is an
   const answer = await answered;
   assert.equal(answer.action, 'accept');
 });
+
+test('a picture attached in a chat on another computer shows here too', async () => {
+  const { a, b } = computers();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  const folder = path.join(a.desk.store.directory, 'uploads', '0b5e2c3a-1111-4222-8333-444455556666'); mkdirSync(folder, { recursive: true });
+  const picture = path.join(folder, 'screen.png'); writeFileSync(picture, Buffer.from([137, 80, 78, 71, 1, 2, 3]));
+  await a.desk.specialistTurn(dara.id, { prompt: `Look at this.\n\nAttached files (read them from these paths):\n- ${picture}` });
+  const runId = a.desk.store.get('specialist', dara.id).runId;
+  await waitFor(() => !['starting', 'running'].includes(a.desk.store.get('run', runId).state));
+  a.desk.peers.copyChat(runId);
+  b.desk.peers.applyAll(['specialist', 'chatcopy', 'chatfile'].flatMap(kind => a.desk.store.list(kind).map(value => ({ kind, id: value.id, value }))));
+  const shown = b.desk.peers.chatPicture(picture);
+  assert.deepEqual([...shown.data], [137, 80, 78, 71, 1, 2, 3]);
+  assert.equal(b.desk.peers.chatPicture(path.join(folder, 'other.png')), null);
+});

@@ -4,12 +4,15 @@
 // and the phone shows the same chats. A computer that is off only takes its own agents offline; messages for them wait.
 import os from 'node:os';
 import path from 'node:path';
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { HUMAN } from './rooms.js';
 
 const now = () => new Date().toISOString();
-const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000;
+const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000, PICTURE_BYTES = 2 * 1024 * 1024;
+const PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+// A picture is known by its path on the computer that has it.
+export const chatFileId = file => createHash('sha1').update(path.resolve(String(file)).toLowerCase()).digest('hex');
 // Tailscale gives every device an address in 100.64.0.0/10.
 export const tailscaleAddresses = (interfaces = os.networkInterfaces()) => Object.values(interfaces).flat().filter(item => item && item.family === 'IPv4' && !item.internal)
   .map(item => item.address).filter(address => { const [first, second] = address.split('.').map(Number); return first === 100 && second >= 64 && second <= 127; });
@@ -274,6 +277,25 @@ export class Peers {
     const asks = this.store.list('interaction').filter(item => item.runId === runId && item.state === 'pending')
       .map(item => Object.fromEntries(Object.entries(item).filter(([, value]) => JSON.stringify(value ?? '').length < 20000)));
     this.store.put('chatcopy', runId, { id: runId, agentId: run.specialistId, run: slim, events, asks, at: now() });
+    this.sharePictures(events);
+  }
+  // Pictures the person attached in a shared chat travel with it (up to 2 MB each), so they show on the other computers too.
+  sharePictures(events) {
+    const uploads = path.resolve(this.store.directory, 'uploads').toLowerCase();
+    for (const event of events) {
+      for (const match of String(event.text || '').matchAll(/^- (.+)$/gm)) {
+        const file = path.resolve(match[1].trim());
+        if (!PICTURE.test(file) || !file.toLowerCase().startsWith(uploads + path.sep) || !existsSync(file)) continue;
+        const id = chatFileId(file), size = statSync(file).size;
+        if (size > PICTURE_BYTES || this.store.get('chatfile', id)?.size === size) continue;
+        this.store.put('chatfile', id, { id, path: file, name: path.basename(file), size, data: readFileSync(file).toString('base64'), at: now() });
+      }
+    }
+  }
+  // One picture from another computer's chat, when it is not on this one.
+  chatPicture(file) {
+    const item = this.store.get('chatfile', chatFileId(file));
+    return item?.data && PICTURE.test(item.name) ? { name: item.name, data: Buffer.from(item.data, 'base64') } : null;
   }
   watchChats() {
     if (this.watching) return; this.watching = true;
@@ -281,7 +303,7 @@ export class Peers {
     this.store.on?.('change', event => {
       const runId = event.kind === 'event' ? event.runId : event.kind === 'run' ? event.id : event.kind === 'interaction' ? this.store.get('interaction', event.id)?.runId || '' : '';
       if (!runId || waiting.has(runId)) return;
-      const timer = setTimeout(() => { waiting.delete(runId); try { this.copyChat(runId); } catch { /* the next change tries again */ } }, 1500);
+      const timer = setTimeout(() => { waiting.delete(runId); try { this.copyChat(runId); } catch { /* the next change tries again */ } }, 4000);
       timer.unref?.(); waiting.set(runId, timer);
     });
     // The chats that were there before this computer started sharing them.

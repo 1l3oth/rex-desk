@@ -623,7 +623,12 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       // A file someone attached in a chat, to show in the chat's Media and Files tabs. Only files under Rex Desk's uploads folder.
       if (url.pathname === '/api/uploads/file' && request.method === 'GET') {
         const uploads = path.resolve(store.directory, 'uploads'), file = path.resolve(String(url.searchParams.get('path') || ''));
-        if (!file.toLowerCase().startsWith(`${uploads.toLowerCase()}${path.sep}`) || !existsSync(file)) return json(response, 404, { error: 'That file is not in the chat uploads.' });
+        if (!file.toLowerCase().startsWith(`${uploads.toLowerCase()}${path.sep}`) || !existsSync(file)) {
+          // A picture attached in a chat on another computer comes from the shared copy of that chat.
+          const picture = desk.peers.chatPicture(String(url.searchParams.get('path') || ''));
+          if (picture) { response.writeHead(200, { 'Content-Type': mime[path.extname(picture.name).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Length': picture.data.length }); return response.end(picture.data); }
+          return json(response, 404, { error: 'That file is not in the chat uploads.' });
+        }
         return serveFile(request, response, file, { sandbox: /\.(html?|svg)$/i.test(file), download: url.searchParams.has('download'), cache: 'private, max-age=86400' });
       }
       if (url.pathname === '/api/uploads' && request.method === 'POST') {
