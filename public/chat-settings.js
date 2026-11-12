@@ -17,6 +17,22 @@ const SECTIONS = [
   ['backup', 'Backup and updates', 'Cloud copy, app updates'],
   ['connect', 'Connect another AI', 'Let another assistant use Rex Desk'],
 ];
+// An icon for each section, shown in the phone's list of sections.
+const ST_ICON = {
+  general: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+  notify: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
+  agents: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 14.5a5 5 0 0 1 5.5 5"/>',
+  accounts: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2.2"/><path d="M5.5 16a3.6 3.6 0 0 1 7 0M14 10h4M14 13.5h3"/>',
+  projects: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  sources: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/>',
+  jev: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  schedule: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  signins: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+  devices: '<rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1"/>',
+  backup: '<path d="M7 18a5 5 0 1 1 .9-9.9A6 6 0 0 1 19 10a4 4 0 0 1-1 7.9"/><path d="M12 12v8M9 15l3-3 3 3"/>',
+  connect: '<path d="M9 15l6-6M10 6l1-1a4.2 4.2 0 0 1 6 6l-1 1M14 18l-1 1a4.2 4.2 0 0 1-6-6l1-1"/>',
+};
+const stIcon = id => `<span class="st-ic st-ic-${id}" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ST_ICON[id] || ''}</svg></span>`;
 const ASKS = { quit_app: 'Close an app', hibernate: 'Hibernate', shutdown: 'Shut down', restart: 'Restart', sign_out: 'Sign out', stop_program: 'Stop a program', empty_trash: 'Empty the Recycle Bin' };
 const LANGS = [['en', 'English'], ['km', 'Khmer'], ['ko', 'Korean']];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -25,7 +41,8 @@ export function openSettings(ctx, section = 'general') {
   const { ui, esc, api, toast, refresh } = ctx;
   document.querySelector('.dialog-back.settings')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back settings'; document.body.append(back);
-  const state = { section, extra: {} };
+  const phone = window.matchMedia('(max-width:760px)').matches;
+  const state = { section, extra: {}, list: phone && section === 'general' };
   const config = () => ui.snap.config || {};
   const field = (label, control, help = '') => `<label class="st-field"><span>${label}</span>${control}${help ? `<small>${help}</small>` : ''}</label>`;
   const check = (name, on, label, help = '') => `<label class="st-check"><input type="checkbox" name="${name}" ${on ? 'checked' : ''}><span><b>${label}</b>${help ? `<small>${help}</small>` : ''}</span></label>`;
@@ -100,8 +117,9 @@ export function openSettings(ctx, section = 'general') {
   };
   const saves = new Set(['general', 'agents', 'projects', 'jev', 'schedule', 'signins']);
   const draw = () => {
-    back.innerHTML = `<form class="settings-pop" aria-label="Settings"><nav class="st-nav"><h1>Settings</h1>${SECTIONS.map(([id, label, hint]) => `<button type="button" class="${state.section === id ? 'on' : ''}" data-st-section="${id}"><b>${label}</b><small>${hint}</small></button>`).join('')}</nav>
-      <div class="st-body"><div class="st-panel" data-st-panel>${panels[state.section]()}</div>
+    const title = (SECTIONS.find(([id]) => id === state.section) || [])[1] || 'Settings';
+    back.innerHTML = `<form class="settings-pop${state.list ? ' st-listing' : ' st-open'}" aria-label="Settings"><nav class="st-nav"><div class="st-navhead"><h1>Settings</h1><button type="button" class="st-done" data-st-close>Done</button></div>${SECTIONS.map(([id, label, hint]) => `<button type="button" class="${state.section === id && !state.list ? 'on' : ''}" data-st-section="${id}">${stIcon(id)}<span class="st-nl"><b>${label}</b><small>${hint}</small></span><svg class="st-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`).join('')}</nav>
+      <div class="st-body"><div class="st-mhead"><button type="button" class="st-back" data-st-back aria-label="Back to Settings"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span>Settings</span></button><b>${esc(title)}</b></div><div class="st-panel" data-st-panel>${panels[state.section]()}</div>
       <div class="st-foot">${saves.has(state.section) ? '<button type="button" class="btn primary" data-st-save>Save</button>' : ''}<span class="spacer"></span><button type="button" class="btn" data-st-close>Close</button></div></div>
       <button type="button" class="st-x" data-st-close aria-label="Close settings">×</button></form>`;
   };
@@ -121,7 +139,8 @@ export function openSettings(ctx, section = 'general') {
     const target = event.target;
     try {
       if (target === back || target.closest('[data-st-close]')) { back.remove(); return; }
-      const section = target.closest('[data-st-section]'); if (section) { state.section = section.dataset.stSection; if (state.section === 'general') state.extra.autostart = await api('/autostart').catch(() => null); draw(); return; }
+      if (target.closest('[data-st-back]')) { state.list = true; draw(); return; }
+      const section = target.closest('[data-st-section]'); if (section) { state.section = section.dataset.stSection; state.list = false; if (state.section === 'general') state.extra.autostart = await api('/autostart').catch(() => null); draw(); return; }
       if (target.closest('[data-st-save]')) { target.closest('[data-st-save]').disabled = true; await save(); return; }
       const open = target.closest('[data-st-open]'); if (open) { back.remove(); document.body.insertAdjacentHTML('beforeend', `<button hidden data-action="${open.dataset.stOpen === 'accounts' ? 'accounts' : open.dataset.stOpen === 'sources' ? 'task-connect' : 'st-voice'}" id="st-opener"></button>`); document.getElementById('st-opener').click(); document.getElementById('st-opener')?.remove(); return; }
       const go = target.closest('[data-st-go]'); if (go) { back.remove(); ctx.open(go.dataset.stGo); return; }
