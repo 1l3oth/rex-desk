@@ -138,6 +138,10 @@ Nothing runs out of sight: every run, whether an issue agent, the main agent, or
 
 Orca shows these worktrees only when the repository's external-worktree visibility is **show**; the run dialog checks this and offers a one-click fix. **Open in Orca** on any run opens a plain terminal in its worktree without starting a second agent.
 
+## Agents keep working through a restart
+
+Each agent reply runs in a small process of its own (`src/agent-host.js`), not inside the Rex Desk server. It runs the same Agent SDK code, writes every step in order to a journal under `.local/hosts/`, and takes answers, new messages and Stop over a private local port. When Rex Desk restarts (for an update, or by hand), the agents keep working; the new server reads each journal from where it stopped, asks again any question an agent was still waiting on, and settles the reply when it ends. The process ends with its reply (about 60 MB while it works). An agent tool call made during the few seconds the server is down fails and the agent tries again. Set `agentHost: false` in the config to run agents inside the server as before.
+
 ## Worktrees
 
 Each personal and group chat has a **Worktrees** tab beside it that lists the worktrees of that chat like a source control panel. **All worktrees** there opens the full history: every git worktree in your configured projects, whether Rex Desk made it for a run, an agent made it in a chat, or you made it by hand. Each card shows the branch, the folder (click to copy), who made it, and the tasks that live in it. Add a task from the card's list to combine it with the others; whoever is then given that task is told to work in that worktree. A task lives in one worktree at a time. A removed worktree stays under **History** with its tasks.

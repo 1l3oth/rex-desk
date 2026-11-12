@@ -26,6 +26,7 @@ import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
 import { inspectRepository } from './repositories.js';
 import { Worktrees } from './worktrees.js';
+import { HostRunner, hostAlive } from './hosts.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
 import { Jev } from './jev.js';
@@ -238,9 +239,19 @@ export class Desk {
     await this.resume(runId, { provider: picked.provider || run.provider, prompt: text, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });
     return { sent: true };
   }
+  // Agents in their own process that kept working while Rex Desk restarted: follow each one again. One whose process ended
+  // without finishing is marked interrupted, and picks up again by itself like any agent cut off by a restart.
+  reattachHosts() {
+    for (const run of this.store.list('run').filter(item => item.reattach === 'host')) {
+      const unread = run.host?.journal && existsSync(run.host.journal) && statSync(run.host.journal).size > (run.host.offset || 0);
+      if (!run.host || (!hostAlive(run.host.pid) && !unread)) { this.patchRun(run.id, { reattach: undefined, host: undefined, state: 'interrupted', endedAt: now(), error: 'Server restarted. Resume this run to continue.' }); continue; }
+      const controller = new AbortController(); this.live.set(run.id, { controller });
+      void this.execute(run.id, controller, { attach: run.host }).catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
+    }
+  }
   // Watch Orca runs that survived a restart until their terminal ends, then settle them like any finished run.
   reattachOrca(options = {}) {
-    for (const run of this.store.list('run').filter(item => item.reattach)) {
+    for (const run of this.store.list('run').filter(item => item.reattach === true)) {
       const controller = new AbortController(), watcher = new OrcaRunner({ run, signal: controller.signal, orcaOptions: options.orcaOptions, pollMs: options.pollMs, isDone: () => terminalStates.has(this.run(run.id).state), session: run.worktree ? this.agentSessionFinder(run) : null, event: (kind, data) => this.store.event(run.id, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result'].includes(kind)) });
       this.live.set(run.id, { controller, runner: watcher }); this.patchRun(run.id, { reattach: false });
       this.store.event(run.id, 'phase', { text: 'Rex Desk restarted; still watching the Orca terminal' }, true);
@@ -424,11 +435,12 @@ export class Desk {
       }
     } finally { this.draining = false; }
   }
-  async execute(runId, controller) {
+  // attach: the agent's own process kept working through a Rex Desk restart; follow it from where reading stopped.
+  async execute(runId, controller, { attach = null } = {}) {
     let run = this.run(runId), token;
     try {
       // Check the selected CLI profile before creating worktrees or spending an agent turn.
-      if (!this.runnerFactory) await this.agents.ensureSignedIn(run.provider, this.accountFor(run) || this.agents.selected(run.provider));
+      if (!this.runnerFactory && !attach) await this.agents.ensureSignedIn(run.provider, this.accountFor(run) || this.agents.selected(run.provider));
       if (run.role === 'worker' && !run.worktree && run.placement?.state === 'pending') run = await this.place(run);
       if (run.role === 'worker' && !run.worktree) {
         const config = this.store.config();
@@ -460,7 +472,7 @@ export class Desk {
         }
       }
       if (controller.signal.aborted) throw new Error('Run stopped.');
-      token = this.scopeToken(runId);
+      if (!attach) token = this.scopeToken(runId);
       const options = { run, cwd: run.cwd || run.worktree || path.join(this.store.directory, 'coordinator'), projectDirectory: run.projectPath || '', token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
         mcpUrl: this.mcpUrl, model: run.modelFallback ? undefined : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
@@ -479,12 +491,20 @@ export class Desk {
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
       const resumeSessionId = this.agentSessionId(run);
-      const runner = this.runnerFactory ? this.runnerFactory(options)
+      // A headless agent works in a process of its own, so a Rex Desk restart (an update) does not cut it off.
+      const hosted = attach || (!this.runnerFactory && run.execution !== 'orca' && this.store.config().agentHost !== false);
+      const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.directory, 'uploads') }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.hostOptions || {}) })
+        : this.runnerFactory ? this.runnerFactory(options)
         : run.execution !== 'orca' ? new (run.provider === 'codex' ? CodexRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.directory, 'uploads') })
         : new OrcaRunner({ ...options, ...(run.worktree ? {} : { cwd: await this.agentWorkspace(), sourcePath: await this.agentWorkspace() }), dataDirectory: this.store.directory,
           resumeSessionId, isDone: () => terminalStates.has(this.run(runId).state),
           session: this.agentSessionFinder({ ...run, mirror: resumeSessionId ? run.mirror : undefined, turnStartedAt: now() }) });
       this.live.get(runId).runner = runner;
+      if (attach) {
+        this.store.event(runId, 'phase', { text: 'Rex Desk restarted; the agent kept working and is followed again' }, true);
+        this.patchRun(runId, { state: 'running', reattach: undefined });
+        await runner.attach(attach);
+      } else {
       // Each turn records its own start, so a resumed run shows time since it resumed, not since it was first created.
       this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), turnStartedAt: now(), endedAt: null, error: '' });
       this.store.event(runId, 'turn-start', { provider: run.provider, resumed: Boolean(run.startedAt) });
@@ -504,6 +524,7 @@ export class Desk {
       await runner.start(digest ? `${digest}
 
 ${message}` : message);
+      }
       if (await this.switchIfLimited(runId)) return;
       const current = this.run(runId);
       if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' ? 'finished' : 'needs_evidence', endedAt: now() });
@@ -522,6 +543,9 @@ ${message}` : message);
     } finally {
       await this.evidence.close(runId).catch(error => this.store.event(runId, 'evidence-error', { message: error.message }, true));
       if (token) this.forgetToken(token);
+      // A followed agent kept the key it was started with; it is done now.
+      if (attach) for (const key of this.store.list('token').filter(item => item.runId === runId)) this.store.delete('token', key.id);
+      if (this.store.get('run', runId)?.host) this.patchRun(runId, { host: undefined });
       await this.closeMcpSessions(runId);
       this.cancelQuestions(runId);
       this.live.delete(runId); void this.drain();
@@ -1367,5 +1391,6 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       this.mcpSessions.delete(sessionId); await session.server.close().catch(() => {});
     }
   }
-  async shutdown() { this.closed = true; this.peers.stop(); await Promise.allSettled([...this.live.keys()].map(runId => this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
+  // Closing Rex Desk (a restart or an update) leaves agents in their own process working; the next start follows them again.
+  async shutdown() { this.closed = true; this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
 }

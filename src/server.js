@@ -134,7 +134,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     desk.port = listenPort; desk.peers.port = listenPort;
     desk.peers.onRemoteChange = () => { remoteAt = '-'; remoteOpen(); }; remoteOpen();
     if (!process.env.NODE_TEST_CONTEXT) desk.peers.start();
-    desk.mcpUrl = `${address}/mcp`; desk.reattachOrca(); void desk.findPullRequests();
+    desk.mcpUrl = `${address}/mcp`; desk.reattachHosts(); desk.reattachOrca(); void desk.findPullRequests();
     void desk.resumeInterrupted(); desk.notifier.start(); void desk.fillEnglishNames(); desk.memory.ensure(); desk.rooms.cleanup(); desk.specialists.normalizeModels(); desk.specialists.ensureMain();
     if (!process.env.NODE_TEST_CONTEXT) void desk.refreshModels().catch(error => store.event('', 'models-error', { message: error.message }));
   }
