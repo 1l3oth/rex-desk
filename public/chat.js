@@ -350,7 +350,9 @@ async function refresh({ full = false } = {}) {
   if (!full && sinceTyping < 1200) { clearTimeout(typingHold); typingHold = setTimeout(() => void refresh().catch(() => {}), 1250 - sinceTyping); return; }
   if (busy) { again = true; return; } busy = true;
   try {
-    ui.snap = await api('/state'); ui.memory = await api('/memory').catch(() => ui.memory); ui.profile = await api('/profile').catch(() => ui.profile);
+    ui.snap = await api('/state');
+    // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
+    if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = await api('/memory').catch(() => ui.memory); ui.profile = await api('/profile').catch(() => ui.profile);
     await loadView(); renderAll(full); watchNotices(ctx); watchShownFile(ctx);
   } finally { busy = false; if (again) { again = false; void refresh(); } }
 }

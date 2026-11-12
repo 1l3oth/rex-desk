@@ -6,7 +6,7 @@ import { agentTools } from './agent-tools.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, createReadStream, createWriteStream, rmSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, openSync, createReadStream, createWriteStream, rmSync, statSync } from 'node:fs';
 import { Store } from './store.js';
 import { Accounts, cleanEmail } from './accounts.js';
 import { findCloudWorkspace } from './turso.js';
@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto';
 import { Desk } from './coordinator.js';
 import { handleMcp } from './mcp.js';
 import { git, resolveCommand } from './processes.js';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { inspectRepository, pickRepositoryFolder, cloneRepository, discoverRepositories } from './repositories.js';
 import { githubAccounts, startGithubLogin, cancelGithubLogin, switchGithubAccount } from './github.js';
@@ -40,6 +40,10 @@ import { scanRoots } from './placement.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// The commit this server runs. A pull or a commit from another session changes it; the server then restarts itself and the page reloads.
+const startedCode = readCode();
+function readCode() { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 5000 }).trim(); } catch { return ''; } }
+function codeVersion() { return startedCode; }
 const mime = { '.webmanifest': 'application/manifest+json', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.json': 'application/json; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 const json = (response, code, data) => { response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(data)); };
 // Recorded speech for transcription arrives as raw WAV bytes, not JSON.
@@ -79,7 +83,10 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   if (existsSync(lockPath)) {
     const owner = Number(readFileSync(lockPath, 'utf8'));
     let alive = false;
-    if (Number.isInteger(owner) && owner > 0) { try { process.kill(owner, 0); alive = true; } catch {} }
+    const isAlive = () => { try { process.kill(owner, 0); return true; } catch { return false; } };
+    // A server restarting itself for new code starts this one first, then exits: wait for it to let go.
+    if (Number.isInteger(owner) && owner > 0 && owner === Number(process.env.REX_RESTART_AFTER)) { for (let i = 0; i < 60 && isAlive(); i++) await new Promise(resolve => setTimeout(resolve, 250)); }
+    if (Number.isInteger(owner) && owner > 0) alive = isAlive();
     if (alive) throw new Error('Rex Desk is already running with this data folder. Open its existing dashboard.');
     unlinkSync(lockPath);
   }
@@ -270,7 +277,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         if (input.action === 'remove') return json(response, 200, desk.peers.remove(input.id));
         throw new Error('Unknown action.');
       }
-      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: updates.status(), account: { email: session.email, role: role() }, ...(role() === 'superadmin' ? {} : { database: null }) }); }
+      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: updates.status(), account: { email: session.email, role: role() }, code: codeVersion(), ...(role() === 'superadmin' ? {} : { database: null }) }); }
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
@@ -724,4 +731,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   let closing = false;
   const shutdown = async () => { if (closing) return; closing = true; await app.close(); process.exit(0); };
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
+  // New code (a pull, or a commit from another session) is picked up without anyone restarting by hand: when HEAD moves
+  // and no agent is working, a fresh server starts and this one hands over. The open page sees the new version and reloads.
+  if (startedCode) setInterval(() => {
+    if (closing || readCode() === startedCode || readCode() === '' || (app.desk?.live?.size || 0) > 0) return;
+    closing = true;
+    // Its own log file: the first server's log may still be held open by whoever started it.
+    let log = 'ignore'; try { log = openSync(path.join(root, '.local', 'server-restart.log'), 'a'); } catch {}
+    spawn(process.execPath, ['src/server.js'], { cwd: root, detached: true, windowsHide: true, stdio: ['ignore', log, log], env: { ...process.env, REX_RESTART_AFTER: String(process.pid) } }).unref();
+    void app.close().catch(() => {}).finally(() => process.exit(0));
+  }, 20000).unref();
 }
