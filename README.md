@@ -6,7 +6,7 @@ It works with the AI subscriptions you already have: **Claude Code**, **Codex** 
 
 ## Download
 
-**Latest build: [Rex Desk 0.2.1 (unsigned build 1)](https://github.com/1l3oth/rex-desk/releases/tag/desktop-v0.2.1-build1)**. All builds are on the [Releases page](https://github.com/1l3oth/rex-desk/releases).
+**Latest build: [Rex Desk 0.2.1 (unsigned build 2)](https://github.com/1l3oth/rex-desk/releases/tag/desktop-v0.2.1-build2)**. All builds are on the [Releases page](https://github.com/1l3oth/rex-desk/releases).
 
 | System | File |
 |---|---|
