@@ -733,6 +733,22 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
   // New code (a pull, or a commit from another session) is picked up without anyone restarting by hand: when HEAD moves
   // and no agent is working, a fresh server starts and this one hands over. The open page sees the new version and reloads.
+  // Auto update: every 10 minutes fetch origin and fast-forward the branch, but only when the checkout is clean, the branch
+  // tracks a remote and has no local commits of its own. Someone's unfinished edits or unpushed work are never touched.
+  // New dependencies are installed before the restart below picks the new code up.
+  const run = (command, args) => { try { return execFileSync(command, args, { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 120000, stdio: ['ignore', 'pipe', 'ignore'], shell: command === 'npm' }).trim(); } catch { return null; } };
+  const pullNewCode = () => {
+    if (closing || process.env.REX_NO_AUTO_PULL === '1' || (app.desk?.live?.size || 0) > 0) return;
+    if (run('git', ['status', '--porcelain', '--untracked-files=no']) !== '') return;
+    if (run('git', ['rev-parse', '--abbrev-ref', '@{u}']) === null || run('git', ['fetch', '--quiet']) === null) return;
+    const [ahead, behind] = String(run('git', ['rev-list', '--left-right', '--count', 'HEAD...@{u}']) || '').split(/\s+/).map(Number);
+    if (ahead !== 0 || !(behind > 0)) return;
+    const before = readCode();
+    if (run('git', ['merge', '--ff-only', '--quiet', '@{u}']) === null) return;
+    const changed = run('git', ['diff', '--name-only', before, 'HEAD']) || '';
+    if (/^package(-lock)?\.json$/m.test(changed)) run('npm', ['install', '--no-audit', '--no-fund']);
+  };
+  if (startedCode) { const pullTimer = setInterval(pullNewCode, 600000); pullTimer.unref(); setTimeout(pullNewCode, 60000).unref(); }
   if (startedCode) setInterval(() => {
     if (closing || readCode() === startedCode || readCode() === '' || (app.desk?.live?.size || 0) > 0) return;
     closing = true;
