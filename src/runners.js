@@ -121,7 +121,7 @@ ${news}` } } : {};
       if (message.type === 'rate_limit_event' && message.rate_limit_info) this.event('rate-limit', { ...message.rate_limit_info });
       if (message.type === 'assistant') {
         // How full the conversation is: everything the model read for this step (new, cached and cache-written input).
-        const used = message.message?.usage; if (used && !message.parent_tool_use_id) this.event('context', { used: (used.input_tokens || 0) + (used.cache_read_input_tokens || 0) + (used.cache_creation_input_tokens || 0), model: message.message?.model || '' });
+        const used = message.message?.usage; if (used && !message.parent_tool_use_id) { this.contextUsed = (used.input_tokens || 0) + (used.cache_read_input_tokens || 0) + (used.cache_creation_input_tokens || 0); this.event('context', { used: this.contextUsed, model: message.message?.model || '', ...(this.contextWindow ? { window: this.contextWindow } : {}) }); }
         const content = message.message?.content?.filter(block => block.type !== 'thinking' && block.type !== 'redacted_thinking');
         // What the agent says shows in the chat; its tool calls stay in the journal.
         const text = (content || []).filter(block => block.type === 'text').map(block => block.text).join('\n').trim();
@@ -145,6 +145,9 @@ ${news}` } } : {};
         this.event('agent-operation', { type: 'tool-result', content: message.message?.content });
       }
       if (message.type === 'result') {
+        // The real context window of the model, as Claude Code reports it, so the circle and auto handoff do not guess 200k.
+        const windows = Object.values(message.modelUsage || {}).map(usage => Number(usage?.contextWindow) || 0).filter(Boolean);
+        if (windows.length) { this.contextWindow = Math.max(...windows); if (this.contextUsed) this.event('context', { used: this.contextUsed, window: this.contextWindow }); }
         this.event('agent-result', { result: message.result, errors: message.errors, subtype: message.subtype, cost: message.total_cost_usd, tokens: tokensOf(message.usage), steps: message.num_turns || 0, durationMs: message.duration_ms || 0, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });
         // The CLI reports a signed-out profile as an ordinary result. Surface it as a setup problem, not agent output.
         if (/not logged in|please run \/login/i.test(String(message.result || ''))) throw new Error(`Claude Code profile ${env.CLAUDE_CONFIG_DIR || '~/.claude'} is not signed in. Open Setup, choose a signed-in Claude Code profile, then continue this run.`);
