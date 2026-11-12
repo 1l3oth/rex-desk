@@ -136,7 +136,7 @@ export class Desk {
   snapshot() {
     return { computer: thisComputer(), config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
       notices: this.notifier.summary(), usage: this.store.list('usage'), shownFile: this.shownFile, fileWindow: this.fileWindow || null, worktrees: this.worktrees.all(),
-      runs: [...this.store.list('run'), ...this.peers.remoteRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
+      runs: [...this.store.list('run'), ...this.peers.remoteRuns(), ...this.peers.cloudRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       devices: this.peers.status(this.port),
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),

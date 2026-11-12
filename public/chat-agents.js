@@ -91,7 +91,7 @@ export const savedChatGone = (ctx, agent) => Boolean(agent?.runId) && !ctx.runBy
 export async function openAgentChat(ctx, agent) {
   const { ui, api, toast, refresh, open } = ctx;
   // An agent on a computer that is off: its chat lives there, so it opens when that computer is back.
-  if (agent.remote && agent.status?.state === 'offline') { toast(`${agent.name} is offline: ${agent.device} is off. Its chat opens when it is back; messages in rooms wait for it.`); return; }
+  if (agent.remote && agent.status?.state === 'offline' && !(agent.runId && ctx.runById(agent.runId))) { toast(`${agent.name} is offline: ${agent.device} is off. Its chat opens when it is back; messages in rooms wait for it.`); return; }
   let runId = agent.runId && ctx.runById(agent.runId) ? agent.runId : '';
   if (!runId) {
     if (starting.has(agent.id)) return; starting.add(agent.id);

@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync,
 import { HUMAN } from './rooms.js';
 
 const now = () => new Date().toISOString();
-const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7;
+const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 80, COPY_TEXT = 6000;
 // Tailscale gives every device an address in 100.64.0.0/10.
 export const tailscaleAddresses = (interfaces = os.networkInterfaces()) => Object.values(interfaces).flat().filter(item => item && item.family === 'IPv4' && !item.internal)
   .map(item => item.address).filter(address => { const [first, second] = address.split('.').map(Number); return first === 100 && second >= 64 && second <= 127; });
@@ -202,6 +202,13 @@ export class Peers {
     try {
       if (command.action === 'say') result = await this.desk.specialistTurn(command.agentId, { prompt: String(command.input?.text || '').slice(0, 4000) });
       else if (command.action === 'assign') result = await this.desk.assignTask({ specialistId: command.agentId, ...this.localTask(command.input) });
+      else if (command.action === 'chat-stop') result = await this.desk.stop(command.runId);
+      else if (command.action === 'chat-say') {
+        // Written on another computer in this agent's personal chat: said to the agent while it works, or it picks the chat up again.
+        const run = this.store.get('run', command.runId), text = String(command.input?.text || '');
+        if (!run) throw new Error('That chat is no longer on this computer.');
+        result = ['starting', 'running', 'queued', 'waiting', 'verifying'].includes(run.state) ? await this.desk.say(run.id, text, {}) : await this.desk.resume(run.id, { prompt: text });
+      }
     } catch (failure) { error = failure.message; }
     this.store.put('peercmd', command.id, { ...this.store.get('peercmd', command.id), done: true, doneAt: now(), error, runId: result?.id || '' });
     this.running.delete(command.id);
@@ -236,9 +243,60 @@ export class Peers {
       if ([...this.cloudSeen.keys()].some(node => this.seen(node) !== before.has(node))) this.store.emit?.('change', { kind: 'peers' });
     } catch { /* Turso shows its own state in Settings */ }
   }
+  // ---------- personal chats through the shared database ----------
+  // A personal chat lives on the computer its agent works on. That computer keeps a copy of each of its agents' personal chats
+  // (the last messages and the chat's state) in the shared database, so the person's other computers and the phone can read
+  // it and write to it even without a direct Tailscale link. What they write is sent back as a command and answered here.
+  copies(run) {
+    if (!run || run.roomAgent || run.roomId || !run.specialistId) return false;
+    const agent = this.store.get('specialist', run.specialistId);
+    return Boolean(agent) && agent.kind !== 'main' && !this.isRemote(agent);
+  }
+  copyChat(runId) {
+    const run = this.store.get('run', runId); if (!this.copies(run)) return;
+    const trim = value => typeof value === 'string' && value.length > COPY_TEXT ? `${value.slice(0, COPY_TEXT)}…` : value;
+    const events = this.store.events(runId, { visible: true, limit: COPY_EVENTS }).map(event => Object.fromEntries(Object.entries(event).map(([key, value]) => [key, trim(value)])));
+    const slim = Object.fromEntries(Object.entries(run).filter(([key, value]) => !['queued', 'mirror', 'prompt'].includes(key) && JSON.stringify(value ?? '').length < 4000));
+    this.store.put('chatcopy', runId, { id: runId, agentId: run.specialistId, run: slim, events, at: now() });
+  }
+  watchChats() {
+    if (this.watching) return; this.watching = true;
+    const waiting = new Map();
+    this.store.on?.('change', event => {
+      const runId = event.kind === 'event' ? event.runId : event.kind === 'run' ? event.id : '';
+      if (!runId || waiting.has(runId)) return;
+      const timer = setTimeout(() => { waiting.delete(runId); try { this.copyChat(runId); } catch { /* the next change tries again */ } }, 1500);
+      timer.unref?.(); waiting.set(runId, timer);
+    });
+    // The chats that were there before this computer started sharing them.
+    for (const agent of this.store.list('specialist')) if (agent.runId && !this.isRemote(agent) && !this.store.get('chatcopy', agent.runId)) { try { this.copyChat(agent.runId); } catch { /* not a personal chat */ } }
+  }
+  // Another computer's chat, read from its copy: only when it is not here and not reached directly.
+  chatCopy(runId) {
+    if (this.store.get('run', runId) || this.runOwner(runId)) return null;
+    const copy = this.store.get('chatcopy', runId);
+    return copy && copy.node && copy.node !== this.self.id ? copy : null;
+  }
+  cloudRuns() {
+    const direct = new Set(this.remoteRuns().map(run => run.id));
+    return this.store.list('chatcopy').filter(copy => copy.node && copy.node !== this.self.id && copy.run && !direct.has(copy.id) && !this.store.get('run', copy.id))
+      .map(copy => ({ ...copy.run, remote: copy.node, cloudCopy: true }));
+  }
+  // The person writes in a chat whose agent is on another computer: straight there when it is reached directly, otherwise
+  // as a command in the shared database that the agent's computer runs within seconds (or when it is back on).
+  async chatAction(copy, action, input = {}) {
+    if (!['say', 'resume', 'stop'].includes(action)) throw new Error(`Open this chat on ${this.deviceName(copy.node)} to do that.`);
+    const text = String(input.text || input.prompt || '').slice(0, 20000);
+    if (action !== 'stop' && !text.trim()) throw new Error('Write a message first.');
+    const id = randomUUID();
+    this.store.put('peercmd', id, { id, target: copy.node, action: `chat-${action === 'stop' ? 'stop' : 'say'}`, runId: copy.id, agentId: copy.agentId, input: { text }, at: now(), done: false });
+    const name = this.store.get('specialist', copy.agentId)?.name || 'The agent';
+    return { queued: true, message: this.online(copy.node) ? `Sent to ${name} on ${this.deviceName(copy.node)}. The reply shows here in a few seconds.` : `${this.deviceName(copy.node)} is off. ${name} gets this when it is back on.` };
+  }
+
   // ---------- the loop ----------
   start() {
-    this.pendingCommands();
+    this.pendingCommands(); this.watchChats();
     const tick = async () => {
       for (const peer of this.settings().peers) {
         if (this.timers.get(peer.id) > Date.now()) continue;

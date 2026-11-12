@@ -544,6 +544,11 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         const [, runId, action] = runMatch;
         const runOwner = !store.get('run', runId) && desk.peers.runOwner(runId);
         if (runOwner) return json(response, 200, await desk.peers.forward(runOwner, request.method, `${url.pathname}${url.search}`, request.method === 'POST' ? await body(request) : undefined));
+        const copy = desk.peers.chatCopy(runId);
+        if (copy) {
+          if (request.method === 'GET') return json(response, 200, action === 'messages' ? copy.events || [] : { ...copy.run, remote: copy.node, cloudCopy: true });
+          if (request.method === 'POST') return json(response, 200, await desk.peers.chatAction(copy, action, await body(request)));
+        }
         if (request.method === 'GET') {
           if (action === 'messages') return json(response, 200, store.events(runId, { visible: true }));
           return json(response, 200, desk.run(runId));

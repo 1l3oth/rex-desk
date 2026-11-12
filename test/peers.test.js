@@ -128,3 +128,31 @@ test('a computer that says it is on through Turso counts as on, even when it can
   const sent = await b.desk.peers.command(copy, 'say', { text: 'hi' });
   assert.match(sent.message, /through the shared database/);
 });
+
+test('a personal chat with an agent on another computer is read and written through the shared database, without Tailscale', async () => {
+  const { a, b } = computers();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  await a.desk.specialistTurn(dara.id, { prompt: 'Introduce yourself.' });
+  const runId = a.desk.store.get('specialist', dara.id).runId;
+  await waitFor(() => !['starting', 'running'].includes(a.desk.store.get('run', runId).state));
+  a.desk.peers.copyChat(runId);
+  // Only through the database: the records arrive on the home laptop as Turso would bring them.
+  const carry = (from, to, kinds) => to.desk.peers.applyAll(kinds.flatMap(kind => from.desk.store.list(kind).map(value => ({ kind, id: value.id, value }))));
+  carry(a, b, ['specialist', 'chatcopy']);
+  const shown = b.desk.snapshot().runs.find(run => run.id === runId);
+  assert.ok(shown?.cloudCopy, 'the chat shows on the home laptop');
+  const copy = b.desk.peers.chatCopy(runId);
+  assert.ok(copy.events.some(event => /a here/.test(event.text || '')), 'with what Dara said');
+  assert.ok(!b.desk.store.get('run', runId), 'nothing runs for Dara on the home laptop');
+
+  const sent = await b.desk.peers.chatAction(copy, 'resume', { prompt: 'How is the shop today?' });
+  assert.equal(sent.queued, true);
+  carry(b, a, ['peercmd']);
+  await waitFor(() => a.turns.some(turn => /How is the shop today/.test(turn.prompt)));
+  await waitFor(() => a.desk.store.list('peercmd').every(item => item.done));
+  await waitFor(() => !['starting', 'running'].includes(a.desk.store.get('run', runId).state));
+  a.desk.peers.copyChat(runId); carry(a, b, ['chatcopy']);
+  const after = b.desk.peers.chatCopy(runId);
+  assert.ok(after.events.some(event => /How is the shop today/.test(event.text || '')), 'the person\'s message is in the chat on both computers');
+  await assert.rejects(() => b.desk.peers.chatAction(after, 'publish', {}), /Open this chat on .* to do that/);
+});

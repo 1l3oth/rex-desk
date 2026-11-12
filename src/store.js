@@ -22,7 +22,7 @@ export const thisComputer = () => process.env.REX_COMPUTER_NAME || os.hostname()
 export const isLocalMain = run => run?.role === 'coordinator' && Boolean(run.main) && !run.roomAgent && run.computer === thisComputer();
 export const latestLocalMain = runs => runs.filter(isLocalMain).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
 // Records every computer of the person shares (see peers.js). The Rex Agent record is each computer's own.
-export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd']);
+export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd', 'chatcopy']);
 const shared = (kind, key) => SHARED.has(kind) && !(kind === 'specialist' && key === 'main');
 export const id = () => randomUUID();
 export const defaults = {
