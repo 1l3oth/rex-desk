@@ -265,7 +265,7 @@ function stageModel() {
   }
   const shown = ui.events.get(run.id) || [], cleared = ui.showEarlier?.[run.id] ? '' : [...shown].reverse().find(event => event.kind === 'chat-cleared')?.createdAt || '';
   const items = [...transcript(shown, run.id), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && (!cleared || String(item.createdAt || item.at || '') >= cleared) && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state);
-  const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`)
+  const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`) + outboxHtml(run, shown)
     + pending(run.id).map(item => `<div class="msg qfloat"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
   const shells = terminalItems(items), stop = (shells.length && !ui.termOpen ? `<button class="btn small" data-action="term-open">Terminal (${shells.length})</button> ` : '') + (live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : !FINISHED.includes(run.state) ? '<button class="btn small danger" data-action="stop" title="This run is not working. Close it so the task can get a new run.">Close run</button>' : '');
   // A personal chat with an agent shows its profile and what was shared on the right; the terminal is one of those tabs.
@@ -378,8 +378,13 @@ async function send() {
     else if (type === 'main' && !mainRun()) await api('/main', { method: 'POST', data: { prompt: text, ...picked } });
     else {
       const run = type === 'main' ? mainRun() : runById(id);
-      if (workingStates.includes(run.state)) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text, ...picked } });
-      else await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text, ...picked } });
+      const away = run.remote ? { text, at: new Date().toISOString() } : null;
+      if (away) { (ui.outbox ||= new Map()).set(run.id, [...(ui.outbox.get(run.id) || []), away]); box.value = ''; renderAll(); }
+      try {
+        if (workingStates.includes(run.state)) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text, ...picked } });
+        else await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text, ...picked } });
+      } catch (error) { if (away) { ui.outbox.set(run.id, ui.outbox.get(run.id).filter(item => item !== away)); box.value = typed; } throw error; }
+      if (away) away.sent = true;
     }
     box.value = ''; box.style.height = ''; ui.drafts.delete(draftKey()); ui.attachments = []; redrawAttachments(ctx); await refresh();
   } catch (error) { toast(error.message, true); }
@@ -1018,3 +1023,18 @@ function earlierChats(agent) {
   if (!runs.length) return '';
   return `<h3>Earlier chats <span>${runs.length}</span></h3><ul class="tl-list">${runs.map(run => `<li><button type="button" class="link-btn" data-open="run" data-id="${esc(run.id)}"><b>${esc(runTitle(run))}</b></button><small>${esc(ago(run.updatedAt || run.createdAt))}</small></li>`).join('')}</ul>`;
 }
+
+// Messages on their way to an agent on another computer. One leaves the list when that computer's copy of the chat has it.
+function outboxHtml(run, shown) {
+  const waiting = ui.outbox?.get(run.id); if (!waiting?.length) return '';
+  const arrived = item => shown.some(event => event.kind === 'human-message' && String(event.createdAt || '') >= item.at.slice(0, 19) && String(event.text || '').includes(item.text.slice(0, 300)))
+    || shown.some(event => event.kind === 'human-message' && String(event.text || '') === item.text && Date.parse(event.createdAt || 0) > Date.parse(item.at) - 120000);
+  const left = waiting.filter(item => !arrived(item)); ui.outbox.set(run.id, left);
+  const agent = personalAgent(run), where = agent?.device || 'the other computer', off = agent?.status?.state === 'offline';
+  return left.map(item => {
+    const state = !item.sent ? 'Sending…' : off ? `Waiting for ${where} to turn on` : Date.now() - Date.parse(item.at) > 45000 ? `Still on its way to ${where}…` : `Sending to ${where}…`;
+    return `<div class="msg mine sending"><div class="bubble"><div class="md">${markdown(spokenText(item.text).text)}</div><div class="send-state"><span class="spin" aria-hidden="true"></span>${esc(state)}</div></div></div>`;
+  }).join('');
+}
+// While a message is on its way, the screen looks again every few seconds, so "Still on its way" shows even with no news.
+setInterval(() => { if ([...(ui.outbox?.values() || [])].some(list => list.length) && ui.view.type === 'run') renderAll(); }, 5000);
