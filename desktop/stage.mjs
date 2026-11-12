@@ -10,6 +10,6 @@ if (!existsSync(path.join(project, 'node_modules', 'playwright'))) throw new Err
 
 rmSync(payload, { recursive: true, force: true });
 mkdirSync(path.join(payload, 'node'), { recursive: true });
-cpSync(process.execPath, path.join(payload, 'node', 'node.exe'));
+cpSync(process.execPath, path.join(payload, 'node', process.platform === 'win32' ? 'node.exe' : 'node'));
 for (const entry of ['src', 'public', 'scripts', 'package.json', 'node_modules']) cpSync(path.join(project, entry), path.join(payload, 'app', entry), { recursive: true, dereference: true });
 console.log(`Staged Node ${process.version} and Rex Desk into ${payload}`);

@@ -33,8 +33,10 @@ fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::
     let own = url.host_str() == Some("127.0.0.1") && url.port() == Some(4317);
     if !own {
         if matches!(url.scheme(), "http" | "https" | "mailto") {
-            let mut command = Command::new("cmd");
-            command.args(["/c", "start", "", url.as_str()]);
+            #[cfg(windows)]
+            let mut command = { let mut command = Command::new("cmd"); command.args(["/c", "start", "", url.as_str()]); command };
+            #[cfg(not(windows))]
+            let mut command = { let mut command = Command::new("open"); command.arg(url.as_str()); command };
             let _ = hidden(&mut command).spawn();
         }
         return tauri::webview::NewWindowResponse::Deny;
@@ -51,11 +53,25 @@ fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::
         Err(_) => tauri::webview::NewWindowResponse::Deny,
     }
 }
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 fn server_running() -> bool {
     let address: SocketAddr = ADDRESS.parse().expect("valid address");
     TcpStream::connect_timeout(&address, Duration::from_millis(300)).is_ok()
+}
+
+#[cfg(windows)]
+const NODE: &str = "node.exe";
+#[cfg(not(windows))]
+const NODE: &str = "node";
+
+fn data_home(fallback: &PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    let base = std::env::var_os("APPDATA").map(PathBuf::from);
+    #[cfg(not(windows))]
+    let base = std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library").join("Application Support"));
+    base.unwrap_or_else(|| fallback.clone()).join("Rex Desk")
 }
 
 struct Runtime {
@@ -77,12 +93,15 @@ fn checkout() -> Option<PathBuf> {
 
 // The installed app carries its own Node and server next to the executable and keeps data in %APPDATA%\Rex Desk.
 // A development build falls back to a checkout and the system Node.
+// On a Mac the payload sits in Contents/Resources, and the data in ~/Library/Application Support/Rex Desk.
 fn runtime() -> Option<Runtime> {
-    let beside = std::env::current_exe().ok()?.parent()?.join("payload");
-    let (node, app) = (beside.join("node").join("node.exe"), beside.join("app"));
-    if node.is_file() && app.join("src").join("server.js").is_file() {
-        let data = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| beside.clone()).join("Rex Desk");
-        return Some(Runtime { node, app, data, bundled: true });
+    let exe = std::env::current_exe().ok()?;
+    let folder = exe.parent()?;
+    for beside in [folder.join("payload"), folder.join("..").join("Resources").join("payload")] {
+        let (node, app) = (beside.join("node").join(NODE), beside.join("app"));
+        if node.is_file() && app.join("src").join("server.js").is_file() {
+            return Some(Runtime { node, app, data: data_home(&beside), bundled: true });
+        }
     }
     checkout().map(|root| Runtime { node: PathBuf::from("node"), data: root.join(".local"), app: root, bundled: false })
 }
@@ -111,7 +130,7 @@ fn start_server(runtime: &Runtime) -> std::io::Result<()> {
         if let Ok(executable) = std::env::current_exe() {
             command.env("REX_DESK_EXE", executable);
         }
-        if let Some(home) = std::env::var_os("USERPROFILE") {
+        if let Some(home) = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
             command.env("REX_CLONE_DIR", PathBuf::from(home).join("Rex Desk repositories"));
         }
     }
@@ -122,8 +141,10 @@ fn start_server(runtime: &Runtime) -> std::io::Result<()> {
 fn stop_server(runtime: &Runtime) {
     let Ok(text) = fs::read_to_string(runtime.data.join("runtime.lock")) else { return };
     let Ok(pid) = text.trim().parse::<u32>() else { return };
-    let mut command = Command::new("taskkill");
-    command.args(["/PID", &pid.to_string(), "/T", "/F"]);
+    #[cfg(windows)]
+    let mut command = { let mut command = Command::new("taskkill"); command.args(["/PID", &pid.to_string(), "/T", "/F"]); command };
+    #[cfg(not(windows))]
+    let mut command = { let mut command = Command::new("kill"); command.args(["-9", &pid.to_string()]); command };
     let _ = hidden(&mut command).status();
 }
 
