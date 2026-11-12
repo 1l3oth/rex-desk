@@ -12,7 +12,10 @@ export function tursoSignIn({ timeoutMs = 270000, base = API } = {}) {
   let finish, fail; const result = new Promise((resolve, reject) => { finish = resolve; fail = reject; }); result.catch(() => {});
   const server = http.createServer((request, response) => {
     const query = new URL(request.url, 'http://localhost').searchParams;
-    if (query.get('state') !== state || !query.get('jwt')) { response.writeHead(400).end(); return; }
+    // Turso's newer sign-in page can drop the state on its way back, so a missing one is accepted; a wrong one never is.
+    // The address is a random port on this computer that lives only for this one sign-in.
+    const back = query.get('state');
+    if ((back && back !== state) || !query.get('jwt')) { response.writeHead(400, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><meta charset="utf-8"><body style="font:18px system-ui;padding:40px">This Turso sign-in is not the one Rex Desk is waiting for. Start it again from Rex Desk.</body>'); return; }
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(DONE_PAGE);
     finish(query.get('jwt'));
   });

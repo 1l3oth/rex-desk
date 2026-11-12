@@ -16,6 +16,14 @@ test("Turso's sign-in page hands its key back to a local address, and a wrong st
   assert.equal(await signIn.token, 'platform-key');
 });
 
+test("Turso's newer sign-in page may drop the state on the way back, and the key is still taken", async () => {
+  const signIn = await tursoSignIn({ timeoutMs: 5000 });
+  const port = new URL(signIn.url).searchParams.get('port');
+  const page = await fetch(`http://localhost:${port}/?jwt=platform-key`);
+  assert.equal(page.status, 200);
+  assert.equal(await signIn.token, 'platform-key');
+});
+
 test('a new Turso account gets a group near this computer, a rex-desk database and a key for it', async () => {
   const calls = [];
   const fetcher = async (url, options = {}) => {
