@@ -5,7 +5,10 @@ import path from 'node:path';
 // the person's memory folder (who they are, their profile photo, agents' notes and homes). The database backup has the chats;
 // this keeps the files they point to, so a reinstall, a cleared data folder or a new computer gets everything back.
 export const FILE_LIMIT = 4 * 1024 * 1024;
-const MAX_FILES = 5000;
+// Each folder has its own limit, so one busy folder never crowds out the others.
+const MAX_FILES = 2000;
+// Evidence folders keep what proves the work (pictures, recordings, reports, text); an agent's copy of source code is not kept.
+export const EVIDENCE = /\.(png|jpe?g|webp|gif|svg|bmp|mp3|mp4|webm|wav|ogg|m4a|mov|html?|txt|md|json|pdf|log|csv)$/i;
 const SKIP = new Set(['node_modules', '.git', '.cache', 'cache', 'worktrees', 'tmp', 'temp', '__pycache__', '.venv', 'venv', 'dist', 'build']);
 const DATA_FOLDERS = ['uploads', 'room-images', 'artifacts'];
 
@@ -13,28 +16,30 @@ export class FileBackup {
   constructor(sync) { this.sync = sync; this.memoryDirectory = ''; this.indexFile = path.join(sync.store.directory, 'file-backup.json'); }
   // Each backed-up file has a key: data/<folder>/... inside the workspace, memory/... inside the memory folder.
   roots() {
-    const roots = DATA_FOLDERS.map(folder => ({ prefix: `data/${folder}/`, directory: path.join(this.sync.store.directory, folder) }));
-    if (this.memoryDirectory) roots.push({ prefix: 'memory/', directory: this.memoryDirectory });
+    // The memory folder first: who the person is and their photo matter most.
+    const roots = DATA_FOLDERS.map(folder => ({ prefix: `data/${folder}/`, directory: path.join(this.sync.store.directory, folder), only: folder === 'artifacts' ? EVIDENCE : null }));
+    if (this.memoryDirectory) roots.unshift({ prefix: 'memory/', directory: this.memoryDirectory, only: null });
     return roots;
   }
   // The local file for a key, never outside its root.
   local(key) {
     const root = this.roots().find(item => key.startsWith(item.prefix));
-    if (!root) return '';
+    if (!root || (root.only && !root.only.test(key))) return '';
     const file = path.resolve(root.directory, ...key.slice(root.prefix.length).split('/'));
     return file.startsWith(path.resolve(root.directory) + path.sep) ? file : '';
   }
   walk() {
     const found = [];
     for (const root of this.roots()) {
+      let counted = 0;
       const visit = (directory, relative) => {
         let entries; try { entries = readdirSync(directory, { withFileTypes: true }); } catch { return; }
         for (const entry of entries) {
-          if (found.length >= MAX_FILES) return;
+          if (counted >= MAX_FILES) return;
           const full = path.join(directory, entry.name), key = `${root.prefix}${relative}${entry.name}`;
           if (entry.isDirectory()) { if (!SKIP.has(entry.name.toLowerCase())) visit(full, `${relative}${entry.name}/`); continue; }
-          if (!entry.isFile() || /\.(tmp|lock)$/i.test(entry.name)) continue;
-          try { const stat = statSync(full); if (stat.size <= FILE_LIMIT) found.push({ key, file: full, stamp: `${stat.size}:${Math.floor(stat.mtimeMs)}` }); } catch { /* gone */ }
+          if (!entry.isFile() || /\.(tmp|lock)$/i.test(entry.name) || (root.only && !root.only.test(entry.name))) continue;
+          try { const stat = statSync(full); if (stat.size <= FILE_LIMIT) { counted += 1; found.push({ key, file: full, stamp: `${stat.size}:${Math.floor(stat.mtimeMs)}` }); } } catch { /* gone */ }
         }
       };
       visit(root.directory, '');
@@ -76,15 +81,22 @@ export class FileBackup {
     this.saveIndex(index);
     return { restored };
   }
-  // Run after each connection and every few minutes; one pass at a time.
+  // Soon after something changes (a picture attached, a photo set), without starting over on every chat message.
+  soon(delay = 20000) {
+    if (this.soonTimer || this.sync.closed) return;
+    this.soonTimer = setTimeout(() => { this.soonTimer = null; void this.run(); }, delay); this.soonTimer.unref?.();
+  }
+  // Run after each connection, soon after changes and every few minutes; one pass at a time.
+  // A call during a pass gets one more pass after it, so a file added meanwhile is not missed.
   run() {
-    if (this.running || !this.sync.ready || this.sync.closed) return this.running;
+    if (this.running) { this.again = true; return this.running.then(() => this.running); }
+    if (!this.sync.ready || this.sync.closed) return Promise.resolve();
     this.running = (async () => {
       try {
         if (!this.index()) { const result = await this.restoreMissing(); this.lastRestored = result.restored; if (result.restored) this.sync.notify(); }
         await this.backup(); this.error = '';
       } catch (error) { this.error = String(error.message || error); }
-      finally { this.running = null; }
+      finally { this.running = null; if (this.again && !this.sync.closed) { this.again = false; this.running = this.run(); } }
     })();
     return this.running;
   }

@@ -59,6 +59,7 @@ export class TursoSync {
   schedule() {
     if (!this.ready || this.timer || this.closed) return;
     this.timer = setTimeout(() => { this.timer = null; void this.flush(); }, 350);
+    this.files.soon();
     this.timer.unref();
   }
   notify() { this.store.emit('change', { kind: 'database' }); }
@@ -214,7 +215,7 @@ export class TursoSync {
     return { matched: hash(local) === hash(remote.rows) && localEvents === remoteEvents, localRecords: local.length, remoteRecords: remote.rows.length, localEvents, remoteEvents };
   }
   async close() {
-    clearTimeout(this.timer); clearInterval(this.retryTimer); clearInterval(this.filesTimer);
+    clearTimeout(this.timer); clearInterval(this.retryTimer); clearInterval(this.filesTimer); clearTimeout(this.files.soonTimer);
     if (this.files.running) await this.files.running.catch(() => {});
     if (this.opening) await this.opening;
     if (this.ready) await this.flush();

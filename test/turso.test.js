@@ -87,6 +87,7 @@ test('a reinstall gets back the files too: chat pictures, room pictures, evidenc
   const { mkdirSync, writeFileSync, readFileSync, rmSync } = await import('node:fs');
   mkdirSync(path.join(original, 'uploads', 'u1'), { recursive: true }); writeFileSync(path.join(original, 'uploads', 'u1', 'shot.png'), 'picture bytes');
   mkdirSync(path.join(original, 'room-images'), { recursive: true }); writeFileSync(path.join(original, 'room-images', 'room-1.png'), 'room picture');
+  mkdirSync(path.join(original, 'artifacts', 'run-1'), { recursive: true }); writeFileSync(path.join(original, 'artifacts', 'run-1', 'screen.png'), 'evidence'); writeFileSync(path.join(original, 'artifacts', 'run-1', 'Page.jsp'), 'a copy of source code');
   writeFileSync(path.join(memory, 'user.md'), '# About the person\n- Likes short answers');
   mkdirSync(path.join(memory, 'node_modules'), { recursive: true }); writeFileSync(path.join(memory, 'node_modules', 'skip.js'), 'never uploaded');
   const first = new Store(original);
@@ -95,7 +96,7 @@ test('a reinstall gets back the files too: chat pictures, room pictures, evidenc
   first.event('run-1', 'human-message', { text: 'Keep me' }, true); first.event('run-1', 'human-message', { text: 'Unsend me' }, true);
   first.unsendEvent('run-1', first.events('run-1').at(-1).sequence);
   await first.cloud.flush(); await first.cloud.files.run();
-  assert.equal(turso.remote.prepare('SELECT COUNT(*) AS n FROM rex_files').get().n, 3, 'node_modules is skipped');
+  assert.equal(turso.remote.prepare('SELECT COUNT(*) AS n FROM rex_files').get().n, 4, 'node_modules and copies of source code in evidence are skipped');
   assert.doesNotMatch(String(turso.remote.prepare("SELECT data FROM rex_files WHERE path='memory/user.md'").get().data), /short answers/, 'files are sealed with the vault key');
   await first.cloud.close(); first.close();
   // Uninstall: the data folder and the memory folder are gone. Only the workspace identity and key come back (from the passphrase).
@@ -107,6 +108,7 @@ test('a reinstall gets back the files too: chat pictures, room pictures, evidenc
   assert.equal(readFileSync(path.join(restored, 'uploads', 'u1', 'shot.png'), 'utf8'), 'picture bytes');
   assert.equal(readFileSync(path.join(restored, 'room-images', 'room-1.png'), 'utf8'), 'room picture');
   assert.match(readFileSync(path.join(memory, 'user.md'), 'utf8'), /short answers/);
+  assert.equal(readFileSync(path.join(restored, 'artifacts', 'run-1', 'screen.png'), 'utf8'), 'evidence');
   assert.deepEqual(second.events('run-1', { visible: true }).map(event => event.text), ['Keep me'], 'an unsent message stays unsent');
   await second.cloud.close(); second.close();
 });

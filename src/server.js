@@ -627,7 +627,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         const uploads = path.resolve(store.directory, 'uploads'); let file = path.resolve(String(url.searchParams.get('path') || ''));
         // A chat restored from the backup into another data folder (a reinstall, a new computer) still names the old folder.
         const moved = /[\\/]uploads[\\/]([^\\/]+)[\\/]([^\\/]+)$/.exec(String(url.searchParams.get('path') || ''));
-        if (moved && !existsSync(file)) { const here = path.join(uploads, moved[1], moved[2]); if (existsSync(here)) file = here; }
+        if (moved && !file.toLowerCase().startsWith(`${uploads.toLowerCase()}${path.sep}`)) { const here = path.join(uploads, moved[1], moved[2]); if (existsSync(here)) file = here; }
         if (!file.toLowerCase().startsWith(`${uploads.toLowerCase()}${path.sep}`) || !existsSync(file)) {
           // A picture attached in a chat on another computer comes from the shared copy of that chat.
           const picture = desk.peers.chatPicture(String(url.searchParams.get('path') || ''));
