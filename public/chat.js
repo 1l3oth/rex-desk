@@ -1,4 +1,4 @@
-import { agentStage, agentAction, agentGroups, initAgentCard, toggleGroup, wireLoop } from '/chat-agents.js';
+import { agentStage, agentAction, agentGroups, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
 import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.js';
@@ -255,7 +255,12 @@ function stageModel() {
   }
   const run = type === 'main' ? mainRun() : runById(id);
   if (!run && type === 'main') return welcomeStage();
-  if (!run) return emptyStage('That run is gone.');
+  if (!run) {
+    // A view saved on this computer can still point at an agent's deleted chat: start a new one, or show its card when its computer is off.
+    const agent = type === 'run' ? (ui.snap.specialists || []).find(item => item.runId === id) : null;
+    if (agent) { setTimeout(() => agent.remote && agent.status?.state === 'offline' ? open('specialist', agent.id) : void openAgentChat(ctx, agent)); return emptyStage(`Starting a new chat with ${esc(agent.name)}…`); }
+    return emptyStage('That run is gone.');
+  }
   const shown = ui.events.get(run.id) || [], cleared = ui.showEarlier?.[run.id] ? '' : [...shown].reverse().find(event => event.kind === 'chat-cleared')?.createdAt || '';
   const items = [...transcript(shown, run.id), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && (!cleared || String(item.createdAt || item.at || '') >= cleared) && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state);
   const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`)
@@ -408,6 +413,7 @@ document.addEventListener('click', async event => {
     if (target.dataset.open === 'specialist' && !target.dataset.profile) {
       const agent = (ui.snap.specialists || []).find(item => item.id === target.dataset.id);
       if (agent?.runId && runById(agent.runId)) { ui.chatTab = 'profile'; return open('run', agent.runId); }
+      if (savedChatGone(ctx, agent) && !(agent.remote && agent.status?.state === 'offline')) { ui.chatTab = 'profile'; return openAgentChat(ctx, agent); }
     }
     return open(target.dataset.open, target.dataset.id);
   }

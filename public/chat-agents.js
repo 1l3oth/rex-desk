@@ -85,6 +85,24 @@ export function wireLoop(ctx) {
   });
   document.addEventListener('focusout', event => { if (event.target.matches?.('[data-loop-prompt]')) { const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (agent && event.target.value !== (agent.loop?.prompt || '')) void save({ prompt: event.target.value }); } });
 }
+// An agent whose saved chat was deleted still names it; a new chat starts then, once even when the screen draws again meanwhile.
+const starting = new Set();
+export const savedChatGone = (ctx, agent) => Boolean(agent?.runId) && !ctx.runById(agent.runId);
+export async function openAgentChat(ctx, agent) {
+  const { ui, api, toast, refresh, open } = ctx;
+  // An agent on a computer that is off: its chat lives there, so it opens when that computer is back.
+  if (agent.remote && agent.status?.state === 'offline') { toast(`${agent.name} is offline: ${agent.device} is off. Its chat opens when it is back; messages in rooms wait for it.`); return; }
+  let runId = agent.runId && ctx.runById(agent.runId) ? agent.runId : '';
+  if (!runId) {
+    if (starting.has(agent.id)) return; starting.add(agent.id);
+    // When it cannot start, the card opens, so a screen left on the deleted chat does not try again on every redraw.
+    try { await api(`/specialists/${agent.id}/say`, { method: 'POST', data: { text: 'Introduce yourself in one or two lines: who you are and which project you look after.' } }); await refresh(); }
+    catch (error) { toast(`${agent.name} could not start a chat: ${error.message}`, true); open('specialist', agent.id); return; }
+    finally { starting.delete(agent.id); }
+    runId = (ui.snap.specialists || []).find(item => item.id === agent.id)?.runId;
+  }
+  if (runId) open('run', runId);
+}
 export async function agentAction(ctx, action, target = null) {
   const { ui, api, toast, refresh, open } = ctx, value = id => document.getElementById(id)?.value ?? '';
   const agent = (ui.snap.specialists || []).find(item => item.id === ui.view.id);
@@ -97,14 +115,7 @@ export async function agentAction(ctx, action, target = null) {
       const created = await api('/specialists', { method: 'POST', data: { name: form.name, projectSlug: form.project } }); await refresh(); open('specialist', created.id); } });
   }
   if (!agent) return;
-  if (action === 'spec-chat') {
-    // A saved chat that was deleted counts as none, so a new one starts.
-    let runId = agent.runId && ctx.runById(agent.runId) ? agent.runId : '';
-    // An agent on a computer that is off: its chat lives there, so it opens when that computer is back.
-    if (agent.remote && agent.status?.state === 'offline') { toast(`${agent.name} is offline: ${agent.device} is off. Its chat opens when it is back; messages in rooms wait for it.`); return; }
-    if (!runId) { await api(`/specialists/${agent.id}/say`, { method: 'POST', data: { text: 'Introduce yourself in one or two lines: who you are and which project you look after.' } }); await refresh(); runId = (ui.snap.specialists || []).find(item => item.id === agent.id)?.runId; }
-    if (runId) open('run', runId); return;
-  }
+  if (action === 'spec-chat') return openAgentChat(ctx, agent);
   if (action === 'spec-answer') {
     const question = (agent.unsure || []).filter(Boolean)[Number(target.dataset.index)] || '';
     const runId = agent.runId && ctx.runById(agent.runId) ? agent.runId : ''; if (!runId) { await agentAction(ctx, 'spec-chat'); return; }
