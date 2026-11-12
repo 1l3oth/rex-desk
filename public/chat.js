@@ -260,7 +260,7 @@ function stageModel() {
   if (!run) {
     // A view saved on this computer can still point at an agent's deleted chat: start a new one, or show its card when its computer is off.
     const agent = type === 'run' ? (ui.snap.specialists || []).find(item => item.runId === id) : null;
-    if (agent) { setTimeout(() => agent.remote && agent.status?.state === 'offline' ? open('specialist', agent.id) : void openAgentChat(ctx, agent)); return emptyStage(`Starting a new chat with ${esc(agent.name)}…`); }
+    if (agent) { setTimeout(() => agent.remote ? open('specialist', agent.id) : void openAgentChat(ctx, agent)); return emptyStage(agent.remote ? `${esc(agent.name)}'s chat is on ${esc(agent.device || 'another computer')}.` : `Starting a new chat with ${esc(agent.name)}…`); }
     return emptyStage('That run is gone.');
   }
   const shown = ui.events.get(run.id) || [], cleared = ui.showEarlier?.[run.id] ? '' : [...shown].reverse().find(event => event.kind === 'chat-cleared')?.createdAt || '';
@@ -420,7 +420,7 @@ document.addEventListener('click', async event => {
     if (target.dataset.open === 'specialist' && !target.dataset.profile) {
       const agent = (ui.snap.specialists || []).find(item => item.id === target.dataset.id);
       if (agent?.runId && runById(agent.runId)) { ui.chatTab = 'profile'; return open('run', agent.runId); }
-      if (savedChatGone(ctx, agent) && !(agent.remote && agent.status?.state === 'offline')) { ui.chatTab = 'profile'; return openAgentChat(ctx, agent); }
+      if (savedChatGone(ctx, agent) && !agent.remote) { ui.chatTab = 'profile'; return openAgentChat(ctx, agent); }
     }
     return open(target.dataset.open, target.dataset.id);
   }
@@ -780,6 +780,7 @@ function personalSide(run, agent, items, shells) {
     ${agent.purpose ? `<h3>About</h3><p class="pabout">${esc(agent.purpose)}</p>` : ''}
     ${sharedBox}
     ${agent.main ? '' : `<h3>${agent.provider === 'codex' ? 'Codex' : agent.provider === 'gemini' ? 'Google (Antigravity)' : 'Claude'} account</h3>${pickerHtml(ctx, { id: 'pp-profile', label: 'Account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.[agent.provider === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}<button type="button" class="btn small quiet" data-action="accounts">Manage accounts</button>`}
+    ${agent.main ? '' : earlierChats(agent)}
     ${toolsHtml(agent.main ? 'main' : agent.id)}
     ${agent.main ? '' : `<h3>Tasks come from</h3><p class="pabout">${esc(sources.join(', ') || 'Not set yet')}</p>`}
     ${(agent.lessons || []).length ? `<h3>Lessons learned <span>${agent.lessons.length}</span></h3><ul class="plessons">${agent.lessons.slice(-4).map(lesson => `<li>${esc(lesson.text)}</li>`).join('')}</ul>` : ''}
@@ -1009,3 +1010,11 @@ document.addEventListener('change', async event => {
   if (!event.target.matches?.('[data-mo-auto]')) return;
   try { await api('/config', { method: 'PUT', data: { ...ui.snap.config, autoFree: event.target.checked } }); toast(event.target.checked ? 'Rex Desk frees memory by itself when it runs low.' : 'Automatic freeing is off.'); await refresh(); } catch (error) { toast(error.message, true); }
 });
+
+// An agent's earlier personal chats (also the ones on another computer), newest first, in its profile.
+function earlierChats(agent) {
+  const runs = (ui.snap?.runs || []).filter(run => run.specialistId === agent.id && !run.roomAgent && !run.roomId && run.id !== agent.runId)
+    .sort((left, right) => String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))).slice(0, 12);
+  if (!runs.length) return '';
+  return `<h3>Earlier chats <span>${runs.length}</span></h3><ul class="tl-list">${runs.map(run => `<li><button type="button" class="link-btn" data-open="run" data-id="${esc(run.id)}"><b>${esc(runTitle(run))}</b></button><small>${esc(ago(run.updatedAt || run.createdAt))}</small></li>`).join('')}</ul>`;
+}

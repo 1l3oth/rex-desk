@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync,
 import { HUMAN } from './rooms.js';
 
 const now = () => new Date().toISOString();
-const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 80, COPY_TEXT = 6000;
+const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000;
 // Tailscale gives every device an address in 100.64.0.0/10.
 export const tailscaleAddresses = (interfaces = os.networkInterfaces()) => Object.values(interfaces).flat().filter(item => item && item.family === 'IPv4' && !item.internal)
   .map(item => item.address).filter(address => { const [first, second] = address.split('.').map(Number); return first === 100 && second >= 64 && second <= 127; });
@@ -187,6 +187,10 @@ export class Peers {
   }
   // A message or a task for an agent whose computer is off waits as a command; that computer runs it when it is back.
   async command(agent, action, input) {
+    // The same words to the same agent a moment ago are not sent again (a screen that kept retrying sent one greeting 100 times).
+    const text = String(input?.text || '');
+    const repeat = action === 'say' && text && this.store.list('peercmd').find(item => item.agentId === agent.id && item.action === 'say' && String(item.input?.text || '') === text && Date.now() - Date.parse(item.at || 0) < REPEAT_MS);
+    if (repeat) return { queued: true, repeat: true, message: `${agent.name} already has this message.` };
     if (this.direct(agent.node) && this.byNode(agent.node)) {
       const route = action === 'say' ? `/api/specialists/${agent.id}/say` : `/api/specialists/${agent.id}/assign`;
       return this.forward(agent.node, 'POST', route, input);
@@ -254,8 +258,16 @@ export class Peers {
   }
   copyChat(runId) {
     const run = this.store.get('run', runId); if (!this.copies(run)) return;
-    const trim = value => typeof value === 'string' && value.length > COPY_TEXT ? `${value.slice(0, COPY_TEXT)}…` : value;
-    const events = this.store.events(runId, { visible: true, limit: COPY_EVENTS }).map(event => Object.fromEntries(Object.entries(event).map(([key, value]) => [key, trim(value)])));
+    const trim = (value, max) => typeof value === 'string' && value.length > max ? `${value.slice(0, max)}…` : value;
+    // The same message said again right after itself is shown once; tool output is shortened. The newest messages are kept.
+    const events = [];
+    for (const event of this.store.events(runId, { visible: true, limit: COPY_EVENTS })) {
+      const last = events.at(-1);
+      if (event.kind === 'human-message' && last?.kind === 'human-message' && last.text === trim(event.text, COPY_TEXT)) continue;
+      const max = /tool/.test(event.kind) ? COPY_TOOL : COPY_TEXT;
+      events.push(Object.fromEntries(Object.entries(event).map(([key, value]) => [key, trim(value, max)])));
+    }
+    events.splice(0, Math.max(0, events.length - COPY_KEEP));
     const slim = Object.fromEntries(Object.entries(run).filter(([key, value]) => !['queued', 'mirror', 'prompt'].includes(key) && JSON.stringify(value ?? '').length < 4000));
     this.store.put('chatcopy', runId, { id: runId, agentId: run.specialistId, run: slim, events, at: now() });
   }
@@ -269,7 +281,9 @@ export class Peers {
       timer.unref?.(); waiting.set(runId, timer);
     });
     // The chats that were there before this computer started sharing them.
-    for (const agent of this.store.list('specialist')) if (agent.runId && !this.isRemote(agent) && !this.store.get('chatcopy', agent.runId)) { try { this.copyChat(agent.runId); } catch { /* not a personal chat */ } }
+    // Every personal chat of the last 30 days, not only the one each agent is in now, so older conversations show too.
+    const since = Date.now() - 30 * 86400000;
+    for (const run of this.store.list('run')) if (this.copies(run) && Date.parse(run.updatedAt || run.createdAt || 0) > since) { try { this.copyChat(run.id); } catch { /* not a personal chat */ } }
   }
   // Another computer's chat, read from its copy: only when it is not here and not reached directly.
   chatCopy(runId) {

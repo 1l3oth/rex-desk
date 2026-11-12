@@ -86,15 +86,18 @@ export function wireLoop(ctx) {
   document.addEventListener('focusout', event => { if (event.target.matches?.('[data-loop-prompt]')) { const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (agent && event.target.value !== (agent.loop?.prompt || '')) void save({ prompt: event.target.value }); } });
 }
 // An agent whose saved chat was deleted still names it; a new chat starts then, once even when the screen draws again meanwhile.
-const starting = new Set();
+const starting = new Set(), introduced = new Set();
 export const savedChatGone = (ctx, agent) => Boolean(agent?.runId) && !ctx.runById(agent.runId);
 export async function openAgentChat(ctx, agent) {
   const { ui, api, toast, refresh, open } = ctx;
   // An agent on a computer that is off: its chat lives there, so it opens when that computer is back.
   if (agent.remote && agent.status?.state === 'offline' && !(agent.runId && ctx.runById(agent.runId))) { toast(`${agent.name} is offline: ${agent.device} is off. Its chat opens when it is back; messages in rooms wait for it.`); return; }
   let runId = agent.runId && ctx.runById(agent.runId) ? agent.runId : '';
+  // An agent on another computer: its chat arrives from there. Starting one from here on every redraw sent it the same
+  // greeting dozens of times, so its card opens instead, and what the person writes there starts the chat.
+  if (!runId && agent.remote) { open('specialist', agent.id); if (!introduced.has(agent.id)) { introduced.add(agent.id); toast(`${agent.name}'s chat is on ${agent.device || 'its computer'}. It shows here once that computer shares it; or write to ${agent.name} from its card.`); } return; }
   if (!runId) {
-    if (starting.has(agent.id)) return; starting.add(agent.id);
+    if (starting.has(agent.id) || introduced.has(agent.id)) { open('specialist', agent.id); return; } starting.add(agent.id); introduced.add(agent.id);
     // When it cannot start, the card opens, so a screen left on the deleted chat does not try again on every redraw.
     try { await api(`/specialists/${agent.id}/say`, { method: 'POST', data: { text: 'Introduce yourself in one or two lines: who you are and which project you look after.' } }); await refresh(); }
     catch (error) { toast(`${agent.name} could not start a chat: ${error.message}`, true); open('specialist', agent.id); return; }

@@ -156,3 +156,22 @@ test('a personal chat with an agent on another computer is read and written thro
   assert.ok(after.events.some(event => /How is the shop today/.test(event.text || '')), 'the person\'s message is in the chat on both computers');
   await assert.rejects(() => b.desk.peers.chatAction(after, 'publish', {}), /Open this chat on .* to do that/);
 });
+
+test('the same message to an agent on another computer is sent once, and its chat copy shows a repeated message once', async () => {
+  const { a, b } = computers();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  b.desk.store.put('specialist', dara.id, { ...a.desk.store.get('specialist', dara.id) });
+  const copy = b.desk.store.get('specialist', dara.id);
+  await b.desk.peers.command(copy, 'say', { text: 'Introduce yourself.' });
+  const again = await b.desk.peers.command(copy, 'say', { text: 'Introduce yourself.' });
+  assert.equal(again.repeat, true);
+  assert.equal(b.desk.store.list('peercmd').length, 1);
+
+  await a.desk.specialistTurn(dara.id, { prompt: 'Hello' });
+  const runId = a.desk.store.get('specialist', dara.id).runId;
+  await waitFor(() => !['starting', 'running'].includes(a.desk.store.get('run', runId).state));
+  for (let index = 0; index < 5; index++) a.desk.store.event(runId, 'human-message', { text: 'Introduce yourself.' }, true);
+  a.desk.peers.copyChat(runId);
+  const events = a.desk.store.get('chatcopy', runId).events;
+  assert.equal(events.filter(event => event.text === 'Introduce yourself.').length, 1);
+});
