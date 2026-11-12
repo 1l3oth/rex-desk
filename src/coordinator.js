@@ -481,7 +481,11 @@ export class Desk {
       }
       if (controller.signal.aborted) throw new Error('Run stopped.');
       if (!attach) token = this.scopeToken(runId);
-      const options = { run, cwd: run.cwd || run.worktree || path.join(this.store.directory, 'coordinator'), projectDirectory: run.projectPath || '', token,
+      // A chat made on another computer names that computer's folders: here the agent works in its own folder on this computer.
+      const owner = run.roomAgent || run.specialistId, ownHome = () => { const agent = owner && owner !== 'main' ? this.specialists.get(owner) : null; const folder = agent ? this.specialists.homeDirectory(agent) : path.join(this.store.directory, 'coordinator'); mkdirSync(folder, { recursive: true }); return folder; };
+      const cwd = [run.cwd, run.worktree].find(folder => folder && existsSync(folder)) || (run.cwd || run.worktree ? ownHome() : path.join(this.store.directory, 'coordinator'));
+      if (run.cwd && cwd !== run.cwd && !existsSync(run.cwd)) this.patchRun(run.id, { cwd });
+      const options = { run, cwd, projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : '', token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
@@ -530,10 +534,11 @@ export class Desk {
       const workflowUpdate = workflow && run.workflowSeen !== workflowKey ? `${workflow.replace(':\n', ' (updated):\n')}` : '';
       if (workflowKey && run.workflowSeen !== workflowKey) this.patchRun(runId, { workflowSeen: workflowKey });
       const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, reopened && owner ? this.specialists.lessonsText(owner) : '', reopened && chat ? '(Reply like a teammate in a chat: short, plain, answer first; no code or long lists unless asked. When corrected, save the lesson with desk_learn.)' : ''].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : [this.prompt(run), run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
-      if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
+      // The handoff is used up only by a turn that really ran: a turn that fails to start reads it next time.
       await runner.start(digest ? `${digest}
 
 ${message}` : message);
+      if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
       }
       if (await this.switchIfLimited(runId)) return;
       const current = this.run(runId);
