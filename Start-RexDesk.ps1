@@ -14,7 +14,13 @@ if (-not $rexRunning) {
     $rexLocal = Join-Path $rexProject '.local'
     New-Item -ItemType Directory -Path $rexLocal -Force | Out-Null
     $rexNode = (Get-Command node -ErrorAction Stop).Source
-    Start-Process -FilePath $rexNode -ArgumentList @('src/server.js') -WorkingDirectory $rexProject -WindowStyle Hidden -RedirectStandardOutput (Join-Path $rexLocal 'server.log') -RedirectStandardError (Join-Path $rexLocal 'server-error.log')
+    # Created through WMI so the server is not part of this window's job: closing the terminal or agent session that ran
+    # this script must not end Rex Desk with it.
+    $rexCommand = "cmd.exe /c `"`"$rexNode`" src/server.js > `"$(Join-Path $rexLocal 'server.log')`" 2> `"$(Join-Path $rexLocal 'server-error.log')`"`""
+    $rexCreated = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $rexCommand; CurrentDirectory = $rexProject }
+    if ($rexCreated.ReturnValue -ne 0) {
+        Start-Process -FilePath $rexNode -ArgumentList @('src/server.js') -WorkingDirectory $rexProject -WindowStyle Hidden -RedirectStandardOutput (Join-Path $rexLocal 'server.log') -RedirectStandardError (Join-Path $rexLocal 'server-error.log')
+    }
     for ($rexAttempt = 0; $rexAttempt -lt 20; $rexAttempt++) {
         try {
             $rexResponse = Invoke-WebRequest -Uri "$rexAddress/api/auth" -UseBasicParsing -TimeoutSec 1

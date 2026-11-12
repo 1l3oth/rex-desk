@@ -42,7 +42,7 @@ const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The commit this server runs. A pull or a commit from another session changes it; the server then restarts itself and the page reloads.
 const startedCode = readCode();
-function readCode() { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 5000 }).trim(); } catch { return ''; } }
+function readCode() { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } }
 function codeVersion() { return startedCode; }
 const mime = { '.webmanifest': 'application/manifest+json', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.json': 'application/json; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 const json = (response, code, data) => { response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(data)); };
@@ -725,6 +725,21 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   return handle;
 }
 
+// Starts the server that takes over from this one. On Windows it is created through WMI, so it does not live in the job of
+// whoever started this server (a terminal, an agent session, the desktop app): when that closes, Windows ends every process
+// in its job, and a plain detached child would die with it.
+async function startReplacement() {
+  const log = path.join(root, '.local', 'server-restart.log');
+  if (process.platform === 'win32') {
+    const command = `cmd.exe /c "set REX_RESTART_AFTER=${process.pid}&& "${process.execPath}" src/server.js >> "${log}" 2>&1"`;
+    const script = `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${command.replaceAll("'", "''")}'; CurrentDirectory = '${root.replaceAll("'", "''")}' }; exit $r.ReturnValue`;
+    await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 30000 });
+    return;
+  }
+  let out = 'ignore'; try { out = openSync(log, 'a'); } catch {}
+  spawn(process.execPath, ['src/server.js'], { cwd: root, detached: true, stdio: ['ignore', out, out], env: { ...process.env, REX_RESTART_AFTER: String(process.pid) } }).unref();
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const app = await createApp({ catchUp: true });
   console.log(`Rex Desk: ${app.address}\nMCP: ${app.address}/mcp\n${app.store ? `Keys and history stay in ${app.store.directory}` : 'Locked: sign in from the dashboard.'}`);
@@ -752,9 +767,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   if (startedCode) setInterval(() => {
     if (closing || readCode() === startedCode || readCode() === '' || (app.desk?.live?.size || 0) > 0) return;
     closing = true;
-    // Its own log file: the first server's log may still be held open by whoever started it.
-    let log = 'ignore'; try { log = openSync(path.join(root, '.local', 'server-restart.log'), 'a'); } catch {}
-    spawn(process.execPath, ['src/server.js'], { cwd: root, detached: true, windowsHide: true, stdio: ['ignore', log, log], env: { ...process.env, REX_RESTART_AFTER: String(process.pid) } }).unref();
-    void app.close().catch(() => {}).finally(() => process.exit(0));
+    // If the new server could not be started, this one keeps running and tries again on the next tick.
+    void startReplacement().then(() => app.close().catch(() => {}).finally(() => process.exit(0)), () => { closing = false; });
   }, 20000).unref();
 }

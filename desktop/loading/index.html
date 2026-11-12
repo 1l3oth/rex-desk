@@ -9,6 +9,10 @@
   h1 { font-size: 20px; margin: 0 0 4px; }
   p { margin: 0; color: #5d6e75; }
   p.error { color: #9b2c2c; }
+  button { margin-top: 16px; padding: 8px 18px; border: 0; border-radius: 8px; background: #4c8dff; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  button[hidden] { display: none; }
+  @media (prefers-color-scheme: dark) { body { background: #14161a; color: #e6e8eb; } p { color: #9aa3b1; } p.error { color: #ff7b72; } }
 </style>
 </head>
 <body>
@@ -16,13 +20,25 @@
   <svg width="40" height="40" viewBox="0 0 64 64" aria-hidden="true" style="display:block;margin:0 auto 12px"><rect x="2" y="2" width="60" height="60" rx="14" fill="#4c8dff"/><g fill="#fff"><rect x="16" y="16" width="14" height="14" rx="3"/><rect x="34" y="16" width="14" height="14" rx="3"/><rect x="16" y="34" width="14" height="14" rx="3"/><rect x="34" y="34" width="14" height="14" rx="3" opacity=".47"/></g></svg>
   <h1>Rex Desk</h1>
   <p id="status">Starting the local server…</p>
+  <button type="button" id="restart" hidden>Restart Rex Desk</button>
 </main>
 <script>
+  const status = document.getElementById('status'), button = document.getElementById('restart');
   function showError(message) {
-    const status = document.getElementById('status');
     status.textContent = message;
     status.className = 'error';
+    button.hidden = false; button.disabled = false;
   }
+  // The server stopped while the app was open: the app is already starting it again; the button does it right away.
+  if (new URLSearchParams(location.search).has('down')) {
+    status.textContent = 'Rex Desk stopped. Starting it again…';
+    button.hidden = false;
+  }
+  button.addEventListener('click', async () => {
+    button.disabled = true; status.className = ''; status.textContent = 'Restarting Rex Desk…';
+    try { await window.__TAURI_INTERNALS__.invoke('restart_server'); status.textContent = 'Rex Desk is back. Opening it…'; }
+    catch (error) { showError(String(error)); }
+  });
 </script>
 </body>
 </html>

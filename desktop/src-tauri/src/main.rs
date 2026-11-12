@@ -5,7 +5,7 @@ use std::{
     net::{SocketAddr, TcpStream},
     path::PathBuf,
     process::Command,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -25,6 +25,7 @@ fn show_window(app: &tauri::AppHandle) {
 
 const ADDRESS: &str = "127.0.0.1:4317";
 static OPENED: AtomicUsize = AtomicUsize::new(0);
+static RESTARTING: AtomicBool = AtomicBool::new(false);
 
 // A link Rex Desk opens in a new window: its own pages open in a child window of the app (same sign-in);
 // anything else opens in the person's browser.
@@ -117,6 +118,54 @@ fn start_server(runtime: &Runtime) -> std::io::Result<()> {
     hidden(&mut command).spawn().map(|_| ())
 }
 
+// Ends the running server (its process id is in runtime.lock) so a fresh one can start.
+fn stop_server(runtime: &Runtime) {
+    let Ok(text) = fs::read_to_string(runtime.data.join("runtime.lock")) else { return };
+    let Ok(pid) = text.trim().parse::<u32>() else { return };
+    let mut command = Command::new("taskkill");
+    command.args(["/PID", &pid.to_string(), "/T", "/F"]);
+    let _ = hidden(&mut command).status();
+}
+
+fn wait_for_server(seconds: u64) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    while Instant::now() < deadline {
+        if server_running() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    server_running()
+}
+
+// Stops the server if it still answers, starts a new one and waits until it is up. Used by the Restart button, the tray and the watchdog.
+fn restart(runtime: &Runtime) -> Result<(), String> {
+    if RESTARTING.swap(true, Ordering::SeqCst) {
+        return Err("Rex Desk is already restarting.".into());
+    }
+    let result = (|| {
+        stop_server(runtime);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while server_running() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(200));
+        }
+        start_server(runtime).map_err(|error| format!("Could not start Rex Desk: {error}"))?;
+        if wait_for_server(40) {
+            Ok(())
+        } else {
+            Err(format!("Rex Desk did not start. See {}", runtime.data.join("server-error.log").display()))
+        }
+    })();
+    RESTARTING.store(false, Ordering::SeqCst);
+    result
+}
+
+#[tauri::command]
+async fn restart_server() -> Result<(), String> {
+    let runtime = runtime().ok_or("Rex Desk files are missing. Reinstall Rex Desk.")?;
+    tauri::async_runtime::spawn_blocking(move || restart(&runtime)).await.map_err(|error| error.to_string())?
+}
+
 // Recorded checks need Playwright's Chromium; the installer cannot carry it, so it downloads once in the background.
 fn ensure_browser(runtime: &Runtime) {
     if !runtime.bundled {
@@ -145,6 +194,7 @@ fn main() {
     tauri::Builder::default()
         // Opening Rex Desk again brings the existing window back instead of starting a second copy.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
+        .invoke_handler(tauri::generate_handler![restart_server])
         .setup(|app| {
             let handle = app.handle().clone();
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -156,14 +206,20 @@ fn main() {
                 .build()?;
             // Rex Desk lives in the system tray: closing the window hides it while the server keeps running agents.
             let open = MenuItem::with_id(app, "open", "Open Rex Desk", true, None::<&str>)?;
+            let again = MenuItem::with_id(app, "restart", "Restart Rex Desk server", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Rex Desk window", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &again, &quit])?;
             let mut tray = TrayIconBuilder::with_id("rex-desk")
                 .tooltip("Rex Desk")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => show_window(app),
+                    "restart" => {
+                        if let Some(runtime) = runtime() {
+                            thread::spawn(move || { let _ = restart(&runtime); });
+                        }
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -183,6 +239,7 @@ fn main() {
                     let _ = hide_on_close.hide();
                 }
             });
+            let home = window.url().ok();
             thread::spawn(move || {
                 let fail = |message: String| { let _ = window.eval(&format!("showError({message:?})")); };
                 let Some(runtime) = runtime() else {
@@ -201,7 +258,40 @@ fn main() {
                     }
                     thread::sleep(Duration::from_millis(250));
                 }
-                let _ = window.navigate(format!("http://{ADDRESS}").parse().expect("valid URL"));
+                let server: tauri::Url = format!("http://{ADDRESS}").parse().expect("valid URL");
+                let _ = window.navigate(server.clone());
+                // Watchdog: when the server stops answering for about 8 seconds (longer than a self-update handover), the window
+                // shows the app's own page with a Restart button and the app starts the server again by itself. When the server
+                // answers again, the window goes back to Rex Desk.
+                let mut down = 0u32;
+                let mut away = false;
+                loop {
+                    thread::sleep(Duration::from_secs(2));
+                    if server_running() {
+                        down = 0;
+                        if away {
+                            away = false;
+                            let _ = window.navigate(server.clone());
+                        }
+                        continue;
+                    }
+                    down += 1;
+                    if down < 4 || RESTARTING.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    if !away {
+                        away = true;
+                        if let Some(mut page) = home.clone() {
+                            page.set_query(Some("down=1"));
+                            let _ = window.navigate(page);
+                        }
+                    }
+                    if down == 4 || down % 30 == 0 {
+                        if let Err(error) = restart(&runtime) {
+                            let _ = window.eval(&format!("showError({error:?})"));
+                        }
+                    }
+                }
             });
             Ok(())
         })
