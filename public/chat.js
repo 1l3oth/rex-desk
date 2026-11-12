@@ -1029,7 +1029,7 @@ function earlierChats(agent) {
 function outboxHtml(run, shown) {
   const waiting = ui.outbox?.get(run.id); if (!waiting?.length) return '';
   // The words the person sees, without the hidden voice note; a few minutes of leeway for the two computers' clocks.
-  const words = text => spokenText(String(text || '')).text.replace(/\s+/g, ' ').trim().slice(0, 200);
+  const words = text => spokenText(String(text || '').split(/\n*Attached files \(read them from these paths\):/)[0]).text.replace(/\s+/g, ' ').trim().slice(0, 200);
   const arrived = item => shown.some(event => event.kind === 'human-message' && Date.parse(event.createdAt || 0) > Date.parse(item.at) - 300000 && words(event.text).includes(words(item.text)));
   const left = waiting.filter(item => !arrived(item)); ui.outbox.set(run.id, left);
   const agent = personalAgent(run), where = agent?.device || 'the other computer', off = agent?.status?.state === 'offline';

@@ -210,3 +210,25 @@ test('a picture attached in a chat on another computer shows here too', async ()
   assert.deepEqual([...shown.data], [137, 80, 78, 71, 1, 2, 3]);
   assert.equal(b.desk.peers.chatPicture(path.join(folder, 'other.png')), null);
 });
+
+test('a file attached here for an agent on another computer is saved there, and the agent is given that computer\'s path', async () => {
+  const { a, b } = computers();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  await a.desk.specialistTurn(dara.id, { prompt: 'Hello' });
+  const runId = a.desk.store.get('specialist', dara.id).runId;
+  await waitFor(() => !['starting', 'running'].includes(a.desk.store.get('run', runId).state));
+  a.desk.peers.copyChat(runId);
+  const carry = (from, to, kinds) => to.desk.peers.applyAll(kinds.flatMap(kind => from.desk.store.list(kind).map(value => ({ kind, id: value.id, value }))));
+  carry(a, b, ['specialist', 'chatcopy']);
+  // The person attaches a screenshot on the home laptop (or the phone connected to it).
+  const folder = path.join(b.desk.store.directory, 'uploads', '7a1e2c3a-1111-4222-8333-444455556666'); mkdirSync(folder, { recursive: true });
+  const shot = path.join(folder, 'image.png'); writeFileSync(shot, Buffer.from([137, 80, 78, 71, 9, 9]));
+  await b.desk.peers.chatAction(b.desk.peers.chatCopy(runId), 'resume', { prompt: `What is in this?\n\nAttached files (read them from these paths):\n- ${shot}` });
+  carry(b, a, ['chatfile', 'peercmd']);
+  await waitFor(() => a.turns.some(turn => /What is in this/.test(turn.prompt)));
+  const prompt = a.turns.find(turn => /What is in this/.test(turn.prompt)).prompt;
+  assert.ok(!prompt.includes(shot), 'the home laptop\'s path is not given to the agent');
+  const there = /- (.+image\.png)/.exec(prompt)[1];
+  assert.ok(there.startsWith(path.join(a.desk.store.directory, 'uploads')), 'it is in the work laptop\'s uploads');
+  assert.deepEqual([...readFileSync(there)], [137, 80, 78, 71, 9, 9]);
+});

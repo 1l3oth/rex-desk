@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync,
 import { HUMAN } from './rooms.js';
 
 const now = () => new Date().toISOString();
-const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000, PICTURE_BYTES = 2 * 1024 * 1024;
+const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000, PICTURE_BYTES = 2 * 1024 * 1024, CARRY_BYTES = 8 * 1024 * 1024;
 const PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
 // A picture is known by its path on the computer that has it.
 export const chatFileId = file => createHash('sha1').update(path.resolve(String(file)).toLowerCase()).digest('hex');
@@ -198,8 +198,8 @@ export class Peers {
       const route = action === 'say' ? `/api/specialists/${agent.id}/say` : `/api/specialists/${agent.id}/assign`;
       return this.forward(agent.node, 'POST', route, input);
     }
-    const id = randomUUID();
-    this.store.put('peercmd', id, { id, target: agent.node, action, agentId: agent.id, input, at: now(), done: false });
+    const id = randomUUID(), packed = action === 'say' ? { ...input, ...this.packFiles(String(input?.text || ''), agent.node) } : input;
+    this.store.put('peercmd', id, { id, target: agent.node, action, agentId: agent.id, input: packed, at: now(), done: false });
     return { queued: true, message: this.seen(agent.node) ? `Sent to ${agent.name} on ${this.deviceName(agent.node)} through the shared database. It starts in a few seconds.` : `${agent.name} is offline: ${this.deviceName(agent.node)} is off. It gets this when it is back.` };
   }
   async runCommand(command) {
@@ -207,13 +207,13 @@ export class Peers {
     (this.running ||= new Set()).add(command.id);
     let result = {}, error = '';
     try {
-      if (command.action === 'say') result = await this.desk.specialistTurn(command.agentId, { prompt: String(command.input?.text || '').slice(0, 4000) });
+      if (command.action === 'say') result = await this.desk.specialistTurn(command.agentId, { prompt: (await this.unpackFiles(command.input)).slice(0, 8000) });
       else if (command.action === 'assign') result = await this.desk.assignTask({ specialistId: command.agentId, ...this.localTask(command.input) });
       else if (command.action === 'chat-stop') result = await this.desk.stop(command.runId);
       else if (command.action === 'answer') result = this.desk.answer(command.input?.interactionId, command.input?.answer || {});
       else if (command.action === 'chat-say') {
         // Written on another computer in this agent's personal chat: said to the agent while it works, or it picks the chat up again.
-        const run = this.store.get('run', command.runId), text = String(command.input?.text || '');
+        const run = this.store.get('run', command.runId), text = await this.unpackFiles(command.input);
         if (!run) throw new Error('That chat is no longer on this computer.');
         result = ['starting', 'running', 'queued', 'waiting', 'verifying'].includes(run.state) ? await this.desk.say(run.id, text, {}) : await this.desk.resume(run.id, { prompt: text });
       }
@@ -292,6 +292,36 @@ export class Peers {
       }
     }
   }
+  // Files the person attached here, for an agent on another computer: each travels in the shared database, and that computer
+  // saves its own copy and tells the agent where it is. A file over 8 MB stays here and the message says so.
+  packFiles(text, target) {
+    const uploads = path.resolve(this.store.directory, 'uploads').toLowerCase(), files = [];
+    let note = '';
+    for (const match of String(text).matchAll(/^- (.+)$/gm)) {
+      const file = path.resolve(match[1].trim());
+      if (!file.toLowerCase().startsWith(uploads + path.sep) || !existsSync(file)) continue;
+      const size = statSync(file).size;
+      if (size > CARRY_BYTES) { note += `\n(${path.basename(file)} is ${Math.round(size / 1048576)} MB, too big to send to another computer; it stays on ${this.self.name}.)`; continue; }
+      const id = chatFileId(file);
+      if (this.store.get('chatfile', id)?.size !== size) this.store.put('chatfile', id, { id, path: file, name: path.basename(file), size, data: readFileSync(file).toString('base64'), for: target, at: now() });
+      files.push({ id, path: match[1].trim(), name: path.basename(file) });
+    }
+    return { text: text + note, files };
+  }
+  // The files arrive with the command, or a few seconds after it; each is saved in this computer's uploads and the message
+  // gets this computer's paths.
+  async unpackFiles(input = {}) {
+    let text = String(input.text || '');
+    for (const file of input.files || []) {
+      let item;
+      for (let attempt = 0; attempt < 40 && !(item = this.store.get('chatfile', file.id))?.data; attempt++) await new Promise(resolve => setTimeout(resolve, 750));
+      if (!item?.data) { text = text.split(file.path).join(`${file.path} (this file did not arrive from the other computer)`); continue; }
+      const folder = path.join(this.store.directory, 'uploads', randomUUID()), target = path.join(folder, path.basename(file.name).replace(/[^\p{L}\p{N}._ -]+/gu, '_') || 'file');
+      mkdirSync(folder, { recursive: true }); writeFileSync(target, Buffer.from(item.data, 'base64'));
+      text = text.split(file.path).join(target);
+    }
+    return text;
+  }
   // One picture from another computer's chat, when it is not on this one.
   chatPicture(file) {
     const item = this.store.get('chatfile', chatFileId(file));
@@ -343,8 +373,8 @@ export class Peers {
     if (!['say', 'resume', 'stop'].includes(action)) throw new Error(`Open this chat on ${this.deviceName(copy.node)} to do that.`);
     const text = String(input.text || input.prompt || '').slice(0, 20000);
     if (action !== 'stop' && !text.trim()) throw new Error('Write a message first.');
-    const id = randomUUID();
-    this.store.put('peercmd', id, { id, target: copy.node, action: `chat-${action === 'stop' ? 'stop' : 'say'}`, runId: copy.id, agentId: copy.agentId, input: { text }, at: now(), done: false });
+    const id = randomUUID(), packed = action === 'stop' ? { text, files: [] } : this.packFiles(text, copy.node);
+    this.store.put('peercmd', id, { id, target: copy.node, action: `chat-${action === 'stop' ? 'stop' : 'say'}`, runId: copy.id, agentId: copy.agentId, input: packed, at: now(), done: false });
     const name = this.store.get('specialist', copy.agentId)?.name || 'The agent';
     return { queued: true, message: this.online(copy.node) ? `Sent to ${name} on ${this.deviceName(copy.node)}. The reply shows here in a few seconds.` : `${this.deviceName(copy.node)} is off. ${name} gets this when it is back on.` };
   }
