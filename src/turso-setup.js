@@ -36,13 +36,20 @@ async function call(fetcher, token, method, path, body) {
 const failed = (what, answer) => new Error(`Turso could not ${what}: ${answer.data?.error || `HTTP ${answer.status}`}`);
 
 // Makes (or finds) the "rex-desk" database in the person's own Turso account and returns its address and a key for it.
-export async function provisionDatabase(platformToken, { fetcher = fetch, name = 'rex-desk' } = {}) {
+// With create false (a new computer opening an existing backup) nothing is made: the database must already be there.
+export async function provisionDatabase(platformToken, { fetcher = fetch, name = 'rex-desk', create = true } = {}) {
   const orgs = await call(fetcher, platformToken, 'GET', '/v1/organizations');
   if (!orgs.ok) throw failed('read your account', orgs);
   const list = Array.isArray(orgs.data) ? orgs.data : orgs.data.organizations || [];
   const org = list.find(item => item.type === 'personal') || list[0];
   if (!org?.slug) throw new Error('Turso did not return an account to put the database in.');
   const at = `/v1/organizations/${encodeURIComponent(org.slug)}`;
+  if (!create) {
+    const found = await call(fetcher, platformToken, 'GET', `${at}/databases/${name}`);
+    if (found.status === 404) throw new Error('This Turso account has no Rex Desk backup yet. Turn on cloud backup on your other computer first, or sign in with the Turso account you used there.');
+    if (!found.ok) throw failed('find your Rex Desk backup', found);
+    return keyFor(fetcher, platformToken, at, org.slug, name, found.data.database);
+  }
   // A database lives in a group. A new account may have none yet, so one is made near this computer.
   const groups = await call(fetcher, platformToken, 'GET', `${at}/groups`);
   if (!groups.ok) throw failed('read your groups', groups);
@@ -56,9 +63,12 @@ export async function provisionDatabase(platformToken, { fetcher = fetch, name =
   let database = await call(fetcher, platformToken, 'POST', `${at}/databases`, { name, group });
   if (database.status === 409) database = await call(fetcher, platformToken, 'GET', `${at}/databases/${name}`);
   if (!database.ok) throw failed('make the database', database);
-  const hostname = database.data.database?.Hostname || database.data.database?.hostname;
-  if (!hostname) throw new Error('Turso made the database but did not say where it is.');
+  return keyFor(fetcher, platformToken, at, org.slug, name, database.data.database);
+}
+async function keyFor(fetcher, platformToken, at, organization, name, database) {
+  const hostname = database?.Hostname || database?.hostname;
+  if (!hostname) throw new Error('Turso did not say where the database is.');
   const key = await call(fetcher, platformToken, 'POST', `${at}/databases/${name}/auth/tokens?authorization=full-access`);
   if (!key.ok || !key.data.jwt) throw failed('make a key for the database', key);
-  return { url: `libsql://${hostname}`, authToken: key.data.jwt, organization: org.slug, database: name };
+  return { url: `libsql://${hostname}`, authToken: key.data.jwt, organization, database: name };
 }

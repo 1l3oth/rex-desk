@@ -104,7 +104,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   const anywhere = anywhereFactory ? anywhereFactory() : new Anywhere({ root, dataRoot });
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
-  let session = null, address = '', tursoPending = null;
+  let session = null, address = '', tursoPending = null, tursoFound = null;
   const cloud = cloudClientFactory ? { clientFactory: cloudClientFactory, retryMs: 50 } : undefined;
   async function openSession(entry, vaultKey, { staySignedIn = false } = {}) {
     const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
@@ -176,6 +176,15 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     const slow = async error => { await new Promise(resolve => setTimeout(resolve, 700)); throw error; };
     if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); return respond(); }
     if (url.pathname === '/api/auth/login') { await activate(await accounts.signIn(input.email, input.passphrase, { claimId: input.claimId }).catch(slow)); return respond(); }
+    // A new computer, from the sign-in screen: Turso's browser sign-in finds the person's existing Rex Desk backup, so they never type its address or key.
+    if (url.pathname === '/api/auth/turso-start') { tursoPending?.cancel(); tursoFound = null; tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
+    if (url.pathname === '/api/auth/turso-finish') {
+      if (!tursoPending) throw new Error('Start the Turso sign-in first.');
+      const pending = tursoPending;
+      try { tursoFound = await provisionDatabase(await pending.token, { create: false }); return json(response, 200, { found: true }); }
+      finally { if (tursoPending === pending) tursoPending = null; }
+    }
+    if (url.pathname === '/api/auth/cloud' && input.turso) { if (!tursoFound) throw new Error('Sign in with Turso first.'); input.url = tursoFound.url; input.authToken = tursoFound.authToken; }
     if (url.pathname === '/api/auth/cloud') {
       // A new computer: find the account in the person's own Turso database, unseal its key, then restore everything before answering.
       const found = await findCloudWorkspace({ url: input.url, authToken: input.authToken, name: cleanEmail(input.email) }, cloudClientFactory);
@@ -184,6 +193,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       catch (error) { return slow(error); }
       await activate(opened);
       if (!session.store.cloud.enabled) { await session.store.cloud.connect({ url: input.url, authToken: input.authToken }); session.cloud = { pulled: !session.store.fresh, restored: true }; }
+      if (input.turso) tursoFound = null;
       return respond();
     }
     if (url.pathname === '/api/auth/logout') {

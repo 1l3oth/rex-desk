@@ -45,3 +45,17 @@ test('an account that already has the rex-desk database reuses it, and a refusal
   assert.equal((await provisionDatabase('k', { fetcher })).url, 'libsql://old.turso.io');
   await assert.rejects(provisionDatabase('k', { fetcher: async () => reply(401, { error: 'token expired' }) }), /Turso could not read your account: token expired/);
 });
+
+test('a new computer only finds the existing backup and never makes a database', async () => {
+  const calls = [];
+  const fetcher = async (url, options = {}) => {
+    calls.push(`${options.method || 'GET'} ${url}`);
+    if (url.endsWith('/v1/organizations')) return reply(200, [{ slug: 'rex', type: 'personal' }]);
+    if (url.endsWith('/databases/rex-desk')) return reply(200, { database: { Hostname: 'mine.turso.io' } });
+    if (url.includes('/auth/tokens')) return reply(200, { jwt: 'db-key' });
+  };
+  assert.equal((await provisionDatabase('k', { fetcher, create: false })).url, 'libsql://mine.turso.io');
+  assert.ok(!calls.some(call => call.startsWith('POST') && !call.includes('/auth/tokens')), 'nothing is made');
+  const empty = async url => url.endsWith('/v1/organizations') ? reply(200, [{ slug: 'rex', type: 'personal' }]) : reply(404, { error: 'not found' });
+  await assert.rejects(provisionDatabase('k', { fetcher: empty, create: false }), /no Rex Desk backup yet/);
+});

@@ -1166,7 +1166,7 @@ function renderLogin(auth, { tab, error = '' } = {}) {
       ${known.length ? `<div class="login-known">${known.map(item => `<button type="button" class="login-account" data-action="login-pick" data-email="${esc(item.email)}"><span class="login-avatar">${esc(item.email[0].toUpperCase())}</span><span><strong>${esc(item.email)}</strong><small>${item.role === 'superadmin' ? 'Superadmin' : 'Member'}${item.lastUsedAt ? ` · ${relative(item.lastUsedAt).toLowerCase()}` : ''}</small></span></button>`).join('')}</div>` : ''}
       ${email(known.length === 1 ? known[0].email : '')}${secret('Passphrase')}${stay}<button class="button primary login-submit" type="submit">Sign in</button>`,
     create: `${email()}${secret('Passphrase', 'passphrase', 'new-password')}${secret('Repeat passphrase', 'repeat', 'new-password')}${stay}<p class="login-note">${auth.workspaces.length ? 'Your account gets its own workspace: issues, keys, and history are separate from other accounts on this computer.' : 'The first account on this computer becomes its superadmin.'} Rex Desk cannot recover a forgotten passphrase.</p><button class="button primary login-submit" type="submit">Create account</button>`,
-    cloud: `<p class="login-note">Open your account on this computer from the Turso database connected under Cloud backup on your other computer.</p><label class="field"><span>Database URL</span><input name="url" placeholder="libsql://your-database.turso.io" autocomplete="off" spellcheck="false" required></label><label class="field"><span>Database token</span><input name="authToken" type="password" autocomplete="off" required></label>${email()}${secret('Passphrase')}${stay}<button class="button primary login-submit" type="submit">Open my account</button>`,
+    cloud: `<p class="login-note">Open your account on this computer from the cloud backup you turned on on your other computer.</p>${ui.loginTurso === 'found' ? '<p class="login-note"><strong>Found your Rex Desk backup in Turso.</strong> Now enter your email and passphrase.</p><input type="hidden" name="turso" value="1">' : `<button type="button" class="button primary login-submit" data-action="login-turso" ${ui.loginTurso ? 'disabled' : ''}>${ui.loginTurso ? 'Waiting for you to sign in to Turso in the browser…' : 'Sign in with Turso to find my backup'}</button><details class="login-manual"><summary>Or type the database address and key</summary><label class="field"><span>Database URL</span><input name="url" placeholder="libsql://your-database.turso.io" autocomplete="off" spellcheck="false"></label><label class="field"><span>Database token</span><input name="authToken" type="password" autocomplete="off"></label></details>`}${email()}${secret('Passphrase')}${stay}<button class="button primary login-submit" type="submit">Open my account</button>`,
   };
   app.innerHTML = `<main class="login" id="main"><section class="login-card" aria-labelledby="login-title"><div class="login-brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><h1 id="login-title">Rex Desk</h1></div>
     ${auth.occupied ? `<p class="login-occupied">${icon('alert')}<span>${esc(auth.occupied)} is signed in on this computer. Signing in to another account closes that workspace and stops its running agents.</span></p>` : ''}
@@ -1186,6 +1186,7 @@ function mountLoginScene() {
 }
 async function submitLogin(form) {
   const data = Object.fromEntries(new FormData(form)), mode = form.dataset.mode, submit = form.querySelector('[type=submit]');
+  if (mode === 'cloud' && !data.turso && (!data.url || !data.authToken)) { form.querySelector('.form-error').textContent = 'Sign in with Turso first, or type the database address and key.'; return; }
   if (mode === 'create' && data.passphrase !== data.repeat) { form.querySelector('.form-error').textContent = 'The passphrases do not match.'; return; }
   submit.disabled = true; submit.textContent = mode === 'cloud' ? 'Restoring your account…' : 'Signing in…';
   try {
@@ -1290,6 +1291,18 @@ document.addEventListener('click', event => {
   if (target.dataset.run) { navigate('runs', { runId: target.dataset.run }); return; }
   const name = target.dataset.action; if (!name) return;
   if (name === 'login-tab') { renderLogin(ui.auth, { tab: target.dataset.tabName }); return; }
+  if (name === 'login-turso') {
+    // A new computer: Turso's browser sign-in finds the existing backup, so the address and key are never typed.
+    const form = document.querySelector('#login-form'), typed = form?.elements.email?.value || '';
+    ui.loginTurso = 'waiting'; renderLogin(ui.auth, { tab: 'cloud' });
+    void (async () => {
+      let error = '';
+      try { const { url } = await api('/auth/turso-start', { method: 'POST', data: {} }); window.open(url, '_blank', 'noopener'); await api('/auth/turso-finish', { method: 'POST', data: {} }); ui.loginTurso = 'found'; }
+      catch (failure) { ui.loginTurso = ''; error = failure.message; }
+      renderLogin(ui.auth, { tab: 'cloud', error }); const field = app.querySelector('[name=email]'); if (field) { field.value = typed; field.focus(); }
+    })();
+    return;
+  }
   if (name === 'login-pick') { const form = document.querySelector('#login-form'); form.elements.email.value = target.dataset.email; form.elements.passphrase.focus(); return; }
   if (name === 'account-menu') { ui.accountMenu = !ui.accountMenu; render(); return; }
   if (name === 'sign-out') { void action(async () => { await api('/auth/logout', { method: 'POST' }); location.reload(); }); return; }
