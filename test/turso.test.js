@@ -110,3 +110,22 @@ test('a reinstall gets back the files too: chat pictures, room pictures, evidenc
   assert.deepEqual(second.events('run-1', { visible: true }).map(event => event.text), ['Keep me'], 'an unsent message stays unsent');
   await second.cloud.close(); second.close();
 });
+
+test('a large backup comes down in pages', async () => {
+  const original = temporary('pages-a'), restored = temporary('pages-b'), turso = fakeTurso();
+  turso.network.online = true;
+  const first = new Store(original);
+  first.cloud = new TursoSync(first, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await first.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' });
+  for (let index = 0; index < 4500; index++) first.event('run-1', 'agent-text', { text: `line ${index}` }, true);
+  for (let index = 0; index < 1200; index++) first.put('task', `task-${index}`, { id: `task-${index}` });
+  await first.cloud.flush(); await first.cloud.close(); first.close();
+  for (const file of ['workspace.id', 'vault.key']) copyFileSync(path.join(original, file), path.join(restored, file));
+  const second = new Store(restored);
+  second.cloud = new TursoSync(second, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await second.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' });
+  assert.equal(second.events('run-1', { limit: 10000 }).length, 4500);
+  assert.equal(second.list('task').length, 1200);
+  assert.equal((await second.cloud.verify()).matched, true);
+  await second.cloud.close(); second.close();
+});

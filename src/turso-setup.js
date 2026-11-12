@@ -47,11 +47,16 @@ export async function provisionDatabase(platformToken, { fetcher = fetch, name =
   const org = list.find(item => item.type === 'personal') || list[0];
   if (!org?.slug) throw new Error('Turso did not return an account to put the database in.');
   const at = `/v1/organizations/${encodeURIComponent(org.slug)}`;
+  // The backup can be in any organization the person belongs to, not only their personal one.
   if (!create) {
-    const found = await call(fetcher, platformToken, 'GET', `${at}/databases/${name}`);
-    if (found.status === 404) throw new Error('This Turso account has no Rex Desk backup yet. Turn on cloud backup on your other computer first, or sign in with the Turso account you used there.');
-    if (!found.ok) throw failed('find your Rex Desk backup', found);
-    return keyFor(fetcher, platformToken, at, org.slug, name, found.data.database);
+    for (const each of [org, ...list.filter(item => item !== org)].filter(item => item?.slug)) {
+      const where = `/v1/organizations/${encodeURIComponent(each.slug)}`;
+      const found = await call(fetcher, platformToken, 'GET', `${where}/databases/${name}`);
+      if (found.ok) return keyFor(fetcher, platformToken, where, each.slug, name, found.data.database);
+      if (found.status !== 404) throw failed('find your Rex Desk backup', found);
+    }
+    const names = list.map(item => item.slug).filter(Boolean).join(', ') || 'this account';
+    throw new Error(`No Rex Desk backup in the Turso account you signed in with (${names}). Sign out of Turso in the browser and sign in with the Turso account your other computer uses, or turn on cloud backup there first.`);
   }
   // A database lives in a group. A new account may have none yet, so one is made near this computer.
   const groups = await call(fetcher, platformToken, 'GET', `${at}/groups`);

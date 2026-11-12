@@ -116,12 +116,29 @@ export class TursoSync {
   }
   // Signing in on a computer that already has this workspace: upload anything left from its last session, then take the
   // cloud copy, which holds whatever another computer did since. Sequential use is safe; simultaneous use keeps the last write.
+  // A backup can hold tens of thousands of messages: it comes down in pages, each well inside the request time limit.
+  async cloudRecords() {
+    const rows = []; let kind = '', id = '';
+    for (;;) {
+      const page = await this.client.execute({ sql: 'SELECT kind,id,value FROM rex_records WHERE workspace=? AND (kind>? OR (kind=? AND id>?)) ORDER BY kind,id LIMIT 1000', args: [this.workspace, kind, kind, id] });
+      rows.push(...page.rows); if (page.rows.length < 1000) return rows;
+      ({ kind, id } = page.rows.at(-1));
+    }
+  }
+  async cloudEvents() {
+    const rows = []; let after = -1;
+    for (;;) {
+      const page = await this.client.execute({ sql: 'SELECT * FROM rex_events WHERE workspace=? AND sequence>? ORDER BY sequence LIMIT 2000', args: [this.workspace, after] });
+      rows.push(...page.rows); if (page.rows.length < 2000) return rows;
+      after = Number(page.rows.at(-1).sequence);
+    }
+  }
   async pullLatest() {
     await this.flush();
     if (this.state !== 'connected' || this.status().pending) return { pulled: false, reason: this.error || 'Local changes are still uploading.' };
-    const records = await this.client.execute({ sql: 'SELECT kind,id,value FROM rex_records WHERE workspace=?', args: [this.workspace] });
+    const records = { rows: await this.cloudRecords() };
     if (!records.rows.length) return { pulled: false, reason: 'The cloud copy is empty.' };
-    const events = await this.client.execute({ sql: 'SELECT * FROM rex_events WHERE workspace=? ORDER BY sequence', args: [this.workspace] });
+    const events = { rows: await this.cloudEvents() };
     this.store.transaction(() => {
       this.store.db.exec('DELETE FROM records; DELETE FROM events;');
       const insert = this.store.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?)');
@@ -134,12 +151,12 @@ export class TursoSync {
     this.notify(); return { pulled: true, records: records.rows.length, events: events.rows.length };
   }
   async restoreIfAvailable() {
-    const records = await this.client.execute({ sql: 'SELECT kind,id,value FROM rex_records WHERE workspace=?', args: [this.workspace] });
+    const records = { rows: await this.cloudRecords() };
     if (!records.rows.length) return;
     this.restoring = true;
     const token = records.rows.find(row => row.kind === 'secret' && row.id === 'mcp-token');
     if (token) this.store.decrypt(JSON.parse(token.value));
-    const events = await this.client.execute({ sql: 'SELECT * FROM rex_events WHERE workspace=? ORDER BY sequence', args: [this.workspace] });
+    const events = { rows: await this.cloudEvents() };
     this.store.transaction(() => {
       const insert = this.store.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value');
       for (const row of records.rows) insert.run(row.kind, row.id, row.value);

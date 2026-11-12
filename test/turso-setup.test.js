@@ -65,5 +65,10 @@ test('a new computer only finds the existing backup and never makes a database',
   assert.equal((await provisionDatabase('k', { fetcher, create: false })).url, 'libsql://mine.turso.io');
   assert.ok(!calls.some(call => call.startsWith('POST') && !call.includes('/auth/tokens')), 'nothing is made');
   const empty = async url => url.endsWith('/v1/organizations') ? reply(200, [{ slug: 'rex', type: 'personal' }]) : reply(404, { error: 'not found' });
-  await assert.rejects(provisionDatabase('k', { fetcher: empty, create: false }), /no Rex Desk backup yet/);
+  await assert.rejects(provisionDatabase('k', { fetcher: empty, create: false }), /No Rex Desk backup in the Turso account you signed in with \(rex\)/);
+  // The backup sits in another organization the person belongs to.
+  const team = async url => url.endsWith('/v1/organizations') ? reply(200, [{ slug: 'me', type: 'personal' }, { slug: 'team', type: 'team' }])
+    : url.includes('/organizations/team/databases/rex-desk/auth/tokens') ? reply(200, { jwt: 'db-key' })
+    : url.endsWith('/organizations/team/databases/rex-desk') ? reply(200, { database: { Hostname: 'rex-desk-team.turso.io' } }) : reply(404, {});
+  assert.equal((await provisionDatabase('k', { fetcher: team, create: false })).url, 'libsql://rex-desk-team.turso.io');
 });
