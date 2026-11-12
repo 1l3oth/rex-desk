@@ -79,6 +79,17 @@ export function carrySession(sessionId, cwd, profile, { roots = { home, appData 
   return false;
 }
 
+// Whether a Claude conversation is on this computer, in any profile. A conversation started on another computer is not.
+export function conversationHere(sessionId, { roots = { home, appData }, profiles } = {}) {
+  if (!sessionId) return false;
+  for (const item of profiles || discoverProfiles('claude', { roots })) {
+    const projects = path.join(item.profile || path.join(roots.home, '.claude'), 'projects');
+    let folders = []; try { folders = readdirSync(projects, { withFileTypes: true }); } catch { continue; }
+    if (folders.some(folder => folder.isDirectory() && existsSync(path.join(projects, folder.name, `${sessionId}.jsonl`)))) return true;
+  }
+  return false;
+}
+
 function capture(command, args, env, timeout) {
   return new Promise(resolve => {
     execFile(command, args, { env, windowsHide: true, timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) =>
@@ -96,14 +107,20 @@ export function parseClaudeStatus(output) {
 }
 
 export class AgentProfiles {
-  constructor(store, { run = capture, ttl = 120000 } = {}) { this.store = store; this.run = run; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); }
+  constructor(store, { run = capture, ttl = 120000 } = {}) { this.store = store; this.run = run; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
+  // Agents and settings travel between computers (the shared database, a restore from backup), but a profile folder is only on the
+  // computer that made it. A folder that is not here counts as not chosen.
+  here(profile) { return profile && directory(profile) ? profile : ''; }
   selected(provider) {
     const saved = this.store.config().agentProfiles?.[provider];
-    return saved === undefined || saved === null ? inheritedProfile(provider) : saved;
+    const chosen = saved === undefined || saved === null ? inheritedProfile(provider) : saved;
+    return chosen && !directory(chosen) ? inheritedProfile(provider) : chosen;
   }
-  environment(provider, env = process.env) { return profileEnvironment(provider, this.selected(provider), env); }
+  // The profile a turn really uses: the chosen one, or the signed-in one standing in for it (see ensureSignedIn).
+  use(provider, profile) { const chosen = this.here(profile) || this.selected(provider); return this.standIn.get(`${provider}:${canonical(chosen || '')}`) ?? chosen; }
+  environment(provider, env = process.env) { return profileEnvironment(provider, this.use(provider), env); }
   // An agent can be pinned to one Claude account; otherwise it uses the one chosen for everyone.
-  environmentFor(provider, profile, env = process.env) { return profileEnvironment(provider, profile || this.selected(provider), env); }
+  environmentFor(provider, profile, env = process.env) { return profileEnvironment(provider, this.use(provider, profile), env); }
   // Another signed-in account to move to when this one hits its usage limit. Accounts that hit theirs recently are skipped.
   async alternative(provider, current) {
     const limited = this.store.get('accounts', 'limited')?.until || {}, key = value => canonical(value || '');
@@ -145,11 +162,15 @@ export class AgentProfiles {
     }));
     return Object.fromEntries(providers);
   }
-  async ensureSignedIn(provider, profile = this.selected(provider)) {
+  async ensureSignedIn(provider, requested = this.selected(provider)) {
+    const profile = this.here(requested) || this.selected(provider), key = `${provider}:${canonical(profile || '')}`;
     const status = await this.status(provider, profile);
-    if (status.loggedIn) return status;
+    if (status.loggedIn) { this.standIn.delete(key); return status; }
     const fresh = await this.status(provider, profile, { refresh: true });
-    if (fresh.loggedIn) return fresh;
+    if (fresh.loggedIn) { this.standIn.delete(key); return fresh; }
+    // Not signed in here (often a profile chosen on another computer): another signed-in account on this computer stands in.
+    const other = await this.alternative(provider, profile).catch(() => null);
+    if (other) { this.standIn.set(key, other.profile); return this.status(provider, other.profile); }
     const name = providerTitle(provider);
     throw new Error(fresh.error && !fresh.installed ? fresh.error
       : `${name} profile ${fresh.label} is not signed in. Open Setup and choose a signed-in ${name} profile, then continue this run. No agent turn was started.`);
