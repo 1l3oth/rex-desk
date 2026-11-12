@@ -1,4 +1,4 @@
-import { agentStage, agentAction, agentGroups, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
+import { agentStage, agentAction, agentGroups, chatTakers, moveRunDialog, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
 import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.js';
@@ -102,7 +102,7 @@ function toggleSection(key) { if (collapsed.has(key)) collapsed.delete(key); els
 const agentDot = state => ({ busy: 'working', replying: 'working', waiting: 'warn', idle: 'good', offline: 'off' })[state] || '';
 
 function renderRail() {
-  const snap = ui.snap, runs = snap.runs.filter(run => run.role !== 'coordinator' && run.role !== 'specialist' && !run.setupSourceId), asks = pending().length;
+  const snap = ui.snap, chats = new Set((snap.specialists || []).map(agent => agent.runId).filter(Boolean)), runs = snap.runs.filter(run => run.role !== 'coordinator' && run.role !== 'specialist' && !run.setupSourceId && !chats.has(run.id)), asks = pending().length;
   const group = name => runs.filter(run => stateGroup(run) === name);
   const line = run => railItem('run', run.id, { avatar: withDot(iconAv('run'), stateTone(run)), name: runTitle(run), sub: `${stateLabel(run)} · ${ago(run.updatedAt || run.createdAt)}`, badge: pending(run.id).length, warn: true });
   const main = mainRun(), agents = snap.specialists || [], tasks = (snap.tasks || []).filter(task => task.active && !task.demo), busy = agents.filter(agent => agent.status?.state === 'busy').length;
@@ -269,8 +269,9 @@ function stageModel() {
   // A personal chat with an agent shows its profile and what was shared on the right; the terminal is one of those tabs.
   const personal = personalAgent(run);
   const side = personal ? (ui.chatInfo === false ? '' : personalSide(run, personal, items, shells)) : shells.length && ui.termOpen ? terminalHtml(shells, { esc, hhmm }) : '';
+  const take = !personal && chatTakers(ctx, run).length ? '<button class="btn small" data-action="move-to-chat" title="Make this run an agent&#39;s personal chat: click the agent to see this work and keep talking">Move to chat</button> ' : '';
   const actions = personal ? `<button class="btn small" data-action="chat-to-room" title="Make a group chat from this chat: add agents and carry on with the same topic">+ Group chat</button> ${ui.chatInfo === false ? '<button class="btn small" data-action="chat-info">Info</button> ' : ''}${live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : ''}` : stop;
-  return { title: personal ? personal.name : runTitle(run), meta: personal ? `${provider(run.provider)} · ${personal.projectSlug}` : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
+  return { title: personal ? personal.name : runTitle(run), meta: personal ? `${provider(run.provider)} · ${personal.projectSlug}` : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions: personal ? actions : take + actions, feed, side, sideClass: personal ? 'info' : '',
     working: workingStates.includes(run.state), composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : (run.provider === 'codex' ? 'Message Claude Code. It takes over from Codex with the chat so far…' : `Message ${provider(run.provider)}. It picks up where it left off…`), mentions: [] } };
 }
 // Until the second brain is set up, the main agent's screen and About you offer to do it.
@@ -423,6 +424,7 @@ document.addEventListener('click', async event => {
     else if (action === 'send') await send();
     else if (action === 'new-room') newRoomDialog();
     else if (action === 'show-earlier') { ui.showEarlier = { ...(ui.showEarlier || {}), [ui.view.type === 'main' ? mainRun()?.id : ui.view.id]: true }; renderAll(true); }
+    else if (action === 'move-to-chat') { const run = runById(ui.view.id); if (run) moveRunDialog(ctx, run); }
     else if (action === 'chat-to-room') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id), agent = personalAgent(run); if (agent) openRoomDialog(ctx, { id: agent.id, name: agent.name }); }
     else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
     else if (action === 'term-open') { ui.termOpen = true; renderAll(); }
@@ -753,7 +755,7 @@ document.addEventListener('click', async event => {
 function personalAgent(run) {
   if (!run || run.roomAgent) return null;
   if (run.role === 'coordinator' && run.main) return { id: 'main', name: 'Rex Agent', projectSlug: 'all projects', purpose: 'Knows every project and agent, and helps you decide who does what.', main: true, status: { label: stateLabel(run) } };
-  if (run.role !== 'specialist' || !run.specialistId) return null;
+  if (!run.specialistId) return null;
   return (ui.snap.specialists || []).find(agent => agent.id === run.specialistId && agent.runId === run.id) || null;
 }
 function personalSide(run, agent, items, shells) {
@@ -766,7 +768,7 @@ function personalSide(run, agent, items, shells) {
   if (tab === 'terminal') return tabs + terminalHtml(shells, { esc, hhmm }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="side-body)/, '');
   const sharedBox = `<h3>Media, files and links</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
   const sources = (agent.taskSources || []).map(id => id === 'local' ? 'Rex Desk tasks' : (ui.snap.config?.sources || []).find(source => source.id === id)?.name).filter(Boolean);
-  const rooms = (ui.snap.rooms || []).filter(room => room.members.some(member => member.id === agent.id));
+  const rooms = (ui.snap.rooms || []).filter(room => room.members.some(member => member.id === agent.id)), earlier = (agent.earlierRuns || []).map(runById).filter(Boolean);
   return `${tabs}<div class="side-body rinfo pinfo">
     <div class="rhero">${avatarHtml(ctx, { name: agent.name, size: 'xl' })}<h2 class="pname">${esc(agent.name)}</h2><p class="rsub"><span class="dot ${stateTone(run) === 'working' ? 'working' : 'good'}"></span> ${esc(agent.status?.label || stateLabel(run))}${agent.main ? '' : ` on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>`}</p></div>
     ${agent.purpose ? `<h3>About</h3><p class="pabout">${esc(agent.purpose)}</p>` : ''}
@@ -776,6 +778,7 @@ function personalSide(run, agent, items, shells) {
     ${agent.main ? '' : `<h3>Tasks come from</h3><p class="pabout">${esc(sources.join(', ') || 'Not set yet')}</p>`}
     ${(agent.lessons || []).length ? `<h3>Lessons learned <span>${agent.lessons.length}</span></h3><ul class="plessons">${agent.lessons.slice(-4).map(lesson => `<li>${esc(lesson.text)}</li>`).join('')}</ul>` : ''}
     ${rooms.length ? `<h3>Group chats <span>${rooms.length}</span></h3><ul class="rtasks">${rooms.map(room => `<li><button class="rtask" data-open="room" data-id="${esc(room.id)}">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'xs' })}<span>${esc(room.name)}</span></button></li>`).join('')}</ul>` : ''}
+    ${earlier.length ? `<h3>Earlier chats <span>${earlier.length}</span></h3><ul class="rtasks">${earlier.map(item => `<li><button class="rtask" data-open="run" data-id="${esc(item.id)}"><span>${esc(runTitle(item))} · ${esc(new Date(item.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' }))}</span></button></li>`).join('')}</ul>` : ''}
     ${agent.main ? '' : `<div class="prow"><button class="btn small" data-open="specialist" data-id="${esc(agent.id)}" data-profile="1">Edit profile</button></div>`}
   </div>`;
 }

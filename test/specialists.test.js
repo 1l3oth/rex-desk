@@ -161,3 +161,33 @@ test('the first task on a project ends with the person checking its workflow, on
   desk.memory.confirmWorkflow('shop');
   assert.ok(!/whose workflow the person has not checked/.test(desk.prompt(run)), 'not asked again');
 });
+
+test('a task run moves into an agent personal chat; the old chat stays under earlier chats', () => {
+  const { desk, store } = setup();
+  const desky = desk.specialists.create({ name: 'Desky', projectSlug: 'shop' }), bot = desk.specialists.create({ name: 'Shop_bot', projectSlug: 'shop' });
+  store.put('run', 'old-chat', { id: 'old-chat', role: 'specialist', specialistId: bot.id, state: 'finished', createdAt: '2026-11-01T00:00:00Z' });
+  store.put('specialist', bot.id, { ...store.get('specialist', bot.id), runId: 'old-chat' });
+  store.put('run', 'task-run', { id: 'task-run', role: 'worker', specialistId: desky.id, taskId: 't1', state: 'ready_for_review', createdAt: '2026-11-02T00:00:00Z' });
+  assert.equal(desk.personalRun(store.get('run', 'task-run')), false);
+  const moved = desk.specialists.moveToChat('task-run', bot.id);
+  assert.equal(moved.runId, 'task-run');
+  assert.deepEqual(moved.earlierRuns, ['old-chat']);
+  assert.equal(store.get('run', 'task-run').specialistId, bot.id, 'the run now belongs to the agent that took it');
+  assert.equal(store.get('run', 'task-run').movedFrom, desky.id);
+  assert.equal(desk.personalRun(store.get('run', 'task-run')), true);
+  assert.equal(desk.specialists.status(store.get('specialist', bot.id)).runId, 'task-run', 'clicking the agent opens the moved run');
+  assert.equal(desk.specialists.moveToChat('task-run', bot.id).runId, 'task-run', 'moving it again changes nothing');
+  assert.deepEqual(store.get('specialist', bot.id).earlierRuns, ['old-chat']);
+});
+
+test('a run moves only to an agent on its own project, and never from a group chat', () => {
+  const { desk, store } = setup();
+  const desky = desk.specialists.create({ name: 'Desky', projectSlug: 'shop' });
+  store.put('specialist', 'other', { ...store.get('specialist', desky.id), id: 'other', name: 'Other', slug: 'other', projectSlug: 'blog' });
+  store.put('run', 'r1', { id: 'r1', role: 'worker', specialistId: desky.id, state: 'finished' });
+  assert.throws(() => desk.specialists.moveToChat('r1', 'other'), /not on blog/);
+  store.put('run', 'room', { id: 'room', role: 'specialist', specialistId: desky.id, roomAgent: desky.id, roomOf: 'x', state: 'finished' });
+  assert.throws(() => desk.specialists.moveToChat('room'), /group chat/);
+  assert.throws(() => desk.specialists.moveToChat('gone'), /gone/);
+  assert.equal(desk.specialists.moveToChat('r1').runId, 'r1', 'without an agent it goes to the agent that did it');
+});

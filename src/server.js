@@ -559,7 +559,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/specialists' && request.method === 'POST') return json(response, 200, desk.specialists.create({ ...(await body(request)), by: 'you' }));
       const lessonMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)\/lessons\/(\d+)$/);
       if (lessonMatch && request.method === 'DELETE') return json(response, 200, desk.specialists.forget(lessonMatch[1], Number(lessonMatch[2])));
-      const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say|loop))?$/);
+      const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say|loop|take-run))?$/);
       if (specialistMatch) {
         const [, specialistId, part] = specialistMatch;
         const remoteAgent = store.get('specialist', specialistId);
@@ -570,6 +570,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         if (desk.peers.isRemote(remoteAgent) && request.method === 'POST' && part === 'duplicate') return json(response, 200, await desk.peers.forward(remoteAgent.node, 'POST', url.pathname, await body(request)));
         if (request.method === 'POST' && part === 'assign') { const input = await body(request); return json(response, 200, await desk.assignTask({ specialistId, ...desk.peers.localTask(input) })); }
         if (request.method === 'PUT' && !part) return json(response, 200, desk.specialists.update(specialistId, await body(request)));
+        if (request.method === 'POST' && part === 'take-run') return json(response, 200, desk.specialists.moveToChat(String((await body(request)).runId || ''), specialistId));
         if (request.method === 'POST' && part === 'loop') return json(response, 200, await desk.runLoop(specialistId));
         if (request.method === 'POST' && part === 'rename') return json(response, 200, desk.specialists.rename(specialistId, (await body(request)).name));
         if (request.method === 'POST' && part === 'duplicate') return json(response, 200, desk.specialists.duplicate(specialistId, (await body(request)).name));

@@ -103,6 +103,23 @@ export async function openAgentChat(ctx, agent) {
   }
   if (runId) open('run', runId);
 }
+// A run an agent did moves into an agent's personal chat: its own agent, or another one on the same project (one that replaces it).
+export const chatTakers = (ctx, run) => {
+  const agents = (ctx.ui.snap.specialists || []).filter(agent => !agent.remote), owner = agents.find(agent => agent.id === run?.specialistId);
+  if (!run || run.roomAgent || run.roomOf || agents.some(agent => agent.runId === run.id)) return [];
+  return agents.filter(agent => owner ? agent.projectSlug === owner.projectSlug : Boolean(run.repositoryId) && agent.repositoryId === run.repositoryId).sort((left, right) => (right.id === owner?.id) - (left.id === owner?.id));
+};
+export function moveRunDialog(ctx, run) {
+  const { esc, api, toast, refresh, open } = ctx, takers = chatTakers(ctx, run); if (!takers.length) return toast('No agent on this project can take this run.', true);
+  const back = document.createElement('div'); back.className = 'dialog-back';
+  back.innerHTML = `<form class="dialog"><h2>Move to a personal chat</h2><p class="muted small">The agent you pick gets this run as its chat: click it in the sidebar to see this work and keep talking. Its current chat stays under Earlier chats.</p><label>Agent<select name="agent">${takers.map(agent => `<option value="${esc(agent.id)}">${esc(agent.name)}</option>`).join('')}</select></label><div class="row"><button class="btn primary">Move</button><button class="btn" type="button" data-close>Cancel</button></div></form>`;
+  document.body.append(back);
+  back.addEventListener('click', event => { if (event.target === back || event.target.dataset.close !== undefined) back.remove(); });
+  back.querySelector('form').addEventListener('submit', async event => {
+    event.preventDefault(); const agentId = new FormData(event.target).get('agent');
+    try { const agent = await api(`/specialists/${agentId}/take-run`, { method: 'POST', data: { runId: run.id } }); back.remove(); await refresh({ full: true }); toast(`This run is now ${agent.name}'s chat.`); open('run', run.id); } catch (error) { toast(error.message, true); }
+  });
+}
 export async function agentAction(ctx, action, target = null) {
   const { ui, api, toast, refresh, open } = ctx, value = id => document.getElementById(id)?.value ?? '';
   const agent = (ui.snap.specialists || []).find(item => item.id === ui.view.id);

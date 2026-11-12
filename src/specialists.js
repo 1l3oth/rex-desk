@@ -100,6 +100,24 @@ export class Specialists {
     rmSync(this.cardFile(item), { force: true }); this.store.delete('specialist', id); return { removed: true };
   }
 
+  // A run an agent did (a task run, or the chat of another agent on the same project) becomes this agent's personal chat,
+  // so the person sees that work when they click the agent and keeps talking there. The old personal chat stays under Earlier chats.
+  moveToChat(runId, agentId = '') {
+    const run = this.store.get('run', runId); if (!run) throw new Error('That run is gone.');
+    if (run.roomAgent || run.roomOf) throw new Error('A group chat session cannot become a personal chat.');
+    if (!agentId && !run.specialistId) throw new Error('This run belongs to no agent. Name the agent whose chat it should go to.');
+    const agent = this.get(agentId || run.specialistId);
+    if (agent.kind === 'main') throw new Error('Only a project agent can take a run into its chat.');
+    if (agent.runId === run.id) return agent;
+    const owner = run.specialistId ? this.store.get('specialist', run.specialistId) : null, same = (left, right) => Boolean(left && right) && path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase();
+    const sameProject = owner ? owner.projectSlug === agent.projectSlug : (Boolean(run.repositoryId) && run.repositoryId === agent.repositoryId) || same(run.projectPath, agent.projectPath);
+    if (!sameProject) throw new Error(`That run is not on ${agent.projectSlug}, the project ${agent.name} looks after.`);
+    const earlier = [agent.runId, ...(agent.earlierRuns || [])].filter((id, index, list) => id && id !== run.id && list.indexOf(id) === index && this.store.get('run', id)).slice(0, 10);
+    this.store.put('run', run.id, { ...run, specialistId: agent.id, ...(owner && owner.id !== agent.id ? { movedFrom: owner.id } : {}) });
+    if (owner && owner.id !== agent.id && owner.runId === run.id) this.store.put('specialist', owner.id, { ...owner, runId: '', updatedAt: now() });
+    const updated = { ...agent, runId: run.id, earlierRuns: earlier, updatedAt: now() };
+    this.store.put('specialist', agent.id, updated); return updated;
+  }
   // What the agent is doing right now, for the chat: working on a task, answering a message, waiting for the person, or idle.
   status(agent) {
     if (this.desk.peers?.isRemote(agent)) return this.desk.peers.statusOf(agent);
@@ -116,7 +134,7 @@ export class Specialists {
       return task.state === 'waiting' ? { state: 'waiting', label: 'Needs you', taskId: task.taskId, runId: task.id }
         : { state: 'busy', label: `Working on #${record.taskNumber || record.externalId || ''} ${record.titleEn || record.title || ''}`.replace(/\s+/g, ' ').trim(), taskId: task.taskId, runId: task.id };
     }
-    const sessions = runs.filter(run => run.role === 'specialist'), personal = sessions.find(run => !run.roomAgent);
+    const sessions = runs.filter(run => run.role === 'specialist' || run.id === agent.runId), personal = sessions.find(run => run.id === agent.runId) || sessions.find(run => !run.roomAgent);
     const waiting = sessions.find(run => run.state === 'waiting'), active = sessions.find(run => working.includes(run.state));
     if (waiting) return { state: 'waiting', label: 'Needs you', runId: waiting.id };
     if (active) return { state: 'replying', label: active.roomAgent ? 'Replying in a room…' : 'Replying…', runId: active.id };
