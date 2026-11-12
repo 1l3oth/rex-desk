@@ -208,7 +208,11 @@ export class Desk {
   async switchIfLimited(runId, message = '') {
     const run = this.store.get('run', runId); if (!run || run.provider !== 'claude') return false;
     const since = Date.parse(run.turnStartedAt || 0) || 0;
-    const hit = message || this.store.events(runId, { limit: 60 }).filter(event => Date.parse(event.createdAt) >= since - 1000 && ['agent-text', 'agent-result', 'error', 'message'].includes(event.kind))
+    // Only Claude's own limit notice counts: a rejected rate-limit report, an error, or a short reply that is nothing but the
+    // notice ("Claude AI usage limit reached…"). An agent writing about limits (another service's quota, say) is not one.
+    const recent = this.store.events(runId, { limit: 60 }).filter(event => Date.parse(event.createdAt) >= since - 1000);
+    const rejected = recent.find(event => event.kind === 'rate-limit' && event.status === 'rejected');
+    const hit = message || (rejected ? 'Claude usage limit reached.' : '') || recent.filter(event => event.kind === 'error' || (['agent-text', 'agent-result'].includes(event.kind) && String(event.text || event.result || '').length <= 240))
       .map(event => String(event.text || event.message || event.result || '')).find(text => LIMIT.test(text));
     if (!hit) return false;
     const pinned = this.accountFor(run), current = pinned || this.agents.selected('claude');
@@ -486,7 +490,7 @@ export class Desk {
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           // How full the chat's context is, for the ring by the message box. A 1M-context model says so in its name.
           if (kind === 'context') { const window = data.window || (/\[1m\]|-1m\b|1m-context/i.test(`${run.model || ''} ${data.model || ''}`) ? 1000000 : 200000); this.patchRun(runId, { contextUsed: data.used, contextWindow: window, contextAt: now() }); return; }
-          if (kind === 'rate-limit') { this.recordUsage(run.provider, this.accountFor(run) || this.agents.selected(run.provider), data); return; }
+          if (kind === 'rate-limit') { this.recordUsage(run.provider, this.accountFor(run) || this.agents.selected(run.provider), data); if (data.status === 'rejected') this.store.event(runId, 'rate-limit', { status: 'rejected', type: data.rateLimitType || '' }); return; }
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
           // The event log hides fields named like secrets ("tokens" among them), so the token counts travel as usage.
           if (kind === 'agent-result') data = { ...data, ...(data.tokens ? { usage: data.tokens } : {}), paidByApi: data.billedToApiKey === true };
@@ -503,7 +507,9 @@ export class Desk {
         : new OrcaRunner({ ...options, ...(run.worktree ? {} : { cwd: await this.agentWorkspace(), sourcePath: await this.agentWorkspace() }), dataDirectory: this.store.directory,
           resumeSessionId, isDone: () => terminalStates.has(this.run(runId).state),
           session: this.agentSessionFinder({ ...run, mirror: resumeSessionId ? run.mirror : undefined, turnStartedAt: now() }) });
-      this.live.get(runId).runner = runner;
+      const entry = this.live.get(runId);
+      if (entry?.controller !== controller) throw new Error('Run stopped.');
+      entry.runner = runner;
       if (attach) {
         this.store.event(runId, 'phase', { text: 'Rex Desk restarted; the agent kept working and is followed again' }, true);
         this.patchRun(runId, { state: 'running', reattach: undefined });
@@ -555,7 +561,9 @@ ${message}` : message);
       if (this.store.get('run', runId)?.host) this.patchRun(runId, { host: undefined });
       await this.closeMcpSessions(runId);
       this.cancelQuestions(runId);
-      this.live.delete(runId); void this.drain();
+      // Only this turn's own entry: an account switch may already have started the next turn under the same run.
+      if (this.live.get(runId)?.controller === controller) this.live.delete(runId);
+      void this.drain();
       void this.rooms.turnFinished(runId).catch(error => this.store.event(runId, 'error', { message: error.message }));
       // A chat whose context is nearly full hands over to a fresh session by itself (and waits with queued messages until then).
       if (!this.closed && await this.autoHandoff(runId).catch(error => { this.store.event(runId, 'error', { message: `Automatic handoff failed: ${error.message}` }, true); return false; })) return;
@@ -1237,6 +1245,29 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   // The usage of each signed-in account: the share of its 5-hour and weekly limits used, and when each resets. Claude Code and
   // Codex report it while they work, so it is as fresh as the account's last turn. Kept per account, never the sign-in itself.
+  // The real usage of each signed-in Claude account, the numbers Claude Code's /usage shows: asked from Anthropic with the
+  // account's own sign-in (read from its profile, never stored or refreshed here). The rate-limit reports during a turn
+  // only carry a share when an account is close to a limit, so without this the bars read 0%.
+  async refreshClaudeUsage({ fetcher = fetch } = {}) {
+    const profiles = (await this.agents.overview().catch(() => ({})))?.claude?.profiles || [];
+    await Promise.all(profiles.filter(item => item.loggedIn).map(async item => {
+      let oauth; try { oauth = JSON.parse(readFileSync(path.join(item.profile || path.join(os.homedir(), '.claude'), '.credentials.json'), 'utf8')).claudeAiOauth; } catch { return; }
+      if (!oauth?.accessToken || (oauth.expiresAt && oauth.expiresAt < Date.now())) return;
+      const response = await fetcher('https://api.anthropic.com/api/oauth/usage', { headers: { Authorization: `Bearer ${oauth.accessToken}`, 'anthropic-beta': 'oauth-2025-04-20' }, signal: AbortSignal.timeout(8000) }).catch(() => null);
+      if (!response?.ok) return;
+      const data = await response.json().catch(() => null); if (!data) return;
+      const windows = {}, when = value => value ? Date.parse(value) || null : null;
+      for (const limit of data.limits || []) {
+        const model = limit.scope?.model?.display_name || '';
+        const key = limit.kind === 'session' ? 'five_hour' : limit.kind === 'weekly_all' ? 'seven_day' : `seven_day_${String(model || limit.kind).toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+        windows[key] = { used: Math.round(Number(limit.percent) || 0), resetsAt: when(limit.resets_at), label: model ? `Week, ${model}` : '', at: now() };
+      }
+      if (!data.limits) for (const key of ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet']) if (data[key]) windows[key] = { used: Math.round(Number(data[key].utilization) || 0), resetsAt: when(data[key].resets_at), at: now() };
+      if (!Object.keys(windows).length) return;
+      const key = `claude:${item.profile || 'default'}`, saved = this.store.get('usage', key) || { id: key, provider: 'claude', profile: item.profile || '' };
+      this.store.put('usage', key, { ...saved, windows, source: 'anthropic', at: now() });
+    }));
+  }
   recordUsage(provider, profile, data = {}) {
     const key = `${provider}:${profile || 'default'}`, saved = this.store.get('usage', key) || { id: key, provider, profile: profile || '', windows: {} };
     const percent = value => value === undefined || value === null ? null : Math.round(Number(value) <= 1.5 ? Number(value) * 100 : Number(value));
@@ -1248,8 +1279,9 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
         windows[limit.windowDurationMins >= 1440 ? 'seven_day' : name] = { used: percent(limit.usedPercent), resetsAt: when(limit.resetsAt), minutes: limit.windowDurationMins || null, at: now() };
       }
     } else {
-      const type = data.rateLimitType || 'five_hour';
-      windows[type] = { used: percent(data.utilization), resetsAt: when(data.resetsAt), status: data.status || '', at: now() };
+      const type = data.rateLimitType || 'five_hour', known = windows[type];
+      // A report without a share keeps the last real number (from Anthropic's usage) instead of drawing 0%.
+      windows[type] = { ...known, used: percent(data.utilization) ?? known?.used ?? null, resetsAt: when(data.resetsAt) || known?.resetsAt || null, status: data.status || '', at: now() };
     }
     this.store.put('usage', key, { ...saved, windows, at: now() });
   }

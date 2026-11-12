@@ -383,7 +383,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/agents/add' && request.method === 'POST') { const input = await body(request), provider = aiProvider(input.provider || 'claude'); const created = desk.agents.addProfile(provider, input.name); return json(response, 200, { ...created, ...desk.agents.login(provider, created.profile) }); }
       if (url.pathname === '/api/accounts/auto' && request.method === 'GET') return json(response, 200, { on: !store.get('accounts', 'auto')?.off });
       if (url.pathname === '/api/accounts/auto' && request.method === 'POST') { const on = (await body(request)).on !== false; store.put('accounts', 'auto', { id: 'auto', off: !on }); return json(response, 200, { on }); }
-      if (url.pathname === '/api/agents' && request.method === 'GET') return json(response, 200, await desk.agents.overview({ refresh: url.searchParams.has('refresh') }));
+      if (url.pathname === '/api/agents' && request.method === 'GET') { void desk.refreshClaudeUsage().then(notify, () => {}); return json(response, 200, await desk.agents.overview({ refresh: url.searchParams.has('refresh') })); }
       if (url.pathname === '/api/agents/profile' && request.method === 'POST') {
         const input = await body(request);
         input.provider = aiProvider(input.provider || 'claude');
@@ -713,6 +713,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     if (++ticks % 8 === 0) void desk.findPullRequests();
     if (ticks % 4 === 0) remoteOpen(); // Tailscale may start after Rex Desk
     if (ticks % 4 === 0) void desk.worktrees.scan().catch(() => {});
+    // Claude account usage, as /usage shows it, every 5 minutes (and whenever the accounts window opens).
+    if (ticks % 20 === 1) void desk.refreshClaudeUsage().then(notify, () => {});
     // The computer stays awake (the screen may still lock) while an agent works or other devices may connect.
     awake.set(desk.live.size > 0 || Boolean(desk.peers.settings().remote));
     if (ticks % 12 === 0) void desk.monitor.tick().catch(error => store.event('', 'monitor-error', { message: error.message }, true));

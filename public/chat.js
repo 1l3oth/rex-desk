@@ -840,7 +840,9 @@ async function accountsDialog() {
     const LIMITS = [['five_hour', '5 hours'], ['seven_day', 'Week'], ['seven_day_opus', 'Week, Opus'], ['seven_day_sonnet', 'Week, Sonnet']];
     const usageHtml = (provider, profile) => {
       const saved = (ui.snap.usage || []).find(entry => entry.provider === provider && (entry.profile || '') === (profile || '')) || (ui.snap.usage || []).find(entry => entry.provider === provider && entry.id === `${provider}:${profile || 'default'}`);
-      const windows = LIMITS.filter(([key]) => saved?.windows?.[key] && (saved.windows[key].used !== null || saved.windows[key].resetsAt));
+      // The known limits first, then any other one the account reports (a per-model week, like Fable), under its own label.
+      const extra = Object.entries(saved?.windows || {}).filter(([key]) => !LIMITS.some(([known]) => known === key)).map(([key, value]) => [key, value.label || key.replace(/^seven_day_/, 'Week, ').replace(/_/g, ' ')]);
+      const windows = [...LIMITS, ...extra].filter(([key]) => saved?.windows?.[key] && (saved.windows[key].used !== null || saved.windows[key].resetsAt));
       if (!windows.length) return '<span class="acct-usage none">Usage shows after an agent works on this account.</span>';
       return `<span class="acct-usage">${windows.map(([key, label]) => { const limit = saved.windows[key], used = limit.used ?? 0, passed = limit.resetsAt && limit.resetsAt < Date.now(); return `<span class="acct-limit ${used >= 90 && !passed ? 'hot' : ''}"><span class="acct-lname">${label}</span><meter min="0" max="100" low="70" high="90" optimum="0" value="${passed ? 0 : used}"></meter><span class="acct-lval">${passed ? 'reset' : `${used}%`}</span><span class="acct-lreset">${passed ? '' : esc(resets(limit.resetsAt))}</span></span>`; }).join('')}<small class="acct-asof">as of ${esc(new Date(saved.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</small></span>`;
     };
