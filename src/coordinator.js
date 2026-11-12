@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
 import { inspectRepository } from './repositories.js';
+import { Worktrees } from './worktrees.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
 import { Jev } from './jev.js';
@@ -96,6 +97,9 @@ export function skillCall(text, tools = null) {
   if (skill) return `The person ran the /${name} skill${args ? ` with: ${args}` : ''}.\nLoad it now with the Skill tool (skill "${skill.name}"), pass what they wrote as its arguments, and follow its instructions instead of your usual way of answering.`;
   return `The person ran /${name}${args ? ` with: ${args}` : ''}.\nRun it now: if a skill has that name, use the Skill tool (skill "${name}", or its plugin name such as "pstack:${name}"). If not, it is a slash command: find ${name}.md in ~/.claude/commands, the project's .claude/commands or the project's command folder, and do what it says, with what they wrote as its $ARGUMENTS. Follow its own instructions instead of your usual way of answering.`;
 }
+// Worktrees an agent makes itself join the person's worktree history and show in the chat.
+export const WORKTREE_RULE = 'When you make a git worktree, call desk_worktree with action show (pass the folder, and taskId when it is for a task) so it shows in this chat as a card and joins the worktree history. A task that already lives in a worktree is worked on there.';
+
 export class Desk {
   constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, orcaOptions, memoryDirectory, peerTransport } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher; this.orcaOptions = orcaOptions;
@@ -106,7 +110,7 @@ export class Desk {
     this.sources = new Sources(store, { fetcher, onSynced: () => { void this.fillEnglishNames(); if (this.store.config().jev?.auto !== false && this.jev.apiKey()) void this.jev.prioritize().catch(error => store.event('', 'jev-error', { message: error.message })); } }); this.live = new Map(); this.waiters = new Map(); this.tokens = new Map();
     this.query = new TrackerQuery(store, this.sources, { apiKey: () => this.jev.apiKey(), env: () => this.agents.environment(this.store.config().provider), cwd: path.join(store.directory, 'coordinator'), ...(queryModel ? { model: queryModel } : {}) });
     this.presence = { focused: false, at: 0 }; this.notifier = new Notifier(store, { focused: () => this.presence.focused && Date.now() - this.presence.at < 45000, viewing: () => this.presence.view || '', enabled: () => !process.env.NODE_TEST_CONTEXT && this.store.config().notify !== false }); this.rooms = new Rooms(this); this.memory = new Memory(memoryDirectory); this.specialists = new Specialists(this); this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
-    this.monitor = new Monitor(this); this.files = new Files(this); this.shownFile = null;
+    this.monitor = new Monitor(this); this.files = new Files(this); this.shownFile = null; this.worktrees = new Worktrees(this);
     this.evidence = new Evidence(store, runId => this.run(runId), (runId, kind, data) => {
       store.event(runId, kind, data);
     }, () => this.mcpUrl);
@@ -126,7 +130,7 @@ export class Desk {
   }
   snapshot() {
     return { computer: thisComputer(), config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
-      notices: this.notifier.summary(), usage: this.store.list('usage'), shownFile: this.shownFile,
+      notices: this.notifier.summary(), usage: this.store.list('usage'), shownFile: this.shownFile, worktrees: this.worktrees.all(),
       runs: [...this.store.list('run'), ...this.peers.remoteRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       devices: this.peers.status(this.port),
@@ -439,6 +443,9 @@ export class Desk {
         const worktree = await createWorktree(repository, this.worktreeRoot, branch);
         run = this.patchRun(runId, { worktree: worktree.directory, branch, baseCommit: worktree.commit, port: await freePort() });
         this.store.event(runId, 'worktree-created', { branch, directory: worktree.directory });
+        // The new worktree joins the history with its task, and shows in the chat as a card.
+        const made = this.worktrees.record({ path: worktree.directory, repositoryId: run.repositoryId, branch, taskId: run.taskId, base: run.baseBranch || '', by: run.specialistId ? this.specialists.get(run.specialistId)?.name || '' : 'Worker run' });
+        this.message(runId, this.worktrees.card(made, 'Made a worktree for this task.'));
         if (repository.flowRuntime) {
           const prepared = seedFlowWorktree(repository, run.worktree, run.runtimeProfile);
           this.store.event(runId, 'flow-runtime-prepared', { ...prepared, note: 'Isolated Tomcat uses this branch with copied local JEX configuration and the selected product profile.' });
@@ -796,11 +803,30 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const url = `/artifacts/${runId}/${encodeURIComponent(name)}`, task = owned ? this.store.get('task', owned) : null;
     const media = /^(image|video)\//.test(type) ? `![${label.replace(/[[\]]/g, '')}](${url})` : `[Open ${label.replace(/[[\]]/g, '')}](${url})`;
     const text = page ? [`**Explanation${task ? ` of #${task.taskNumber || task.externalId}` : ''}: ${label}**`, String(note || '').trim(), `[Open the explanation](${url})`].filter(Boolean).join('\n') : [`**Test evidence${task ? ` for #${task.taskNumber || task.externalId}` : ''}: ${label}**${mark ? ` (${mark})` : ''}`, String(note || '').trim(), media].filter(Boolean).join('\n');
-    // A room session posts in the room of its current turn, else in the room the task was given in.
+    return { shared: true, url, taskId: owned || null, where: this.sayInChat(runId, text, task) };
+  }
+  // Says something in the chat the agent is talking in. A room session posts in the room of its current turn,
+  // else in the room the task was given in; everyone else in their own chat.
+  sayInChat(runId, text, task = null) {
+    const run = this.run(runId), agentId = run.roomAgent || run.specialistId || '';
     const roomId = run.roomTurn?.roomId || (task?.roomWork?.agentId === agentId ? task.roomWork.roomId : '') || (run.role === 'worker' ? run.roomId : '');
-    if (run.roomAgent && roomId) void this.rooms.post(roomId, { fromAgentId: agentId, text }).catch(() => {});
-    else this.message(runId, text);
-    return { shared: true, url, taskId: owned || null, where: run.roomAgent && roomId ? 'room' : 'chat' };
+    if (run.roomAgent && roomId) { void this.rooms.post(roomId, { fromAgentId: agentId, text }).catch(() => {}); return 'room'; }
+    this.message(runId, text); return 'chat';
+  }
+  // desk_worktree: show a worktree in the chat as a card, or add a task to it (or take one out).
+  async worktreeAction(runId, { worktree, action = 'show', taskId = '', note = '' }) {
+    const run = this.run(runId), agentId = run.roomAgent || run.specialistId || '', by = agentId ? this.specialists.get(agentId)?.name || '' : run.main ? 'Rex Agent' : '';
+    let item = await this.worktrees.find(worktree);
+    const task = taskId ? this.store.get('task', taskId) || this.store.list('task').find(entry => String(entry.taskNumber || entry.externalId) === String(taskId).replace(/^#/, '')) : null;
+    if (taskId && !task) throw new Error('No task has that taskId. Read it from desk_tasks.');
+    if (action !== 'show' && !task) throw new Error('Pass taskId: the task to add to the worktree or take out of it.');
+    if (action === 'remove_task') return this.worktrees.removeTask(item.id, task.id);
+    if (task) item = this.worktrees.addTask(item.id, task.id);
+    const stored = this.store.get('worktree', item.id);
+    if (by && !stored.createdBy) this.store.put('worktree', item.id, { ...stored, createdBy: by });
+    if (action === 'add_task') return item;
+    const fresh = this.store.get('worktree', item.id);
+    return { shown: true, worktree: this.worktrees.summary(fresh), where: this.sayInChat(runId, this.worktrees.card(fresh, note), task) };
   }
   // Headless agents live in this process, so a restart ends their turn. Each one that was cut off a moment ago picks its session up again by itself.
   async resumeInterrupted() {
@@ -948,7 +974,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const brief = [`You were given task #${number} ${name}. Do it here in this chat, the way the person asks.`, task.url ? `Tracker link: ${task.url}` : '',
       `What it says:\n${String(task.description || task.title || '').slice(0, 4000)}`, instructions ? `Notes from the person: ${instructions}` : '',
       'Change, run and test the code in your project, share test results with desk_share_evidence, commit when it works, and send it out the way the person wants (desk_publish with worktree set to the folder you worked in and taskId). Say what you did in a short reply.',
-      this.memory.workflowText(agent.projectSlug)].filter(Boolean).join('\n\n');
+      this.worktrees.briefFor(taskId) || WORKTREE_RULE, this.memory.workflowText(agent.projectSlug)].filter(Boolean).join('\n\n');
     const run = await this.specialistTurn(agent.id, { prompt: brief, quiet: true });
     this.store.event(run.id, 'loop-check', { text: `Task given: #${number} ${name}` }, true);
     return { inChat: true, agentId: agent.id, runId: run.id, taskId, state: run.state };
@@ -981,6 +1007,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const brief = [`${by} gave you this task to do here in the room: #${number} ${name}.${others.length ? ` You work on it together with ${others.join(', ')}${owner.id !== agent.id ? ` (${owner.name} leads it)` : ''}: split the work in the room, and say what you take before you start.` : ''}`,
       task.url ? `Tracker link: ${task.url}` : '', `What it says:\n${String(task.description || task.title || '').slice(0, 4000)}`, instructions ? `Notes from the person: ${instructions}` : '',
       `Do the work in this session and talk about it in this room. Do it the way the person says; when they say nothing about where, use a branch ${branch} from ${base} in ${project}${team.length > 1 ? `, or a git worktree beside it (\`git worktree add "${project}-worktrees/${String(number).toLowerCase()}" -b ${branch} ${base}\`) so teammates do not step on each other` : ''}.`,
+      this.worktrees.briefFor(taskId) || WORKTREE_RULE,
       'Post a short note in the room when you start, when something important happens, and when you are done (what changed and how you tested it). Share test results with desk_share_evidence so they show in the room and on the task. When it works, commit, and send it out the way the person wants (desk_publish with worktree set to the folder you worked in and taskId: a draft pull request, or a direct push when they say no PR); post the link here. Their message is the yes: never ask again or tell them to start a run.',
       this.memory.workflowText(agent.projectSlug)].filter(Boolean).join('\n\n');
     await this.rooms.post(roomId, { system: true, text: others.length ? `${agent.name} joins ${others.join(', ')} on #${number} ${name} here in the room.` : `${agent.name} is now working on #${number} ${name} here in the room.`, instruction: brief, to: [agent.slug] });
@@ -1124,7 +1151,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // A project agent works in its own project like a person on that team: it reads, changes, runs, commits and pushes there when asked.
   ownProjectRule(agent) {
     const folder = agent?.projectPath || '';
-    return [`Your project${folder ? ` is at ${folder}` : ''}. You work in it directly: read it, change the code, run it, test it, commit, and push or open a pull request when the person asks (desk_publish with worktree set to the folder you worked in, or git yourself). Work the way the person says (straight in the folder, on a branch, or in a worktree); when they say nothing, use a branch in the project folder and leave others' uncommitted changes alone.`,
+    return [`Your project${folder ? ` is at ${folder}` : ''}. You work in it directly: read it, change the code, run it, test it, commit, and push or open a pull request when the person asks (desk_publish with worktree set to the folder you worked in, or git yourself). Work the way the person says (straight in the folder, on a branch, or in a worktree); when they say nothing, use a branch in the project folder and leave others' uncommitted changes alone.`, WORKTREE_RULE,
       'Answer from your project and from this chat. Do not bring other projects or other chats into your answers on your own. When the person asks you to look at or change another project or folder, do it.'].join(' ');
   }
   // The skills and commands this run's agent has, found the same way the / menu finds them.

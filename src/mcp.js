@@ -128,6 +128,13 @@ export function createMcp(desk, scope) {
     { runId, file: z.string().min(3).describe('Full path of the .html file on this computer.'), title: z.string().min(1).max(120).describe('What the page explains, in English.'),
       taskId: z.string().optional().describe('The task it belongs to. Omit it when you work on one task.'), note: z.string().max(2000).optional().describe('Two or three plain lines: what changed and why.') },
     input => { requireEnglish(`${input.title} ${input.note || ''}`, 'the title and note'); return desk.shareEvidence(resolveRun(input.runId), { ...input, page: true }); });
+  tool('desk_worktrees', 'List the worktree history: every git worktree in the projects of the person (made by Rex Desk, by an agent, or by hand), newest first, with the tasks that live in each one and whether it still exists. Filter by project or state.',
+    { project: z.string().optional().describe('Project name or repository id.'), state: z.enum(['active', 'gone']).optional() },
+    input => desk.worktrees.list(input), true);
+  tool('desk_worktree', 'Show a worktree to the person as a card in the chat you are talking in (your personal chat or your room), or add a task to it so the task lives there with the others (remove_task takes it out). Call show right after you make a git worktree, and whenever the person asks which worktree the work is in.',
+    { runId, worktree: z.string().min(1).describe('The worktree: its full folder, its branch, or its id from desk_worktrees.'), action: z.enum(['show', 'add_task', 'remove_task']).default('show'),
+      taskId: z.string().optional().describe('Task id or number: shown with the worktree, or the one to add or take out.'), note: z.string().max(600).optional().describe('One short line for the card, like "Made for the login fix".') },
+    input => { requireEnglish(input.note || '', 'the note'); return desk.worktreeAction(resolveRun(input.runId), input); });
   tool('desk_show_file', 'Open a file in front of the person, in the file window of Rex Desk, at a line if you give one. Use it when they ask to see a file, or to point at the exact code you mean. Any kind opens: code and text (they can edit and save it), Markdown and HTML with a preview, pictures, videos, PDFs, Excel and Word files.',
     { runId, file: z.string().min(1).describe('Full path, or a path inside your worktree or project, like src/server.js.'), line: z.number().int().min(0).optional().describe('Line to scroll to.'), note: z.string().max(300).optional().describe('One short line on why you show it.') },
     input => desk.showFile(resolveRun(input.runId), input));

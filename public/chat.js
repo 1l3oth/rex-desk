@@ -6,6 +6,7 @@ import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, room
 import { collectShared, sharedTabsHtml } from '/chat-media.js';
 import { devicesStage, devicesAction, initDevices } from '/chat-devices.js';
 import { monitorStage, monitorAction } from '/chat-monitor.js';
+import { worktreesStage, fillWorktreeEmbeds, wireWorktrees, wireChatSwitch, WORKTREE_ICON } from '/chat-worktrees.js';
 import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
 import { openSettings } from '/chat-settings.js';
 import { wireFiles, watchShownFile } from '/chat-files.js';
@@ -15,7 +16,7 @@ import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttach
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
 // Which screen is open lives in the address (#/room/ID) and is also saved, so a refresh or a restart comes back to the same place.
-const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'jev', 'monitor'];
+const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'jev', 'monitor', 'worktrees'];
 const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
 function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash); return match && SCREENS.includes(match[1]) ? { type: match[1], id: match[2] ? decodeURIComponent(match[2]) : '' } : null; }
 function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
@@ -68,7 +69,7 @@ const runTitle = run => { const task = run?.taskId ? ui.snap?.tasks?.find(item =
 const roomById = id => ui.snap.rooms.find(room => room.id === id);
 
 // ---------- rail ----------
-const TILE_NAMES = { notices: 'Alerts', inbox: 'Needs', tasks: 'Tasks', jev: 'Jev', person: 'You', monitor: 'RAM', devices: 'PCs' };
+const TILE_NAMES = { notices: 'Alerts', inbox: 'Needs', tasks: 'Tasks', jev: 'Jev', person: 'You', monitor: 'RAM', devices: 'PCs', worktrees: 'Trees' };
 // A small square button for a place (Notifications, Tasks, Monitor…), with its name and state in the tooltip and a badge when something waits.
 function tile(type, avatar, name, sub, badge = 0, warn = false) {
   // The bell opens a dropdown list instead of a screen.
@@ -89,6 +90,7 @@ const SVG = {
   bell: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>',
   monitor: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M7 13l3-3 3 2 4-5M8 21h8"/></svg>',
   devices: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1"/></svg>',
+  worktrees: WORKTREE_ICON,
   run: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 3 14 9-14 9z"/></svg>',
 };
 const iconAv = (name, tone = '') => `<span class="av sm icon ${tone}">${SVG[name]}</span>`;
@@ -116,6 +118,7 @@ function renderRail() {
         tile('jev', iconAv('mic', 'accent'), 'Jev', 'Control this computer and websites', 0),
         tile('person', ui.profile?.photo ? `<img class="av sm photo" src="${photoUrl()}" alt="">` : iconAv('person'), 'About you', ui.profile?.name || 'What the agents learned', 0),
         tile('monitor', iconAv('monitor'), 'Monitor', ui.monitor ? `${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : 'Memory and what uses it', 0),
+        tile('worktrees', iconAv('worktrees'), 'Worktrees', `${(snap.worktrees || []).filter(item => item.state !== 'gone').length} in use`, 0),
         tile('devices', iconAv('devices'), 'Devices', (snap.devices?.peers || []).length ? `${(snap.devices.peers.filter(peer => peer.online).length + 1)} of ${snap.devices.peers.length + 1} on` : 'Only this computer', 0),
       ].join('')}</div>
     </div>
@@ -245,6 +248,7 @@ function stageModel() {
   if (type === 'specialist') return agentStage(ctx);
   if (type === 'devices') return devicesStage(ctx);
   if (type === 'monitor') return monitorStage(ctx);
+  if (type === 'worktrees') return worktreesStage(ctx);
   if (type === 'jev') return jevStage();
   if (type === 'person') return { title: 'About you', meta: 'Your profile, from what the agents learned', feed: personPage(), top: true };
   if (type === 'project') {
@@ -317,6 +321,8 @@ function renderAll(full = false) {
   // The sidebar is rebuilt only when something in it changed.
   const railHtml = renderRail(); if (railHtml !== ui.railHtml) { ui.railHtml = railHtml; rail.innerHTML = railHtml; const restored = rail.querySelector('.rail-scroll'); if (restored) restored.scrollTop = scroll; }
   renderStage(full);
+  fillWorktreeEmbeds(ctx);
+  if (ui.view.type === 'worktrees' && ui.view.id && ui.wtFocused !== ui.view.id) { const card = document.querySelector(`.wt-page [data-wt-id="${CSS.escape(ui.view.id)}"]`); if (card) { ui.wtFocused = ui.view.id; card.classList.add('focus'); card.scrollIntoView({ block: 'center' }); } }
 }
 
 // ---------- data ----------
@@ -329,6 +335,7 @@ async function loadView() {
     } else if (type === 'room') {
       const room = ui.snap.rooms.find(item => item.id === id);
       if (room && ui.infoOpen !== false && ui.sideTab === 'activity') await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
+    } else if (type === 'worktrees') { await api('/worktrees');
     } else if (type === 'monitor') { ui.monitor = await api('/monitor'); 
     } else if (type === 'person') { ui.page = (await api('/memory/page?name=user')).text; }
     else if (type === 'project') ui.page = (await api(`/memory/page?name=${encodeURIComponent(id)}`)).text;
@@ -463,7 +470,7 @@ document.addEventListener('submit', async event => {
 });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
 
-initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx); wireAgentCards(ctx); wireSpeak(toast);
+initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx); wireAgentCards(ctx); wireSpeak(toast); wireWorktrees(ctx); wireChatSwitch();
 // On a phone the side panels start closed, and the menu button opens the list of chats.
 if (window.matchMedia('(max-width: 760px)').matches) { ui.infoOpen = false; ui.chatInfo = false; ui.termOpen = false; }
 // A page an agent made (an explanation of its changes) opens full screen over the chat, in a sandbox with no access to Rex Desk.

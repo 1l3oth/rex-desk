@@ -30,7 +30,7 @@ const cells = row => row.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<
 const isDivider = line => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line) && line.includes('-');
 const isRule = line => /^\s*([-*_])(\s*\1){2,}\s*$/.test(line);
 const listMarker = line => /^(\s*)([-*+•]|\d+[.)])\s+(.*)$/.exec(line);
-const blockStart = line => /^\s*```/.test(line) || /^#{1,6}\s/.test(line) || /^\s*>/.test(line) || isRule(line) || listMarker(line);
+const blockStart = line => /^\s*\[\[worktree:[\w-]+\]\]\s*$/.test(line) || /^\s*```/.test(line) || /^#{1,6}\s/.test(line) || /^\s*>/.test(line) || isRule(line) || listMarker(line);
 
 function renderList(items) {
   let index = 0;
@@ -51,6 +51,9 @@ export function markdown(source, { mentions = [], tasks = {} } = {}) {
   for (let i = 0; i < lines.length;) {
     const line = lines[i];
     if (!line.trim()) { i += 1; continue; }
+    // A worktree an agent showed: chat.js draws its card here from the latest data.
+    const worktree = /^\s*\[\[worktree:([\w-]{6,64})\]\]\s*$/.exec(line);
+    if (worktree) { out.push(`<div class="wt-embed" data-worktree="${worktree[1]}"></div>`); i += 1; continue; }
     if (/^\s*```/.test(line)) {
       const code = []; i += 1;
       while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]);

@@ -1092,7 +1092,7 @@ button.cn-main{cursor:pointer}
 .nt-adv summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.nt-adv input{width:100%;margin:6px 0 4px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
 
 /* Places as small tiles under Rex Agent */
-.tiles{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;margin:6px 0 2px;padding:0}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;margin:6px 0 2px;padding:0}
 .tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 2px 5px;border:0;border-radius:10px;background:none;color:var(--muted)}
 .tile:hover{background:var(--raised);color:var(--ink)}.tile.active{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--ink)}
 .tile .av{width:28px;height:28px}.tile .tname{font-size:10.5px;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1230,3 +1230,39 @@ body.dropping-files::after{content:attr(data-drop-hint);position:fixed;inset:10p
 .ring.ctx{display:inline-grid;place-items:center;width:20px;height:20px;border:0;background:none;animation:none;cursor:help}
 .ring.ctx .ring-bg{fill:none;stroke:var(--line);stroke-width:2.4}.ring.ctx .ring-fill{fill:none;stroke:var(--muted);stroke-width:2.4;stroke-linecap:round}
 .ring.ctx.mid .ring-fill{stroke:var(--warn)}.ring.ctx.full .ring-fill{stroke:var(--bad)}.ring.ctx.busy .ring-fill{stroke:var(--accent)}
+
+/* Worktrees: one card per git worktree, with the tasks that live in it. The same card sits inside chat messages. */
+.wt-page{padding-top:16px;padding-bottom:24px}
+.wt-filter{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.chip-btn.small{padding:3px 12px;font-size:12px}.chip-btn.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}
+.wt-sec{display:flex;align-items:center;gap:6px;margin:18px 0 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.wt-sec .cnt,.wt-label .cnt{font-size:11px;padding:0 6px;border-radius:999px;background:var(--raised);color:var(--muted);letter-spacing:0}
+.wt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));gap:12px}
+.wt-card{position:relative;display:flex;flex-direction:column;gap:10px;padding:12px 14px 12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}
+.wt-card::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--good)}
+.wt-card.gone::before{background:var(--line)}.wt-card.gone .wt-title b,.wt-card.gone .wt-path{color:var(--muted)}
+.wt-card.focus{box-shadow:0 0 0 2px var(--accent)}
+.wt-card.compact{max-width:460px;margin:6px 0 2px}
+.wt-head{display:flex;align-items:flex-start;gap:10px}
+.wt-icon{display:grid;place-items:center;width:30px;height:30px;flex:none;border-radius:8px;background:color-mix(in srgb,var(--good) 14%,transparent);color:var(--good)}
+.wt-card.gone .wt-icon{background:var(--raised);color:var(--muted)}
+.wt-title{flex:1;min-width:0;display:flex;flex-direction:column}
+.wt-title b{font-family:var(--mono);font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wt-title small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wt-path{display:block;width:100%;text-align:left;padding:5px 8px;border:1px dashed var(--line);border-radius:8px;background:var(--bg);font:12px var(--mono);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wt-path:hover{border-color:var(--accent)}
+.wt-tasks{display:flex;flex-direction:column;gap:6px}
+.wt-label{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--muted)}
+.wt-tasks ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.wt-task{display:flex;align-items:center;gap:4px;border-radius:8px;background:var(--raised)}
+.wt-task-open{flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding:5px 8px;border:0;background:none;text-align:left;border-radius:8px}
+button.wt-task-open:hover .wt-task-name{color:var(--accent)}
+.wt-task .tnum{font:600 11px var(--mono);color:var(--accent);flex:none}
+.wt-task-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.wt-task-state{flex:none;font-size:11px;color:var(--muted);text-transform:capitalize}
+.wt-x{flex:none;width:26px;height:26px;margin-right:2px;border:0;border-radius:6px;background:none;color:var(--muted);font-size:16px;line-height:1}
+.wt-x:hover{background:var(--panel);color:var(--bad)}
+.wt-none{margin:0}
+.wt-add select{width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:12px;color:var(--muted)}
+.wt-add select:hover,.wt-add select:focus{border-color:var(--accent);color:var(--ink)}
+.wt-foot{display:flex;justify-content:flex-end}

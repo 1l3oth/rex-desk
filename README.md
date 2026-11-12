@@ -138,6 +138,14 @@ Nothing runs out of sight: every run, whether an issue agent, the main agent, or
 
 Orca shows these worktrees only when the repository's external-worktree visibility is **show**; the run dialog checks this and offers a one-click fix. **Open in Orca** on any run opens a plain terminal in its worktree without starting a second agent.
 
+## Worktrees
+
+**Trees** in the sidebar lists the worktree history: every git worktree in your configured projects, whether Rex Desk made it for a run, an agent made it in a chat, or you made it by hand. Each card shows the branch, the folder (click to copy), who made it, and the tasks that live in it. Add a task from the card's list to combine it with the others; whoever is then given that task is told to work in that worktree. A task lives in one worktree at a time. A removed worktree stays under **History** with its tasks.
+
+Agents use `desk_worktrees` to read the history and `desk_worktree` to show one in the chat as the same card (`show`), or to add or take out a task (`add_task`, `remove_task`). They are told to show a worktree right after they make one, and Rex Desk posts the card itself when it makes a worktree for a run.
+
+**Ctrl+Shift+Up / Down** switches to the previous or next chat in the sidebar.
+
 ## Handing an issue to any session
 
 Settings → **Connect an existing AI** reports the `rex_desk` entry per profile, for example “rex_desk in 2 of 4 profiles · missing from ~/.claude”, and **Install in every profile** adds it to each Claude Code profile on this computer. A session started from a profile without it has no Rex Desk tools, whatever folder it runs in. With it, any session anywhere can call `desk_tasks` and `desk_task` to read the issues, and `desk_message`/`desk_ask` to reach you.
