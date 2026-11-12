@@ -10,7 +10,8 @@ It works with the AI subscriptions you already have: **Claude Code**, **Codex** 
 
 | System | File |
 |---|---|
-| Windows 10/11 (64-bit) | `Rex.Desk_<version>_x64-setup.exe` |
+| Windows 10/11 (64-bit) | `Rex.Desk_<version>_x64-setup.exe` (installer) |
+| Windows, if `.exe` installers are blocked | `Rex.Desk_<version>_x64_en-US.msi`, or `Rex.Desk_<version>_x64-portable.zip` (unzip it and run `rex-desk.exe`, no install needed) |
 | macOS (Apple Silicon) | `Rex.Desk_<version>_aarch64.dmg` |
 
 The installers bundle Node.js and the Rex Desk server, so you don't need to install anything else to open the app.
