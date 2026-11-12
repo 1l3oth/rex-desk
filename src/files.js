@@ -1,10 +1,9 @@
 // The file window: open any file the person or an agent points at, save edits, format with Prettier,
-// and turn Excel and Word files into something a browser can show. Only folders Rex Desk works with are open to it,
-// and the app's own data folder (where the keys live) and private key files never are.
+// and turn Excel and Word files into something a browser can show. Any file opens,
+// except the app's own data folder (where the keys live) and private key files.
 import { readFileSync, writeFileSync, statSync, existsSync, openSync, readSync, closeSync } from 'node:fs';
 import { spawn, execFileSync } from 'node:child_process';
 import path from 'node:path';
-import os from 'node:os';
 
 export const TEXT_MAX = 1.8 * 1024 * 1024;
 const EXT = {
@@ -30,23 +29,12 @@ const inside = (file, root) => { const relative = path.relative(root, file); ret
 
 export class Files {
   constructor(desk) { this.desk = desk; }
-  // Folders the window may open: home, every project, the agents' worktrees, project memory, the notes vault, shared evidence.
-  roots() {
-    const config = this.desk.store.config(), roots = [os.homedir(), this.desk.worktreeRoot, this.desk.memory?.directory, path.join(this.desk.store.directory, 'artifacts'), path.join(this.desk.store.directory, 'uploads')];
-    // Every project Rex Desk knows: the ones set up, the ones it found on this computer, and Rex Desk itself.
-    for (const repo of [...(config.repositories || []), ...(this.desk.store.list?.('repository') || [])]) roots.push(repo.path);
-    roots.push(this.desk.root);
-    const brain = String(this.desk.memory?.secondBrain?.() || '').match(/[A-Za-z]:[\\/][^\s`'")\]]+/);
-    if (brain) roots.push(brain[0]);
-    return roots.filter(Boolean).map(root => path.resolve(root));
-  }
   // The app's own data folder holds encrypted keys and sign-ins: never open it, except the evidence agents shared.
   check(file) {
     const full = path.resolve(file), store = path.resolve(this.desk.store.directory), shared = [path.join(store, 'artifacts'), path.join(store, 'uploads')];
     // Shared evidence and the files people attached open; the rest of the data folder (keys, sign-ins) never does.
     if (inside(full, store) && !shared.some(folder => inside(full, folder))) throw new Error('That file is part of Rex Desk\'s private data (keys and sign-ins), so it does not open here.');
     if (SECRET.test(full)) throw new Error('That looks like a private key or a sign-in file, so it does not open here.');
-    if (!this.roots().some(root => inside(full, root))) throw new Error('Rex Desk opens files in your home folder, your projects, the agents\' worktrees and your notes vault. That file is outside them.');
     return full;
   }
   // The folders a chat works in: the run's worktree and project; in a group chat, the worktrees and projects of the work done in that room.

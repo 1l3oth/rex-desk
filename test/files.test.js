@@ -28,12 +28,13 @@ test('a path from a chat opens with its line, from the run worktree first, then 
   assert.throws(() => files.open('nope/missing.ts', 'run-1'), /No file named/);
 });
 
-test('Rex Desk data, private keys and folders outside the known ones never open', () => {
+test('any file opens, except the app data folder and private keys', () => {
   const { files, store } = setup();
   assert.throws(() => files.open(path.join(store, 'secrets.json')), /private data/);
   assert.equal(files.open(path.join(store, 'artifacts', 'run-1', 'shot.png')).kind, 'image');
   assert.throws(() => files.check(path.join(os.homedir(), '.ssh', 'id_rsa')), /private key/);
-  assert.throws(() => files.check(path.parse(process.cwd()).root + 'Windows-not-here' + path.sep + 'x.txt'), /outside/);
+  const outside = path.resolve(path.parse(process.cwd()).root, 'Windows-not-here', 'x.txt');
+  assert.equal(files.check(outside), outside);
 });
 
 test('saving refuses a file changed on disk since it was opened, unless forced', () => {
