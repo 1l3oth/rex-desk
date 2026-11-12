@@ -110,7 +110,7 @@ function renderRail() {
   const snap = ui.snap, asks = pending().length;
   const main = mainRun(), agents = snap.specialists || [], tasks = (snap.tasks || []).filter(task => task.active && !task.demo), busy = agents.filter(agent => agent.status?.state === 'busy').length;
   const plus = (action, label) => `<button class="sec-add" data-action="${action}" title="${label}" aria-label="${label}">+</button>`;
-  return `<div class="rail-head"><span class="brand">${iconAv('main', 'brandmark')}<strong>Rex Desk</strong></span><span class="spacer"></span><button class="btn small" data-action="sync" title="Sync issues from the tracker">Sync</button></div><div class="rail-scroll">
+  return `<div class="rail-head"><span class="brand">${iconAv('main', 'brandmark')}<strong>Rex Desk</strong></span><span class="spacer"></span><button class="btn small" data-action="sync" title="Sync issues from the tracker">Sync</button></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
     <div class="sec-body top">
       ${railItem('main', '', { avatar: withDot(iconAv('main', 'accent'), main ? stateTone(main) : ''), name: 'Rex Agent', sub: main ? stateLabel(main) : 'Not started', badge: unreadFor(ui, 'main:') })}
       <div class="tiles" role="toolbar" aria-label="Places">${[
@@ -123,7 +123,7 @@ function renderRail() {
         tile('devices', iconAv('devices'), 'Devices', (snap.devices?.peers || []).length ? `${(snap.devices.peers.filter(peer => peer.online).length + 1)} of ${snap.devices.peers.length + 1} on` : 'Only this computer', 0),
       ].join('')}</div>
     </div>
-    ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })).join('') : '<p class="rail-empty">No rooms yet.</p>')}
+    ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} ${room.members.length === 1 ? 'agent' : 'agents'}`, badge: unreadFor(ui, `room:${room.id}`) })).join('') : '<p class="rail-empty">No rooms yet.</p>')}
     ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentGroups(ctx, agents, (agent, grouped) => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: grouped ? agent.status?.label || 'Idle' : `${agent.status?.state === 'idle' || !agent.status ? agent.projectSlug : agent.status.label}`, badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
   </div>${phoneTabs(asks)}<div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button><button class="btn small" data-action="theme">Theme</button></div>`;
 }
@@ -321,7 +321,11 @@ function renderAll(full = false) {
   if (!document.getElementById('rail')) ui.railHtml = '', app.innerHTML = `<div class="chat-shell${phone() && !location.hash ? ' show-rail' : ''}"><aside class="rail" id="rail"></aside><main class="stage" id="stage"></main></div>`;
   const rail = document.getElementById('rail'), scroll = rail.querySelector('.rail-scroll')?.scrollTop || 0;
   // The sidebar is rebuilt only when something in it changed.
-  const railHtml = renderRail(); if (railHtml !== ui.railHtml) { ui.railHtml = railHtml; rail.innerHTML = railHtml; const restored = rail.querySelector('.rail-scroll'); if (restored) restored.scrollTop = scroll; }
+  // While the person types in the phone search box, only the list under it is redrawn, so the box keeps its focus.
+  const railHtml = renderRail(); if (railHtml !== ui.railHtml) { ui.railHtml = railHtml;
+    if (document.activeElement?.id === 'm-search' && rail.querySelector('.rail-scroll')) { const fresh = document.createElement('div'); fresh.innerHTML = railHtml; rail.querySelector('.rail-scroll').replaceWith(fresh.querySelector('.rail-scroll')); }
+    else rail.innerHTML = railHtml;
+    const restored = rail.querySelector('.rail-scroll'); if (restored) restored.scrollTop = scroll; filterChats(); }
   renderStage(full);
   fillWorktreeEmbeds(ctx);
   if (ui.view.type === 'worktrees' && ui.view.id && ui.wtFocused !== ui.view.id) { const card = document.querySelector(`.wt-page [data-wt-id="${CSS.escape(ui.view.id)}"]`); if (card) { ui.wtFocused = ui.view.id; card.classList.add('focus'); card.scrollIntoView({ block: 'center' }); } }
@@ -1055,3 +1059,66 @@ document.addEventListener('click', event => {
   ui.stick = true; ui.freshBelow = false;
   feed.scrollTo({ top: feed.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 });
+
+// ---------- phone: the chat list like a messenger ----------
+function phIcon(name) {
+  return ({
+  bell: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>',
+  more: '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
+  search: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+})[name];
+}
+function phoneHead() {
+  const unread = ui.snap?.notices?.unread || 0;
+  const me = ui.profile?.photo ? `<img class="av photo" src="${photoUrl()}" alt="">` : `<span class="av icon">${SVG.person}</span>`;
+  return `<div class="m-head"><div class="m-bar"><button type="button" class="m-me" data-open="person" data-id="" aria-label="About you">${me}</button><h2>Chats</h2>
+    <button type="button" class="m-round" data-action="nt-panel" aria-label="Notifications">${phIcon('bell')}${unread ? `<span class="tb-badge">${unread > 99 ? '99+' : unread}</span>` : ''}</button>
+    <button type="button" class="m-round" data-action="m-more" aria-label="More">${phIcon('more')}</button></div>
+    <label class="m-search">${phIcon('search')}<input id="m-search" type="search" placeholder="Search" autocomplete="off" value="${esc(ui.chatFilter || '')}"></label></div>`;
+}
+function phoneChats() {
+  const snap = ui.snap, rows = [], last = new Map();
+  for (const message of snap.messages || []) if (message.from?.type !== 'system') last.set(message.roomId, message);
+  for (const room of snap.rooms || []) {
+    const said = last.get(room.id), who = said ? (said.from.type === 'human' ? 'You' : said.from.name || (said.from.id === 'main' ? 'Rex Agent' : (snap.specialists || []).find(agent => agent.id === said.from.id)?.name) || 'Agent') : '';
+    const working = room.members.some(member => member.state === 'replying' || member.state === 'busy');
+    rows.push({ at: said?.at || room.createdAt || '', html: phoneRow('room', room.id, avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), working ? 'working' : '', room.name,
+      working ? 'Someone is typing…' : said ? `${who}: ${String(said.text || '').replace(/\s+/g, ' ').slice(0, 90)}` : `${room.members.length} ${room.members.length === 1 ? 'agent' : 'agents'}`, said?.at || '', unreadFor(ui, `room:${room.id}`)) });
+  }
+  for (const agent of snap.specialists || []) {
+    const run = runById(agent.runId), state = agent.status?.state;
+    rows.push({ at: run?.updatedAt || agent.updatedAt || agent.createdAt || '', html: phoneRow('specialist', agent.id, avatarHtml(ctx, { name: agent.name, size: 'sm' }), agentDot(state), agent.name,
+      `${agent.status?.label || 'Idle'} · ${agent.projectSlug || ''}`, run?.updatedAt || '', agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0) });
+  }
+  rows.sort((left, right) => String(right.at).localeCompare(String(left.at)));
+  const main = mainRun();
+  const pinned = phoneRow('main', '', iconAv('main', 'accent'), main ? stateTone(main) : '', 'Rex Agent', main ? stateLabel(main) : 'Your helper for everything', main?.updatedAt || '', unreadFor(ui, 'main:'));
+  return `<div class="m-chats">${pinned}${rows.map(row => row.html).join('')}<p class="m-none" hidden>No chat matches.</p></div>`;
+}
+function phoneRow(type, id, avatar, dot, name, sub, at, badge) {
+  return `<button type="button" class="m-row${badge ? ' unread' : ''}" data-open="${type}" data-id="${esc(id || '')}" data-name="${esc(String(name).toLowerCase())}">${withDot(avatar, dot)}<span class="m-text"><span class="m-top"><b>${esc(name)}</b>${at ? `<time>${esc(ago(at))}</time>` : ''}</span><span class="m-sub"><span>${esc(sub)}</span>${badge ? `<span class="m-badge">${badge}</span>` : ''}</span></span></button>`;
+}
+function filterChats() {
+  const words = String(ui.chatFilter || '').trim().toLowerCase(), list = document.querySelector('.m-chats'); if (!list) return;
+  let shown = 0;
+  for (const row of list.querySelectorAll('.m-row')) { const match = !words || row.dataset.name.includes(words); row.hidden = !match; if (match) shown += 1; }
+  const none = list.querySelector('.m-none'); if (none) none.hidden = shown > 0;
+}
+document.addEventListener('input', event => { if (event.target.id !== 'm-search') return; ui.chatFilter = event.target.value; filterChats(); });
+// More: what the round buttons used to hold, in a sheet from the bottom.
+document.addEventListener('click', event => {
+  if (!event.target.closest?.('[data-action="m-more"]')) return;
+  event.stopPropagation();
+  document.querySelector('.dialog-back.m-more-sheet')?.remove();
+  const back = document.createElement('div'); back.className = 'dialog-back m-more-sheet';
+  const item = (attrs, icon, label) => `<button type="button" class="m-sheet-item" ${attrs}>${icon}<span>${label}</span></button>`;
+  back.innerHTML = `<div class="dialog m-sheet" role="dialog" aria-label="More">
+    ${item('data-action="new-room"', iconAv('main'), 'New room')}
+    ${item('data-action="spec-new"', iconAv('person'), 'New agent')}
+    ${item('data-open="devices" data-id=""', iconAv('devices'), 'Devices')}
+    ${item('data-open="monitor" data-id=""', iconAv('monitor'), 'Memory')}
+    ${item('data-action="sync"', iconAv('tasks'), 'Sync tasks now')}
+    <button type="button" class="btn m-sheet-close">Close</button></div>`;
+  document.body.append(back);
+  back.addEventListener('click', inner => { if (inner.target === back || inner.target.closest('.m-sheet-close') || inner.target.closest('.m-sheet-item')) setTimeout(() => back.remove()); });
+}, true);
