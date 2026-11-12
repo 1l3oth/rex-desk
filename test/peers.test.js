@@ -232,3 +232,16 @@ test('a file attached here for an agent on another computer is saved there, and 
   assert.ok(there.startsWith(path.join(a.desk.store.directory, 'uploads')), 'it is in the work laptop\'s uploads');
   assert.deepEqual([...readFileSync(there)], [137, 80, 78, 71, 9, 9]);
 });
+
+test('a screenshot an agent on another computer saved as evidence shows here too', async () => {
+  const { a, b } = computers();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  await a.desk.specialistTurn(dara.id, { prompt: 'Hello' });
+  const runId = a.desk.store.get('specialist', dara.id).runId;
+  await waitFor(() => !['starting', 'running'].includes(a.desk.store.get('run', runId).state));
+  const folder = a.desk.evidence.directory(runId); writeFileSync(path.join(folder, 'proof.png'), Buffer.from([137, 80, 78, 71, 5]));
+  a.desk.evidence.attach(runId, 'proof.png', 'Proof', 'image/png');
+  a.desk.peers.copyChat(runId);
+  b.desk.peers.applyAll(['chatcopy', 'chatfile'].flatMap(kind => a.desk.store.list(kind).map(value => ({ kind, id: value.id, value }))));
+  assert.deepEqual([...b.desk.peers.evidencePicture(runId, 'proof.png').data], [137, 80, 78, 71, 5]);
+});

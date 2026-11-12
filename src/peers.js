@@ -13,6 +13,7 @@ const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVEN
 const PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
 // A picture is known by its path on the computer that has it.
 export const chatFileId = file => createHash('sha1').update(path.resolve(String(file)).toLowerCase()).digest('hex');
+export const evidenceId = (runId, file) => createHash('sha1').update(`evidence:${runId}/${path.basename(String(file))}`).digest('hex');
 // Tailscale gives every device an address in 100.64.0.0/10.
 export const tailscaleAddresses = (interfaces = os.networkInterfaces()) => Object.values(interfaces).flat().filter(item => item && item.family === 'IPv4' && !item.internal)
   .map(item => item.address).filter(address => { const [first, second] = address.split('.').map(Number); return first === 100 && second >= 64 && second <= 127; });
@@ -277,7 +278,7 @@ export class Peers {
     const asks = this.store.list('interaction').filter(item => item.runId === runId && item.state === 'pending')
       .map(item => Object.fromEntries(Object.entries(item).filter(([, value]) => JSON.stringify(value ?? '').length < 20000)));
     this.store.put('chatcopy', runId, { id: runId, agentId: run.specialistId, run: slim, events, asks, at: now() });
-    this.sharePictures(events);
+    this.sharePictures(events); this.shareEvidence(runId);
   }
   // Pictures the person attached in a shared chat travel with it (up to 2 MB each), so they show on the other computers too.
   sharePictures(events) {
@@ -321,6 +322,20 @@ export class Peers {
       text = text.split(file.path).join(target);
     }
     return text;
+  }
+  // Screenshots an agent saved as evidence in the chat travel with it too (up to 2 MB each).
+  shareEvidence(runId) {
+    for (const artifact of this.store.list('artifact').filter(item => item.runId === runId && PICTURE.test(item.file))) {
+      const file = path.join(this.store.directory, 'artifacts', runId, path.basename(artifact.file));
+      if (!existsSync(file)) continue;
+      const id = evidenceId(runId, artifact.file), size = statSync(file).size;
+      if (size > PICTURE_BYTES || this.store.get('chatfile', id)?.size === size) continue;
+      this.store.put('chatfile', id, { id, path: `evidence:${runId}/${artifact.file}`, name: path.basename(artifact.file), size, data: readFileSync(file).toString('base64'), at: now() });
+    }
+  }
+  evidencePicture(runId, file) {
+    const item = this.store.get('chatfile', evidenceId(runId, file));
+    return item?.data && PICTURE.test(item.name) ? { name: item.name, data: Buffer.from(item.data, 'base64') } : null;
   }
   // One picture from another computer's chat, when it is not on this one.
   chatPicture(file) {

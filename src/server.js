@@ -700,7 +700,12 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (artifactMatch) {
         const [, runId, encodedFile] = artifactMatch, file = decodeURIComponent(encodedFile);
         const artifact = store.list('artifact').find(item => item.runId === runId && item.file === file);
-        if (!artifact) return json(response, 404, { error: 'Artifact not found.' });
+        if (!artifact) {
+          // Evidence from a chat on another computer comes from the shared copy of that chat.
+          const picture = desk.peers.evidencePicture(runId, file);
+          if (picture) { response.writeHead(200, { 'Content-Type': mime[path.extname(picture.name).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Length': picture.data.length }); return response.end(picture.data); }
+          return json(response, 404, { error: 'Artifact not found.' });
+        }
         const location = path.join(store.directory, 'artifacts', runId, path.basename(file));
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }

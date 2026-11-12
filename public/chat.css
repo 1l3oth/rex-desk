@@ -1384,3 +1384,7 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
   .composer .foot .pick2.compact .pick2-btn svg{width:12px;height:12px}
   .composer .foot .ring{margin-left:auto;flex:none}
 }
+
+/* a step's "view" link and its state never break into letters on a narrow screen */
+.step .linkish,.step .tstate{flex:none;white-space:nowrap}
+.step .what{flex:1}

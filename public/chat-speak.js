@@ -39,9 +39,19 @@ function pieces(text) {
   if (piece.trim()) out.push(piece);
   return out;
 }
+// Phones (iPhone above all) only let a page make sound that starts during the tap itself. The voice is fetched first, so one
+// player is started with a moment of silence right at the tap, and every piece of the voice then plays through that same player.
+let player = null;
+const SILENCE = Uint8Array.from(atob('UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA='), char => char.charCodeAt(0));
+function unlockSound() {
+  player ||= new Audio();
+  try { player.src = URL.createObjectURL(new Blob([SILENCE], { type: 'audio/wav' })); const started = player.play(); started?.catch?.(() => {}); } catch { /* the voice still tries */ }
+  // The computer's own voices on a phone need the same first touch.
+  try { if ('speechSynthesis' in window) speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch { /* no voices */ }
+}
 function stop() {
   speechSynthesis.cancel?.();
-  if (playing?.audio) { playing.audio.pause(); URL.revokeObjectURL(playing.audio.src); }
+  if (playing?.audio) { playing.audio.pause(); playing.audio.onended = null; playing.audio.onerror = null; URL.revokeObjectURL(playing.audio.src); }
   if (playing) { playing.button.innerHTML = SPEAKER; playing.button.classList.remove('on', 'loading'); playing.button.title = 'Listen'; }
   playing = null;
 }
@@ -61,7 +71,7 @@ async function playLocal(text, lang, mine) {
 async function play(button) {
   const message = button.closest('.bubble')?.querySelector('.md'); if (!message) return;
   const text = spokenText(message); if (!text) return;
-  stop();
+  stop(); unlockSound();
   const lang = language(text), chosen = chosenVoice(lang);
   playing = { button }; button.innerHTML = STOP; button.classList.add('on', 'loading'); button.title = 'Stop';
   const mine = playing;
@@ -77,7 +87,7 @@ async function play(button) {
       for (let index = 0; index < parts.length; index += 1) {
         const url = await next; if (playing !== mine) { URL.revokeObjectURL(url); return; }
         next = index + 1 < parts.length ? fetchPart(parts[index + 1]) : null;
-        const audio = new Audio(url); mine.audio = audio; button.classList.remove('loading');
+        const audio = player || new Audio(); audio.src = url; mine.audio = audio; button.classList.remove('loading');
         await new Promise((resolve, reject) => { audio.onended = resolve; audio.onerror = () => reject(new Error('The sound could not play.')); audio.play().catch(reject); });
         URL.revokeObjectURL(url); if (playing !== mine) return;
       }
