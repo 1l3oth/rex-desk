@@ -444,7 +444,7 @@ export class Desk {
         run = this.patchRun(runId, { worktree: worktree.directory, branch, baseCommit: worktree.commit, port: await freePort() });
         this.store.event(runId, 'worktree-created', { branch, directory: worktree.directory });
         // The new worktree joins the history with its task, and shows in the chat as a card.
-        const made = this.worktrees.record({ path: worktree.directory, repositoryId: run.repositoryId, branch, taskId: run.taskId, base: run.baseBranch || '', by: run.specialistId ? this.specialists.get(run.specialistId)?.name || '' : 'Worker run' });
+        const made = this.worktrees.record({ path: worktree.directory, repositoryId: run.repositoryId, branch, taskId: run.taskId, base: run.baseBranch || '', chat: `run:${runId}`, by: run.specialistId ? this.specialists.get(run.specialistId)?.name || '' : 'Worker run' });
         this.message(runId, this.worktrees.card(made, 'Made a worktree for this task.'));
         if (repository.flowRuntime) {
           const prepared = seedFlowWorktree(repository, run.worktree, run.runtimeProfile);
@@ -808,10 +808,15 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // Says something in the chat the agent is talking in. A room session posts in the room of its current turn,
   // else in the room the task was given in; everyone else in their own chat.
   sayInChat(runId, text, task = null) {
+    const run = this.run(runId), agentId = run.roomAgent || run.specialistId || '', roomId = this.chatRoom(runId, task);
+    if (roomId) { void this.rooms.post(roomId, { fromAgentId: agentId, text }).catch(() => {}); return 'room'; }
+    this.message(runId, text); return 'chat';
+  }
+  // The group chat an agent is talking in right now, if any.
+  chatRoom(runId, task = null) {
     const run = this.run(runId), agentId = run.roomAgent || run.specialistId || '';
     const roomId = run.roomTurn?.roomId || (task?.roomWork?.agentId === agentId ? task.roomWork.roomId : '') || (run.role === 'worker' ? run.roomId : '');
-    if (run.roomAgent && roomId) { void this.rooms.post(roomId, { fromAgentId: agentId, text }).catch(() => {}); return 'room'; }
-    this.message(runId, text); return 'chat';
+    return run.roomAgent && roomId ? roomId : '';
   }
   // desk_worktree: show a worktree in the chat as a card, or add a task to it (or take one out).
   async worktreeAction(runId, { worktree, action = 'show', taskId = '', note = '' }) {
@@ -822,8 +827,9 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (action !== 'show' && !task) throw new Error('Pass taskId: the task to add to the worktree or take out of it.');
     if (action === 'remove_task') return this.worktrees.removeTask(item.id, task.id);
     if (task) item = this.worktrees.addTask(item.id, task.id);
-    const stored = this.store.get('worktree', item.id);
-    if (by && !stored.createdBy) this.store.put('worktree', item.id, { ...stored, createdBy: by });
+    // The chat it was shown in lists it in its side panel.
+    const stored = this.store.get('worktree', item.id), roomId = this.chatRoom(runId, task), chat = roomId ? `room:${roomId}` : `run:${runId}`;
+    this.store.put('worktree', item.id, { ...stored, createdBy: stored.createdBy || by, chats: [...new Set([...(stored.chats || []), chat])] });
     if (action === 'add_task') return item;
     const fresh = this.store.get('worktree', item.id);
     return { shown: true, worktree: this.worktrees.summary(fresh), where: this.sayInChat(runId, this.worktrees.card(fresh, note), task) };

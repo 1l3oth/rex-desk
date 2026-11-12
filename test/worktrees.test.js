@@ -52,6 +52,13 @@ test('worktree history: found from git, tasks live in one worktree, shown in cha
     assert.match(said.text, new RegExp(`\[\[worktree:${one}\]\]`));
     await assert.rejects(desk.worktreeAction('run-1', { worktree: path.join(directory, 'nowhere') }), /No worktree/);
 
+    // The side panel's source control list: changed and new files with their lines; the chat it was shown in lists it.
+    writeFileSync(path.join(first, 'a.txt'), 'a\nb\nc'); writeFileSync(path.join(first, 'new.txt'), 'x\ny');
+    const changes = await desk.worktrees.changes(one);
+    assert.equal(changes.branch, 'temp/rex/one');
+    assert.deepEqual(changes.files.map(file => [file.name, file.status, file.added, file.removed]).sort(), [['a.txt', 'M', 3, 1], ['new.txt', 'U', 2, 0]]);
+    assert.ok(store.get('worktree', one).chats.includes('run:run-1'));
+
     await git(repository, ['worktree', 'remove', second]);
     const after = await desk.worktrees.scan({ force: true });
     const gone = after.find(item => item.id === two);

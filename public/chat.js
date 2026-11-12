@@ -6,7 +6,7 @@ import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, room
 import { collectShared, sharedTabsHtml } from '/chat-media.js';
 import { devicesStage, devicesAction, initDevices } from '/chat-devices.js';
 import { monitorStage, monitorAction } from '/chat-monitor.js';
-import { worktreesStage, fillWorktreeEmbeds, wireWorktrees, wireChatSwitch, WORKTREE_ICON } from '/chat-worktrees.js';
+import { worktreesStage, fillWorktreeEmbeds, wireWorktrees, wireChatSwitch, WORKTREE_ICON, chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
 import { openSettings } from '/chat-settings.js';
 import { wireFiles, watchShownFile } from '/chat-files.js';
@@ -760,12 +760,14 @@ function personalAgent(run) {
   return (ui.snap.specialists || []).find(agent => agent.id === run.specialistId && agent.runId === run.id) || null;
 }
 function personalSide(run, agent, items, shells) {
-  // Two tabs, like a messenger's chat info: Profile (with what was shared in the chat) and the agent's Terminal.
-  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : 'profile', part = ['media', 'files', 'links'].includes(ui.chatShared) ? ui.chatShared : 'media';
+  // Tabs, like a messenger's chat info: Profile (with what was shared in the chat), the worktrees of this chat, and the agent's Terminal.
+  const trees = chatWorktrees(ui, { runId: run.id, agentId: agent.id });
+  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'worktrees' ? 'worktrees' : 'profile', part = ['media', 'files', 'links'].includes(ui.chatShared) ? ui.chatShared : 'media';
   const entries = items.filter(item => item.role === 'human' || item.role === 'agent').map(item => ({ from: item.role === 'human' ? 'You' : agent.name, at: item.at, text: item.text }));
   const shared = collectShared(entries, (ui.snap.artifacts || []).filter(item => item.runId === run.id).map(item => ({ ...item, from: agent.name })));
   const close = '<button type="button" class="side-x" data-action="chat-info-close" aria-label="Close the side panel" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
-  const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">Profile</button>${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">Terminal<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span>${close}</div>`;
+  const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">Profile</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="chat-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button>${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">Terminal<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span>${close}</div>`;
+  if (tab === 'worktrees') return tabs + worktreeSideHtml(ctx, trees);
   if (tab === 'terminal') return tabs + terminalHtml(shells, { esc, hhmm }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="side-body)/, '');
   const sharedBox = `<h3>Media, files and links</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
   const sources = (agent.taskSources || []).map(id => id === 'local' ? 'Rex Desk tasks' : (ui.snap.config?.sources || []).find(source => source.id === id)?.name).filter(Boolean);

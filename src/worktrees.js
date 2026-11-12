@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { git } from './processes.js';
 
@@ -37,12 +37,13 @@ export class Worktrees {
     return this.store.config().repositories.find(item => item.path && sameDir(path.join(item.path, '.git'), common)) || null;
   }
   // Adds or refreshes one worktree. Tasks and who made it are only ever added, never dropped by a refresh.
-  record({ path: directory, repositoryId = '', branch = '', head = '', taskId = '', by = '', base = '' }) {
+  // chat: where it was shown or made, as run:<id> (a personal chat) or room:<id> (a group chat); its side panel lists it.
+  record({ path: directory, repositoryId = '', branch = '', head = '', taskId = '', by = '', base = '', chat = '' }) {
     const id = worktreeId(directory), old = this.store.get('worktree', id) || {}, at = now();
     const repository = this.store.config().repositories.find(item => item.id === (repositoryId || old.repositoryId)) || null;
-    const tasks = [...new Set([...(old.tasks || []), ...(taskId ? [taskId] : [])])];
+    const tasks = [...new Set([...(old.tasks || []), ...(taskId ? [taskId] : [])])], chats = [...new Set([...(old.chats || []), ...(chat ? [chat] : [])])];
     return this.store.put('worktree', id, { ...old, id, path: clean(directory), repositoryId: repositoryId || old.repositoryId || '', project: repository?.name || old.project || '',
-      branch: branch || old.branch || '', head: head || old.head || '', base: base || old.base || '', tasks, createdBy: old.createdBy || by || '',
+      branch: branch || old.branch || '', head: head || old.head || '', base: base || old.base || '', tasks, chats, createdBy: old.createdBy || by || '',
       createdAt: old.createdAt || at, lastUsedAt: taskId || by ? at : old.lastUsedAt || old.createdAt || at, state: existsSync(directory) ? 'active' : 'gone', goneAt: existsSync(directory) ? undefined : old.goneAt || at });
   }
   // Reads every configured project's worktrees. A worktree that disappeared stays in the history, marked gone.
@@ -59,7 +60,7 @@ export class Worktrees {
       // Runs remember the worktree they worked in and their task.
       for (const run of this.store.list('run')) if (run.worktree) {
         const known = this.store.get('worktree', worktreeId(run.worktree));
-        if (known || existsSync(run.worktree)) this.record({ path: run.worktree, repositoryId: run.repositoryId, branch: run.branch, taskId: run.taskId || '', base: run.baseBranch || '' });
+        if (known || existsSync(run.worktree)) this.record({ path: run.worktree, repositoryId: run.repositoryId, branch: run.branch, taskId: run.taskId || '', base: run.baseBranch || '', chat: `run:${run.id}` });
       }
       for (const item of this.store.list('worktree')) if (item.state !== 'gone' && !seen.has(item.id) && !existsSync(item.path)) this.store.put('worktree', item.id, { ...item, state: 'gone', goneAt: now() });
       this.scannedAt = Date.now(); return this.all();
@@ -97,6 +98,25 @@ export class Worktrees {
   removeTask(id, taskId) {
     const item = this.store.get('worktree', id); if (!item) throw new Error('Worktree not found.');
     return this.summary(this.store.put('worktree', id, { ...item, tasks: (item.tasks || []).filter(entry => entry !== taskId) }));
+  }
+  // What changed in a worktree, the way a source control panel shows it: branch, the branch it tracks, how far ahead or behind,
+  // and every changed file with its added and removed lines (uncommitted work, staged or not, and new files).
+  async changes(id) {
+    const item = this.store.get('worktree', id); if (!item) throw new Error('Worktree not found.');
+    if (!existsSync(item.path)) return { id, gone: true, branch: item.branch, files: [], added: 0, removed: 0 };
+    const [status, numstat] = await Promise.all([git(item.path, ['status', '--porcelain=v1', '-b', '--untracked-files=all']), git(item.path, ['diff', '--numstat', 'HEAD']).catch(() => '')]);
+    const lines = status.split('\n').filter(Boolean), head = lines[0]?.startsWith('## ') ? lines.shift().slice(3) : '';
+    const tracking = /^(.+?)(?:\.\.\.(\S+))?(?: \[(.+)\])?$/.exec(head) || [], counts = String(tracking[3] || '');
+    const counted = new Map(numstat.split('\n').filter(Boolean).map(line => { const [plus, minus, ...name] = line.split('\t'); return [name.join('\t').replace(/\{[^}]* => ([^}]*)\}/, '$1').replace(/\/\//g, '/').replace(/^.* => /, ''), { added: Number(plus) || 0, removed: Number(minus) || 0 }]; }));
+    const files = lines.slice(0, 500).map(line => {
+      const code = line.slice(0, 2), file = line.slice(3).replace(/^.* -> /, '').replace(/^"(.*)"$/, '$1');
+      const status = code === '??' ? 'U' : code.includes('D') ? 'D' : code.includes('A') ? 'A' : code.includes('R') ? 'R' : 'M';
+      let lines = counted.get(file) || { added: 0, removed: 0 };
+      if (status === 'U') { try { const full = path.join(item.path, file); lines = { added: statSync(full).size < 2e6 ? readFileSync(full, 'utf8').split('\n').length : 0, removed: 0 }; } catch {} }
+      return { path: path.join(item.path, file), name: path.basename(file), dir: path.dirname(file) === '.' ? '' : path.dirname(file).replace(/\\/g, '/'), status, ...lines };
+    });
+    return { id, branch: tracking[1] || item.branch, upstream: tracking[2] || '', ahead: Number(/ahead (\d+)/.exec(counts)?.[1] || 0), behind: Number(/behind (\d+)/.exec(counts)?.[1] || 0),
+      files, added: files.reduce((sum, file) => sum + file.added, 0), removed: files.reduce((sum, file) => sum + file.removed, 0), at: now() };
   }
   forTask(taskId) { return this.all().find(item => item.state !== 'gone' && (item.tasks || []).includes(taskId)) || null; }
   // Told to whoever is given a task that lives in a worktree, so the tasks in it are worked on together, in one place.

@@ -1,3 +1,4 @@
+import { chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { speakButton } from '/chat-speak.js';
 import { pickerHtml } from '/chat-pick.js';
 import { collectShared, sharedTabsHtml, sharedCount } from '/chat-media.js';
@@ -105,9 +106,10 @@ function activityHtml(ctx, room) {
 // The right side of a room: Activity and Chat info, as tabs.
 // Two tabs, like a messenger's chat info: Chat info (members, and the media, files and links shared here) and Activity (what the agents are doing).
 function roomSideHtml(ctx, room) {
-  const tab = ctx.ui.sideTab === 'activity' ? 'activity' : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
+  const trees = chatWorktrees(ctx.ui, { roomId: room.id });
+  const tab = ['activity', 'worktrees'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
   const close = '<button type="button" class="side-x" data-action="info-toggle" aria-label="Close the side panel" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
-  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : activityHtml(ctx, room)}`;
+  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : activityHtml(ctx, room)}`;
 }
 function roomSharedHtml(ctx, room) {
   const messages = (ctx.ui.snap.messages || []).filter(message => message.roomId === room.id && message.from.type !== 'system'), runs = new Set(roomRunIds(ctx.ui, room));

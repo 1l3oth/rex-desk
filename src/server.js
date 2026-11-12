@@ -556,6 +556,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/files/format' && request.method === 'POST') { const input = await body(request); return json(response, 200, await desk.files.format(input.path, input.text)); }
       if (url.pathname === '/api/files/reveal' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.files.reveal(input.path, input.how)); }
       if (url.pathname === '/api/worktrees' && request.method === 'GET') return json(response, 200, await desk.worktrees.list());
+      const worktreeChanges = /^\/api\/worktrees\/([\w-]+)\/changes$/.exec(url.pathname);
+      if (worktreeChanges && request.method === 'GET') return json(response, 200, await desk.worktrees.changes(worktreeChanges[1]));
       const worktreeTask = /^\/api\/worktrees\/([\w-]+)\/tasks$/.exec(url.pathname);
       if (worktreeTask && request.method === 'POST') { const input = await body(request); return json(response, 200, input.remove ? desk.worktrees.removeTask(worktreeTask[1], String(input.taskId || '')) : desk.worktrees.addTask(worktreeTask[1], String(input.taskId || ''))); }
       if (url.pathname === '/api/monitor' && request.method === 'GET') return json(response, 200, await desk.monitor.snapshot({ fresh: url.searchParams.has('fresh') }));
