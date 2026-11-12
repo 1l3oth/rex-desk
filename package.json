@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local QA task dashboard and MCP agent coordinator for Flow and Morningmate",
+  "description": "A local, chat-first desk where AI agents work on your projects with you: personal chats, group rooms and tasks",
   "engines": {
     "node": ">=24.0.0"
   },

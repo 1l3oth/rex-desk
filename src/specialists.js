@@ -65,12 +65,12 @@ export class Specialists {
   }
 
   // The project must be one Rex Desk has in memory, so the specialist starts from what is already known about it.
-  create({ name, projectSlug, rules = '', unsure = [], provider, model = '', by = 'you', cloneOf = '' }) {
+  create({ name, projectSlug, purpose = '', rules = '', unsure = [], provider, model = '', by = 'you', cloneOf = '' }) {
     const project = this.memory.list().find(item => item.slug === String(projectSlug || '').toLowerCase());
     if (!project) throw new Error(`No project "${projectSlug}" in memory. Scan this computer first, then pick one of the projects.`);
     const { name: clean, slug } = this.checkName(name);
     const repository = this.store.config().repositories.find(item => path.resolve(item.path).toLowerCase() === path.resolve(project.path).toLowerCase());
-    const item = { id: randomUUID(), name: clean, slug, projectSlug: project.slug, projectPath: project.path, repositoryId: repository?.id || '', purpose: project.purpose || '',
+    const item = { id: randomUUID(), name: clean, slug, projectSlug: project.slug, projectPath: project.path, repositoryId: repository?.id || '', purpose: String(purpose || '').trim().slice(0, 400) || project.purpose || '',
       rules: String(rules).slice(0, 4000), unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12),
       provider: aiProvider(provider || this.store.config().provider), model: this.cleanModel(model, { strict: true, provider: provider || this.store.config().provider }), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, loop: { ...LOOP_DEFAULT }, createdAt: now(), updatedAt: now() };
     this.store.put('specialist', item.id, item); this.writeCard(item); return item;
@@ -178,7 +178,7 @@ export class Specialists {
       "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
       EVIDENCE_RULE,
       this.memory.workflowText(agent.projectSlug), "When the person tells you how work on a project is done (which branch to start from, where a pull request goes, how to test or sign in, who reviews, what to never touch), or answers a question about it, or corrects a step you took, save it at once with desk_learn_workflow as one short rule. Every agent on that project, now and later, gets these rules, so nobody asks the person the same thing again or repeats the mistake. Before you ask the person how something is done on a project, check its workflow rules first. If a new answer changes an old rule, pass replaces.",
-      `Read your project's memory first: desk_memory("${agent.projectSlug}"). Here you only read the project and answer; you never edit the original checkout. Code changes happen on a task, in its own worktree, after the person assigns it. Always call a task by its English name. Do only what the person asks, for the tasks they name: do not widen the scope to sub-tasks, related tasks or other projects without asking first. Use desk_rooms and desk_room_history to read any group chat you are in.`].filter(Boolean).join('\n');
+      `Read your project's memory first: desk_memory("${agent.projectSlug}"). You work in this project the way the person asks: read it, answer, change it, test it and send it out. Always call a task by its English name. Do what the person asks; when widening the scope (sub-tasks, related tasks, other projects) is not clearly what they want, ask first. Use desk_rooms and desk_room_history to read any group chat you are in.`].filter(Boolean).join('\n');
   }
   writeCard(item) {
     const lines = [`# ${item.name}`, '', `- Project: ${item.projectSlug} (\`${item.projectPath}\`)`, `- Agent: Claude Code${item.model ? ` · ${item.model}` : ''}`,
