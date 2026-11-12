@@ -1296,3 +1296,19 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 .wt-side .wt-task{color:var(--ink)}
 .wt-side .prow{padding:12px 14px 0}
 .wt-side-empty{margin:12px 14px}
+
+/* Picture viewer: a picture in a chat opens full screen inside Rex Desk. */
+.md-media-link img.md-media{cursor:zoom-in}
+.iv{width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;padding:0;border:0;background:rgba(8,10,13,.97);backdrop-filter:blur(6px);color:#e6e8eb;display:none}
+.iv[open]{display:grid;grid-template-rows:auto minmax(0,1fr)}
+.iv::backdrop{background:transparent}
+.iv-head{display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(0,0,0,.35)}
+.iv-head strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.iv-count{font-size:12px;color:#9aa3b1;white-space:nowrap}.iv-sp{flex:1}
+.iv-btn{display:grid;place-items:center;width:34px;height:34px;border:0;border-radius:8px;background:none;color:#e6e8eb;text-decoration:none}
+.iv-btn:hover{background:rgba(255,255,255,.12);text-decoration:none}
+.iv-stage{display:grid;place-items:center;min-height:0;overflow:hidden;padding:16px 64px 24px}
+.iv-stage img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;cursor:zoom-in;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+.iv-stage.actual{overflow:auto;place-items:start center}.iv-stage.actual img{max-width:none;max-height:none;cursor:zoom-out}
+.iv-nav{position:fixed;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:44px;height:44px;border:0;border-radius:50%;background:rgba(255,255,255,.1);color:#fff}
+.iv-nav:hover{background:rgba(255,255,255,.22)}.iv-nav.prev{left:12px}.iv-nav.next{right:12px}
