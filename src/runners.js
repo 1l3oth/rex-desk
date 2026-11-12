@@ -98,16 +98,15 @@ export class ClaudeRunner {
     delete connections.rex_desk;
     const mode = sdkMode(this.run.permissionMode), resume = sessionId(this.run.sessionId);
     if (resume) { try { carrySession(resume, this.cwd, env.CLAUDE_CONFIG_DIR || ''); } catch { /* the resume reports it if the conversation is really gone */ } }
-    // Dangerous mode skips every permission prompt, so what the prompts used to refuse is refused by a hook instead.
-    // A specialist reads its project but never writes in the original checkout: code changes happen in a task worktree.
-    const writesProject = input => this.run.role === 'specialist' && this.projectDirectory && ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(input.tool_name)
-      && path.resolve(String(input.tool_input?.file_path || input.tool_input?.notebook_path || '/')).toLowerCase().startsWith(`${path.resolve(this.projectDirectory).toLowerCase()}${path.sep}`);
-    // A project agent stays in its project: another project's folder (by any spelling: F:\\x, F:/x, /f/x) is refused, in files and commands.
-    const elsewhere = input => projectIn(input.tool_input, this.otherProjects);
-    const refuseElsewhere = async input => { const project = elsewhere(input); return project ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `${project.name} is another project, not yours. Stay in your own project: do not read its files, git history or chats. If the person wants it, tell them its agent handles it.` } } : {}; };
-    const refuseClaudeHome = async input => writesProject(input) ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'You read this project here. Code changes happen on a task in its own worktree, after the person assigns the task.' } }
-      : this.run.role !== 'coordinator' && writesClaudeHome(input.tool_name, input.tool_input)
-      ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Rex Desk agents do not write Claude memory, instructions, or settings. Say what you learned in desk_message instead, and continue the task.' } } : {};
+    // Rex Desk does not stand between the person and their agents: an agent edits its own project, and goes into another project or
+    // the person's Claude settings when the person asks for it. Only what nobody asked for is turned back: an agent wandering into
+    // another project's files on its own, or writing Claude memory and settings on its own habit.
+    const asked = () => (this.personAsks?.() || []).join('\n');
+    const elsewhere = input => projectIn(input.tool_input, typeof this.otherProjects === 'function' ? this.otherProjects() : this.otherProjects);
+    const refuseElsewhere = async input => { const project = elsewhere(input); return project ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `${project.name} is another project and the person has not asked you to work in it. Stay in your own project unless they ask; when they name it, you may.` } } : {}; };
+    const claudeAsked = () => /\b(memory|remember|claude\.md|settings?|skills?|hooks?|commands?|agents? file|instructions?)\b/i.test(asked());
+    const refuseClaudeHome = async input => this.run.role !== 'coordinator' && writesClaudeHome(input.tool_name, input.tool_input) && !claudeAsked()
+      ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'The person has not asked you to change Claude memory, instructions or settings. Save what you learned with desk_learn instead, unless they ask for the file itself.' } } : {};
     const options = { cwd: this.cwd, env, abortController: this.controller,
       permissionMode: mode, ...(mode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
       ...(this.run.effort ? { effort: this.run.effort } : {}),
@@ -132,7 +131,6 @@ ${news}` } } : {};
       },
       // Only reached in modes that ask: each request becomes an approval card in the chat.
       canUseTool: async (name, input, context) => {
-        if (this.run.role !== 'coordinator' && writesClaudeHome(name, input)) return { behavior: 'deny', message: 'Rex Desk agents do not write Claude memory, instructions, or settings. Say what you learned in desk_message instead, and continue the task.' };
         if (quietRexTool(name) || allowedTools.has(name)) return { behavior: 'allow', updatedInput: input };
         const answer = await this.ask({ kind: 'approval', title: `Approve ${name}`, request: { tool: name, input, suggestions: context.suggestions, allowAlways: true }, method: 'claude-permission' });
         if (answer.action === 'accept' && answer.content?.always) allowedTools.add(name);

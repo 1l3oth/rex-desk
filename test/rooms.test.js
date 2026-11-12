@@ -98,8 +98,8 @@ test('a task given in a room is done by the agent right there, in its room sessi
   await waitFor(() => turns.some(item => item.run.roomAgent === dara.id && item.prompt.includes('gave you this task')));
   const prompt = turns.find(item => item.run.roomAgent === dara.id && item.prompt.includes('gave you this task')).prompt;
   assert.match(prompt, /gave you this task to do here in the room: #49760 Cart total is wrong/);
-  assert.ok(prompt.includes('-b temp/rex/49760-cart-total-is-wrong develop'), `the worktree branch follows the naming rules: ${prompt.slice(prompt.indexOf('git worktree add'), prompt.indexOf('git worktree add') + 160)}`);
-  assert.match(prompt, /Never change the main checkout/);
+  assert.ok(prompt.includes('branch temp/rex/49760-cart-total-is-wrong from develop'), 'the branch follows the naming rules');
+  assert.match(prompt, /the way the person says/);
   await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id && /Making a worktree/.test(item.text)));
   assert.equal(store.get('task', 't1').roomWork.agentId, dara.id);
   assert.ok(desk.rooms.taskOwners().some(line => /#49760 Cart total is wrong: Dara .*working in the room/.test(line)));
@@ -434,7 +434,9 @@ test('a task on a project with its own agent goes to that agent, never to a new 
   store.put('task', 't1', { ...store.get('task', 't1'), sourceId: 'src-mm' });
   store.put('specialist', dara.id, { ...store.get('specialist', dara.id), taskSources: ['src-mm'] });
   store.put('run', 'main-room', { id: 'main-room', role: 'coordinator', roomAgent: 'main', state: 'running', createdAt: now(), roomTurn: { roomId: room.id, messageId: '' } });
-  await assert.rejects(desk.dispatch('main-room', { taskId: 't1' }), error => error.message.includes(`Dara is the agent for this project. Give it to them with desk_assign_task (specialistId ${dara.id}, taskId t1, roomId ${room.id})`));
+  const given = await desk.dispatch('main-room', { taskId: 't1' });
+  assert.deepEqual(given.team, ['Dara'], 'the project agent gets it in the room, no new run');
+  assert.ok(!store.list('run').some(run => run.role === 'worker'));
   store.put('run', 'dara-room', { id: 'dara-room', role: 'specialist', specialistId: dara.id, roomAgent: dara.id, state: 'running', createdAt: now(), roomTurn: { roomId: room.id } });
   const joined = await desk.dispatch('dara-room', { taskId: 't1' });
   assert.deepEqual(joined.team, ['Dara'], 'in a room the agent takes it right there, no new run');

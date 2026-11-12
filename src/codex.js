@@ -152,7 +152,7 @@ export class CodexRunner {
         servers[name] = { url: server.url, env_http_headers: headers };
       } else if (server.command) servers[name] = { command: server.command, args: server.args || [], env: server.env || {} };
     }
-    const permissions = codexPermissions(this.run.permissionMode, [this.cwd, this.artifactDirectory, this.uploadsDirectory].filter(Boolean));
+    const permissions = codexPermissions(this.run.permissionMode, [this.cwd, this.projectDirectory, this.artifactDirectory, this.uploadsDirectory].filter(Boolean));
     const completed = new Promise((resolve, reject) => { this.resolveTurn = resolve; this.rejectTurn = reject; });
     completed.catch(() => {});
     this.client = (this.clientFactory || (options => new CodexClient(options)))({ env, cwd: this.cwd, onNotification: (method, params) => this.notification(method, params), onRequest: (method, params) => this.approve(method, params), onError: error => this.rejectTurn(error) });
