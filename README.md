@@ -140,7 +140,7 @@ Orca shows these worktrees only when the repository's external-worktree visibili
 
 ## Worktrees
 
-**Trees** in the sidebar lists the worktree history: every git worktree in your configured projects, whether Rex Desk made it for a run, an agent made it in a chat, or you made it by hand. Each card shows the branch, the folder (click to copy), who made it, and the tasks that live in it. Add a task from the card's list to combine it with the others; whoever is then given that task is told to work in that worktree. A task lives in one worktree at a time. A removed worktree stays under **History** with its tasks.
+Each personal and group chat has a **Worktrees** tab beside it that lists the worktrees of that chat like a source control panel. **All worktrees** there opens the full history: every git worktree in your configured projects, whether Rex Desk made it for a run, an agent made it in a chat, or you made it by hand. Each card shows the branch, the folder (click to copy), who made it, and the tasks that live in it. Add a task from the card's list to combine it with the others; whoever is then given that task is told to work in that worktree. A task lives in one worktree at a time. A removed worktree stays under **History** with its tasks.
 
 Agents use `desk_worktrees` to read the history and `desk_worktree` to show one in the chat as the same card (`show`), or to add or take out a task (`add_task`, `remove_task`). They are told to show a worktree right after they make one, and Rex Desk posts the card itself when it makes a worktree for a run.
 

@@ -1092,7 +1092,7 @@ button.cn-main{cursor:pointer}
 .nt-adv summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.nt-adv input{width:100%;margin:6px 0 4px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
 
 /* Places as small tiles under Rex Agent */
-.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;margin:6px 0 2px;padding:0}
+.tiles{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;margin:6px 0 2px;padding:0}
 .tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 2px 5px;border:0;border-radius:10px;background:none;color:var(--muted)}
 .tile:hover{background:var(--raised);color:var(--ink)}.tile.active{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--ink)}
 .tile .av{width:28px;height:28px}.tile .tname{font-size:10.5px;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -118,7 +118,6 @@ function renderRail() {
         tile('jev', iconAv('mic', 'accent'), 'Jev', 'Control this computer and websites', 0),
         tile('person', ui.profile?.photo ? `<img class="av sm photo" src="${photoUrl()}" alt="">` : iconAv('person'), 'About you', ui.profile?.name || 'What the agents learned', 0),
         tile('monitor', iconAv('monitor'), 'Monitor', ui.monitor ? `${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : 'Memory and what uses it', 0),
-        tile('worktrees', iconAv('worktrees'), 'Worktrees', `${(snap.worktrees || []).filter(item => item.state !== 'gone').length} in use`, 0),
         tile('devices', iconAv('devices'), 'Devices', (snap.devices?.peers || []).length ? `${(snap.devices.peers.filter(peer => peer.online).length + 1)} of ${snap.devices.peers.length + 1} on` : 'Only this computer', 0),
       ].join('')}</div>
     </div>
