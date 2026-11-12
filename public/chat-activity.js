@@ -52,11 +52,16 @@ export function terminalHtml(entries, { esc, hhmm }) {
 }
 
 // A file change the agent made: the file, +added −removed, and the changed lines when opened.
+// Which ones the reader opened is remembered, so the next redraw of the chat does not close them again.
+const openChanges = new Set();
+const changeKey = change => [change.file, change.added, change.removed, change.created ? 1 : 0, (change.diff || []).length].join('|');
+document.addEventListener('toggle', event => { const box = event.target; if (!box.matches?.('details.dfile')) return; if (box.open) openChanges.add(box.dataset.dfile); else openChanges.delete(box.dataset.dfile); }, true);
 export function changeHtml(change, esc) {
   if (!change) return '';
+  const key = changeKey(change);
   const name = String(change.file).split(/[\\/]/).filter(Boolean).slice(-3).join('/');
   const counts = `<span class="dchg add">+${change.added}</span><span class="dchg del">−${change.removed}</span>`;
   const body = change.hidden ? '<p class="muted small">Not shown: this file usually holds secrets.</p>'
     : change.diff.length ? `<pre class="diff">${change.diff.map(line => line === '…' ? '<span class="dgap">⋯</span>' : `<span class="${line[0] === '+' ? 'dadd' : 'ddel'}">${esc(line)}</span>`).join('')}${change.more ? `<span class="dgap">… ${change.more} more lines</span>` : ''}</pre>` : '<p class="muted small">No line changes.</p>';
-  return `<details class="dfile"><summary><span class="dname" title="${esc(change.file)}">${change.created ? 'Created' : 'Changed'} ${esc(name)}</span>${counts}</summary>${body}</details>`;
+  return `<details class="dfile" data-dfile="${esc(key)}" ${openChanges.has(key) ? 'open' : ''}><summary><span class="dname" title="${esc(change.file)}">${change.created ? 'Created' : 'Changed'} ${esc(name)}</span>${counts}</summary>${body}</details>`;
 }

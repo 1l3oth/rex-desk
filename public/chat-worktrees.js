@@ -58,6 +58,12 @@ export function fillWorktreeEmbeds(ctx) {
 }
 
 export function wireWorktrees(ctx) {
+  // A worktree folded or opened in the side panel stays that way when the panel redraws.
+  document.addEventListener('toggle', event => {
+    const box = event.target; if (!box.matches?.('details.scm')) return;
+    const { ui } = ctx, id = box.dataset.wtId; ui.wtFolded ||= new Set(); ui.wtUnfolded ||= new Set();
+    if (box.open) { ui.wtFolded.delete(id); ui.wtUnfolded.add(id); } else { ui.wtUnfolded.delete(id); ui.wtFolded.add(id); }
+  }, true);
   document.addEventListener('click', async event => {
     const target = event.target.closest?.('[data-wt-act]'); if (!target) return;
     event.preventDefault();
@@ -118,7 +124,8 @@ function scmBlock(ctx, item) {
   const files = !data ? '<p class="muted small scm-wait">Reading changes…</p>' : data.error ? `<p class="muted small">${esc(data.error)}</p>`
     : data.files.length ? `<ul class="scm-files">${data.files.map(file => `<li><button type="button" class="scm-file" data-file-open="${esc(file.path)}" title="${esc(`${STATUS[file.status] || ''}: ${file.dir ? `${file.dir}/` : ''}${file.name}`)}"><span class="scm-ficon">${FILE}</span><span class="scm-fname">${esc(file.name)}</span><span class="scm-dir">${esc(file.dir)}</span>${lines(file.added, file.removed)}<span class="scm-st s-${file.status}">${file.status}</span></button></li>`).join('')}</ul>`
     : '<p class="muted small scm-clean">No uncommitted changes.</p>';
-  return `<details class="scm${gone ? ' gone' : ''}" ${gone ? '' : 'open'} data-wt-id="${esc(item.id)}">
+  const open = ui.wtFolded?.has(item.id) ? false : ui.wtUnfolded?.has(item.id) ? true : !gone;
+  return `<details class="scm${gone ? ' gone' : ''}" ${open ? 'open' : ''} data-wt-id="${esc(item.id)}">
     <summary><span class="scm-branch"><span class="scm-bicon">${BRANCH}</span><b title="${esc(item.branch || '')}">${esc(item.branch || 'No branch')}</b></span>${gone ? '<span class="chip">Removed</span>' : data && !data.error ? lines(data.added, data.removed) : ''}</summary>
     ${data?.upstream ? `<div class="scm-up"><span aria-hidden="true">→</span><b>${esc(data.upstream)}</b>${sync}</div>` : ''}
     <button type="button" class="scm-path" data-wt-act="copy" data-path="${esc(item.path)}" title="Copy the folder">${esc(item.path)}</button>
