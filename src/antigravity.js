@@ -95,7 +95,10 @@ export class AntigravityRunner {
   async request(method, params) {
     if (method !== 'session/request_permission') throw new Error(`Unsupported Antigravity request: ${method}`);
     const allow = params.options?.find(option => /^allow/.test(option.kind)) || params.options?.[0], deny = params.options?.find(option => /^reject/.test(option.kind));
-    if (this.run.permissionMode === 'bypassPermissions') return { outcome: { outcome: 'selected', optionId: allow?.optionId } };
+    // Rex Desk's own tools (desk_message, desk_memory...) run without asking, the same as for Claude.
+    const input = params.toolCall?.rawInput || params.toolCall?.args || {};
+    const rexTool = input.ServerName === 'rex_desk' && /^desk_/.test(String(input.ToolName || ''));
+    if (this.run.permissionMode === 'bypassPermissions' || (rexTool && this.ask)) return { outcome: { outcome: 'selected', optionId: allow?.optionId } };
     // A one-shot text answer (naming, a query) has nobody to ask, so it never runs a tool.
     if (!this.ask) return { outcome: deny ? { outcome: 'selected', optionId: deny.optionId } : { outcome: 'cancelled' } };
     const call = params.toolCall || {};

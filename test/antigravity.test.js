@@ -63,3 +63,14 @@ test('Antigravity models come from the account, and agy models output means sign
   assert.deepEqual(parseAgyModels('Fetching available models...\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\nclaude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n').map(item => item.id), ['gemini-3.8-flash-high', 'claude-sonnet-4-6']);
   assert.deepEqual(parseAgyModels('Error: authentication required'), []);
 });
+
+test("Rex Desk's own tools run without asking in Manual mode; other MCP tools still ask", async () => {
+  const asks = [];
+  const item = new AntigravityRunner({ run: { permissionMode: 'manual' }, ask: async request => { asks.push(request); return { action: 'accept' }; } });
+  const options = [{ optionId: 'allow', kind: 'allow_once' }, { optionId: 'deny', kind: 'reject_once' }];
+  const own = await item.request('session/request_permission', { toolCall: { title: 'MCP Tool desk_message', rawInput: { ServerName: 'rex_desk', ToolName: 'desk_message', Arguments: { text: 'hi' } } }, options });
+  assert.equal(own.outcome.optionId, 'allow');
+  assert.equal(asks.length, 0);
+  await item.request('session/request_permission', { toolCall: { title: 'MCP Tool other', rawInput: { ServerName: 'github', ToolName: 'create_issue' } }, options });
+  assert.equal(asks.length, 1);
+});

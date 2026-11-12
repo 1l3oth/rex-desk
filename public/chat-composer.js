@@ -33,10 +33,22 @@ export function pickedOptions(ctx) {
   return { provider: read('opt-provider') || undefined, model: read('opt-model') || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
 }
 
-export function composerHtml(ctx, model) {
-  const { ui, esc } = ctx, now = currentOptions(ctx), choices = choicesFor(ctx, now.provider), working = Boolean(model.working);
+// The AI, model, effort and mode pickers under the message box, for the AI picked now.
+function optionPickers(ctx) {
+  const now = currentOptions(ctx), choices = choicesFor(ctx, now.provider);
   const select = (id, label, items, value) => pickerHtml(ctx, { id, label, compact: true, value, items: items.map(item => ({ value: item.id, label: item.label, hint: item.hint })) });
   const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? 'Dangerous' : item.label, hint: MODE_HINT[item.id] }));
+  return `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude subscription' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT subscription' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}`;
+}
+// The message box is not redrawn while the chat updates (it would lose what is typed), so a new AI redraws only its pickers.
+function redrawOptionPickers(ctx) {
+  const ids = ['opt-model', 'opt-effort', 'opt-mode'];
+  if (ctx.ui.picks) for (const id of ids) delete ctx.ui.picks[id];
+  const fresh = document.createElement('div'); fresh.innerHTML = optionPickers(ctx);
+  for (const id of ids) { const old = document.querySelector(`.composer [data-pick="${id}"]`), next = fresh.querySelector(`[data-pick="${id}"]`); if (old && next) old.replaceWith(next); }
+}
+export function composerHtml(ctx, model) {
+  const { ui, esc } = ctx, working = Boolean(model.working);
   return `<div class="composer" id="composer"><div class="composer-inner">
     <div class="attach-chips" id="attach-chips"></div>
     <div class="box2"><div id="menu"></div>
@@ -47,7 +59,7 @@ export function composerHtml(ctx, model) {
       <input type="file" id="file-input" multiple hidden>
     </div>
     <div class="foot"><span class="hint">Type / for commands · hold Space to talk${model.composer.mentions?.length ? ' · @ to mention · # for a task' : ''}</span><span class="spacer"></span>
-      ${model.composer.noPickers ? '' : `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude subscription' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT subscription' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
+      ${model.composer.noPickers ? '' : `${optionPickers(ctx)}
       ${contextRing(ctx, working)}`}</div>
   </div></div>`;
 }
@@ -249,7 +261,7 @@ export function initComposer(ctx) {
   document.addEventListener('change', event => {
     if (event.target.id === 'file-input') { for (const file of event.target.files) void upload(ctx, file); event.target.value = ''; return; }
     // Switching the AI shows that AI's models and modes; the next message goes to it, with the chat so far handed over.
-    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : 'Claude Code'}.`); return; }
+    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : 'Claude Code'}.`); return; }
     if (event.target.id === 'opt-model') remember({ model: event.target.value });
     if (event.target.id === 'opt-effort') remember({ effort: event.target.value });
     if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast('Dangerous: the agent runs tools without asking.'); }
