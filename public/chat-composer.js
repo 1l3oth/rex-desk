@@ -47,7 +47,7 @@ export function composerHtml(ctx, model) {
       <input type="file" id="file-input" multiple hidden>
     </div>
     <div class="foot"><span class="hint">Type / for commands · hold Space to talk${model.composer.mentions?.length ? ' · @ to mention · # for a task' : ''}</span><span class="spacer"></span>
-      ${model.composer.noPickers ? '' : `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude subscription' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT subscription' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
+      ${model.composer.noPickers ? '' : `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude subscription' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT subscription' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}
       ${contextRing(ctx, working)}`}</div>
   </div></div>`;
 }
@@ -249,7 +249,7 @@ export function initComposer(ctx) {
   document.addEventListener('change', event => {
     if (event.target.id === 'file-input') { for (const file of event.target.files) void upload(ctx, file); event.target.value = ''; return; }
     // Switching the AI shows that AI's models and modes; the next message goes to it, with the chat so far handed over.
-    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : 'Claude Code'}.`); return; }
+    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : 'Claude Code'}.`); return; }
     if (event.target.id === 'opt-model') remember({ model: event.target.value });
     if (event.target.id === 'opt-effort') remember({ effort: event.target.value });
     if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast('Dangerous: the agent runs tools without asking.'); }

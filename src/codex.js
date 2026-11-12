@@ -2,13 +2,14 @@
 import { createInterface } from 'node:readline';
 import { resolveCommand, stopTree } from './processes.js';
 
-export const AI_PROVIDERS = ['claude', 'codex'];
+export const AI_PROVIDERS = ['claude', 'codex', 'gemini'];
 export function aiProvider(value = 'claude') {
-  if (!AI_PROVIDERS.includes(value)) throw new Error('Choose Claude Code or Codex.');
+  if (!AI_PROVIDERS.includes(value)) throw new Error('Choose Claude Code, Codex or Gemini.');
   return value;
 }
-export const providerTitle = value => value === 'codex' ? 'Codex' : 'Claude Code';
-export const profileKey = value => value === 'codex' ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR';
+export const providerTitle = value => value === 'codex' ? 'Codex' : value === 'gemini' ? 'Gemini (Antigravity)' : 'Claude Code';
+// Antigravity keeps one Google sign-in per computer for now, so its "profile" variable is only Rex Desk's own marker.
+export const profileKey = value => value === 'codex' ? 'CODEX_HOME' : value === 'gemini' ? 'REX_GEMINI_HOME' : 'CLAUDE_CONFIG_DIR';
 
 export function codexEnvironment(env = process.env) {
   const clean = { ...env };

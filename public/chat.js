@@ -30,7 +30,8 @@ export const tokenText = tokens => tokens ? [`${kilo((tokens.input || 0) + (toke
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`; };
-const provider = name => name === 'codex' ? 'Codex' : name === 'claude' ? 'Claude Code' : 'Agent';
+const provider = name => name === 'codex' ? 'Codex' : name === 'gemini' ? 'Gemini' : name === 'claude' ? 'Claude Code' : 'Agent';
+const aiKey = value => ['codex', 'gemini'].includes(value) ? value : 'claude';
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value), tokenText,
   render: () => renderAll(), currentRunId: () => (ui.view.type === 'main' ? mainRun()?.id : ui.view.type === 'run' ? ui.view.id : '') || '', openSettings: section => openSettings(ctx, section), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
@@ -778,7 +779,7 @@ function personalSide(run, agent, items, shells) {
     <div class="rhero">${avatarHtml(ctx, { name: agent.name, size: 'xl' })}<h2 class="pname">${esc(agent.name)}</h2><p class="rsub"><span class="dot ${stateTone(run) === 'working' ? 'working' : 'good'}"></span> ${esc(agent.status?.label || stateLabel(run))}${agent.main ? '' : ` on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>`}</p></div>
     ${agent.purpose ? `<h3>About</h3><p class="pabout">${esc(agent.purpose)}</p>` : ''}
     ${sharedBox}
-    ${agent.main ? '' : `<h3>${agent.provider === 'codex' ? 'Codex' : 'Claude'} account</h3>${pickerHtml(ctx, { id: 'pp-profile', label: 'Account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.[agent.provider === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}<button type="button" class="btn small quiet" data-action="accounts">Manage accounts</button>`}
+    ${agent.main ? '' : `<h3>${agent.provider === 'codex' ? 'Codex' : agent.provider === 'gemini' ? 'Google (Antigravity)' : 'Claude'} account</h3>${pickerHtml(ctx, { id: 'pp-profile', label: 'Account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.[agent.provider === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}<button type="button" class="btn small quiet" data-action="accounts">Manage accounts</button>`}
     ${toolsHtml(agent.main ? 'main' : agent.id)}
     ${agent.main ? '' : `<h3>Tasks come from</h3><p class="pabout">${esc(sources.join(', ') || 'Not set yet')}</p>`}
     ${(agent.lessons || []).length ? `<h3>Lessons learned <span>${agent.lessons.length}</span></h3><ul class="plessons">${agent.lessons.slice(-4).map(lesson => `<li>${esc(lesson.text)}</li>`).join('')}</ul>` : ''}
@@ -817,17 +818,17 @@ document.addEventListener('click', async event => {
 
 // ---------- Claude accounts: which subscription the agents run on ----------
 function accountChip() {
-  const name = ui.snap?.config?.provider === 'codex' ? 'codex' : 'claude', list = ui.accounts?.[name], current = list?.profiles?.find(item => item.profile === list.selected) || list?.profiles?.[0];
-  return `<span class="acct-dot ${current?.loggedIn ? 'good' : 'bad'}"></span><span class="acct-text"><b>${name === 'codex' ? 'Codex' : 'Claude'}</b> ${esc(current ? (current.account || current.label) : 'account')}</span>`;
+  const name = aiKey(ui.snap?.config?.provider), list = ui.accounts?.[name], current = list?.profiles?.find(item => item.profile === list.selected) || list?.profiles?.[0];
+  return `<span class="acct-dot ${current?.loggedIn ? 'good' : 'bad'}"></span><span class="acct-text"><b>${{ codex: 'Codex', gemini: 'Gemini' }[name] || 'Claude'}</b> ${esc(current ? (current.account || current.label) : 'account')}</span>`;
 }
 async function loadAccounts(refreshStatus = false) { try { ui.accounts = await api(`/agents${refreshStatus ? '?refresh=1' : ''}`); ui.accountsAuto = (await api('/accounts/auto')).on; } catch {} }
 async function accountsDialog() {
   document.querySelector('.dialog-back.accounts')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back accounts'; document.body.append(back);
-  const NAMES = { claude: ['Claude', 'Claude Code', 'Claude'], codex: ['Codex', 'Codex', 'ChatGPT'] };
-  const tab = () => ui.acctTab === 'codex' ? 'codex' : ui.acctTab === 'claude' ? 'claude' : (ui.snap?.config?.provider === 'codex' ? 'codex' : 'claude');
+  const NAMES = { claude: ['Claude', 'Claude Code', 'Claude'], codex: ['Codex', 'Codex', 'ChatGPT'], gemini: ['Gemini', 'Gemini', 'Google'] };
+  const tab = () => NAMES[ui.acctTab] ? ui.acctTab : aiKey(ui.snap?.config?.provider);
   const draw = () => {
-    const name = tab(), [short, product, service] = NAMES[name], list = ui.accounts?.[name] || { profiles: [] }, defaultAi = ui.snap?.config?.provider === 'codex' ? 'codex' : 'claude';
+    const name = tab(), [short, product, service] = NAMES[name], list = ui.accounts?.[name] || { profiles: [] }, defaultAi = aiKey(ui.snap?.config?.provider);
     const signedIn = list.profiles.filter(item => item.loggedIn), signedOut = list.profiles.filter(item => !item.loggedIn);
     // The title is the account; the line under it says where it lives and what plan it is, without repeating the title or saying "none".
     // Each account: a colored letter for the person, the email, its plan as a tag, and the profile folder it lives in, in plain words.
@@ -848,9 +849,9 @@ async function accountsDialog() {
     back.innerHTML = `<form class="dialog acct-dialog"><div class="acct-head"><h2>AI accounts</h2><button type="button" class="side-x" data-close aria-label="Close" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>
       <div class="acct-tabs" role="tablist">${Object.entries(NAMES).map(([key, [, title]]) => `<button type="button" role="tab" aria-selected="${name === key}" class="acct-tab${name === key ? ' on' : ''}" data-acct-tab="${key}"><b>${title}</b>${defaultAi === key ? '<span class="acct-default-badge">Default</span>' : ''}</button>`).join('')}</div>
       <div class="acct-intro"><p>Agents on ${product} run on the account marked <b>In use</b>. Click another account to switch.</p>${defaultAi === name ? `<span class="acct-note">New agents and chats use ${product}</span>` : `<button type="button" class="btn small" data-acct-default="${name}">Use ${product} for new agents</button>`}</div>
-      ${signedIn.length ? `<div class="acct-list">${signedIn.map(row).join('')}</div>` : `<p class="acct-empty">No ${service} account is signed in yet${name === 'codex' ? '. Install the Codex CLI (npm install -g @openai/codex) if it is missing, then add an account below.' : '.'}</p>`}
+      ${signedIn.length ? `<div class="acct-list">${signedIn.map(row).join('')}</div>` : `<p class="acct-empty">No ${service} account is signed in yet${name === 'codex' ? '. Install the Codex CLI (npm install -g @openai/codex) if it is missing, then add an account below.' : name === 'gemini' ? '. Install the Antigravity CLI (winget install Google.AntigravityCLI) if it is missing, then press Sign in.' : '.'}</p>`}
       ${signedOut.length ? `<details class="acct-out"${signedIn.length ? '' : ' open'}><summary>Not signed in <span>${signedOut.length}</span></summary><ul>${signedOut.map(out).join('')}</ul></details>` : ''}
-      <div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="Name for the new account, like work or personal" aria-label="Name for the new account"><button type="button" class="btn small primary" data-acct-create>Create and sign in</button><button type="button" class="btn small" data-acct-cancel>Cancel</button>` : `<button type="button" class="btn small" data-acct-new>+ Add a ${short} account</button>`}</div>
+      ${name === 'gemini' ? '' : `<div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="Name for the new account, like work or personal" aria-label="Name for the new account"><button type="button" class="btn small primary" data-acct-create>Create and sign in</button><button type="button" class="btn small" data-acct-cancel>Cancel</button>` : `<button type="button" class="btn small" data-acct-new>+ Add a ${short} account</button>`}</div>`}
       ${ui.acctWaiting ? `<p class="acct-wait"><span class="dot working"></span> Finish signing in to ${service} in the window that opened. This list updates by itself.</p>` : ''}
       <label class="acct-auto"><input type="checkbox" data-acct-auto ${ui.accountsAuto !== false ? 'checked' : ''}><span>When an account hits its usage limit, switch to another signed-in one and continue</span></label>
       <div class="acct-foot"><button type="button" class="btn quiet" data-acct-refresh>Check again</button><button type="button" class="btn primary" data-close>Done</button></div></form>`;
@@ -861,7 +862,7 @@ async function accountsDialog() {
     if (event.target === back || event.target.closest('[data-close]')) { back.remove(); renderAll(); return; }
     const switchTab = event.target.closest('[data-acct-tab]'); if (switchTab) { ui.acctTab = switchTab.dataset.acctTab; ui.acctAdding = false; draw(); return; }
     const pickDefault = event.target.closest('[data-acct-default]');
-    if (pickDefault) { try { await api('/config', { method: 'PUT', data: { ...ui.snap.config, provider: pickDefault.dataset.acctDefault } }); await refresh(); ui.acctTab = pickDefault.dataset.acctDefault; toast(`New agents and chats use ${pickDefault.dataset.acctDefault === 'codex' ? 'Codex' : 'Claude Code'}.`); draw(); } catch (error) { toast(error.message, true); } return; }
+    if (pickDefault) { try { await api('/config', { method: 'PUT', data: { ...ui.snap.config, provider: pickDefault.dataset.acctDefault } }); await refresh(); ui.acctTab = pickDefault.dataset.acctDefault; toast(`New agents and chats use ${{ codex: 'Codex', gemini: 'Gemini' }[pickDefault.dataset.acctDefault] || 'Claude Code'}.`); draw(); } catch (error) { toast(error.message, true); } return; }
     if (event.target.closest('[data-acct-refresh]')) { back.querySelector('[data-acct-refresh]').textContent = 'Checking…'; await loadAccounts(true); draw(); }
     if (event.target.closest('[data-acct-new]')) { ui.acctAdding = true; draw(); back.querySelector('[data-acct-name]')?.focus(); }
     if (event.target.closest('[data-acct-cancel]')) { ui.acctAdding = false; draw(); }

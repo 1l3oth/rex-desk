@@ -48,7 +48,7 @@ export class Specialists {
     if (list.some(item => item.id === text)) return text;
     if (list.some(item => item.id === id)) return id;
     const byName = list.find(item => item.label.toLowerCase() === text.toLowerCase()); if (byName) return byName.id;
-    if (provider === 'codex' && !list.length) return text;
+    if (provider !== 'claude' && !list.length) return text;
     if (strict) throw new Error('Choose a model from the list.');
     return '';
   }

@@ -1,4 +1,5 @@
 import { codexText } from './codex.js';
+import { antigravityText } from './antigravity.js';
 // A readable English branch name from the QA issue, written when a run starts so even Korean or Japanese titles get one.
 // Uses the person's OpenRouter key (the one Jev uses) and a small model, or else the signed-in Claude Code; any failure falls back to the tracker number.
 import { execFile } from 'node:child_process';
@@ -36,6 +37,7 @@ export async function branchName(task, { apiKey, fetcher = fetch, model = naming
 // Without an OpenRouter key, the signed-in Claude Code names the branch with its small model: one short turn on the person's own plan, no tools.
 export function branchNameFromCli(task, { env = process.env, cwd, run = execFile } = {}) {
   if (env.REX_AI_PROVIDER === 'codex') return codexText(`${instructions}\n\nIssue: ${JSON.stringify(issueSummary(task))}`, { env, cwd }).then(parseBranchName).catch(() => null);
+  if (env.REX_AI_PROVIDER === 'gemini') return antigravityText(`${instructions}\n\nIssue: ${JSON.stringify(issueSummary(task))}`, { env, cwd }).then(parseBranchName).catch(() => null);
   const executable = resolveCommand('claude'), clean = { ...env }; delete clean.CLAUDECODE;
   const prompt = `${instructions}\n\nIssue: ${JSON.stringify(issueSummary(task))}`;
   return new Promise(resolve => run(executable.command, [...executable.args, '-p', '--model', 'haiku', '--max-turns', '1', prompt],

@@ -12,7 +12,7 @@ function place(anchor) {
   card.style.left = `${left}px`; card.style.top = `${below ? box.bottom + 6 : Math.max(8, box.top - height - 6)}px`;
 }
 function html(ctx, agent) {
-  const { ui } = ctx, provider = agent.provider === 'codex' ? 'codex' : 'claude';
+  const { ui } = ctx, provider = ['codex', 'gemini'].includes(agent.provider) ? agent.provider : 'claude';
   const models = ui.snap.choices?.providers?.[provider]?.models || ui.snap.choices?.models || [];
   const accounts = (ui.accounts?.[provider]?.profiles || []).filter(item => item.loggedIn);
   const loop = { on: true, every: 60, ...(agent.loop || {}) }, status = agent.status || {};
@@ -20,7 +20,7 @@ function html(ctx, agent) {
   return `<div class="pc-head">${ctx.avatar({ name: agent.name })}<div class="pc-who"><div class="pc-name"><b>${esc(agent.name)}</b><button type="button" class="pc-edit" data-card-act="rename" title="Rename" aria-label="Rename ${esc(agent.name)}">&#9998;</button></div><small>@${esc(agent.slug || '')} · ${esc(agent.projectSlug || '')}</small><span class="pc-state ${esc(status.state || '')}"><i></i>${esc(status.label || 'Idle')}</span></div><button type="button" class="pc-x" data-card-act="close" aria-label="Close">&#215;</button></div>
     ${agent.purpose ? `<p class="pc-about">${esc(agent.purpose)}</p>` : ''}
     <div class="pc-rows">
-      <label><span>AI</span>${select('provider', provider, [['claude', 'Claude Code'], ['codex', 'Codex']])}</label>
+      <label><span>AI</span>${select('provider', provider, [['claude', 'Claude Code'], ['codex', 'Codex'], ['gemini', 'Gemini']])}</label>
       <label><span>Model</span>${select('model', agent.model || '', [['', 'Default'], ...models.map(model => [model.id, model.label])])}</label>
       <label><span>Account</span>${select('profile', agent.profile || '', [['', 'Same as everyone'], ...accounts.map(item => [item.profile, item.account || item.label])])}</label>
       <label><span>Own loop</span>${select('loop', loop.on === false ? 'off' : String(loop.every), [['off', 'Off'], ...EVERY.map(([minutes, label]) => [String(minutes), label])])}</label>
@@ -32,7 +32,7 @@ async function save(ctx, agent, field, value) {
   const data = field === 'loop' ? { loop: value === 'off' ? { on: false } : { on: true, every: Number(value) } } : field === 'model' ? { rules: agent.rules, unsure: agent.unsure || [], model: value } : { [field]: value };
   try {
     await api(`/specialists/${agent.id}`, { method: 'PUT', data });
-    toast({ provider: `${agent.name} now runs on ${value === 'codex' ? 'Codex' : 'Claude Code'}.`, model: 'Model saved.', profile: value ? `${agent.name} now uses that account.` : `${agent.name} uses the same account as everyone.`, loop: value === 'off' ? 'Its loop is off.' : 'Loop saved.' }[field]);
+    toast({ provider: `${agent.name} now runs on ${value === 'codex' ? 'Codex' : value === 'gemini' ? 'Gemini' : 'Claude Code'}.`, model: 'Model saved.', profile: value ? `${agent.name} now uses that account.` : `${agent.name} uses the same account as everyone.`, loop: value === 'off' ? 'Its loop is off.' : 'Loop saved.' }[field]);
     await refresh({ full: true }); redraw(ctx);
   } catch (error) { toast(error.message, true); }
 }

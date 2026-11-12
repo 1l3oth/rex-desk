@@ -232,7 +232,7 @@ export function createMcp(desk, scope) {
       return { room: room.name, members: room.members.map(id => desk.rooms.member(id).name), added: added.length, removed: removed.length };
     });
   tool('desk_update_agent', 'Change an agent the way the person asks: rename it, or change its rules, model or AI. Do it at once when they ask; tell them in one line what changed.',
-    { agent: z.string().describe('Agent name, handle or id.'), name: z.string().min(1).max(40).optional().describe('New name.'), rules: z.string().max(4000).optional(), model: z.string().optional(), provider: z.enum(['claude', 'codex']).optional() },
+    { agent: z.string().describe('Agent name, handle or id.'), name: z.string().min(1).max(40).optional().describe('New name.'), rules: z.string().max(4000).optional(), model: z.string().optional(), provider: z.enum(['claude', 'codex', 'gemini']).optional() },
     input => {
       const key = String(input.agent || '').replace(/^@/, '').toLowerCase();
       const agent = desk.specialists.list().find(item => [item.id, item.name, item.slug].some(value => String(value || '').toLowerCase() === key));

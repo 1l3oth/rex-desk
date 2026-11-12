@@ -268,8 +268,8 @@ export class Store extends EventEmitter {
       username: String(account.username || '').trim().slice(0, 200) })).filter(account => account.username);
     const config = { ...defaults, name: String(input.name || 'Rex'), notify: input.notify !== false, autonomy: input.autonomy !== false, provider: aiProvider(input.provider || 'claude'),
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
-      syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), saver: input.saver !== false, autoFree: input.autoFree !== false, models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex) }, sources, repositories,
-      agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex') },
+      syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), saver: input.saver !== false, autoFree: input.autoFree !== false, models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex), gemini: modelName('gemini', input.models?.gemini) }, sources, repositories,
+      agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex'), gemini: agentProfile(input.agentProfiles?.gemini, 'Gemini') },
       tourDismissed: Boolean(input.tourDismissed), execution: 'headless', testAccounts: accounts,
       // How full a chat's context may get before it hands over to a fresh session by itself (false: never).
       autoHandoff: input.autoHandoff === false ? false : Math.min(0.98, Math.max(0.5, Number(input.autoHandoff) || 0.85)),

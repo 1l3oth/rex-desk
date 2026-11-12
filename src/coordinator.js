@@ -1,4 +1,5 @@
-import { aiProvider, AI_PROVIDERS, CodexRunner, codexModels, profileKey } from './codex.js';
+import { aiProvider, AI_PROVIDERS, CodexRunner, codexModels, profileKey, providerTitle } from './codex.js';
+import { AntigravityRunner, antigravityModels } from './antigravity.js';
 import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
 import { Memory } from './memory.js';
@@ -80,7 +81,7 @@ export function validateAnswer(interaction, answer) {
   }
 }
 
-const providerLabel = name => name === 'codex' ? 'Codex' : 'Claude Code';
+const providerLabel = providerTitle;
 // "/teach sql injection" typed in a Rex Desk chat runs that skill. Rex Desk puts its own notes in front of the message, so the agent
 // would read the slash as plain text; it is spelled out instead. Rex Desk's own commands (/clear, /loop) never reach here.
 export function skillCall(text, tools = null) {
@@ -498,7 +499,7 @@ export class Desk {
       const hosted = attach || (!this.runnerFactory && run.execution !== 'orca' && this.store.config().agentHost !== false);
       const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.directory, 'uploads') }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.hostOptions || {}) })
         : this.runnerFactory ? this.runnerFactory(options)
-        : run.execution !== 'orca' ? new (run.provider === 'codex' ? CodexRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.directory, 'uploads') })
+        : run.execution !== 'orca' ? new (run.provider === 'codex' ? CodexRunner : run.provider === 'gemini' ? AntigravityRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.directory, 'uploads') })
         : new OrcaRunner({ ...options, ...(run.worktree ? {} : { cwd: await this.agentWorkspace(), sourcePath: await this.agentWorkspace() }), dataDirectory: this.store.directory,
           resumeSessionId, isDone: () => terminalStates.has(this.run(runId).state),
           session: this.agentSessionFinder({ ...run, mirror: resumeSessionId ? run.mirror : undefined, turnStartedAt: now() }) });
@@ -538,10 +539,10 @@ ${message}` : message);
         const agentId = run.roomAgent || run.specialistId, agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
         if (agent?.model) this.store.put('specialist', agentId, { ...agent, model: '' });
         // The account's model list can offer a model its plan cannot run (Codex lists them for ChatGPT accounts too): drop it from the pickers.
-        const refused = error.message.match(/The '([^']+)' model/)?.[1], listKey = run.provider === 'codex' ? 'codex' : 'list', saved = this.store.get('models', listKey);
+        const refused = error.message.match(/The '([^']+)' model/)?.[1], listKey = run.provider === 'claude' || !run.provider ? 'list' : run.provider, saved = this.store.get('models', listKey);
         if (refused && saved?.items?.some(item => item.id === refused)) this.store.put('models', listKey, { ...saved, items: saved.items.filter(item => item.id !== refused), refused: [...new Set([...(saved.refused || []), refused])] });
         this.patchRun(runId, { modelFallback: true, model: undefined, state: 'queued', followUp: run.followUp || '', error: '', endedAt: null });
-        this.store.event(runId, 'message', { text: `The model this agent was set to is not available on this ${run.provider === 'codex' ? 'Codex (ChatGPT)' : 'Claude'} account, so it now uses the account's default model. Pick another one on the agent's card if you want.` }, true);
+        this.store.event(runId, 'message', { text: `The model this agent was set to is not available on this ${run.provider === 'codex' ? 'Codex (ChatGPT)' : run.provider === 'gemini' ? 'Antigravity (Google)' : 'Claude'} account, so it now uses the account's default model. Pick another one on the agent's card if you want.` }, true);
         return;
       }
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: error.message, endedAt: now() });
@@ -926,7 +927,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // Asks the signed-in Claude Code which models it offers, keeps the list, and fixes any agent whose saved model is not on it.
   async refreshModels({ sdk, provider } = {}) {
     const selected = provider || this.store.config().provider;
-    const items = selected === 'codex' ? await codexModels({ env: this.agents.environment(selected) }) : await fetchModels({ env: this.agents.environment(selected), sdk });
+    const items = selected === 'codex' ? await codexModels({ env: this.agents.environment(selected) }) : selected === 'gemini' ? await antigravityModels({ env: this.agents.environment(selected) }) : await fetchModels({ env: this.agents.environment(selected), sdk });
     if (!items.length) return modelList(this.store, selected);
     const key = selected === 'claude' ? 'list' : selected, refused = this.store.get('models', key)?.refused || [];
     const usable = items.filter(item => !refused.includes(item.id));

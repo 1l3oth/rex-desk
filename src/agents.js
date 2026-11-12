@@ -4,6 +4,13 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, sym
 import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
+import { agyCommand, antigravityMcpInstalled, parseAgyModels } from './antigravity.js';
+
+// The command and arguments that check, and start, a provider's sign-in. Antigravity has no status command: listing the
+// account's models only works when it is signed in. Its sign-in is `agy acp --login`, which opens Google sign-in and exits.
+const cli = provider => provider === 'gemini' ? { command: agyCommand(), args: [] } : resolveCommand(provider);
+const statusArgs = { claude: ['auth', 'status', '--json'], codex: ['login', 'status'], gemini: ['models'] };
+const loginArgs = { claude: ['auth', 'login'], codex: ['login'], gemini: ['acp', '--login'] };
 
 // Agent sign-in lives in each CLI profile. Rex Desk only reads status; it never reads or copies credentials.
 const home = os.homedir();
@@ -116,10 +123,10 @@ export class AgentProfiles {
     if (!refresh && cached && Date.now() - cached.checkedAtMs < this.ttl) return cached;
     if (this.pending.has(key)) return this.pending.get(key);
     const check = (async () => {
-      const executable = resolveCommand(provider), env = profileEnvironment(provider, profile);
-      const args = [...executable.args, ...(provider === 'codex' ? ['login', 'status'] : ['auth', 'status', '--json'])];
-      const result = await this.run(executable.command, args, env, 20000);
-      const parsed = provider === 'codex' ? { loggedIn: result.code === 0 && /Logged in using ChatGPT/i.test(result.stdout + result.stderr), method: /ChatGPT/i.test(result.stdout + result.stderr) ? 'ChatGPT' : '', account: '', plan: '' } : parseClaudeStatus(result.stdout);
+      const executable = cli(provider), env = profileEnvironment(provider, profile);
+      const args = [...executable.args, ...statusArgs[provider]];
+      const result = await this.run(executable.command, args, env, 30000);
+      const parsed = provider === 'gemini' ? { loggedIn: result.code === 0 && parseAgyModels(result.stdout).length > 0, method: 'Google', account: '', plan: '' } : provider === 'codex' ? { loggedIn: result.code === 0 && /Logged in using ChatGPT/i.test(result.stdout + result.stderr), method: /ChatGPT/i.test(result.stdout + result.stderr) ? 'ChatGPT' : '', account: '', plan: '' } : parseClaudeStatus(result.stdout);
       const status = { provider, profile, label: profileLabel(provider, profile), checkedAt: new Date().toISOString(), checkedAtMs: Date.now(),
         installed: !(result.error?.code === 'ENOENT'), loggedIn: Boolean(parsed?.loggedIn), method: parsed?.method || '', account: parsed?.account || '',
         organization: parsed?.organization || '', plan: parsed?.plan || '',
@@ -149,8 +156,8 @@ export class AgentProfiles {
   }
   // Signs a profile in to a Claude account: Claude Code opens the browser, the person signs in, and the profile is ready.
   login(provider, profile) {
-    const executable = resolveCommand(provider), env = profileEnvironment(provider, profile);
-    const child = spawn(executable.command, [...executable.args, ...(provider === 'codex' ? ['login'] : ['auth', 'login'])], { env, windowsHide: false, detached: true, stdio: 'ignore' });
+    const executable = cli(provider), env = profileEnvironment(provider, profile);
+    const child = spawn(executable.command, [...executable.args, ...loginArgs[provider]], { env, windowsHide: false, detached: true, stdio: 'ignore' });
     child.unref(); this.invalidate(provider);
     return { started: true, profile, label: profileLabel(provider, profile) };
   }
@@ -169,6 +176,7 @@ export class AgentProfiles {
   invalidate(provider) { for (const key of this.cache.keys()) if (!provider || key.startsWith(`${provider}:`)) this.cache.delete(key); }
   mcpInstalled(provider, profile = this.selected(provider)) {
     try {
+      if (provider === 'gemini') return antigravityMcpInstalled();
       if (provider === 'codex') { const config = path.join(profile || path.join(home, '.codex'), 'config.toml'); return existsSync(config) && /\[mcp_servers\.rex_desk\]/.test(readFileSync(config, 'utf8')); }
       const file = profile ? path.join(profile, '.claude.json') : path.join(home, '.claude.json');
       return existsSync(file) && Boolean(JSON.parse(readFileSync(file, 'utf8')).mcpServers?.rex_desk);

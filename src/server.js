@@ -1,4 +1,5 @@
 import { aiProvider } from './codex.js';
+import { agyCommand } from './antigravity.js';
 import http from 'node:http';
 import { tailscaleAddresses } from './peers.js';
 import QRCode from 'qrcode';
@@ -137,6 +138,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     desk.mcpUrl = `${address}/mcp`; desk.reattachHosts(); desk.reattachOrca(); void desk.findPullRequests();
     void desk.resumeInterrupted(); desk.notifier.start(); void desk.fillEnglishNames(); desk.memory.ensure(); desk.rooms.cleanup(); desk.specialists.normalizeModels(); desk.specialists.ensureMain();
     if (!process.env.NODE_TEST_CONTEXT) void desk.refreshModels().catch(error => store.event('', 'models-error', { message: error.message }));
+    // Antigravity's models fill its pickers when it is installed and signed in; otherwise this fails quietly.
+    if (!process.env.NODE_TEST_CONTEXT && store.config().provider !== 'gemini') void desk.refreshModels({ provider: 'gemini' }).catch(() => {});
   }
   async function closeSession({ forget = false } = {}) {
     if (!session) return;
@@ -392,8 +395,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/agents/mcp' && request.method === 'POST') {
         const { provider } = await body(request);
         aiProvider(provider);
-        const command = resolveCommand(provider), proxy = path.join(root, 'src', 'stdio.js');
-        const args = [...command.args, 'mcp', 'add', ...(provider === 'claude' ? ['--scope', 'user'] : []), 'rex_desk', '--', process.execPath, proxy];
+        const command = provider === 'gemini' ? { command: agyCommand(), args: [] } : resolveCommand(provider), proxy = path.join(root, 'src', 'stdio.js');
+        // Antigravity takes the server command right after its name; the others want -- before it.
+        const args = [...command.args, 'mcp', 'add', ...(provider === 'claude' ? ['--scope', 'user'] : []), 'rex_desk', ...(provider === 'gemini' ? [] : ['--']), process.execPath, proxy];
         // An agent started from any profile folder, in any directory, must be able to read tasks, so every profile
         // this computer has gets the entry, not only the one Rex Desk's own runs use.
         const profiles = discoverProfiles(provider, { configured: desk.agents.selected(provider) });
@@ -478,8 +482,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
           claude: { mcpServers: { rex_desk: { type: 'http', url: desk.mcpUrl, headers: { Authorization: 'Bearer ${REX_DESK_TOKEN}' } } } } });
       }
       if (url.pathname === '/api/diagnostics') {
-        const results = await Promise.all(['claude', 'codex', 'git', 'gh'].map(async name => {
-          const command = resolveCommand(name);
+        const results = await Promise.all(['claude', 'codex', 'agy', 'git', 'gh'].map(async name => {
+          const command = name === 'agy' ? { command: agyCommand(), args: [] } : resolveCommand(name);
           try { const { stdout } = await exec(command.command, [...command.args, '--version'], { windowsHide: true, timeout: 10000 }); return { name, available: true, version: stdout.split('\n')[0] }; }
           catch (error) { return { name, available: false, error: error.message }; }
         })); return json(response, 200, { node: process.version, tools: results });

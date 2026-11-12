@@ -37,7 +37,8 @@ async function main() {
   writeFileSync(spec.stateFile, JSON.stringify({ pid: process.pid, port: server.address().port }), { mode: 0o600 });
   const { ClaudeRunner } = await import('./runners.js');
   const { CodexRunner } = await import('./codex.js');
-  const Runner = spec.options.run.provider === 'codex' ? CodexRunner : ClaudeRunner;
+  const { AntigravityRunner } = await import('./antigravity.js');
+  const Runner = spec.options.run.provider === 'codex' ? CodexRunner : spec.options.run.provider === 'gemini' ? AntigravityRunner : ClaudeRunner;
   // Tests hand in a stand-in for the Agent SDK as a module path.
   const sdk = spec.sdkModule ? await import(pathToFileURL(spec.sdkModule).href) : undefined;
   runner = new Runner({ ...spec.options, ...(sdk ? { sdk } : {}), controller, signal: controller.signal,

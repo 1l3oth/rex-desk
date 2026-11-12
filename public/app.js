@@ -2,7 +2,7 @@ import { openMicrophone, startRecorder, transcribe } from './recorder.js';
 const app = document.querySelector('#app');
 const repositoryInfo = new Map(), inspecting = new Map(), previewTimers = new Map(), connectingSources = new Set();
 const loadingTasks = new Set(), taskErrors = new Map();
-const providerName = provider => provider === 'codex' ? 'Codex (retired)' : 'Claude Code';
+const providerName = provider => provider === 'codex' ? 'Codex (retired)' : provider === 'gemini' ? 'Gemini (Antigravity)' : 'Claude Code';
 const samePath = (left, right) => String(left || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase() === String(right || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
 const taskImage = (task, address) => `/api/task-image?task=${encodeURIComponent(task.id)}&url=${encodeURIComponent(address)}`;
 const taskFile = (task, address) => `/api/task-file?task=${encodeURIComponent(task.id)}&url=${encodeURIComponent(address)}`;

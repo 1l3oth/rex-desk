@@ -1,6 +1,6 @@
 import { pickerHtml } from '/chat-pick.js';
 // Specialist agents: one identity per project. The card shows who the agent is and what it was told; the person can rename, edit or duplicate it.
-const providerName = name => name === 'codex' ? 'Codex (retired)' : 'Claude Code';
+const providerName = name => name === 'codex' ? 'Codex (retired)' : name === 'gemini' ? 'Gemini (Antigravity)' : 'Claude Code';
 
 // Agents are grouped under their project; a project with several agents folds away. Folded groups are remembered on this computer.
 const FOLDED = 'rex-agent-groups-folded';
@@ -25,7 +25,7 @@ export function agentStage(ctx) {
   const origin = agent.cloneOf ? (ui.snap.specialists || []).find(item => item.id === agent.cloneOf) : null;
   const state = agent.status?.state || 'idle', tone = { busy: 'working', replying: 'working', waiting: 'warn', idle: 'good' }[state] || '';
   const unsure = (agent.unsure || []).filter(Boolean), lessons = agent.lessons || [];
-  const ai = agent.provider === 'codex' ? 'codex' : 'claude', aiChoices = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
+  const ai = ['codex', 'gemini'].includes(agent.provider) ? agent.provider : 'claude', aiChoices = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
   const models = [{ value: '', label: 'Default', hint: 'The model set in Settings' }, ...(aiChoices.models || []).map(model => ({ value: model.id, label: model.label }))];
   const head = `<header class="ag-head">${ctx.avatar({ name: agent.name, size: 'xl' })}
     <div class="ag-who">
@@ -54,8 +54,8 @@ export function agentStage(ctx) {
     <section class="ag-sec"><h2>Lessons learned</h2>${lessonList}</section>
     <section class="ag-sec"><h2>Tasks come from</h2>${taskSources}</section>
     ${loopBox}
-    <section class="ag-sec"><h2>AI</h2>${pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: [{ value: 'claude', label: 'Claude Code', hint: 'Claude subscription' }, { value: 'codex', label: 'Codex', hint: 'ChatGPT subscription' }] })}<p class="ag-help">Switching starts a fresh session; the chat so far is handed over.</p></section>
-    <section class="ag-sec"><h2>${ai === 'codex' ? 'Codex' : 'Claude'} account</h2>${pickerHtml(ctx, { id: 'sp-profile', label: 'Account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.[ai]?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}</section>
+    <section class="ag-sec"><h2>AI</h2>${pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: [{ value: 'claude', label: 'Claude Code', hint: 'Claude subscription' }, { value: 'codex', label: 'Codex', hint: 'ChatGPT subscription' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }] })}<p class="ag-help">Switching starts a fresh session; the chat so far is handed over.</p></section>
+    <section class="ag-sec"><h2>${ai === 'codex' ? 'Codex' : ai === 'gemini' ? 'Google (Antigravity)' : 'Claude'} account</h2>${pickerHtml(ctx, { id: 'sp-profile', label: 'Account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.[ai]?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}</section>
     <section class="ag-sec"><h2>Model</h2>${pickerHtml(ctx, { id: 'sp-model', label: 'Model', value: agent.model || '', items: models })}</section>
     <section class="ag-sec ag-meta"><p>Created by ${esc(agent.createdBy || 'you')}${origin ? `, copied from ${esc(origin.name)}` : ''}.</p><button class="btn small danger" data-action="spec-remove">Remove ${esc(agent.name)}</button></section>
   </aside>`;
@@ -160,7 +160,7 @@ export function initAgentCard(ctx) {
   document.addEventListener('change', async event => {
     if (event.target.id !== 'sp-provider') return;
     const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent || agent.provider === event.target.value) return;
-    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { provider: event.target.value } }); ctx.toast(`${agent.name} now runs on ${event.target.value === 'codex' ? 'Codex' : 'Claude Code'}.`); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
+    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { provider: event.target.value } }); ctx.toast(`${agent.name} now runs on ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : 'Claude Code'}.`); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   // An account picked for this agent is saved at once.
   document.addEventListener('change', async event => {
