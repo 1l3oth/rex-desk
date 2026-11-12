@@ -1348,3 +1348,39 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 @keyframes to-end-in{from{opacity:0;transform:translateY(8px)}}
 @media (prefers-reduced-motion:reduce){.to-end{animation:none}}
 @media (max-width:760px){.to-end{right:14px;bottom:calc(112px + env(safe-area-inset-bottom))}}
+
+/* ---- the chat's top bar: title and state on the left, actions on the right ---- */
+.head-title{display:flex;align-items:center;gap:10px;min-width:0}
+.head-title h1{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.head-actions{display:flex;align-items:center;gap:8px;flex:none}
+.head-actions:empty{display:none}
+
+@media (max-width:760px){
+  /* the name with its state under it, like a messenger; round icon buttons */
+  .stage-head{gap:2px;padding:calc(4px + env(safe-area-inset-top)) 8px 4px 2px;min-height:56px}
+  .stage-head .spacer{display:none}
+  .head-title{flex:1;flex-direction:column;align-items:flex-start;gap:0;padding-left:2px}
+  .head-title h1{font-size:17px;line-height:1.25;max-width:100%}
+  .head-title .meta{display:none}
+  .head-title .chip{background:none!important;border:0!important;padding:0!important;font-size:12.5px;line-height:1.3;display:inline-flex;align-items:center;gap:5px}
+  .head-title .chip::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+  .head-actions{gap:6px}
+  .head-actions .btn{height:36px;min-height:36px;padding:0 12px;border-radius:18px;font-size:14px;white-space:nowrap;display:inline-flex;align-items:center}
+  .head-actions [data-action="chat-to-room"],.head-actions [data-action="chat-info"],.head-actions [data-action="term-open"]{width:38px;height:38px;min-height:38px;padding:0;justify-content:center;font-size:0;border-radius:50%;background:var(--raised);border-color:transparent}
+  .head-actions [data-action="chat-to-room"]::before,.head-actions [data-action="chat-info"]::before,.head-actions [data-action="term-open"]::before{content:'';width:19px;height:19px;background:var(--ink);-webkit-mask:var(--ic) center/contain no-repeat;mask:var(--ic) center/contain no-repeat}
+  .head-actions [data-action="chat-to-room"]{--ic:url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'2'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M16%2021v-2a4%204%200%200%200-4-4H6a4%204%200%200%200-4%204v2'%2F%3E%3Ccircle%20cx%3D'9'%20cy%3D'7'%20r%3D'4'%2F%3E%3Cpath%20d%3D'M19%208v6M22%2011h-6'%2F%3E%3C%2Fsvg%3E")}
+  .head-actions [data-action="chat-info"]{--ic:url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'2'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Ccircle%20cx%3D'12'%20cy%3D'12'%20r%3D'9'%2F%3E%3Cpath%20d%3D'M12%2011v5M12%208h.01'%2F%3E%3C%2Fsvg%3E")}
+  .head-actions [data-action="term-open"]{--ic:url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'2'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M4%2017l6-6-6-6M12%2019h8'%2F%3E%3C%2Fsvg%3E")}
+
+  /* under the message box: small pills in one row, the hint hidden, room for the home bar */
+  .composer{padding:8px 10px calc(6px + env(safe-area-inset-bottom))}
+  .composer .box2{border-radius:22px;padding:6px 6px 6px 4px;align-items:center}
+  .composer textarea{padding:8px 4px;line-height:1.4}
+  #draft::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .composer .send-btn{width:38px;height:38px;flex:none}
+  .composer .foot{gap:6px;padding:8px 2px 0;align-items:center}
+  .composer .foot .pick2.compact .pick2-btn{height:30px;padding:0 10px;border-radius:15px;background:var(--raised);border:1px solid var(--line);font-size:13px;color:var(--muted)}
+  .composer .foot .pick2.compact .pick2-label{max-width:30vw}
+  .composer .foot .pick2.compact .pick2-btn svg{width:12px;height:12px}
+  .composer .foot .ring{margin-left:auto;flex:none}
+}
