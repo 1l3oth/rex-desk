@@ -1335,3 +1335,16 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 .send-state .spin{width:11px;height:11px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:send-spin .8s linear infinite;flex:none}
 @keyframes send-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.send-state .spin{animation:none;border-right-color:currentColor;opacity:.5}}
+
+/* ---- back to the newest message ---- */
+.stage-main{position:relative}
+.to-end{position:absolute;right:22px;bottom:118px;z-index:6;display:flex;align-items:center;gap:6px;height:40px;min-width:40px;padding:0 11px;border-radius:20px;border:1px solid var(--line);background:var(--panel);color:var(--ink);box-shadow:0 6px 20px rgba(0,0,0,.35);cursor:pointer;animation:to-end-in .18s ease}
+.to-end[hidden]{display:none}
+.to-end:hover{background:var(--raised)}
+.to-end:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.to-end .to-end-new{display:none;font-size:12.5px;font-weight:600}
+.to-end.fresh{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.to-end.fresh .to-end-new{display:inline}
+@keyframes to-end-in{from{opacity:0;transform:translateY(8px)}}
+@media (prefers-reduced-motion:reduce){.to-end{animation:none}}
+@media (max-width:760px){.to-end{right:14px;bottom:calc(112px + env(safe-area-inset-bottom))}}

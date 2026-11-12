@@ -288,7 +288,7 @@ function renderStage(full) {
   const head = `<div class="stage-head"><button class="m-menu" data-action="m-rail" aria-label="Back to the list"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}<span class="spacer"></span>${model.actions || ''}</div>`;
   // A view that needs the message box always gets it, even when an earlier view had none.
   if (full || !document.getElementById('feed') || Boolean(model.composer) !== Boolean(document.getElementById('composer'))) {
-    stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}</div><aside class="side" id="side"></aside>`;
+    stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}${model.top ? '' : '<button type="button" class="to-end" id="to-end" hidden aria-label="Go to the newest messages"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span class="to-end-new">New messages</span></button>'}</div><aside class="side" id="side"></aside>`;
     ui.stick = !model.top; redrawAttachments(ctx); if (model.top) document.getElementById('feed').scrollTop = 0;
   } else { document.getElementById('head').innerHTML = head; const slot = document.getElementById('members'); if (!slot.contains(document.activeElement) && !pickerOpen()) slot.innerHTML = model.members || ''; }
   document.getElementById('feed').className = `feed ${model.feedClass || ''}`;
@@ -300,7 +300,8 @@ function renderStage(full) {
   const active = document.activeElement, form = active?.closest?.('[data-interaction]');
   const editing = !full && feed.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName) && (!form || model.feed.includes(`data-interaction="${form.dataset.interaction}"`));
   const choosing = pickerOpen();
-  if (!editing && !choosing) { inner.innerHTML = model.feed; if (ui.stick && !model.top) feed.scrollTop = feed.scrollHeight; }
+  if (!editing && !choosing) { const before = inner.innerHTML; inner.innerHTML = model.feed; if (ui.stick && !model.top) feed.scrollTop = feed.scrollHeight; else if (before && before !== inner.innerHTML && feed.scrollHeight > ui.feedHeight) ui.freshBelow = true; ui.feedHeight = feed.scrollHeight; }
+  syncToEnd();
   ui.mentions = model.composer?.mentions || [];
 }
 // The terminal panel keeps its scroll place unless it was at the bottom, where it follows the newest command.
@@ -476,7 +477,7 @@ document.addEventListener('submit', async event => {
   try { await api(`/interactions/${form.dataset.interaction}/answer`, { method: 'POST', data: { action: always ? 'accept' : decision, content: always ? { ...content, always: true } : content } }); toast(decision === 'accept' || always ? 'Sent to the agent.' : 'Declined.'); await refresh(); }
   catch (error) { toast(error.message, true); }
 });
-document.addEventListener('scroll', event => { if (event.target.id === 'feed') ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; }, true);
+document.addEventListener('scroll', event => { if (event.target.id === 'feed') { ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; if (ui.stick) ui.freshBelow = false; syncToEnd(); } }, true);
 
 initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx); wireAgentCards(ctx); wireSpeak(toast); wireWorktrees(ctx); wireChatSwitch(); wireImageViewer();
 // On a phone the side panels start closed, and the menu button opens the list of chats.
@@ -1039,3 +1040,18 @@ function outboxHtml(run, shown) {
 }
 // While a message is on its way, the screen looks again every few seconds, so "Still on its way" shows even with no news.
 setInterval(() => { if ([...(ui.outbox?.values() || [])].some(list => list.length) && ui.view.type === 'run') renderAll(); }, 5000);
+
+// Scrolled up through the history: a round button brings the chat back to the newest message, and says when new ones came in.
+function syncToEnd() {
+  const feed = document.getElementById('feed'), button = document.getElementById('to-end'); if (!feed || !button) return;
+  const far = feed.scrollHeight - feed.scrollTop - feed.clientHeight > 240;
+  button.hidden = !far; button.classList.toggle('fresh', far && Boolean(ui.freshBelow));
+  // Just above the message box, however tall it is now.
+  const box = document.getElementById('composer'); button.style.bottom = `${(box?.offsetHeight || 0) + 16}px`;
+}
+document.addEventListener('click', event => {
+  if (!event.target.closest?.('#to-end')) return;
+  const feed = document.getElementById('feed'); if (!feed) return;
+  ui.stick = true; ui.freshBelow = false;
+  feed.scrollTo({ top: feed.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+});
