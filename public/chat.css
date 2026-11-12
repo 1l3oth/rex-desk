@@ -1516,3 +1516,4 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
   .st-foot:not(:has([data-st-save])){display:none}
 }
 @media (max-width:760px) and (prefers-reduced-motion:reduce){.settings-pop .st-nav,.settings-pop .st-body{transition:none}}
+.si-link{all:unset;cursor:pointer;color:var(--accent);font-weight:600}.si-link:hover,.si-link:focus-visible{text-decoration:underline}

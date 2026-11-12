@@ -91,7 +91,8 @@ export class Accounts {
     const entry = this.byEmail(address);
     if (entry) return { entry, vaultKey: openKey(entry, passphrase) };
     const legacy = claimId && this.workspaces.find(item => item.id === claimId && !item.kdf);
-    if (!legacy) throw new Error('Email or passphrase is incorrect.');
+    // A reinstall or a new computer has no copy of the account yet: say so, and point to the backup instead of a wrong passphrase.
+    if (!legacy) throw new Error('There is no account for that email on this computer yet. If you used Rex Desk before (before a reinstall, or on another computer), open it with Restore from backup.');
     checkPassphrase(passphrase);
     const keyFile = path.join(this.directory(legacy), 'vault.key');
     if (!existsSync(keyFile)) throw new Error('This workspace has no key file. Restore it from cloud backup instead.');
