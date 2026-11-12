@@ -6,7 +6,8 @@ import { markdown } from '/chat-markdown.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 // second: the tab in the other pane when the window is split (-1: one pane); focusRight: the active tab is in the right pane.
-const state = { tabs: [], active: -1, second: -1, focusRight: false, shown: false, big: false, ctx: null, lastShown: null, standalone: false };
+// dodged: where the window was before it moved out of the way of the chat; lastOrder: the last desk_file_window order carried out.
+const state = { tabs: [], active: -1, second: -1, focusRight: false, shown: false, big: false, ctx: null, lastShown: null, standalone: false, dodged: null, lastOrder: undefined };
 const editors = new Map();
 const PREVIEW = new Set(['markdown', 'html', 'csv']);
 
@@ -117,10 +118,11 @@ const ICON = { image: 'IMG', video: 'VID', audio: 'AUD', pdf: 'PDF', sheet: 'XLS
 function shell() {
   let box = document.querySelector('.fw'); if (box) return box;
   box = document.createElement('section'); box.className = 'fw'; box.setAttribute('aria-label', 'Files');
-  box.innerHTML = '<div class="fw-head"><div class="fw-tabs" role="tablist"></div><div class="fw-wins"><button type="button" class="fw-ic" data-fw="popout" title="Open in its own window" aria-label="Open in its own window">&#10697;</button><button type="button" class="fw-ic" data-fw="big" title="Bigger or smaller (window)" aria-label="Bigger or smaller"></button><button type="button" class="fw-ic" data-fw="hide" title="Hide (your tabs stay)" aria-label="Hide the file window">&#8211;</button><button type="button" class="fw-ic" data-fw="close-all" title="Close all files" aria-label="Close all files">&#215;</button></div></div><div class="fw-bar"></div><div class="fw-body"></div>';
+  box.innerHTML = '<div class="fw-head"><div class="fw-tabs" role="tablist"></div><div class="fw-wins"><button type="button" class="fw-ic fw-away" data-fw="dodge" title="Move out of the way while I type in the chat (on or off)" aria-label="Move out of the way while I type"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2 5h9M8 2l3 3-3 3M14 11H5M8 8l-3 3 3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button type="button" class="fw-ic" data-fw="popout" title="Open in its own window" aria-label="Open in its own window">&#10697;</button><button type="button" class="fw-ic" data-fw="big" title="Bigger or smaller (window)" aria-label="Bigger or smaller"></button><button type="button" class="fw-ic" data-fw="hide" title="Hide (your tabs stay)" aria-label="Hide the file window">&#8211;</button><button type="button" class="fw-ic" data-fw="close-all" title="Close all files" aria-label="Close all files">&#215;</button></div></div><div class="fw-bar"></div><div class="fw-body"></div>';
   box.insertAdjacentHTML('beforeend', ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map(edge => `<div class="fw-rs fw-rs-${edge}" data-edge="${edge}" aria-hidden="true"></div>`).join(''));
   document.body.append(box);
   box.addEventListener('click', onClick);
+  box.addEventListener('pointerdown', () => undodge(), true);
   box.addEventListener('pointerdown', startMove);
   box.addEventListener('pointerdown', focusPane);
   // Scrolling over the window scrolls the window: when the part under the mouse cannot scroll further, the page behind stays still.
@@ -188,6 +190,76 @@ function startMove(event) {
   box.addEventListener('pointermove', move); box.addEventListener('pointerup', stop); box.addEventListener('pointercancel', stop);
 }
 window.addEventListener('resize', () => place());
+
+// ---------- where the window sits: places an agent asks for, and moving out of the way while the person types ----------
+// The chat column (the conversation and the message box), and the side panel beside it when it is open.
+function layout() {
+  const main = document.querySelector('.stage-main')?.getBoundingClientRect(), side = document.querySelector('#side.on')?.getBoundingClientRect();
+  const composer = document.getElementById('composer')?.getBoundingClientRect();
+  return { main, side, composer, W: window.innerWidth, H: window.innerHeight };
+}
+function setBox(geo, { keep = true, minW = MIN_W } = {}) {
+  const box = shell(); state.big = false; box.classList.remove('big');
+  const width = Math.min(Math.max(geo.w, minW), window.innerWidth - 16), height = Math.min(Math.max(geo.h, MIN_H), window.innerHeight - 16);
+  const at = { w: width, h: height, x: Math.min(Math.max(geo.x, 0), window.innerWidth - width), y: Math.min(Math.max(geo.y, 0), window.innerHeight - height) };
+  Object.assign(box.style, { left: `${at.x}px`, top: `${at.y}px`, width: `${at.w}px`, height: `${at.h}px`, right: 'auto', bottom: 'auto' });
+  if (keep) saveGeo(at);
+  editors.get(state.tabs[state.active]?.path)?.cm?.refresh();
+}
+export const PLACES = ['side', 'right', 'left', 'top', 'center', 'corner', 'big'];
+// side: over the side panel, beside the chat; top: above the message box; corner: small, top right.
+export function placeWindow(where) {
+  if (state.standalone || !PLACES.includes(where)) return;
+  state.dodged = null;
+  if (where === 'big') { state.big = true; place(); if (state.shown) drawChrome(); return; }
+  const { main, side, composer, W, H } = layout(), pad = 8;
+  const geo = {
+    side: () => { const x = side ? side.left : Math.max(W * 0.55, W - 560); return { x, y: pad, w: W - x - pad, h: H - 2 * pad }; },
+    right: () => ({ x: W / 2, y: pad, w: W / 2 - pad, h: H - 2 * pad }),
+    left: () => ({ x: pad, y: pad, w: W / 2 - pad, h: H - 2 * pad }),
+    top: () => ({ x: (main?.left ?? 0) + pad, y: pad, w: (main?.width ?? W) - 2 * pad, h: (composer?.top ?? H * 0.6) - 2 * pad }),
+    center: () => { const w = Math.min(980, W - 32), h = Math.min(720, H - 32); return { x: (W - w) / 2, y: (H - h) / 2, w, h }; },
+    corner: () => ({ x: W - 560 - pad, y: pad, w: 560, h: 400 }),
+  }[where]();
+  setBox(geo, { minW: where === 'side' ? 280 : MIN_W });
+}
+// While the person types in the chat, a window lying over the conversation or the message box moves over the side panel,
+// or shrinks to the Files button when there is no room. Clicking the window (or the button) brings it back where it was.
+const dodgeOn = () => { try { return localStorage.getItem('rex-desk-files-dodge') !== 'off'; } catch { return true; } };
+const overlap = (a, b) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+function dodge() {
+  if (state.standalone || !state.shown || state.dodged || !dodgeOn()) return;
+  const box = document.querySelector('.fw'); if (!box || box.classList.contains('hidden')) return;
+  const rect = box.getBoundingClientRect(), { main, side, composer } = layout(); if (!main) return;
+  const chat = { left: main.left, right: side ? side.left : main.right, top: main.top, bottom: main.bottom };
+  const covers = overlap(rect, chat) > 0.12 * rect.width * rect.height || (composer && overlap(rect, composer) > 0);
+  if (!covers) return;
+  state.dodged = { big: state.big, at: { x: rect.left, y: rect.top, w: rect.width, h: rect.height }, hid: false };
+  if (side && side.width >= 280) setBox({ x: side.left, y: 8, w: side.width - 8, h: window.innerHeight - 16 }, { keep: false, minW: 280 });
+  else { state.dodged.hid = true; state.shown = false; remember(); draw(); }
+}
+function undodge() {
+  const before = state.dodged; if (!before) return; state.dodged = null;
+  if (before.hid) { state.shown = true; remember(); draw(); }
+  if (before.big) { state.big = true; place(); drawChrome(); } else setBox(before.at, { keep: false, minW: 1 });
+}
+document.addEventListener('focusin', event => { if (event.target?.id === 'draft' || event.target?.closest?.('#composer')) dodge(); });
+// What an agent asked the file window to do (desk_file_window). Each order is carried out once, where the person is.
+export function watchFileWindow(ctx) {
+  const order = ctx.ui.snap?.fileWindow;
+  if (state.lastOrder === undefined) { state.lastOrder = order?.id || ''; return; }
+  if (!order?.id || order.id === state.lastOrder) return;
+  state.lastOrder = order.id; state.ctx ||= ctx;
+  const { action, place: where, file } = order;
+  if (action === 'show' && state.tabs.length) { state.dodged = null; state.shown = true; remember(); draw(); }
+  else if (action === 'hide') { state.dodged = null; state.shown = false; remember(); draw(); }
+  else if (action === 'close' || action === 'close_all') {
+    // A file with changes that are not saved stays open: the person decides about their own edits.
+    const match = tab => action === 'close_all' || (file ? tab.path.toLowerCase().endsWith(String(file).replace(/\//g, '\\').toLowerCase()) || tab.path.toLowerCase().endsWith(String(file).toLowerCase()) || tab.name === file : state.tabs.indexOf(tab) === state.active);
+    for (let index = state.tabs.length - 1; index >= 0; index--) if (match(state.tabs[index]) && !dirty(state.tabs[index])) closeTab(index);
+  }
+  if (where) { placeWindow(where); if (action === 'move' && !state.shown && state.tabs.length) { state.shown = true; remember(); draw(); } }
+}
 function pill() {
   let button = document.querySelector('.fw-pill');
   if (!state.tabs.length || state.shown) { button?.remove(); return; }
@@ -206,6 +278,7 @@ function drawChrome() {
   const box = shell(), tab = state.tabs[state.active]; if (!tab) return;
   box.classList.toggle('big', state.big);
   box.querySelector('[data-fw="big"]').innerHTML = state.big ? '&#10697;' : '&#9634;';
+  const away = box.querySelector('[data-fw="dodge"]'); if (away) { away.classList.toggle('on', dodgeOn()); away.setAttribute('aria-pressed', String(dodgeOn())); }
   box.querySelector('.fw-tabs').innerHTML = state.tabs.map((item, index) => `<div class="fw-tab ${index === state.active ? 'on' : ''} ${index === state.second ? 'twin' : ''}" role="tab" aria-selected="${index === state.active}"><button type="button" class="fw-tab-name" draggable="true" data-fw="tab" data-index="${index}" title="${esc(item.path)}">${ICON[item.kind] ? `<span class="fw-k">${ICON[item.kind]}</span>` : ''}${esc(item.name.replace(/^[0-9]{10,}-/, ""))}${dirty(item) ? '<span class="fw-dot" aria-label="not saved"></span>' : ''}</button><button type="button" class="fw-tab-x" data-fw="tab-close" data-index="${index}" aria-label="Close ${esc(item.name)}">&#215;</button></div>`).join('');
   const views = PREVIEW.has(tab.kind) && tab.editable ? `<div class="pseg fw-views"><button type="button" class="tab ${tab.view === 'code' ? 'on' : ''}" data-fw="view" data-view="code">Code</button><button type="button" class="tab ${tab.view === 'preview' ? 'on' : ''}" data-fw="view" data-view="preview">Preview</button>${tab.kind !== 'csv' ? `<button type="button" class="tab ${tab.view === 'split' ? 'on' : ''}" data-fw="view" data-view="split">Both</button>` : ''}</div>` : '';
   box.querySelector('.fw-bar').innerHTML = `<button type="button" class="fw-path" data-fw="copy" title="Copy the path">${esc(tab.path)}</button><span class="muted small">${size(tab.size)}</span><span class="spacer"></span>${views}
@@ -334,8 +407,9 @@ async function onClick(event) {
     else if (act === 'unsplit') { state.second = -1; state.focusRight = false; remember(); draw(); }
     else if (act === 'tab-close') closeTab(Number(target.dataset.index));
     else if (act === 'hide') { state.shown = false; remember(); draw(); }
-    else if (act === 'show') { state.shown = true; remember(); draw(); }
-    else if (act === 'big') { state.big = !state.big; place(); drawChrome(); editors.get(tab?.path)?.cm?.refresh(); }
+    else if (act === 'show') { if (state.dodged) undodge(); else { state.shown = true; remember(); draw(); } }
+    else if (act === 'dodge') { try { localStorage.setItem('rex-desk-files-dodge', dodgeOn() ? 'off' : 'on'); } catch { /* private window */ } drawChrome(); state.ctx.toast(dodgeOn() ? 'The window moves out of the way while you type.' : 'The window stays where it is while you type.'); }
+    else if (act === 'big') { state.dodged = null; state.big = !state.big; place(); drawChrome(); editors.get(tab?.path)?.cm?.refresh(); }
     else if (act === 'close-all') { const unsaved = state.tabs.filter(dirty); if (unsaved.length && !confirm(`${unsaved.map(item => item.name).join(', ')} not saved. Close all anyway?`)) return; if (state.standalone) { window.close(); return; } for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.shown = false; remember(); draw(); }
     else if (act === 'view') { tab.view = target.dataset.view; drawChrome(); drawBody(); }
     else if (act === 'sheet') { tab.sheet = Number(target.dataset.index); drawBody(); }
@@ -385,5 +459,5 @@ export function watchShownFile(ctx) {
   if (!shown?.id) return;
   if (shown.id === state.lastShown) return;
   state.lastShown = shown.id;
-  void openFile(ctx, shown.path, { line: shown.line, endLine: shown.endLine || 0 });
+  void openFile(ctx, shown.path, { line: shown.line, endLine: shown.endLine || 0 }).then(() => { if (shown.place) placeWindow(shown.place); });
 }

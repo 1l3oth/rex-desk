@@ -99,6 +99,8 @@ export function skillCall(text, tools = null) {
   return `The person ran /${name}${args ? ` with: ${args}` : ''}.\nRun it now: if a skill has that name, use the Skill tool (skill "${name}", or its plugin name such as "pstack:${name}"). If not, it is a slash command: find ${name}.md in ~/.claude/commands, the project's .claude/commands or the project's command folder, and do what it says, with what they wrote as its $ARGUMENTS. Follow its own instructions instead of your usual way of answering.`;
 }
 // Worktrees an agent makes itself join the person's worktree history and show in the chat.
+// Where the file window can go: over the side panel beside the chat, a half of the screen, above the message box, the middle, small in the top right corner, or full size.
+const FILE_PLACES = ['side', 'right', 'left', 'top', 'center', 'corner', 'big'];
 export const WORKTREE_RULE = 'When you make a git worktree, call desk_worktree with action show (pass the folder, and taskId when it is for a task) so it shows in this chat as a card and joins the worktree history. A task that already lives in a worktree is worked on there.';
 
 export class Desk {
@@ -131,7 +133,7 @@ export class Desk {
   }
   snapshot() {
     return { computer: thisComputer(), config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
-      notices: this.notifier.summary(), usage: this.store.list('usage'), shownFile: this.shownFile, worktrees: this.worktrees.all(),
+      notices: this.notifier.summary(), usage: this.store.list('usage'), shownFile: this.shownFile, fileWindow: this.fileWindow || null, worktrees: this.worktrees.all(),
       runs: [...this.store.list('run'), ...this.peers.remoteRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       devices: this.peers.status(this.port),
@@ -803,12 +805,21 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // An agent tested something and shares the proof: a screenshot, a recording or the test output. The file is kept with the run's evidence,
   // belongs to the task, and is posted where the agent is talking (its room, or its personal chat), so it also shows in that chat's Media tab.
   // An agent puts a file in front of the person: it opens in their file window, at the line given.
-  showFile(runId, { file, line = 0, endLine = 0, note = '' }) {
+  showFile(runId, { file, line = 0, endLine = 0, note = '', place = '' }) {
     const opened = this.files.open(line ? `${file}:${line}${endLine > line ? `-${endLine}` : ''}` : file, runId);
-    this.shownFile = { id: randomUUID(), path: opened.path, line: opened.line, endLine: opened.endLine || 0, note: String(note || '').slice(0, 300), runId, at: new Date().toISOString() };
+    this.shownFile = { id: randomUUID(), path: opened.path, line: opened.line, endLine: opened.endLine || 0, place: FILE_PLACES.includes(place) ? place : '', note: String(note || '').slice(0, 300), runId, at: new Date().toISOString() };
     this.store.event(runId, 'file-shown', { path: opened.path, line: opened.line, endLine: opened.endLine || 0 });
     this.store.emit('change', { kind: 'file' });
     return { shown: true, path: opened.path, kind: opened.kind };
+  }
+  // desk_file_window: an agent moves, sizes, hides, shows or closes the file window for the person, so they click less.
+  fileWindowOrder(runId, { action = 'move', place = '', file = '' }) {
+    this.run(runId);
+    if (place && !FILE_PLACES.includes(place)) throw new Error(`Place is one of: ${FILE_PLACES.join(', ')}.`);
+    if (action === 'move' && !place) throw new Error('Say where to move it: place.');
+    this.fileWindow = { id: randomUUID(), action, place, file: String(file || ''), runId, at: new Date().toISOString() };
+    this.store.emit('change', { kind: 'file' });
+    return { done: true, action, place: place || undefined, note: 'Carried out in the Rex Desk window the person has open.' };
   }
   shareEvidence(runId, { file, title, taskId = '', result = 'info', note = '', page = false }) {
     const run = this.run(runId), source = path.resolve(String(file || ''));

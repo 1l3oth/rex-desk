@@ -9,7 +9,7 @@ import { monitorStage, monitorAction } from '/chat-monitor.js';
 import { worktreesStage, fillWorktreeEmbeds, wireWorktrees, wireChatSwitch, WORKTREE_ICON, chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
 import { openSettings } from '/chat-settings.js';
-import { wireFiles, watchShownFile } from '/chat-files.js';
+import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
 import { wireSpeak, speakButton } from '/chat-speak.js';
@@ -353,7 +353,7 @@ async function refresh({ full = false } = {}) {
     ui.snap = await api('/state');
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
     if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = await api('/memory').catch(() => ui.memory); ui.profile = await api('/profile').catch(() => ui.profile);
-    await loadView(); renderAll(full); watchNotices(ctx); watchShownFile(ctx);
+    await loadView(); renderAll(full); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
   } finally { busy = false; if (again) { again = false; void refresh(); } }
 }
 function open(type, id = '') {

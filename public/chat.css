@@ -1326,3 +1326,4 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 .iv-stage.actual{overflow:auto;place-items:start center}.iv-stage.actual img{max-width:none;max-height:none;cursor:zoom-out}
 .iv-nav{position:fixed;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:44px;height:44px;border:0;border-radius:50%;background:rgba(255,255,255,.1);color:#fff}
 .iv-nav:hover{background:rgba(255,255,255,.22)}.iv-nav.prev{left:12px}.iv-nav.next{right:12px}
+.fw-ic.fw-away{display:inline-grid;place-items:center}.fw-ic.fw-away.on{color:var(--accent)}
