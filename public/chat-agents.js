@@ -98,7 +98,8 @@ export async function agentAction(ctx, action, target = null) {
   }
   if (!agent) return;
   if (action === 'spec-chat') {
-    let runId = agent.runId;
+    // A saved chat that was deleted counts as none, so a new one starts.
+    let runId = agent.runId && ctx.runById(agent.runId) ? agent.runId : '';
     // An agent on a computer that is off: its chat lives there, so it opens when that computer is back.
     if (agent.remote && agent.status?.state === 'offline') { toast(`${agent.name} is offline: ${agent.device} is off. Its chat opens when it is back; messages in rooms wait for it.`); return; }
     if (!runId) { await api(`/specialists/${agent.id}/say`, { method: 'POST', data: { text: 'Introduce yourself in one or two lines: who you are and which project you look after.' } }); await refresh(); runId = (ui.snap.specialists || []).find(item => item.id === agent.id)?.runId; }
@@ -106,7 +107,7 @@ export async function agentAction(ctx, action, target = null) {
   }
   if (action === 'spec-answer') {
     const question = (agent.unsure || []).filter(Boolean)[Number(target.dataset.index)] || '';
-    let runId = agent.runId; if (!runId) { await agentAction(ctx, 'spec-chat'); return; }
+    const runId = agent.runId && ctx.runById(agent.runId) ? agent.runId : ''; if (!runId) { await agentAction(ctx, 'spec-chat'); return; }
     ui.drafts.set(`run:${runId}`, `About "${question}": `); open('run', runId); setTimeout(() => { const box = document.getElementById('draft'); if (box) { box.value = `About "${question}": `; box.focus(); } }, 50); return;
   }
   if (action === 'spec-loop-now') { await api(`/specialists/${agent.id}/loop`, { method: 'POST', data: {} }); toast(`${agent.name} is checking its tasks.`); await refresh(); return; }
