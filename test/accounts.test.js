@@ -37,7 +37,7 @@ function browser(app) {
   };
 }
 
-test('accounts gate the dashboard, the first account is superadmin, and only a superadmin sees the cloud database', async () => {
+test('accounts gate the dashboard, the first account is superadmin, and each account sees only its own cloud backup', async () => {
   const app = await accountApp(temporary('accounts'));
   const admin = browser(app), member = browser(app);
   try {
@@ -56,8 +56,9 @@ test('accounts gate the dashboard, the first account is superadmin, and only a s
     assert.equal(joined.body.current.role, 'member');
     assert.equal((await admin('/api/state')).status, 401, 'Opening another account signs the previous window out');
     const memberState = await member('/api/state');
-    assert.equal(memberState.body.database, null);
-    assert.equal((await member('/api/database/connect', { method: 'POST', data: { url: 'libsql://x.example.invalid', authToken: 'secret' } })).status, 403);
+    assert.equal(memberState.body.database.configured, false, 'a new account starts with no backup of its own');
+    assert.equal(memberState.body.database.state, 'local');
+    assert.notEqual((await member('/api/database/sync', { method: 'POST' })).status, 403, 'a member may manage its own backup');
 
     assert.match((await admin('/api/auth/login', { method: 'POST', data: { email: 'owner@example.com', passphrase: 'wrong passphrase' } })).body.error, /incorrect/);
     assert.equal((await admin('/api/auth/login', { method: 'POST', data: { email: 'owner@example.com', passphrase } })).body.current.role, 'superadmin');

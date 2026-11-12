@@ -260,8 +260,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       // Everything else that touches a workspace needs this window's sign-in.
       if ((url.pathname.startsWith('/api/') || url.pathname.startsWith('/artifacts/')) && !signedIn(request) && !peerSignedIn) return json(response, 401, { error: 'Sign in to Rex Desk.', signIn: true });
       const store = session?.store, desk = session?.desk;
-      // The cloud database belongs to the superadmin; other accounts never see or change it.
-      if (url.pathname.startsWith('/api/database/') && role() !== 'superadmin') return json(response, 403, { error: 'Only a superadmin can manage the cloud database.' });
+      // Every account backs up its own workspace to its own Turso database: the key is kept in that account's locked workspace,
+      // so one account never sees or changes another account's backup.
       if (url.pathname === '/api/events' && request.method === 'GET') {
         response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
         response.write('event: connected\ndata: {}\n\n'); clients.add(response);
@@ -291,7 +291,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         if (input.action === 'remove') return json(response, 200, desk.peers.remove(input.id));
         throw new Error('Unknown action.');
       }
-      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: updates.status(), account: { email: session.email, role: role() }, code: codeVersion(), ...(role() === 'superadmin' ? {} : { database: null }) }); }
+      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: updates.status(), account: { email: session.email, role: role() }, code: codeVersion() }); }
       // One-click cloud backup: start opens Turso's sign-in page in the browser; finish waits for it, makes the database and connects it.
       if (url.pathname === '/api/database/turso-start' && request.method === 'POST') { tursoPending?.cancel(); tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
       if (url.pathname === '/api/database/turso-finish' && request.method === 'POST') {
