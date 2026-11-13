@@ -30,8 +30,8 @@ export function agentStage(ctx) {
   const head = `<header class="ag-head">${ctx.avatar({ name: agent.name, size: 'xl' })}
     <div class="ag-who">
       <form class="ag-name" data-agent-rename><input id="sp-name" type="text" maxlength="40" value="${esc(agent.name)}" aria-label="Agent name" spellcheck="false"><button class="btn small" type="submit" hidden>Rename</button></form>
-      <p class="ag-line"><span class="dot ${tone}"></span>${esc(agent.status?.label || 'Idle')} on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a></p>
-      <p class="ag-path" title="${esc(agent.projectPath)}"><code>${esc(agent.projectPath)}</code></p>
+      <p class="ag-line"><span class="dot ${tone}"></span>${esc(agent.status?.label || 'Idle')} on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>${agent.device ? ` · works on <b>${esc(agent.device)}</b>${agent.remote ? '' : ' (this computer)'}` : ''}</p>
+      <p class="ag-path" title="${esc(agent.projectPath)}">Main folder <code>${esc(agent.projectPath || 'not set')}</code></p>
     </div>
     <div class="ag-actions"><button class="btn primary" data-action="spec-chat">Chat with ${esc(agent.name)}</button><button class="btn" data-action="spec-duplicate">Duplicate</button></div>
   </header>`;

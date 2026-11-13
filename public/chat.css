@@ -1527,3 +1527,5 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 .agents-pop-host{position:relative;display:inline-flex}.agents-btn{white-space:nowrap}
 .agents-pop{position:absolute;right:0;bottom:calc(100% + 8px);z-index:20;width:min(340px,86vw);max-height:min(62vh,520px);overflow:auto;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 12px 32px rgba(0,0,0,.35)}
 .agents-pop[hidden]{display:none}.agents-pop .room-agents{padding:0}
+
+.pc-who small.pc-path{font-family:var(--mono,monospace);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
