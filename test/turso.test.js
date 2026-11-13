@@ -167,3 +167,16 @@ test('a restore on the same machine takes back its computer id; a second machine
   assert.equal(rows.length, 2); assert.ok(rows[1] >= 1e9);
   await second.cloud.close(); second.close();
 });
+
+test('signing in again keeps this computer\'s own name instead of taking the other computer\'s', async () => {
+  const turso = fakeTurso(); turso.network.online = true;
+  const store = new Store(temporary('pull-name'));
+  store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await store.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' });
+  store.put('peers', 'main', { name: 'Laptop', remote: false, peers: [], cursors: {}, files: {} });
+  await store.cloud.flush();
+  turso.remote.prepare("UPDATE rex_records SET value=? WHERE kind='peers' AND id='main'").run(JSON.stringify({ name: 'Work', peers: [] }));
+  assert.equal((await store.cloud.pullLatest()).pulled, true);
+  assert.equal(store.get('peers', 'main').name, 'Laptop');
+  await store.cloud.close(); store.close();
+});

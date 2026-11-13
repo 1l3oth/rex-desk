@@ -143,6 +143,9 @@ export class TursoSync {
     const records = { rows: await this.cloudRecords() };
     if (!records.rows.length) return { pulled: false, reason: 'The cloud copy is empty.' };
     const events = { rows: await this.cloudEvents() };
+    // This computer's own name, links and read positions are not the other computer's: they stay as they are here.
+    const own = this.store.db.prepare("SELECT value FROM records WHERE kind='peers' AND id='main'").get();
+    if (own) records.rows = [...records.rows.filter(row => !(row.kind === 'peers' && row.id === 'main')), { kind: 'peers', id: 'main', value: own.value }];
     this.store.transaction(() => {
       this.store.db.exec('DELETE FROM records; DELETE FROM events;');
       const insert = this.store.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?)');
