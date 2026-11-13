@@ -119,7 +119,7 @@ function roomAgentsHtml(ctx, room) {
   return `<div class="room-agents">${agents.map(agent => {
     const ai = ['codex', 'gemini'].includes(agent.provider) ? agent.provider : 'claude', choices = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
     const models = [{ value: '', label: 'Default', hint: 'The model set in Settings' }, ...(choices.models || []).map(model => ({ value: model.id, label: model.label, hint: model.hint, disabled: model.disabled }))];
-    return `<section class="ag-sec room-agent" data-agent="${esc(agent.id)}"><h3>${esc(agent.name)}</h3>
+    return `<section class="ag-sec room-agent" data-agent="${esc(agent.id)}"><h3>${esc(agent.name)}</h3>${(room.members.find(member => member.id === agent.id) || {}).project ? `<p class="room-agent-sub">${esc(room.members.find(member => member.id === agent.id).project)}</p>` : ''}
       <label class="room-agent-row"><span>AI</span>${pickerHtml(ctx, { id: `ra-provider-${agent.id}`, label: 'AI', value: ai, items: AIS, compact: true })}</label>
       <label class="room-agent-row"><span>Model</span>${pickerHtml(ctx, { id: `ra-model-${agent.id}`, label: 'Model', value: agent.model || '', items: models, compact: true })}</label></section>`;
   }).join('')}<p class="muted">Changes save at once and hold for this agent everywhere. A new AI starts a fresh session with the chat so far handed over.</p></div>`;
