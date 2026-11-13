@@ -103,9 +103,20 @@ function tile(type, avatar, name, sub, badge = 0, warn = false) {
 }
 // The computer an agent works on, after its state, unless the state already names it ("Offline · Work is off").
 const withDevice = (text, device) => !device || String(text).includes(device) ? text : `${text} · ${device}`;
-function railItem(type, id, { dot = '', avatar = '', name, sub = '', badge = 0, warn = false, title = '' }) {
+// Rex Agent's own state, the same shape as an agent's.
+const mainLive = () => {
+  const listed = (ui.snap?.specialists || []).find(agent => agent.kind === 'main')?.status; if (listed) return listed;
+  const run = mainRun(); if (run && ['starting', 'running', 'queued', 'verifying'].includes(run.state)) return { state: 'replying' };
+  if (run?.state === 'waiting') return { state: 'waiting' };
+  const last = run?.lastTokens, span = last?.cacheTtl >= 3600 ? last.cacheTtl - 600 : Math.max(0, (last?.cacheTtl || 0) - 60), until = last?.at && span ? new Date(last.at).getTime() + span * 1000 : 0;
+  return { state: 'idle', warmUntil: until > Date.now() ? new Date(until).toISOString() : '', warmTtl: span };
+};
+function railItem(type, id, { dot = '', avatar = '', name, sub = '', badge = 0, warn = false, title = '', live = '' }) {
   const active = (ui.view.type === type && (ui.view.id || '') === (id || '')) || (type === 'specialist' && ui.view.type === 'run' && (ui.snap?.specialists || []).some(agent => agent.id === id && agent.runId === ui.view.id));
-  return `<button class="item ${active ? 'active' : ''}" data-open="${type}" data-id="${esc(id || '')}"${title ? ` title="${esc(title)}"` : ''}>${avatar || (dot ? `<span class="dot ${dot}"></span>` : '')}<span class="name">${esc(name)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span>${badge ? `<span class="badge ${warn ? 'warn' : ''}">${badge}</span>` : ''}</button>`;
+  // live: { state, warmUntil } of an agent: working shows a turning halo, asleep a dimmed face, warm a countdown.
+  const mood = live ? (['busy', 'replying'].includes(live.state) ? 'is-working' : live.state === 'waiting' ? 'is-waiting' : live.state === 'idle' || !live.state ? 'is-asleep' : '') : '';
+  const warm = mood === 'is-asleep' && live.warmUntil ? ` data-warm="${esc(live.warmUntil)}" data-ttl="${Number(live.warmTtl) || 300}"` : '';
+  return `<button class="item ${active ? 'active' : ''} ${mood}" data-open="${type}" data-id="${esc(id || '')}"${warm}${title ? ` title="${esc(title)}"` : ''}>${avatar || (dot ? `<span class="dot ${dot}"></span>` : '')}<span class="name">${esc(name)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span>${badge ? `<span class="badge ${warn ? 'warn' : ''}">${badge}</span>` : ''}</button>`;
 }
 // Sidebar pieces: an icon or a picture for every row, a status dot on agents, and sections that fold and remember it.
 const SVG = {
@@ -137,7 +148,7 @@ function renderRail() {
   const plus = (action, label) => `<button class="sec-add" data-action="${action}" title="${label}" aria-label="${label}">+</button>`;
   return `<div class="rail-head"><span class="brand">${iconAv('main', 'brandmark')}<strong>Rex Desk</strong></span><span class="spacer"></span></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
     <div class="sec-body top">
-      ${railItem('main', '', { avatar: withDot(iconAv('main', 'accent'), main ? stateTone(main) : ''), name: 'Rex Agent', sub: main ? stateLabel(main) : 'Not started', badge: unreadFor(ui, 'main:') })}
+      ${railItem('main', '', { avatar: withDot(iconAv('main', 'accent'), main ? stateTone(main) : ''), name: 'Rex Agent', sub: mainLive().state === 'idle' ? 'Asleep' : main ? stateLabel(main) : 'Not started', badge: unreadFor(ui, 'main:'), live: mainLive() })}
       <nav class="places" aria-label="Places">${[
         place('notices', 'bell', 'Notifications', snap.notices?.unread || 0, true),
         place('inbox', 'inbox', 'Needs you', asks, true),
@@ -146,7 +157,7 @@ function renderRail() {
       ].join('')}</nav>
     </div>
     ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} ${room.members.length === 1 ? 'agent' : 'agents'}`, badge: unreadFor(ui, `room:${room.id}`) })) : '<p class="rail-empty">No rooms yet.</p>')}
-    ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: ['busy', 'replying', 'waiting'].includes(agent.status?.state) ? agent.status.label : agent.projectSlug || '', title: [agent.device && `Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
+    ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: ['busy', 'replying', 'waiting'].includes(agent.status?.state) ? agent.status.label : agent.status?.state === 'idle' ? `Asleep · ${agent.projectSlug || ''}` : agent.projectSlug || '', live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && `Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
   </div>${phoneTabs(asks)}<div class="rail-tools" role="toolbar" aria-label="Tools"><button type="button" class="tool" data-open="jev" title="Jev: control this computer and websites" aria-label="Jev">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? `Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : 'Memory and what uses it')}" aria-label="Memory">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="Devices: your other computers and phone" aria-label="Devices">${iconAv('devices')}</button></div><div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button><button class="btn small" data-action="theme">Theme</button><button class="btn small" type="button" data-glass-open title="How see-through Rex Desk is">Glass</button></div>`;
 }
 

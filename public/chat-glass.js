@@ -118,3 +118,20 @@ document.addEventListener('click', event => {
 // Effects stop while Rex Desk is hidden or minimised, so a theme never uses the computer when nobody is looking.
 const rest = () => root.classList.toggle('fx-rest', document.hidden);
 document.addEventListener('visibilitychange', rest); rest();
+
+
+// Warm countdowns in the list tick once a second in place: only their text changes, nothing is drawn again.
+const tickWarm = () => {
+  for (const item of document.querySelectorAll('.item[data-warm]')) {
+    const left = Math.round((new Date(item.dataset.warm).getTime() - Date.now()) / 1000), sub = item.querySelector('.sub');
+    if (!sub) continue;
+    if (!sub.dataset.base) sub.dataset.base = sub.textContent.replace(/^Asleep · ?/, '');
+    if (left <= 0) { item.removeAttribute('data-warm'); sub.textContent = sub.dataset.base ? `Asleep · ${sub.dataset.base}` : 'Asleep'; item.title = 'Asleep: not running and using no memory. Its cache has gone cold, so the next message starts from scratch.'; continue; }
+    const text = `Warm ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    if (sub.textContent !== text) sub.textContent = text;
+    item.title = `Asleep, cache still warm for ${Math.ceil(left / 60)} min: a message now is quicker and cheaper.`;
+    item.style.setProperty('--warm', String(Math.max(0, Math.min(1, left / Number(item.dataset.ttl || 300)))));
+  }
+};
+setInterval(() => { if (!document.hidden) tickWarm(); }, 1000);
+new MutationObserver(tickWarm).observe(document.body, { childList: true, subtree: true });

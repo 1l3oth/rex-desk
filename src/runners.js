@@ -5,7 +5,8 @@ import { resolveCommand } from './processes.js';
 import { carrySession } from './agents.js';
 import { guardTool } from './app-guard.js';
 // What one reply cost in tokens: new input, output, and the part of the context read from or written to the prompt cache.
-export const tokensOf = usage => usage ? { input: usage.input_tokens || 0, output: usage.output_tokens || 0, cacheRead: usage.cache_read_input_tokens || 0, cacheWrite: usage.cache_creation_input_tokens || 0 } : null;
+export const tokensOf = usage => usage ? { input: usage.input_tokens || 0, output: usage.output_tokens || 0, cacheRead: usage.cache_read_input_tokens || 0, cacheWrite: usage.cache_creation_input_tokens || 0,
+  cacheTtl: usage.cache_creation?.ephemeral_1h_input_tokens > 0 ? 3600 : (usage.cache_read_input_tokens || usage.cache_creation_input_tokens) ? 300 : 0 } : null;
 
 // A config file that is half-written (Claude Code saves .claude.json while it runs) or broken is skipped, not fatal.
 const readJson = file => { try { return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null; } catch { return null; } };

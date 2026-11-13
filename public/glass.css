@@ -304,3 +304,37 @@ html.has-win-bar .chat-shell{height:100dvh;padding-top:34px}
 .ra-dialog .ra-search input{height:38px;margin:0;border-radius:0}
 
 .dialog.ra-dialog .ra-search input[type=search]:not([type=checkbox]):not([type=radio]):not([type=file]),.dialog.ra-dialog .ra-search input[type=search]:focus{border:0;background:none;box-shadow:none;outline:0;padding:0 12px 0 0;min-height:0;height:38px;border-radius:0}
+
+/* ===== Agent states in the list. ===== */
+/* Working: a ring of light turns around the face, and its line shimmers. Drawn by the graphics card only. */
+.item.is-working .avwrap::before{content:"";position:absolute;inset:-4px;border-radius:50%;pointer-events:none;z-index:0;box-sizing:border-box;
+  border:2px solid color-mix(in srgb,var(--accent) 22%,transparent);border-top-color:var(--accent);border-right-color:color-mix(in srgb,var(--accent) 70%,#b07cff);
+  filter:drop-shadow(0 0 3px color-mix(in srgb,var(--accent) 70%,transparent));animation:halo-turn 1.1s linear infinite;will-change:transform}
+.item.is-working .avwrap>*{position:relative;z-index:1}
+.item.is-working .avwrap .sdot{display:none}
+.item.is-working .sub{background:linear-gradient(90deg,var(--muted) 0 35%,var(--ink) 50%,var(--muted) 65% 100%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:sub-shine 2.2s linear infinite}
+@keyframes halo-turn{to{transform:rotate(360deg)}}
+@keyframes sub-shine{from{background-position:150% 0}to{background-position:-100% 0}}
+/* Needs you: a slow amber breath around the face. */
+.item.is-waiting .avwrap::before{content:"";position:absolute;inset:-3px;border-radius:50%;border:2px solid var(--warn);opacity:.9;animation:wait-breathe 2s ease-in-out infinite}
+@keyframes wait-breathe{50%{opacity:.25;transform:scale(1.08)}}
+/* Asleep: not running, no memory used. The face dims, and a small moon sits on it. */
+.item.is-asleep .avwrap>.av{filter:grayscale(.55) brightness(.8);opacity:.85;transition:filter .3s,opacity .3s}
+.item.is-asleep .avwrap .sdot{display:none}
+.item.is-asleep .avwrap::after{content:"";position:absolute;right:-3px;bottom:-3px;width:15px;height:15px;border-radius:50%;z-index:2;
+  background:var(--solid) url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22%3E%3Cpath d=%22M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z%22 fill=%22%239aa3b1%22/%3E%3C/svg%3E") center/10px no-repeat;
+  box-shadow:0 0 0 1.5px var(--line)}
+.item.is-asleep:hover .avwrap>.av{filter:none;opacity:1}
+/* Warm: asleep, but its cache is still fresh. The moon turns into a small ring that empties as time runs out. */
+.item.is-asleep[data-warm] .avwrap::after{background:conic-gradient(#f59e0b calc(var(--warm,1)*360deg),color-mix(in srgb,var(--ink) 12%,transparent) 0);
+  -webkit-mask:radial-gradient(closest-side,transparent 55%,#000 58%);mask:radial-gradient(closest-side,transparent 55%,#000 58%);box-shadow:none}
+.item.is-asleep[data-warm] .sub{color:#d9902a;font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){.item.is-working .avwrap::before,.item.is-working .sub,.item.is-waiting .avwrap::before{animation:none}}
+html.fx-rest .item .avwrap::before,html.fx-rest .item.is-working .sub{animation-play-state:paused}
+/* Each theme's own halo. */
+html[data-skin=cyberpunk] .item.is-working .avwrap::before{border-radius:6px;border-color:rgba(255,43,214,.25);border-top-color:#00e5ff;border-right-color:#ff2bd6}
+html[data-skin=crayon] .item.is-working .avwrap::before{border:2.5px dashed #e4572e;filter:none;animation-duration:4s}
+html[data-skin=sakura] .item.is-working .avwrap::before{border-color:rgba(255,154,201,.3);border-top-color:#ff7ab8;border-right-color:#c4a8ff}
+html[data-skin=gojo] .item.is-working .avwrap::before{border-color:rgba(160,210,255,.25);border-top-color:#cfe6ff;border-right-color:#59b4ff;filter:drop-shadow(0 0 5px #59b4ff)}
+
+.avwrap{line-height:0}.item.is-working .avwrap::after{content:"";position:absolute;inset:-6px;border-radius:50%;z-index:-1;background:radial-gradient(closest-side,color-mix(in srgb,var(--accent) 35%,transparent),transparent);animation:wait-breathe 2s ease-in-out infinite}

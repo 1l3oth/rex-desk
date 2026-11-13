@@ -25,6 +25,11 @@ const atomic = (file, text) => { mkdirSync(path.dirname(file), { recursive: true
 
 // A specialist is the identity of one agent for one project: its name, what it knows, its rules, and which model it uses.
 // The identity card is saved in .rexdesk/agents so every other agent can read it. A duplicate shares the project but is its own agent.
+// Claude keeps a chat's prompt cache 5 minutes or 1 hour after its last reply. The countdown stops 10 minutes early on the
+// hour cache (so 50 minutes) and 1 minute early on the 5-minute one, so a message sent before it ends still finds it warm.
+export const warmFor = ttl => ttl >= 3600 ? ttl - 600 : Math.max(0, ttl - 60);
+// Until when the chat's prompt cache is still warm, from its last reply ('' when it is cold or never replied).
+const warmUntil = run => { const last = run?.lastTokens; if (!last?.at || !last.cacheTtl) return ''; const until = new Date(last.at).getTime() + warmFor(last.cacheTtl) * 1000; return until > Date.now() ? new Date(until).toISOString() : ''; };
 export class Specialists {
   constructor(desk) { this.desk = desk; this.store = desk.store; this.memory = desk.memory; }
 
@@ -136,7 +141,7 @@ export class Specialists {
       const run = this.store.list('run').filter(item => item.role === 'coordinator' && (item.main ? item.computer === thisComputer() : item.roomAgent === 'main')).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
       if (run?.state === 'waiting') return { state: 'waiting', label: 'Needs you', runId: run.id };
       if (run && ['starting', 'running', 'queued', 'verifying'].includes(run.state)) return { state: 'replying', label: 'Working…', runId: run.id };
-      return { state: 'idle', label: 'Idle', runId: run?.id || '' };
+      return { state: 'idle', label: 'Asleep', runId: run?.id || '', warmUntil: warmUntil(run), warmTtl: warmFor(run?.lastTokens?.cacheTtl || 0) };
     }
     const working = ['starting', 'running', 'queued', 'verifying'], runs = this.store.list('run').filter(run => run.specialistId === agent.id);
     const task = runs.find(run => run.role === 'worker' && [...working, 'waiting'].includes(run.state));
@@ -149,7 +154,7 @@ export class Specialists {
     const waiting = sessions.find(run => run.state === 'waiting'), active = sessions.find(run => working.includes(run.state));
     if (waiting) return { state: 'waiting', label: 'Needs you', runId: waiting.id };
     if (active) return { state: 'replying', label: active.roomAgent ? 'Replying in a room…' : 'Replying…', runId: active.id };
-    return { state: 'idle', label: 'Idle', runId: personal?.id || sessions[0]?.id || '' };
+    return { state: 'idle', label: 'Asleep', runId: personal?.id || sessions[0]?.id || '', warmUntil: warmUntil(personal || sessions[0]), warmTtl: warmFor((personal || sessions[0])?.lastTokens?.cacheTtl || 0) };
   }
   // Lessons the agent learned from the person's corrections. Kept on the agent (newest last, at most 30) and given to it with every turn.
   learn(agentId, text, by = 'agent') {
