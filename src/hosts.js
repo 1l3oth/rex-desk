@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 const HOST_SCRIPT = fileURLToPath(new URL('./agent-host.js', import.meta.url));
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
 // What crosses into the host process: plain data only. Callbacks stay here and travel as journal entries and HTTP calls.
-const PLAIN = ['run', 'cwd', 'projectDirectory', 'token', 'sourcePath', 'mcpUrl', 'model', 'agentEnv', 'javaEnv', 'artifactDirectory', 'uploadsDirectory', 'extraMcp', 'remote'];
+const PLAIN = ['run', 'cwd', 'projectDirectory', 'token', 'sourcePath', 'mcpUrl', 'model', 'agentEnv', 'javaEnv', 'artifactDirectory', 'uploadsDirectory', 'extraMcp', 'remote', 'guard'];
 
 export class HostRunner {
   // options: the coordinator's runner options (event, ask, inbox, run…). onState: saves { pid, port, key, journal, offset, asks } on the run.

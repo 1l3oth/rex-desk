@@ -35,6 +35,11 @@
     status.textContent = 'Rex Desk stopped. Starting it again…';
     button.hidden = false;
   }
+  // The server is running but not answering (the computer is busy): wait for it; Restart is there if it stays stuck.
+  if (new URLSearchParams(location.search).has('busy')) {
+    status.textContent = 'Rex Desk is busy. It opens again as soon as it answers; your agents keep working.';
+    button.hidden = false;
+  }
   // Whatever state this page is in (starting, error, after Restart), open Rex Desk as soon as the server answers.
   // An opaque no-cors reply means it is up; a refused connection rejects.
   const server = 'http://127.0.0.1:4317/';

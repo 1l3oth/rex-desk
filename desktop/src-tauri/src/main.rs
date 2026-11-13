@@ -87,9 +87,37 @@ fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+// Whether the server answers: a real request to /api/boot (cheap, and answered even while Rex Desk opens), not only a
+// connection, because Windows accepts connections for a server that is frozen, which left the window black. Any HTTP
+// answer counts (an older server says "not found"). On a busy computer an answer may take a few seconds.
 fn server_running() -> bool {
+    use std::io::Read;
     let address: SocketAddr = ADDRESS.parse().expect("valid address");
-    TcpStream::connect_timeout(&address, Duration::from_millis(300)).is_ok()
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(2000)) else { return false };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    if stream.write_all(b"GET /api/boot HTTP/1.0\r\nHost: 127.0.0.1:4317\r\nConnection: close\r\n\r\n").is_err() {
+        return false;
+    }
+    let mut head = [0u8; 5];
+    stream.read_exact(&mut head).is_ok() && &head == b"HTTP/"
+}
+
+// Whether the server process named in runtime.lock is still alive. A living server that is slow to answer (busy, or still
+// opening) is waited for, never killed: killing it also ended the agents it was running.
+fn server_process_alive(runtime: &Runtime) -> bool {
+    let Ok(text) = fs::read_to_string(runtime.data.join("runtime.lock")) else { return false };
+    let Ok(pid) = text.trim().parse::<u32>() else { return false };
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("tasklist");
+        command.args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"]);
+        hidden(&mut command).output().map(|out| String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\""))).unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new("kill").args(["-0", &pid.to_string()]).status().map(|status| status.success()).unwrap_or(false)
+    }
 }
 
 #[cfg(windows)]
@@ -368,7 +396,7 @@ fn restart(runtime: &Runtime) -> Result<(), String> {
             thread::sleep(Duration::from_millis(200));
         }
         let mut child = start_server(runtime).map_err(|error| format!("Could not start Rex Desk: {error}"))?;
-        wait_for_start(runtime, &mut child, 240)
+        wait_for_start(runtime, &mut child, 360)
     })();
     RESTARTING.store(false, Ordering::SeqCst);
     set_error(result.as_ref().err().map(String::as_str).unwrap_or(""));
@@ -477,7 +505,7 @@ fn main() {
                         Err(error) => return fail(format!("Could not start Rex Desk: {error}")),
                     };
                     ensure_browser(&runtime);
-                    if let Err(error) = wait_for_start(&runtime, &mut child, 90) {
+                    if let Err(error) = wait_for_start(&runtime, &mut child, 360) {
                         return fail(error);
                     }
                 }
@@ -502,14 +530,20 @@ fn main() {
                     if down < 4 || RESTARTING.load(Ordering::SeqCst) {
                         continue;
                     }
+                    // A server whose process is alive is busy, not gone: wait for it (up to five minutes), and only then
+                    // restart it. A server whose process has ended is started again at once. The start page says which.
+                    let alive = server_process_alive(&runtime);
                     if !away {
                         away = true;
                         if let Some(mut page) = home.clone() {
-                            page.set_query(Some("down=1"));
+                            page.set_query(Some(if alive { "busy=1" } else { "down=1" }));
                             let _ = window.navigate(page);
                         }
                     }
-                    if down == 4 || down % 30 == 0 {
+                    if alive && down < 150 {
+                        continue;
+                    }
+                    if (!alive && (down == 4 || down % 30 == 0)) || (alive && down % 150 == 0) {
                         if let Err(error) = restart(&runtime) {
                             let _ = window.eval(&format!("showError({error:?})"));
                         }

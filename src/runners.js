@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
 import { carrySession } from './agents.js';
+import { guardTool } from './app-guard.js';
 // What one reply cost in tokens: new input, output, and the part of the context read from or written to the prompt cache.
 export const tokensOf = usage => usage ? { input: usage.input_tokens || 0, output: usage.output_tokens || 0, cacheRead: usage.cache_read_input_tokens || 0, cacheWrite: usage.cache_creation_input_tokens || 0 } : null;
 
@@ -92,7 +93,15 @@ export class ClaudeRunner {
       disallowedTools: ['AskUserQuestion'],
       additionalDirectories: [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
       settingSources: ['user', 'project', 'local'],
-      hooks: { PostToolUse: [{ hooks: [async () => {
+      hooks: {
+        // Every command and file edit is checked first: one that would take down Rex Desk itself is refused, with the reason.
+        PreToolUse: [{ hooks: [async input => {
+          const reason = guardTool(input?.tool_name, input?.tool_input, this.guard || {});
+          if (!reason) return {};
+          this.event('agent-tool', { tool: 'Blocked by Rex Desk', failed: true, text: reason });
+          return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
+        }] }],
+        PostToolUse: [{ hooks: [async () => {
         // New messages for this agent arrived while it worked: hand them over now, between steps.
         const news = this.inbox?.() || '';
         return news ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: `New messages arrived while you were working. Read them now; they may change what you are doing. Answer them in your reply.

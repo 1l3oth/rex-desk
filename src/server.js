@@ -45,7 +45,8 @@ import { accountSignIn, accountDatabase, accountMe, accountReachable } from './r
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The commit this server runs. A pull or a commit from another session changes it; the server then restarts itself and the page reloads.
-const startedCode = readCode();
+// The installed app is not a Git checkout: it never asks Git (a program run while the server loads) and never updates this way.
+const startedCode = process.env.REX_DESK_VERSION ? '' : readCode();
 function readCode() { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } }
 function codeVersion() { return startedCode; }
 const mime = { '.webmanifest': 'application/manifest+json', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.json': 'application/json; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
@@ -1000,7 +1001,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   setInterval(() => {
     if (closing || !app.restartWanted) return;
     closing = true;
-    void startReplacement().then(() => Promise.race([app.close().catch(() => {}), new Promise(resolve => setTimeout(resolve, 10000))]).finally(() => process.exit(0)), () => { closing = false; });
+    void startReplacement(Number(new URL(app.address).port)).then(() => Promise.race([app.close().catch(() => {}), new Promise(resolve => setTimeout(resolve, 10000))]).finally(() => process.exit(0)), () => { closing = false; });
   }, 1000).unref();
   if (startedCode) setInterval(() => {
     if (closing || readCode() === startedCode || readCode() === '' || (app.desk?.live?.size || 0) > 0) return;

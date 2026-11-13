@@ -16,7 +16,7 @@ const turn = [{ type: 'system', subtype: 'init', session_id: SESSION },
 const runnerFor = (run, seen, events = []) => new ClaudeRunner({ sdk: fakeSdk(turn, seen), run: { id: 'r', role: 'worker', ...run }, cwd: 'x', token: 't', mcpUrl: 'http://127.0.0.1:1/mcp',
   event: (kind, data) => events.push([kind, data]), ask: async () => ({ action: 'accept' }), controller: new AbortController(), uploadsDirectory: 'UP' });
 
-test('headless Claude Code starts dangerous, speaks in the chat, and Rex Desk refuses no tool: the agent decides or asks the person', async () => {
+test('headless Claude Code starts dangerous, speaks in the chat, and Rex Desk refuses only what would take Rex Desk itself down', async () => {
   const seen = [], events = [];
   await runnerFor({ effort: 'high' }, seen, events).start('Go');
   const { options } = seen[0];
@@ -25,7 +25,10 @@ test('headless Claude Code starts dangerous, speaks in the chat, and Rex Desk re
   assert.equal(options.resume, undefined);
   assert.ok(events.some(([kind, data]) => kind === 'agent-text' && data.text === 'Hello there'), 'what the agent says reaches the chat');
   assert.ok(events.some(([kind, data]) => kind === 'session' && data.sessionId === SESSION));
-  assert.equal(options.hooks.PreToolUse, undefined, 'no tool is refused before it runs');
+  // The agent decides or asks the person about everything else; the one check before a tool runs protects Rex Desk itself.
+  const check = options.hooks.PreToolUse[0].hooks[0];
+  assert.deepEqual(await check({ tool_name: 'Bash', tool_input: { command: 'npm test' } }), {}, 'ordinary work is never refused');
+  assert.equal((await check({ tool_name: 'Bash', tool_input: { command: 'taskkill /F /IM node.exe' } })).hookSpecificOutput.permissionDecision, 'deny', 'a command that would end Rex Desk is');
 });
 
 test('Manual mode asks through the dashboard, and only a real session id is resumed', async () => {
