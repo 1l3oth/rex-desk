@@ -135,7 +135,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     desk.port = listenPort; desk.peers.port = listenPort;
     desk.peers.onRemoteChange = () => { remoteAt = '-'; remoteOpen(); }; remoteOpen();
     if (!process.env.NODE_TEST_CONTEXT) desk.peers.start();
-    desk.mcpUrl = `${address}/mcp`; desk.reattachHosts(); void desk.findPullRequests();
+    desk.mcpUrl = `${address}/mcp`; desk.reattachHosts(); desk.projectRules.watch(); void desk.findPullRequests();
     void desk.resumeInterrupted(); desk.notifier.start(); void desk.fillEnglishNames(); desk.memory.ensure(); desk.rooms.cleanup(); desk.specialists.normalizeModels(); desk.specialists.ensureMain();
     if (!process.env.NODE_TEST_CONTEXT) void desk.refreshModels().catch(error => store.event('', 'models-error', { message: error.message }));
     // Antigravity's models fill its pickers when it is installed and signed in; otherwise this fails quietly.
@@ -553,7 +553,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
           const input = await body(request);
           // A chat with an agent that lives on another computer runs there while that computer is on, even when this one holds a copy of the chat.
           const homeAgent = ['say', 'resume', 'stop'].includes(action) && store.get('run', runId)?.specialistId ? store.get('specialist', store.get('run', runId).specialistId) : null;
-          if (homeAgent && desk.peers.isRemote(homeAgent) && desk.peers.online(homeAgent.node)) return json(response, 200, await desk.peers.chatAction({ id: runId, node: homeAgent.node, agentId: homeAgent.id }, action, input));
+          // A project that runs only on its own computer, or is not on this one, never starts here: the message waits for that computer.
+          const elsewhere = homeAgent && desk.peers.isRemote(homeAgent) && (desk.peers.online(homeAgent.node) || homeAgent.pinned || Boolean(homeAgent.projectSlug && !desk.projectRules.folderHere(homeAgent.projectSlug)));
+          if (elsewhere) return json(response, 200, await desk.peers.chatAction({ id: runId, node: homeAgent.node, agentId: homeAgent.id }, action, input));
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
           if (action === 'fresh') return json(response, 200, await desk.freshStart(runId));
           if (action === 'say') return json(response, 200, await desk.say(runId, input.text, input));
@@ -600,10 +602,15 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (url.pathname === '/api/specialists' && request.method === 'POST') return json(response, 200, desk.specialists.create({ ...(await body(request)), by: 'you' }));
       const lessonMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)\/lessons\/(\d+)$/);
       if (lessonMatch && request.method === 'DELETE') return json(response, 200, desk.specialists.forget(lessonMatch[1], Number(lessonMatch[2])));
-      const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say|loop))?$/);
+      // A project's two rules: runs only on its computer, and keep out of the cloud (see project-rules.js).
+      const ruleMatch = url.pathname.match(/^\/api\/project-rules\/([^/]+)$/);
+      if (ruleMatch && request.method === 'PUT') return json(response, 200, desk.projectRules.set(decodeURIComponent(ruleMatch[1]), await body(request)));
+      if (url.pathname === '/api/project-rules' && request.method === 'GET') return json(response, 200, desk.projectRules.list());
+      const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say|loop|move))?$/);
       if (specialistMatch) {
         const [, specialistId, part] = specialistMatch;
         const remoteAgent = store.get('specialist', specialistId);
+        if (request.method === 'POST' && part === 'move') return json(response, 200, await desk.projectRules.move(specialistId));
         if (desk.peers.isRemote(remoteAgent) && request.method === 'POST' && ['say', 'assign'].includes(part)) {
           const input = await body(request), task = input.taskId && store.get('task', input.taskId);
           return json(response, 200, await desk.peers.command(remoteAgent, part, task ? { ...input, taskNumber: task.taskNumber || task.externalId } : input));

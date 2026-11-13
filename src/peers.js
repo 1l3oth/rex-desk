@@ -210,7 +210,7 @@ export class Peers {
       const route = action === 'say' ? `/api/specialists/${agent.id}/say` : `/api/specialists/${agent.id}/assign`;
       return this.forward(agent.node, 'POST', route, input);
     }
-    const id = randomUUID(), packed = action === 'say' ? { ...input, ...this.packFiles(String(input?.text || ''), agent.node) } : input;
+    const id = randomUUID(), packed = action === 'say' ? { ...input, ...this.packFiles(String(input?.text || ''), agent.node, agent.id) } : input;
     this.store.put('peercmd', id, { id, target: agent.node, action, agentId: agent.id, input: packed, at: now(), done: false });
     return { queued: true, message: this.seen(agent.node) ? `Sent to ${agent.name} on ${this.deviceName(agent.node)} through the shared database. It starts in a few seconds.` : `${agent.name} is offline: ${this.deviceName(agent.node)} is off. It gets this when it is back.` };
   }
@@ -291,10 +291,10 @@ export class Peers {
     const asks = this.store.list('interaction').filter(item => item.runId === runId && item.state === 'pending')
       .map(item => Object.fromEntries(Object.entries(item).filter(([, value]) => JSON.stringify(value ?? '').length < 20000)));
     this.store.put('chatcopy', runId, { id: runId, agentId: run.specialistId, run: slim, events, asks, at: now() });
-    this.sharePictures(events); this.shareEvidence(runId);
+    this.sharePictures(events, run.specialistId); this.shareEvidence(runId, run.specialistId);
   }
   // Pictures the person attached in a shared chat travel with it (up to 2 MB each), so they show on the other computers too.
-  sharePictures(events) {
+  sharePictures(events, agentId = '') {
     const uploads = path.resolve(this.store.directory, 'uploads').toLowerCase();
     for (const event of events) {
       for (const match of String(event.text || '').matchAll(/^- (.+)$/gm)) {
@@ -302,13 +302,13 @@ export class Peers {
         if (!PICTURE.test(file) || !file.toLowerCase().startsWith(uploads + path.sep) || !existsSync(file)) continue;
         const id = chatFileId(file), size = statSync(file).size;
         if (size > PICTURE_BYTES || this.store.get('chatfile', id)?.size === size) continue;
-        this.store.put('chatfile', id, { id, path: file, name: path.basename(file), size, data: readFileSync(file).toString('base64'), at: now() });
+        this.store.put('chatfile', id, { id, path: file, name: path.basename(file), size, data: readFileSync(file).toString('base64'), agentId, at: now() });
       }
     }
   }
   // Files the person attached here, for an agent on another computer: each travels in the shared database, and that computer
   // saves its own copy and tells the agent where it is. A file over 8 MB stays here and the message says so.
-  packFiles(text, target) {
+  packFiles(text, target, agentId = '') {
     const uploads = path.resolve(this.store.directory, 'uploads').toLowerCase(), files = [];
     let note = '';
     for (const match of String(text).matchAll(/^- (.+)$/gm)) {
@@ -317,7 +317,7 @@ export class Peers {
       const size = statSync(file).size;
       if (size > CARRY_BYTES) { note += `\n(${path.basename(file)} is ${Math.round(size / 1048576)} MB, too big to send to another computer; it stays on ${this.self.name}.)`; continue; }
       const id = chatFileId(file);
-      if (this.store.get('chatfile', id)?.size !== size) this.store.put('chatfile', id, { id, path: file, name: path.basename(file), size, data: readFileSync(file).toString('base64'), for: target, at: now() });
+      if (this.store.get('chatfile', id)?.size !== size) this.store.put('chatfile', id, { id, path: file, name: path.basename(file), size, data: readFileSync(file).toString('base64'), for: target, agentId, at: now() });
       files.push({ id, path: match[1].trim(), name: path.basename(file) });
     }
     return { text: text + note, files };
@@ -337,13 +337,13 @@ export class Peers {
     return text;
   }
   // Screenshots an agent saved as evidence in the chat travel with it too (up to 2 MB each).
-  shareEvidence(runId) {
+  shareEvidence(runId, agentId = '') {
     for (const artifact of this.store.list('artifact').filter(item => item.runId === runId && (PICTURE.test(item.file) || (isPageArtifact(item))))) {
       const file = path.join(this.store.directory, 'artifacts', runId, path.basename(artifact.file));
       if (!existsSync(file)) continue;
       const id = evidenceId(runId, artifact.file), size = statSync(file).size;
       if (size > PICTURE_BYTES || this.store.get('chatfile', id)?.size === size) continue;
-      this.store.put('chatfile', id, { id, path: `evidence:${runId}/${artifact.file}`, name: path.basename(artifact.file), size, data: readFileSync(file).toString('base64'), at: now() });
+      this.store.put('chatfile', id, { id, path: `evidence:${runId}/${artifact.file}`, name: path.basename(artifact.file), size, data: readFileSync(file).toString('base64'), agentId, at: now() });
     }
   }
   // A page or file an agent shared on another computer: written here from the shared copy of the chat, so it opens like any local file.
@@ -377,9 +377,12 @@ export class Peers {
   }
   // Another computer's chat, read from its copy: only when it is not here and not reached directly.
   chatCopy(runId) {
-    if (this.store.get('run', runId) || this.runOwner(runId)) return null;
-    const copy = this.store.get('chatcopy', runId);
-    return copy && copy.node && copy.node !== this.self.id ? copy : null;
+    if (this.runOwner(runId)) return null;
+    const copy = this.store.get('chatcopy', runId), local = this.store.get('run', runId);
+    if (!copy || !copy.node || copy.node === this.self.id) return null;
+    // A chat whose agent moved from this computer to another is read from that computer's copy, not from the older one left here.
+    if (local) { const agent = local.specialistId ? this.store.get('specialist', local.specialistId) : null; if (!(agent && this.isRemote(agent) && agent.movedFrom === this.self.id && copy.node === agent.node)) return null; }
+    return copy;
   }
   cloudRuns() {
     const direct = new Set(this.remoteRuns().map(run => run.id));
@@ -407,7 +410,7 @@ export class Peers {
     if (!['say', 'resume', 'stop'].includes(action)) throw new Error(`Open this chat on ${this.deviceName(copy.node)} to do that.`);
     const text = String(input.text || input.prompt || '').slice(0, 20000);
     if (action !== 'stop' && !text.trim()) throw new Error('Write a message first.');
-    const id = randomUUID(), packed = action === 'stop' ? { text, files: [] } : this.packFiles(text, copy.node);
+    const id = randomUUID(), packed = action === 'stop' ? { text, files: [] } : this.packFiles(text, copy.node, copy.agentId);
     this.store.put('peercmd', id, { id, target: copy.node, action: `chat-${action === 'stop' ? 'stop' : 'say'}`, runId: copy.id, agentId: copy.agentId, input: packed, at: now(), done: false });
     const name = this.store.get('specialist', copy.agentId)?.name || 'The agent';
     return { queued: true, message: this.online(copy.node) ? `Sent to ${name} on ${this.deviceName(copy.node)}. The reply shows here in a few seconds.` : `${this.deviceName(copy.node)} is off. ${name} gets this when it is back on.` };

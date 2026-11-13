@@ -28,6 +28,17 @@ export class FileBackup {
     const file = path.resolve(root.directory, ...key.slice(root.prefix.length).split('/'));
     return file.startsWith(path.resolve(root.directory) + path.sep) ? file : '';
   }
+  // Folders of a project kept out of the cloud stay here: an agent's own folder and the evidence of its chats.
+  kept(key) {
+    const store = this.sync.store, agent = /^memory\/agents\/home\/([^/]+)\/$/.exec(key), run = /^data\/artifacts\/([^/]+)\/$/.exec(key);
+    return agent ? store.privateAgent(agent[1]) : run ? store.privateRun(run[1]) : false;
+  }
+  // The backup forgets these folders, so they go up again if the project uses the cloud later.
+  forget(prefixes) {
+    const index = this.index(); if (!index) return;
+    for (const key of Object.keys(index.files)) if (prefixes.some(prefix => key.startsWith(prefix))) delete index.files[key];
+    this.saveIndex(index);
+  }
   walk() {
     const found = [];
     for (const root of this.roots()) {
@@ -37,7 +48,7 @@ export class FileBackup {
         for (const entry of entries) {
           if (counted >= MAX_FILES) return;
           const full = path.join(directory, entry.name), key = `${root.prefix}${relative}${entry.name}`;
-          if (entry.isDirectory()) { if (!SKIP.has(entry.name.toLowerCase())) visit(full, `${relative}${entry.name}/`); continue; }
+          if (entry.isDirectory()) { if (!SKIP.has(entry.name.toLowerCase()) && !this.kept(`${key}/`)) visit(full, `${relative}${entry.name}/`); continue; }
           if (!entry.isFile() || /\.(tmp|lock)$/i.test(entry.name) || (root.only && !root.only.test(entry.name))) continue;
           try { const stat = statSync(full); if (stat.size <= FILE_LIMIT) { counted += 1; found.push({ key, file: full, stamp: `${stat.size}:${Math.floor(stat.mtimeMs)}` }); } } catch { /* gone */ }
         }

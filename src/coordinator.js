@@ -26,6 +26,7 @@ import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
 import { inspectRepository } from './repositories.js';
 import { Worktrees, longPath } from './worktrees.js';
+import { ProjectRules } from './project-rules.js';
 import { HostRunner, hostAlive } from './hosts.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
@@ -119,6 +120,7 @@ export class Desk {
       store.event(runId, kind, data);
     }, () => this.mcpUrl);
     this.peers = new Peers(this, { transport: peerTransport });
+    this.projectRules = new ProjectRules(this);
     // A phone push opens Rex Desk on the phone when it can reach this computer (Tailscale and remote access on).
     this.notifier.pushClick = () => this.peers.settings().remote && this.port ? this.peers.addresses(this.port)[0] || '' : '';
     this.worktreeRoot = path.join(path.dirname(store.directory), 'worktrees');
@@ -139,7 +141,7 @@ export class Desk {
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions(), ...this.peers.cloudInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       devices: this.peers.status(this.port),
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
-      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, choices: { models: modelList(this.store, this.store.config().provider), efforts: effortsFor(this.store.config().provider), modes: modesFor(this.store.config().provider), providers: Object.fromEntries(AI_PROVIDERS.map(provider => [provider, { models: pickerModels(this.store, provider), efforts: effortsFor(provider), modes: modesFor(provider) }])) }, mainAgent: (m => m && { id: m.id, name: m.name, provider: m.provider, model: m.model || '' })(this.store.get('specialist', 'main')), specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent), device: this.peers.deviceName(agent.node), remote: this.peers.isRemote(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
+      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, projectRules: this.projectRules.list(), choices: { models: modelList(this.store, this.store.config().provider), efforts: effortsFor(this.store.config().provider), modes: modesFor(this.store.config().provider), providers: Object.fromEntries(AI_PROVIDERS.map(provider => [provider, { models: pickerModels(this.store, provider), efforts: effortsFor(provider), modes: modesFor(provider) }])) }, mainAgent: (m => m && { id: m.id, name: m.name, provider: m.provider, model: m.model || '' })(this.store.get('specialist', 'main')), specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent), device: this.peers.deviceName(agent.node), remote: this.peers.isRemote(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
   }
   // Run keys are kept as hashes in the database, so an agent that kept working through a restart keeps its connection.
   scopeToken(runId) {
@@ -902,6 +904,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // One turn in an agent's own session: a group chat message, or anything else that needs the agent. The session is made the first time and kept after that.
   async specialistTurn(agentId, { prompt, roomId = '', messageId = '', quiet = false }) {
     const agent = this.specialists.get(agentId), turn = roomId ? { roomId, messageId } : null;
+    this.projectRules.guard(agent);
     // Every agent has a personal chat with the person and its own session in each group chat. A group chat never sees what was said
     // in another one: one shared session made agents carry one room's talk into the next, and a reply could land in the wrong room.
     if (!roomId && agent.kind === 'main') {
@@ -1066,6 +1069,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const provider = aiProvider(picked.provider || run.provider || this.store.config().provider);
     if (run.external) throw new Error('Reconnect this conversation from the external AI using desk_connect.');
     if (this.live.has(runId)) throw new Error('Stop the active run before resuming.');
+    if (run.specialistId && run.role === 'specialist') this.projectRules.guard(this.store.get('specialist', run.specialistId));
     // A Claude conversation started on another computer (an account restored from backup, an agent shared between computers) is not
     // here to reopen: the agent starts a fresh session that first reads a handoff of the chat, which this computer has in full.
     if (run.provider === 'claude' && provider === 'claude' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && !this.runnerFactory && !conversationHere(run.sessionId)) {

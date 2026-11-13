@@ -67,6 +67,14 @@ export function openSettings(ctx, section = 'general') {
       ${check('reportToOrbit', config().reportToOrbit, 'Let agents send their final report to Orbit', 'Through your Orbit connection, when it is set up.')}`,
     accounts: () => `<h2>Claude accounts</h2><p class="muted">Agents run on a Claude Code sign-in. You can add more accounts and switch when one runs out.</p><button type="button" class="btn primary" data-st-open="accounts">Open Claude accounts</button>`,
     projects: () => {
+      // Each project that has agents: where its agents may work, and whether their chats may go to the cloud.
+      const projectRulesHtml = () => {
+        const rules = ui.snap.projectRules || []; if (!rules.length) return '';
+        const rule = item => `<div class="st-rule"><div class="st-rule-head"><b>${esc(item.slug)}</b><span class="muted">${item.agents} agent${item.agents === 1 ? '' : 's'} · ${esc(item.computers.join(', '))}${item.here ? '' : ' · not on this computer'}</span></div>
+          <label class="st-check"><input type="checkbox" data-st-rule="pinned" data-slug="${esc(item.slug)}" ${item.pinned ? 'checked' : ''}><span><b>Runs only on its computer</b><small>Its agents never move and never start on another computer. You can still chat with them from anywhere.</small></span></label>
+          <label class="st-check"><input type="checkbox" data-st-rule="noCloud" data-slug="${esc(item.slug)}" ${item.noCloud ? 'checked' : ''}><span><b>Keep out of the cloud</b><small>Its chats and files go only straight between your computers. Turning this on deletes its cloud copy; turning it off sends it back.</small></span></label></div>`;
+        return `<h3>Where each project's agents work</h3><p class="muted">For a project that is only on one computer, like work code. Changes save at once.</p>${rules.map(rule).join('')}`;
+      };
       const repositories = config().repositories || [];
       const row = (repo, index) => `<details class="st-repo" ${state.openRepo === index ? 'open' : ''}><summary><b>${esc(repo.name)}</b><code>${esc(repo.path)}</code><span class="muted">${esc(repo.baseBranch)} → ${esc(repo.targetBranch)}</span></summary>
         <div class="st-row">${field('New work starts from', input(`repo.${index}.baseBranch`, repo.baseBranch, 'spellcheck="false"'))}${field('Pull requests go to', input(`repo.${index}.targetBranch`, repo.targetBranch, 'spellcheck="false"'))}</div>
@@ -77,6 +85,7 @@ export function openSettings(ctx, section = 'general') {
         <button type="button" class="btn small quiet danger" data-st-repo-remove="${index}">Remove this project</button></details>`;
       return `<h2>Projects</h2><p class="muted">The code your agents work on. Each run gets its own copy, so your own checkout is never touched. Rex Agent can also add a project when you name it in chat.</p>
         ${repositories.length ? repositories.map(row).join('') : '<p class="muted">No projects yet.</p>'}
+        ${projectRulesHtml()}
         <div class="st-add"><input data-st-repo-path placeholder="Folder of a project, like D:\\dev\\my-app" spellcheck="false" aria-label="Folder of a project"><button type="button" class="btn small" data-st-repo-pick>Browse…</button><button type="button" class="btn small primary" data-st-repo-add>Add</button></div>`;
     },
     sources: () => `<h2>Task sources</h2><p class="muted">Where tasks come from. Rex Desk tasks are built in.</p>
@@ -185,6 +194,14 @@ export function openSettings(ctx, section = 'general') {
     } catch (error) { toast(error.message, true); back.querySelector('[data-st-save]')?.removeAttribute('disabled'); }
   });
   back.addEventListener('keydown', event => { if (event.key === 'Escape') back.remove(); });
+  // A project's two rules save at once.
+  back.addEventListener('change', async event => {
+    const rule = event.target.dataset?.stRule; if (!rule) return;
+    const slug = event.target.dataset.slug, on = event.target.checked;
+    if (rule === 'noCloud' && on && !confirm(`Keep ${slug} out of the cloud? Its chats and files are deleted from the cloud database. They stay on your computers.`)) { event.target.checked = false; return; }
+    try { await api(`/project-rules/${encodeURIComponent(slug)}`, { method: 'PUT', data: { [rule]: on } }); await refresh({ full: true }); toast(rule === 'pinned' ? (on ? `${slug} now runs only on its computer.` : `${slug}'s agents can be moved again.`) : (on ? `${slug} is kept out of the cloud. Its cloud copy is being deleted.` : `${slug} uses the cloud again. Its chats are being sent back.`)); draw(); }
+    catch (error) { event.target.checked = !on; toast(error.message, true); }
+  });
   // The voices on this computer, for the reading voice choices.
   void api('/speak/voices').then(neural => { state.extra.neural = neural; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
   if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); if (state.section === 'general' && document.body.contains(back)) draw(); });

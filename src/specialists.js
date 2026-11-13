@@ -73,7 +73,7 @@ export class Specialists {
     const item = { id: randomUUID(), name: clean, slug, projectSlug: project.slug, projectPath: project.path, repositoryId: repository?.id || '', purpose: String(purpose || '').trim().slice(0, 400) || project.purpose || '',
       rules: String(rules).slice(0, 4000), unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12),
       provider: aiProvider(provider || this.store.config().provider), model: this.cleanModel(model, { strict: true, provider: provider || this.store.config().provider }), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, loop: { ...LOOP_DEFAULT }, createdAt: now(), updatedAt: now() };
-    this.store.put('specialist', item.id, item); this.writeCard(item); return item;
+    this.store.put('specialist', item.id, item); this.writeCard(item); return this.desk.projectRules?.inherit(this.store.get('specialist', item.id)) || item;
   }
   update(id, { rules, unsure, provider, model, taskSources, profile, loop }) {
     const item = this.get(id);

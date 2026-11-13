@@ -159,7 +159,28 @@ export class Store extends EventEmitter {
       this.put(kind, key, value); return { changed: true, isNew: !local };
     } finally { this.remote = false; }
   }
+  // "Keep out of the cloud" is set on a project and carried by each of its agents (noCloud on the agent's card). Their chats,
+  // runs, questions, evidence and files then skip the cloud database; they still travel straight between the person's computers.
+  // The agent's card itself stays shared, so every computer knows the rule.
+  privateAgent(agentId) {
+    if (!agentId || agentId === 'main') return false;
+    if (!this.privateAgents) this.privateAgents = new Set(this.list('specialist').filter(agent => agent.noCloud).map(agent => agent.id));
+    return this.privateAgents.has(agentId);
+  }
+  privateRun(runId) {
+    if (!runId) return false;
+    const run = this.get('run', runId);
+    return Boolean(run) && (this.privateAgent(run.specialistId) || this.privateAgent(run.roomAgent));
+  }
+  isPrivate(kind, value) {
+    if (!value) return false;
+    if (kind === 'run') return this.privateAgent(value.specialistId) || this.privateAgent(value.roomAgent);
+    if (kind === 'chatcopy' || kind === 'peercmd' || kind === 'chatfile') return this.privateAgent(value.agentId);
+    if (kind === 'interaction' || kind === 'artifact') return this.privateRun(value.runId);
+    return false;
+  }
   put(kind, key, value) {
+    if (kind === 'specialist') this.privateAgents = null;
     if (shared(kind, key) && !this.remote && this.nodeId) value = { ...value, node: value.node || this.nodeId, _v: this.stamp() };
     this.transaction(() => {
       this.logChange(kind, key);
@@ -170,11 +191,23 @@ export class Store extends EventEmitter {
     this.emit('change', { kind, id: key });
     return value;
   }
-  delete(kind, key) { this.transaction(() => { this.db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(kind, key); this.logChange(kind, key, true); this.cloud?.remove(kind, key); }); this.cloud?.schedule(); this.emit('change', { kind, id: key }); }
+  delete(kind, key) { if (kind === 'specialist') this.privateAgents = null; this.transaction(() => { this.db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(kind, key); this.logChange(kind, key, true); this.cloud?.remove(kind, key); }); this.cloud?.schedule(); this.emit('change', { kind, id: key }); }
   event(runId, kind, value, visible = false) {
     this.transaction(() => {
       const result = this.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?)').run(runId ?? '', kind, visible ? 1 : 0, JSON.stringify(redact(value)), now());
       this.cloud?.event(this.db.prepare('SELECT * FROM events WHERE sequence=?').get(result.lastInsertRowid));
+    });
+    this.cloud?.schedule();
+    this.emit('change', { kind: 'event', runId });
+  }
+  // A chat that moved here from another computer keeps its messages with the times they were written.
+  importEvents(runId, events) {
+    this.transaction(() => {
+      for (const event of events) {
+        const { sequence, kind, visible, createdAt, ...value } = event;
+        const result = this.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?)').run(runId, kind, visible === false ? 0 : 1, JSON.stringify(value), createdAt || now());
+        this.cloud?.event(this.db.prepare('SELECT * FROM events WHERE sequence=?').get(result.lastInsertRowid));
+      }
     });
     this.cloud?.schedule();
     this.emit('change', { kind: 'event', runId });

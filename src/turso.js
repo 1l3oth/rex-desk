@@ -53,10 +53,43 @@ export class TursoSync {
     const result = await this.client.execute({ sql: 'SELECT kind,id,value,deleted,v FROM rex_shared WHERE v > ? AND node != ? ORDER BY v LIMIT ?', args: [since, this.store.nodeId, limit] });
     return result.rows.map(row => ({ kind: row.kind, id: row.id, deleted: Boolean(Number(row.deleted)), value: Number(row.deleted) ? null : JSON.parse(row.value), v: row.v }));
   }
-  record(kind, id, value) { this.shared(kind, id, value); this.enqueue('INSERT INTO rex_records(workspace,kind,id,value) VALUES(?,?,?,?) ON CONFLICT(workspace,kind,id) DO UPDATE SET value=excluded.value', [this.workspace, kind, id, JSON.stringify(value)]); }
+  // What belongs to a project kept out of the cloud is never written there (see Store.isPrivate): not by a change, not by the
+  // first upload of a workspace. Deleting still reaches the cloud, so an older copy there goes away.
+  record(kind, id, value) { if (this.store.isPrivate(kind, value)) return; this.shared(kind, id, value); this.enqueue('INSERT INTO rex_records(workspace,kind,id,value) VALUES(?,?,?,?) ON CONFLICT(workspace,kind,id) DO UPDATE SET value=excluded.value', [this.workspace, kind, id, JSON.stringify(value)]); }
   remove(kind, id) { this.shared(kind, id, null, true); this.enqueue('DELETE FROM rex_records WHERE workspace=? AND kind=? AND id=?', [this.workspace, kind, id]); }
   removeEvent(sequence) { this.enqueue('DELETE FROM rex_events WHERE workspace=? AND sequence=?', [this.workspace, Number(sequence)]); }
-  event(row) { this.enqueue('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,sequence) DO UPDATE SET run_id=excluded.run_id,kind=excluded.kind,visible=excluded.visible,value=excluded.value,created_at=excluded.created_at', [this.workspace, Number(row.sequence), row.run_id, row.kind, row.visible, row.value, row.created_at]); }
+  event(row) { if (this.store.privateRun(row.run_id)) return; this.enqueue('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,sequence) DO UPDATE SET run_id=excluded.run_id,kind=excluded.kind,visible=excluded.visible,value=excluded.value,created_at=excluded.created_at', [this.workspace, Number(row.sequence), row.run_id, row.kind, row.visible, row.value, row.created_at]); }
+  // A project was set to stay out of the cloud: what the cloud holds of one of its agents is deleted there. The copies in the
+  // shared table are removed outright (not marked deleted), so the other computers keep their own copy of the chat.
+  forget(agentId) {
+    if (!this.enabled) return { removed: 0 };
+    let removed = 0;
+    const drop = (kind, id) => { removed += 1; this.enqueue('DELETE FROM rex_records WHERE workspace=? AND kind=? AND id=?', [this.workspace, kind, id]); if (SHARED.has(kind)) this.enqueue('DELETE FROM rex_shared WHERE kind=? AND id=?', [kind, id]); };
+    const runs = this.store.list('run').filter(run => run.specialistId === agentId || run.roomAgent === agentId), runIds = new Set(runs.map(run => run.id));
+    this.store.transaction(() => {
+      for (const kind of ['chatcopy', 'peercmd', 'chatfile']) for (const item of this.store.list(kind)) if (item.agentId === agentId) drop(kind, item.id);
+      for (const kind of ['interaction', 'artifact']) for (const item of this.store.list(kind)) if (runIds.has(item.runId)) drop(kind, item.id);
+      for (const run of runs) {
+        drop('run', run.id); this.enqueue('DELETE FROM rex_events WHERE workspace=? AND run_id=?', [this.workspace, run.id]);
+        this.enqueue('DELETE FROM rex_files WHERE workspace=? AND path LIKE ?', [this.workspace, `data/artifacts/${run.id}/%`]);
+      }
+      this.enqueue('DELETE FROM rex_files WHERE workspace=? AND path LIKE ?', [this.workspace, `memory/agents/home/${agentId}/%`]);
+    });
+    this.files.forget([...[...runIds].map(id => `data/artifacts/${id}/`), `memory/agents/home/${agentId}/`]);
+    this.schedule(); return { removed };
+  }
+  // The project may use the cloud again: everything of the agent that is here goes back up.
+  restoreAgent(agentId) {
+    if (!this.enabled) return { sent: 0 };
+    let sent = 0;
+    const runs = this.store.list('run').filter(run => run.specialistId === agentId || run.roomAgent === agentId), runIds = new Set(runs.map(run => run.id));
+    this.store.transaction(() => {
+      for (const run of runs) { this.record('run', run.id, run); sent += 1; for (const row of this.store.db.prepare('SELECT * FROM events WHERE run_id=? ORDER BY sequence').all(run.id)) this.event(row); }
+      for (const kind of ['chatcopy', 'peercmd', 'chatfile']) for (const item of this.store.list(kind)) if (item.agentId === agentId) { this.record(kind, item.id, item); sent += 1; }
+      for (const kind of ['interaction', 'artifact']) for (const item of this.store.list(kind)) if (runIds.has(item.runId)) { this.record(kind, item.id, item); sent += 1; }
+    });
+    this.schedule(); void this.files.run?.(); return { sent };
+  }
   schedule() {
     if (!this.ready || this.timer || this.closed) return;
     this.timer = setTimeout(() => { this.timer = null; void this.flush(); }, 350);
@@ -234,10 +267,11 @@ export class TursoSync {
   async verify() {
     await this.flush();
     if (this.state !== 'connected') throw new Error('Turso is offline. Pending writes are safe in the local outbox.');
-    const local = this.store.db.prepare('SELECT kind,id,value FROM records ORDER BY kind,id').all();
+    const local = this.store.db.prepare('SELECT kind,id,value FROM records ORDER BY kind,id').all().filter(row => !this.store.isPrivate(row.kind, JSON.parse(row.value)));
     const remote = await this.client.execute({ sql: 'SELECT kind,id,value FROM rex_records WHERE workspace=? ORDER BY kind,id', args: [this.workspace] });
     const hash = rows => createHash('sha256').update(JSON.stringify(rows.map(row => [row.kind, row.id, row.value]))).digest('hex');
-    const localEvents = Number(this.store.db.prepare('SELECT COUNT(*) AS total FROM events').get().total);
+    const privateRuns = new Set(this.store.list('run').filter(run => this.store.isPrivate('run', run)).map(run => run.id));
+    const localEvents = privateRuns.size ? this.store.db.prepare('SELECT run_id FROM events').all().filter(row => !privateRuns.has(row.run_id)).length : Number(this.store.db.prepare('SELECT COUNT(*) AS total FROM events').get().total);
     const remoteEvents = Number((await this.client.execute({ sql: 'SELECT COUNT(*) AS total FROM rex_events WHERE workspace=?', args: [this.workspace] })).rows[0].total);
     return { matched: hash(local) === hash(remote.rows) && localEvents === remoteEvents, localRecords: local.length, remoteRecords: remote.rows.length, localEvents, remoteEvents };
   }

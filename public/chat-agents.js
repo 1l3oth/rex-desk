@@ -33,7 +33,7 @@ export function agentStage(ctx) {
       <p class="ag-line"><span class="dot ${tone}"></span>${esc(agent.status?.label || 'Idle')} on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>${agent.device ? ` · works on <b>${esc(agent.device)}</b>${agent.remote ? '' : ' (this computer)'}` : ''}</p>
       <p class="ag-path" title="${esc(agent.projectPath)}">Main folder <code>${esc(agent.projectPath || 'not set')}</code></p>
     </div>
-    <div class="ag-actions"><button class="btn primary" data-action="spec-chat">Chat with ${esc(agent.name)}</button><button class="btn" data-action="spec-duplicate">Duplicate</button></div>
+    <div class="ag-actions"><button class="btn primary" data-action="spec-chat">Chat with ${esc(agent.name)}</button><button class="btn" data-action="spec-duplicate">Duplicate</button>${agent.remote && !agent.pinned ? '<button class="btn" data-action="spec-move" title="Make this agent work on this computer, with the same chat">Move to this computer</button>' : ''}</div>${agent.pinned ? `<p class="ag-help">Runs only on ${esc(agent.device || 'its computer')} (set in Settings, Projects).${agent.noCloud ? ' Kept out of the cloud.' : ''}</p>` : agent.noCloud ? '<p class="ag-help">Kept out of the cloud (set in Settings, Projects).</p>' : ''}
   </header>`;
   const questions = unsure.length ? `<section class="ag-ask"><h2>${esc(agent.name)} is not sure about</h2><ul>${unsure.map((text, index) => `<li><span>${esc(text)}</span><span class="ag-ask-do"><button class="btn small" data-action="spec-answer" data-index="${index}">Answer</button><button class="btn small quiet" data-action="spec-settled" data-index="${index}" title="Mark as settled" aria-label="Mark as settled">Settled</button></span></li>`).join('')}</ul></section>` : '';
   const rules = `<section class="ag-sec"><h2>Rules from you</h2><p class="ag-help">${esc(agent.name)} follows these on every task in ${esc(agent.projectSlug)}.</p>
@@ -134,6 +134,12 @@ export async function agentAction(ctx, action, target = null) {
   else if (action === 'spec-save') {
     await api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: value('sp-rules'), unsure: agent.unsure || [], model: value('sp-model') } });
     toast('Rules saved.'); await refresh({ full: true });
+  } else if (action === 'spec-move') {
+    if (!confirm(`Move ${agent.name} to this computer?
+
+Its chat comes along and it starts a fresh session from a handoff. Code that was not pushed on ${agent.device || 'the other computer'} stays there, so push it first.`)) return;
+    const moved = await api(`/specialists/${agent.id}/move`, { method: 'POST', data: {} }); await refresh({ full: true });
+    toast(`${agent.name} now works on this computer, in ${moved.folder}.`);
   } else if (action === 'spec-duplicate') {
     dialog(ctx, { title: `Duplicate ${agent.name}`, nameValue: `${agent.name} 2`, submit: async form => {
       const copy = await api(`/specialists/${agent.id}/duplicate`, { method: 'POST', data: { name: form.name } }); await refresh(); open('specialist', copy.id); toast('Duplicated. It has the same project and rules, and its own conversation.'); } });
