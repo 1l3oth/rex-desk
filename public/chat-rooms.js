@@ -107,9 +107,22 @@ function activityHtml(ctx, room) {
 // Two tabs, like a messenger's chat info: Chat info (members, and the media, files and links shared here) and Activity (what the agents are doing).
 function roomSideHtml(ctx, room) {
   const trees = chatWorktrees(ctx.ui, { roomId: room.id });
-  const tab = ['activity', 'worktrees'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
+  const tab = ['activity', 'worktrees', 'agents'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
   const close = '<button type="button" class="side-x" data-action="info-toggle" aria-label="Close the side panel" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
-  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : activityHtml(ctx, room)}`;
+  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'agents' ? 'on' : ''}" data-action="side-tab" data-tab="agents">Agents</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'agents' ? roomAgentsHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : activityHtml(ctx, room)}`;
+}
+// The Agents tab: each member's AI and model, changed right here. Saved at once on the agent itself, so it holds in every chat.
+const AIS = [{ value: 'claude', label: 'Claude Code', hint: 'Claude subscription' }, { value: 'codex', label: 'Codex', hint: 'ChatGPT subscription' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }];
+function roomAgentsHtml(ctx, room) {
+  const { esc, ui } = ctx, agents = room.members.map(member => (ui.snap.specialists || []).find(item => item.id === member.id)).filter(Boolean);
+  if (!agents.length) return '<p class="muted">No agents in this room yet.</p>';
+  return `<div class="room-agents">${agents.map(agent => {
+    const ai = ['codex', 'gemini'].includes(agent.provider) ? agent.provider : 'claude', choices = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
+    const models = [{ value: '', label: 'Default', hint: 'The model set in Settings' }, ...(choices.models || []).map(model => ({ value: model.id, label: model.label, hint: model.hint, disabled: model.disabled }))];
+    return `<section class="ag-sec room-agent" data-agent="${esc(agent.id)}"><h3>${esc(agent.name)}</h3>
+      <label class="room-agent-row"><span>AI</span>${pickerHtml(ctx, { id: `ra-provider-${agent.id}`, label: 'AI', value: ai, items: AIS, compact: true })}</label>
+      <label class="room-agent-row"><span>Model</span>${pickerHtml(ctx, { id: `ra-model-${agent.id}`, label: 'Model', value: agent.model || '', items: models, compact: true })}</label></section>`;
+  }).join('')}<p class="muted">Changes save at once and hold for this agent everywhere. A new AI starts a fresh session with the chat so far handed over.</p></div>`;
 }
 function roomSharedHtml(ctx, room) {
   const messages = (ctx.ui.snap.messages || []).filter(message => message.roomId === room.id && message.from.type !== 'system'), runs = new Set(roomRunIds(ctx.ui, room));
@@ -267,6 +280,18 @@ export function initRoomInfo(ctx) {
         await refresh(); toast('Room picture changed.');
       } catch (error) { toast(error.message, true); }
     }
+  });
+  // The Agents tab: an AI or model picked for a member is saved on that agent at once.
+  document.addEventListener('change', async event => {
+    const match = /^ra-(provider|model)-(.+)$/.exec(event.target.id || ''); if (!match) return;
+    const [, field, id] = match, agent = (ctx.ui.snap.specialists || []).find(item => item.id === id); if (!agent) return;
+    if (field === 'provider' && (agent.provider || 'claude') === event.target.value) return;
+    try {
+      await ctx.api(`/specialists/${id}`, { method: 'PUT', data: field === 'provider' ? { provider: event.target.value } : { model: event.target.value } });
+      delete ctx.ui.picks?.[`ra-provider-${id}`]; delete ctx.ui.picks?.[`ra-model-${id}`];
+      ctx.toast(field === 'provider' ? `${agent.name} now runs on ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : 'Claude Code'}.` : `${agent.name}'s model saved.`);
+      await ctx.refresh({ full: true });
+    } catch (error) { ctx.toast(error.message, true); }
   });
   document.addEventListener('keydown', event => { if (event.target.id === 'room-name' && event.key === 'Enter') { event.preventDefault(); event.target.blur(); } });
 }

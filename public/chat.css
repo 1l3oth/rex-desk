@@ -420,6 +420,7 @@ html[data-theme=light] .nc0{color:#3559c7}html[data-theme=light] .nc1{color:#c24
 .ag-body{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
 .ag-main{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px}
 .ag-sec{display:flex;flex-direction:column;gap:8px}
+.room-agents{display:flex;flex-direction:column;gap:14px;padding:4px 2px}.room-agent h3{margin:0;font-size:14px}.room-agent-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px}.room-agent-row>span{color:var(--muted,#888)}
 .ag-main textarea{width:100%;min-height:150px;resize:vertical;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.55}
 .ag-main textarea:focus{border-color:var(--accent);outline:0;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
 .ag-save{display:flex;align-items:center;gap:10px}
