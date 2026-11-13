@@ -57,6 +57,13 @@ test('Dangerous mode starts agy with every tool approved and asks nothing; a sav
   assert.equal(events[0].data.sessionId, 'abcdabcd-0000-0000-0000-000000000000');
 });
 
+test('a Gemini agent with no mode set runs as Dangerous, like Claude, and asks nothing', async () => {
+  const { item, events, asks } = runner({});
+  await item.start('go');
+  assert.equal(asks.length, 0);
+  assert.match(events.find(event => event.kind === 'agent-result').data.result, / skip$/);
+});
+
 test('Antigravity models come from the account, and agy models output means signed in', async () => {
   const items = await antigravityModels({ clientFactory: factory });
   assert.deepEqual(items.map(item => item.id), ['gemini-3.8-flash', 'claude-sonnet-4-6']);

@@ -89,6 +89,9 @@ export const antigravityMode = mode => ({ manual: 'default', acceptEdits: 'accep
 const thought = effort => effort ? (['xhigh', 'max'].includes(effort) ? 'high' : effort) : '';
 const resultText = output => typeof output === 'string' ? output : output?.output ?? (output && Object.keys(output).length ? JSON.stringify(output) : '');
 
+// No mode set means Dangerous, the mode Rex Desk agents start with, the same as for Claude.
+const dangerous = mode => !mode || mode === 'bypassPermissions';
+
 export class AntigravityRunner {
   constructor(options) { Object.assign(this, options); this.event ||= () => {}; this.text = ''; this.pendingText = ''; }
   flush() { if (!this.pendingText.trim()) { this.pendingText = ''; return; } this.event('agent-text', { text: this.pendingText.trim() }); this.pendingText = ''; }
@@ -98,7 +101,7 @@ export class AntigravityRunner {
     // Rex Desk's own tools (desk_message, desk_memory...) run without asking, the same as for Claude.
     const input = params.toolCall?.rawInput || params.toolCall?.args || {};
     const rexTool = input.ServerName === 'rex_desk' && /^desk_/.test(String(input.ToolName || ''));
-    if (this.run.permissionMode === 'bypassPermissions' || (rexTool && this.ask)) return { outcome: { outcome: 'selected', optionId: allow?.optionId } };
+    if (dangerous(this.run.permissionMode) || (rexTool && this.ask)) return { outcome: { outcome: 'selected', optionId: allow?.optionId } };
     // A one-shot text answer (naming, a query) has nobody to ask, so it never runs a tool.
     if (!this.ask) return { outcome: deny ? { outcome: 'selected', optionId: deny.optionId } : { outcome: 'cancelled' } };
     const call = params.toolCall || {};
@@ -121,7 +124,7 @@ export class AntigravityRunner {
     if (this.signal?.aborted) throw new Error('Antigravity run interrupted.');
     const env = { ...this.agentEnv, REX_DESK_TOKEN: this.token || '', REX_AGENT_TOKEN: this.token || '', REX_DESK_URL: this.mcpUrl || '' };
     let failed; const broken = new Promise((resolve, reject) => { failed = reject; }); broken.catch(() => {});
-    this.client = (this.clientFactory || (options => new AcpClient(options)))({ env, cwd: this.cwd, args: this.run.permissionMode === 'bypassPermissions' ? ['--dangerously-skip-permissions'] : [],
+    this.client = (this.clientFactory || (options => new AcpClient(options)))({ env, cwd: this.cwd, args: dangerous(this.run.permissionMode) ? ['--dangerously-skip-permissions'] : [],
       onNotification: (method, params) => this.notification(method, params), onRequest: (method, params) => this.request(method, params), onError: error => failed(error) });
     const abort = () => { if (this.sessionId) this.client.notify('session/cancel', { sessionId: this.sessionId }); failed(new Error('Antigravity run interrupted.')); setTimeout(() => this.client.close(), 500); };
     this.signal?.addEventListener('abort', abort, { once: true });
