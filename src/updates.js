@@ -3,13 +3,15 @@ import { createHash, createPublicKey, verify } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
-// Installers are published with an Ed25519 signature made by the release key that never leaves the publisher's computer.
-// The app trusts only this public key, so a changed manifest or installer is refused.
+// Installers are published with an Ed25519 signature made by the release key, which only the release workflow holds.
+// The app trusts only this public key, so an installer changed in the downloads bucket or on the way is refused.
 const releaseKey = createPublicKey(`-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAJmCa3mqqjlD4lVjyGWHafrS3Sye2kdJDtyPJ1WndQtw=
 -----END PUBLIC KEY-----`);
-export const releasesRepository = process.env.REX_RELEASES_REPO || 'DaraBoth/rex-desk-releases';
-const manifestUrl = () => process.env.REX_UPDATE_MANIFEST || `https://github.com/${releasesRepository}/releases/latest/download/latest.json`;
+// The downloads bucket behind an address Rex Desk owns, so the storage behind it can change without stranding installed apps.
+export const downloadsUrl = 'https://downloads.rexdesk.dev';
+// REX_UPDATE_CHANNEL=beta makes an installed app follow test releases; everyone else stays on stable.
+const manifestUrl = () => process.env.REX_UPDATE_MANIFEST || `${downloadsUrl}/${process.env.REX_UPDATE_CHANNEL || 'stable'}/latest.json`;
 
 export function newer(candidate, current) {
   const parts = value => String(value || '').replace(/^v/, '').split('.').map(part => Number.parseInt(part, 10) || 0);

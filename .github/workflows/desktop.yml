@@ -1,13 +1,37 @@
 name: Desktop installers
 
-# Builds the installable Rex Desk app (bundled Node and server) for Windows (.exe) and macOS (.dmg).
-# The installers are not code-signed yet, so Windows SmartScreen and macOS Gatekeeper warn on first open.
-# Run it from the Actions tab, or push a tag like desktop-v0.2.2. Each run publishes a pre-release in this repository;
-# pre-releases never count as "latest", so the signed auto-update channel in DaraBoth/rex-desk-releases is not touched.
+# Builds the installable Rex Desk app (bundled Node and server) for Windows (.exe, .msi, portable .zip) and macOS (.dmg).
+# Run it from the Actions tab: pick a channel and it builds, signs the update, and uploads everything to the downloads
+# bucket (Cloudflare R2 or AWS S3). Installed apps on that channel then update themselves.
+#   beta    test releases; only apps started with REX_UPDATE_CHANNEL=beta take them
+#   stable  everyone
+#   none    build only, nothing is uploaded
+# Every run also publishes a pre-release in this repository, as before. A tag like desktop-v0.2.2 only builds that pre-release.
+#
+# One-time setup, under Settings → Secrets and variables → Actions:
+#   Secrets    REX_RELEASE_KEY_PEM (the Ed25519 release key), RELEASE_S3_ACCESS_KEY_ID, RELEASE_S3_SECRET_ACCESS_KEY
+#   Variables  RELEASE_S3_BUCKET, RELEASE_S3_ENDPOINT (R2: https://<account>.r2.cloudflarestorage.com; leave empty for AWS),
+#              RELEASE_S3_REGION (R2: auto), RELEASE_BASE_URL (only when the public address is not the one in src/updates.js)
 on:
   workflow_dispatch:
+    inputs:
+      channel:
+        description: "Who gets this build as an update: beta (testers), stable (everyone), none (build only)"
+        type: choice
+        options: [beta, stable, none]
+        default: beta
+      version:
+        description: "Version to build, like 0.3.0. Empty uses the version in desktop/src-tauri/tauri.conf.json"
+        required: false
+        type: string
+      notes:
+        description: "What changed, shown to people in Settings → Updates"
+        required: false
+        type: string
   push:
     tags: ['desktop-v*']
+
+run-name: "Desktop ${{ inputs.version || '(repo version)' }} → ${{ inputs.channel || 'pre-release only' }}"
 
 permissions:
   contents: read
@@ -49,6 +73,12 @@ jobs:
       - run: npm ci
       - run: npm ci
         working-directory: desktop
+      - name: Set the version
+        if: inputs.version != ''
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: node desktop/version.mjs "$VERSION"
       # stage.mjs copies this Node and the server into the payload; tauri build packs it into the installer.
       - run: npm run build -- --bundles ${{ matrix.bundle }}
         working-directory: desktop
@@ -68,6 +98,36 @@ jobs:
           name: rex-desk-${{ matrix.name }}
           path: ${{ matrix.files }}
           if-no-files-found: error
+
+  # The only job that holds the release key and the bucket keys; the build jobs above run third-party code without them.
+  publish:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.channel != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: desktop-publish-${{ inputs.channel }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Sign, upload and check the release
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          NOTES: ${{ inputs.notes }}
+          REX_RELEASE_KEY_PEM: ${{ secrets.REX_RELEASE_KEY_PEM }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_S3_SECRET_ACCESS_KEY }}
+          RELEASE_S3_BUCKET: ${{ vars.RELEASE_S3_BUCKET }}
+          RELEASE_S3_ENDPOINT: ${{ vars.RELEASE_S3_ENDPOINT }}
+          RELEASE_S3_REGION: ${{ vars.RELEASE_S3_REGION }}
+          RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
+        run: node scripts/release-desktop.mjs --files dist --channel "$CHANNEL" --notes "$NOTES" --upload
 
   release:
     needs: build

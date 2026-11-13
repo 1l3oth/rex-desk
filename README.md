@@ -90,7 +90,15 @@ Then open http://127.0.0.1:4317. Use `npm run dev` to restart on every change. A
 
 ## Build the installers
 
-The **Desktop installers** workflow (`.github/workflows/desktop.yml`) builds the Windows `.exe` and the macOS `.dmg` on GitHub and publishes them as a pre-release. You can start it from the Actions tab, or by pushing a tag like `desktop-v0.2.2`. Raise `version` in `desktop/src-tauri/tauri.conf.json` and `desktop/src-tauri/Cargo.toml` first.
+The **Desktop installers** workflow (`.github/workflows/desktop.yml`) builds the Windows `.exe`, `.msi` and portable `.zip` and the macOS `.dmg` on GitHub. Start it from the Actions tab with **Run workflow** and fill in:
+
+- **channel**: `beta` for a test release, `stable` for everyone, `none` to only build.
+- **version**: like `0.3.0`. Leave it empty to use the version in `desktop/src-tauri/tauri.conf.json`.
+- **notes**: what changed, shown in Settings → Updates.
+
+The run signs the Windows installer with the release key, uploads every file to the downloads bucket under `releases/<version>/`, then replaces `<channel>/latest.json`, the small file installed apps read. It finishes by downloading the release back and checking the signature, so a run that ends green is a release people can install. Installed Windows apps update themselves within six hours, or at Settings → Updates → Check now. To follow test releases, start Rex Desk with the environment variable `REX_UPDATE_CHANNEL=beta`. The macOS app does not update itself yet.
+
+The bucket is Cloudflare R2 or AWS S3; the secrets and variables the workflow needs are listed at the top of the workflow file. `node scripts/release-desktop.mjs --files <folder>` stages and signs the same release on your computer without uploading.
 
 To build on your own computer (you need Rust; on Windows, also the MSVC build tools):
 
