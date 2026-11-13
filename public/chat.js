@@ -272,7 +272,8 @@ function stageModel() {
   if (type === 'monitor') return monitorStage(ctx);
   if (type === 'worktrees') return worktreesStage(ctx);
   if (type === 'jev') return jevStage();
-  if (type === 'person') return { title: 'About you', meta: 'Your profile, from what the agents learned', feed: personPage(), top: true };
+  if (type === 'person') { const graph = knowledgeView() === 'graph'; return { title: 'Knowledge', meta: graph ? 'You, your agents and your second brain' : 'Your profile, from what the agents learned', top: true,
+    feed: `<div class="kg-switch" role="tablist" aria-label="How to look at your knowledge"><button type="button" role="tab" aria-selected="${graph}" class="${graph ? 'on' : ''}" data-action="kg-view" data-view="graph">Graph</button><button type="button" role="tab" aria-selected="${!graph}" class="${graph ? '' : 'on'}" data-action="kg-view" data-view="list">List</button></div>${graph ? '<div class="kg" id="kg" data-keep="kg"></div>' : personPage()}` }; }
   if (type === 'project') {
     return { title: id, meta: 'Project memory', feed: `<div class="page"><div class="row"><button class="btn primary small" data-action="spec-new">Create agent for this project</button></div><div class="card"><div class="md">${markdown(ui.page || 'Loading…')}</div></div></div>` };
   }
@@ -305,13 +306,16 @@ const welcomeStage = () => ({ title: 'Rex', meta: 'Rex Agent',
 // The chat is not drawn again from nothing when something changes: only the messages that differ are swapped, and new
 // ones are added at the end. Messages already on screen stay as they are (a playing video, selected text, an open step).
 let feedHtml = '';
+// Graph or list on the Knowledge screen; remembered on this computer.
+const knowledgeView = () => { try { return localStorage.getItem('rex-knowledge-view') === 'list' ? 'list' : 'graph'; } catch { return 'graph'; } };
 function patchFeed(inner, html, full) {
   if (!full && html === feedHtml && inner.childElementCount) return false;
   feedHtml = html;
   const next = document.createElement('template'); next.innerHTML = html;
   const want = [...next.content.childNodes], have = [...inner.childNodes];
   if (full || !have.length) { inner.replaceChildren(...want); return true; }
-  const same = (a, b) => a.nodeType === b.nodeType && (a.nodeType === 1 ? a.outerHTML === b.outerHTML : a.nodeValue === b.nodeValue);
+  // An element marked data-keep (the graph's canvas lives in one) is kept as it is while its mark stays the same.
+  const same = (a, b) => a.nodeType === b.nodeType && (a.nodeType === 1 ? (a.dataset.keep && a.dataset.keep === b.dataset.keep) || a.outerHTML === b.outerHTML : a.nodeValue === b.nodeValue);
   let changed = false;
   for (let index = 0; index < want.length; index++) {
     const old = have[index];
@@ -515,6 +519,7 @@ document.addEventListener('click', async event => {
     else if (action === 'sec-toggle') toggleSection(target.dataset.sec);
     else if (action === 'settings-open') openSettings(ctx);
     else if (action === 'settings-sources') { document.querySelector('.dialog-back:not(.settings)')?.remove(); openSettings(ctx, 'sources'); }
+    else if (action === 'kg-view') { try { localStorage.setItem('rex-knowledge-view', target.dataset.view); } catch {} renderAll(true); }
     else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
     else if (action === 'stop') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
     else if (action === 'scan') await scanProjects();

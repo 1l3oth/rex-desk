@@ -116,3 +116,38 @@ select option,select optgroup{background:var(--solid);color:var(--ink)}
 /* AI accounts: the providers sit in one row, however many there are, instead of stacking two by two. */
 .acct-tabs{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}
 .acct-tabs .tab{white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+
+/* Knowledge: the graph fills the chat area; its controls and the reading card are glass over the canvas. */
+.feed-inner:has(.kg-switch){max-width:none;padding:12px 14px 14px;gap:10px}
+.feed-inner:has(.kg-switch) .pf{max-width:1180px;margin:0 auto;width:100%}
+.kg-switch{align-self:center;display:inline-flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:11px;background:var(--bg)}
+.kg-switch button{border:0;background:none;border-radius:8px;padding:5px 16px;font-size:12.5px;color:var(--muted)}
+.kg-switch button.on{background:var(--raised);color:var(--ink);font-weight:600;box-shadow:inset 0 1px 0 var(--glass-edge)}
+.kg{position:relative;height:calc(100dvh - 150px);min-height:420px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:radial-gradient(120% 90% at 50% 40%,color-mix(in srgb,var(--accent) 9%,transparent),transparent 70%),color-mix(in srgb,var(--canvas) 55%,transparent)}
+.kg-canvas{position:absolute;inset:0;width:100%;height:100%;cursor:grab;touch-action:none}.kg-canvas:active{cursor:grabbing}
+.kg-top{position:absolute;left:14px;top:14px;right:14px;display:flex;align-items:center;gap:12px;pointer-events:none}
+.kg-search{pointer-events:auto;display:flex;align-items:center;gap:8px;width:min(300px,60%);height:38px;padding:0 12px;border:1px solid var(--line);border-radius:12px;background:var(--glass);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);color:var(--muted);box-shadow:inset 0 1px 0 var(--glass-edge)}
+.kg-search:focus-within{border-color:var(--accent)}
+.kg-search input{flex:1;min-width:0;border:0;background:none;outline:0;color:var(--ink);font-size:13.5px}
+.kg-count{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.kg-legend{position:absolute;left:14px;bottom:14px;display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--glass);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);font-size:12px;color:var(--muted)}
+.kg-legend:empty{display:none}
+.kg-legend span{display:inline-flex;align-items:center;gap:6px}
+.kg-legend i,.kg-links i{width:9px;height:9px;border-radius:50%;background:hsl(var(--h) 80% 60%);box-shadow:0 0 8px hsl(var(--h) 90% 60% / .7);flex:none}
+.kg-hint{position:absolute;right:16px;bottom:16px;font-size:11.5px;color:var(--muted);opacity:.8;pointer-events:none}
+.kg-card{position:absolute;right:14px;top:62px;width:min(330px,calc(100% - 28px));max-height:calc(100% - 110px);overflow:auto;padding:16px;border:1px solid var(--line);border-radius:16px;background:var(--glass);-webkit-backdrop-filter:blur(26px) saturate(150%);backdrop-filter:blur(26px) saturate(150%);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-edge);animation:kg-card-in .22s cubic-bezier(.22,1,.36,1)}
+.kg-card[hidden]{display:none}
+@keyframes kg-card-in{from{opacity:0;transform:translateX(14px)}}
+.kg-card h3{margin:8px 26px 6px 0;max-height:9em;overflow:auto;font-size:15.5px;line-height:1.4;overflow-wrap:anywhere}
+.kg-card p{margin:0 0 10px;font-size:13px;line-height:1.55;color:var(--muted);overflow-wrap:anywhere}
+.kg-card h4{margin:12px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.kg-kind{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;color:hsl(var(--h) 85% 68%);background:hsl(var(--h) 85% 60% / .14);border:1px solid hsl(var(--h) 85% 60% / .3)}
+html:not([data-theme=dark]) .kg-kind{color:hsl(var(--h) 75% 34%)}
+.kg-x{position:absolute;right:10px;top:10px;width:26px;height:26px;border:0;border-radius:8px;background:none;color:var(--muted);font-size:18px;line-height:1}.kg-x:hover{background:var(--raised);color:var(--ink)}
+.kg-links{display:flex;flex-direction:column;gap:2px;margin-bottom:12px}
+.kg-links button{display:flex;align-items:center;gap:8px;padding:5px 8px;border:0;border-radius:8px;background:none;text-align:left;font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kg-links button:hover{background:var(--raised)}
+@media (max-width:760px){.kg{height:calc(100dvh - 190px)}.kg-hint,.kg-count{display:none}.kg-card{top:auto;bottom:10px;right:10px;left:10px;width:auto;max-height:50%}}
+@media (prefers-reduced-motion:reduce){.kg-card{animation:none}}
+/* Over the moving graph, glass is dense instead of blurred: a blur there would be worked out again on every frame. */
+.kg-search,.kg-legend,.kg-card{-webkit-backdrop-filter:none;backdrop-filter:none;background:color-mix(in srgb,var(--solid) 90%,transparent)}
