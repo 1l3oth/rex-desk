@@ -21,3 +21,21 @@ test('a page an agent shared on another computer opens here from the shared copy
   assert.match(opened.text, /Hello/);
   desk.closed = true;
 });
+
+test('a message to a chat with an agent that lives on another computer goes there while it is on, and runs here only when it is off', async () => {
+  const { createApp } = await import('../src/server.js');
+  const app = await createApp({ dataDirectory: temporary('home-agent'), port: 0 });
+  try {
+    const { store, desk } = app, runId = randomUUID();
+    store.put('specialist', 'far', { id: 'far', kind: 'specialist', name: 'Far_bot', slug: 'far', node: 'other-computer', provider: 'claude' });
+    store.put('run', runId, { id: runId, specialistId: 'far', state: 'finished', provider: 'claude', createdAt: new Date().toISOString() });
+    const sent = []; let online = true;
+    desk.peers.online = () => online; desk.peers.chatAction = async (copy, action, input) => { sent.push({ copy, action, text: input.text }); return { queued: true }; };
+    const post = text => fetch(`${app.address}/api/runs/${runId}/say`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text }) });
+    assert.equal((await post('hello')).status, 200);
+    assert.deepEqual(sent.map(item => [item.copy.node, item.action, item.text]), [['other-computer', 'say', 'hello']]);
+    online = false; desk.say = async () => ({ ranHere: true });
+    assert.deepEqual(await (await post('again')).json(), { ranHere: true });
+    assert.equal(sent.length, 1);
+  } finally { await app.close(); }
+});

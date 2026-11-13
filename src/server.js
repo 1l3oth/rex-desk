@@ -558,6 +558,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         }
         if (request.method === 'POST') {
           const input = await body(request);
+          // A chat with an agent that lives on another computer runs there while that computer is on, even when this one holds a copy of the chat.
+          const homeAgent = ['say', 'resume', 'stop'].includes(action) && store.get('run', runId)?.specialistId ? store.get('specialist', store.get('run', runId).specialistId) : null;
+          if (homeAgent && desk.peers.isRemote(homeAgent) && desk.peers.online(homeAgent.node)) return json(response, 200, await desk.peers.chatAction({ id: runId, node: homeAgent.node, agentId: homeAgent.id }, action, input));
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
           if (action === 'fresh') return json(response, 200, await desk.freshStart(runId));
           if (action === 'say') return json(response, 200, await desk.say(runId, input.text, input));
