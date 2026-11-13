@@ -90,5 +90,5 @@ export async function installUpdate(api) {
     throw failure;
   }
   card?.remove();
-  document.getElementById('app').innerHTML = '<div class="boot"><img class="boot-mark" src="/favicon.svg" alt=""><span>Updating Rex Desk. It reopens by itself in about a minute.</span><i class="boot-bar"></i></div>';
+  document.getElementById('app').innerHTML = '<div class="boot"><svg class="boot-mark" viewBox="0 0 64 64" width="44" height="44" aria-hidden="true"><defs><linearGradient id="rex-mark-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a97ff"/><stop offset="1" stop-color="#3a72e8"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="14" fill="url(#rex-mark-g)"/><g fill="#fff"><rect x="16" y="16" width="14" height="14" rx="3"/><rect x="34" y="16" width="14" height="14" rx="3"/><rect x="16" y="34" width="14" height="14" rx="3"/><rect x="34" y="34" width="14" height="14" rx="3" opacity=".47"/></g></svg><span>Updating Rex Desk. It reopens by itself in about a minute.</span><i class="boot-bar"></i></div>';
 }

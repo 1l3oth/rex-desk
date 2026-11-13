@@ -147,10 +147,18 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       accounts.touch(entry.id);
       // A start that just opened the remembered key does not save it again (another PowerShell start, seconds at each open).
       if (staySignedIn && !remembered) await accounts.remember(entry.id, vaultKey).catch(error => { session.staySignedIn = false; console.error(`Stay signed in failed: ${error.message}`); });
-      // Bring this computer up to date before anyone works: upload leftovers, then take the newest cloud copy.
-      const status = await store.cloud.open();
-      if (status.state === 'connected' && !store.fresh) session.cloud = await store.cloud.pullLatest({ live: new Set(desk.live?.keys?.() || []) }).catch(error => ({ pulled: false, reason: error.message }));
-      else if (store.cloud.enabled) session.cloud = { pulled: false, reason: status.error || 'Cloud backup is offline; working from this computer’s copy.' };
+      // Bring this computer up to date with the cloud: upload leftovers, then merge in what changed elsewhere. It runs after the
+      // workspace opens, from what is on this computer, so Rex Desk shows at once instead of after minutes of network work
+      // (and the window's watchdog no longer restarts a server that is only syncing). A new computer restoring from the cloud
+      // has nothing to show yet, so it waits for the restore.
+      const opened = session, sync = async () => {
+        const status = await store.cloud.open();
+        if (status.state === 'connected' && !store.fresh) opened.cloud = await store.cloud.pullLatest({ live: new Set(desk.live?.keys?.() || []) }).catch(error => ({ pulled: false, reason: error.message }));
+        else if (store.cloud.enabled) opened.cloud = { pulled: false, reason: status.error || 'Cloud backup is offline; working from this computer’s copy.' };
+        if (session === opened) notify();
+      };
+      if (store.fresh) await sync();
+      else { opened.cloud = { pulled: false, syncing: true }; void sync().catch(error => { opened.cloud = { pulled: false, reason: error.message }; }); }
     } else void store.cloud.open();
     notify(); return session;
   }
@@ -426,7 +434,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (url.pathname === '/api/voice/engine' && request.method === 'POST') {
           const engine = String((await body(request)).engine || '');
           if (!['local', 'gemini', 'elevenlabs'].includes(engine)) return json(response, 400, { error: 'Choose local, gemini or elevenlabs.' });
-          if (!engines()[engine]) return json(response, 400, { error: engine === 'local' ? 'Install the voice model first.' : engine === 'gemini' ? 'Add your OpenRouter key first (Issues & settings → Jev priority).' : 'Add your ElevenLabs key first.' });
+          if (!engines()[engine]) return json(response, 400, { error: engine === 'local' ? 'Install the voice model first.' : engine === 'gemini' ? 'Add your OpenRouter key first (Settings → Jev and voice).' : 'Add your ElevenLabs key first.' });
           store.put('voice', 'engine', { id: 'engine', engine }); return json(response, 200, { engine });
         }
         if (url.pathname === '/api/voice/key' && request.method === 'POST') {
@@ -454,7 +462,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname.startsWith('/api/computer') || url.pathname.startsWith('/api/voice')) {
         const control = store.config().control || {};
         if (url.pathname === '/api/computer' && request.method === 'GET') return json(response, 200, { platform: computer.key, catalog: computer.catalog(), control, voice: { ...voice.status(), sizeMB: voice.size() }, anywhere: await anywhere.status() });
-        if (control.enabled === false) return json(response, 403, { error: 'Computer control is off. Turn it on in Settings → Computer control.' });
+        if (control.enabled === false) return json(response, 403, { error: 'Computer control is off. Turn it on in Settings → Jev and voice → Controlling this computer.' });
         if (url.pathname === '/api/computer/anywhere' && request.method === 'POST') return json(response, 200, await anywhere.set((await body(request)).on === true));
         if (url.pathname === '/api/computer/do' && request.method === 'POST') return json(response, 200, await desk.commander.perform((await body(request)).text));
         // "Yes, always": these actions stop asking. Only actions that normally ask can be added.

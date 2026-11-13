@@ -20,6 +20,13 @@ const SECTIONS = [
   ['backup', 'Backup and updates', 'Cloud copy, app updates'],
   ['connect', 'Connect another AI', 'Let another assistant use Rex Desk'],
 ];
+// The sections in groups by what they are about, so the list reads in a few chunks instead of thirteen rows.
+const GROUPS = [
+  ['You', ['general', 'notify', 'jev']],
+  ['Agents', ['agents', 'accounts', 'schedule', 'signins']],
+  ['Work', ['projects', 'sources', 'connect']],
+  ['Data and devices', ['folders', 'backup', 'devices']],
+];
 // An icon for each section, shown in the phone's list of sections.
 const ST_ICON = {
   general: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
@@ -176,7 +183,7 @@ export function openSettings(ctx, section = 'general') {
     const keep = back.dataset.section === state.section ? back.querySelector('.st-panel')?.scrollTop || 0 : 0;
     queueMicrotask(() => { back.dataset.section = state.section; const panel = back.querySelector('.st-panel'); if (panel && keep) panel.scrollTop = keep; });
     const title = (SECTIONS.find(([id]) => id === state.section) || [])[1] || 'Settings';
-    back.innerHTML = `<form class="settings-pop${state.list ? ' st-listing' : ' st-open'}" aria-label="Settings"><nav class="st-nav"><div class="st-navhead"><h1>Settings</h1><button type="button" class="st-done" data-st-close>Done</button></div>${SECTIONS.map(([id, label, hint]) => `<button type="button" class="${state.section === id && !state.list ? 'on' : ''}" data-st-section="${id}">${stIcon(id)}<span class="st-nl"><b>${label}</b><small>${hint}</small></span><svg class="st-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`).join('')}</nav>
+    back.innerHTML = `<form class="settings-pop${state.list ? ' st-listing' : ' st-open'}" aria-label="Settings"><nav class="st-nav"><div class="st-navhead"><h1>Settings</h1><button type="button" class="st-done" data-st-close>Done</button></div>${GROUPS.map(([group, ids]) => `<div class="st-group" role="group" aria-label="${group}"><span class="st-glabel" aria-hidden="true">${group}</span>${ids.map(id => SECTIONS.find(([key]) => key === id)).filter(Boolean).map(([id, label, hint]) => `<button type="button" class="${state.section === id && !state.list ? 'on' : ''}" data-st-section="${id}">${stIcon(id)}<span class="st-nl"><b>${label}</b><small>${hint}</small></span><svg class="st-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`).join('')}</div>`).join('')}</nav>
       <div class="st-body"><div class="st-mhead"><button type="button" class="st-back" data-st-back aria-label="Back to Settings"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span>Settings</span></button><b>${esc(title)}</b></div><div class="st-panel" data-st-panel>${panels[state.section]()}</div>
       <div class="st-foot">${saves.has(state.section) ? '<button type="button" class="btn primary" data-st-save>Save</button>' : ''}<span class="spacer"></span><button type="button" class="btn" data-st-close>Close</button></div></div>
       <button type="button" class="st-x" data-st-close aria-label="Close settings">×</button></form>`;

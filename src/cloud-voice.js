@@ -20,7 +20,7 @@ async function geminiModel(fetcher) {
 }
 
 export async function transcribeGemini(wav, language, key, { fetcher = fetch } = {}) {
-  if (!key) throw new Error('Gemini needs your OpenRouter key. Add it in Issues & settings → Jev priority.');
+  if (!key) throw new Error('Gemini needs your OpenRouter key. Add it in Settings → Jev and voice.');
   const model = await geminiModel(fetcher);
   const response = await fetcher('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST', signal: AbortSignal.timeout(60000),

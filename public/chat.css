@@ -5,6 +5,15 @@ html[data-theme=dark]{--bg:#14161a;--panel:#1b1e24;--raised:#23272e;--line:#2c31
 html{color-scheme:light}html[data-theme=dark]{color-scheme:dark}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
 button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}
+/* Form fields (Settings, the setup tour): a sunken well a step darker than the card, a hairline that firms up on hover, an
+   accent ring on focus. Zero specificity (:where), so a field styled on purpose keeps its own look. */
+:where(.st-field,.tour-card) :where(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=hidden]),select,textarea){box-sizing:border-box;width:100%;min-height:40px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.4;caret-color:var(--accent);transition:border-color .12s,box-shadow .12s}
+:where(.st-field,.tour-card) :where(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=hidden]),select,textarea):hover{border-color:color-mix(in srgb,var(--line) 55%,var(--muted))}
+:where(.st-field,.tour-card) :where(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=color],[type=button],[type=submit],[type=hidden]),select,textarea):focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent);outline:0}
+:where(.st-field,.tour-card) :where(input,textarea)::placeholder{color:var(--muted);opacity:.75}
+:where(.st-field,.tour-card) :where(input,textarea)::selection{background:color-mix(in srgb,var(--accent) 32%,transparent)}
+:where(.st-field,.tour-card) :where(input,select,textarea):disabled{opacity:.55;cursor:not-allowed}
+@media (prefers-reduced-motion:reduce){:where(.st-field,.tour-card) :where(input,select,textarea){transition:none}}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 code,pre{font-family:var(--mono);font-size:12px}
@@ -792,6 +801,8 @@ button.cn-main{cursor:pointer}
 .st-nav h1{margin:0 10px 12px;font-size:18px}
 .st-nav button{display:flex;flex-direction:column;gap:1px;padding:8px 10px;border:0;border-radius:9px;background:none;color:var(--ink);text-align:left}
 .st-nav button b{font-weight:600;font-size:13.5px}.st-nav button small{font-size:11.5px;color:var(--muted)}
+.st-group{display:flex;flex-direction:column;gap:2px}.st-group+.st-group{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.st-glabel{padding:2px 10px 4px;font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--muted)}
 .st-nav button:hover{background:var(--raised)}.st-nav button.on{background:color-mix(in srgb,var(--accent) 14%,transparent);box-shadow:inset 3px 0 0 var(--accent)}
 .st-body{display:grid;grid-template-rows:minmax(0,1fr) auto;min-width:0;min-height:0}
 .st-panel{overflow:auto;padding:26px 32px;display:flex;flex-direction:column;gap:16px;max-width:760px}
@@ -1585,13 +1596,20 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .st-gh-code{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.st-gh-code code{font-size:16px;letter-spacing:.12em;padding:4px 10px;border:1px solid var(--line);border-radius:8px}.st-gh-code small{flex-basis:100%}
 /* Folders, in Settings and in the setup tour. */
 .st-folders{display:flex;flex-direction:column;gap:10px}
-.st-folder{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;padding:12px 14px;border:1px solid var(--line);border-radius:12px;flex-wrap:wrap}
-.st-folder-text{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 260px}.st-folder-text small{color:var(--muted)}
-.st-folder-text code{font-size:12px;overflow-wrap:anywhere;color:var(--ink)}.st-folder-note{color:var(--accent)!important}
+.st-folder{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 12px;align-items:start;padding:12px 14px;border:1px solid var(--line);border-radius:12px}
+@media (max-width:560px){.st-folder{grid-template-columns:auto minmax(0,1fr)}.st-folder-actions{grid-column:2}}
+.st-folder-text{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 240px}.st-folder-text small{color:var(--muted)}
+.st-folder-text code{font-size:12px;color:var(--ink)}
+.st-folder-icon{flex:none;display:grid;place-items:center;width:38px;height:38px;border-radius:10px;color:var(--accent);background:color-mix(in srgb,var(--accent) 13%,transparent)}
+.st-folder-memory{color:#8250df;background:color-mix(in srgb,#8250df 11%,transparent)}html[data-theme=dark] .st-folder-memory{color:#b392f0;background:color-mix(in srgb,#b392f0 14%,transparent)}.st-folder-files{color:var(--good);background:color-mix(in srgb,var(--good) 13%,transparent)}
+.st-folder-path{display:flex;align-items:flex-start;gap:7px;margin-top:5px;padding:6px 9px;border-radius:8px;background:var(--bg);border:1px solid var(--line);color:var(--muted)}
+.st-folder-path svg{flex:none;margin-top:2px}.st-folder-path code{min-width:0;line-height:1.45}.st-folder-note{color:var(--accent)!important}
 .st-folder-actions{display:flex;gap:6px;flex-wrap:wrap}
 /* The setup tour. */
 .tour-back{z-index:60}
-.tour-card{background:var(--panel,var(--bg));color:var(--ink);border:1px solid var(--line);border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.25);width:min(560px,calc(100vw - 24px));max-height:calc(100vh - 32px);overflow:auto;padding:22px 24px;display:flex;flex-direction:column;gap:12px}
+/* A window opened from the tour (AI accounts, a folder picker) goes on top of it, not behind it. */
+.tour-back~.dialog-back{z-index:61}
+.tour-card{background:var(--panel,var(--bg));color:var(--ink);border:1px solid var(--line);border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.25);width:min(720px,calc(100vw - 24px));max-height:calc(100vh - 32px);overflow:auto;padding:22px 24px;display:flex;flex-direction:column;gap:12px}
 .tour-card h2{margin:0;font-size:20px}.tour-card p{margin:0;line-height:1.5}
 .tour-dots{display:flex;gap:6px;justify-content:center}.tour-dots span{width:8px;height:8px;border-radius:50%;background:var(--line)}.tour-dots span.on{background:var(--accent);width:22px;border-radius:4px}.tour-dots span.done{background:color-mix(in srgb,var(--accent) 45%,transparent)}
 .tour-pic{width:120px;height:80px;align-self:center}.tour-pic .tp-line{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.tour-pic .tp-fill{fill:color-mix(in srgb,var(--accent) 30%,transparent);stroke:var(--accent);stroke-width:3}.tour-pic .tp-check{fill:none;stroke:var(--accent);stroke-width:5;stroke-linecap:round;stroke-linejoin:round}

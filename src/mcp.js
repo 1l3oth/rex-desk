@@ -193,7 +193,7 @@ export function createMcp(desk, scope) {
   const computerAllowed = () => {
     if (!desk.computer) throw new Error('Computer control is not available on this Rex Desk.');
     const control = desk.store.config().control || {};
-    if (control.enabled === false || control.agents !== true) throw new Error('The person has not let agents control this computer. They can allow it in Settings → Computer control.');
+    if (control.enabled === false || control.agents !== true) throw new Error('The person has not let agents control this computer. They can allow it in Settings → Jev and voice → Controlling this computer.');
     return desk.computer;
   };
   tool('desk_computer_actions', 'List everything this computer can do for you: open apps and settings, volume, brightness, Wi-Fi, Bluetooth, camera, battery saver, sleep and wake, shutdown, mouse, keyboard, reading and clicking what is on screen. Each entry names its values.',

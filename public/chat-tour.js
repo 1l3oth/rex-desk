@@ -6,6 +6,17 @@ const ROWS = [
   ['files', 'Files from agents', 'Screenshots, recordings and files you attach.', 'now'],
 ];
 
+// One line icon per kind of folder (16px, 2px stroke, like the rest of the app).
+const svg = body => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const ICONS = {
+  data: svg('<ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V5.5"/><path d="M4.5 12v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V12"/>'),
+  memory: svg('<path d="M12 6.5c-1.6-1.3-4-2-7.5-2v13c3.5 0 5.9.7 7.5 2 1.6-1.3 4-2 7.5-2v-13c-3.5 0-5.9.7-7.5 2Z"/><path d="M12 6.5v13"/>'),
+  files: svg('<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.7"/><path d="m20.5 16-4.5-4.5-8.5 8"/>'),
+};
+const FOLDER = svg('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/>').replace('width="18" height="18"', 'width="14" height="14"');
+// A path breaks at its folder separators, not inside a folder name.
+const pathHtml = (esc, value) => esc(value).replace(/([\\/])/g, '$1<wbr>');
+
 export async function loadFolders({ api }, state) { state.folders = await api('/folders').catch(error => ({ error: error.message })); return state.folders; }
 
 export function foldersHtml({ esc }, state) {
@@ -13,7 +24,7 @@ export function foldersHtml({ esc }, state) {
   if (!folders) return '<p class="muted">Finding your folders…</p>';
   if (folders.error) return `<p class="error-text">${esc(folders.error)}</p>`;
   const pending = { data: folders.dataPending, memory: folders.memoryPending };
-  return `<div class="st-folders">${ROWS.map(([kind, label, help, when]) => `<div class="st-folder"><div class="st-folder-text"><b>${label}</b><small>${help}</small><code>${esc(folders[kind])}</code>
+  return `<div class="st-folders">${ROWS.map(([kind, label, help, when]) => `<div class="st-folder"><span class="st-folder-icon st-folder-${kind}">${ICONS[kind]}</span><div class="st-folder-text"><b>${label}</b><small>${help}</small><span class="st-folder-path" title="${esc(folders[kind])}">${FOLDER}<code>${pathHtml(esc, folders[kind])}</code></span>
       ${pending[kind] ? `<small class="st-folder-note">Moves to ${esc(pending[kind])} when Rex Desk restarts.</small>` : ''}
       ${kind === 'data' && folders.dataFailed ? `<small class="error-text">The last move did not happen: ${esc(folders.dataFailed)}</small>` : ''}
       ${kind === 'files' && folders.filesInData ? `<small class="st-folder-note">Kept with your Rex Desk data, so they are backed up with it.</small>` : ''}</div>

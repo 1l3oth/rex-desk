@@ -177,7 +177,7 @@ async function finishMic(ctx) {
     const heard = await transcribe(recording.wav(), voiceLanguage(ctx)), box = document.getElementById('draft');
     if (box) { ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(ctx.draftKey()); box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + heard.text; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); box.dispatchEvent(new Event('input', { bubbles: true })); }
   } catch (error) {
-    ctx.toast(/not installed|install/i.test(error.message) ? 'Voice is not installed yet. Install it in Issues & settings → Computer control.' : `Voice input: ${error.message}`, true);
+    ctx.toast(/not installed|install/i.test(error.message) ? 'Voice is not installed yet. Install it in Settings → Jev and voice.' : `Voice input: ${error.message}`, true);
   } finally { clearTimeout(slow); transcribing = false; micButton()?.classList.remove('busy'); }
 }
 async function toggleMic(ctx) {
@@ -354,7 +354,7 @@ async function voiceDialog(ctx) {
     const language = voiceLanguage(ctx);
     back.innerHTML = `<form class="dialog vdialog"><h2>Voice</h2>
       <label>I speak<select data-v-language>${LANG.map(([value, label]) => `<option value="${value}" ${value === language ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
-      <fieldset class="vengines"><legend>Turn speech into text with</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] ? hint : key === 'local' ? localHint() : key === 'gemini' ? 'Needs your OpenRouter key: Issues & settings → Jev priority.' : 'Paste a key below to use it.'}</small></span></label>`).join('')}</fieldset>
+      <fieldset class="vengines"><legend>Turn speech into text with</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] ? hint : key === 'local' ? localHint() : key === 'gemini' ? 'Needs your OpenRouter key: Settings → Jev and voice.' : 'Paste a key below to use it.'}</small></span></label>`).join('')}</fieldset>
       <label>ElevenLabs API key<span class="vkey"><input type="password" data-v-key autocomplete="off" spellcheck="false" placeholder="${info.available.elevenlabs ? 'Saved. Paste a new key to replace it.' : 'From elevenlabs.io → Profile → API keys'}"><button type="button" class="btn small" data-v-savekey>Save key</button>${info.available.elevenlabs ? '<button type="button" class="btn small quiet danger" data-v-dropkey>Remove</button>' : ''}</span></label>
       <section class="vcompare"><h3>Which one understands you?</h3><p class="muted small">Press Record, say one sentence, then Stop. It goes through every engine that is ready, so you can pick the best. Online engines receive this recording.</p>
         <button type="button" class="btn ${recording ? 'danger' : 'primary'}" data-v-record ${busy ? 'disabled' : ''}>${recording ? 'Stop' : busy ? 'Comparing…' : 'Record a sentence'}</button>

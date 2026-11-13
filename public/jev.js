@@ -27,7 +27,7 @@ for (const type of ['pointerdown', 'keydown', 'wheel']) addEventListener(type, s
 
 async function listen() {
   if (state.recording || state.busy) return;
-  if (!state.voice) { status('Voice is not installed yet. Install it in Rex Desk → Settings → Computer control, or type below.', 'warn'); input.focus(); return; }
+  if (!state.voice) { status('Voice is not installed yet. Install it in Rex Desk → Settings → Jev and voice, or type below.', 'warn'); input.focus(); return; }
   void api(`/voice/prepare?language=${language()}`, { method: 'POST' }).catch(() => {});
   let stream;
   try { stream = await openMicrophone(); }
@@ -115,10 +115,10 @@ async function start() {
       result.innerHTML = '<p><a class="button primary" href="/" target="_blank" rel="noopener">Open Rex Desk to sign in</a></p>'; return;
     }
     const computer = await api('/computer');
-    if (computer.control?.enabled === false) { status('Computer control is off. Turn it on in Rex Desk → Settings → Computer control.', 'warn'); return; }
+    if (computer.control?.enabled === false) { status('Computer control is off. Turn it on in Rex Desk → Settings → Jev and voice.', 'warn'); return; }
     languageSelect.value = recall('jev-language') || computer.control?.language || 'en';
     state.voice = Boolean(computer.voice?.installed); state.ready = true;
-    status(state.voice ? 'Press the microphone or type a command.' : 'Type a command. Voice can be installed in Rex Desk → Settings → Computer control.');
+    status(state.voice ? 'Press the microphone or type a command.' : 'Type a command. Voice can be installed in Rex Desk → Settings → Jev and voice.');
     if (params.has('text')) { input.value = params.get('text'); void perform(input.value); }
     else if (params.has('listen') && state.voice) void listen();
     else input.focus();
