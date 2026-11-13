@@ -1,0 +1,72 @@
+/* Rex Desk glass. Loaded after chat.css: it changes the surface tokens to translucent ones, paints a soft colored
+   backdrop behind everything, and frosts the frame (rail, header, message box, side panel) and whatever floats
+   (menus, dialogs, pop-ups). Messages stay unblurred, so a long chat scrolls as fast as before.
+   People who ask their system for less transparency get the solid look back. */
+:root{
+  --canvas:#e9eef7;--bg:rgba(255,255,255,.5);--panel:rgba(255,255,255,.58);--raised:rgba(255,255,255,.62);--line:rgba(24,36,60,.13);
+  --mine:rgba(9,105,218,.16);--glass:rgba(250,252,255,.74);--glass-edge:rgba(255,255,255,.75);--glass-shadow:0 18px 50px rgba(30,45,80,.18);
+  --solid:#fff;--blur:blur(22px) saturate(160%);
+  --glow-a:rgba(64,132,255,.42);--glow-b:rgba(168,112,255,.34);--glow-c:rgba(40,196,190,.3);
+}
+html[data-theme=dark]{
+  --canvas:#0a0c12;--bg:rgba(0,0,0,.24);--panel:rgba(255,255,255,.055);--raised:rgba(255,255,255,.085);--line:rgba(255,255,255,.115);
+  --mine:rgba(90,162,255,.24);--glass:rgba(22,25,34,.68);--glass-edge:rgba(255,255,255,.1);--glass-shadow:0 22px 60px rgba(0,0,0,.55);
+  --solid:#1b1e25;
+  --glow-a:rgba(48,108,255,.55);--glow-b:rgba(150,84,255,.42);--glow-c:rgba(20,178,172,.34);
+}
+
+/* The backdrop: three soft lights on the canvas. Painted once, never animated. */
+html{background:var(--canvas)}
+body{background:transparent}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:
+  radial-gradient(60vw 55vh at 8% -6%,var(--glow-a),transparent 62%),
+  radial-gradient(50vw 55vh at 104% 22%,var(--glow-b),transparent 60%),
+  radial-gradient(60vw 50vh at 46% 112%,var(--glow-c),transparent 62%),
+  var(--canvas)}
+.boot{background:var(--canvas)}
+
+/* Floating panes (wide screens): the list, the chat and the side panel are separate sheets of glass with the backdrop
+   showing between them. Phones keep edge-to-edge panels. */
+@media (min-width:761px){
+  .chat-shell{padding:10px;gap:10px;grid-template-columns:292px minmax(0,1fr)}
+  .rail,.stage-main,.stage>.side{border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 10px 34px rgba(0,0,0,.16),inset 0 1px 0 var(--glass-edge)}
+  .stage{gap:10px}
+  .stage-main{background:var(--panel);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
+  .stage-main .stage-head,.stage-main .composer{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none}
+  .stage-main .stage-head{border-bottom-color:var(--line)}
+}
+/* The frame: frosted, with a light edge along the top. */
+.rail,.stage-head,.composer,.side.info,.st-nav{-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
+.rail{box-shadow:inset -1px 0 0 var(--glass-edge)}
+.stage-head{box-shadow:inset 0 -1px 0 transparent,inset 0 1px 0 var(--glass-edge)}
+.composer{box-shadow:inset 0 1px 0 var(--glass-edge)}
+.side{background:rgba(8,10,14,.62);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
+.side.info{background:var(--panel)}
+
+/* Whatever floats over other content: denser glass, so text stays easy to read. */
+.menu,.pop,.dialog,.settings-pop,.tour-card,.si-card,#update-card,.to-end,.agents-pop,.fw-menu,.msg.qfloat,.toast,.wt-side{
+  background:var(--glass);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  border-color:var(--line);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-edge)}
+.to-end.fresh{background:var(--accent)}
+.dialog-back{background:rgba(6,9,16,.38);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+html:not([data-theme=dark]) .dialog-back{background:rgba(120,135,165,.28)}
+.st-nav{background:transparent}
+
+/* Cards and bubbles in the chat: clear glass without blur. */
+.bubble,.card{box-shadow:inset 0 1px 0 var(--glass-edge)}
+.msg.mine .bubble{box-shadow:inset 0 1px 0 var(--glass-edge);border:1px solid color-mix(in srgb,var(--accent) 22%,transparent)}
+.btn.primary,.to-end.fresh{box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 34%,transparent),inset 0 1px 0 rgba(255,255,255,.28)}
+
+/* Native lists cannot be translucent. */
+select option,select optgroup{background:var(--solid);color:var(--ink)}
+
+/* Less transparency asked for (or no backdrop-filter): the solid look. */
+@media (prefers-reduced-transparency:reduce){
+  :root{--canvas:#f6f8fa;--bg:#f6f8fa;--panel:#fff;--raised:#eef1f4;--line:#d6dce2;--mine:#dbeafe;--glass:#fff;--glass-edge:transparent}
+  html[data-theme=dark]{--canvas:#14161a;--bg:#14161a;--panel:#1b1e24;--raised:#23272e;--line:#2c313a;--mine:#1f3350;--glass:#1b1e24}
+  body::before{background:var(--canvas)}
+  *{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  :root{--glass:#fff;--panel:rgba(255,255,255,.9)}html[data-theme=dark]{--glass:#1b1e25;--panel:rgba(27,30,37,.92)}
+}
