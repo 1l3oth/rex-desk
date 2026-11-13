@@ -33,7 +33,7 @@ function step() {
   }
   for (let k = 0; k < links.length; k += 2) {
     const a = links[k], b = links[k + 1], rx = x[b] - x[a], ry = y[b] - y[a], distance = Math.sqrt(rx * rx + ry * ry) || 1;
-    const pull = (distance - REST * (mass[a] + mass[b]) / 2) * SPRING * heat / distance, px = rx * pull, py = ry * pull;
+    const heavy = mass[a] > 3 && mass[b] > 3 ? 3.2 : 1, pull = (distance - REST * heavy * (mass[a] + mass[b]) / 2) * SPRING * heat / distance, px = rx * pull, py = ry * pull;
     vx[a] += px / mass[a]; vy[a] += py / mass[a]; vx[b] -= px / mass[b]; vy[b] -= py / mass[b];
   }
   for (let i = 0; i < count; i++) {

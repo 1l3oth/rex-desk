@@ -117,13 +117,12 @@ select option,select optgroup{background:var(--solid);color:var(--ink)}
 .acct-tabs{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}
 .acct-tabs .tab{white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 
-/* Knowledge: the graph fills the chat area; its controls and the reading card are glass over the canvas. */
-.feed-inner:has(.kg-switch){max-width:none;padding:12px 14px 14px;gap:10px}
-.feed-inner:has(.kg-switch) .pf{max-width:1180px;margin:0 auto;width:100%}
-.kg-switch{align-self:center;display:inline-flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:11px;background:var(--bg)}
-.kg-switch button{border:0;background:none;border-radius:8px;padding:5px 16px;font-size:12.5px;color:var(--muted)}
-.kg-switch button.on{background:var(--raised);color:var(--ink);font-weight:600;box-shadow:inset 0 1px 0 var(--glass-edge)}
-.kg{position:relative;height:calc(100dvh - 150px);min-height:420px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:radial-gradient(120% 90% at 50% 40%,color-mix(in srgb,var(--accent) 9%,transparent),transparent 70%),color-mix(in srgb,var(--canvas) 55%,transparent)}
+/* Knowledge: the graph takes the whole chat area; its controls and the reading card float over the canvas. */
+.feed:has(#kg){overflow:hidden}
+.feed-inner:has(#kg){max-width:none;height:100%;padding:10px;gap:0}
+.feed-inner:has(.kg-back){max-width:1180px}
+.kg-back{display:flex;justify-content:flex-start}
+.kg{position:relative;flex:1;height:100%;min-height:360px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:radial-gradient(120% 90% at 50% 40%,color-mix(in srgb,var(--accent) 9%,transparent),transparent 70%),color-mix(in srgb,var(--canvas) 55%,transparent)}
 .kg-canvas{position:absolute;inset:0;width:100%;height:100%;cursor:grab;touch-action:none}.kg-canvas:active{cursor:grabbing}
 .kg-top{position:absolute;left:14px;top:14px;right:14px;display:flex;align-items:center;gap:12px;pointer-events:none}
 .kg-search{pointer-events:auto;display:flex;align-items:center;gap:8px;width:min(300px,60%);height:38px;padding:0 12px;border:1px solid var(--line);border-radius:12px;background:var(--glass);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);color:var(--muted);box-shadow:inset 0 1px 0 var(--glass-edge)}
@@ -147,7 +146,13 @@ html:not([data-theme=dark]) .kg-kind{color:hsl(var(--h) 75% 34%)}
 .kg-links{display:flex;flex-direction:column;gap:2px;margin-bottom:12px}
 .kg-links button{display:flex;align-items:center;gap:8px;padding:5px 8px;border:0;border-radius:8px;background:none;text-align:left;font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .kg-links button:hover{background:var(--raised)}
-@media (max-width:760px){.kg{height:calc(100dvh - 190px)}.kg-hint,.kg-count{display:none}.kg-card{top:auto;bottom:10px;right:10px;left:10px;width:auto;max-height:50%}}
+@media (max-width:760px){.kg-hint,.kg-count,.kg-edit{display:none}.kg-card{top:auto;bottom:10px;right:10px;left:10px;width:auto;max-height:50%}}
 @media (prefers-reduced-motion:reduce){.kg-card{animation:none}}
 /* Over the moving graph, glass is dense instead of blurred: a blur there would be worked out again on every frame. */
 .kg-search,.kg-legend,.kg-card{-webkit-backdrop-filter:none;backdrop-filter:none;background:color-mix(in srgb,var(--solid) 90%,transparent)}
+.kg-top>*{pointer-events:auto}.kg-grow{flex:1;pointer-events:none}
+.kg-style{display:inline-flex;gap:3px;padding:3px;height:38px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--solid) 90%,transparent)}
+.kg-style button{border:0;background:none;border-radius:9px;padding:0 13px;font-size:12.5px;color:var(--muted)}
+.kg-style button.on{background:var(--raised);color:var(--ink);font-weight:600;box-shadow:inset 0 1px 0 var(--glass-edge)}
+.kg-edit{height:38px;padding:0 13px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--solid) 90%,transparent);font-size:12.5px;color:var(--muted)}
+.kg-edit:hover{color:var(--ink);border-color:var(--accent)}
