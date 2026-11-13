@@ -15,7 +15,7 @@ function setup() {
   writeFileSync(path.join(store, 'artifacts', 'run-1', 'shot.png'), Buffer.from([137, 80, 78, 71]));
   const runs = { 'run-1': { id: 'run-1', worktree, repositoryId: 'r1', roomId: 'room-1' } };
   const desk = { worktreeRoot: path.join(root, 'worktrees'), memory: null,
-    store: { directory: store, config: () => ({ repositories: [{ id: 'r1', path: repo }] }), get: (kind, id) => (kind === 'run' ? runs[id] : null), list: kind => (kind === 'run' ? Object.values(runs) : []) } };
+    store: { directory: store, media: name => path.join(store, name), config: () => ({ repositories: [{ id: 'r1', path: repo }] }), get: (kind, id) => (kind === 'run' ? runs[id] : null), list: kind => (kind === 'run' ? Object.values(runs) : []) } };
   return { root, repo, store, worktree, files: new Files(desk) };
 }
 
@@ -80,7 +80,7 @@ test('a picture someone attached opens, by its path or its upload link', () => {
 test('a code reference with a line range opens the file with the range', () => {
   const folder = mkdtempSync(path.join(os.tmpdir(), 'rex-desk-range-')), file = path.join(folder, 'a.js');
   writeFileSync(file, Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join('\n'));
-  const files = new Files({ store: { directory: folder, list: () => [], get: () => null, config: () => ({ repositories: [] }) } });
+  const files = new Files({ store: { directory: folder, media: name => path.join(folder, name), list: () => [], get: () => null, config: () => ({ repositories: [] }) } });
   const check = files.check; files.check = value => value; // the folder is a temporary one, not a project
   for (const [input, line, endLine] of [[`${file}:42-58`, 42, 58], [`${file}#L10-L20`, 10, 20], [`${file}:7`, 7, 0], [`${file}:7:3`, 7, 0], [`${file}:9-4`, 9, 0]]) {
     const opened = files.open(input); assert.equal(opened.line, line, input); assert.equal(opened.endLine, endLine, input);

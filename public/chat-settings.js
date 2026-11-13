@@ -1,11 +1,13 @@
 import { pickerHtml } from '/chat-pick.js';
 import { noticeSettingsHtml } from '/chat-notices.js';
 import { voicesFor, chosenVoice } from '/chat-speak.js';
+import { loadFolders, foldersHtml, folderClick, startTour } from '/chat-tour.js';
 import { trackerDraft, readTrackers, trackersHtml, trackerSources, trackerClick, trackerInput } from '/chat-trackers.js';
 // Settings, as a popup over the chat: the sections on the left, one section's settings on the right. Each section saves on its own,
 // so a change never waits for the rest. It replaces the old "Issues & settings" page.
 const SECTIONS = [
   ['general', 'General', 'Your name, theme, start with Windows'],
+  ['folders', 'Folders', 'Where data, AI memory and files are kept'],
   ['notify', 'Notifications', 'Pop-ups, sound, phone, quiet hours'],
   ['agents', 'Agents', 'Workers, model, branches, pull requests'],
   ['accounts', 'Claude accounts', 'Which subscription agents use'],
@@ -21,6 +23,7 @@ const SECTIONS = [
 // An icon for each section, shown in the phone's list of sections.
 const ST_ICON = {
   general: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+  folders: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5 12 16l2.5-2.5"/>',
   notify: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
   agents: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 14.5a5 5 0 0 1 5.5 5"/>',
   accounts: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2.2"/><path d="M5.5 16a3.6 3.6 0 0 1 7 0M14 10h4M14 13.5h3"/>',
@@ -87,7 +90,9 @@ export function openSettings(ctx, section = 'general') {
       ${field('Your name', input('name', config().name, 'maxlength="60"'), 'Agents call you by this name.')}
       ${field('Theme', `<select name="theme">${[['system', 'Follow Windows'], ['dark', 'Dark'], ['light', 'Light']].map(([value, label]) => `<option value="${value}" ${(window.rexTheme?.preference || 'system') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
       ${['en', 'ko', 'km'].map(lang => field(`Reading voice, ${{ en: 'English', ko: 'Korean', km: 'Khmer' }[lang]}`, `<select data-st-voice="${lang}"><option value="">Natural voice (recommended)</option><optgroup label="Natural voices">${(state.extra.neural?.[lang] || []).map(([id, label]) => `<option value="${esc(id)}" ${chosenVoice(lang) === id ? 'selected' : ''}>${esc(label)}</option>`).join('')}</optgroup>${(state.extra.voices?.[lang] || []).length ? `<optgroup label="This computer's voices">${state.extra.voices[lang].map(voice => `<option value="${esc(voice.name)}" ${chosenVoice(lang) === voice.name ? 'selected' : ''}>${esc(voice.name)}</option>`).join('')}</optgroup>` : ''}</select>`, lang === 'en' ? "For the speaker button on agent messages. Natural voices are Microsoft's Edge voices (the same studybook uses): the text is sent to Microsoft to be read. This computer's voices stay on this computer." : '')).join('')}
+      <div class="st-actions"><button type="button" class="btn small" data-st-tour>Show the setup tour again</button></div>
       ${check('autostart', state.extra.autostart?.enabled, 'Start Rex Desk when I sign in to Windows', 'So schedules, away mode and your phone keep working without opening the app.')}`,
+    folders: () => `<h2>Folders</h2><p class="muted">Where Rex Desk keeps things on this computer. Moving data or AI memory restarts Rex Desk; the old folder stays as a backup.</p>${foldersHtml(ctx, state)}`,
     notify: () => `<h2>Notifications</h2><p class="muted">Changes save as you make them.</p>${noticeSettingsHtml(ctx)}`,
     agents: () => `<h2>Agents</h2>
       <div class="st-row">${field('Agents working at once', input('concurrency', config().concurrency, 'type="number" min="1" max="6"'), '1 to 6. Each runs in its own copy of the project.')}
@@ -194,8 +199,10 @@ export function openSettings(ctx, section = 'general') {
     try {
       if (target === back || target.closest('[data-st-close]')) { back.remove(); return; }
       if (target.closest('[data-st-back]')) { state.list = true; draw(); return; }
-      const section = target.closest('[data-st-section]'); if (section) { state.section = section.dataset.stSection; state.list = false; if (state.section === 'sources') state.trackers = trackerDraft(ui); if (state.section === 'projects') void loadGithub(); if (state.section === 'general') state.extra.autostart = await api('/autostart').catch(() => null); draw(); return; }
+      const section = target.closest('[data-st-section]'); if (section) { state.section = section.dataset.stSection; state.list = false; if (state.section === 'sources') state.trackers = trackerDraft(ui); if (state.section === 'projects') void loadGithub(); if (state.section === 'folders') void loadFolders(ctx, state).then(() => state.section === 'folders' && draw()); if (state.section === 'general') state.extra.autostart = await api('/autostart').catch(() => null); draw(); return; }
       if (await trackerClick(ctx, state, target, back, draw)) return;
+      if (await folderClick(ctx, state, target, draw)) return;
+      if (target.closest('[data-st-tour]')) { back.remove(); startTour(ctx); return; }
       if (await githubClick(target)) return;
       if (target.closest('[data-st-rank]')) {
         state.extra.ranking = true; draw();
@@ -293,6 +300,7 @@ export function openSettings(ctx, section = 'general') {
   if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); if (state.section === 'general' && document.body.contains(back)) draw(); });
   back.addEventListener('change', event => { const lang = event.target.dataset?.stVoice; if (!lang) return; try { if (event.target.value) localStorage.setItem(`rex-desk-voice-${lang}`, event.target.value); else localStorage.removeItem(`rex-desk-voice-${lang}`); } catch { /* private window */ } toast('Reading voice saved.'); });
   if (section === 'projects') void loadGithub();
+  if (section === 'folders') void loadFolders(ctx, state).then(() => state.section === 'folders' && draw());
   if (section === 'general') void api('/autostart').then(result => { state.extra.autostart = result; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
   // The Notifications tab saves on change; redraw it when its settings come back changed, keeping the scroll.
   let noticeHtml = '';

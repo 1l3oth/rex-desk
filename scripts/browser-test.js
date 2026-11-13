@@ -138,13 +138,38 @@ try {
   };
   const save = async () => { await settings.locator('[data-st-save]').click(); await page.getByText('Saved.', { exact: true }).last().waitFor(); };
 
-  // Projects: a folder is added, and its commands come from the project's own files.
-  await openSection('projects');
-  await settings.getByRole('textbox', { name: /Folder of a project/ }).fill(repository);
-  await settings.locator('[data-st-repo-add]').click();
-  await settings.locator('.st-repo summary', { hasText: 'source' }).waitFor({ timeout: 30000 });
+  // A new person gets the setup tour: name, AI sign-in, where things are kept, first project, done.
+  const tour = page.getByRole('dialog', { name: 'Set up Rex Desk' });
+  await tour.getByRole('heading', { name: 'Welcome to Rex Desk' }).waitFor();
+  await page.screenshot({ path: path.join(screenshots, 'tour-welcome.png') });
+  await tour.locator('[data-tour-name]').fill('Synthetic Tester');
+  await tour.getByRole('button', { name: 'Next', exact: true }).click();
+  await tour.getByRole('heading', { name: 'Your AI sign-in' }).waitFor();
+  await tour.getByRole('button', { name: 'Next', exact: true }).click();
+  await tour.getByRole('heading', { name: 'Where things are kept' }).waitFor();
+  await tour.locator('.st-folder', { hasText: 'Files from agents' }).locator('code').waitFor();
+  assert.match(await tour.locator('.st-folder', { hasText: 'Rex Desk data' }).locator('code').innerText(), /data/);
+  await page.screenshot({ path: path.join(screenshots, 'tour-folders.png') });
+  await tour.getByRole('button', { name: 'Next', exact: true }).click();
+  // The first project is added in the tour; its commands come from the project's own files.
+  await tour.locator('[data-tour-repo]').fill(repository);
+  await tour.locator('[data-tour-add]').click();
+  await tour.locator('.tour-ok', { hasText: 'source' }).waitFor({ timeout: 30000 });
+  await tour.getByRole('button', { name: 'Next', exact: true }).click();
+  await tour.getByRole('heading', { name: 'You are ready' }).waitFor();
+  await tour.getByRole('button', { name: 'Start', exact: true }).click();
+  await tour.waitFor({ state: 'detached' });
+  assert.equal(app.store.config().name, 'Synthetic Tester');
+  assert.equal(app.store.config().tourDismissed, true, 'The tour does not come back once finished');
   assert.equal(app.store.config().repositories.length, 1);
+
+  // Settings, Projects lists it, with GitHub accounts below.
+  await openSection('projects');
+  await settings.locator('.st-repo summary', { hasText: 'source' }).waitFor();
   await settings.getByRole('heading', { name: 'GitHub', exact: true }).waitFor();
+  // Settings, Folders shows the three folders.
+  await openSection('folders');
+  assert.equal(await settings.locator('.st-folder').count(), 3);
 
   // Task sources: a Morningmate connection is made, its projects load, and people are added by name.
   await openSection('sources');

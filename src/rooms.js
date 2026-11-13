@@ -45,7 +45,7 @@ export class Rooms {
     this.room(roomId);
     for (const message of this.store.list('roommsg').filter(item => item.roomId === roomId)) this.store.delete('roommsg', message.id);
     this.store.delete('room', roomId);
-    const folder = path.join(this.store.directory, 'room-images');
+    const folder = path.join(this.store.media('room-images'));
     try { for (const file of readdirSync(folder).filter(name => name.startsWith(roomId))) rmSync(path.join(folder, file), { force: true }); } catch { /* no picture */ }
     return { removed: true };
   }

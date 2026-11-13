@@ -17,7 +17,7 @@ export class FileBackup {
   // Each backed-up file has a key: data/<folder>/... inside the workspace, memory/... inside the memory folder.
   roots() {
     // The memory folder first: who the person is and their photo matter most.
-    const roots = DATA_FOLDERS.map(folder => ({ prefix: `data/${folder}/`, directory: path.join(this.sync.store.directory, folder), only: folder === 'artifacts' ? EVIDENCE : null }));
+    const roots = DATA_FOLDERS.map(folder => ({ prefix: `data/${folder}/`, directory: this.sync.store.media(folder), only: folder === 'artifacts' ? EVIDENCE : null }));
     if (this.memoryDirectory) roots.unshift({ prefix: 'memory/', directory: this.memoryDirectory, only: null });
     return roots;
   }
