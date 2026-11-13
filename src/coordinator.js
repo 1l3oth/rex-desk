@@ -401,7 +401,7 @@ export class Desk {
     try {
       const queued = this.store.list('run').filter(run => run.state === 'queued');
       for (const run of queued) {
-        const workers = [...this.live.keys()].map(runId => this.run(runId)).filter(item => item.role === 'worker').length;
+        const workers = [...this.live.keys()].map(runId => this.run(runId)).filter(item => item.role === 'worker' && !item.inApp).length; // a chat open in the Claude app waits for the person
         if (run.role === 'worker' && workers >= this.store.config().concurrency) continue;
         const controller = new AbortController(); this.live.set(run.id, { controller });
         this.patchRun(run.id, { state: 'starting' });
@@ -463,7 +463,9 @@ export class Desk {
       const cwd = [run.cwd, run.worktree].find(folder => folder && existsSync(folder)) || (run.cwd || run.worktree ? projectHere || ownHome() : path.join(this.store.directory, 'coordinator'));
       if (run.cwd && cwd !== run.cwd && !existsSync(run.cwd)) this.patchRun(run.id, { cwd, ...(projectHere && cwd === projectHere ? { projectPath: projectHere } : {}) });
       // A run nobody picked a mode for starts in the person's default mode from Settings.
-      const options = { run: run.permissionMode ? run : { ...run, permissionMode: defaultModeFor(run.provider || 'claude', this.store.config().defaultMode) }, cwd, projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere, token,
+      const remoteOn = Boolean(this.store.get('run', runId)?.inApp?.on) && (run.provider || 'claude') === 'claude';
+      const options = { run: run.permissionMode ? run : { ...run, permissionMode: defaultModeFor(run.provider || 'claude', this.store.config().defaultMode) }, cwd,
+        ...(remoteOn ? { remote: this.remoteName(runId) } : {}), projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere, token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
@@ -473,10 +475,17 @@ export class Desk {
           // How full the chat's context is, for the ring by the message box. A 1M-context model says so in its name.
           if (kind === 'context') { const window = data.window || run.contextWindowReported || (/\[1m\]|-1m\b|1m-context/i.test(`${run.model || ''} ${data.model || ''}`) ? 1000000 : 200000); this.patchRun(runId, { contextUsed: data.used, contextWindow: window, contextAt: now(), ...(data.window ? { contextWindowReported: data.window } : {}) }); return; }
           if (kind === 'rate-limit') { this.recordUsage(run.provider, this.accountFor(run) || this.agents.selected(run.provider), data); if (data.status === 'rejected') this.store.event(runId, 'rate-limit', { status: 'rejected', type: data.rateLimitType || '' }); return; }
+          // The open session is connected to the Claude app (or could not be): keep its link on the run for the chat to show.
+          if (kind === 'remote-control') {
+            const current = this.store.get('run', runId)?.inApp;
+            if (current) this.patchRun(runId, { inApp: { ...current, url: data.url || '', connectUrl: data.connectUrl || '', error: data.error || '', connectedAt: data.error ? '' : now() } });
+            this.store.event(runId, 'remote-control', data.error ? { text: `Could not open this chat in the Claude app: ${data.error}`, error: true } : { text: 'This chat is open in the Claude app. Write there or here; both see the same conversation.', url: data.url || '' }, true);
+            return;
+          }
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
           // The event log hides fields named like secrets ("tokens" among them), so the token counts travel as usage.
           if (kind === 'agent-result') data = { ...data, ...(data.tokens ? { usage: data.tokens } : {}), paidByApi: data.billedToApiKey === true };
-          this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result', 'subagent-text', 'subagent-done', 'agent-result'].includes(kind));
+          this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result', 'subagent-text', 'subagent-done', 'agent-result', 'app-message'].includes(kind));
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
@@ -509,7 +518,8 @@ export class Desk {
       if (workflowKey && run.workflowSeen !== workflowKey) this.patchRun(runId, { workflowSeen: workflowKey });
       const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, reopened && owner ? this.specialists.lessonsText(owner) : '', reopened && chat ? '(Reply like a teammate in a chat: short, plain, answer first; no code or long lists unless asked. When corrected, save the lesson with desk_learn.)' : ''].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : [this.prompt(run), run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
       // The handoff is used up only by a turn that really ran: a turn that fails to start reads it next time.
-      await runner.start(digest ? `${digest}
+      // An open Claude-app session starts with no message: it waits for the person to write, there or here.
+      await runner.start(remoteOn ? '' : digest ? `${digest}
 
 ${message}` : message);
       if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
@@ -540,6 +550,8 @@ ${message}` : message);
         void this.drain();
         return;
       }
+      // The open Claude-app session ended (Stop, or its process went away): the chat is back to Rex Desk only.
+      if (this.store.get('run', runId)?.inApp) this.patchRun(runId, { inApp: undefined });
       await this.evidence.close(runId).catch(error => this.store.event(runId, 'evidence-error', { message: error.message }, true));
       if (token) this.forgetToken(token);
       // A followed agent kept the key it was started with; it is done now.
@@ -1067,6 +1079,30 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       this.memory.workflowText(agent.projectSlug)].filter(Boolean).join('\n\n');
     await this.rooms.post(roomId, { system: true, text: others.length ? `${agent.name} joins ${others.join(', ')} on #${number} ${name} here in the room.` : `${agent.name} is now working on #${number} ${name} here in the room.`, instruction: brief, to: [agent.slug] });
     return { inRoom: true, agentId: agent.id, roomId, taskId };
+  }
+  // The name the chat gets in the Claude app's session list: the agent and its project.
+  remoteName(runId) {
+    const run = this.store.get('run', runId), id = run?.roomAgent || run?.specialistId, agent = id && id !== 'main' ? this.store.get('specialist', id) : null;
+    return [agent?.name || (run?.main || run?.role === 'coordinator' ? 'Rex Agent' : run?.title || 'Rex Desk chat'), agent?.projectSlug || ''].filter(Boolean).join(' · ').slice(0, 80);
+  }
+  // Continue in Claude app: the chat's Claude Code session stays open with Remote Control on, so the person can chat with it
+  // from claude.ai/code or the Claude app (phone, another computer) while Rex Desk shows the same conversation. Off ends it.
+  async continueInApp(runId, on = true) {
+    const run = this.run(runId);
+    if (!on) {
+      if (!run.inApp) return this.run(runId);
+      if (this.live.has(runId)) await this.stop(runId);
+      this.patchRun(runId, { inApp: undefined, state: 'finished', endedAt: now() });
+      this.store.event(runId, 'remote-control', { text: 'Closed in the Claude app. This chat continues in Rex Desk.' }, true);
+      return this.run(runId);
+    }
+    if ((run.provider || 'claude') !== 'claude') throw new Error('Continue in Claude app works with Claude agents. This chat uses another AI.');
+    if (run.inApp) return run;
+    if (this.live.has(runId)) throw new Error('The agent is still replying. Continue in the Claude app when it has finished.');
+    this.patchRun(runId, { inApp: { on: true, startedAt: now() } });
+    this.store.event(runId, 'phase', { text: 'Opening this chat in the Claude app…' }, true);
+    try { return await this.resume(runId, { prompt: '', silent: true }); }
+    catch (error) { this.patchRun(runId, { inApp: undefined }); throw error; }
   }
   async stop(runId) {
     const active = this.live.get(runId);

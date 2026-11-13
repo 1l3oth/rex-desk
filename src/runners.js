@@ -116,7 +116,16 @@ ${news}` } } : {};
           : { behavior: 'deny', message: 'User declined this action.' };
       },
     };
-    this.query = query({ prompt, options });
+    // Continue in Claude app: the session stays open on a stream of messages instead of ending after one reply, and Remote
+    // Control connects it to claude.ai/code and the Claude app. The person writes there, or in Rex Desk (its inbox).
+    const remote = this.remote ? this.remoteMessages(prompt) : null;
+    this.query = query({ prompt: remote || prompt, options });
+    if (remote) {
+      const connect = typeof this.query.enableRemoteControl === 'function' ? this.query.enableRemoteControl(true, String(this.remote).slice(0, 80))
+        : Promise.reject(new Error('This Claude Code version cannot connect to the Claude app. Update Claude Code, then try again.'));
+      void connect.then(answer => this.event('remote-control', { url: answer?.session_url || '', connectUrl: answer?.connect_url || '' }),
+        error => this.event('remote-control', { error: String(error?.message || error) }));
+    }
     for await (const message of this.query) {
       if (message.type === 'system' && message.subtype === 'init') { this.apiKeySource = message.apiKeySource; this.event('session', { sessionId: message.session_id, apiKeySource: message.apiKeySource }); }
       // How much of the account's 5-hour and weekly limits is used, as Claude Code reports it during a turn.
@@ -137,6 +146,12 @@ ${news}` } } : {};
         }
         this.event('agent-operation', { type: 'assistant', content });
       }
+      if (message.type === 'user' && remote) {
+        // Something the person wrote in the Claude app (Rex Desk did not send it): it shows in Rex Desk's chat as theirs.
+        const said = typeof message.message?.content === 'string' ? message.message.content
+          : (Array.isArray(message.message?.content) && !message.message.content.some(block => block.type === 'tool_result') ? message.message.content.filter(block => block.type === 'text').map(block => block.text).join('\n') : '');
+        if (said.trim() && !this.sent?.delete(said)) this.event('app-message', { text: said.trim().slice(0, 20000) });
+      }
       if (message.type === 'user') {
         for (const block of Array.isArray(message.message?.content) ? message.message.content : []) {
           if (block.type !== 'tool_result') continue;
@@ -153,11 +168,23 @@ ${news}` } } : {};
         this.event('agent-result', { result: message.result, errors: message.errors, subtype: message.subtype, cost: message.total_cost_usd, tokens: tokensOf(message.usage), steps: message.num_turns || 0, durationMs: message.duration_ms || 0, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });
         // The CLI reports a signed-out profile as an ordinary result. Surface it as a setup problem, not agent output.
         if (/not logged in|please run \/login/i.test(String(message.result || ''))) throw new Error(`Claude Code profile ${env.CLAUDE_CONFIG_DIR || '~/.claude'} is not signed in. Open Setup, choose a signed-in Claude Code profile, then continue this run.`);
-        if (message.is_error) throw new Error(message.errors?.join('\n') || message.result || `Claude ended with ${message.subtype}.`);
+        // An open Claude-app session carries on after one failed reply; the person sees it and writes again.
+        if (message.is_error && !remote) throw new Error(message.errors?.join('\n') || message.result || `Claude ended with ${message.subtype}.`);
       }
     }
     return { status: 'completed' };
   }
-  async interrupt() { await this.query?.interrupt(); this.query?.close(); }
+  // The messages of an open Claude-app session: the first one (if any), then whatever arrives in Rex Desk, until Stop.
+  async *remoteMessages(first) {
+    // What Rex Desk sends is remembered, so its echo in the stream is not taken for a message from the Claude app.
+    const user = text => { (this.sent ||= new Set()).add(text); return { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null }; };
+    if (String(first || '').trim()) yield user(first);
+    while (!this.signal?.aborted && !this.ended) {
+      const news = this.inbox?.() || '';
+      if (news) yield user(news);
+      await new Promise(resolve => setTimeout(resolve, 600));
+    }
+  }
+  async interrupt() { this.ended = true; await this.query?.interrupt(); this.query?.close(); }
   close() { this.query?.close(); }
 }

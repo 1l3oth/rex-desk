@@ -61,6 +61,19 @@ function toast(text, bad = false) {
 const workingStates = ['starting', 'running', 'queued', 'waiting', 'verifying'];
 const reviewStates = ['ready_for_review', 'needs_evidence', 'qa_passed', 'qa_failed', 'qa_blocked', 'published'];
 const stateGroup = run => workingStates.includes(run.state) ? 'working' : reviewStates.includes(run.state) ? 'review' : 'done';
+// Continue in Claude app: a Claude chat stays open with Remote Control, so the person can chat with it from claude.ai/code or
+// the Claude app on a phone. While it is open the header links to it and offers to close it there; Rex Desk shows the same chat.
+const APP_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/></svg>';
+function appControl(run, live) {
+  if (run.inApp) {
+    if (run.inApp.error) return `<button class="btn small" data-action="app-off" title="${esc(run.inApp.error)}">Could not open in Claude app. Close</button> `;
+    const open = run.inApp.url ? `<a class="btn small app-link" href="${esc(run.inApp.url)}" target="_blank" rel="noopener">${APP_ICON}Open in Claude app</a>`
+      : `<span class="btn small app-link" aria-busy="true">${APP_ICON}Connecting…</span>`;
+    return `${open} <button class="btn small" data-action="app-off" title="End the Claude app session. The chat carries on here.">Close in app</button> `;
+  }
+  if ((run.provider || 'claude') !== 'claude' || run.remote || run.cloudCopy || live || run.state === 'waiting') return '';
+  return `<button class="btn small app-link" data-action="app-on" title="Keep this chat open so you can chat with it from claude.ai/code or the Claude app on your phone">${APP_ICON}Continue in Claude app</button> `;
+}
 const stateTone = run => ({ working: 'working', review: 'warn' })[stateGroup(run)] || (['failed', 'interrupted'].includes(run.state) ? 'bad' : 'good');
 const stateLabel = run => ({ starting: 'Preparing', queued: 'Queued', running: 'Working', waiting: 'Needs you', verifying: 'Verifying', ready_for_review: 'Ready for review', needs_evidence: 'Needs evidence', published: 'PR created', failed: 'Failed', interrupted: 'Interrupted', stopped: 'Stopped', finished: 'Finished' }[run.state] || String(run.state || '').replaceAll('_', ' '));
 const pending = runId => (ui.snap?.interactions || []).filter(item => item.state === 'pending' && (!runId || item.runId === runId));
@@ -192,6 +205,8 @@ function transcript(all, runId = '') {
     if (event.kind === 'subagent-done') { const sub = subs.get(event.id); if (sub) Object.assign(sub, { done: true, failed: event.failed, result: event.text, endedAt: event.createdAt }); continue; }
     if (['command-output', 'dev-output'].includes(event.kind)) continue;
     if (event.kind === 'human-message') { const said = spokenText(event.text); items.push({ role: 'human', text: said.text, voice: said.voice, at: event.createdAt, sequence: event.sequence }); }
+    // Written in the Claude app while the chat was open there (Continue in Claude app).
+    else if (event.kind === 'app-message') items.push({ role: 'human', text: event.text || '', at: event.createdAt, sequence: event.sequence });
     else if (event.kind === 'turn-start') items.push({ role: 'status', text: `${event.resumed ? 'Resumed' : 'Started'} with ${provider(event.provider)}`, at: event.createdAt });
     else if (event.kind === 'loop-check') items.push({ role: 'status', text: event.text || 'Loop check', at: event.createdAt });
     // The tokens of a reply show under the reply itself, like in a group chat.
@@ -268,15 +283,15 @@ function stageModel() {
     return emptyStage('That run is gone.');
   }
   const shown = ui.events.get(run.id) || [], cleared = ui.showEarlier?.[run.id] ? '' : [...shown].reverse().find(event => event.kind === 'chat-cleared')?.createdAt || '';
-  const items = [...transcript(shown, run.id), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && (!cleared || String(item.createdAt || item.at || '') >= cleared) && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state);
+  const items = [...transcript(shown, run.id), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && (!cleared || String(item.createdAt || item.at || '') >= cleared) && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state) && !run.inApp; // a chat open in the Claude app waits for the person; it is not "typing"
   const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`) + outboxHtml(run, shown)
     + pending(run.id).map(item => `<div class="msg qfloat"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
   const shells = terminalItems(items), stop = (shells.length && !ui.termOpen ? `<button class="btn small" data-action="term-open">Terminal (${shells.length})</button> ` : '') + (live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : !FINISHED.includes(run.state) ? '<button class="btn small danger" data-action="stop" title="This run is not working. Close it so the task can get a new run.">Close run</button>' : '');
   // A personal chat with an agent shows its profile and what was shared on the right; the terminal is one of those tabs.
   const personal = personalAgent(run);
   const side = personal ? (ui.chatInfo === false ? '' : personalSide(run, personal, items, shells)) : shells.length && ui.termOpen ? terminalHtml(shells, { esc, hhmm }) : '';
-  const actions = personal ? `<button class="btn small" data-action="chat-to-room" title="Make a group chat from this chat: add agents and carry on with the same topic">+ Group chat</button> ${ui.chatInfo === false ? '<button class="btn small" data-action="chat-info">Info</button> ' : ''}${live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : ''}` : stop;
-  return { title: personal ? personal.name : runTitle(run), meta: personal ? `${provider(run.provider)} · ${personal.projectSlug}` : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
+  const actions = appControl(run, live) + (personal ? `<button class="btn small" data-action="chat-to-room" title="Make a group chat from this chat: add agents and carry on with the same topic">+ Group chat</button> ${ui.chatInfo === false ? '<button class="btn small" data-action="chat-info">Info</button> ' : ''}${live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : ''}` : run.inApp ? '' : stop);
+  return { title: personal ? personal.name : runTitle(run), meta: personal ? `${provider(run.provider)} · ${personal.projectSlug}` : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: run.inApp ? '<span class="chip working">In Claude app</span>' : `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
     working: workingStates.includes(run.state), composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : (run.provider === 'codex' ? 'Message Claude Code. It takes over from Codex with the chat so far…' : `Message ${provider(run.provider)}. It picks up where it left off…`), mentions: [] } };
 }
 // Until the second brain is set up, the main agent's screen and About you offer to do it.
@@ -445,6 +460,12 @@ document.addEventListener('click', async event => {
     else if (action === 'agent-signin') { try { await api('/agents/login', { method: 'POST', data: { provider: target.dataset.provider || 'claude', profile: '' } }); toast('Sign-in opened. Pick the account that has the plan, finish it, then start a fresh chat.'); } catch (error) { toast(error.message, true); } }
     else if (action === 'update-install') await installUpdate(api);
     else if (action === 'update-later') updateLater();
+    else if (action === 'app-on' || action === 'app-off') {
+      const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return;
+      await api(`/runs/${run.id}/app`, { method: 'POST', data: { on: action === 'app-on' } });
+      toast(action === 'app-on' ? 'Opening this chat in the Claude app. Its link shows here in a few seconds.' : 'Closed in the Claude app. The chat carries on here.');
+      await refresh();
+    }
     else if (action === 'update-when-idle') await updateWhenIdle(api);
     else if (action === 'update-cancel') await updateWhenIdle(api, false);
     else if (action === 'new-room') newRoomDialog();

@@ -276,7 +276,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   // Agents working right now, by name: an update restarts Rex Desk and would cut them off.
   function busyAgents(store) {
     if (!store) return [];
-    const names = store.list('run').filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state))
+    // A chat open in the Claude app is a session waiting for the person, not work in progress: it does not hold an update back.
+    const names = store.list('run').filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state) && !run.inApp)
       .map(run => { const id = run.roomAgent || run.specialistId; return (id && id !== 'main' ? store.get('specialist', id)?.name : '') || (run.main || run.role === 'coordinator' ? 'Rex Agent' : run.title) || 'An agent'; });
     return [...new Set(names)];
   }
@@ -677,13 +678,15 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (request.method === 'POST') {
           const input = await body(request);
           // A chat with an agent that lives on another computer runs there while that computer is on, even when this one holds a copy of the chat.
-          const homeAgent = ['say', 'resume', 'stop'].includes(action) && store.get('run', runId)?.specialistId ? store.get('specialist', store.get('run', runId).specialistId) : null;
+          const homeAgent = ['say', 'resume', 'stop', 'app'].includes(action) && store.get('run', runId)?.specialistId ? store.get('specialist', store.get('run', runId).specialistId) : null;
           // A project that runs only on its own computer, or is not on this one, never starts here: the message waits for that computer.
           const elsewhere = homeAgent && desk.peers.isRemote(homeAgent) && (desk.peers.online(homeAgent.node) || homeAgent.pinned || Boolean(homeAgent.projectSlug && !desk.projectRules.folderHere(homeAgent.projectSlug)));
           if (elsewhere) return json(response, 200, await desk.peers.chatAction({ id: runId, node: homeAgent.node, agentId: homeAgent.id }, action, input));
           // Its computer is off and the project is here: the agent moves to this computer and carries on, shown as working here.
           if (homeAgent && desk.peers.isRemote(homeAgent) && action !== 'stop') await desk.projectRules.move(homeAgent.id).catch(() => {});
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
+          // Continue in Claude app (on), or bring the chat back to Rex Desk only (on: false).
+          if (action === 'app') return json(response, 200, await desk.continueInApp(runId, input.on !== false));
           if (action === 'fresh') return json(response, 200, await desk.freshStart(runId));
           if (action === 'say') return json(response, 200, await desk.say(runId, input.text, input));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));
@@ -883,7 +886,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (!session) { awake.set(false); return; }
     const { store, desk } = session;
     // "Update when it finishes": the last agent is done, so the update goes in now.
-    if (updateWhenIdle && updates.state.ready && !busyAgents(store).length && !(desk.live?.size > 0)) { try { installNow(); } catch (error) { updateWhenIdle = false; store.event('', 'update-error', { message: error.message }, true); notify(); } return; }
+    if (updateWhenIdle && updates.state.ready && !busyAgents(store).length && ![...(desk.live?.keys?.() || [])].some(id => !store.get('run', id)?.inApp)) { try { installNow(); } catch (error) { updateWhenIdle = false; store.event('', 'update-error', { message: error.message }, true); notify(); } return; }
     const minutes = store.config().syncMinutes;
     if (minutes && Date.now() - lastSync >= minutes * 60000 && !desk.sources.syncing) {
       lastSync = Date.now(); void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
