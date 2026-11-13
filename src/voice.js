@@ -83,7 +83,7 @@ export class Voice {
     const running = this.servers.get(key);
     if (running) { this.rest(key); return running.ready; }
     const executable = this.serverPath();
-    if (!executable || !this.modelsReady(key)) return Promise.reject(new Error('Voice is not installed yet. Open Settings → Computer control and install voice commands.'));
+    if (!executable || !this.modelsReady(key)) return Promise.reject(new Error('Voice on this computer is not installed yet. Install it from the microphone menu → Voice.'));
     // One model in memory at a time: each holds about 1 GB.
     for (const other of [...this.servers.keys()]) if (other !== key) this.stop(other);
     // The entry is registered before anything waits, so a second request for the same model shares this start.

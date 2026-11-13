@@ -331,11 +331,29 @@ async function voiceDialog(ctx) {
   let info = await api('/voice/engines').catch(error => { toast(error.message, true); return null; }); if (!info) { back.remove(); return; }
   let results = null, recording = null, busy = false;
   const setLanguage = value => { try { localStorage.setItem('jev-language', value); } catch {} };
+  // On-computer voice installs right here: one download (about 1.9 GB), with its progress.
+  const localHint = () => {
+    const local = info.local || {};
+    if (local.supported === false) return 'Not available on this computer.';
+    if (local.installing) { const p = local.progress; return `Downloading${p ? ` ${p.index} of ${p.total}${p.sizeMB ? `: ${Math.round(p.receivedMB)} of ${Math.round(p.sizeMB)} MB` : ''}` : ''}… You can keep working.`; }
+    return `${local.error ? `Install failed: ${esc(local.error)}. ` : 'Not installed yet. '}<button type="button" class="btn small" data-v-install>Install (${local.downloadMB || 1900} MB download)</button>`;
+  };
+  let watching = null;
+  const watchInstall = () => {
+    if (watching) return;
+    watching = setInterval(async () => {
+      if (!back.isConnected) { clearInterval(watching); watching = null; return; }
+      try { info = await api('/voice/engines'); } catch { return; }
+      if (!info.local?.installing) { clearInterval(watching); watching = null; if (info.available.local) toast('Voice on this computer is installed.'); }
+      draw();
+    }, 2000);
+  };
+  if (info.local?.installing) watchInstall();
   const draw = () => {
     const language = voiceLanguage(ctx);
     back.innerHTML = `<form class="dialog vdialog"><h2>Voice</h2>
       <label>I speak<select data-v-language>${LANG.map(([value, label]) => `<option value="${value}" ${value === language ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
-      <fieldset class="vengines"><legend>Turn speech into text with</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] ? hint : key === 'local' ? 'Not installed. Install it in Issues & settings → Computer control.' : key === 'gemini' ? 'Needs your OpenRouter key: Issues & settings → Jev priority.' : 'Paste a key below to use it.'}</small></span></label>`).join('')}</fieldset>
+      <fieldset class="vengines"><legend>Turn speech into text with</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] ? hint : key === 'local' ? localHint() : key === 'gemini' ? 'Needs your OpenRouter key: Issues & settings → Jev priority.' : 'Paste a key below to use it.'}</small></span></label>`).join('')}</fieldset>
       <label>ElevenLabs API key<span class="vkey"><input type="password" data-v-key autocomplete="off" spellcheck="false" placeholder="${info.available.elevenlabs ? 'Saved. Paste a new key to replace it.' : 'From elevenlabs.io → Profile → API keys'}"><button type="button" class="btn small" data-v-savekey>Save key</button>${info.available.elevenlabs ? '<button type="button" class="btn small quiet danger" data-v-dropkey>Remove</button>' : ''}</span></label>
       <section class="vcompare"><h3>Which one understands you?</h3><p class="muted small">Press Record, say one sentence, then Stop. It goes through every engine that is ready, so you can pick the best. Online engines receive this recording.</p>
         <button type="button" class="btn ${recording ? 'danger' : 'primary'}" data-v-record ${busy ? 'disabled' : ''}>${recording ? 'Stop' : busy ? 'Comparing…' : 'Record a sentence'}</button>
@@ -353,6 +371,7 @@ async function voiceDialog(ctx) {
     const target = event.target;
     if (target === back || target.closest('[data-v-close]')) { recording?.stop(); back.remove(); return; }
     const use = target.closest('[data-v-use]'); if (use) { await choose(use.dataset.vUse); return; }
+    if (target.closest('[data-v-install]')) { event.preventDefault(); try { info = { ...info, local: await api('/voice/install', { method: 'POST', data: {} }) }; draw(); watchInstall(); } catch (error) { toast(error.message, true); } return; }
     if (target.closest('[data-v-savekey]') || target.closest('[data-v-dropkey]')) {
       const key = target.closest('[data-v-dropkey]') ? '' : back.querySelector('[data-v-key]').value.trim();
       if (!key && !target.closest('[data-v-dropkey]')) return toast('Paste the key first.', true);

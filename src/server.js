@@ -320,7 +320,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         const engines = () => ({ local: voice.status().installed, gemini: Boolean(desk.jev.apiKey()), elevenlabs: Boolean(elevenKey()) });
         const chosen = () => store.get('voice', 'engine')?.engine || 'local';
         const run = (engine, audio) => engine === 'gemini' ? transcribeGemini(audio, language, desk.jev.apiKey()) : engine === 'elevenlabs' ? transcribeElevenLabs(audio, language, elevenKey()) : voice.transcribe(audio, language);
-        if (url.pathname === '/api/voice/engines' && request.method === 'GET') return json(response, 200, { engine: chosen(), available: engines() });
+        if (url.pathname === '/api/voice/engines' && request.method === 'GET') return json(response, 200, { engine: chosen(), available: engines(), local: voice.status() });
         if (url.pathname === '/api/voice/engine' && request.method === 'POST') {
           const engine = String((await body(request)).engine || '');
           if (!['local', 'gemini', 'elevenlabs'].includes(engine)) return json(response, 400, { error: 'Choose local, gemini or elevenlabs.' });
