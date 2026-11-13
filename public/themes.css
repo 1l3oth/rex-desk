@@ -1,0 +1,76 @@
+/* Themes: each one is a colour set (and, for Crayon, a hand-drawn touch) laid over the glass. Picked in Settings and
+   kept on this computer as html[data-skin]. Midnight, the default, has no rules of its own. */
+
+/* Cyberpunk: neon pink and cyan on near-black, thin glowing edges. */
+html[data-skin=cyberpunk]{--accent:#ff2bd6;--accent-ink:#12001a;--mine:rgba(0,229,255,.16);--good:#2dffb3;--warn:#ffe14d;--bad:#ff3b6b;
+  --canvas:#f3eefe;--glow-a:rgba(255,43,214,.32);--glow-b:rgba(0,229,255,.32);--glow-c:rgba(255,225,77,.22)}
+html[data-skin=cyberpunk][data-theme=dark]{--canvas:#06030d;--line:rgba(255,43,214,.2);--ink:#f2ecff;--muted:#a99cc4;
+  --panel:color-mix(in srgb,#120a1f var(--solid-mix),rgba(255,43,214,.04));--raised:color-mix(in srgb,#1b1030 var(--solid-mix),rgba(0,229,255,.07));
+  --glass:color-mix(in srgb,#120a1f var(--solid-mix),rgba(18,8,31,.88));--glass-edge:rgba(0,229,255,.18);
+  --glow-a:rgba(255,43,214,.5);--glow-b:rgba(0,229,255,.42);--glow-c:rgba(124,58,237,.4)}
+html[data-skin=cyberpunk][data-theme=dark] :is(.rail,.stage-main,.stage>.side){box-shadow:0 0 0 1px rgba(255,43,214,.18),0 0 28px rgba(255,43,214,.12),inset 0 1px 0 rgba(0,229,255,.22)}
+html[data-skin=cyberpunk] .btn.primary{box-shadow:0 0 18px color-mix(in srgb,var(--accent) 55%,transparent)}
+html[data-skin=cyberpunk] :is(.stage-head h1,.rail-head strong){letter-spacing:.04em;text-transform:uppercase;font-size:13.5px}
+
+/* Gojo: white and deep navy with a bright "six eyes" blue. */
+html[data-skin=gojo]{--accent:#2f8cff;--accent-ink:#fff;--mine:rgba(47,140,255,.16);--canvas:#f2f6ff;--line:rgba(30,60,140,.14);
+  --glow-a:rgba(98,180,255,.5);--glow-b:rgba(255,255,255,.9);--glow-c:rgba(140,200,255,.4)}
+html[data-skin=gojo][data-theme=dark]{--canvas:#040817;--ink:#eef4ff;--muted:#93a6c8;--line:rgba(120,180,255,.16);--accent:#59b4ff;--accent-ink:#031024;
+  --panel:color-mix(in srgb,#0b1430 var(--solid-mix),rgba(120,180,255,.05));--raised:color-mix(in srgb,#122045 var(--solid-mix),rgba(120,180,255,.09));
+  --glass:color-mix(in srgb,#0b1430 var(--solid-mix),rgba(8,16,40,.88));--glass-edge:rgba(160,210,255,.16);--mine:rgba(89,180,255,.22);
+  --glow-a:rgba(60,150,255,.55);--glow-b:rgba(220,240,255,.16);--glow-c:rgba(40,90,255,.4)}
+html[data-skin=gojo] .btn.primary{background:linear-gradient(135deg,#7cc7ff,var(--accent));border-color:transparent}
+
+/* Crayon: drawn by hand on paper. Wobbly outlines, crayon colours, and a handwritten face for headings.
+   In dark, the paper becomes a chalkboard. */
+html[data-skin=crayon]{--accent:#e4572e;--accent-ink:#fff;--good:#2f9e44;--warn:#e8a317;--bad:#d62828;--ink:#2b2622;--muted:#6f655b;
+  --canvas:#fbf5e6;--line:rgba(60,45,30,.28);--mine:rgba(66,135,245,.16);
+  --panel:color-mix(in srgb,#fffaf0 var(--solid-mix),rgba(255,250,240,.62));--raised:color-mix(in srgb,#f6eedb var(--solid-mix),rgba(246,238,219,.7));
+  --glass:color-mix(in srgb,#fffaf0 var(--solid-mix),rgba(255,250,240,.92));--glass-edge:transparent;
+  --glow-a:rgba(255,209,102,.5);--glow-b:rgba(118,185,255,.38);--glow-c:rgba(140,214,140,.4);
+  --hand:"Segoe Print","Bradley Hand","Comic Sans MS","Chalkboard SE",cursive}
+html[data-skin=crayon][data-theme=dark]{--canvas:#1d2b25;--ink:#f3efe4;--muted:#b9c2b4;--line:rgba(243,239,228,.3);--accent:#ffb347;--accent-ink:#1d2b25;
+  --panel:color-mix(in srgb,#22322b var(--solid-mix),rgba(255,255,255,.04));--raised:color-mix(in srgb,#2a3c34 var(--solid-mix),rgba(255,255,255,.07));
+  --glass:color-mix(in srgb,#22322b var(--solid-mix),rgba(34,50,43,.92));--mine:rgba(255,179,71,.18);
+  --glow-a:rgba(255,179,71,.18);--glow-b:rgba(118,185,255,.16);--glow-c:rgba(140,214,140,.16)}
+/* Paper grain: two faint crossing stripe patterns, painted once behind everything. */
+html[data-skin=crayon] body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
+  background:repeating-linear-gradient(0deg,rgba(120,90,50,.035) 0 1px,transparent 1px 4px),repeating-linear-gradient(90deg,rgba(120,90,50,.025) 0 1px,transparent 1px 5px)}
+html[data-skin=crayon][data-theme=dark] body::after{background:repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0 1px,transparent 1px 4px)}
+/* Hand-drawn outlines: uneven corners and a slightly thicker, darker line. */
+html[data-skin=crayon] :is(.rail,.stage-main,.stage>.side,.dialog,.settings-pop,.kg-card,.kl-side,.kl-panel){border:2px solid var(--line);border-radius:22px 9px 24px 8px / 9px 24px 8px 22px;box-shadow:3px 4px 0 color-mix(in srgb,var(--ink) 12%,transparent)}
+html[data-skin=crayon] :is(.btn,.msg.mine .bubble,.composer textarea,.place.active,.item.active){border-radius:14px 6px 15px 5px / 6px 15px 5px 14px}
+html[data-skin=crayon] .btn{border-width:2px}
+html[data-skin=crayon] .btn.primary{box-shadow:2px 3px 0 color-mix(in srgb,var(--ink) 25%,transparent)}
+html[data-skin=crayon] :is(h1,h2,h3,.rail-head strong,.place>span,.welcome h2,.kl-panel header h2){font-family:var(--hand);letter-spacing:0}
+html[data-skin=crayon] .msg.mine .bubble{background:color-mix(in srgb,#76b9ff 22%,var(--panel));border:2px solid color-mix(in srgb,#4287f5 35%,transparent)}
+html[data-skin=crayon] :is(.rail,.stage-main,.composer,.stage-head,.st-nav){-webkit-backdrop-filter:none;backdrop-filter:none}
+
+/* Forest: deep greens, calm. */
+html[data-skin=forest]{--accent:#1f9d55;--accent-ink:#fff;--mine:rgba(31,157,85,.15);--canvas:#eef6f0;--glow-a:rgba(80,200,120,.35);--glow-b:rgba(180,220,120,.3);--glow-c:rgba(40,160,140,.3)}
+html[data-skin=forest][data-theme=dark]{--canvas:#06100b;--accent:#3ddc84;--accent-ink:#04140b;--ink:#e8f3ec;--muted:#93ab9c;--line:rgba(120,220,160,.14);--mine:rgba(61,220,132,.18);
+  --panel:color-mix(in srgb,#0c1a12 var(--solid-mix),rgba(120,220,160,.04));--raised:color-mix(in srgb,#12251a var(--solid-mix),rgba(120,220,160,.07));
+  --glass:color-mix(in srgb,#0c1a12 var(--solid-mix),rgba(10,24,16,.88));
+  --glow-a:rgba(40,180,90,.45);--glow-b:rgba(150,200,60,.25);--glow-c:rgba(20,150,130,.35)}
+
+/* Sunset: warm orange and rose. */
+html[data-skin=sunset]{--accent:#f0602d;--accent-ink:#fff;--mine:rgba(240,96,45,.14);--canvas:#fff3ec;--glow-a:rgba(255,140,80,.42);--glow-b:rgba(255,90,140,.3);--glow-c:rgba(255,200,90,.32)}
+html[data-skin=sunset][data-theme=dark]{--canvas:#120708;--accent:#ff7a45;--accent-ink:#1a0703;--ink:#fbeee8;--muted:#c2a49a;--line:rgba(255,150,110,.15);--mine:rgba(255,122,69,.2);
+  --panel:color-mix(in srgb,#1d0d0d var(--solid-mix),rgba(255,150,110,.04));--raised:color-mix(in srgb,#2a1414 var(--solid-mix),rgba(255,150,110,.07));
+  --glass:color-mix(in srgb,#1d0d0d var(--solid-mix),rgba(29,12,12,.88));
+  --glow-a:rgba(255,110,50,.48);--glow-b:rgba(230,60,120,.38);--glow-c:rgba(140,60,220,.3)}
+
+/* Sakura: soft pink, lavender and mint, gentle and bright. */
+html[data-skin=sakura]{--accent:#e8559a;--accent-ink:#fff;--mine:rgba(232,85,154,.14);--canvas:#fff2f7;--line:rgba(150,60,110,.14);--ink:#3a2433;--muted:#86697a;
+  --glow-a:rgba(255,150,200,.5);--glow-b:rgba(190,160,255,.42);--glow-c:rgba(140,230,200,.36)}
+html[data-skin=sakura][data-theme=dark]{--canvas:#140a12;--accent:#ff7ab8;--accent-ink:#2a0a1c;--ink:#fbeaf3;--muted:#c49fb4;--line:rgba(255,150,200,.16);--mine:rgba(255,122,184,.2);
+  --panel:color-mix(in srgb,#1f1019 var(--solid-mix),rgba(255,150,200,.05));--raised:color-mix(in srgb,#2b1623 var(--solid-mix),rgba(255,150,200,.08));
+  --glass:color-mix(in srgb,#1f1019 var(--solid-mix),rgba(31,16,25,.88));
+  --glow-a:rgba(255,110,180,.45);--glow-b:rgba(170,120,255,.36);--glow-c:rgba(90,210,180,.22)}
+html[data-skin=sakura] .btn.primary{background:linear-gradient(135deg,#ff9ac9,var(--accent));border-color:transparent}
+
+/* The Rex mark and the coloured icons take the theme's colour. */
+html[data-skin]:not([data-skin=midnight]) :is(.av.icon.accent,.av.icon.brandmark){background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 60%,#fff),var(--accent));color:var(--accent-ink)}
+/* Crayon: a crayon stroke under the screen title. */
+html[data-skin=crayon] .stage-head h1{background:linear-gradient(transparent 62%,color-mix(in srgb,#ffd166 70%,transparent) 62% 88%,transparent 88%) no-repeat;padding:0 2px}
+html[data-skin=crayon][data-theme=dark] .stage-head h1{background:linear-gradient(transparent 62%,rgba(255,179,71,.35) 62% 88%,transparent 88%) no-repeat}
