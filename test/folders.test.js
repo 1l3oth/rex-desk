@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
-import { checkTarget, planDataMove, followDataMove, planMemoryMove, followMemoryMove, memoryFolder, moveMedia } from '../src/folders.js';
+import { development, pointerHome, checkTarget, planDataMove, followDataMove, planMemoryMove, followMemoryMove, memoryFolder, moveMedia } from '../src/folders.js';
 
 const temp = () => mkdtempSync(path.join(os.tmpdir(), 'rex-folders-'));
 
@@ -40,7 +40,7 @@ test('a failed data move keeps the old folder and says why', async () => {
 });
 
 test('the AI memory moves on the next start and is read from its new place', () => {
-  const home = temp(), env = {}, brain = path.join(home, '.rexdesk'), to = path.join(home, 'Brain');
+  const home = temp(), env = { REX_DESK_VERSION: '0.0.10' }, brain = path.join(home, '.rexdesk'), to = path.join(home, 'Brain');
   mkdirSync(path.join(brain, 'agents'), { recursive: true }); writeFileSync(path.join(brain, 'user.md'), 'about me'); writeFileSync(path.join(brain, 'data-folder.txt'), 'X:\\data');
   assert.equal(memoryFolder(env, home), brain);
   planMemoryMove(to, { env, home });
@@ -61,4 +61,16 @@ test('files from agents move at once, and new files go to the new folder', () =>
   assert.ok(!existsSync(path.join(store.directory, 'artifacts', 'run-1', 'shot.png')), 'The old copy is removed');
   assert.equal(store.media('uploads'), path.join(to, 'uploads'));
   store.close?.();
+});
+
+test('a development copy keeps its own home folder; the installed app and a checkout on 4317 use the real one', () => {
+  const home = temp();
+  assert.equal(development({}), true, 'npm start in a checkout');
+  assert.equal(pointerHome(home, {}), path.join(home, '.rexdesk-dev'));
+  assert.equal(memoryFolder({}, home), path.join(home, '.rexdesk-dev'));
+  for (const env of [{ REX_DESK_VERSION: '0.0.10' }, { PORT: '4317' }, { REX_RESTART_AFTER: '123' }]) {
+    assert.equal(development(env), false, JSON.stringify(env));
+    assert.equal(pointerHome(home, env), path.join(home, '.rexdesk'));
+  }
+  assert.equal(development({ PORT: '4318', REX_RESTART_AFTER: '123' }), true, 'a development copy that updated itself stays development');
 });

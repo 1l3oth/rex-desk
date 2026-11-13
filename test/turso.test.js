@@ -242,3 +242,17 @@ test('signing in merges the cloud copy: only new messages come down, a chat kept
   assert.equal(store.events('run-1', { visible: true })[0].text, 'Here');
   await store.cloud.close(); store.close();
 });
+
+test('shared agents and computers belong to one account: another account (or a development copy) in the same database stays out of view', async () => {
+  const turso = fakeTurso(); turso.network.online = true;
+  const store = new Store(temporary('shared-workspace'));
+  store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await store.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' });
+  const workspace = store.cloud.workspace, add = (id, node, owner) => turso.remote.prepare('INSERT INTO rex_shared(kind,id,value,deleted,v,node,workspace) VALUES(?,?,?,?,?,?,?)').run('specialist', id, JSON.stringify({ id, name: id }), 0, '00000000a.0001.x', node, owner);
+  add('mine', 'other-laptop', workspace); add('theirs', 'dev-copy', 'another-workspace');
+  turso.remote.prepare('INSERT INTO rex_presence(node,name,at,agents,host,workspace) VALUES(?,?,?,?,?,?)').run('dev-copy', 'Dev', Date.now(), '{}', 'X', 'another-workspace');
+  turso.remote.prepare('INSERT INTO rex_presence(node,name,at,agents,host,workspace) VALUES(?,?,?,?,?,?)').run('other-laptop', 'Laptop', Date.now(), '{}', 'Y', workspace);
+  assert.deepEqual((await store.cloud.pullShared('0')).map(row => row.id), ['mine']);
+  assert.deepEqual((await store.cloud.presence('Here', {})).map(row => row.name), ['Laptop']);
+  await store.cloud.close(); store.close();
+});

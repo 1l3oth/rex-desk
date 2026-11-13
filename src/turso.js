@@ -7,6 +7,12 @@ import { randomUUID, createHash } from 'node:crypto';
 import { SHARED } from './store.js';
 import { FileBackup } from './file-backup.js';
 import { AccountLink } from './rexdesk-account.js';
+import { development } from './folders.js';
+
+// A development copy (npm start) never writes to a cloud database unless asked with REX_DEV_CLOUD=1: the same database may
+// hold the real Rex Desk's backup, and a schema change in code being written would reach it too.
+const DEV_CLOUD_OFF = 'This is a development copy of Rex Desk, so cloud backup is off. Start it with REX_DEV_CLOUD=1 to use a cloud database.';
+const cloudAllowed = () => !development() || process.env.REX_DEV_CLOUD === '1';
 
 // Local transactions and their cloud outbox commit together. Failed uploads can be retried without losing work.
 export class TursoSync {
@@ -21,7 +27,8 @@ export class TursoSync {
     this.workspace = readFileSync(workspaceFile, 'utf8').trim();
     this.files = new FileBackup(this);
     store.db.exec('CREATE TABLE IF NOT EXISTS cloud_outbox (sequence INTEGER PRIMARY KEY AUTOINCREMENT, destination TEXT NOT NULL, sql TEXT NOT NULL, args TEXT NOT NULL)');
-    if (existsSync(this.connectionFile)) {
+    if (existsSync(this.connectionFile) && !cloudAllowed()) this.error = DEV_CLOUD_OFF;
+    else if (existsSync(this.connectionFile)) {
       try { this.connection = JSON.parse(store.decrypt(readFileSync(this.connectionFile, 'utf8'))); }
       catch { this.state = 'error'; this.error = 'Database connection cannot be decrypted with this local vault key.'; }
     }
@@ -41,20 +48,21 @@ export class TursoSync {
   // Turso database gives each of them the same chats, also while another computer is off. The newest version wins.
   shared(kind, id, value, deleted = false) {
     if (!SHARED.has(kind) || (kind === 'specialist' && id === 'main') || !value?._v && !deleted) return;
-    this.enqueue('INSERT INTO rex_shared(kind,id,value,deleted,v,node) VALUES(?,?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value,deleted=excluded.deleted,v=excluded.v,node=excluded.node WHERE excluded.v > rex_shared.v',
-      [kind, id, deleted ? '' : JSON.stringify(value), deleted ? 1 : 0, deleted ? this.store.stamp() : value._v, this.store.nodeId]);
+    // workspace: only this account's computers read it (another account, or a development copy, in the same database does not).
+    this.enqueue('INSERT INTO rex_shared(kind,id,value,deleted,v,node,workspace) VALUES(?,?,?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value,deleted=excluded.deleted,v=excluded.v,node=excluded.node,workspace=excluded.workspace WHERE excluded.v > rex_shared.v',
+      [kind, id, deleted ? '' : JSON.stringify(value), deleted ? 1 : 0, deleted ? this.store.stamp() : value._v, this.store.nodeId, this.workspace]);
   }
   // Each computer says it is on, every half minute, with how its agents are doing. A computer that cannot reach another one
   // directly (no Tailscale) still knows it is on, and messages for its agents go through this database.
   async presence(name, agents) {
     if (!this.ready || this.closed) return null;
-    await this.client.execute({ sql: 'INSERT INTO rex_presence(node,name,at,agents,host) VALUES(?,?,?,?,?) ON CONFLICT(node) DO UPDATE SET name=excluded.name,at=excluded.at,agents=excluded.agents,host=excluded.host', args: [this.store.nodeId, name, Date.now(), JSON.stringify(agents), os.hostname()] });
-    const result = await this.client.execute({ sql: 'SELECT node,name,at,agents FROM rex_presence WHERE node != ?', args: [this.store.nodeId] });
+    await this.client.execute({ sql: 'INSERT INTO rex_presence(node,name,at,agents,host,workspace) VALUES(?,?,?,?,?,?) ON CONFLICT(node) DO UPDATE SET name=excluded.name,at=excluded.at,agents=excluded.agents,host=excluded.host,workspace=excluded.workspace', args: [this.store.nodeId, name, Date.now(), JSON.stringify(agents), os.hostname(), this.workspace] });
+    const result = await this.client.execute({ sql: 'SELECT node,name,at,agents FROM rex_presence WHERE node != ? AND workspace = ?', args: [this.store.nodeId, this.workspace] });
     return result.rows.map(row => ({ node: row.node, name: row.name, at: Number(row.at), agents: JSON.parse(row.agents || '{}') }));
   }
   async pullShared(since, limit = 400) {
     if (!this.ready || this.closed) return null;
-    const result = await this.client.execute({ sql: 'SELECT kind,id,value,deleted,v FROM rex_shared WHERE v > ? AND node != ? ORDER BY v LIMIT ?', args: [since, this.store.nodeId, limit] });
+    const result = await this.client.execute({ sql: 'SELECT kind,id,value,deleted,v FROM rex_shared WHERE v > ? AND node != ? AND workspace = ? ORDER BY v LIMIT ?', args: [since, this.store.nodeId, this.workspace, limit] });
     return result.rows.map(row => ({ kind: row.kind, id: row.id, deleted: Boolean(Number(row.deleted)), value: Number(row.deleted) ? null : JSON.parse(row.value), v: row.v }));
   }
   // What belongs to a project kept out of the cloud is never written there (see Store.isPrivate): not by a change, not by the
@@ -68,7 +76,7 @@ export class TursoSync {
   forget(agentId) {
     if (!this.enabled) return { removed: 0 };
     let removed = 0;
-    const drop = (kind, id) => { removed += 1; this.enqueue('DELETE FROM rex_records WHERE workspace=? AND kind=? AND id=?', [this.workspace, kind, id]); if (SHARED.has(kind)) this.enqueue('DELETE FROM rex_shared WHERE kind=? AND id=?', [kind, id]); };
+    const drop = (kind, id) => { removed += 1; this.enqueue('DELETE FROM rex_records WHERE workspace=? AND kind=? AND id=?', [this.workspace, kind, id]); if (SHARED.has(kind)) this.enqueue('DELETE FROM rex_shared WHERE (workspace=? OR workspace IS NULL) AND kind=? AND id=?', [this.workspace, kind, id]); };
     const runs = this.store.list('run').filter(run => run.specialistId === agentId || run.roomAgent === agentId), runIds = new Set(runs.map(run => run.id));
     this.store.transaction(() => {
       for (const kind of ['chatcopy', 'peercmd', 'chatfile']) for (const item of this.store.list(kind)) if (item.agentId === agentId) drop(kind, item.id);
@@ -135,6 +143,12 @@ export class TursoSync {
       ], 'write');
       // Which machine each computer id runs on, so a restore can tell a reinstall here from a second computer.
       await this.client.execute({ sql: 'ALTER TABLE rex_presence ADD COLUMN host TEXT', args: [] }).catch(() => {});
+      // Shared agents and computers belong to one account (workspace). Rows from before the column existed are claimed by the
+      // computer that wrote them: this one, or the account's first computer (its id is the workspace id). Anything else in the
+      // same database (another account, a development copy) stays out of this account's view.
+      for (const table of ['rex_shared', 'rex_presence']) await this.client.execute({ sql: `ALTER TABLE ${table} ADD COLUMN workspace TEXT`, args: [] }).catch(() => {});
+      await this.client.execute({ sql: 'CREATE INDEX IF NOT EXISTS rex_shared_workspace_v ON rex_shared(workspace, v)', args: [] }).catch(() => {});
+      for (const table of ['rex_shared', 'rex_presence']) await this.client.execute({ sql: `UPDATE ${table} SET workspace=? WHERE workspace IS NULL AND node IN (?, ?)`, args: [this.workspace, this.store.nodeId, this.workspace] }).catch(() => {});
       // Another computer finds this workspace by name; only the passphrase unseals its key.
       if (this.store.auth?.kdf) await this.client.batch([{ sql: 'INSERT INTO rex_workspaces(workspace,name,kdf,sealed_key,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace) DO UPDATE SET name=excluded.name,kdf=excluded.kdf,sealed_key=excluded.sealed_key,updated_at=excluded.updated_at',
         args: [this.workspace, this.store.auth.name, JSON.stringify(this.store.auth.kdf), this.store.auth.sealedKey, new Date().toISOString()] }], 'write');
@@ -268,6 +282,7 @@ export class TursoSync {
     return { node: this.store.nodeId, own: false };
   }
   async connect({ url, authToken }) {
+    if (!cloudAllowed()) throw new Error(DEV_CLOUD_OFF);
     const parsed = new URL(url);
     if (!['libsql:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('Use a libsql:// or HTTPS Turso database URL without credentials in the URL.');
     const token = String(authToken || (this.connection?.url === url ? this.connection.authToken : '') || '').trim();
