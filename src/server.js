@@ -592,6 +592,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
           // A project that runs only on its own computer, or is not on this one, never starts here: the message waits for that computer.
           const elsewhere = homeAgent && desk.peers.isRemote(homeAgent) && (desk.peers.online(homeAgent.node) || homeAgent.pinned || Boolean(homeAgent.projectSlug && !desk.projectRules.folderHere(homeAgent.projectSlug)));
           if (elsewhere) return json(response, 200, await desk.peers.chatAction({ id: runId, node: homeAgent.node, agentId: homeAgent.id }, action, input));
+          // Its computer is off and the project is here: the agent moves to this computer and carries on, shown as working here.
+          if (homeAgent && desk.peers.isRemote(homeAgent) && action !== 'stop') await desk.projectRules.move(homeAgent.id).catch(() => {});
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
           if (action === 'fresh') return json(response, 200, await desk.freshStart(runId));
           if (action === 'say') return json(response, 200, await desk.say(runId, input.text, input));
@@ -645,7 +647,11 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say|loop|move))?$/);
       if (specialistMatch) {
         const [, specialistId, part] = specialistMatch;
-        const remoteAgent = store.get('specialist', specialistId);
+        let remoteAgent = store.get('specialist', specialistId);
+        // A message for an agent whose computer is off, whose project is also here and not kept to its computer: it moves here.
+        if (desk.peers.isRemote(remoteAgent) && request.method === 'POST' && ['say', 'assign'].includes(part) && !desk.peers.online(remoteAgent.node) && !remoteAgent.pinned && desk.projectRules.folderHere(remoteAgent.projectSlug)) {
+          await desk.projectRules.move(specialistId).catch(() => {}); remoteAgent = store.get('specialist', specialistId);
+        }
         if (request.method === 'POST' && part === 'move') return json(response, 200, await desk.projectRules.move(specialistId));
         if (desk.peers.isRemote(remoteAgent) && request.method === 'POST' && ['say', 'assign'].includes(part)) {
           const input = await body(request), task = input.taskId && store.get('task', input.taskId);
