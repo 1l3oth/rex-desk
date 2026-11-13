@@ -61,3 +61,15 @@ test('checking often is cheap: an unchanged release answers 304 and keeps what w
   assert.equal(again.ready, true); assert.equal(again.available.version, '0.3.0');
   assert.deepEqual(seen, ['', '', '"v3"']);
 });
+
+test('only the newest installer is kept, and an update is not installed without room for it', async () => {
+  const { writeFileSync: write, readdirSync: list } = await import('node:fs');
+  const data = temporary('cleanup');
+  const updates = new Updates(data, { version: '0.2.0', executable: 'C:/Rex Desk/rex-desk.exe', key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
+  const { mkdirSync: make } = await import('node:fs'); make(path.join(data, 'updates'), { recursive: true });
+  write(path.join(data, 'updates', 'Rex-Desk-0.1.0-setup.exe'), 'old'); write(path.join(data, 'updates', 'Rex-Desk-0.1.5-setup.exe'), 'old');
+  assert.equal((await updates.check()).ready, true);
+  assert.deepEqual(list(path.join(data, 'updates')).filter(name => name.endsWith('.exe')), ['Rex-Desk-0.3.0-setup.exe']);
+  updates.freeSpace = () => 100 * 1024 * 1024;
+  assert.throws(() => updates.install(1), /Not enough free space to install the update: 100 MB free/);
+});

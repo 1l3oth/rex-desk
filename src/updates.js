@@ -1,6 +1,12 @@
 import path from 'node:path';
 import { createHash, createPublicKey, verify } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statfsSync } from 'node:fs';
+import os from 'node:os';
+
+// Free space an install needs on the drive of the temp folder: the installer unpacks there first. On a full drive the
+// 0.0.15 install wrote an empty node.exe and Rex Desk could not start.
+const INSTALL_ROOM = 500 * 1024 * 1024;
+export const freeSpace = folder => { try { const disk = statfsSync(folder); return Number(disk.bavail) * Number(disk.bsize); } catch { return Infinity; } };
 import { execFileSync, spawn } from 'node:child_process';
 
 // Installers are published with an Ed25519 signature made by the release key, which only the release workflow holds.
@@ -84,6 +90,8 @@ export class Updates {
     const file = path.join(this.directory, `Rex-Desk-${String(version).replace(/[^0-9.]/g, '')}${updaters[this.platform]}`);
     if (this.file === file && this.state.ready) return;
     mkdirSync(this.directory, { recursive: true });
+    // Only the newest installer is kept: older ones are not needed and took hundreds of MB on a nearly full drive.
+    for (const name of readdirSync(this.directory)) if (/^Rex-Desk-.+-setup\.exe$|^Rex-Desk-.+\.app\.tar\.gz$/i.test(name) && path.join(this.directory, name) !== file) rmSync(path.join(this.directory, name), { force: true });
     let bytes = existsSync(file) ? readFileSync(file) : null;
     if (!bytes) {
       const response = await this.fetcher(update.url, { redirect: 'follow', signal: AbortSignal.timeout(15 * 60000) });
@@ -107,6 +115,8 @@ export class Updates {
   // PowerShell has no console and never starts. A WMI-created process inherits no environment, so values go as arguments.
   install(serverPid) {
     if (!this.state.ready || !this.file) throw new Error('No verified update is ready yet.');
+    const free = (this.freeSpace || freeSpace)(os.tmpdir());
+    if (free < INSTALL_ROOM) throw new Error(`Not enough free space to install the update: ${Math.max(0, Math.round(free / 1048576))} MB free on the drive of ${os.tmpdir()}, and it needs 500 MB. Free some space, then press Update now again.`);
     if (this.platform.startsWith('darwin')) {
       // The executable is "Rex Desk.app/Contents/MacOS/rex-desk"; the app is the folder three levels up.
       const helper = path.join(this.directory, 'install-update.sh');
