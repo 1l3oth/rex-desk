@@ -1336,7 +1336,7 @@ document.addEventListener('click', event => {
           toast(ui.snapshot.database.state === 'connected' ? 'Turso connected. Existing history was uploaded.' : `Saved. Turso is ${ui.snapshot.database.state}; changes wait in the local outbox.`, ui.snapshot.database.state !== 'connected');
         } else {
           const result = await api('/database/sync', { method: 'POST' }); ui.snapshot.database = result.status;
-          toast(result.matched ? `Cloud copy verified: ${result.remoteRecords} records and ${result.remoteEvents} events match.` : `Cloud copy differs: local ${result.localRecords}/${result.localEvents}, Turso ${result.remoteRecords}/${result.remoteEvents}. Upload again or check the database.`, !result.matched);
+          toast(result.matched ? `Everything on this computer is in the cloud: ${result.localRecords} records and ${result.localEvents} messages.` : `${result.missingRecords} records and ${result.missingEvents} messages from this computer did not reach the cloud. Check the connection and try again.`, !result.matched);
         }
       } finally { const element = document.querySelector('[data-database]'); if (element && !element.contains(document.activeElement)) element.innerHTML = renderDatabase(); else if (target.isConnected) { target.disabled = false; target.innerHTML = label; } }
     }); return;

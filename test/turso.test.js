@@ -180,3 +180,22 @@ test('signing in again keeps this computer\'s own name instead of taking the oth
   assert.equal(store.get('peers', 'main').name, 'Laptop');
   await store.cloud.close(); store.close();
 });
+
+test('the cloud check passes when another computer added its own chats, and uploads again what is missing', async () => {
+  const turso = fakeTurso(); turso.network.online = true;
+  const store = new Store(temporary('verify-two'));
+  store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await store.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' });
+  store.put('task', 'here', { id: 'here', title: 'From this computer' });
+  store.event('run-1', 'message', { text: 'Here' }, true);
+  await store.cloud.flush();
+  const workspace = store.cloud.workspace;
+  turso.remote.prepare('INSERT INTO rex_records(workspace,kind,id,value) VALUES(?,?,?,?)').run(workspace, 'task', 'there', '{"id":"there"}');
+  turso.remote.prepare('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?)').run(workspace, 999, 'run-2', 'message', 1, '{}', '');
+  assert.equal((await store.cloud.verify()).matched, true, 'the other computer\'s chats are not a difference');
+  turso.remote.prepare("DELETE FROM rex_records WHERE workspace=? AND id='here'").run(workspace);
+  const result = await store.cloud.verify();
+  assert.equal(result.matched, true, 'a missing record is uploaded again');
+  assert.ok(turso.remote.prepare("SELECT 1 FROM rex_records WHERE workspace=? AND id='here'").get(workspace));
+  await store.cloud.close(); store.close();
+});

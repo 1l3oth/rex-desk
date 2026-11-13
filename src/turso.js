@@ -273,16 +273,35 @@ export class TursoSync {
     })();
     return this.flushing;
   }
-  async verify() {
+  async verify({ repaired = false } = {}) {
     await this.flush();
     if (this.state !== 'connected') throw new Error('Turso is offline. Pending writes are safe in the local outbox.');
+    // The question is whether everything on this computer is in the cloud. The same account on another computer adds its own
+    // chats and records there too, so the cloud copy may hold more than this computer, and that is fine.
     const local = this.store.db.prepare('SELECT kind,id,value FROM records ORDER BY kind,id').all().filter(row => !this.store.isPrivate(row.kind, JSON.parse(row.value)));
-    const remote = await this.client.execute({ sql: 'SELECT kind,id,value FROM rex_records WHERE workspace=? ORDER BY kind,id', args: [this.workspace] });
-    const hash = rows => createHash('sha256').update(JSON.stringify(rows.map(row => [row.kind, row.id, row.value]))).digest('hex');
     const privateRuns = new Set(this.store.list('run').filter(run => this.store.isPrivate('run', run)).map(run => run.id));
-    const localEvents = privateRuns.size ? this.store.db.prepare('SELECT run_id FROM events').all().filter(row => !privateRuns.has(row.run_id)).length : Number(this.store.db.prepare('SELECT COUNT(*) AS total FROM events').get().total);
-    const remoteEvents = Number((await this.client.execute({ sql: 'SELECT COUNT(*) AS total FROM rex_events WHERE workspace=?', args: [this.workspace] })).rows[0].total);
-    return { matched: hash(local) === hash(remote.rows) && localEvents === remoteEvents, localRecords: local.length, remoteRecords: remote.rows.length, localEvents, remoteEvents };
+    const localEvents = this.store.db.prepare('SELECT sequence,run_id FROM events').all().filter(row => !privateRuns.has(row.run_id));
+    const remoteKeys = new Set(); let kind = '', id = '';
+    for (;;) {
+      const page = await this.client.execute({ sql: 'SELECT kind,id FROM rex_records WHERE workspace=? AND (kind>? OR (kind=? AND id>?)) ORDER BY kind,id LIMIT 5000', args: [this.workspace, kind, kind, id] });
+      for (const row of page.rows) remoteKeys.add(`${row.kind}\u0000${row.id}`);
+      if (page.rows.length < 5000) break; ({ kind, id } = page.rows.at(-1));
+    }
+    const remoteSequences = new Set(); let after = -1;
+    for (;;) {
+      const page = await this.client.execute({ sql: 'SELECT sequence FROM rex_events WHERE workspace=? AND sequence>? ORDER BY sequence LIMIT 20000', args: [this.workspace, after] });
+      for (const row of page.rows) remoteSequences.add(Number(row.sequence));
+      if (page.rows.length < 20000) break; after = Number(page.rows.at(-1).sequence);
+    }
+    const lostRecords = local.filter(row => !remoteKeys.has(`${row.kind}\u0000${row.id}`)), lostEvents = localEvents.filter(row => !remoteSequences.has(Number(row.sequence)));
+    // Anything missing is uploaded again once, then checked again.
+    if (!repaired && (lostRecords.length || lostEvents.length)) {
+      const event = this.store.db.prepare('SELECT * FROM events WHERE sequence=?');
+      this.store.transaction(() => { for (const row of lostRecords) this.record(row.kind, row.id, JSON.parse(row.value)); for (const row of lostEvents) this.event(event.get(row.sequence)); });
+      return this.verify({ repaired: true });
+    }
+    const missingRecords = lostRecords.length, missingEvents = lostEvents.length;
+    return { matched: missingRecords === 0 && missingEvents === 0, missingRecords, missingEvents, localRecords: local.length, remoteRecords: remoteKeys.size, localEvents: localEvents.length, remoteEvents: remoteSequences.size };
   }
   async close() {
     clearTimeout(this.timer); clearInterval(this.retryTimer); clearInterval(this.filesTimer); clearTimeout(this.files.soonTimer);

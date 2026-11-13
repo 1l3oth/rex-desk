@@ -196,7 +196,7 @@ export function openSettings(ctx, section = 'general') {
       }
       if (target.closest('[data-st-db-sync]')) {
         const button = target.closest('[data-st-db-sync]'); button.disabled = true; button.textContent = 'Uploading…';
-        try { const result = await api('/database/sync', { method: 'POST' }); toast(result.matched ? `Cloud copy checked: ${result.remoteRecords} records and ${result.remoteEvents} events match.` : 'The cloud copy differs from this computer. Upload again, or check the database.', !result.matched); }
+        try { const result = await api('/database/sync', { method: 'POST' }); toast(result.matched ? `Everything on this computer is in the cloud: ${result.localRecords} records and ${result.localEvents} messages.` : `${result.missingRecords} records and ${result.missingEvents} messages from this computer did not reach the cloud. Check the connection and try again.`, !result.matched); }
         finally { await refresh(); draw(); }
         return;
       }
