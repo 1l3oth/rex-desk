@@ -112,3 +112,7 @@ select option,select optgroup{background:var(--solid);color:var(--ink)}
 .glass-pop .glass-row{display:flex;gap:6px;margin-top:10px}.glass-pop .glass-row button{flex:1;padding:5px 0;border:1px solid var(--line);border-radius:8px;background:var(--raised);font-size:12px}
 .glass-pop .glass-row button:hover{border-color:var(--accent)}
 @media (prefers-reduced-motion:reduce){.chat-shell,.rail,.stage>.side.on{transition:none!important}.glass-pop{animation:none}}
+
+/* AI accounts: the providers sit in one row, however many there are, instead of stacking two by two. */
+.acct-tabs{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}
+.acct-tabs .tab{white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
