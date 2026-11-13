@@ -752,7 +752,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });
       const editorFile = url.pathname.match(/^\/vendor\/codemirror\/((?:lib|mode\/[a-z0-9-]+|addon\/[a-z]+)\/[a-z0-9-]+\.(?:js|css))$/);
       if (editorFile) return serveFile(request, response, path.join(root, 'node_modules', 'codemirror', ...editorFile[1].split('/')), { cache: 'public, max-age=604800' });
-      const file = publicFiles[url.pathname];
+      // A page script or style added after this server started is served by its name too, so a server still waiting for
+      // agents to finish before it restarts does not leave the page stuck on a missing file.
+      const file = publicFiles[url.pathname] || (/^\/[a-z0-9-]+\.(?:js|css)$/.test(url.pathname) ? url.pathname.slice(1) : '');
       if (!file || !existsSync(path.join(root, 'public', file))) return json(response, 404, { error: 'Page not found.' });
       return serveFile(request, response, path.join(root, 'public', file));
     } catch (error) { if (!response.headersSent) json(response, 400, { error: error.message }); else response.end(); }
