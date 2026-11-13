@@ -6,6 +6,7 @@ import { redactText } from './memory.js';
 import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { findProjectLogo } from './project-logo.js';
 const EXPLAINER = path.join(os.homedir(), '.agents', 'skills', 'code-explainer-page');
 // Explaining an idea, a cause or how something works: a picture page in eli5 style, the way the person likes to learn.
 export const LOOP_EVERY = [15, 30, 60, 120, 240, 1440];
@@ -71,7 +72,8 @@ export class Specialists {
     if (!text) return '';
     const preset = /^a:(\d{1,3})$/.exec(text);
     if (preset && Number(preset[1]) < Specialists.AVATARS) return text;
-    if (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(text) && text.length <= 80000) return text;
+    // A project's SVG logo too (shown through an image, where an SVG cannot run anything).
+    if (/^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(text) && text.length <= 82000) return text;
     throw new Error('Pick one of the avatars, or a PNG, JPEG or WebP picture under 60 KB.');
   }
   // The lowest avatar no agent of this person has yet, so no two agents look the same (after 128, they repeat).
@@ -80,10 +82,15 @@ export class Specialists {
     for (let index = 0; index < Specialists.AVATARS; index++) if (!used.has(`a:${index}`)) return `a:${index}`;
     return `a:${Math.floor(Math.random() * Specialists.AVATARS)}`;
   }
+  // A new agent's avatar: its project's own logo when the project has one (see project-logo.js), else the next robot.
+  firstAvatar(projectPath, except = '') {
+    try { const logo = findProjectLogo(projectPath); if (logo) return this.cleanAvatar(logo.dataUrl); } catch { /* no usable logo */ }
+    return this.nextAvatar(except);
+  }
   // Agents from before avatars get one each, oldest first. Only this computer's own agents: another computer gives its own.
   ensureAvatars(nodeId = '') {
     for (const item of this.list().filter(agent => !agent.avatar && (!agent.node || !nodeId || agent.node === nodeId)).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))))
-      this.store.put('specialist', item.id, { ...this.store.get('specialist', item.id), avatar: this.nextAvatar(item.id) });
+      this.store.put('specialist', item.id, { ...this.store.get('specialist', item.id), avatar: this.firstAvatar(item.projectPath, item.id) });
   }
 
   // The project must be one Rex Desk has in memory, so the specialist starts from what is already known about it.
@@ -94,7 +101,7 @@ export class Specialists {
     const repository = this.store.config().repositories.find(item => path.resolve(item.path).toLowerCase() === path.resolve(project.path).toLowerCase());
     const item = { id: randomUUID(), name: clean, slug, projectSlug: project.slug, projectPath: project.path, repositoryId: repository?.id || '', purpose: String(purpose || '').trim().slice(0, 400) || project.purpose || '',
       rules: String(rules).slice(0, 4000), unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12),
-      provider: aiProvider(provider || this.store.config().provider), model: this.cleanModel(model, { strict: true, provider: provider || this.store.config().provider }), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, loop: { ...LOOP_DEFAULT }, avatar: this.nextAvatar(), createdAt: now(), updatedAt: now() };
+      provider: aiProvider(provider || this.store.config().provider), model: this.cleanModel(model, { strict: true, provider: provider || this.store.config().provider }), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, loop: { ...LOOP_DEFAULT }, avatar: this.firstAvatar(project.path), createdAt: now(), updatedAt: now() };
     this.store.put('specialist', item.id, item); this.writeCard(item); return this.desk.projectRules?.inherit(this.store.get('specialist', item.id)) || item;
   }
   update(id, { rules, unsure, provider, model, taskSources, profile, loop, avatar }) {

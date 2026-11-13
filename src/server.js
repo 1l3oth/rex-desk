@@ -161,6 +161,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const status = await store.cloud.open();
         if (status.state === 'connected' && !store.fresh) opened.cloud = await store.cloud.pullLatest({ live: new Set(desk.live?.keys?.() || []) }).catch(error => ({ pulled: false, reason: error.message }));
         else if (store.cloud.enabled) opened.cloud = { pulled: false, reason: status.error || 'Cloud backup is offline; working from this computer’s copy.' };
+        // No cloud backup at all (or a development copy): nothing to sync, so the "syncing" note goes away.
+        else opened.cloud = { pulled: false, reason: 'No cloud backup.' };
         if (session === opened) notify();
       };
       if (store.fresh) { if (bootStage) bootStage = 'Restoring your workspace from your cloud backup'; await sync(); }
@@ -497,6 +499,15 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/repositories/scan' && request.method === 'POST') { await desk.scanRepositories(); return json(response, 200, desk.snapshot().catalog); }
       if (url.pathname === '/api/repositories/catalog' && request.method === 'GET') return json(response, 200, store.list('repository'));
       // Folders: where data, AI memory and files from agents are kept, and moving them.
+      // The sidebar's order and pins, as the person dragged them: { kind: 'agents' | 'rooms', order: [ids], pins: [ids] }.
+      if (url.pathname === '/api/sidebar' && request.method === 'POST') {
+        const input = await body(request), kind = input.kind;
+        if (!['agents', 'rooms'].includes(kind)) throw new Error('Say which list: agents or rooms.');
+        const ids = list => Array.isArray(list) ? [...new Set(list.map(String).filter(id => /^[A-Za-z0-9_-]{1,80}$/.test(id)))].slice(0, 500) : undefined;
+        const saved = store.get('sidebar', 'main') || {}, order = ids(input.order), pins = ids(input.pins);
+        const next = { ...saved, [kind]: { ...(saved[kind] || {}), ...(order ? { order } : {}), ...(pins ? { pins } : {}) } };
+        store.put('sidebar', 'main', next); notify(); return json(response, 200, next);
+      }
       if (url.pathname === '/api/folders' && request.method === 'GET') return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() }));
       if (url.pathname === '/api/folders/files' && request.method === 'POST') { moveMedia(store, (await body(request)).to); return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() })); }
       if (url.pathname === '/api/folders/move' && request.method === 'POST') {

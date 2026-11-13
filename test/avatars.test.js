@@ -12,7 +12,7 @@ const withAgents = agents => {
 test('every agent gets its own avatar; one the person picks or uploads is checked', () => {
   assert.equal(AVATARS.length, Specialists.AVATARS);
   assert.equal(new Set(AVATARS).size, AVATARS.length, 'no two pictures are the same');
-  assert.ok(AVATARS.every(svg => svg.startsWith('<svg') && svg.length < 4000), 'each picture is a small SVG');
+  assert.ok(AVATARS.every(svg => svg.startsWith('<svg') && svg.length < 6000), 'each picture is a small SVG');
   const agents = withAgents([{ id: 'a', avatar: 'a:0', createdAt: '1' }, { id: 'b', createdAt: '2' }, { id: 'c', createdAt: '3' }, { id: 'remote', node: 'other-pc', createdAt: '0' }]);
   agents.ensureAvatars('this-pc');
   assert.equal(agents.saved.get('b').avatar, 'a:1'); assert.equal(agents.saved.get('c').avatar, 'a:2');

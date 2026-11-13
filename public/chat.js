@@ -1,3 +1,4 @@
+import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter } from '/chat-sidebar.js';
 import { agentStage, agentAction, agentGroups, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
@@ -37,7 +38,7 @@ const provider = name => name === 'codex' ? 'Codex' : name === 'gemini' ? 'Gemin
 const aiKey = value => ['codex', 'gemini'].includes(value) ? value : 'claude';
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value), tokenText,
-  render: () => renderAll(), currentRunId: () => (ui.view.type === 'main' ? mainRun()?.id : ui.view.type === 'run' ? ui.view.id : '') || '', openSettings: section => openSettings(ctx, section), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
+  render: () => renderAll(), renderAll: () => renderAll(), isCollapsed: key => collapsed.has(key), currentRunId: () => (ui.view.type === 'main' ? mainRun()?.id : ui.view.type === 'run' ? ui.view.id : '') || '', openSettings: section => openSettings(ctx, section), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
   commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), clear: () => clearAgent().catch(error => toast(error.message, true)), loop: () => loopNow().catch(error => toast(error.message, true)), settings: () => openSettings(ctx) }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
@@ -141,8 +142,8 @@ function renderRail() {
         tile('devices', iconAv('devices'), 'Devices', (snap.devices?.peers || []).length ? `${(snap.devices.peers.filter(peer => peer.online).length + 1)} of ${snap.devices.peers.length + 1} on` : 'Only this computer', 0),
       ].join('')}</div>
     </div>
-    ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? snap.rooms.map(room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} ${room.members.length === 1 ? 'agent' : 'agents'}`, badge: unreadFor(ui, `room:${room.id}`) })).join('') : '<p class="rail-empty">No rooms yet.</p>')}
-    ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentGroups(ctx, agents, (agent, grouped) => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: withDevice(grouped ? agent.status?.label || 'Idle' : `${agent.status?.state === 'idle' || !agent.status ? agent.projectSlug : agent.status.label}`, agent.device), title: [agent.device && `Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
+    ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} ${room.members.length === 1 ? 'agent' : 'agents'}`, badge: unreadFor(ui, `room:${room.id}`) })) : '<p class="rail-empty">No rooms yet.</p>')}
+    ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: ['busy', 'replying', 'waiting'].includes(agent.status?.state) ? agent.status.label : agent.projectSlug || '', title: [agent.device && `Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
   </div>${phoneTabs(asks)}<div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button><button class="btn small" data-action="theme">Theme</button></div>`;
 }
 
@@ -345,7 +346,10 @@ function renderAll(full = false) {
   const railHtml = renderRail(); if (railHtml !== ui.railHtml) { ui.railHtml = railHtml;
     if (document.activeElement?.id === 'm-search' && rail.querySelector('.rail-scroll')) { const fresh = document.createElement('div'); fresh.innerHTML = railHtml; rail.querySelector('.rail-scroll').replaceWith(fresh.querySelector('.rail-scroll')); }
     else rail.innerHTML = railHtml;
-    const restored = rail.querySelector('.rail-scroll'); if (restored) restored.scrollTop = scroll; filterChats(); }
+    const restored = rail.querySelector('.rail-scroll'); if (restored) restored.scrollTop = scroll; filterChats();
+    // The agent filter keeps hiding what does not match, and keeps the cursor if the person was typing in it.
+    applyFilter(rail, ui.agentFilter);
+    if (ui.filterFocused) { const box = rail.querySelector('[data-rail-filter]'); if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); } } }
   renderStage(full);
   fillWorktreeEmbeds(ctx);
   if (ui.view.type === 'worktrees' && ui.view.id && ui.wtFocused !== ui.view.id) { const card = document.querySelector(`.wt-page [data-wt-id="${CSS.escape(ui.view.id)}"]`); if (card) { ui.wtFocused = ui.view.id; card.classList.add('focus'); card.scrollIntoView({ block: 'center' }); } }
@@ -379,7 +383,7 @@ async function refresh({ full = false } = {}) {
     ui.snap = await api('/state');
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
     if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = await api('/memory').catch(() => ui.memory); ui.profile = await api('/profile').catch(() => ui.profile);
-    await loadView(); renderAll(full); maybeStartTour(ctx); showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
+    await loadView(); renderAll(full); maybeStartTour(ctx); showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
   } finally { busy = false; if (again) { again = false; void refresh(); } }
 }
 function open(type, id = '') {
@@ -462,6 +466,7 @@ document.addEventListener('click', async event => {
     else if (action === 'update-install') await installUpdate(api);
     else if (action === 'update-later') updateLater();
     else if (action === 'avatar-pick') { const agent = (ui.snap.specialists || []).find(item => item.id === target.closest('[data-agent-id]')?.dataset.agentId); if (agent) openAvatarPicker(ctx, agent); }
+    else if (action === 'pin-toggle') togglePin(ctx, target.dataset.kind, target.dataset.id);
     else if (action === 'app-on' || action === 'app-off') {
       const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return;
       await api(`/runs/${run.id}/app`, { method: 'POST', data: { on: action === 'app-on' } });
@@ -827,7 +832,7 @@ function personalSide(run, agent, items, shells) {
     ${toolsHtml(agent.main ? 'main' : agent.id)}
     ${agent.main ? '' : `<h3>Tasks come from</h3><p class="pabout">${esc(sources.join(', ') || 'Not set yet')}</p>`}
     ${(agent.lessons || []).length ? `<h3>Lessons learned <span>${agent.lessons.length}</span></h3><ul class="plessons">${agent.lessons.slice(-4).map(lesson => `<li>${esc(lesson.text)}</li>`).join('')}</ul>` : ''}
-    ${rooms.length ? `<h3>Group chats <span>${rooms.length}</span></h3><ul class="rtasks">${rooms.map(room => `<li><button class="rtask" data-open="room" data-id="${esc(room.id)}">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'xs' })}<span>${esc(room.name)}</span></button></li>`).join('')}</ul>` : ''}
+    ${rooms.length ? `<h3>Group chats <span>${rooms.length}</span></h3><ul class="rtasks">${rooms.map(room => `<li><button class="rtask" data-open="room" data-id="${esc(room.id)}">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'xs' })}<span>${esc(room.name)}</span></button></li>`).join('')}</ul>` : ''}
     ${agent.main ? '' : `<div class="prow"><button class="btn small" data-open="specialist" data-id="${esc(agent.id)}" data-profile="1">Edit profile</button></div>`}
   </div>`;
 }
@@ -1115,7 +1120,7 @@ function phoneChats() {
   for (const room of snap.rooms || []) {
     const said = last.get(room.id), who = said ? (said.from.type === 'human' ? 'You' : said.from.name || (said.from.id === 'main' ? 'Rex Agent' : (snap.specialists || []).find(agent => agent.id === said.from.id)?.name) || 'Agent') : '';
     const working = room.members.some(member => member.state === 'replying' || member.state === 'busy');
-    rows.push({ at: said?.at || room.createdAt || '', html: phoneRow('room', room.id, avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'sm' }), working ? 'working' : '', room.name,
+    rows.push({ at: said?.at || room.createdAt || '', html: phoneRow('room', room.id, avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), working ? 'working' : '', room.name,
       working ? 'Someone is typing…' : said ? `${who}: ${String(said.text || '').replace(/\s+/g, ' ').slice(0, 90)}` : `${room.members.length} ${room.members.length === 1 ? 'agent' : 'agents'}`, said?.at || '', unreadFor(ui, `room:${room.id}`)) });
   }
   for (const agent of snap.specialists || []) {

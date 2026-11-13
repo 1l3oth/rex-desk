@@ -1634,7 +1634,10 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .ap-dialog{width:min(640px,calc(100vw - 24px));max-height:calc(100dvh - 40px);display:flex;flex-direction:column;gap:14px}
 .ap-head{display:flex;align-items:center;gap:14px}.ap-head h2{margin:0;font-size:17px}.ap-head p{margin:2px 0 0}.ap-head>div{flex:1}
 .ap-now{width:56px;height:56px;border-radius:50%;background:var(--raised)}
-.ap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:8px;overflow:auto;padding:4px;min-height:0}
+.ap-groups{overflow:auto;min-height:0;padding:0 4px}
+.ap-group{margin:12px 0 8px;font-size:12.5px;font-weight:600;color:var(--muted)}.ap-group:first-child{margin-top:0}
+.ap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:8px;padding:4px}
+.ap-credit{flex-basis:100%;color:var(--muted);font-size:11.5px}
 .ap-item{aspect-ratio:1;padding:3px;border:2px solid transparent;border-radius:50%;background:none;cursor:pointer;transition:border-color .12s,transform .12s}
 .ap-item img{width:100%;height:100%;border-radius:50%;display:block}
 .ap-item:hover{transform:scale(1.06)}.ap-item:focus-visible{outline:0;border-color:var(--accent)}
@@ -1650,3 +1653,30 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 #update-card .uc-bar-unknown i{animation:uc-slide 1.4s ease-in-out infinite}
 @keyframes uc-slide{from{transform:translateX(-100%)}to{transform:translateX(330%)}}
 @media (prefers-reduced-motion:reduce){#update-card .uc-bar i{transition:none;animation:none}}
+/* A group chat with no picture of its own: two members' avatars overlapped, like a messenger group. */
+.av.av-pair{position:relative;overflow:visible;background:none}
+.av.av-pair img{position:absolute;width:68%;height:68%;border-radius:50%;object-fit:cover;box-shadow:0 0 0 2px var(--panel)}
+.av.av-pair img:first-child{left:0;top:0}.av.av-pair img:last-child{right:0;bottom:0}
+
+/* Sidebar lists of agents and group chats: the person's order and pins. A row drags; its pin shows on hover or focus. */
+.drag-row{position:relative;border-radius:10px}
+.drag-row .item{padding-right:34px}
+.drag-row.dragging{opacity:.45}
+.drag-row.drop-before::before,.drag-row.drop-after::after{content:"";position:absolute;left:8px;right:8px;height:2px;border-radius:2px;background:var(--accent);pointer-events:none}
+.drag-row.drop-before::before{top:-1px}.drag-row.drop-after::after{bottom:-1px}
+.pin-btn{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:24px;height:24px;border:0;border-radius:6px;background:none;color:var(--muted);opacity:0;cursor:pointer;transition:opacity .12s,background-color .12s}
+.drag-row:hover .pin-btn,.pin-btn:focus-visible,.drag-row:focus-within .pin-btn,.pin-btn.on{opacity:1}
+.pin-btn:hover{background:var(--raised);color:var(--ink)}.pin-btn.on{color:var(--accent)}
+.pin-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* The small headings inside a list: Pinned, On this computer, On other computers. Pinned takes a dropped row. */
+.sub-sec{display:flex;align-items:center;gap:6px;width:100%;margin:6px 0 2px;padding:4px 10px;border:0;border-radius:8px;background:none;color:var(--muted);font-size:11.5px;font-weight:600;text-align:left}
+.sub-sec[data-action]{cursor:pointer}.sub-sec[data-action]:hover{color:var(--ink)}
+.sub-sec .cnt{margin-left:auto;font-weight:500;opacity:.8}.sub-sec .chev{transition:transform .12s}.sub-sec.shut .chev{transform:rotate(-90deg)}
+.sub-sec.drop-pin{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--ink)}
+/* Agents on another computer: dimmed, so the ones that can work now stand out. */
+.drag-list.away .item .av img{filter:grayscale(.8);opacity:.6}.drag-list.away .item .name{color:var(--muted)}
+/* The agent filter. */
+.rail-filter{display:flex;align-items:center;gap:7px;margin:2px 8px 6px;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--muted)}
+.rail-filter input{flex:1;min-width:0;min-height:0;padding:0;border:0;background:none;color:var(--ink);font-size:12.5px;outline:0;box-shadow:none}
+.rail-filter:focus-within{border-color:var(--accent)}
+@media (prefers-reduced-motion:reduce){.pin-btn,.sub-sec .chev{transition:none}}

@@ -19,8 +19,23 @@ export function agentPicture(agent) {
   if (!pictures.has(number)) pictures.set(number, `data:image/svg+xml;charset=utf-8,${encodeURIComponent(AVATARS[number])}`);
   return pictures.get(number);
 }
-export function avatarHtml(ctx, { name, image = '', id = '', at = '', size = '', agent = null }) {
-  const { esc, initials } = ctx;
+// Rex Agent's picture is Rex Desk's own mark.
+const REX_MARK = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#3a72e8"/><g fill="#fff"><rect x="16" y="16" width="14" height="14" rx="3"/><rect x="34" y="16" width="14" height="14" rx="3"/><rect x="16" y="34" width="14" height="14" rx="3"/><rect x="34" y="34" width="14" height="14" rx="3" opacity=".47"/></g></svg>');
+export function avatarHtml(ctx, { name, image = '', id = '', at = '', size = '', agent = null, members = null }) {
+  const { esc, initials, ui } = ctx;
+  // Whoever this is gets their own picture wherever it shows (group chat messages, cards, lists): an agent its avatar,
+  // the person their profile photo, Rex Agent the Rex Desk mark. Letters only for someone with no picture at all.
+  if (!agent && !image && !members) {
+    if (name === 'Rex Agent') return `<span class="av av-agent ${size}"><img src="${REX_MARK}" alt=""></span>`;
+    if ((name === 'You' || (ui?.profile?.name && name === ui.profile.name)) && ui?.profile?.photo) return `<span class="av ${size}"><img src="/api/profile/photo?v=${encodeURIComponent(ui.profile.photo.updatedAt || '')}" alt=""></span>`;
+    agent = (ui?.snap?.specialists || []).find(item => item.name === name) || null;
+  }
+  // A group chat without its own picture shows two of its members together, the way messengers show a group.
+  if (members && !image) {
+    const faces = members.map(member => member === 'main' ? REX_MARK : (ui?.snap?.specialists || []).find(item => item.id === member)).filter(Boolean).slice(0, 2).map(face => typeof face === 'string' ? face : agentPicture(face));
+    if (faces.length === 2) return `<span class="av av-pair ${size}" aria-hidden="true"><img src="${esc(faces[0])}" alt=""><img src="${esc(faces[1])}" alt=""></span>`;
+    if (faces.length === 1) return `<span class="av av-agent ${size}"><img src="${esc(faces[0])}" alt=""></span>`;
+  }
   if (agent) return `<span class="av av-agent ${size}"><img src="${esc(agentPicture(agent))}" alt=""></span>`;
   return image ? `<span class="av ${size}"><img src="/api/rooms/${esc(id)}/image?v=${encodeURIComponent(at)}" alt=""></span>` : `<span class="av av${hashOf(name)} ${size}">${esc(initials(name))}</span>`;
 }
@@ -150,7 +165,7 @@ function roomInfoHtml(ctx, room) {
   const free = [{ id: 'main', name: 'Rex Agent', projectSlug: 'all projects', status: { label: 'Knows every project' } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
   const member = person => `<li class="rperson"><button class="rperson-main" data-open="${person.runId ? 'run' : 'specialist'}" data-id="${esc(person.runId || person.id)}" title="Open ${esc(person.name)}"><span data-agent-card="${esc(person.id)}" title="${esc(person.name)}'s card">${avatarHtml(ctx, { name: person.name, agent: person.id === 'main' ? null : (ctx.ui.snap.specialists || []).find(agent => agent.id === person.id) || null, size: 'sm' })}</span><span class="rperson-text"><b>${esc(person.name)}</b><small>${esc(person.project)} · <span class="st ${esc(person.state)}">${esc(person.label)}</span></small></span></button><button class="btn small x" data-action="room-remove" data-id="${esc(person.id)}" title="Remove from the room" aria-label="Remove ${esc(person.name)}">×</button></li>`;
   return `<div class="side-body rinfo">
-      <div class="rhero"><button type="button" class="ravatar" data-action="room-image" title="Change the picture">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'xl' })}<span class="cam">Change</span></button><input type="file" id="room-image-input" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+      <div class="rhero"><button type="button" class="ravatar" data-action="room-image" title="Change the picture">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'xl' })}<span class="cam">Change</span></button><input type="file" id="room-image-input" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
         <input class="rname" id="room-name" value="${esc(room.name)}" maxlength="80" aria-label="Room name" spellcheck="false">
         <p class="rsub">${room.members.length} agent${room.members.length === 1 ? '' : 's'} · started ${esc(new Date(room.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }))}</p></div>
       <h3>Members <span>${room.members.length + 1}</span></h3>

@@ -135,7 +135,8 @@ export class Desk {
     return Object.fromEntries(this.store.config().repositories.map(repository => { const { detected } = effectiveRepository(repository); return [repository.id, { setupCommand: detected.setupCommand, testCommand: detected.testCommand, devCommand: detected.devCommand, from: detected.from, flow: Boolean(detected.flowRuntime), electron: Boolean(detected.electronRuntime) }]; }));
   }
   snapshot() {
-    return { computer: thisComputer(), config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
+    // sidebar: the person's own order and pins for agents and group chats (dragged in the sidebar), on every computer.
+    return { computer: thisComputer(), sidebar: this.store.get('sidebar', 'main') || {}, config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
       notices: this.notifier.summary(), usage: this.store.list('usage'), shownFile: this.shownFile, fileWindow: this.fileWindow || null, worktrees: this.worktrees.all(),
       runs: [...this.store.list('run'), ...this.peers.remoteRuns(), ...this.peers.cloudRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions(), ...this.peers.cloudInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
