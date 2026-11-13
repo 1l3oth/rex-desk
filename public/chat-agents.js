@@ -1,6 +1,6 @@
 import { pickerHtml } from '/chat-pick.js';
 // Specialist agents: one identity per project. The card shows who the agent is and what it was told; the person can rename, edit or duplicate it.
-const providerName = name => name === 'codex' ? 'Codex (retired)' : name === 'gemini' ? 'Gemini (Antigravity)' : 'Claude Code';
+const providerName = name => name === 'codex' ? 'Codex' : name === 'gemini' ? 'Gemini (Antigravity)' : 'Claude Code';
 
 // Agents are grouped under their project; a project with several agents folds away. Folded groups are remembered on this computer.
 const FOLDED = 'rex-agent-groups-folded';

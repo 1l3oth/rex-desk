@@ -204,9 +204,10 @@ test('native elicitation survives HTTP sessions and the installed stdio proxy', 
   const directory = temporary('elicitation'), app = await createApp({ dataDirectory: directory, port: 0 });
   const clients = [];
   try {
+    // An agent running the tests has its own Rex Desk token in its environment; the proxy must read this test server's token instead.
     const transports = [
       new StreamableHTTPClientTransport(new URL(app.address + '/mcp'), { requestInit: { headers: { Authorization: `Bearer ${app.store.token}` } } }),
-      new StdioClientTransport({ command: process.execPath, args: [path.resolve('src/stdio.js')], env: { ...process.env, REX_DATA_DIR: directory, REX_DESK_URL: app.address + '/mcp' }, stderr: 'pipe' }),
+      new StdioClientTransport({ command: process.execPath, args: [path.resolve('src/stdio.js')], env: { ...process.env, REX_DESK_TOKEN: '', REX_AGENT_TOKEN: '', REX_DATA_DIR: directory, REX_DESK_URL: app.address + '/mcp' }, stderr: 'pipe' }),
     ];
     for (const transport of transports) {
       const client = new Client({ name: 'elicitation-test', version: '1' }, { capabilities: { elicitation: { form: {} } } });
