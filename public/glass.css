@@ -273,3 +273,34 @@ html.has-win-bar .chat-shell{height:100dvh;padding-top:34px}
 .ra-foot{display:flex;align-items:center;gap:8px;padding-top:4px;border-top:1px solid var(--line)}.ra-count{flex:1;font-size:12.5px;color:var(--muted);padding-top:8px}.ra-foot .btn{margin-top:8px}
 @media (prefers-reduced-motion:reduce){.ra-card{transition:none}}
 .ra-dialog .ra-search input,.ra-dialog .ra-search input:focus{border:0;background:none;box-shadow:none;outline:0}
+
+/* ===== Selected place in the rail: a tinted glass pill with a soft glow and stronger text, not a bar. ===== */
+.rail .item.active,.places .place.active,.places .place.tile.active{background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 24%,transparent),color-mix(in srgb,var(--accent) 8%,transparent));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 38%,transparent),0 6px 18px color-mix(in srgb,var(--accent) 16%,transparent);border-radius:12px}
+.rail .item.active .name,.places .place.active>span{font-weight:600}
+.rail .item,.places .place{transition:background .18s,box-shadow .18s}
+.rail .item:hover:not(.active),.places .place:hover:not(.active){background:color-mix(in srgb,var(--ink) 6%,transparent)}
+
+/* ===== Primary buttons: a lit gradient, a soft glow, a shine that sweeps across on hover, and a press. ===== */
+.btn.primary{position:relative;overflow:hidden;isolation:isolate;border:0;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 70%,#fff),var(--accent) 55%,color-mix(in srgb,var(--accent) 80%,#000));
+  box-shadow:0 6px 20px color-mix(in srgb,var(--accent) 40%,transparent),inset 0 1px 0 rgba(255,255,255,.35),inset 0 -1px 0 rgba(0,0,0,.15);font-weight:600;transition:transform .15s cubic-bezier(.22,1,.36,1),box-shadow .2s,filter .2s}
+.btn.primary::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.45) 48%,transparent 66%);transform:translateX(-120%);transition:transform .6s cubic-bezier(.22,1,.36,1)}
+.btn.primary:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 10px 28px color-mix(in srgb,var(--accent) 52%,transparent),inset 0 1px 0 rgba(255,255,255,.4);filter:saturate(1.1)}
+.btn.primary:hover:not(:disabled)::after{transform:translateX(120%)}
+.btn.primary:active:not(:disabled){transform:translateY(0) scale(.97)}
+.btn.primary:disabled{box-shadow:none;filter:grayscale(.4)}
+@media (prefers-reduced-motion:reduce){.btn.primary,.btn.primary::after{transition:none}}
+
+/* Look picker in Settings. */
+.st-skins{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px}
+.st-skin{display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:6px 6px 8px;border:1px solid var(--line);border-radius:12px;background:var(--bg);font-size:12.5px;color:var(--ink);transition:border-color .15s,transform .15s}
+.st-skin:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
+.st-skin.on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+.st-skin-swatch{position:relative;height:46px;border-radius:8px;background:var(--base);overflow:hidden}
+.st-skin-swatch i:first-child{position:absolute;left:8%;top:22%;width:46%;height:56%;border-radius:6px;background:linear-gradient(135deg,var(--a),var(--b))}
+.st-skin-swatch i:last-child{position:absolute;right:8%;top:22%;width:28%;height:56%;border-radius:6px;background:color-mix(in srgb,var(--b) 60%,transparent)}
+
+/* Search box in the Add agents window: one box, not two. */
+.ra-dialog .ra-search{padding:0 0 0 12px;overflow:hidden}
+.ra-dialog .ra-search input{height:38px;margin:0;border-radius:0}
+
+.dialog.ra-dialog .ra-search input[type=search]:not([type=checkbox]):not([type=radio]):not([type=file]),.dialog.ra-dialog .ra-search input[type=search]:focus{border:0;background:none;box-shadow:none;outline:0;padding:0 12px 0 0;min-height:0;height:38px;border-radius:0}

@@ -154,3 +154,13 @@ html[data-skin=cyberpunk]{--blur:blur(5px) saturate(140%)}
 html[data-skin=gojo]{--blur:blur(10px) saturate(150%)}
 html[data-skin=sakura] .skin-fx{z-index:60}
 html[data-skin=sakura] .skin-fx i{opacity:.55}
+
+/* ===== Light on the computer: effects pause when the window is hidden, and the heavy parts are drawn by the
+   graphics card only (transform and opacity). ===== */
+html.fx-rest .skin-fx,html.fx-rest .skin-fx::before,html.fx-rest .skin-fx::after,html.fx-rest .skin-fx i{animation-play-state:paused!important}
+/* Cyberpunk's floor moves by sliding the layer (no repaint), not by moving its background. */
+html[data-skin=cyberpunk] .skin-fx::before{height:calc(130% + 80px);animation:cp-floor 3s linear infinite;will-change:transform}
+@keyframes cp-floor{from{transform:perspective(700px) rotateX(68deg) translateY(0)}to{transform:perspective(700px) rotateX(68deg) translateY(80px)}}
+/* Gojo's ring turns without a blur filter, which would be worked out again on every frame. */
+html[data-skin=gojo] .skin-fx::before{filter:none;will-change:transform}
+html[data-skin=gojo] .skin-fx::after{filter:none;background:radial-gradient(circle,rgba(220,240,255,.55),rgba(89,180,255,.25) 35%,transparent 70%)}

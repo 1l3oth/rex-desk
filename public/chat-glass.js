@@ -105,3 +105,16 @@ function dressSkin() {
 }
 dressSkin();
 new MutationObserver(dressSkin).observe(root, { attributes: true, attributeFilter: ['data-skin'] });
+
+
+// Settings > General > Look: picking a theme changes the app at once.
+const paintSwatches = () => { for (const button of document.querySelectorAll('.st-skin:not([data-painted])')) { button.dataset.painted = '1'; button.style.setProperty('--a', button.dataset.a); button.style.setProperty('--b', button.dataset.b); button.style.setProperty('--base', button.dataset.base); } };
+new MutationObserver(paintSwatches).observe(document.body, { childList: true, subtree: true });
+document.addEventListener('click', event => {
+  const pick = event.target.closest('[data-st-skin]'); if (!pick) return;
+  window.rexSkin?.set(pick.dataset.stSkin);
+  for (const button of document.querySelectorAll('[data-st-skin]')) { const on = button === pick; button.classList.toggle('on', on); button.setAttribute('aria-checked', String(on)); }
+});
+// Effects stop while Rex Desk is hidden or minimised, so a theme never uses the computer when nobody is looking.
+const rest = () => root.classList.toggle('fx-rest', document.hidden);
+document.addEventListener('visibilitychange', rest); rest();
