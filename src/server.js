@@ -80,14 +80,15 @@ function serveFile(request, response, file, { sandbox = false, download = false,
 
 export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
   const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
-  mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
+  // A folder that exists already (even a drive root such as F:\, where mkdir fails with EPERM) is used as it is.
+  if (!existsSync(dataRoot)) mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataRoot, 'runtime.lock');
   if (existsSync(lockPath)) {
     const owner = Number(readFileSync(lockPath, 'utf8'));
     let alive = false;
     const isAlive = () => { try { process.kill(owner, 0); return true; } catch { return false; } };
     // A server restarting itself for new code starts this one first, then exits: wait for it to let go.
-    if (Number.isInteger(owner) && owner > 0 && owner === Number(process.env.REX_RESTART_AFTER)) { for (let i = 0; i < 60 && isAlive(); i++) await new Promise(resolve => setTimeout(resolve, 250)); }
+    if (Number.isInteger(owner) && owner > 0 && owner === Number(process.env.REX_RESTART_AFTER)) { for (let i = 0; i < 240 && isAlive(); i++) await new Promise(resolve => setTimeout(resolve, 250)); }
     if (Number.isInteger(owner) && owner > 0) alive = isAlive();
     if (alive) throw new Error('Rex Desk is already running with this data folder. Open its existing dashboard.');
     unlinkSync(lockPath);
@@ -847,6 +848,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     if (closing || readCode() === startedCode || readCode() === '' || (app.desk?.live?.size || 0) > 0) return;
     closing = true;
     // If the new server could not be started, this one keeps running and tries again on the next tick.
-    void startReplacement().then(() => app.close().catch(() => {}).finally(() => process.exit(0)), () => { closing = false; });
+    // Closing waits at most 10s: the new server waits up to 60s for this one to let go, and gives up after that.
+    void startReplacement().then(() => Promise.race([app.close().catch(() => {}), new Promise(resolve => setTimeout(resolve, 10000))]).finally(() => process.exit(0)), () => { closing = false; });
   }, 20000).unref();
 }
