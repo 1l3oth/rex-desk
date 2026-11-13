@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
@@ -264,4 +264,8 @@ try {
     screenshots, fixtureWorkspace: workspace, workerId: worker.id, artifacts: artifacts.map(item => ({ type: item.type, title: item.title, path: path.join(app.store.directory, 'artifacts', worker.id, item.file) })) };
   writeFileSync(path.join(qa, 'acceptance.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result, null, 2));
-} finally { await context?.close(); await browser?.close(); await app?.close(); }
+} finally {
+  await context?.close(); await browser?.close(); await app?.close();
+  // The fixture holds a git repository, whose files are read-only on Windows: clear that, then remove the folder, so a run leaves nothing behind.
+  try { const { execFileSync } = await import('node:child_process'); if (process.platform === 'win32') execFileSync('cmd', ['/c', 'rmdir', '/s', '/q', workspace], { stdio: 'ignore' }); else rmSync(workspace, { recursive: true, force: true }); } catch { /* left for the next cleanup */ }
+}
