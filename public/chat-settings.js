@@ -113,10 +113,12 @@ export function openSettings(ctx, section = 'general') {
       ${(config().testAccounts || []).map((account, index) => `<div class="st-signin"><input name="ta.${index}.site" value="${esc(account.site || '')}" placeholder="Site, like localhost or staging.example.com" aria-label="Site"><input name="ta.${index}.username" value="${esc(account.username || '')}" placeholder="User name or email" aria-label="User name"><input type="password" name="ta.${index}.password" placeholder="${account.hasPassword ? 'Saved' : 'Password'}" aria-label="Password" autocomplete="new-password"><button type="button" class="ag-x" data-st-signin-remove="${index}" aria-label="Remove this sign-in">×</button></div>`).join('')}
       <button type="button" class="btn small" data-st-signin-add>+ Add a sign-in</button>`,
     devices: () => `<h2>Devices and phone</h2><p class="muted">Use Rex Desk on your phone and your other computers over Tailscale. The Devices page has the QR code for your phone.</p><button type="button" class="btn primary" data-st-go="devices">Open Devices</button>`,
-    backup: () => { const database = ui.snap.database || {}, update = ui.snap.update || {}; return `<h2>Backup and updates</h2>
-      <h3>Cloud backup</h3><p>${esc({ connected: 'Copied to your Turso database.', syncing: 'Uploading to Turso…', connecting: 'Connecting to Turso…', offline: 'Turso is offline; changes wait and upload later.', error: 'Turso needs attention.' }[database.state] || 'Kept on this computer only.')}${database.pending ? ` ${Number(database.pending)} changes waiting.` : ''}</p>
-      ${database.configured ? '' : `<p class="muted">New to Turso? Sign in with GitHub or Google and Rex Desk makes your own free database. You never type an address or a key.</p><button type="button" class="btn primary" data-st-turso ${state.extra.turso ? 'disabled' : ''}>${esc(state.extra.turso || 'Set up cloud backup for me')}</button> `}${database.configured ? '<button type="button" class="btn" data-st-db-sync>Upload now and check</button>' : ''}
-      <details class="st-db-manual"><summary>${database.configured ? 'Use another database' : 'I already have a Turso database'}</summary>
+    backup: () => { const database = ui.snap.database || {}, update = ui.snap.update || {}, account = database.account, hosted = Boolean(account && account.url === database.url); return `<h2>Backup and updates</h2>
+      <h3>Cloud backup</h3><p>${esc((hosted ? { connected: 'Backed up with your Rex Desk account.', syncing: 'Uploading your backup…', connecting: 'Connecting to your backup…', offline: 'Your backup is offline; changes wait and upload later.', error: 'Your backup needs attention.' } : { connected: 'Copied to your Turso database.', syncing: 'Uploading to Turso…', connecting: 'Connecting to Turso…', offline: 'Turso is offline; changes wait and upload later.', error: 'Turso needs attention.' })[database.state] || 'Kept on this computer only.')}${database.pending ? ` ${Number(database.pending)} changes waiting.` : ''}</p>
+      ${account ? `<div class="st-account st-cloud-account"><span class="si-avatar">${esc((account.name || account.email || '?')[0].toUpperCase())}</span><span><b>${esc(account.name || account.email)}</b><small>${esc(hosted ? `Rex Desk account${account.name ? ` · ${account.email}` : ''}. This computer renews its backup key by itself.` : `Rex Desk account${account.name ? ` · ${account.email}` : ''}. Signed in, but the backup uses another database.`)}</small></span><button type="button" class="btn small" data-st-account-out>Sign out</button></div>` : ''}
+      ${database.configured ? '' : `<div class="st-cloud"><div class="st-cloud-head">${stIcon('backup')}<div><b>Back up with your Rex Desk account</b><small>One sign-in with Google. Rex Desk makes a private cloud database for you, and your agents, chats and settings follow you to every computer you sign in on.</small></div></div><button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || 'Sign in with Rex Desk')}</button><p class="st-cloud-fine">Nothing to type: no address and no key. Your backup is kept in Rex Desk's cloud, in a database only your account can open.</p></div>`}${database.accountNote ? `<p class="error-text" role="alert">${esc(database.accountNote)}</p>` : ''}${database.configured ? '<button type="button" class="btn" data-st-db-sync>Upload now and check</button>' : ''}
+      <details class="st-db-manual"><summary>${database.configured ? 'Use another database' : 'Use my own Turso account instead'}</summary>
+        ${database.configured ? '' : `<p class="muted">Keep the backup in a Turso account of your own. Sign in to Turso with GitHub or Google and Rex Desk makes the database there.</p><button type="button" class="btn" data-st-turso ${state.extra.turso ? 'disabled' : ''}>${esc(state.extra.turso || 'Set up with my Turso account')}</button><p class="muted">Or type the address and key of a database you already have:</p>`}
         <label class="st-field"><span>Database address</span><input data-st-db-url value="${esc(database.url || '')}" placeholder="libsql://your-database.turso.io" autocomplete="off" spellcheck="false"></label>
         <label class="st-field"><span>Database key${database.configured ? ' (saved; leave empty to keep it)' : ''}</span><input data-st-db-token type="password" autocomplete="new-password"></label>
         <button type="button" class="btn small" data-st-db-connect>Connect</button>
@@ -156,6 +158,22 @@ export function openSettings(ctx, section = 'general') {
       const go = target.closest('[data-st-go]'); if (go) { back.remove(); ctx.open(go.dataset.stGo); return; }
       if (target.closest('[data-st-signout]')) { if (!confirm('Sign out of Rex Desk on this computer? Running agents of this account stop.')) return; await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; return; }
       const allowOff = target.closest('[data-st-allow-off]'); if (allowOff) { await api('/computer/allow', { method: 'POST', data: { actions: [allowOff.dataset.stAllowOff], on: false } }); await refresh(); draw(); return; }
+      if (target.closest('[data-st-account]')) {
+        // One click: the Rex Desk sign-in opens in the browser; the account service then makes the person's database and this computer connects to it.
+        state.extra.account = 'Opening the Rex Desk sign-in…'; draw();
+        try {
+          const { url } = await api('/database/account-start', { method: 'POST' }); window.open(url, '_blank', 'noopener');
+          state.extra.account = 'Waiting for you to sign in in the browser…'; draw();
+          const status = await api('/database/account-finish', { method: 'POST' });
+          toast(status.state === 'connected' ? (status.created ? 'Cloud backup is on. Your private database was made and your history was uploaded.' : 'Cloud backup is on. This computer is connected to your backup.') : `Signed in. The backup is ${status.state}; changes wait and upload later.`, status.state !== 'connected');
+          await refresh();
+        } finally { state.extra.account = ''; draw(); }
+        return;
+      }
+      if (target.closest('[data-st-account-out]')) {
+        if (!confirm('Sign this computer out of your Rex Desk account? The backup keeps working for up to 30 days, then stops until you sign in again.')) return;
+        await api('/database/account-signout', { method: 'POST' }); toast('Signed out of your Rex Desk account on this computer.'); await refresh(); draw(); return;
+      }
       if (target.closest('[data-st-turso]')) {
         // One click: Turso's sign-in opens in the browser; Rex Desk then makes the person's own database and connects it.
         state.extra.turso = 'Opening Turso sign-in…'; draw();

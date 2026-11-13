@@ -6,11 +6,14 @@ import os from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { SHARED } from './store.js';
 import { FileBackup } from './file-backup.js';
+import { AccountLink } from './rexdesk-account.js';
 
 // Local transactions and their cloud outbox commit together. Failed uploads can be retried without losing work.
 export class TursoSync {
-  constructor(store, { clientFactory = createClient, retryMs = 30000 } = {}) {
+  constructor(store, { clientFactory = createClient, retryMs = 30000, accountFetcher, accountApi } = {}) {
     this.store = store; this.clientFactory = clientFactory; this.retryMs = retryMs; this.state = 'local'; this.error = ''; this.ready = false;
+    // Set when the person turned cloud backup on with their Rex Desk account instead of their own Turso account.
+    this.account = new AccountLink(store, { ...(accountFetcher ? { fetcher: accountFetcher } : {}), ...(accountApi ? { base: accountApi } : {}) });
     this.connectionFile = path.join(store.directory, 'turso.connection');
     this.marker = path.join(store.directory, 'turso.migrated');
     const workspaceFile = path.join(store.directory, 'workspace.id');
@@ -27,6 +30,7 @@ export class TursoSync {
   status() {
     return { configured: this.enabled, url: this.connection?.url || '', state: this.state, error: this.error,
       pending: this.enabled ? Number(this.store.db.prepare('SELECT COUNT(*) AS total FROM cloud_outbox WHERE destination=?').get(this.connection.url).total) : 0,
+      account: this.account.summary(), accountNote: this.account.ended || '',
       lastSyncedAt: this.lastSyncedAt || '', workspace: this.workspace, files: { error: this.files.error || '', restored: this.files.lastRestored || 0 } };
   }
   enqueue(sql, args) {
@@ -108,9 +112,14 @@ export class TursoSync {
     this.opening ||= this.connectNow().finally(() => { this.opening = null; });
     return this.opening;
   }
-  retry() { return this.ready ? this.flush() : this.open(); }
+  retry() { return this.ready && !this.account.due(this.connection) ? this.flush() : this.open(); }
   async connectNow() {
     if (this.flushing) await this.flushing;
+    // A Rex Desk account's key lasts about a month: take a fresh one before it runs out, or when the old one stopped working.
+    if (this.account.due(this.connection, { failing: this.state === 'offline' && !this.ready })) {
+      const authToken = await this.account.freshKey();
+      if (authToken) { this.connection = { ...this.connection, authToken }; writeFileSync(this.connectionFile, this.store.encrypt(JSON.stringify(this.connection)), { mode: 0o600 }); }
+    }
     this.state = 'connecting'; this.notify();
     try {
       this.client?.close();

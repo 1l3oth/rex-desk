@@ -2,7 +2,7 @@
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const root = document.getElementById('signin');
 const TABS = [['signin', 'Sign in'], ['create', 'New account'], ['cloud', 'Restore from backup']];
-const state = { auth: null, tab: '', error: '', email: '', scene: undefined, turso: '' };
+const state = { auth: null, tab: '', error: '', email: '', scene: undefined, turso: '', account: '' };
 
 async function post(path, data) {
   const response = await fetch(`/api${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify(data) });
@@ -25,7 +25,7 @@ function draw() {
       ${email(state.email || (known.length === 1 ? known[0].email : ''))}${secret('Passphrase')}${stay}<button class="btn primary si-submit" type="submit">Sign in</button>${back}`,
     create: `${email(state.email)}${secret('Passphrase', 'passphrase', 'new-password')}${secret('Repeat passphrase', 'repeat', 'new-password')}${stay}<p class="si-note">${auth.workspaces.length ? 'Your account gets its own workspace: tasks, keys and history stay apart from other accounts on this computer.' : 'The first account on this computer becomes its superadmin.'} Rex Desk cannot recover a forgotten passphrase.</p><button class="btn primary si-submit" type="submit">Create account</button>${back}`,
     // Turso's browser sign-in finds the backup, so the database address and key are never typed. Typing them stays possible.
-    cloud: `<p class="si-note">Open your account from its cloud backup (Settings, Backup and updates): after a reinstall, after this computer's data was cleared, or on a new computer. Your agents, chats, pictures and settings come back.</p>${state.turso === 'found' ? '<p class="si-note"><b>Found your Rex Desk backup in Turso.</b> Now enter your email and passphrase.</p><input type="hidden" name="turso" value="1">' : `<button type="button" class="btn primary si-submit" data-turso ${state.turso ? 'disabled' : ''}>${state.turso ? 'Waiting for you to sign in to Turso in the browser…' : 'Sign in with Turso to find my backup'}</button><details class="si-manual"><summary>Or type the database address and key</summary><label class="st-field"><span>Database URL</span><input name="url" placeholder="libsql://your-database.turso.io" autocomplete="off" spellcheck="false"></label><label class="st-field"><span>Database token</span><input name="authToken" type="password" autocomplete="off"></label></details>`}${email(state.email)}${secret('Passphrase')}${stay}<button class="btn primary si-submit" type="submit">Open my account</button>`,
+    cloud: `<p class="si-note">Open your account from its cloud backup (Settings, Backup and updates): after a reinstall, after this computer's data was cleared, or on a new computer. Your agents, chats, pictures and settings come back.</p>${state.account === 'found' ? '<p class="si-note"><b>Found the backup of your Rex Desk account.</b> Now enter the email and passphrase of the workspace in it.</p><input type="hidden" name="account" value="1">' : state.turso === 'found' ? '<p class="si-note"><b>Found your Rex Desk backup in Turso.</b> Now enter your email and passphrase.</p><input type="hidden" name="turso" value="1">' : `<button type="button" class="btn primary si-submit" data-account ${state.account || state.turso ? 'disabled' : ''}>${state.account ? 'Waiting for you to sign in in the browser…' : 'Sign in with Rex Desk to find my backup'}</button><button type="button" class="btn si-submit" data-turso ${state.turso || state.account ? 'disabled' : ''}>${state.turso ? 'Waiting for you to sign in to Turso in the browser…' : 'My backup is in my own Turso account'}</button><details class="si-manual"><summary>Or type the database address and key</summary><label class="st-field"><span>Database URL</span><input name="url" placeholder="libsql://your-database.turso.io" autocomplete="off" spellcheck="false"></label><label class="st-field"><span>Database token</span><input name="authToken" type="password" autocomplete="off"></label></details>`}${email(state.email)}${secret('Passphrase')}${stay}<button class="btn primary si-submit" type="submit">Open my account</button>`,
   };
   root.innerHTML = `<section class="si-card" aria-labelledby="si-title"><div class="si-brand"><img src="/favicon.svg" alt="" width="28" height="28"><h1 id="si-title">Rex Desk</h1></div>
     ${auth.occupied ? `<p class="si-note warn">${esc(auth.occupied)} is signed in on this computer. Signing in to another account closes that workspace and stops its running agents.</p>` : ''}
@@ -46,6 +46,15 @@ function mountScene() {
 root.addEventListener('click', event => {
   const tab = event.target.closest('[data-tab]'); if (tab) { state.tab = tab.dataset.tab; state.error = ''; draw(); return; }
   const account = event.target.closest('[data-email]'); if (account) { state.email = account.dataset.email; draw(); return; }
+  if (event.target.closest('[data-account]')) {
+    state.email = root.querySelector('input[name=email]')?.value || state.email; state.account = 'waiting'; state.error = ''; draw();
+    void (async () => {
+      try { const { url } = await post('/auth/account-start', {}); window.open(url, '_blank', 'noopener'); const found = await post('/auth/account-finish', {}); state.account = 'found'; state.email ||= found?.email || ''; }
+      catch (error) { state.account = ''; state.error = error.message; }
+      draw();
+    })();
+    return;
+  }
   if (event.target.closest('[data-turso]')) {
     state.email = root.querySelector('input[name=email]')?.value || state.email; state.turso = 'waiting'; state.error = ''; draw();
     void (async () => {
@@ -59,7 +68,7 @@ root.addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.target, data = Object.fromEntries(new FormData(form)), mode = form.dataset.mode, submit = form.querySelector('[type=submit]');
   state.tab = mode; state.email = data.email || '';
-  if (mode === 'cloud' && !data.turso && (!data.url || !data.authToken)) { state.error = 'Sign in with Turso first, or type the database address and key.'; draw(); return; }
+  if (mode === 'cloud' && !data.turso && !data.account && (!data.url || !data.authToken)) { state.error = 'Sign in with Rex Desk or Turso first, or type the database address and key.'; draw(); return; }
   if (mode === 'create' && data.passphrase !== data.repeat) { state.error = 'The passphrases do not match.'; draw(); return; }
   submit.disabled = true; submit.textContent = mode === 'cloud' ? 'Restoring your account…' : 'Signing in…';
   try {

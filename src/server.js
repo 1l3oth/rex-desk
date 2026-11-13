@@ -38,6 +38,7 @@ import { Commander } from './command.js';
 import { Awake } from './awake.js';
 import { scanRoots } from './placement.js';
 import { tursoSignIn, provisionDatabase } from './turso-setup.js';
+import { accountSignIn, accountDatabase } from './rexdesk-account.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -77,7 +78,7 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
+export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
   const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataRoot, 'runtime.lock');
@@ -103,8 +104,10 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   const anywhere = anywhereFactory ? anywhereFactory() : new Anywhere({ root, dataRoot });
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
-  let session = null, address = '', tursoPending = null, tursoFound = null;
-  const cloud = cloudClientFactory ? { clientFactory: cloudClientFactory, retryMs: 50 } : undefined;
+  let session = null, address = '', tursoPending = null, tursoFound = null, accountPending = null, accountFound = null;
+  // The Rex Desk account service (tests pass a pretend one).
+  const accountOptions = { ...(accountFetcher ? { fetcher: accountFetcher } : {}), ...(accountApi ? { base: accountApi } : {}) };
+  const cloud = cloudClientFactory || accountFetcher || accountApi ? { ...(cloudClientFactory ? { clientFactory: cloudClientFactory, retryMs: 50 } : {}), ...(accountFetcher ? { accountFetcher } : {}), ...(accountApi ? { accountApi } : {}) } : undefined;
   async function openSession(entry, vaultKey, { staySignedIn = false } = {}) {
     const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
     const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher });
@@ -183,6 +186,15 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       try { tursoFound = await provisionDatabase(await pending.token, { create: false }); return json(response, 200, { found: true }); }
       finally { if (tursoPending === pending) tursoPending = null; }
     }
+    // The same, with a Rex Desk account: the account service knows which database is this person's and hands over a key.
+    if (url.pathname === '/api/auth/account-start') { accountPending?.cancel(); accountFound = null; accountPending = await accountSignIn(accountOptions); return json(response, 200, { url: accountPending.url }); }
+    if (url.pathname === '/api/auth/account-finish') {
+      if (!accountPending) throw new Error('Start the Rex Desk sign-in first.');
+      const pending = accountPending;
+      try { const signedIn = await pending.session; accountFound = { session: signedIn, database: await accountDatabase(signedIn.token, accountOptions) }; return json(response, 200, { found: true, email: signedIn.user?.email || '' }); }
+      finally { if (accountPending === pending) accountPending = null; }
+    }
+    if (url.pathname === '/api/auth/cloud' && input.account) { if (!accountFound) throw new Error('Sign in with Rex Desk first.'); input.url = accountFound.database.url; input.authToken = accountFound.database.authToken; }
     if (url.pathname === '/api/auth/cloud' && input.turso) { if (!tursoFound) throw new Error('Sign in with Turso first.'); input.url = tursoFound.url; input.authToken = tursoFound.authToken; }
     if (url.pathname === '/api/auth/cloud') {
       // A new computer: find the account in the person's own Turso database, unseal its key, then restore everything before answering.
@@ -193,6 +205,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       await activate(opened);
       if (!session.store.cloud.enabled) { await session.store.cloud.connect({ url: input.url, authToken: input.authToken }); session.cloud = { pulled: !session.store.fresh, restored: true }; }
       if (input.turso) tursoFound = null;
+      // Keep the account sign-in in the restored workspace, so this computer can renew the database key by itself.
+      if (input.account) { session.store.cloud.account.save(accountFound.session, accountFound.database); accountFound = null; }
       return respond();
     }
     if (url.pathname === '/api/auth/logout') {
@@ -301,6 +315,20 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         try { const made = await provisionDatabase(await pending.token); return json(response, 200, { ...await store.cloud.connect({ url: made.url, authToken: made.authToken }), database: made.database }); }
         finally { if (tursoPending === pending) tursoPending = null; }
       }
+      // The same with a Rex Desk account: one browser sign-in, and the account service makes the person's private database and its key.
+      if (url.pathname === '/api/database/account-start' && request.method === 'POST') { accountPending?.cancel(); accountPending = await accountSignIn(accountOptions); return json(response, 200, { url: accountPending.url }); }
+      if (url.pathname === '/api/database/account-finish' && request.method === 'POST') {
+        if (!accountPending) throw new Error('Start the Rex Desk sign-in first.');
+        const pending = accountPending;
+        try {
+          const signedIn = await pending.session, made = await accountDatabase(signedIn.token, accountOptions);
+          const status = await store.cloud.connect({ url: made.url, authToken: made.authToken });
+          store.cloud.account.save(signedIn, made);
+          return json(response, 200, { ...status, ...store.cloud.status(), created: Boolean(made.created) });
+        } finally { if (accountPending === pending) accountPending = null; }
+      }
+      // Signing the account out stops key renewal. The backup keeps working until its current key runs out (about a month).
+      if (url.pathname === '/api/database/account-signout' && request.method === 'POST') { await store.cloud.account.signOut(); notify(); return json(response, 200, store.cloud.status()); }
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
