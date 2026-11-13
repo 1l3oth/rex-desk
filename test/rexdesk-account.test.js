@@ -28,7 +28,9 @@ function fakeAccounts() {
       const made = `session-${service.sessions.size + 1}`; service.sessions.add(made);
       return reply(200, { token: made, expiresAt: new Date(Date.now() + 60 * 86400000).toISOString(), user: { id: 'u1', email: 'person@example.com', name: 'Test Person', image: null } });
     }
+    if (route === 'GET /health') { if (service.down) throw new TypeError('fetch failed'); return reply(200, { ok: true }); }
     if (!service.sessions.has(token)) return reply(401, { error: { code: 'signed_out', message: 'Your sign-in ended. Sign in to Rex Desk again.' } });
+    if (route === 'GET /v1/me') return reply(200, { user: { id: 'u1', email: 'person@example.com' }, plan: 'free', sync: { on: service.keys > 0 } });
     if (route === 'POST /v1/sync/database') { service.keys += 1; return reply(200, { url: service.url, authToken: `database-key-${service.keys}`, expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(), database: 'rd-test-person', created: service.keys === 1 }); }
     if (route === 'DELETE /v1/session') { service.sessions.delete(token); return reply(200, { ok: true }); }
     return reply(404, { error: { code: 'not_found', message: 'There is nothing at this address.' } });
@@ -171,4 +173,78 @@ test('the database key is renewed before it runs out, and a sign-in that ended s
     assert.equal(store.cloud.status().account, null);
     assert.match(store.cloud.status().accountNote, /sign-in ended/);
   } finally { await store.cloud.close(); store.close(); }
+});
+
+// The real app's front door: the Rex Desk account first, then the passphrase of its workspace.
+async function frontDoor(visitor, service) {
+  const started = await visitor('/api/auth/account-start', { method: 'POST', data: {} });
+  const [found] = await Promise.all([visitor('/api/auth/account-finish', { method: 'POST', data: {} }), service.browser(started.body.url)]);
+  return found.body;
+}
+
+test('the app opens only after a Rex Desk sign-in: a new person sets a passphrase, and no cloud database is made by signing in', async () => {
+  const service = fakeAccounts(), turso = fakeTurso();
+  const app = await accountApp(temporary('door-new'), { cloudClientFactory: turso.clientFactory, accountFetcher: service.fetcher, accountApi: API, requireAccount: true });
+  const person = browser(app);
+  try {
+    assert.equal((await person('/api/auth')).body.requireAccount, true);
+    // No passphrase-only way in, and no account made on this computer without the Rex Desk sign-in.
+    const blocked = await person('/api/auth/create', { method: 'POST', data: { email: 'someone@example.com', passphrase } });
+    assert.equal(blocked.status, 400); assert.match(blocked.body.error, /Sign in with Rex Desk first/);
+    const found = await frontDoor(person, service);
+    assert.equal(found.email, 'person@example.com'); assert.equal(found.workspace, 'new'); assert.equal(found.found, false);
+    assert.equal(service.keys, 0, 'signing in did not make a cloud database');
+    assert.equal((await person('/api/auth')).body.account.workspace, 'new', 'a reload keeps the signed-in step');
+    // The workspace takes the account's email, whatever the page sends.
+    const opened = await person('/api/auth/create', { method: 'POST', data: { email: 'other@example.com', passphrase } });
+    assert.equal(opened.status, 200); assert.equal(opened.body.current.email, 'person@example.com');
+    // Settings turns backup on with the same sign-in: no second trip to the browser.
+    const start = await person('/api/database/account-start', { method: 'POST' });
+    assert.equal(start.body.url, '');
+    const on = await person('/api/database/account-finish', { method: 'POST' });
+    assert.equal(on.status, 200); assert.equal(on.body.configured, true); assert.equal(on.body.account.email, 'person@example.com');
+  } finally { await app.close(); }
+});
+
+test('a person with a workspace here signs in with Rex Desk, then the passphrase opens it; offline it opens with the passphrase alone', async () => {
+  const service = fakeAccounts(), turso = fakeTurso(), root = temporary('door-here');
+  const options = { cloudClientFactory: turso.clientFactory, accountFetcher: service.fetcher, accountApi: API, requireAccount: true };
+  let app = await accountApp(root, options), person = browser(app);
+  try {
+    await frontDoor(person, service);
+    await person('/api/auth/create', { method: 'POST', data: { passphrase } });
+    await person('/api/auth/logout', { method: 'POST' });
+    assert.equal((await person('/api/auth/login', { method: 'POST', data: { email: 'person@example.com', passphrase } })).status, 400, 'the passphrase alone does not open it while the service answers');
+    assert.equal((await person('/api/auth/login', { method: 'POST', data: { email: 'person@example.com', passphrase, offline: '1' } })).status, 400, 'nor by claiming to be offline');
+    const found = await frontDoor(person, service);
+    assert.equal(found.workspace, 'here');
+    assert.notEqual((await person('/api/auth/login', { method: 'POST', data: { passphrase: 'not the passphrase' } })).status, 200);
+    const opened = await person('/api/auth/login', { method: 'POST', data: { passphrase } });
+    assert.equal(opened.status, 200); assert.equal(opened.body.current.email, 'person@example.com');
+    await person('/api/auth/logout', { method: 'POST' });
+    service.down = true;
+    const offline = await person('/api/auth/login', { method: 'POST', data: { email: 'person@example.com', passphrase, offline: '1' } });
+    assert.equal(offline.status, 200, 'with no account service, a workspace already here still opens');
+  } finally { await app.close(); }
+});
+
+test('on a new computer the Rex Desk sign-in finds the backup, and its passphrase restores it', async () => {
+  const service = fakeAccounts(), turso = fakeTurso();
+  const options = { cloudClientFactory: turso.clientFactory, accountFetcher: service.fetcher, accountApi: API, requireAccount: true };
+  const first = await accountApp(temporary('door-first'), options), owner = browser(first);
+  try {
+    await frontDoor(owner, service);
+    await owner('/api/auth/create', { method: 'POST', data: { passphrase } });
+    await owner('/api/database/account-start', { method: 'POST' });
+    await owner('/api/database/account-finish', { method: 'POST' });
+    await owner('/api/database/sync', { method: 'POST' });
+  } finally { await first.close(); }
+  const second = await accountApp(temporary('door-second'), options), visitor = browser(second);
+  try {
+    const found = await frontDoor(visitor, service);
+    assert.equal(found.workspace, 'backup'); assert.equal(found.found, true);
+    const opened = await visitor('/api/auth/cloud', { method: 'POST', data: { account: '1', passphrase } });
+    assert.equal(opened.status, 200); assert.equal(opened.body.current.email, 'person@example.com');
+    assert.equal((await visitor('/api/state')).body.database.account.email, 'person@example.com');
+  } finally { await second.close(); }
 });

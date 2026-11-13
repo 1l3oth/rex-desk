@@ -165,8 +165,9 @@ export function openSettings(ctx, section = 'general') {
         // One click: the Rex Desk sign-in opens in the browser; the account service then makes the person's database and this computer connects to it.
         state.extra.account = 'Opening the Rex Desk sign-in…'; draw();
         try {
-          const { url } = await api('/database/account-start', { method: 'POST' }); window.open(url, '_blank', 'noopener');
-          state.extra.account = 'Waiting for you to sign in in the browser…'; draw();
+          // Already signed in to Rex Desk when this workspace opened: no second trip to the browser.
+          const { url } = await api('/database/account-start', { method: 'POST' }); if (url) window.open(url, '_blank', 'noopener');
+          state.extra.account = url ? 'Waiting for you to sign in in the browser…' : 'Turning cloud backup on…'; draw();
           const status = await api('/database/account-finish', { method: 'POST' });
           toast(status.state === 'connected' ? (status.created ? 'Cloud backup is on. Your private database was made and your history was uploaded.' : 'Cloud backup is on. This computer is connected to your backup.') : `Signed in. The backup is ${status.state}; changes wait and upload later.`, status.state !== 'connected');
           await refresh();

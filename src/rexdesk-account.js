@@ -48,7 +48,13 @@ export function accountSignIn({ timeoutMs = 270000, base = ACCOUNT_API, fetcher 
 
 // The person's own cloud database: made the first time, and a fresh key every time. { url, authToken, expiresAt, database, created }
 export const accountDatabase = (token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'POST', '/v1/sync/database', { token });
-export const accountSignOut = (token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'DELETE', '/v1/session', { token });
+// Who signed in, and whether their cloud database exists yet: { user, plan, sync: { on, since } }. Makes nothing.
+export const accountMe = (token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'GET', '/v1/me', { token });
+// False only when the account service cannot be reached at all (no internet, or the service is down).
+export async function accountReachable({ base = ACCOUNT_API, fetcher = fetch } = {}) {
+  try { await fetcher(`${base}/health`, { signal: AbortSignal.timeout(8000) }); return true; } catch { return false; }
+}
+export const accountSignOut =(token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'DELETE', '/v1/session', { token });
 
 const SOON = 7 * 86400000, WAIT = 10 * 60000;
 

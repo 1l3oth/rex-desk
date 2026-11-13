@@ -38,7 +38,7 @@ import { Commander } from './command.js';
 import { Awake } from './awake.js';
 import { scanRoots } from './placement.js';
 import { tursoSignIn, provisionDatabase } from './turso-setup.js';
-import { accountSignIn, accountDatabase } from './rexdesk-account.js';
+import { accountSignIn, accountDatabase, accountMe, accountReachable } from './rexdesk-account.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -78,7 +78,7 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
+export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
   const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   // A folder that exists already (even a drive root such as F:\, where mkdir fails with EPERM) is used as it is.
   if (!existsSync(dataRoot)) mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
@@ -156,6 +156,15 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   const cookieOf = request => /(?:^|;\s*)rex_session=([^;]+)/.exec(request.headers.cookie || '')?.[1];
   const sessionCookie = value => `rex_session=${value}; HttpOnly; SameSite=Strict; Path=/`;
   const signedIn = request => Boolean(session) && (!accounts || cookieOf(request) === session.cookie);
+  // What this computer holds for the signed-in Rex Desk account: its workspace (here), one from before accounts to claim,
+  // a backup in the account's cloud database, or nothing yet (new).
+  async function workspaceFor(email, database) {
+    if (!accounts || !email) return 'new';
+    if (accounts.workspaces.some(item => item.email && item.email.toLowerCase() === email.toLowerCase())) return 'here';
+    if (database) { try { await findCloudWorkspace({ url: database.url, authToken: database.authToken, name: email }, cloudClientFactory); return 'backup'; } catch {} }
+    return accounts.workspaces.some(item => !item.email) ? 'claim' : 'new';
+  }
+  const accountView = () => ({ email: accountFound.session.user?.email || '', name: accountFound.session.user?.name || '', image: accountFound.session.user?.image || '', workspace: accountFound.workspace });
   async function handleAuth(request, response, url) {
     if (url.pathname === '/api/auth' && request.method === 'GET') {
       // A session that chose to stay signed in on this computer hands its cookie to the local app window.
@@ -163,7 +172,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         response.setHeader('Set-Cookie', sessionCookie(session.cookie));
         return json(response, 200, { mode: 'accounts', workspaces: accounts.summary(), current: { id: session.id, email: session.email, role: role(), staySignedIn: true, cloud: session.cloud } });
       }
-      return json(response, 200, { mode: accounts ? 'accounts' : 'single', workspaces: accounts?.summary() || [], current: signedIn(request) ? { id: session.id, email: session.email, role: role(), staySignedIn: session.staySignedIn, cloud: session.cloud } : null, occupied: Boolean(session && !signedIn(request)) && session?.email });
+      return json(response, 200, { mode: accounts ? 'accounts' : 'single', workspaces: accounts?.summary() || [], current: signedIn(request) ? { id: session.id, email: session.email, role: role(), staySignedIn: session.staySignedIn, cloud: session.cloud } : null, occupied: Boolean(session && !signedIn(request)) && session?.email,
+        requireAccount: Boolean(accounts && requireAccount), account: accountFound ? accountView() : null });
     }
     if (!accounts) return json(response, 400, { error: 'This Rex Desk opens a single data folder without accounts.' });
     if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' });
@@ -178,8 +188,15 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     };
     const respond = () => { response.setHeader('Set-Cookie', sessionCookie(session.cookie)); return json(response, 200, { current: describe() }); };
     const slow = async error => { await new Promise(resolve => setTimeout(resolve, 700)); throw error; };
-    if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); return respond(); }
-    if (url.pathname === '/api/auth/login') { await activate(await accounts.signIn(input.email, input.passphrase, { claimId: input.claimId }).catch(slow)); return respond(); }
+    // The front door: the Rex Desk account signs in first, and its email names the workspace the passphrase opens.
+    // Only when the account service cannot be reached does a workspace already on this computer open with its passphrase alone.
+    const gated = requireAccount && ['/api/auth/create', '/api/auth/login', '/api/auth/cloud'].includes(url.pathname);
+    if (gated && !accountFound) {
+      if (!(url.pathname === '/api/auth/login' && input.offline && !await accountReachable(accountOptions))) throw new Error('Sign in with Rex Desk first.');
+    } else if (gated) input.email = accountFound.session.user?.email || '';
+    const linked = () => { if (requireAccount && accountFound) { session.account = accountFound.session; accountFound = null; } };
+    if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); linked(); return respond(); }
+    if (url.pathname === '/api/auth/login') { await activate(await accounts.signIn(input.email, input.passphrase, { claimId: input.claimId }).catch(slow)); linked(); return respond(); }
     // A new computer, from the sign-in screen: Turso's browser sign-in finds the person's existing Rex Desk backup, so they never type its address or key.
     if (url.pathname === '/api/auth/turso-start') { tursoPending?.cancel(); tursoFound = null; tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
     if (url.pathname === '/api/auth/turso-finish') {
@@ -193,10 +210,18 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     if (url.pathname === '/api/auth/account-finish') {
       if (!accountPending) throw new Error('Start the Rex Desk sign-in first.');
       const pending = accountPending;
-      try { const signedIn = await pending.session; accountFound = { session: signedIn, database: await accountDatabase(signedIn.token, accountOptions) }; return json(response, 200, { found: true, email: signedIn.user?.email || '' }); }
+      try {
+        const signedIn = await pending.session;
+        // Ask for the database only when the account already has one: signing in must not make a cloud database by itself.
+        const me = requireAccount ? await accountMe(signedIn.token, accountOptions).catch(() => null) : null;
+        const database = !requireAccount || me?.sync?.on ? await accountDatabase(signedIn.token, accountOptions) : null;
+        accountFound = { session: signedIn, database, workspace: await workspaceFor(signedIn.user?.email || '', database) };
+        return json(response, 200, requireAccount ? { found: Boolean(database), ...accountView() } : { found: true, email: signedIn.user?.email || '' });
+      }
       finally { if (accountPending === pending) accountPending = null; }
     }
-    if (url.pathname === '/api/auth/cloud' && input.account) { if (!accountFound) throw new Error('Sign in with Rex Desk first.'); input.url = accountFound.database.url; input.authToken = accountFound.database.authToken; }
+    if (url.pathname === '/api/auth/account-forget') { accountPending?.cancel(); accountPending = null; accountFound = null; return json(response, 200, { ok: true }); }
+    if (url.pathname === '/api/auth/cloud' && input.account) { if (!accountFound?.database) throw new Error('Sign in with Rex Desk first.'); input.url = accountFound.database.url; input.authToken = accountFound.database.authToken; }
     if (url.pathname === '/api/auth/cloud' && input.turso) { if (!tursoFound) throw new Error('Sign in with Turso first.'); input.url = tursoFound.url; input.authToken = tursoFound.authToken; }
     if (url.pathname === '/api/auth/cloud') {
       // A new computer: find the account in the person's own Turso database, unseal its key, then restore everything before answering.
@@ -209,11 +234,12 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (input.turso) tursoFound = null;
       // Keep the account sign-in in the restored workspace, so this computer can renew the database key by itself.
       if (input.account) { session.store.cloud.account.save(accountFound.session, accountFound.database); accountFound = null; }
+      linked();
       return respond();
     }
     if (url.pathname === '/api/auth/logout') {
       if (!signedIn(request)) return json(response, 401, { error: 'Not signed in.' });
-      await closeSession({ forget: true });
+      await closeSession({ forget: true }); accountFound = null;
       response.setHeader('Set-Cookie', 'rex_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
       return json(response, 200, { signedOut: true });
     }
@@ -324,16 +350,22 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         finally { if (tursoPending === pending) tursoPending = null; }
       }
       // The same with a Rex Desk account: one browser sign-in, and the account service makes the person's private database and its key.
-      if (url.pathname === '/api/database/account-start' && request.method === 'POST') { accountPending?.cancel(); accountPending = await accountSignIn(accountOptions); return json(response, 200, { url: accountPending.url }); }
+      // Signed in at the front door already: that sign-in turns backup on, with no second trip to the browser.
+      if (url.pathname === '/api/database/account-start' && request.method === 'POST') {
+        accountPending?.cancel(); accountPending = null;
+        if (session.account) return json(response, 200, { url: '' });
+        accountPending = await accountSignIn(accountOptions); return json(response, 200, { url: accountPending.url });
+      }
       if (url.pathname === '/api/database/account-finish' && request.method === 'POST') {
-        if (!accountPending) throw new Error('Start the Rex Desk sign-in first.');
-        const pending = accountPending;
+        if (!accountPending && !session.account) throw new Error('Start the Rex Desk sign-in first.');
+        const started = accountPending, pending = started ? started.session : Promise.resolve(session.account);
         try {
-          const signedIn = await pending.session, made = await accountDatabase(signedIn.token, accountOptions);
+          const signedIn = await pending, made = await accountDatabase(signedIn.token, accountOptions);
           const status = await store.cloud.connect({ url: made.url, authToken: made.authToken });
-          store.cloud.account.save(signedIn, made);
+          store.cloud.account.save(signedIn, made); session.account = null;
           return json(response, 200, { ...status, ...store.cloud.status(), created: Boolean(made.created) });
-        } finally { if (accountPending === pending) accountPending = null; }
+        } catch (error) { if (error.status === 401) session.account = null; throw error; }
+        finally { if (started && accountPending === started) accountPending = null; }
       }
       // Signing the account out stops key renewal. The backup keeps working until its current key runs out (about a month).
       if (url.pathname === '/api/database/account-signout' && request.method === 'POST') { await store.cloud.account.signOut(); notify(); return json(response, 200, store.cloud.status()); }
