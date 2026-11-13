@@ -114,7 +114,7 @@ function roomSideHtml(ctx, room) {
 // The Agents tab: each member's AI and model, changed right here. Saved at once on the agent itself, so it holds in every chat.
 const AIS = [{ value: 'claude', label: 'Claude Code', hint: 'Claude subscription' }, { value: 'codex', label: 'Codex', hint: 'ChatGPT subscription' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }];
 function roomAgentsHtml(ctx, room) {
-  const { esc, ui } = ctx, agents = room.members.map(member => (ui.snap.specialists || []).find(item => item.id === member.id)).filter(Boolean);
+  const { esc, ui } = ctx, agents = room.members.map(member => member.id === 'main' ? ui.snap.mainAgent : (ui.snap.specialists || []).find(item => item.id === member.id)).filter(Boolean);
   if (!agents.length) return '<p class="muted">No agents in this room yet.</p>';
   return `<div class="room-agents">${agents.map(agent => {
     const ai = ['codex', 'gemini'].includes(agent.provider) ? agent.provider : 'claude', choices = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
@@ -284,7 +284,7 @@ export function initRoomInfo(ctx) {
   // The Agents tab: an AI or model picked for a member is saved on that agent at once.
   document.addEventListener('change', async event => {
     const match = /^ra-(provider|model)-(.+)$/.exec(event.target.id || ''); if (!match) return;
-    const [, field, id] = match, agent = (ctx.ui.snap.specialists || []).find(item => item.id === id); if (!agent) return;
+    const [, field, id] = match, agent = id === 'main' ? ctx.ui.snap.mainAgent : (ctx.ui.snap.specialists || []).find(item => item.id === id); if (!agent) return;
     if (field === 'provider' && (agent.provider || 'claude') === event.target.value) return;
     try {
       await ctx.api(`/specialists/${id}`, { method: 'PUT', data: field === 'provider' ? { provider: event.target.value } : { model: event.target.value } });
