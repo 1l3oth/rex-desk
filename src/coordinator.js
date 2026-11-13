@@ -6,7 +6,7 @@ import { Memory } from './memory.js';
 import { Specialists, EVIDENCE_RULE, ELI5_RULE } from './specialists.js';
 import { ClaudeRunner } from './runners.js';
 import { Notifier } from './notify.js';
-import { EFFORTS, MODES, modesFor, runOptions, modelList, pickerModels } from './choices.js';
+import { EFFORTS, MODES, modesFor, effortsFor, runOptions, modelList, pickerModels } from './choices.js';
 import { fetchModels } from './models.js';
 import path from 'node:path';
 import os from 'node:os';
@@ -140,7 +140,7 @@ export class Desk {
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions(), ...this.peers.cloudInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       devices: this.peers.status(this.port),
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
-      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, choices: { models: modelList(this.store, this.store.config().provider), efforts: EFFORTS, modes: modesFor(this.store.config().provider), providers: Object.fromEntries(AI_PROVIDERS.map(provider => [provider, { models: pickerModels(this.store, provider), efforts: EFFORTS, modes: modesFor(provider) }])) }, specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent), device: this.peers.deviceName(agent.node), remote: this.peers.isRemote(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
+      directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, choices: { models: modelList(this.store, this.store.config().provider), efforts: effortsFor(this.store.config().provider), modes: modesFor(this.store.config().provider), providers: Object.fromEntries(AI_PROVIDERS.map(provider => [provider, { models: pickerModels(this.store, provider), efforts: effortsFor(provider), modes: modesFor(provider) }])) }, specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent), device: this.peers.deviceName(agent.node), remote: this.peers.isRemote(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
   }
   // Run keys are kept as hashes in the database, so an agent still working in an Orca terminal keeps its connection through a restart.
   scopeToken(runId) {

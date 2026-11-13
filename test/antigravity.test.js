@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AcpClient, AntigravityRunner, antigravityModels, antigravityMode, parseAgyModels } from '../src/antigravity.js';
 import { aiProvider, providerTitle } from '../src/codex.js';
+import { modesFor, effortsFor, runOptions } from '../src/choices.js';
 
 const fake = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-agy.mjs');
 const factory = options => new AcpClient({ ...options, spawnProcess: (command, args, spawnOptions) => spawn(process.execPath, [fake, ...args], spawnOptions) });
@@ -80,4 +81,12 @@ test("Rex Desk's own tools run without asking in Manual mode; other MCP tools st
   assert.equal(asks.length, 0);
   await item.request('session/request_permission', { toolCall: { title: 'MCP Tool other', rawInput: { ServerName: 'github', ToolName: 'create_issue' } }, options });
   assert.equal(asks.length, 1);
+});
+
+test('Gemini offers its own modes and efforts, not the Claude list', () => {
+  assert.deepEqual(modesFor('gemini').map(item => item.label), ['Dangerous', 'Auto', 'Accept edits', 'Ask first', 'Plan']);
+  assert.ok(modesFor('gemini').every(item => antigravityMode(item.id) || item.id === 'bypassPermissions'));
+  assert.deepEqual(effortsFor('gemini'), ['low', 'medium', 'high']);
+  assert.throws(() => runOptions({ provider: 'gemini', effort: 'max' }));
+  assert.equal(runOptions({ provider: 'claude', effort: 'max' }).effort, 'max');
 });

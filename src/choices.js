@@ -21,14 +21,23 @@ export const MODES = [
 export const modelList = (store, provider = 'claude') => { const saved = store?.get?.('models', provider === 'claude' ? 'list' : provider)?.items; return Array.isArray(saved) && saved.length ? saved : provider === 'claude' ? MODELS : []; };
 // The pickers also show the models this account refused (a higher plan only), greyed out, so the person sees why one is missing.
 export const pickerModels = (store, provider = 'claude') => { const refused = store?.get?.('models', provider === 'claude' ? 'list' : provider)?.refusedItems || []; return [...modelList(store, provider), ...refused.map(item => ({ ...item, hint: 'Not on your plan: it needs a higher one', disabled: true }))]; };
-export const modesFor = provider => provider === 'codex' ? [{ id: 'bypassPermissions', label: 'Dangerous' }, { id: 'manual', label: 'Workspace' }, { id: 'plan', label: 'Read only' }] : MODES;
+// Gemini's own four modes, as agy reports them, plus Dangerous, which Rex Desk adds by starting agy with every tool approved.
+export const GEMINI_MODES = [
+  { id: 'bypassPermissions', label: 'Dangerous', hint: 'Runs everything without asking' },
+  { id: 'auto', label: 'Auto', hint: 'Edits and safe commands run; asks before anything that cannot be undone' },
+  { id: 'acceptEdits', label: 'Accept edits', hint: 'Edits files freely, asks before commands' },
+  { id: 'manual', label: 'Ask first', hint: 'Asks you before each edit and command' },
+  { id: 'plan', label: 'Plan', hint: 'Plans carefully before it does anything' },
+];
+export const effortsFor = provider => provider === 'gemini' ? ['low', 'medium', 'high'] : EFFORTS;
+export const modesFor = provider => provider === 'gemini' ? GEMINI_MODES : provider === 'codex' ? [{ id: 'bypassPermissions', label: 'Dangerous' }, { id: 'manual', label: 'Workspace' }, { id: 'plan', label: 'Read only' }] : MODES;
 
 // Only values from the lists above are accepted; anything else is refused instead of being passed to the CLI.
 export function runOptions(input = {}, store) {
   const provider = aiProvider(input.provider || store?.config?.().provider || 'claude');
   const out = input.provider ? { provider } : {};
   if (input.model) { if (!modelList(store, provider).some(item => item.id === input.model)) throw new Error('Choose one of the listed models.'); out.model = input.model; }
-  if (input.effort) { if (!EFFORTS.includes(input.effort)) throw new Error('Choose low, medium, high, xhigh or max effort.'); out.effort = input.effort; }
-  if (input.permissionMode) { if (!modesFor(provider).some(item => item.id === input.permissionMode)) throw new Error('Choose Dangerous, Manual, Auto, Plan or Accept edits.'); out.permissionMode = input.permissionMode; }
+  if (input.effort) { if (!effortsFor(provider).includes(input.effort)) throw new Error(`Choose ${effortsFor(provider).join(', ')} effort.`); out.effort = input.effort; }
+  if (input.permissionMode) { if (!modesFor(provider).some(item => item.id === input.permissionMode)) throw new Error(`Choose ${modesFor(provider).map(item => item.label).join(', ')}.`); out.permissionMode = input.permissionMode; }
   return out;
 }

@@ -26,7 +26,8 @@ export function currentOptions(ctx) {
   // Only a model that is on the current list is shown and sent; anything else falls back to the first one (the recommended default).
   const ids = choices.models.filter(item => !item.disabled).map(item => item.id), model = [run?.model, last.model, configured].find(value => value && ids.includes(value)) || ids[0] || '';
   const modeIds = choices.modes.map(item => item.id), mode = [run?.permissionMode, last.permissionMode, DEFAULT_MODE].find(value => value && modeIds.includes(value)) || modeIds[0];
-  return { provider, model, effort: run?.effort || last.effort || 'medium', permissionMode: mode };
+  const effort = [run?.effort, last.effort, 'medium'].find(value => value && choices.efforts.includes(value)) || choices.efforts[0];
+  return { provider, model, effort, permissionMode: mode };
 }
 export function pickedOptions(ctx) {
   const read = id => document.getElementById(id)?.value || '';
@@ -37,7 +38,7 @@ export function pickedOptions(ctx) {
 function optionPickers(ctx) {
   const now = currentOptions(ctx), choices = choicesFor(ctx, now.provider);
   const select = (id, label, items, value) => pickerHtml(ctx, { id, label, compact: true, value, items: items.map(item => ({ value: item.id, label: item.label, hint: item.hint, disabled: item.disabled })) });
-  const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? 'Dangerous' : item.label, hint: MODE_HINT[item.id] }));
+  const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? 'Dangerous' : item.label, hint: item.hint || MODE_HINT[item.id] }));
   return `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude subscription' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT subscription' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}`;
 }
 // The message box is not redrawn while the chat updates (it would lose what is typed), so a new AI redraws only its pickers.
