@@ -1,7 +1,16 @@
-// The card that tells the person a new version is downloaded and checked. Nothing installs until they press Restart to
-// update; Later hides the card for a day, and the button in Settings stays.
-const LATER = 'rex-desk-update-later';
+// The card that tells the person a new version is downloaded and checked. Nothing installs until they press Update now;
+// Later hides the card for a day, and the button in Settings stays.
+const LATER = 'rex-desk-update-later', SHOWN = 4;
 const laterChoice = () => { try { return JSON.parse(localStorage.getItem(LATER) || '{}'); } catch { return {}; } };
+const ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 19h14"/></svg>';
+const CLOSE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+
+// Release notes arrive as one paragraph or as lines ("- item"). Each change becomes one list item.
+export function noteItems(text) {
+  const lines = String(text || '').split(/\r?\n/).map(line => line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').trim()).filter(Boolean);
+  const items = lines.length > 1 ? lines : lines.flatMap(line => line.split(/(?<=[.!?])\s+(?=[A-Z0-9"“])/));
+  return items.map(item => item.replace(/[.;]\s*$/, '').trim()).filter(Boolean);
+}
 
 export function showUpdateCard(update) {
   let card = document.getElementById('update-card');
@@ -9,10 +18,24 @@ export function showUpdateCard(update) {
   if (!version || (later.version === version && later.until > Date.now())) { card?.remove(); return; }
   if (card?.dataset.version === version) return;
   card?.remove();
-  card = document.createElement('aside'); card.id = 'update-card'; card.dataset.version = version; card.setAttribute('role', 'status');
-  card.innerHTML = '<h2></h2><p></p><div class="update-actions"><button type="button" class="btn primary" data-action="update-install">Restart to update</button><button type="button" class="btn quiet" data-action="update-later">Later</button></div>';
+  const items = noteItems(update.available.notes);
+  card = document.createElement('aside'); card.id = 'update-card'; card.dataset.version = version;
+  card.setAttribute('role', 'region'); card.setAttribute('aria-labelledby', 'update-card-title');
+  card.innerHTML = `<header class="uc-head"><span class="uc-mark">${ICON}</span><div class="uc-title"><h2 id="update-card-title"></h2><p class="uc-meta"></p></div>
+      <button type="button" class="uc-close" data-action="update-later" aria-label="Remind me later">${CLOSE}</button></header>
+    <ul class="uc-notes"></ul><button type="button" class="uc-more" hidden></button>
+    <p class="uc-error" role="alert" hidden></p>
+    <footer class="uc-foot"><p class="uc-hint">Rex Desk restarts and opens again in about a minute.</p>
+      <div class="uc-actions"><button type="button" class="btn quiet" data-action="update-later">Later</button><button type="button" class="btn primary" data-action="update-install">Update now</button></div></footer>`;
   card.querySelector('h2').textContent = `Rex Desk ${version} is ready`;
-  const notes = card.querySelector('p'); notes.textContent = update.available.notes || ''; notes.hidden = !update.available.notes;
+  card.querySelector('.uc-meta').textContent = update.current ? `Downloaded and verified · you have ${update.current}` : 'Downloaded and verified';
+  const list = card.querySelector('.uc-notes'), more = card.querySelector('.uc-more');
+  for (const [index, text] of items.entries()) { const item = document.createElement('li'); item.textContent = text; if (index >= SHOWN) item.hidden = true; list.append(item); }
+  list.hidden = !items.length;
+  if (items.length > SHOWN) {
+    more.hidden = false; more.textContent = `Show all ${items.length} changes`;
+    more.onclick = () => { for (const item of list.children) item.hidden = false; more.remove(); };
+  }
   document.body.append(card);
 }
 
@@ -23,7 +46,16 @@ export function updateLater() {
 }
 
 export async function installUpdate(api) {
-  await api('/update/install', { method: 'POST' });
-  document.getElementById('update-card')?.remove();
+  const card = document.getElementById('update-card'), button = card?.querySelector('[data-action="update-install"]'), error = card?.querySelector('.uc-error');
+  if (button) { button.disabled = true; button.textContent = 'Updating…'; }
+  if (error) error.hidden = true;
+  try { await api('/update/install', { method: 'POST' }); }
+  catch (failure) {
+    // Agents still working, or the download went away: say why here and let the person try again.
+    if (button) { button.disabled = false; button.textContent = 'Update now'; }
+    if (error) { error.textContent = failure.message; error.hidden = false; return; }
+    throw failure;
+  }
+  card?.remove();
   document.getElementById('app').innerHTML = '<div class="boot"><img class="boot-mark" src="/favicon.svg" alt=""><span>Updating Rex Desk. It reopens by itself in about a minute.</span><i class="boot-bar"></i></div>';
 }

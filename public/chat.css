@@ -1535,8 +1535,29 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 .agents-pop[hidden]{display:none}.agents-pop .room-agents{padding:0}
 
 .pc-who small.pc-path{font-family:var(--mono,monospace);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#update-card{position:fixed;right:20px;top:60px;z-index:29;width:min(340px,calc(100vw - 40px));padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 10px 30px rgb(0 0 0 / .18)}
-#update-card h2{margin:0 0 4px;font-size:14.5px}#update-card p{margin:0 0 12px;font-size:13px;color:var(--muted);white-space:pre-wrap;max-height:9em;overflow:auto}#update-card .update-actions{display:flex;gap:8px}
+/* Update ready: a floating notice bottom-right (it floats, so it takes the overlay shadow, like the toast). */
+#update-card{position:fixed;right:20px;bottom:20px;z-index:29;width:min(360px,calc(100vw - 32px));max-height:calc(100dvh - 40px);display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);box-shadow:0 16px 48px rgb(31 35 40 / .18);animation:uc-rise .25s cubic-bezier(.16,1,.3,1)}
+html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
+@keyframes uc-rise{from{opacity:0;transform:translateY(6px)}}
+#update-card .uc-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:start;padding:14px 12px 10px 14px}
+#update-card .uc-mark{display:grid;place-items:center;width:30px;height:30px;border-radius:8px;color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
+#update-card h2{margin:1px 0 2px;font-size:14px;font-weight:600;line-height:1.35;text-wrap:balance}
+#update-card .uc-meta{margin:0;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+#update-card .uc-close{display:grid;place-items:center;width:26px;height:26px;margin:-2px -2px 0 0;border:0;border-radius:6px;background:none;color:var(--muted);cursor:pointer}
+#update-card .uc-close:hover{background:var(--raised);color:var(--ink)}
+#update-card .uc-notes{margin:0;padding:10px 16px 4px 14px;list-style:none;border-top:1px solid var(--line);overflow:auto;min-height:0}
+#update-card .uc-notes li{position:relative;padding:3px 0 3px 16px;font-size:13px;line-height:1.5;max-width:60ch}
+#update-card .uc-notes li::before{content:"";position:absolute;left:3px;top:.72em;width:5px;height:5px;border-radius:50%;background:var(--muted);opacity:.7}
+#update-card .uc-more{align-self:flex-start;margin:2px 0 4px 30px;padding:2px 0;border:0;background:none;color:var(--accent);font-size:12.5px;cursor:pointer}
+#update-card .uc-more:hover{text-decoration:underline;text-underline-offset:2px}
+#update-card .uc-error{margin:6px 14px 0;padding:8px 10px;border-radius:8px;font-size:12.5px;color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,transparent)}
+#update-card .uc-foot{display:flex;align-items:center;gap:12px;padding:10px 12px 12px 14px;margin-top:6px;border-top:1px solid var(--line)}
+#update-card .uc-hint{flex:1;margin:0;font-size:12px;line-height:1.4;color:var(--muted)}
+#update-card .uc-actions{display:flex;gap:6px;flex:none}
+#update-card .btn:disabled{opacity:.6;cursor:progress}
+#update-card :is(button):focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+@media (max-width:760px){#update-card{right:12px;left:12px;bottom:calc(84px + env(safe-area-inset-bottom));width:auto}#update-card .uc-foot{flex-wrap:wrap}#update-card .uc-actions{width:100%;justify-content:flex-end}}
+@media (prefers-reduced-motion:reduce){#update-card{animation:none}}
 /* Sign in: the Rex Desk account front door */
 .si-title{margin:2px 0 4px;font-size:20px;letter-spacing:-.01em;line-height:1.25}
 .si-card>.si-note{margin-bottom:14px;line-height:1.5}
