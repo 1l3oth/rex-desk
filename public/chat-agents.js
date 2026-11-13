@@ -44,11 +44,17 @@ export function agentStage(ctx) {
   const taskSources = `<div class="ag-sources">${options.map(([id, label, hint]) => `<label><input type="checkbox" data-task-source="${esc(id)}" ${chosen.has(id) ? 'checked' : ''}><span>${esc(label)}<small>${esc(hint)}</small></span></label>`).join('')}</div>${chosen.size ? '' : `<p class="ag-help">Not set. ${esc(agent.name)} asks you before it looks for tasks.</p>`}`;
   // The agent's own loop: how often it looks at its tasks by itself, and what it does on each look.
   const loop = { on: true, every: 60, prompt: '', ...(agent.loop || {}) }, everyLabel = minutes => minutes >= 1440 ? 'Once a day' : minutes >= 60 ? `Every ${minutes / 60} hour${minutes === 60 ? '' : 's'}` : `Every ${minutes} minutes`;
-  const loopBox = `<section class="ag-sec ag-loop"><h2>Own loop</h2>
-    <label class="ag-loop-on"><input type="checkbox" data-loop-on ${loop.on ? 'checked' : ''}><span>${esc(agent.name)} checks its own tasks and starts work by itself</span></label>
-    <div class="ag-loop-row"><select data-loop-every aria-label="How often">${[15, 30, 60, 120, 240, 1440].map(minutes => `<option value="${minutes}" ${Number(loop.every) === minutes ? 'selected' : ''}>${everyLabel(minutes)}</option>`).join('')}</select><button type="button" class="btn small" data-action="spec-loop-now">Check now</button></div>
-    <textarea data-loop-prompt rows="3" maxlength="2000" placeholder="What to do on each check (optional). For example: pick up QA issues first and test them in the browser.">${esc(loop.prompt || '')}</textarea>
-    <p class="ag-help">${loop.lastAt ? `Last check ${esc(new Date(loop.lastAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}. ` : ''}A check is skipped, using nothing, when its tasks have not changed. It follows the ${esc(agent.projectSlug)} workflow and asks you before anything risky.</p></section>`;
+  const STEP = { 15: '15m', 30: '30m', 60: '1h', 120: '2h', 240: '4h', 1440: '1 day' }, next = loop.on && loop.lastAt ? new Date(new Date(loop.lastAt).getTime() + Number(loop.every) * 60000) : null;
+  const nextIn = next ? Math.max(0, Math.round((next.getTime() - Date.now()) / 60000)) : null;
+  const loopBox = `<section class="ag-sec ag-loop${loop.on ? ' on' : ''}"><div class="lp-head"><div><h2>Own loop</h2><p>${esc(agent.name)} checks its own tasks and starts work by itself.</p></div>
+      <label class="switch" title="${loop.on ? 'Turn the loop off' : 'Turn the loop on'}"><input type="checkbox" role="switch" data-loop-on ${loop.on ? 'checked' : ''} aria-label="Own loop"><span></span></label></div>
+    <div class="lp-body">
+      <div class="lp-every" role="radiogroup" aria-label="How often">${[15, 30, 60, 120, 240, 1440].map(minutes => `<label title="${everyLabel(minutes)}"><input type="radio" name="loop-every-${esc(agent.id)}" value="${minutes}" data-loop-every ${Number(loop.every) === minutes ? 'checked' : ''}><span>${STEP[minutes]}</span></label>`).join('')}</div>
+      <textarea data-loop-prompt rows="3" maxlength="2000" placeholder="What to do on each check (optional). For example: pick up QA issues first and test them in the browser.">${esc(loop.prompt || '')}</textarea>
+      <div class="lp-foot"><span class="lp-status">${loop.on ? `<i class="lp-dot"></i>${nextIn === null ? 'First check soon' : nextIn <= 0 ? 'Checking soon' : `Next check in ${nextIn >= 60 ? `${Math.round(nextIn / 60)} h` : `${nextIn} min`}`}` : 'Off'}${loop.lastAt ? `<small>Last ${esc(new Date(loop.lastAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</small>` : ''}</span>
+        <button type="button" class="btn small lp-now" data-action="spec-loop-now"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>Check now</button></div>
+      <p class="ag-help">A check costs nothing when its tasks have not changed. It follows the ${esc(agent.projectSlug)} workflow and asks you before anything risky.</p>
+    </div></section>`;
   const side = `<aside class="ag-side">
     <section class="ag-sec"><h2>What ${esc(agent.projectSlug)} is for</h2><p>${esc(agent.purpose || 'Not recorded yet.')}</p></section>
     <section class="ag-sec"><h2>Lessons learned</h2>${lessonList}</section>

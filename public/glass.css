@@ -338,3 +338,31 @@ html[data-skin=sakura] .item.is-working .avwrap::before{border-color:rgba(255,15
 html[data-skin=gojo] .item.is-working .avwrap::before{border-color:rgba(160,210,255,.25);border-top-color:#cfe6ff;border-right-color:#59b4ff;filter:drop-shadow(0 0 5px #59b4ff)}
 
 .avwrap{line-height:0}.item.is-working .avwrap::after{content:"";position:absolute;inset:-6px;border-radius:50%;z-index:-1;background:radial-gradient(closest-side,color-mix(in srgb,var(--accent) 35%,transparent),transparent);animation:wait-breathe 2s ease-in-out infinite}
+
+/* A real on/off switch. */
+.switch{position:relative;display:inline-flex;flex:none;width:42px;height:24px;cursor:pointer}
+.switch input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.switch span{position:absolute;inset:0;border-radius:999px;background:color-mix(in srgb,var(--ink) 18%,transparent);transition:background .2s}
+.switch span::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:transform .22s cubic-bezier(.22,1,.36,1)}
+.switch input:checked+span{background:var(--accent)}
+.switch input:checked+span::after{transform:translateX(18px)}
+.switch input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+
+/* The agent's own loop. */
+.ag-loop .lp-head{display:flex;align-items:flex-start;gap:12px}.ag-loop .lp-head>div{flex:1}.ag-loop .lp-head h2{margin:0}.ag-loop .lp-head p{margin:3px 0 0;font-size:12.5px;color:var(--muted)}
+.ag-loop .lp-body{display:flex;flex-direction:column;gap:10px;margin-top:12px;transition:opacity .2s}
+.ag-loop:not(.on) .lp-body{opacity:.45;pointer-events:none}
+.lp-every{display:grid;grid-template-columns:repeat(6,1fr);gap:3px;padding:3px;border:1px solid var(--line);border-radius:11px;background:var(--bg)}
+.lp-every label{position:relative;cursor:pointer}.lp-every input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.lp-every span{display:block;padding:6px 0;border-radius:8px;text-align:center;font-size:12.5px;color:var(--muted);transition:background .15s,color .15s}
+.lp-every input:checked+span{background:var(--raised);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 40%,transparent)}
+.lp-every input:focus-visible+span{outline:2px solid var(--accent)}
+.ag-loop textarea{width:100%;min-height:76px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--ink);font:inherit;font-size:13.5px;resize:vertical}
+.ag-loop textarea:focus{border-color:var(--accent);outline:0;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.lp-foot{display:flex;align-items:center;gap:10px}
+.lp-status{flex:1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;font-weight:600}
+.lp-status small{font-weight:400;font-size:12px;color:var(--muted)}
+.lp-dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 60%,transparent);animation:lp-ping 2s ease-out infinite}
+@keyframes lp-ping{to{box-shadow:0 0 0 7px transparent}}
+.lp-now{display:inline-flex;align-items:center;gap:6px}
+@media (prefers-reduced-motion:reduce){.lp-dot{animation:none}}
