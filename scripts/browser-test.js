@@ -169,6 +169,7 @@ try {
   await settings.getByRole('heading', { name: 'GitHub', exact: true }).waitFor();
   // Settings, Folders shows the three folders.
   await openSection('folders');
+  await settings.locator('.st-folder').nth(2).waitFor();
   assert.equal(await settings.locator('.st-folder').count(), 3);
 
   // Task sources: a Morningmate connection is made, its projects load, and people are added by name.
