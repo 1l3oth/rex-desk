@@ -1,6 +1,7 @@
 import { pickerHtml } from '/chat-pick.js';
 import { noticeSettingsHtml } from '/chat-notices.js';
 import { voicesFor, chosenVoice } from '/chat-speak.js';
+import { trackerDraft, readTrackers, trackersHtml, trackerSources, trackerClick, trackerInput } from '/chat-trackers.js';
 // Settings, as a popup over the chat: the sections on the left, one section's settings on the right. Each section saves on its own,
 // so a change never waits for the rest. It replaces the old "Issues & settings" page.
 const SECTIONS = [
@@ -42,11 +43,44 @@ export function openSettings(ctx, section = 'general') {
   document.querySelector('.dialog-back.settings')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back settings'; document.body.append(back);
   const phone = window.matchMedia('(max-width:760px)').matches;
-  const state = { section, extra: {}, list: phone && section === 'general' };
+  const state = { section, extra: {}, list: phone && section === 'general', trackers: trackerDraft(ui) };
   const config = () => ui.snap.config || {};
   const field = (label, control, help = '') => `<label class="st-field"><span>${label}</span>${control}${help ? `<small>${help}</small>` : ''}</label>`;
   const check = (name, on, label, help = '') => `<label class="st-check"><input type="checkbox" name="${name}" ${on ? 'checked' : ''}><span><b>${label}</b>${help ? `<small>${help}</small>` : ''}</span></label>`;
   const input = (name, value, attrs = '') => `<input name="${name}" value="${esc(value ?? '')}" ${attrs}>`;
+  // GitHub accounts come from the GitHub CLI. Signing in runs GitHub's device flow: approve the shown code on github.com.
+  const githubHtml = () => {
+    const github = state.extra.github;
+    const head = '<h3>GitHub</h3><p class="muted">Pushes, pull requests and clones use the active account. Rex Desk uses the GitHub CLI sign-in and never keeps a GitHub token.</p>';
+    if (!github) return `${head}<p class="muted">Checking GitHub sign-in…</p>`;
+    if (!github.installed) return `${head}<p class="error-text">The GitHub CLI (gh) is not installed on this computer.</p>`;
+    const login = github.login, waiting = ['waiting', 'starting'].includes(login?.state);
+    const list = github.accounts.map(account => `<li><b>${esc(account.login)}</b>${account.active ? '<span class="muted">Active</span>' : account.valid ? `<button type="button" class="btn small quiet" data-st-gh-use="${esc(account.login)}">Use</button>` : '<span class="error-text">Sign in again</span>'}</li>`).join('');
+    const signIn = waiting
+      ? `<div class="st-gh-code"><span>Enter this code on GitHub</span><code>${esc(login.code || '…')}</code><button type="button" class="btn small" data-st-gh-copy="${esc(login.code || '')}">Copy</button><a class="btn small" href="${esc(login.url)}" target="_blank" rel="noopener">Open GitHub</a><button type="button" class="btn small quiet" data-st-gh-cancel>Cancel</button><small class="muted">This updates by itself once you approve it.</small></div>`
+      : `<div class="st-actions"><button type="button" class="btn small" data-st-gh-login>${github.accounts.length ? 'Sign in another GitHub account' : 'Sign in to GitHub'}</button></div>`;
+    return `${head}<ul class="st-list">${list || '<li class="muted">No GitHub account signed in.</li>'}</ul>${signIn}${login?.state === 'failed' ? `<p class="error-text">${esc(login.error)}</p>` : ''}`;
+  };
+  let githubTimer = 0;
+  const loadGithub = async () => {
+    const before = state.extra.github?.login?.state;
+    try { state.extra.github = await api('/github'); } catch (error) { state.extra.github = { installed: true, accounts: [], login: { state: 'failed', error: error.message } }; }
+    if (!document.body.contains(back)) return;
+    if (state.section === 'projects') draw();
+    const now = state.extra.github.login?.state;
+    clearTimeout(githubTimer); if (['waiting', 'starting'].includes(now)) githubTimer = setTimeout(loadGithub, 2000);
+    else if (now === 'done' && before && before !== 'done') toast(`Signed in to GitHub${state.extra.github.login.account ? ` as ${state.extra.github.login.account}` : ''}.`);
+  };
+  const githubClick = async target => {
+    if (target.closest('[data-st-gh-login]')) { target.closest('[data-st-gh-login]').disabled = true; const login = await api('/github/login', { method: 'POST' }); state.extra.github = { ...(state.extra.github || { installed: true, accounts: [] }), login }; await loadGithub(); return true; }
+    if (target.closest('[data-st-gh-cancel]')) { await api('/github/login', { method: 'DELETE' }); await loadGithub(); return true; }
+    const use = target.closest('[data-st-gh-use]'); if (use) { await api('/github/switch', { method: 'POST', data: { user: use.dataset.stGhUse } }); await loadGithub(); toast(`${use.dataset.stGhUse} is now the active GitHub account.`); return true; }
+    const copy = target.closest('[data-st-gh-copy]'); if (copy) { await navigator.clipboard.writeText(copy.dataset.stGhCopy); toast('Copied.'); return true; }
+    return false;
+  };
+  // Test sign-ins are edited as a working copy: a new empty row has no user name yet, which the server would drop if saved at once.
+  const signins = () => (state.signins ||= (config().testAccounts || []).map(account => ({ ...account, password: '' })));
+  const readSignins = () => signins().forEach((account, index) => { for (const key of ['site', 'username', 'password']) { const input = back.querySelector(`[name="ta.${index}.${key}"]`); if (input) account[key] = input.value; } });
   const panels = {
     general: () => `<h2>General</h2>
       ${ui.snap.account?.email ? `<div class="st-account"><span class="si-avatar">${esc(ui.snap.account.email[0].toUpperCase())}</span><span><b>${esc(ui.snap.account.email)}</b><small>${ui.snap.account.role === 'superadmin' ? 'Superadmin' : 'Member'} · this computer</small></span><button type="button" class="btn small" data-st-signout>Sign out</button></div>` : ''}
@@ -86,17 +120,20 @@ export function openSettings(ctx, section = 'general') {
       return `<h2>Projects</h2><p class="muted">The code your agents work on. Each run gets its own copy, so your own checkout is never touched. Rex Agent can also add a project when you name it in chat.</p>
         ${repositories.length ? repositories.map(row).join('') : '<p class="muted">No projects yet.</p>'}
         ${projectRulesHtml()}
-        <div class="st-add"><input data-st-repo-path placeholder="Folder of a project, like D:\\dev\\my-app" spellcheck="false" aria-label="Folder of a project"><button type="button" class="btn small" data-st-repo-pick>Browse…</button><button type="button" class="btn small primary" data-st-repo-add>Add</button></div>`;
+        <div class="st-add"><input data-st-repo-path placeholder="A folder, like D:\\dev\\my-app, or owner/name on GitHub to clone" spellcheck="false" aria-label="Folder of a project, or a GitHub repository to clone"><button type="button" class="btn small" data-st-repo-pick>Browse…</button><button type="button" class="btn small primary" data-st-repo-add>Add</button></div>
+        ${githubHtml()}`;
     },
     sources: () => `<h2>Task sources</h2><p class="muted">Where tasks come from. Rex Desk tasks are built in.</p>
-      <ul class="st-list">${(config().sources || []).map(source => `<li><b>${esc(source.name)}</b><span class="muted">${esc(source.type)}${source.hasKey ? '' : ' · no key'}</span></li>`).join('') || '<li class="muted">No trackers connected.</li>'}</ul>
-      <div class="st-actions"><button type="button" class="btn primary" data-st-open="sources">Manage sources and connect Orbit</button><a class="btn" href="/classic#connections">Flow and Morningmate projects</a></div>`,
+      <ul class="st-list">${(config().sources || []).filter(source => source.type === 'orbit').map(source => `<li><b>${esc(source.name)}</b><span class="muted">${esc(source.type)}${source.hasKey ? '' : ' · no key'}</span></li>`).join('') || '<li class="muted">No Orbit goal connected.</li>'}</ul>
+      <div class="st-actions"><button type="button" class="btn" data-st-open="sources">Orbit and Rex Desk tasks</button></div>
+      ${trackersHtml(ctx, state)}`,
     jev: () => `<h2>Jev and voice</h2>
       <h3>Ranking your issues</h3>
       ${field('OpenRouter key', `<input type="password" name="jev.apiKey" autocomplete="off" spellcheck="false" placeholder="${config().jev?.hasKey ? 'Saved. Paste a new key to replace it.' : 'sk-or-…'}">`, 'Kept encrypted on this computer and sent only to OpenRouter. Also used for the Gemini voice engine.')}
       ${config().jev?.hasKey ? check('jev.clearKey', false, 'Remove the saved key') : ''}
       <div class="st-row">${field('Jev model', input('jev.model', config().jev?.model, 'placeholder="Newest Jev release" spellcheck="false"'))}${field('Versions you ship now', input('jev.versions', config().jev?.versions, 'placeholder="App 2.0.1, website current release"'))}</div>
       ${check('jev.auto', config().jev?.auto !== false, 'Rank new and changed issues after each sync')}
+      ${config().jev?.hasKey ? `<div class="st-actions"><button type="button" class="btn small" data-st-rank ${state.extra.ranking ? 'disabled' : ''}>${state.extra.ranking ? 'Ranking…' : 'Rank my issues now'}</button><small class="muted">Shift-click to check every issue again.</small></div>` : ''}
       <h3>Controlling this computer</h3>
       ${check('control.enabled', config().control?.enabled !== false, 'Let Jev control this computer when I ask')}
       ${check('control.confirm', config().control?.confirm !== false, 'Ask me before shutting down, restarting, signing out, closing apps or emptying the Recycle Bin')}
@@ -108,9 +145,10 @@ export function openSettings(ctx, section = 'general') {
       ${check('schedule.enabled', schedule.enabled, 'Start work on its own on a schedule')}
       <div class="st-row">${field('Time', input('schedule.time', schedule.time || '09:00', 'type="time"'))}${field('Most runs a day', input('schedule.maxRuns', schedule.maxRuns || 6, 'type="number" min="1" max="20"'), 'Runs use your Claude subscription.')}</div>
       <fieldset class="st-days"><legend>Days</legend>${DAYS.map((day, index) => `<label><input type="checkbox" name="schedule.days" value="${index}" ${days.includes(index) ? 'checked' : ''}><span>${day}</span></label>`).join('')}</fieldset>
-      ${check('schedule.fix', schedule.fix !== false, 'Start runs for the top-ranked issues', 'Needs a project for them.')}`; },
+      ${check('schedule.fix', schedule.fix !== false, 'Start runs for the top-ranked issues', 'Needs a project for them.')}
+      <div class="st-actions"><button type="button" class="btn small" data-st-schedule-run ${state.extra.scheduling ? 'disabled' : ''}>${state.extra.scheduling ? 'Starting…' : 'Run it now'}</button></div>`; },
     signins: () => `<h2>Test sign-ins</h2><p class="muted">An agent can sign in to a preview it starts with these, without ever seeing the password. Never used on a live production site.</p>
-      ${(config().testAccounts || []).map((account, index) => `<div class="st-signin"><input name="ta.${index}.site" value="${esc(account.site || '')}" placeholder="Site, like localhost or staging.example.com" aria-label="Site"><input name="ta.${index}.username" value="${esc(account.username || '')}" placeholder="User name or email" aria-label="User name"><input type="password" name="ta.${index}.password" placeholder="${account.hasPassword ? 'Saved' : 'Password'}" aria-label="Password" autocomplete="new-password"><button type="button" class="ag-x" data-st-signin-remove="${index}" aria-label="Remove this sign-in">×</button></div>`).join('')}
+      ${signins().map((account, index) => `<div class="st-signin"><input name="ta.${index}.site" value="${esc(account.site || '')}" placeholder="Site, like localhost or staging.example.com" aria-label="Site"><input name="ta.${index}.username" value="${esc(account.username || '')}" placeholder="User name or email" aria-label="User name"><input type="password" name="ta.${index}.password" value="${esc(account.password || '')}" placeholder="${account.hasPassword ? 'Saved' : 'Password'}" aria-label="Password" autocomplete="new-password"><button type="button" class="ag-x" data-st-signin-remove="${index}" aria-label="Remove this sign-in">×</button></div>`).join('')}
       <button type="button" class="btn small" data-st-signin-add>+ Add a sign-in</button>`,
     devices: () => `<h2>Devices and phone</h2><p class="muted">Use Rex Desk on your phone and your other computers over Tailscale. The Devices page has the QR code for your phone.</p><button type="button" class="btn primary" data-st-go="devices">Open Devices</button>`,
     backup: () => { const database = ui.snap.database || {}, update = ui.snap.update || {}, account = database.account, hosted = Boolean(account && account.url === database.url); return `<h2>Backup and updates</h2>
@@ -123,11 +161,11 @@ export function openSettings(ctx, section = 'general') {
         <label class="st-field"><span>Database key${database.configured ? ' (saved; leave empty to keep it)' : ''}</span><input data-st-db-token type="password" autocomplete="new-password"></label>
         <button type="button" class="btn small" data-st-db-connect>Connect</button>
       </details>${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}
-      <h3>App updates</h3><p>${esc(update.supported ? `This is Rex Desk ${[update.current, update.stage].filter(Boolean).join(' ')}. ` : '')}${esc(update.ready ? `Version ${update.available?.version} is downloaded and checked.` : update.available ? `Version ${update.available.version} is available.` : 'Rex Desk is up to date, or updates are not used in this copy.')}</p>${update.ready ? '<button type="button" class="btn primary" data-action="update-install">Install and restart</button>' : ''}`; },
+      <h3>App updates</h3><p>${esc(update.supported ? `This is Rex Desk ${[update.current, update.stage].filter(Boolean).join(' ')}. ` : '')}${esc(update.ready ? `Version ${update.available?.version} is downloaded and checked.` : update.available ? `Version ${update.available.version} is available.` : update.supported ? (update.checkedAt ? 'Rex Desk is up to date.' : 'Not checked yet.') : 'This copy runs from source code and updates with Git.')}</p>${update.error ? `<p class="error-text">${esc(update.error)}</p>` : ''}<div class="st-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${state.extra.checking ? 'disabled' : ''}>${state.extra.checking ? 'Checking…' : 'Check now'}</button>` : ''}${update.ready ? '<button type="button" class="btn primary" data-action="update-install">Install and restart</button>' : ''}</div>`; },
     connect: () => `<h2>Connect another AI</h2><p class="muted">Give this to another Claude Code session (or another assistant) so it can read your tasks and ask you questions through Rex Desk. No key is needed on this computer.</p>
       <button type="button" class="btn" data-st-prompt>Show the setup text</button>${state.extra.prompt ? `<pre class="st-prompt">${esc(state.extra.prompt)}</pre><button type="button" class="btn small" data-st-copy-prompt>Copy</button>` : ''}`,
   };
-  const saves = new Set(['general', 'agents', 'projects', 'jev', 'schedule', 'signins']);
+  const saves = new Set(['general', 'agents', 'projects', 'sources', 'jev', 'schedule', 'signins']);
   const draw = () => {
     // A redraw of the same section keeps the place the person scrolled to (ticking a box used to jump back to the top).
     const keep = back.dataset.section === state.section ? back.querySelector('.st-panel')?.scrollTop || 0 : 0;
@@ -147,15 +185,33 @@ export function openSettings(ctx, section = 'general') {
     if (state.section === 'projects') next.repositories = base.repositories.map((repo, index) => ({ ...repo, ...Object.fromEntries(['baseBranch', 'targetBranch', 'setupCommand', 'devCommand', 'testCommand', 'push'].map(key => [key, v[`repo.${index}.${key}`] ?? repo[key]])) }));
     if (state.section === 'jev') { next.jev = { ...base.jev, apiKey: v['jev.apiKey'] || '', clearKey: checked('jev.clearKey'), model: v['jev.model'], versions: v['jev.versions'], auto: checked('jev.auto') }; next.control = { enabled: checked('control.enabled'), confirm: checked('control.confirm'), agents: checked('control.agents'), language: v['control.language'] }; }
     if (state.section === 'schedule') next.schedule = { enabled: checked('schedule.enabled'), time: v['schedule.time'], maxRuns: Number(v['schedule.maxRuns']), fix: checked('schedule.fix'), days: [...back.querySelectorAll('[name="schedule.days"]:checked')].map(box => Number(box.value)) };
-    if (state.section === 'signins') next.testAccounts = (base.testAccounts || []).map((account, index) => ({ ...account, site: v[`ta.${index}.site`] ?? account.site, username: v[`ta.${index}.username`] ?? account.username, password: v[`ta.${index}.password`] || '' }));
-    await api('/config', { method: 'PUT', data: next }); await refresh(); toast('Saved.'); draw();
+    if (state.section === 'sources') { readTrackers(back, state); next.sources = trackerSources(ui, state); }
+    if (state.section === 'signins') { readSignins(); next.testAccounts = state.signins.filter(account => account.username.trim()); }
+    ui.snap.config = await api('/config', { method: 'PUT', data: next }); await refresh(); if (state.section === 'sources') state.trackers = trackerDraft(ui); state.signins = null; toast('Saved.'); draw();
   }
   back.addEventListener('click', async event => {
     const target = event.target;
     try {
       if (target === back || target.closest('[data-st-close]')) { back.remove(); return; }
       if (target.closest('[data-st-back]')) { state.list = true; draw(); return; }
-      const section = target.closest('[data-st-section]'); if (section) { state.section = section.dataset.stSection; state.list = false; if (state.section === 'general') state.extra.autostart = await api('/autostart').catch(() => null); draw(); return; }
+      const section = target.closest('[data-st-section]'); if (section) { state.section = section.dataset.stSection; state.list = false; if (state.section === 'sources') state.trackers = trackerDraft(ui); if (state.section === 'projects') void loadGithub(); if (state.section === 'general') state.extra.autostart = await api('/autostart').catch(() => null); draw(); return; }
+      if (await trackerClick(ctx, state, target, back, draw)) return;
+      if (await githubClick(target)) return;
+      if (target.closest('[data-st-rank]')) {
+        state.extra.ranking = true; draw();
+        try { const result = await api('/jev/prioritize', { method: 'POST', data: { force: event.shiftKey } }); await refresh(); toast(result.failed ? `Jev rated ${result.done - result.failed} of ${result.total}; ${result.failed} failed: ${result.error}` : result.total ? `Jev rated ${result.total} issue${result.total === 1 ? '' : 's'}.` : 'Every issue is already rated. Shift-click to check them all again.', Boolean(result.failed)); }
+        finally { state.extra.ranking = false; draw(); } return;
+      }
+      if (target.closest('[data-st-schedule-run]')) {
+        state.extra.scheduling = true; draw();
+        try { const result = await api('/schedule/run', { method: 'POST' }); toast(result.state === 'started' ? `Started Rex Agent on ${result.issues} new issue${result.issues === 1 ? '' : 's'}.` : result.reason, result.state !== 'started'); await refresh(); }
+        finally { state.extra.scheduling = false; draw(); } return;
+      }
+      if (target.closest('[data-st-update-check]')) {
+        state.extra.checking = true; draw();
+        try { const update = await api('/update/check', { method: 'POST' }); ui.snap.update = update; toast(update.error || (update.available ? `Rex Desk ${update.available.version} is ${update.ready ? 'ready to install' : 'downloading'}.` : 'Rex Desk is up to date.'), Boolean(update.error)); }
+        finally { state.extra.checking = false; draw(); } return;
+      }
       if (target.closest('[data-st-save]')) { target.closest('[data-st-save]').disabled = true; await save(); return; }
       const open = target.closest('[data-st-open]'); if (open) { back.remove(); document.body.insertAdjacentHTML('beforeend', `<button hidden data-action="${open.dataset.stOpen === 'accounts' ? 'accounts' : open.dataset.stOpen === 'sources' ? 'task-connect' : 'st-voice'}" id="st-opener"></button>`); document.getElementById('st-opener').click(); document.getElementById('st-opener')?.remove(); return; }
       const go = target.closest('[data-st-go]'); if (go) { back.remove(); ctx.open(go.dataset.stGo); return; }
@@ -203,19 +259,27 @@ export function openSettings(ctx, section = 'general') {
       }
       if (target.closest('[data-st-prompt]')) { state.extra.prompt = (await api('/setup-prompt', { method: 'POST', data: { target: 'claude' } })).prompt; draw(); return; }
       if (target.closest('[data-st-copy-prompt]')) { await navigator.clipboard.writeText(state.extra.prompt); toast('Copied.'); return; }
-      if (target.closest('[data-st-signin-add]')) { await api('/config', { method: 'PUT', data: { ...config(), testAccounts: [...(config().testAccounts || []), { id: crypto.randomUUID(), site: '', username: '' }] } }); await refresh(); draw(); return; }
-      const dropSignin = target.closest('[data-st-signin-remove]'); if (dropSignin) { await api('/config', { method: 'PUT', data: { ...config(), testAccounts: config().testAccounts.filter((_, index) => index !== Number(dropSignin.dataset.stSigninRemove)) } }); await refresh(); draw(); return; }
-      const dropRepo = target.closest('[data-st-repo-remove]'); if (dropRepo) { const repo = config().repositories[Number(dropRepo.dataset.stRepoRemove)]; if (!confirm(`Remove ${repo.name} from Rex Desk? The folder on disk stays.`)) return; await api('/config', { method: 'PUT', data: { ...config(), repositories: config().repositories.filter((_, index) => index !== Number(dropRepo.dataset.stRepoRemove)) } }); await refresh(); draw(); return; }
+      if (target.closest('[data-st-signin-add]')) { readSignins(); state.signins.push({ id: crypto.randomUUID(), site: '', username: '', password: '' }); draw(); back.querySelector(`[name="ta.${state.signins.length - 1}.site"]`)?.focus(); return; }
+      const dropSignin = target.closest('[data-st-signin-remove]'); if (dropSignin) { readSignins(); state.signins.splice(Number(dropSignin.dataset.stSigninRemove), 1); draw(); toast('Press Save to make it final.'); return; }
+      const dropRepo = target.closest('[data-st-repo-remove]'); if (dropRepo) { const repo = config().repositories[Number(dropRepo.dataset.stRepoRemove)]; if (!confirm(`Remove ${repo.name} from Rex Desk? The folder on disk stays.`)) return; ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: config().repositories.filter((_, index) => index !== Number(dropRepo.dataset.stRepoRemove)) } }); await refresh(); draw(); return; }
       if (target.closest('[data-st-repo-pick]')) { const picked = await api('/repositories/pick', { method: 'POST', data: {} }).catch(() => null); if (picked?.path) back.querySelector('[data-st-repo-path]').value = picked.path; return; }
       if (target.closest('[data-st-repo-add]')) {
-        const folder = back.querySelector('[data-st-repo-path]').value.trim(); if (!folder) return toast('Type or browse to a project folder first.', true);
+        let folder = back.querySelector('[data-st-repo-path]').value.trim(); if (!folder) return toast('Type or browse to a project folder first.', true);
+        // owner/name or a github.com address is cloned next to Rex Desk with the active GitHub account, then added like a folder.
+        if ((!/[\\:]/.test(folder) && /^[\w.-]+\/[\w.-]+$/.test(folder)) || /^https:\/\/github\.com\//.test(folder)) {
+          const button = target.closest('[data-st-repo-add]'); button.disabled = true; button.textContent = 'Cloning…';
+          try { folder = (await api('/repositories/clone', { method: 'POST', data: { repository: folder } })).path; } finally { button.disabled = false; button.textContent = 'Add'; }
+        }
         const found = await api('/repositories/inspect', { method: 'POST', data: { path: folder } });
-        await api('/config', { method: 'PUT', data: { ...config(), repositories: [...config().repositories, { name: found.name, path: found.path, baseBranch: found.preferredBranch || 'develop', targetBranch: found.preferredBranch || 'develop' }] } });
+        ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: [...config().repositories, { name: found.name, path: found.path, baseBranch: found.preferredBranch || 'develop', targetBranch: found.preferredBranch || 'develop' }] } });
         await refresh(); toast(`Added ${found.name}.`); draw(); return;
       }
     } catch (error) { toast(error.message, true); back.querySelector('[data-st-save]')?.removeAttribute('disabled'); }
   });
   back.addEventListener('keydown', event => { if (event.key === 'Escape') back.remove(); });
+  back.addEventListener('input', event => { trackerInput(back, state, event, draw); });
+  back.addEventListener('change', event => { trackerInput(back, state, event, draw); });
+  back.addEventListener('toggle', event => { const card = event.target.dataset?.trCard; if (card && event.target.open) state.openTracker = card; }, true);
   // A project's two rules save at once.
   back.addEventListener('change', async event => {
     const rule = event.target.dataset?.stRule; if (!rule) return;
@@ -228,6 +292,7 @@ export function openSettings(ctx, section = 'general') {
   void api('/speak/voices').then(neural => { state.extra.neural = neural; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
   if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); if (state.section === 'general' && document.body.contains(back)) draw(); });
   back.addEventListener('change', event => { const lang = event.target.dataset?.stVoice; if (!lang) return; try { if (event.target.value) localStorage.setItem(`rex-desk-voice-${lang}`, event.target.value); else localStorage.removeItem(`rex-desk-voice-${lang}`); } catch { /* private window */ } toast('Reading voice saved.'); });
+  if (section === 'projects') void loadGithub();
   if (section === 'general') void api('/autostart').then(result => { state.extra.autostart = result; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
   // The Notifications tab saves on change; redraw it when its settings come back changed, keeping the scroll.
   let noticeHtml = '';

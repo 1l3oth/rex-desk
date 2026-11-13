@@ -200,7 +200,7 @@ export function tasksStage(ctx) {
   const item = (id, mark, name, number, extra = '') => `<button class="tk-source${pick === id ? ' on' : ''}" data-action="task-source" data-source="${esc(id)}" aria-pressed="${pick === id}"><span class="src-mark mini ${esc(mark)}" aria-hidden="true">${esc(name[0])}</span><span class="tk-sname">${esc(name)}</span>${extra}<span class="tk-count">${number}</span></button>`;
   const connected = sources.map(source => { const sync = syncs.get(source.id); return item(source.id, source.type, source.name, count(task => task.sourceId === source.id), sync?.error ? `<span class="dot bad" title="${esc(sync.error)}"></span>` : ''); }).join('');
   const missing = [['flow', 'Flow'], ['morningmate', 'Morningmate'], ['orbit', 'Orbit']].filter(([type]) => !sources.some(source => source.type === type))
-    .map(([type, name]) => type === 'orbit' ? `<button class="tk-connect" data-action="task-connect" data-service="orbit"><span class="src-mark mini orbit" aria-hidden="true">O</span>Connect ${name}</button>` : `<a class="tk-connect" href="/classic#connections"><span class="src-mark mini ${type}" aria-hidden="true">${name[0]}</span>Connect ${name}</a>`).join('');
+    .map(([type, name]) => type === 'orbit' ? `<button class="tk-connect" data-action="task-connect" data-service="orbit"><span class="src-mark mini orbit" aria-hidden="true">O</span>Connect ${name}</button>` : `<button type="button" class="tk-connect" data-action="settings-sources"><span class="src-mark mini ${type}" aria-hidden="true">${name[0]}</span>Connect ${name}</button>`).join('');
   const side = `<aside class="tk-side"><h3>Sources</h3>${item('all', 'all', 'All tasks', count(() => true))}${item('local', 'local', 'Rex Desk tasks', count(task => task.local))}${connected}
     ${missing ? `<h3>Connect</h3>${missing}` : ''}<button class="btn small tk-manage" data-action="task-connect">Manage sources</button>
     <label class="tk-donebox"><input type="checkbox" data-task-done ${showDone ? 'checked' : ''}> Show done tasks</label></aside>`;
@@ -421,7 +421,7 @@ function connectionsDialog(ctx, startWith = '') {
     const row = source => { const sync = syncs.get(source.id); return `<li><span class="src-mark ${esc(source.type)}" aria-hidden="true">${esc((SERVICE[source.type] || '?')[0])}</span><span class="src-text"><b>${esc(source.name)}</b><small>${esc(SERVICE[source.type] || source.type)} · ${sync?.error ? `<span class="bad">${esc(sync.error)}</span>` : sync ? `${sync.count} tasks` : 'not synced yet'}${source.hasKey ? '' : ' · no key'}</small></span>${source.type === 'orbit' ? `<button type="button" class="btn small" data-src-edit="${esc(source.id)}">Change</button>` : ''}<button type="button" class="btn small quiet danger" data-src-remove="${esc(source.id)}">Remove</button></li>`; };
     const list = `<h2>Task sources</h2><p class="muted">Agents read tasks from these. Each agent uses only the sources you tick on its card.</p>
       <ul class="src-list"><li><span class="src-mark local" aria-hidden="true">R</span><span class="src-text"><b>Rex Desk tasks</b><small>Built in · kept on this computer · ${(ui.snap.tasks || []).filter(task => task.local).length} tasks</small></span></li>${sources.map(row).join('')}</ul>
-      <div class="src-add"><span class="muted">Connect another:</span><button type="button" class="btn small primary" data-src-new="orbit">Orbit goal (tasks)</button><a class="btn small" href="/classic#connections">Flow or Morningmate</a></div>
+      <div class="src-add"><span class="muted">Connect another:</span><button type="button" class="btn small primary" data-src-new="orbit">Orbit goal (tasks)</button><button type="button" class="btn small" data-action="settings-sources">Flow or Morningmate</button></div>
       <h3 class="src-h">Orbit account</h3><div class="src-account" data-orbit-account><p class="muted">Checking…</p></div>
       <div class="row"><button type="button" class="btn" data-close>Done</button></div>`;
     const form = `<h2>${editing ? `Change ${esc(editing.name)}` : 'Connect an Orbit goal'}</h2><p class="muted">Brings one goal's tasks into Tasks. For your goals, notes and knowledge in every agent, use the Orbit account sign-in instead. One Orbit goal per connection. In Orbit open the goal, then Settings → API → Generate Project Key, and paste the key (it starts with dgm_).</p>
@@ -479,11 +479,11 @@ function connectorsHtml(ctx, tasks) {
     const sync = syncs.get(source.id);
     cards.push(card({ id: source.id, mark: source.type, name: source.name, kind: SERVICE[source.type] || source.type,
       detail: sync?.error ? sync.error : `${SERVICE[source.type] || source.type} · ${many(source.id)}${sync?.at ? '' : ' · not synced yet'}`, bad: Boolean(sync?.error),
-      action: source.type === 'orbit' ? '<button type="button" class="btn small quiet" data-action="task-connect">Manage</button>' : '<a class="btn small quiet" href="/classic#connections">Manage</a>' }));
+      action: source.type === 'orbit' ? '<button type="button" class="btn small quiet" data-action="task-connect">Manage</button>' : '<button type="button" class="btn small quiet" data-action="settings-sources">Manage</button>' }));
   }
   for (const [type, hint] of [['flow', 'Issues assigned to you in Flow'], ['morningmate', 'Issues assigned to you in Morningmate'], ['orbit', 'Tasks of an Orbit goal']])
     if (!sources.some(source => source.type === type)) cards.push(card({ id: '', mark: type, name: SERVICE[type], kind: SERVICE[type], detail: hint,
-      action: type === 'orbit' ? '<button type="button" class="btn small primary" data-action="task-connect" data-service="orbit">Connect</button>' : '<a class="btn small primary" href="/classic#connections">Connect</a>' }));
+      action: type === 'orbit' ? '<button type="button" class="btn small primary" data-action="task-connect" data-service="orbit">Connect</button>' : '<button type="button" class="btn small primary" data-action="settings-sources">Connect</button>' }));
   return `<section class="cn"><div class="cn-head"><h2>Connectors</h2><button type="button" class="btn small" data-action="task-connect">Manage sources</button></div><div class="cn-grid">${cards.join('')}</div></section>`;
 }
 
