@@ -88,7 +88,16 @@ export class Updates {
     if (!bytes) {
       const response = await this.fetcher(update.url, { redirect: 'follow', signal: AbortSignal.timeout(15 * 60000) });
       if (!response.ok) throw new Error(`Update download failed (${response.status}).`);
-      bytes = Buffer.from(await response.arrayBuffer());
+      // Read in pieces so the update card can show how much has arrived (state.downloading), as it arrives.
+      const total = Number(response.headers?.get?.('content-length')) || 0, parts = [];
+      this.state.downloading = { version, received: 0, total };
+      try {
+        if (response.body?.getReader) {
+          const reader = response.body.getReader();
+          for (;;) { const { done, value } = await reader.read(); if (done) break; parts.push(Buffer.from(value)); this.state.downloading = { version, received: this.state.downloading.received + value.length, total }; this.onProgress?.(); }
+          bytes = Buffer.concat(parts);
+        } else bytes = Buffer.from(await response.arrayBuffer());
+      } finally { this.state.downloading = null; }
     }
     try { verifyInstaller(bytes, update, this.key); } catch (error) { rmSync(file, { force: true }); throw error; }
     writeFileSync(file, bytes); this.file = file; this.state.ready = true;
@@ -106,24 +115,43 @@ export class Updates {
       return;
     }
     const helper = path.join(this.directory, 'install-update.ps1');
-    writeFileSync(path.join(this.directory, 'install-update.json'), JSON.stringify({ serverPid: Number(serverPid), installer: this.file, app: this.executable, log: path.join(this.directory, 'install-update.log') }));
+    writeFileSync(path.join(this.directory, 'install-update.json'), JSON.stringify({ serverPid: Number(serverPid), installer: this.file, app: this.executable, version: this.state.available?.version || '', log: path.join(this.directory, 'install-update.log') }));
     writeFileSync(helper, [
       '$settings = Get-Content -Raw (Join-Path $PSScriptRoot "install-update.json") | ConvertFrom-Json',
       '$ServerPid = [int]$settings.serverPid; $Installer = $settings.installer; $App = $settings.app; $Log = $settings.log',
       // Each step is written as it happens (a transcript is lost if the helper is cut off), so a stuck update shows where.
-      'function Step($text) { Add-Content -Path $Log -Value "$(Get-Date -Format s) $text" }',
+      // While Rex Desk is closed for the update, a small window says which step it is on and how far along, until Rex Desk
+      // answers again. The window is a nicety: if it cannot be shown, the update goes on without it.
+      '$Version = [string]$settings.version',
+      '$ui = $null',
+      'try { Add-Type -AssemblyName System.Windows.Forms, System.Drawing; [Windows.Forms.Application]::EnableVisualStyles()',
+      '  $form = New-Object Windows.Forms.Form -Property @{ Text = "Updating Rex Desk"; ClientSize = New-Object Drawing.Size(440, 120); StartPosition = "CenterScreen"; FormBorderStyle = "FixedDialog"; ControlBox = $false; TopMost = $true; ShowInTaskbar = $true; BackColor = [Drawing.Color]::FromArgb(27, 30, 36); ForeColor = [Drawing.Color]::FromArgb(230, 232, 235); Font = New-Object Drawing.Font("Segoe UI", 10) }',
+      '  $title = New-Object Windows.Forms.Label -Property @{ Text = "Updating Rex Desk $Version"; Location = New-Object Drawing.Point(20, 16); AutoSize = $true; Font = New-Object Drawing.Font("Segoe UI Semibold", 11) }',
+      '  $label = New-Object Windows.Forms.Label -Property @{ Text = "Getting ready"; Location = New-Object Drawing.Point(20, 46); Size = New-Object Drawing.Size(400, 22); ForeColor = [Drawing.Color]::FromArgb(154, 163, 177) }',
+      '  $bar = New-Object Windows.Forms.ProgressBar -Property @{ Location = New-Object Drawing.Point(20, 80); Size = New-Object Drawing.Size(400, 10); Minimum = 0; Maximum = 100; Style = "Continuous" }',
+      '  $form.Controls.AddRange(@($title, $label, $bar)); $form.Show(); [Windows.Forms.Application]::DoEvents(); $ui = $form } catch { $ui = $null }',
+      'function Pump { if ($ui) { [Windows.Forms.Application]::DoEvents() } }',
+      'function Step($text, $say, $percent) { Add-Content -Path $Log -Value "$(Get-Date -Format s) $text"; if ($ui -and $say) { $label.Text = $say; if ($percent -ge 0) { $bar.Value = [Math]::Min(100, $percent) }; Pump } }',
       'Set-Content -Path $Log -Value "$(Get-Date -Format s) update helper started"',
-      'Wait-Process -Id $ServerPid -Timeout 60 -ErrorAction SilentlyContinue',
-      'Step "server stopped"',
+      'Step "closing" "Closing Rex Desk" 5',
+      '$until = (Get-Date).AddSeconds(60); while ((Get-Process -Id $ServerPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $until) { Pump; Start-Sleep -Milliseconds 200 }',
+      'Step "server stopped" "Closing Rex Desk" 15',
       // The window and any bundled Node still running from the install folder would lock files the installer replaces.
       '$folder = Split-Path -Parent $App',
       'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($folder, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue',
-      'Start-Sleep -Seconds 2',
-      'Step "installing"',
-      // Waits for the installer process only (-Wait would also wait for anything the installer starts).
-      'try { $setup = Start-Process -FilePath $Installer -ArgumentList "/S" -PassThru; $setup.WaitForExit(); Step "installer exit code $($setup.ExitCode)" } catch { Step "installer failed: $($_.Exception.Message)" }',
+      'for ($i = 0; $i -lt 10; $i++) { Pump; Start-Sleep -Milliseconds 200 }',
+      'Step "installing" "Installing the new version" 20',
+      // Waits for the installer process only (-Wait would also wait for anything the installer starts). The installer does not
+      // report its own progress, so the bar moves on time (it usually takes about a minute) and never claims to be done early.
+      'try { $setup = Start-Process -FilePath $Installer -ArgumentList "/S" -PassThru; $started = Get-Date; while (-not $setup.HasExited) { if ($ui) { $bar.Value = [Math]::Min(80, 20 + [int](((Get-Date) - $started).TotalSeconds / 1.2)) }; Pump; Start-Sleep -Milliseconds 250 }; Step "installer exit code $($setup.ExitCode)" "Installed" 85 } catch { Step "installer failed: $($_.Exception.Message)" "The installer did not finish. Opening the version you had." 85 }',
       // Rex Desk opens again whatever happened, so an update never leaves it closed.
-      'Start-Process -FilePath $App; Step "app opened"',
+      'Start-Process -FilePath $App; Step "app opened" "Starting Rex Desk" 90',
+      // The window stays until Rex Desk answers (at most two minutes), so there is never a gap with nothing on screen.
+      // Any answer counts (an older Rex Desk has no /api/boot and answers "not found"); only no answer at all means it is not up yet.
+      '$until = (Get-Date).AddMinutes(2); while ((Get-Date) -lt $until) { try { Invoke-WebRequest "http://127.0.0.1:4317/api/boot" -UseBasicParsing -TimeoutSec 2 | Out-Null; break } catch { if ($_.Exception.Response) { break }; Pump; Start-Sleep -Milliseconds 500 } }',
+      'Step "rex desk answered" "Rex Desk is open" 100',
+      'for ($i = 0; $i -lt 6; $i++) { Pump; Start-Sleep -Milliseconds 200 }',
+      'if ($ui) { $ui.Close() }',
       'schtasks.exe /Delete /TN "Rex Desk update" /F | Out-Null',
       'Step "done"',
     ].join('\r\n'));

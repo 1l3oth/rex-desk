@@ -1616,3 +1616,37 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .tour-body{display:flex;flex-direction:column;gap:12px}.tour-ok{color:var(--good,#16a34a)}.tour-warn{color:var(--warn,#d97706)}
 .tour-foot{display:flex;gap:8px;align-items:center;margin-top:4px}.tour-foot .spacer{flex:1}
 .tour-wait{z-index:70}
+
+/* "Syncing with your cloud backup…": a quiet note bottom left while Rex Desk merges in the cloud copy after opening. */
+#sync-note{position:fixed;left:16px;bottom:16px;z-index:28;display:flex;align-items:center;gap:8px;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);font-size:12.5px;box-shadow:0 6px 20px rgb(0 0 0 / .18);animation:uc-rise .25s cubic-bezier(.16,1,.3,1)}
+#sync-note .sn-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:uc-wait 1.8s ease-out infinite}
+@media (max-width:760px){#sync-note{bottom:calc(84px + env(safe-area-inset-bottom))}}
+@media (prefers-reduced-motion:reduce){#sync-note,#sync-note .sn-dot{animation:none}}
+
+/* Agent avatars: a picture on a soft ring, so a light picture still reads on a light panel. */
+.av.av-agent{background:var(--raised);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 10%,transparent)}
+/* The agent page's avatar opens the picker; a small pencil says it can be changed. */
+.av-edit{position:relative;display:inline-grid;padding:0;border:0;border-radius:50%;background:none;cursor:pointer}
+.av-edit:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.av-edit-badge{position:absolute;right:2px;bottom:2px;display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--panel);color:var(--ink);border:1px solid var(--line);box-shadow:0 2px 8px rgb(0 0 0 / .18);transition:transform .12s}
+.av-edit:hover .av-edit-badge{transform:scale(1.08)}
+/* The picker: the current avatar beside the name, a grid of all 128, then upload. */
+.ap-dialog{width:min(640px,calc(100vw - 24px));max-height:calc(100dvh - 40px);display:flex;flex-direction:column;gap:14px}
+.ap-head{display:flex;align-items:center;gap:14px}.ap-head h2{margin:0;font-size:17px}.ap-head p{margin:2px 0 0}.ap-head>div{flex:1}
+.ap-now{width:56px;height:56px;border-radius:50%;background:var(--raised)}
+.ap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:8px;overflow:auto;padding:4px;min-height:0}
+.ap-item{aspect-ratio:1;padding:3px;border:2px solid transparent;border-radius:50%;background:none;cursor:pointer;transition:border-color .12s,transform .12s}
+.ap-item img{width:100%;height:100%;border-radius:50%;display:block}
+.ap-item:hover{transform:scale(1.06)}.ap-item:focus-visible{outline:0;border-color:var(--accent)}
+.ap-item.on{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.ap-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--line)}
+.ap-foot .btn{cursor:pointer}
+@media (prefers-reduced-motion:reduce){.ap-item,.av-edit-badge{transition:none}}
+
+/* Update card while downloading: a real progress bar with how much has arrived. */
+#update-card .uc-progress{flex:1 1 180px;display:flex;flex-direction:column;gap:6px}
+#update-card .uc-bar{height:6px;border-radius:6px;background:color-mix(in srgb,var(--ink) 10%,transparent);overflow:hidden}
+#update-card .uc-bar i{display:block;height:100%;border-radius:6px;background:var(--accent);transition:width .4s cubic-bezier(.16,1,.3,1)}
+#update-card .uc-bar-unknown i{animation:uc-slide 1.4s ease-in-out infinite}
+@keyframes uc-slide{from{transform:translateX(-100%)}to{transform:translateX(330%)}}
+@media (prefers-reduced-motion:reduce){#update-card .uc-bar i{transition:none;animation:none}}

@@ -20,7 +20,23 @@ fn show_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
+        fix_size(&window);
         let _ = window.set_focus();
+    }
+}
+
+// A window that ended up smaller than its minimum (Windows restored it to a title bar while the server restarted) is
+// maximized again, so Rex Desk never comes back as a 159x38 strip.
+fn fix_size(window: &tauri::WebviewWindow) {
+    if window.is_minimized().unwrap_or(false) {
+        return;
+    }
+    let scale = window.scale_factor().unwrap_or(1.0);
+    if let Ok(size) = window.inner_size() {
+        let (width, height) = (size.width as f64 / scale, size.height as f64 / scale);
+        if width < 900.0 || height < 600.0 {
+            let _ = window.maximize();
+        }
     }
 }
 
@@ -232,6 +248,7 @@ fn start_server(runtime: &Runtime) -> std::io::Result<Child> {
         .env("REX_DATA_DIR", &runtime.data)
         // The window talks to 4317. A checkout started by itself is development and would pick 4318.
         .env("PORT", "4317")
+        .stdin(std::process::Stdio::null())
         .stdout(log_file(runtime, "server.log")?)
         .stderr(log_file(runtime, "server-error.log")?);
     if runtime.bundled {
@@ -243,6 +260,19 @@ fn start_server(runtime: &Runtime) -> std::io::Result<Child> {
         if let Some(home) = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
             command.env("REX_CLONE_DIR", PathBuf::from(home).join("Rex Desk repositories"));
         }
+    }
+    // On Windows the server starts outside the window's job (the group Windows ties its child processes to). Started inside
+    // it, servers often hung before running any code, which left the window black; started outside, the same server opens in
+    // seconds, and it also no longer ends with the window. Where Windows does not allow leaving the job, it starts as before.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB);
+        if let Ok(child) = command.spawn() {
+            return Ok(child);
+        }
+        command.stdout(log_file(runtime, "server.log")?).stderr(log_file(runtime, "server-error.log")?);
     }
     hidden(&mut command).spawn()
 }
@@ -421,9 +451,14 @@ fn main() {
             tray.build(app)?;
             let hide_on_close = window.clone();
             window.on_window_event(move |event| {
-                if let WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    let _ = hide_on_close.hide();
+                match event {
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let _ = hide_on_close.hide();
+                    }
+                    // Switching to the window checks its size too.
+                    WindowEvent::Focused(true) => fix_size(&hide_on_close),
+                    _ => {}
                 }
             });
             let home = window.url().ok();

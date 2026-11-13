@@ -22,6 +22,11 @@
     };
     tick();
   }, 8000);
+  // While Rex Desk opens, the loading screen says what it is doing (unlocking, opening chats, restoring a backup).
+  const stageTimer = setInterval(async () => {
+    const label = document.querySelector('#app > .boot:not(.boot-failed) span'); if (!label) { clearInterval(stageTimer); return; }
+    try { const boot = await (await fetch('/api/boot', { cache: 'no-store' })).json(); if (boot.stage) label.textContent = `${boot.stage}…`; } catch { /* the server is still starting */ }
+  }, 800);
   // While the page is open: if the server stops answering, say so over the page and reload once it is back.
   async function serverUp() { try { return (await fetch('/api/auth', { cache: 'no-store' })).ok; } catch { return false; } }
   let misses = 0, cover = null;

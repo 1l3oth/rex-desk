@@ -38,7 +38,8 @@
   // Whatever state this page is in (starting, error, after Restart), open Rex Desk as soon as the server answers.
   // An opaque no-cors reply means it is up; a refused connection rejects.
   const server = 'http://127.0.0.1:4317/';
-  async function open() { try { await fetch(server + 'api/auth', { mode: 'no-cors', cache: 'no-store' }); location.replace(server); return true; } catch { return false; } }
+  // /api/boot answers as soon as the server listens (its page then says what it is doing while it opens the workspace).
+  async function open() { try { await fetch(server + 'api/boot', { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(3000) }); location.replace(server); return true; } catch { return false; } }
   // The app keeps why the server could not start; asking for it means a fast failure is shown even if it happened
   // before this page finished loading.
   let shown = '';

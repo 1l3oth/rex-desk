@@ -4,16 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#16181d">
+<!-- Shown when Rex Desk cannot be reached: it tries again by itself every 5 seconds (a refresh works even where scripts
+     cannot run), and everything it needs is in this file, because the server it would load them from is the one away. -->
+<meta http-equiv="refresh" content="5">
 <title>Rex Desk</title>
-<link rel="stylesheet" href="/login.css">
+<style>
+  :root { color-scheme: light dark; --bg: #f6f8fa; --panel: #fff; --ink: #1f2328; --muted: #59636e; --line: #d6dce2; --accent: #0969da; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #14161a; --panel: #1b1e24; --ink: #e6e8eb; --muted: #9aa3b1; --line: #2c313a; --accent: #5aa2ff; } }
+  body { margin: 0; min-height: 100dvh; display: grid; place-items: center; background: var(--bg); color: var(--ink); font: 15px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+  main { width: min(420px, calc(100vw - 32px)); text-align: center; }
+  h1 { margin: 14px 0 6px; font-size: 19px; }
+  p { margin: 0 0 6px; color: var(--muted); }
+  .bar { height: 3px; margin: 18px auto 0; width: 160px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .bar::after { content: ""; display: block; height: 100%; width: 40%; background: var(--accent); animation: slide 1.4s ease-in-out infinite; }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+  a { color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .bar::after { animation: none; width: 100%; } }
+</style>
 </head>
 <body>
 <main>
-  <form action="/" method="get">
-    <h1>Rex Desk</h1>
-    <p>Your computer can't be reached right now. Check that it is on, Rex Desk is open, and Tailscale is connected on both.</p>
-    <button type="submit">Try again</button>
-  </form>
+  <svg viewBox="0 0 64 64" width="44" height="44" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a97ff"/><stop offset="1" stop-color="#3a72e8"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g)"/><g fill="#fff"><rect x="16" y="16" width="14" height="14" rx="3"/><rect x="34" y="16" width="14" height="14" rx="3"/><rect x="16" y="34" width="14" height="14" rx="3"/><rect x="34" y="34" width="14" height="14" rx="3" opacity=".47"/></g></svg>
+  <h1>Waiting for Rex Desk</h1>
+  <p>Rex Desk is starting or restarting. This page opens it by itself as soon as it answers.</p>
+  <p>On your phone or another computer: check that this computer is on and Tailscale is connected on both.</p>
+  <div class="bar" role="progressbar" aria-label="Trying again"></div>
+  <p style="margin-top:14px"><a href="/">Try now</a></p>
 </main>
 </body>
 </html>

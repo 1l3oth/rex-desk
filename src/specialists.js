@@ -64,6 +64,28 @@ export class Specialists {
     return { name: text, slug };
   }
 
+  // Avatars: one of the 128 pictures in public/avatars.js ("a:<number>"), or a small picture the person uploaded (a data URL).
+  static AVATARS = 128;
+  cleanAvatar(value) {
+    const text = String(value || '');
+    if (!text) return '';
+    const preset = /^a:(\d{1,3})$/.exec(text);
+    if (preset && Number(preset[1]) < Specialists.AVATARS) return text;
+    if (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(text) && text.length <= 80000) return text;
+    throw new Error('Pick one of the avatars, or a PNG, JPEG or WebP picture under 60 KB.');
+  }
+  // The lowest avatar no agent of this person has yet, so no two agents look the same (after 128, they repeat).
+  nextAvatar(except = '') {
+    const used = new Set(this.list().filter(item => item.id !== except).map(item => item.avatar).filter(Boolean));
+    for (let index = 0; index < Specialists.AVATARS; index++) if (!used.has(`a:${index}`)) return `a:${index}`;
+    return `a:${Math.floor(Math.random() * Specialists.AVATARS)}`;
+  }
+  // Agents from before avatars get one each, oldest first. Only this computer's own agents: another computer gives its own.
+  ensureAvatars(nodeId = '') {
+    for (const item of this.list().filter(agent => !agent.avatar && (!agent.node || !nodeId || agent.node === nodeId)).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))))
+      this.store.put('specialist', item.id, { ...this.store.get('specialist', item.id), avatar: this.nextAvatar(item.id) });
+  }
+
   // The project must be one Rex Desk has in memory, so the specialist starts from what is already known about it.
   create({ name, projectSlug, purpose = '', rules = '', unsure = [], provider, model = '', by = 'you', cloneOf = '' }) {
     const project = this.memory.list().find(item => item.slug === String(projectSlug || '').toLowerCase());
@@ -72,14 +94,14 @@ export class Specialists {
     const repository = this.store.config().repositories.find(item => path.resolve(item.path).toLowerCase() === path.resolve(project.path).toLowerCase());
     const item = { id: randomUUID(), name: clean, slug, projectSlug: project.slug, projectPath: project.path, repositoryId: repository?.id || '', purpose: String(purpose || '').trim().slice(0, 400) || project.purpose || '',
       rules: String(rules).slice(0, 4000), unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12),
-      provider: aiProvider(provider || this.store.config().provider), model: this.cleanModel(model, { strict: true, provider: provider || this.store.config().provider }), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, loop: { ...LOOP_DEFAULT }, createdAt: now(), updatedAt: now() };
+      provider: aiProvider(provider || this.store.config().provider), model: this.cleanModel(model, { strict: true, provider: provider || this.store.config().provider }), createdBy: String(by).slice(0, 40), cloneOf, runId: '', roomSeen: {}, loop: { ...LOOP_DEFAULT }, avatar: this.nextAvatar(), createdAt: now(), updatedAt: now() };
     this.store.put('specialist', item.id, item); this.writeCard(item); return this.desk.projectRules?.inherit(this.store.get('specialist', item.id)) || item;
   }
-  update(id, { rules, unsure, provider, model, taskSources, profile, loop }) {
+  update(id, { rules, unsure, provider, model, taskSources, profile, loop, avatar }) {
     const item = this.get(id);
     const selectedProvider = aiProvider(provider || item.provider || 'claude');
     const updated = { ...item, provider: selectedProvider, ...(selectedProvider !== item.provider ? { model: '', profile: '' } : {}), ...(rules !== undefined ? { rules: String(rules).slice(0, 4000) } : {}), ...(unsure !== undefined ? { unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12) } : {}),
-      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true, provider: selectedProvider }) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), ...(profile !== undefined ? { profile: String(profile || '').slice(0, 500) } : {}), ...(loop !== undefined ? { loop: { ...this.loopOf(item), ...cleanLoop(loop) } } : {}), updatedAt: now() };
+      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true, provider: selectedProvider }) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), ...(profile !== undefined ? { profile: String(profile || '').slice(0, 500) } : {}), ...(loop !== undefined ? { loop: { ...this.loopOf(item), ...cleanLoop(loop) } } : {}), ...(avatar !== undefined ? { avatar: this.cleanAvatar(avatar) || this.nextAvatar(id) } : {}), updatedAt: now() };
     this.store.put('specialist', id, updated); this.writeCard(updated); return updated;
   }
   // Renaming moves the card too; the run history and the project stay as they are.

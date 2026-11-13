@@ -3,12 +3,25 @@ import { speakButton } from '/chat-speak.js';
 import { pickerHtml } from '/chat-pick.js';
 import { collectShared, sharedTabsHtml, sharedCount } from '/chat-media.js';
 import { toolLine, changeHtml } from '/chat-activity.js';
+import { AVATARS } from '/avatars.js';
 // Rooms (group chats with agents) and Tasks. Both are their own screens, apart from the main agent.
 const WORKING = ['starting', 'running', 'queued', 'verifying'];
 // A round picture: the room's own image, or its initials on a colour taken from its name.
 const hashOf = text => [...String(text)].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7) % 8;
-export function avatarHtml(ctx, { name, image = '', id = '', at = '', size = '' }) {
+// An agent's picture: the one it was given ("a:<number>" from public/avatars.js) or one the person uploaded. An agent with none
+// yet (made on another computer) gets one from its id, so it never shows as letters.
+const pictures = new Map();
+const spread = text => [...String(text)].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7);
+export function agentPicture(agent) {
+  const value = String(agent?.avatar || '');
+  if (value.startsWith('data:image/')) return value;
+  const number = Number(/^a:(\d+)$/.exec(value)?.[1] ?? spread(agent?.id || agent?.name || '') % AVATARS.length) % AVATARS.length;
+  if (!pictures.has(number)) pictures.set(number, `data:image/svg+xml;charset=utf-8,${encodeURIComponent(AVATARS[number])}`);
+  return pictures.get(number);
+}
+export function avatarHtml(ctx, { name, image = '', id = '', at = '', size = '', agent = null }) {
   const { esc, initials } = ctx;
+  if (agent) return `<span class="av av-agent ${size}"><img src="${esc(agentPicture(agent))}" alt=""></span>`;
   return image ? `<span class="av ${size}"><img src="/api/rooms/${esc(id)}/image?v=${encodeURIComponent(at)}" alt=""></span>` : `<span class="av av${hashOf(name)} ${size}">${esc(initials(name))}</span>`;
 }
 export const nameHash = text => [...String(text)].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7) % 8;
@@ -120,7 +133,7 @@ function roomAgentsHtml(ctx, room) {
     const ai = ['codex', 'gemini'].includes(agent.provider) ? agent.provider : 'claude', choices = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
     const models = [{ value: '', label: 'Default', hint: 'The model set in Settings' }, ...(choices.models || []).map(model => ({ value: model.id, label: model.label, hint: model.hint, disabled: model.disabled }))];
     const seat = room.members.find(member => member.id === agent.id) || {};
-    return `<section class="ag-sec room-agent" data-agent="${esc(agent.id)}"><div class="rperson-main ra-head">${avatarHtml(ctx, { name: agent.name, size: 'sm' })}<span class="rperson-text"><b>${esc(agent.name)}</b><small>${esc(seat.project || '')}${seat.label ? ` · <span class="st ${esc(seat.state)}">${esc(seat.label)}</span>` : ''}</small></span></div>
+    return `<section class="ag-sec room-agent" data-agent="${esc(agent.id)}"><div class="rperson-main ra-head">${avatarHtml(ctx, { name: agent.name, agent: agent.id === 'main' ? null : agent, size: 'sm' })}<span class="rperson-text"><b>${esc(agent.name)}</b><small>${esc(seat.project || '')}${seat.label ? ` · <span class="st ${esc(seat.state)}">${esc(seat.label)}</span>` : ''}</small></span></div>
       <label class="room-agent-row"><span>AI</span>${pickerHtml(ctx, { id: `ra-provider-${agent.id}`, label: 'AI', value: ai, items: AIS, compact: true })}</label>
       <label class="room-agent-row"><span>Model</span>${pickerHtml(ctx, { id: `ra-model-${agent.id}`, label: 'Model', value: agent.model || '', items: models, compact: true })}</label></section>`;
   }).join('')}<p class="muted">Changes save at once and hold for this agent everywhere. A new AI starts a fresh session with the chat so far handed over.</p></div>`;
@@ -135,7 +148,7 @@ function roomInfoHtml(ctx, room) {
   const { ui, esc } = ctx, messages = (ui.snap.messages || []).filter(message => message.roomId === room.id);
   const mentioned = [...new Set(messages.flatMap(message => message.tasks || []))].map(id => (ui.snap.tasks || []).find(task => task.id === id)).filter(Boolean);
   const free = [{ id: 'main', name: 'Rex Agent', projectSlug: 'all projects', status: { label: 'Knows every project' } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
-  const member = person => `<li class="rperson"><button class="rperson-main" data-open="${person.runId ? 'run' : 'specialist'}" data-id="${esc(person.runId || person.id)}" title="Open ${esc(person.name)}"><span data-agent-card="${esc(person.id)}" title="${esc(person.name)}'s card">${avatarHtml(ctx, { name: person.name, size: 'sm' })}</span><span class="rperson-text"><b>${esc(person.name)}</b><small>${esc(person.project)} · <span class="st ${esc(person.state)}">${esc(person.label)}</span></small></span></button><button class="btn small x" data-action="room-remove" data-id="${esc(person.id)}" title="Remove from the room" aria-label="Remove ${esc(person.name)}">×</button></li>`;
+  const member = person => `<li class="rperson"><button class="rperson-main" data-open="${person.runId ? 'run' : 'specialist'}" data-id="${esc(person.runId || person.id)}" title="Open ${esc(person.name)}"><span data-agent-card="${esc(person.id)}" title="${esc(person.name)}'s card">${avatarHtml(ctx, { name: person.name, agent: person.id === 'main' ? null : (ctx.ui.snap.specialists || []).find(agent => agent.id === person.id) || null, size: 'sm' })}</span><span class="rperson-text"><b>${esc(person.name)}</b><small>${esc(person.project)} · <span class="st ${esc(person.state)}">${esc(person.label)}</span></small></span></button><button class="btn small x" data-action="room-remove" data-id="${esc(person.id)}" title="Remove from the room" aria-label="Remove ${esc(person.name)}">×</button></li>`;
   return `<div class="side-body rinfo">
       <div class="rhero"><button type="button" class="ravatar" data-action="room-image" title="Change the picture">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, at: room.imageAt || '', size: 'xl' })}<span class="cam">Change</span></button><input type="file" id="room-image-input" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
         <input class="rname" id="room-name" value="${esc(room.name)}" maxlength="80" aria-label="Room name" spellcheck="false">

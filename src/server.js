@@ -121,13 +121,19 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   const anywhere = anywhereFactory ? anywhereFactory() : new Anywhere({ root, dataRoot });
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
+  // An update downloading tells the page how far it is, at most twice a second.
+  let progressAt = 0;
+  updates.onProgress = () => { if (Date.now() - progressAt > 500) { progressAt = Date.now(); notify(); } };
   // updateWhenIdle: the person chose "Update when it finishes"; the update installs once no agent is working.
   let updateWhenIdle = false;
+  // What Rex Desk is doing while it opens, for the loading screen (GET /api/boot). Empty once the workspace is open.
+  let bootStage = 'Starting Rex Desk';
   let restartWanted = false, session = null, address = '', tursoPending = null, tursoFound = null, accountPending = null, accountFound = null;
   // The Rex Desk account service (tests pass a pretend one).
   const accountOptions = { ...(accountFetcher ? { fetcher: accountFetcher } : {}), ...(accountApi ? { base: accountApi } : {}) };
   const cloud = cloudClientFactory || accountFetcher || accountApi ? { ...(cloudClientFactory ? { clientFactory: cloudClientFactory, retryMs: 50 } : {}), ...(accountFetcher ? { accountFetcher } : {}), ...(accountApi ? { accountApi } : {}) } : undefined;
   async function openSession(entry, vaultKey, { staySignedIn = false, remembered = false } = {}) {
+    if (bootStage) bootStage = 'Opening your chats and agents';
     const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
     const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher });
     if (address) startDesk(desk, store);
@@ -157,7 +163,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         else if (store.cloud.enabled) opened.cloud = { pulled: false, reason: status.error || 'Cloud backup is offline; working from this computer’s copy.' };
         if (session === opened) notify();
       };
-      if (store.fresh) await sync();
+      if (store.fresh) { if (bootStage) bootStage = 'Restoring your workspace from your cloud backup'; await sync(); }
       else { opened.cloud = { pulled: false, syncing: true }; void sync().catch(error => { opened.cloud = { pulled: false, reason: error.message }; }); }
     } else void store.cloud.open();
     notify(); return session;
@@ -167,6 +173,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   function startDesk(desk, store) {
     if (desk.started) return; desk.started = true;
     desk.port = listenPort; desk.peers.port = listenPort;
+    // Agents from before avatars each get their own picture (this computer's agents only; the others get theirs at home).
+    try { desk.specialists.ensureAvatars(store.nodeId); } catch (error) { store.event('', 'avatar-error', { message: error.message }); }
     desk.peers.onRemoteChange = () => { remoteAt = '-'; remoteOpen(); }; remoteOpen();
     if (!process.env.NODE_TEST_CONTEXT) desk.peers.start();
     desk.mcpUrl = `${address}/mcp`; desk.reattachHosts(); desk.projectRules.watch(); void desk.findPullRequests();
@@ -280,7 +288,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   // Requests wait for it, so nobody sees the sign-in page or works on an out-of-date copy meanwhile.
   let opening = Promise.resolve();
   if (!accounts) await openSession(null, null);
-  else opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; });
+  else { bootStage = 'Unlocking your workspace'; opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; }); }
+  void opening.finally(() => { bootStage = ''; });
   // Agents working right now, by name: an update restarts Rex Desk and would cut them off.
   function busyAgents(store) {
     if (!store) return [];
@@ -296,7 +305,11 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     setTimeout(() => void handle.close().finally(() => process.exit(0)), 300);
   }
   const handler = async (request, response) => {
-    await opening;
+    // While Rex Desk opens, this computer's window gets its page and files at once, and the page asks /api/boot what is
+    // happening and shows it. Everything else (data, agents, other devices) waits until the workspace is open.
+    const early = (() => { try { const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress), page = new URL(request.url, 'http://local').pathname; return local && request.method === 'GET' && (page === '/api/boot' || (!page.startsWith('/api/') && page !== '/mcp' && !page.startsWith('/artifacts/'))); } catch { return false; } })();
+    if (early && new URL(request.url, 'http://local').pathname === '/api/boot') return json(response, 200, { stage: bootStage, ready: !bootStage });
+    if (!early) await opening;
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
@@ -383,7 +396,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (input.action === 'remove') return json(response, 200, desk.peers.remove(input.id));
         throw new Error('Unknown action.');
       }
-      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: { ...updates.status(), whenIdle: updateWhenIdle, busy: busyAgents(store) }, account: { email: session.email, role: role() }, code: codeVersion() }); }
+      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: { ...updates.status(), whenIdle: updateWhenIdle, busy: busyAgents(store) }, cloudSync: session.cloud || null, account: { email: session.email, role: role() }, code: codeVersion() }); }
       // One-click cloud backup: start opens Turso's sign-in page in the browser; finish waits for it, makes the database and connects it.
       if (url.pathname === '/api/database/turso-start' && request.method === 'POST') { tursoPending?.cancel(); tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
       if (url.pathname === '/api/database/turso-finish' && request.method === 'POST') {

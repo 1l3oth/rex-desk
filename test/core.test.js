@@ -126,6 +126,7 @@ test('HTTP protects mutations and MCP credentials and never serves runtime datab
     assert.equal((await fetch(app.address + '/mcp', { method: 'POST' })).status, 401);
     assert.equal((await fetch(app.address + '/.local/desk.sqlite')).status, 404);
     assert.equal((await fetch(app.address + '/api/mcp-config')).status, 404);
+    assert.deepEqual(await (await fetch(app.address + '/api/boot')).json(), { stage: '', ready: true }, 'an open workspace has nothing left to say on the loading screen');
     const state = await (await fetch(app.address + '/api/state')).json();
     assert.ok(!JSON.stringify(state).includes(app.store.token));
   } finally { await app.close(); }
