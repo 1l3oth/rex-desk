@@ -1,7 +1,8 @@
 // Where Rex Desk keeps things (shown in Settings, Folders and in the setup tour), and the setup tour a new person gets.
 const ROWS = [
   ['data', 'Rex Desk data', 'Chats, tasks, settings and saved keys.', 'restart'],
-  ['memory', 'AI memory', 'What agents know about you and your projects. Every agent reads it.', 'restart'],
+  // The AI memory stays in the home folder (~/.rexdesk): every account on this computer and every agent reads the same one.
+  ['memory', 'AI memory', 'What agents know about you and your projects. Every agent and every account on this computer reads it, so it stays in your home folder.', 'fixed'],
   ['files', 'Files from agents', 'Screenshots, recordings and files you attach.', 'now'],
 ];
 
@@ -16,7 +17,7 @@ export function foldersHtml({ esc }, state) {
       ${pending[kind] ? `<small class="st-folder-note">Moves to ${esc(pending[kind])} when Rex Desk restarts.</small>` : ''}
       ${kind === 'data' && folders.dataFailed ? `<small class="error-text">The last move did not happen: ${esc(folders.dataFailed)}</small>` : ''}
       ${kind === 'files' && folders.filesInData ? `<small class="st-folder-note">Kept inside the data folder. Most people keep these in ${esc(folders.suggestedFiles)}.</small>` : ''}</div>
-    <div class="st-folder-actions"><button type="button" class="btn small quiet" data-fd-open="${kind}">Open</button><button type="button" class="btn small" data-fd-change="${kind}" data-fd-when="${when}">Change…</button>${kind === 'files' && folders.filesInData ? '<button type="button" class="btn small primary" data-fd-downloads>Use Downloads</button>' : ''}</div></div>`).join('')}</div>`;
+    <div class="st-folder-actions"><button type="button" class="btn small quiet" data-fd-open="${kind}">Open</button>${when === 'fixed' ? '' : `<button type="button" class="btn small" data-fd-change="${kind}" data-fd-when="${when}" title="Copies everything to a folder you pick, then uses it. The old folder stays as a backup.">Move…</button>`}${kind === 'files' && folders.filesInData ? '<button type="button" class="btn small primary" data-fd-downloads>Move to Downloads</button>' : ''}</div></div>`).join('')}</div>`;
 }
 
 // Clicks on the folder rows. Returns true when it handled the click.
@@ -24,7 +25,7 @@ export async function folderClick(ctx, state, target, draw) {
   const { api, toast } = ctx;
   const open = target.closest('[data-fd-open]');
   if (open) { await api('/folders/open', { method: 'POST', data: { kind: open.dataset.fdOpen } }); return true; }
-  if (target.closest('[data-fd-downloads]')) { state.folders = await api('/folders/files', { method: 'POST', data: { to: state.folders.suggestedFiles } }); toast('Files from agents now go to your Downloads folder.'); draw(); return true; }
+  if (target.closest('[data-fd-downloads]')) { state.folders = await api('/folders/files', { method: 'POST', data: { to: state.folders.suggestedFiles } }); toast(`Files from agents moved to ${state.folders.files}.`); draw(); return true; }
   const change = target.closest('[data-fd-change]');
   if (!change) return false;
   const kind = change.dataset.fdChange, label = ROWS.find(([id]) => id === kind)[1];

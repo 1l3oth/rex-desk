@@ -104,17 +104,22 @@ export class Updates {
     writeFileSync(helper, [
       '$settings = Get-Content -Raw (Join-Path $PSScriptRoot "install-update.json") | ConvertFrom-Json',
       '$ServerPid = [int]$settings.serverPid; $Installer = $settings.installer; $App = $settings.app; $Log = $settings.log',
-      'Start-Transcript -Path $Log -Force | Out-Null',
+      // Each step is written as it happens (a transcript is lost if the helper is cut off), so a stuck update shows where.
+      'function Step($text) { Add-Content -Path $Log -Value "$(Get-Date -Format s) $text" }',
+      'Set-Content -Path $Log -Value "$(Get-Date -Format s) update helper started"',
       'Wait-Process -Id $ServerPid -Timeout 60 -ErrorAction SilentlyContinue',
+      'Step "server stopped"',
       // The window and any bundled Node still running from the install folder would lock files the installer replaces.
       '$folder = Split-Path -Parent $App',
       'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($folder, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue',
       'Start-Sleep -Seconds 2',
-      '$setup = Start-Process -FilePath $Installer -ArgumentList "/S" -Wait -PassThru',
-      '"Installer exit code: $($setup.ExitCode)"',
-      'Start-Process -FilePath $App',
+      'Step "installing"',
+      // Waits for the installer process only (-Wait would also wait for anything the installer starts).
+      'try { $setup = Start-Process -FilePath $Installer -ArgumentList "/S" -PassThru; $setup.WaitForExit(); Step "installer exit code $($setup.ExitCode)" } catch { Step "installer failed: $($_.Exception.Message)" }',
+      // Rex Desk opens again whatever happened, so an update never leaves it closed.
+      'Start-Process -FilePath $App; Step "app opened"',
       'schtasks.exe /Delete /TN "Rex Desk update" /F | Out-Null',
-      'Stop-Transcript | Out-Null',
+      'Step "done"',
     ].join('\r\n'));
     // Task Scheduler runs the helper in this person's desktop session, outside this server's process tree and free of the
     // memory limits a WMI-created process gets (which cut the installer off mid-copy). Settings travel in the JSON beside it.

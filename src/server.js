@@ -38,7 +38,7 @@ import { Commander } from './command.js';
 import { Awake } from './awake.js';
 import { scanRoots } from './placement.js';
 import { tursoSignIn, provisionDatabase } from './turso-setup.js';
-import { followDataMove, followMemoryMove, planDataMove, planMemoryMove, moveMedia, folderStatus, defaultMediaFolder, memoryFolder } from './folders.js';
+import { followDataMove, followMemoryMove, planDataMove, moveMedia, folderStatus, defaultMediaFolder, memoryFolder } from './folders.js';
 import { readdirSync } from 'node:fs';
 import { accountSignIn, accountDatabase, accountMe, accountReachable } from './rexdesk-account.js';
 
@@ -467,7 +467,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const input = await body(request);
         if (dataDirectory) throw new Error('This copy of Rex Desk runs with a fixed data folder, so it cannot move it.');
         if ((desk.live?.size || 0) > 0) throw new Error('Agents are working. Wait until they finish, then move the folder.');
-        if (input.kind === 'memory') planMemoryMove(input.to); else planDataMove(dataRoot, input.to);
+        // The AI memory stays in the home folder, shared by every account on this computer.
+        if (input.kind === 'memory') throw new Error('The AI memory stays in your home folder, where every account on this computer reads it.');
+        planDataMove(dataRoot, input.to);
         if (input.restart) { restartWanted = true; return json(response, 200, { restarting: true }); }
         return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() }));
       }
