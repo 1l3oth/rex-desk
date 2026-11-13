@@ -218,6 +218,8 @@ fn start_server(runtime: &Runtime) -> std::io::Result<()> {
         .stdout(fs::File::create(runtime.data.join("server.log"))?)
         .stderr(fs::File::create(runtime.data.join("server-error.log"))?);
     if runtime.bundled {
+        // Which app version started this server, so a newer app can tell a leftover server apart from its own.
+        let _ = fs::write(runtime.data.join("server.version"), env!("CARGO_PKG_VERSION"));
         command.env("REX_DESK_VERSION", env!("CARGO_PKG_VERSION"));
         if let Ok(executable) = std::env::current_exe() {
             command.env("REX_DESK_EXE", executable);
@@ -238,6 +240,12 @@ fn stop_server(runtime: &Runtime) {
     #[cfg(not(windows))]
     let mut command = { let mut command = Command::new("kill"); command.args(["-9", &pid.to_string()]); command };
     let _ = hidden(&mut command).status();
+}
+
+// A server left running by an older version (an install over the top keeps it, as it outlives the window) runs the old
+// code: the installed app would show the old version and miss every fix. Such a server is replaced by one of this version.
+fn server_outdated(runtime: &Runtime) -> bool {
+    runtime.bundled && fs::read_to_string(runtime.data.join("server.version")).map(|text| text.trim() != env!("CARGO_PKG_VERSION")).unwrap_or(true)
 }
 
 fn wait_for_server(seconds: u64) -> bool {
@@ -298,7 +306,9 @@ fn main() {
     // Started at Windows sign-in: run the server without a window, then exit.
     if std::env::args().any(|arg| arg == "--background") {
         if let Some(runtime) = runtime() {
-            if !server_running() && start_server(&runtime).is_ok() {
+            if server_running() && server_outdated(&runtime) {
+                let _ = restart(&runtime);
+            } else if !server_running() && start_server(&runtime).is_ok() {
                 ensure_browser(&runtime);
             }
         }
@@ -358,7 +368,11 @@ fn main() {
                 let Some(runtime) = runtime_with(true) else {
                     return fail("Rex Desk files are missing. Reinstall Rex Desk.".into());
                 };
-                if !server_running() {
+                if server_running() && server_outdated(&runtime) {
+                    if let Err(error) = restart(&runtime) {
+                        return fail(error);
+                    }
+                } else if !server_running() {
                     if let Err(error) = start_server(&runtime) {
                         return fail(format!("Could not start Rex Desk: {error}"));
                     }
