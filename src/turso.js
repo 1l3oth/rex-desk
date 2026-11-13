@@ -2,6 +2,7 @@ import { createClient } from '@libsql/client/web';
 import { backup } from 'node:sqlite';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { SHARED } from './store.js';
 import { FileBackup } from './file-backup.js';
@@ -43,7 +44,7 @@ export class TursoSync {
   // directly (no Tailscale) still knows it is on, and messages for its agents go through this database.
   async presence(name, agents) {
     if (!this.ready || this.closed) return null;
-    await this.client.execute({ sql: 'INSERT INTO rex_presence(node,name,at,agents) VALUES(?,?,?,?) ON CONFLICT(node) DO UPDATE SET name=excluded.name,at=excluded.at,agents=excluded.agents', args: [this.store.nodeId, name, Date.now(), JSON.stringify(agents)] });
+    await this.client.execute({ sql: 'INSERT INTO rex_presence(node,name,at,agents,host) VALUES(?,?,?,?,?) ON CONFLICT(node) DO UPDATE SET name=excluded.name,at=excluded.at,agents=excluded.agents,host=excluded.host', args: [this.store.nodeId, name, Date.now(), JSON.stringify(agents), os.hostname()] });
     const result = await this.client.execute({ sql: 'SELECT node,name,at,agents FROM rex_presence WHERE node != ?', args: [this.store.nodeId] });
     return result.rows.map(row => ({ node: row.node, name: row.name, at: Number(row.at), agents: JSON.parse(row.agents || '{}') }));
   }
@@ -90,6 +91,8 @@ export class TursoSync {
         'CREATE TABLE IF NOT EXISTS rex_files (workspace TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, updated_at TEXT, PRIMARY KEY(workspace,path))',
         'CREATE TABLE IF NOT EXISTS rex_workspaces (workspace TEXT PRIMARY KEY, name TEXT NOT NULL, kdf TEXT NOT NULL, sealed_key TEXT NOT NULL, updated_at TEXT)',
       ], 'write');
+      // Which machine each computer id runs on, so a restore can tell a reinstall here from a second computer.
+      await this.client.execute({ sql: 'ALTER TABLE rex_presence ADD COLUMN host TEXT', args: [] }).catch(() => {});
       // Another computer finds this workspace by name; only the passphrase unseals its key.
       if (this.store.auth?.kdf) await this.client.batch([{ sql: 'INSERT INTO rex_workspaces(workspace,name,kdf,sealed_key,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace) DO UPDATE SET name=excluded.name,kdf=excluded.kdf,sealed_key=excluded.sealed_key,updated_at=excluded.updated_at',
         args: [this.workspace, this.store.auth.name, JSON.stringify(this.store.auth.kdf), this.store.auth.sealedKey, new Date().toISOString()] }], 'write');
@@ -165,9 +168,30 @@ export class TursoSync {
       for (const row of events.rows) event.run(Number(row.sequence), row.run_id, row.kind, Number(row.visible), row.value, row.created_at);
     });
     this.store.token = this.store.decrypt(this.store.get('secret', 'mcp-token'));
+    await this.adoptIdentity(events.rows);
     for (const run of this.store.list('run')) if (['running', 'queued', 'waiting', 'starting', 'verifying'].includes(run.state)) this.store.put('run', run.id, { ...run, state: 'interrupted', error: 'Restored from Turso. Resume this run explicitly.' });
     for (const item of this.store.list('interaction')) if (item.state === 'pending') this.store.put('interaction', item.id, { ...item, state: 'expired' });
     this.store.fresh = false; this.notify();
+  }
+  // After a restore: the same machine (a reinstall, a cleared data folder) takes back its old computer id, so its agents stay
+  // its own. A different machine whose old computer is still in use keeps its new id, calls itself by its own name, and numbers
+  // its messages far above the other computer's, so the two never overwrite each other's chats in the backup.
+  async adoptIdentity(events = []) {
+    const counts = new Map();
+    for (const agent of this.store.list('specialist')) if (agent.node) counts.set(agent.node, (counts.get(agent.node) || 0) + 1);
+    const old = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] || this.workspace;
+    if (old === this.store.nodeId) return { node: old, own: true };
+    const row = (await this.client.execute({ sql: 'SELECT host,at FROM rex_presence WHERE node=?', args: [old] }).catch(() => ({ rows: [] }))).rows[0];
+    const elsewhere = row && (row.host ? row.host !== os.hostname() : Date.now() - Number(row.at) < 10 * 60000);
+    if (!elsewhere) {
+      writeFileSync(path.join(this.store.directory, 'node.id'), old, { mode: 0o600 }); this.store.nodeId = old;
+      return { node: old, own: true };
+    }
+    const peers = this.store.get('peers', 'main');
+    if (peers?.name) this.store.put('peers', 'main', { ...peers, name: '' });
+    const top = events.reduce((max, item) => Math.max(max, Number(item.sequence) || 0), 0);
+    if (top) this.store.db.prepare("UPDATE sqlite_sequence SET seq=? WHERE name='events'").run((Math.floor(top / 1e9) + 1) * 1e9);
+    return { node: this.store.nodeId, own: false };
   }
   async connect({ url, authToken }) {
     const parsed = new URL(url);

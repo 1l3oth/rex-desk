@@ -100,7 +100,11 @@ export class Store extends EventEmitter {
     this.migrateConfig();
     this.cloud = new TursoSync(this, cloud);
     // This computer's id, and a log of changed shared records that the person's other computers read from.
-    this.nodeId = this.cloud.workspace; this.clock = 0;
+    // A data folder from before node.id existed keeps the workspace id it always used. A new folder gets its own id, so two
+    // computers that restored the same account never speak for each other (a restore may take over the old id, see turso.js).
+    const nodeFile = path.join(this.directory, 'node.id');
+    if (!existsSync(nodeFile)) writeFileSync(nodeFile, this.fresh ? randomUUID() : this.cloud.workspace, { mode: 0o600 });
+    this.nodeId = readFileSync(nodeFile, 'utf8').trim() || this.cloud.workspace; this.clock = 0;
     this.db.exec('CREATE TABLE IF NOT EXISTS changes (seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, id TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)');
     if (!this.get('meta', 'changes-backfilled')) {
       this.transaction(() => {

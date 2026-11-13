@@ -131,3 +131,39 @@ test('a large backup comes down in pages', async () => {
   assert.equal((await second.cloud.verify()).matched, true);
   await second.cloud.close(); second.close();
 });
+
+test('a restore on the same machine takes back its computer id; a second machine gets its own and never overwrites the other\'s chats', async () => {
+  const original = temporary('node-a'), turso = fakeTurso();
+  turso.network.online = true;
+  const first = new Store(original);
+  first.cloud = new TursoSync(first, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await first.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' });
+  first.put('specialist', 'agent-1', { id: 'agent-1', name: 'Dara' });
+  first.put('peers', 'main', { name: 'Work', remote: false, peers: [], cursors: {}, files: {} });
+  first.event('run-1', 'message', { text: 'From the first computer' }, true);
+  await first.cloud.flush(); await first.cloud.presence('Work', {});
+  const firstNode = first.nodeId;
+  await first.cloud.close(); first.close();
+  const restore = async () => {
+    const directory = temporary('node-b');
+    for (const file of ['workspace.id', 'vault.key', 'turso.connection']) copyFileSync(path.join(original, file), path.join(directory, file));
+    const store = new Store(directory);
+    store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 1000 });
+    await store.cloud.open(); return store;
+  };
+  // A reinstall on this machine: the agents stay this computer's own.
+  const again = await restore();
+  assert.equal(again.nodeId, firstNode);
+  assert.equal(again.get('peers', 'main').name, 'Work');
+  await again.cloud.close(); again.close();
+  // Another machine while the first one is in use: its own id, its own name, messages numbered apart.
+  turso.remote.prepare('UPDATE rex_presence SET host=? WHERE node=?').run('SOME-OTHER-PC', firstNode);
+  const second = await restore();
+  assert.notEqual(second.nodeId, firstNode);
+  assert.equal(second.get('peers', 'main').name, '');
+  second.event('run-2', 'message', { text: 'From the second computer' }, true);
+  await second.cloud.flush();
+  const rows = turso.remote.prepare('SELECT sequence FROM rex_events ORDER BY sequence').all().map(row => Number(row.sequence));
+  assert.equal(rows.length, 2); assert.ok(rows[1] >= 1e9);
+  await second.cloud.close(); second.close();
+});
