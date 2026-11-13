@@ -1535,3 +1535,5 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 .agents-pop[hidden]{display:none}.agents-pop .room-agents{padding:0}
 
 .pc-who small.pc-path{font-family:var(--mono,monospace);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#update-card{position:fixed;right:20px;top:60px;z-index:29;width:min(340px,calc(100vw - 40px));padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 10px 30px rgb(0 0 0 / .18)}
+#update-card h2{margin:0 0 4px;font-size:14.5px}#update-card p{margin:0 0 12px;font-size:13px;color:var(--muted);white-space:pre-wrap;max-height:9em;overflow:auto}#update-card .update-actions{display:flex;gap:8px}

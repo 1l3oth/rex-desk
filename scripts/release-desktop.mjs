@@ -11,14 +11,14 @@ import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, read
 import { createHash, createPrivateKey, sign } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { downloadsUrl, newer, verifyInstaller } from '../src/updates.js';
+import { downloadsUrl, newer, updaters, verifyInstaller } from '../src/updates.js';
 
 export const channels = ['stable', 'beta'];
-const installerTypes = /\.(exe|msi|zip|dmg)$/i;
+const installerTypes = /\.(exe|msi|zip|dmg|tar\.gz)$/i;
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const walk = folder => readdirSync(folder, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? walk(path.join(folder, entry.name)) : [path.join(folder, entry.name)]);
 
-// Lays the release out exactly as it will sit in the bucket and signs the Windows installer the updater downloads.
+// Lays the release out exactly as it will sit in the bucket and signs the file each kind of computer downloads to update itself.
 export function stageRelease({ files, out, channel = 'stable', notes = '', baseUrl = downloadsUrl, privateKey, publicKey, now = new Date() }) {
   if (!channels.includes(channel)) throw new Error(`Channel must be one of: ${channels.join(', ')}.`);
   const found = walk(files).filter(file => installerTypes.test(file));
@@ -29,16 +29,20 @@ export function stageRelease({ files, out, channel = 'stable', notes = '', baseU
   if (!version) throw new Error(`No version in the installer name ${path.basename(setups[0])}.`);
   const base = baseUrl.replace(/\/+$/, ''), folder = path.join(out, 'releases', version);
   mkdirSync(folder, { recursive: true });
+  const platforms = {};
   const downloads = found.map(file => {
     const name = path.basename(file).replace(/^Rex[ .]Desk/, 'Rex-Desk').replaceAll(' ', '-'), bytes = readFileSync(file);
     copyFileSync(file, path.join(folder, name));
-    return { name, url: `${base}/releases/${version}/${name}`, sha256: sha256(bytes), size: bytes.length, updater: file === setups[0] };
+    const download = { name, url: `${base}/releases/${version}/${name}`, sha256: sha256(bytes), size: bytes.length };
+    const platform = Object.keys(updaters).find(key => name.toLowerCase().endsWith(updaters[key]));
+    if (platform) {
+      platforms[platform] = { url: download.url, sha256: download.sha256, signature: sign(null, bytes, privateKey).toString('base64') };
+      verifyInstaller(bytes, platforms[platform], publicKey); // Installed apps trust only the public keys in src/updates.js; refuse to publish anything they would reject.
+    }
+    return download;
   }).sort((a, b) => a.name.localeCompare(b.name));
-  const installer = downloads.find(download => download.updater), bytes = readFileSync(setups[0]);
-  const manifest = { version, channel, notes, publishedAt: now.toISOString(), sha256: installer.sha256,
-    signature: sign(null, bytes, privateKey).toString('base64'), url: installer.url,
-    downloads: downloads.map(({ updater, ...download }) => download) };
-  verifyInstaller(bytes, manifest, publicKey); // Installed apps trust only the public key in src/updates.js; refuse to publish anything they would reject.
+  // The Windows entry is repeated at the top for the apps up to 0.0.2, which read it there.
+  const manifest = { version, channel, notes, publishedAt: now.toISOString(), ...platforms['win32-x64'], platforms, downloads };
   mkdirSync(path.join(out, channel), { recursive: true });
   writeFileSync(path.join(out, channel, 'latest.json'), JSON.stringify(manifest, null, 2));
   return manifest;
@@ -72,6 +76,7 @@ async function confirm(baseUrl, manifest) {
   const response = await fetch(live.url, { signal: AbortSignal.timeout(15 * 60000) });
   if (!response.ok) throw new Error(`The published installer did not download (${response.status}): ${live.url}`);
   verifyInstaller(Buffer.from(await response.arrayBuffer()), live);
+  for (const [platform, update] of Object.entries(live.platforms)) if ((await fetch(update.url, { method: 'HEAD' })).status !== 200) throw new Error(`The published ${platform} update is not reachable: ${update.url}`);
 }
 
 async function main() {

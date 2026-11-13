@@ -57,7 +57,9 @@ jobs:
           - os: macos-latest
             bundle: dmg
             name: macos
-            files: desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            files: |
+              desktop/src-tauri/target/release/bundle/dmg/*.dmg
+              dist/*.app.tar.gz
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -93,6 +95,13 @@ jobs:
           Copy-Item desktop/src-tauri/target/release/rex-desk.exe $folder
           Copy-Item -Recurse desktop/src-tauri/payload "$folder/payload"
           Compress-Archive -Path $folder -DestinationPath "dist/Rex.Desk_${version}_x64-portable.zip"
+      # The Mac app cannot update itself from a .dmg; it downloads this packed copy of the app and swaps it in.
+      - name: Pack the Mac app for self-update
+        if: runner.os == 'macOS'
+        run: |
+          version=$(node -p "require('./desktop/src-tauri/tauri.conf.json').version")
+          mkdir -p dist
+          COPYFILE_DISABLE=1 tar -czf "dist/Rex Desk_${version}_aarch64.app.tar.gz" -C desktop/src-tauri/target/release/bundle/macos "Rex Desk.app"
       - uses: actions/upload-artifact@v4
         with:
           name: rex-desk-${{ matrix.name }}
@@ -153,5 +162,5 @@ jobs:
           - **Windows:** run the .exe. If SmartScreen says "Windows protected your PC", choose More info, then Run anyway. If .exe installers are blocked on your computer, use the .msi, or unzip the portable .zip and run rex-desk.exe inside it.
           - **macOS (Apple Silicon):** open the .dmg and drag Rex Desk to Applications. The first time, right-click Rex Desk and choose Open. If macOS says the app is damaged, run \`xattr -cr "/Applications/Rex Desk.app"\` in Terminal once.
           EOF
-          mapfile -t files < <(find dist -type f -name '*.exe' -o -type f -name '*.msi' -o -type f -name '*.dmg' -o -type f -name '*.zip')
+          mapfile -t files < <(find dist -type f -name '*.exe' -o -type f -name '*.msi' -o -type f -name '*.dmg' -o -type f -name '*.zip' -o -type f -name '*.tar.gz')
           gh release create "$tag" "${files[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Rex Desk ${version} (unsigned build ${GITHUB_RUN_NUMBER})" --notes-file notes.md
