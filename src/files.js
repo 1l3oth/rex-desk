@@ -89,8 +89,16 @@ export class Files {
     }
     throw new Error(`No file named ${text} in this chat's worktrees or your projects.`);
   }
+  // A page an agent shared from another computer is not on this disk yet: it is written from the shared copy of the chat.
+  restoreShared(file) {
+    const root = path.join(this.desk.store.directory, 'artifacts') + path.sep, full = path.resolve(file);
+    if (!full.toLowerCase().startsWith(root.toLowerCase())) return;
+    const [runId, name] = path.relative(root, full).split(path.sep); if (!runId || !name) return;
+    try { this.desk.peers.restoreEvidence(runId, name); } catch {}
+  }
   open(input, runId, roomId) {
     const { file, line, endLine } = this.resolve(input, runId, roomId);
+    if (!existsSync(file)) this.restoreShared(file);
     if (!existsSync(file)) throw new Error(`${file} does not exist.`);
     const stat = statSync(file); if (stat.isDirectory()) throw new Error(`${file} is a folder. Name a file in it.`);
     const head = Buffer.alloc(Math.min(stat.size, 8192)); if (head.length) { const fd = openSync(file, 'r'); try { readSync(fd, head, 0, head.length, 0); } finally { closeSync(fd); } }

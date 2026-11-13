@@ -11,6 +11,7 @@ import { execFile } from 'node:child_process';
 
 const now = () => new Date().toISOString();
 const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000, PICTURE_BYTES = 2 * 1024 * 1024, CARRY_BYTES = 8 * 1024 * 1024;
+const isPageArtifact = item => Boolean(item.page) || /\.html?$/i.test(item.file);
 const PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
 // A picture is known by its path on the computer that has it.
 export const chatFileId = file => createHash('sha1').update(path.resolve(String(file)).toLowerCase()).digest('hex');
@@ -337,13 +338,19 @@ export class Peers {
   }
   // Screenshots an agent saved as evidence in the chat travel with it too (up to 2 MB each).
   shareEvidence(runId) {
-    for (const artifact of this.store.list('artifact').filter(item => item.runId === runId && PICTURE.test(item.file))) {
+    for (const artifact of this.store.list('artifact').filter(item => item.runId === runId && (PICTURE.test(item.file) || (isPageArtifact(item))))) {
       const file = path.join(this.store.directory, 'artifacts', runId, path.basename(artifact.file));
       if (!existsSync(file)) continue;
       const id = evidenceId(runId, artifact.file), size = statSync(file).size;
       if (size > PICTURE_BYTES || this.store.get('chatfile', id)?.size === size) continue;
       this.store.put('chatfile', id, { id, path: `evidence:${runId}/${artifact.file}`, name: path.basename(artifact.file), size, data: readFileSync(file).toString('base64'), at: now() });
     }
+  }
+  // A page or file an agent shared on another computer: written here from the shared copy of the chat, so it opens like any local file.
+  restoreEvidence(runId, file) {
+    const item = this.store.get('chatfile', evidenceId(runId, file)); if (!item?.data) return false;
+    const folder = path.join(this.store.directory, 'artifacts', runId), target = path.join(folder, path.basename(file));
+    mkdirSync(folder, { recursive: true }); writeFileSync(target, Buffer.from(item.data, 'base64')); return true;
   }
   evidencePicture(runId, file) {
     const item = this.store.get('chatfile', evidenceId(runId, file));

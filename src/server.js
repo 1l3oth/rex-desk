@@ -712,6 +712,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
           return json(response, 404, { error: 'Artifact not found.' });
         }
         const location = path.join(store.directory, 'artifacts', runId, path.basename(file));
+        if (!existsSync(location)) desk.peers.restoreEvidence(runId, file);
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
