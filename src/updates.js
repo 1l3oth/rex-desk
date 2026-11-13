@@ -4,10 +4,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node
 import { execFileSync } from 'node:child_process';
 
 // Installers are published with an Ed25519 signature made by the release key, which only the release workflow holds.
-// The app trusts only this public key, so an installer changed in the downloads bucket or on the way is refused.
-const releaseKey = createPublicKey(`-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAJmCa3mqqjlD4lVjyGWHafrS3Sye2kdJDtyPJ1WndQtw=
------END PUBLIC KEY-----`);
+// The app trusts only the public keys below, so an installer changed in the downloads bucket or on the way is refused.
+// Two keys are trusted: the first sealed the releases up to 0.2.1, the second seals the ones the release workflow publishes.
+const releaseKeys = ['MCowBQYDK2VwAyEAJmCa3mqqjlD4lVjyGWHafrS3Sye2kdJDtyPJ1WndQtw=', 'MCowBQYDK2VwAyEA6MpHcyNjV9KlhtbrEsVhnAh+xCmlLoOXY0bJduoeXjk=']
+  .map(key => createPublicKey(`-----BEGIN PUBLIC KEY-----
+${key}
+-----END PUBLIC KEY-----`));
 // The downloads bucket behind an address Rex Desk owns, so the storage behind it can change without stranding installed apps.
 export const downloadsUrl = 'https://downloads.rexdesk.dev';
 // REX_UPDATE_CHANNEL=beta makes an installed app follow test releases; everyone else stays on stable.
@@ -19,14 +21,14 @@ export function newer(candidate, current) {
   for (let index = 0; index < Math.max(a.length, b.length); index++) if ((a[index] || 0) !== (b[index] || 0)) return (a[index] || 0) > (b[index] || 0);
   return false;
 }
-export function verifyInstaller(bytes, manifest, key = releaseKey) {
+export function verifyInstaller(bytes, manifest, key = releaseKeys) {
   if (createHash('sha256').update(bytes).digest('hex') !== manifest.sha256) throw new Error('The downloaded update does not match its published checksum.');
-  if (!verify(null, bytes, key, Buffer.from(manifest.signature || '', 'base64'))) throw new Error('The downloaded update is not signed by the Rex Desk release key.');
+  if (![key].flat().some(trusted => verify(null, bytes, trusted, Buffer.from(manifest.signature || '', 'base64')))) throw new Error('The downloaded update is not signed by the Rex Desk release key.');
 }
 
 // Only the installed desktop app updates itself; a source checkout updates through Git.
 export class Updates {
-  constructor(dataDirectory, { fetcher = fetch, version = process.env.REX_DESK_VERSION, executable = process.env.REX_DESK_EXE, key = releaseKey } = {}) {
+  constructor(dataDirectory, { fetcher = fetch, version = process.env.REX_DESK_VERSION, executable = process.env.REX_DESK_EXE, key = releaseKeys } = {}) {
     Object.assign(this, { fetcher, version, executable, key, directory: path.join(dataDirectory, 'updates') });
     this.state = { supported: Boolean(version && executable), current: version || '', checkedAt: '', available: null, ready: false, error: '' };
   }
