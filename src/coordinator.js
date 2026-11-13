@@ -449,10 +449,12 @@ export class Desk {
       if (!attach) token = this.scopeToken(runId);
       // A chat made on another computer names that computer's folders: here the agent works in its own folder on this computer.
       const owner = run.roomAgent || run.specialistId, ownHome = () => { const agent = owner && owner !== 'main' ? this.specialists.get(owner) : null; const folder = agent ? this.specialists.homeDirectory(agent) : path.join(this.store.directory, 'coordinator'); mkdirSync(folder, { recursive: true }); return folder; };
-      const cwd = [run.cwd, run.worktree].find(folder => folder && existsSync(folder)) || (run.cwd || run.worktree ? ownHome() : path.join(this.store.directory, 'coordinator'));
-      if (run.cwd && cwd !== run.cwd && !existsSync(run.cwd)) this.patchRun(run.id, { cwd });
+      // The same project on this computer (found by its name) comes first, so the agent keeps working on the project here.
+      const ownAgent = owner && owner !== 'main' ? this.specialists.get(owner) : null, projectHere = ownAgent?.projectSlug ? this.projectRules.folderHere(ownAgent.projectSlug) : '';
+      const cwd = [run.cwd, run.worktree].find(folder => folder && existsSync(folder)) || (run.cwd || run.worktree ? projectHere || ownHome() : path.join(this.store.directory, 'coordinator'));
+      if (run.cwd && cwd !== run.cwd && !existsSync(run.cwd)) this.patchRun(run.id, { cwd, ...(projectHere && cwd === projectHere ? { projectPath: projectHere } : {}) });
       // A run nobody picked a mode for starts in the person's default mode from Settings.
-      const options = { run: run.permissionMode ? run : { ...run, permissionMode: defaultModeFor(run.provider || 'claude', this.store.config().defaultMode) }, cwd, projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : '', token,
+      const options = { run: run.permissionMode ? run : { ...run, permissionMode: defaultModeFor(run.provider || 'claude', this.store.config().defaultMode) }, cwd, projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere, token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
