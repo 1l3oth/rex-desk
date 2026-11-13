@@ -59,16 +59,22 @@ export class Updates {
     if (!this.state.supported || this.checking) return this.status();
     this.checking = true;
     try {
-      const response = await this.fetcher(manifestUrl(), { redirect: 'follow', signal: AbortSignal.timeout(20000) });
+      // Asked with the last answer's ETag: while nothing is new the bucket answers 304 with no body, so checking often is cheap.
+      const headers = this.etag && this.state.checkedAt ? { 'If-None-Match': this.etag } : {};
+      const response = await this.fetcher(manifestUrl(), { redirect: 'follow', signal: AbortSignal.timeout(20000), headers });
+      if (response.status === 304) { Object.assign(this.state, { checkedAt: new Date().toISOString(), error: '' }); return this.status(); }
+      // Kept only once this answer is fully handled (a failed download must be tried again, not skipped as unchanged).
+      const etag = response.headers?.get?.('etag') || ''; this.etag = '';
       if (response.status === 404) { Object.assign(this.state, { checkedAt: new Date().toISOString(), available: null, error: '' }); return this.status(); }
       if (!response.ok) throw new Error(`Update check failed (${response.status}).`);
       const manifest = await response.json();
       Object.assign(this.state, { checkedAt: new Date().toISOString(), error: '' });
-      if (!newer(manifest.version, this.version)) { Object.assign(this.state, { available: null, ready: false }); return this.status(); }
+      if (!newer(manifest.version, this.version)) { Object.assign(this.state, { available: null, ready: false }); this.etag = etag; return this.status(); }
       const update = manifest.platforms?.[this.platform];
       if (!update) { Object.assign(this.state, { available: null, ready: false }); return this.status(); }
       this.state.available = { version: manifest.version, notes: String(manifest.notes || '').slice(0, 4000), publishedAt: manifest.publishedAt || '' };
       await this.download(manifest.version, update);
+      this.etag = etag;
     } catch (error) { this.state.error = error.message; }
     finally { this.checking = false; }
     return this.status();

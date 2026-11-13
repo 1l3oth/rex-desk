@@ -44,3 +44,20 @@ test('the installed app downloads and verifies a newer release, and ignores the 
   const linux = new Updates(temporary('linux'), { version: '0.2.0', executable: '/opt/rex-desk', platform: 'linux-x64', fetcher: fetcher(manifest()) });
   assert.equal((await linux.check()).supported, false, 'A computer with no update file published for it never self-updates');
 });
+
+test('checking often is cheap: an unchanged release answers 304 and keeps what was found; a failed download is tried again', async () => {
+  const seen = [];
+  let failNext = true;
+  const etagFetcher = async (url, options = {}) => {
+    if (!url.endsWith('latest.json')) { if (failNext) { failNext = false; throw new Error('network blip'); } return new Response(installer); }
+    seen.push(options.headers?.['If-None-Match'] || '');
+    if (options.headers?.['If-None-Match'] === '"v3"') return new Response(null, { status: 304 });
+    return new Response(JSON.stringify(manifest()), { headers: { etag: '"v3"' } });
+  };
+  const updates = new Updates(temporary('etag'), { version: '0.2.0', executable: 'x', key: keys.publicKey, platform: 'win32-x64', fetcher: etagFetcher });
+  assert.equal((await updates.check()).ready, false, 'the first download failed');
+  assert.equal((await updates.check()).ready, true, 'tried again in full, not skipped as unchanged');
+  const again = await updates.check();
+  assert.equal(again.ready, true); assert.equal(again.available.version, '0.3.0');
+  assert.deepEqual(seen, ['', '', '"v3"']);
+});

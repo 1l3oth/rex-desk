@@ -63,6 +63,15 @@ export async function updateWhenIdle(api, wait = true) {
   catch (failure) { if (error) { error.textContent = failure.message; error.hidden = false; } }
 }
 
+// Coming back to Rex Desk (switching to its window, unlocking the computer) asks for an update check, at most every two
+// minutes, so a version published while the person was away shows at once. The server tells the page when it finds one.
+let watching = false, askedAt = Date.now();
+export function watchForUpdates(api) {
+  if (watching) return; watching = true;
+  const ask = () => { if (document.visibilityState !== 'visible' || Date.now() - askedAt < 120000) return; askedAt = Date.now(); void api('/update/check', { method: 'POST' }).catch(() => {}); };
+  document.addEventListener('visibilitychange', ask); addEventListener('focus', ask);
+}
+
 export function updateLater() {
   const card = document.getElementById('update-card'); if (!card) return;
   try { localStorage.setItem(LATER, JSON.stringify({ version: card.dataset.version, until: Date.now() + 24 * 3600000 })); } catch { /* private window */ }

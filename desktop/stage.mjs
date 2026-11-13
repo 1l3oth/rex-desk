@@ -14,5 +14,9 @@ cpSync(process.execPath, path.join(payload, 'node', process.platform === 'win32'
 // Left out: the agent SDK's own copy of Claude Code (about 220 MB). Rex Desk runs the Claude Code installed on the
 // computer, which signing in needs anyway, so the copy was never used and only made the installer 400 MB.
 const skip = /[\\/]node_modules[\\/](@anthropic-ai[\\/]claude-agent-sdk-[^\\/]+|@types)([\\/]|$)/;
-for (const entry of ['src', 'public', 'scripts', 'package.json', 'node_modules']) cpSync(path.join(project, entry), path.join(payload, 'app', entry), { recursive: true, dereference: true, filter: source => !skip.test(source) });
+// Also left out: files nothing runs (type definitions, source maps, package docs, three.js's examples and sources: the
+// app serves only three/build). About 4,000 of 9,300 files: an update deletes and copies every file, so fewer files is a
+// shorter update. Markdown that a package reads while it runs (Playwright's prompts) stays.
+const unused = /[\\/]node_modules[\\/](.+\.(d\.[cm]?ts|map)|(.+[\\/])?(readme|changelog|changes|history|contributing|code_of_conduct|security|sponsors|upgrading|migration)[^\\/]*\.md|three[\\/](examples|src|docs|editor|manual|test)([\\/].*)?|.+[\\/]\.github([\\/].*)?)$/i;
+for (const entry of ['src', 'public', 'scripts', 'package.json', 'node_modules']) cpSync(path.join(project, entry), path.join(payload, 'app', entry), { recursive: true, dereference: true, filter: source => !skip.test(source) && !unused.test(source) });
 console.log(`Staged Node ${process.version} and Rex Desk into ${payload}`);

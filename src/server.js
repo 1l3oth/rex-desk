@@ -496,7 +496,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         return json(response, 200, { opened: folder });
       }
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
-      if (url.pathname === '/api/update/check' && request.method === 'POST') return json(response, 200, await updates.check());
+      if (url.pathname === '/api/update/check' && request.method === 'POST') { const status = await updates.check(); notify(); return json(response, 200, status); }
       if (url.pathname === '/api/update/install' && request.method === 'POST') {
         const input = await body(request), busy = busyAgents(store);
         if (input.cancel) { updateWhenIdle = false; notify(); return json(response, 200, { whenIdle: false }); }
@@ -902,8 +902,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   }, 15000);
   timer.unref();
   // The installed app looks for a signed update shortly after start and every six hours.
-  const updateTimer = updates.state.supported ? setInterval(() => void updates.check(), 6 * 3600000) : null;
-  const firstCheck = updates.state.supported ? setTimeout(() => void updates.check().then(notify), 30000) : null;
+  // A new version shows within minutes of being published: checked 30 s after start, then every 10 minutes (and when the
+  // window comes back, see chat.js). The page is told at once when the answer changed, so the update card appears by itself.
+  let lastUpdateKey = '';
+  const checkForUpdate = () => updates.check().then(status => { const key = `${status.available?.version || ''}${status.ready}`; if (key !== lastUpdateKey) { lastUpdateKey = key; notify(); } }, () => {});
+  const updateTimer = updates.state.supported ? setInterval(() => void checkForUpdate(), 10 * 60000) : null;
+  const firstCheck = updates.state.supported ? setTimeout(() => void checkForUpdate(), 30000) : null;
   updateTimer?.unref(); firstCheck?.unref();
   const handle = { server, address, accounts, updates, get restartWanted() { return restartWanted; }, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
     awake.set(false); computer.stop(); voice.stopAll(); clearInterval(timer); for (const item of remoteServers) item.close(); clearInterval(updateTimer); clearTimeout(firstCheck); await closeSession(); for (const client of clients) client.end();
