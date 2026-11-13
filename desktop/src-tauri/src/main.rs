@@ -288,7 +288,7 @@ fn main() {
             let handle = app.handle().clone();
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .on_new_window(move |url, features| open_link(&handle, url, features))
-                .title("Rex Desk")
+                .title("Rex Desk Beta")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(900.0, 600.0)
                 .maximized(true)

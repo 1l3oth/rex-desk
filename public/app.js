@@ -630,7 +630,7 @@ function renderUpdates() {
   const update = ui.snapshot.update || {};
   if (!update.supported) return '<p class="muted">This copy runs from source code. Update it with Git; the installed desktop app updates itself.</p>';
   const status = update.ready ? `Rex Desk ${esc(update.available.version)} is downloaded and verified.` : update.available ? `Downloading Rex Desk ${esc(update.available.version)}…` : update.checkedAt ? `Up to date · checked ${relative(update.checkedAt).toLowerCase()}` : 'Not checked yet.';
-  return `<dl class="detail-properties"><dt>Version</dt><dd>${esc(update.current)}</dd><dt>Status</dt><dd>${status}</dd></dl>${update.error ? `<p class="error-text">${esc(update.error)}</p>` : ''}${update.available?.notes ? `<div class="md update-notes">${renderMarkdown(update.available.notes)}</div>` : ''}<div class="actions">${button(`${icon('sync')} Check now`, 'update-check', 'small', 'type="button"')}${update.ready ? button('Restart to update', 'update-install', 'small primary', 'type="button"') : ''}</div>`;
+  return `<dl class="detail-properties"><dt>Version</dt><dd>${esc([update.current, update.stage].filter(Boolean).join(' '))}</dd><dt>Status</dt><dd>${status}</dd></dl>${update.error ? `<p class="error-text">${esc(update.error)}</p>` : ''}${update.available?.notes ? `<div class="md update-notes">${renderMarkdown(update.available.notes)}</div>` : ''}<div class="actions">${button(`${icon('sync')} Check now`, 'update-check', 'small', 'type="button"')}${update.ready ? button('Restart to update', 'update-install', 'small primary', 'type="button"') : ''}</div>`;
 }
 // Git checkouts found beside the configured ones, so another project is one click away instead of a typed path.
 function foundRepositories() {

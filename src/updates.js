@@ -30,7 +30,7 @@ export function verifyInstaller(bytes, manifest, key = releaseKeys) {
 export class Updates {
   constructor(dataDirectory, { fetcher = fetch, version = process.env.REX_DESK_VERSION, executable = process.env.REX_DESK_EXE, key = releaseKeys } = {}) {
     Object.assign(this, { fetcher, version, executable, key, directory: path.join(dataDirectory, 'updates') });
-    this.state = { supported: Boolean(version && executable), current: version || '', checkedAt: '', available: null, ready: false, error: '' };
+    this.state = { supported: Boolean(version && executable), current: version || '', stage: 'Beta', checkedAt: '', available: null, ready: false, error: '' };
   }
   status() { return { ...this.state }; }
   async check() {
