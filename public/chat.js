@@ -302,6 +302,31 @@ const quick = (label, text) => `<button class="chip-btn" data-action="quick" dat
 const welcomeStage = () => ({ title: 'Rex', meta: 'Rex Agent',
   feed: `${brainBanner()}<div class="welcome"><div class="avatar big">RX</div><h2>Hi, I am Rex</h2><p>I get to know your projects, set up an agent for each one, and help you work through your issues. Pick a start, or just type.</p><div class="chips">${quick('Meet my projects', 'Meet my projects: go through them one by one, ask me what you are unsure about, and set up an agent for each.')}${quick('Triage my issues', 'Look at my assigned issues and tell me what to do first.')}${quick('What can you do?', 'What can you do for me here?')}</div></div>`,
   composer: { placeholder: 'Message Rex…', mentions: [] } });
+// The chat is not drawn again from nothing when something changes: only the messages that differ are swapped, and new
+// ones are added at the end. Messages already on screen stay as they are (a playing video, selected text, an open step).
+let feedHtml = '';
+function patchFeed(inner, html, full) {
+  if (!full && html === feedHtml && inner.childElementCount) return false;
+  feedHtml = html;
+  const next = document.createElement('template'); next.innerHTML = html;
+  const want = [...next.content.childNodes], have = [...inner.childNodes];
+  if (full || !have.length) { inner.replaceChildren(...want); return true; }
+  const same = (a, b) => a.nodeType === b.nodeType && (a.nodeType === 1 ? a.outerHTML === b.outerHTML : a.nodeValue === b.nodeValue);
+  let changed = false;
+  for (let index = 0; index < want.length; index++) {
+    const old = have[index];
+    if (!old) { inner.append(want[index]); changed = true; }
+    else if (!same(old, want[index])) { old.replaceWith(want[index]); changed = true; }
+  }
+  for (let index = want.length; index < have.length; index++) { have[index].remove(); changed = true; }
+  return changed;
+}
+// Staying at the newest message: a new reply glides into view; a first draw or a switch of chat jumps there at once.
+function followFeed(feed, glide) {
+  const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches, gap = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
+  if (glide && !calm && gap > 4 && gap < feed.clientHeight * 1.5) { ui.gliding = true; clearTimeout(ui.glideTimer); ui.glideTimer = setTimeout(() => { ui.gliding = false; }, 700); feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); }
+  else feed.scrollTop = feed.scrollHeight;
+}
 const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="empty"><h2>Nothing here</h2><p>${text}</p></div>` });
 
 function renderStage(full) {
@@ -321,7 +346,7 @@ function renderStage(full) {
   const active = document.activeElement, form = active?.closest?.('[data-interaction]');
   const editing = !full && feed.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName) && (!form || model.feed.includes(`data-interaction="${form.dataset.interaction}"`));
   const choosing = pickerOpen();
-  if (!editing && !choosing) { const before = inner.innerHTML; inner.innerHTML = model.feed; if (ui.stick && !model.top) feed.scrollTop = feed.scrollHeight; else if (before && before !== inner.innerHTML && feed.scrollHeight > ui.feedHeight) ui.freshBelow = true; ui.feedHeight = feed.scrollHeight; }
+  if (!editing && !choosing) { const changed = patchFeed(inner, model.feed, full); if (ui.stick && !model.top) followFeed(feed, changed && !full); else if (changed && feed.scrollHeight > ui.feedHeight) ui.freshBelow = true; ui.feedHeight = feed.scrollHeight; }
   syncToEnd();
   ui.mentions = model.composer?.mentions || [];
 }
@@ -519,7 +544,7 @@ document.addEventListener('submit', async event => {
   try { await api(`/interactions/${form.dataset.interaction}/answer`, { method: 'POST', data: { action: always ? 'accept' : decision, content: always ? { ...content, always: true } : content } }); toast(decision === 'accept' || always ? 'Sent to the agent.' : 'Declined.'); await refresh(); }
   catch (error) { toast(error.message, true); }
 });
-document.addEventListener('scroll', event => { if (event.target.id === 'feed') { ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; if (ui.stick) ui.freshBelow = false; syncToEnd(); } }, true);
+document.addEventListener('scroll', event => { if (event.target.id === 'feed') { if (ui.gliding) return; ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; if (ui.stick) ui.freshBelow = false; syncToEnd(); } }, true);
 
 initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx); wireAgentCards(ctx); wireSpeak(toast); wireWorktrees(ctx); wireChatSwitch(); wireImageViewer();
 // On a phone the side panels start closed, and the menu button opens the list of chats.
