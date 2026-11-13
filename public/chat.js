@@ -9,6 +9,7 @@ import { monitorStage, monitorAction } from '/chat-monitor.js';
 import { worktreesStage, fillWorktreeEmbeds, wireWorktrees, wireChatSwitch, WORKTREE_ICON, chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
 import { openSettings } from '/chat-settings.js';
+import { maybeStartTour } from '/chat-tour.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
@@ -362,7 +363,7 @@ async function refresh({ full = false } = {}) {
     ui.snap = await api('/state');
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
     if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = await api('/memory').catch(() => ui.memory); ui.profile = await api('/profile').catch(() => ui.profile);
-    await loadView(); renderAll(full); showUpdateCard(ui.snap.update); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
+    await loadView(); renderAll(full); maybeStartTour(ctx); showUpdateCard(ui.snap.update); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
   } finally { busy = false; if (again) { again = false; void refresh(); } }
 }
 function open(type, id = '') {
@@ -458,6 +459,7 @@ document.addEventListener('click', async event => {
     else if (action === 'sync') await syncIssues();
     else if (action === 'sec-toggle') toggleSection(target.dataset.sec);
     else if (action === 'settings-open') openSettings(ctx);
+    else if (action === 'settings-sources') { document.querySelector('.dialog-back:not(.settings)')?.remove(); openSettings(ctx, 'sources'); }
     else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
     else if (action === 'stop') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
     else if (action === 'scan') await scanProjects();

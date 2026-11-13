@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { memoryFolder } from './folders.js';
 import { createHash } from 'node:crypto';
 import { detectProject } from './project-detect.js';
 
@@ -25,7 +26,8 @@ export const CHAT_STYLE = [
   '- One message per turn when you can. If you need something, ask one clear question.',
   '',
 ].join('\n');
-export const memoryHome = (env = process.env) => path.resolve(env.REX_DESK_MEMORY || path.join(os.homedir(), '.rexdesk'));
+// The AI memory folder: REX_DESK_MEMORY, else where the person moved it in Settings, else ~/.rexdesk.
+export const memoryHome = (env = process.env) => memoryFolder(env);
 export const redactText = text => String(text).replace(SECRET_LINE, '$1: [redacted]');
 const read = (file, limit) => { try { return redactText(readFileSync(file, 'utf8').slice(0, limit)); } catch { return ''; } };
 const exists = target => { try { return statSync(target); } catch { return null; } };

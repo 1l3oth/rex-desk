@@ -16,7 +16,7 @@ export class Evidence {
     // A paused recording keeps its preview server and its page and cookies, so the next action continues where it left off.
     this.previews = new Map(); this.resumes = new Map(); this.idleTimers = new Map(); this.idleMs = 60000;
   }
-  directory(runId) { const directory = path.join(this.store.directory, 'artifacts', runId); mkdirSync(directory, { recursive: true }); return directory; }
+  directory(runId) { const directory = path.join(this.store.media('artifacts'), runId); mkdirSync(directory, { recursive: true }); return directory; }
   attach(runId, file, title, type, metadata = {}) {
     // Evidence belongs to the task the run works on, so each task shows its own evidence.
     let run = null; try { run = this.getRun(runId); } catch { run = null; }

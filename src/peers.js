@@ -301,7 +301,7 @@ export class Peers {
   }
   // Pictures the person attached in a shared chat travel with it (up to 2 MB each), so they show on the other computers too.
   sharePictures(events, agentId = '') {
-    const uploads = path.resolve(this.store.directory, 'uploads').toLowerCase();
+    const uploads = path.resolve(this.store.media('uploads')).toLowerCase();
     for (const event of events) {
       for (const match of String(event.text || '').matchAll(/^- (.+)$/gm)) {
         const file = path.resolve(match[1].trim());
@@ -315,7 +315,7 @@ export class Peers {
   // Files the person attached here, for an agent on another computer: each travels in the shared database, and that computer
   // saves its own copy and tells the agent where it is. A file over 8 MB stays here and the message says so.
   packFiles(text, target, agentId = '') {
-    const uploads = path.resolve(this.store.directory, 'uploads').toLowerCase(), files = [];
+    const uploads = path.resolve(this.store.media('uploads')).toLowerCase(), files = [];
     let note = '';
     for (const match of String(text).matchAll(/^- (.+)$/gm)) {
       const file = path.resolve(match[1].trim());
@@ -336,7 +336,7 @@ export class Peers {
       let item;
       for (let attempt = 0; attempt < 40 && !(item = this.store.get('chatfile', file.id))?.data; attempt++) await new Promise(resolve => setTimeout(resolve, 750));
       if (!item?.data) { text = text.split(file.path).join(`${file.path} (this file did not arrive from the other computer)`); continue; }
-      const folder = path.join(this.store.directory, 'uploads', randomUUID()), target = path.join(folder, path.basename(file.name).replace(/[^\p{L}\p{N}._ -]+/gu, '_') || 'file');
+      const folder = path.join(this.store.media('uploads'), randomUUID()), target = path.join(folder, path.basename(file.name).replace(/[^\p{L}\p{N}._ -]+/gu, '_') || 'file');
       mkdirSync(folder, { recursive: true }); writeFileSync(target, Buffer.from(item.data, 'base64'));
       text = text.split(file.path).join(target);
     }
@@ -345,7 +345,7 @@ export class Peers {
   // Screenshots an agent saved as evidence in the chat travel with it too (up to 2 MB each).
   shareEvidence(runId, agentId = '') {
     for (const artifact of this.store.list('artifact').filter(item => item.runId === runId && (PICTURE.test(item.file) || (isPageArtifact(item))))) {
-      const file = path.join(this.store.directory, 'artifacts', runId, path.basename(artifact.file));
+      const file = path.join(this.store.media('artifacts'), runId, path.basename(artifact.file));
       if (!existsSync(file)) continue;
       const id = evidenceId(runId, artifact.file), size = statSync(file).size;
       if (size > PICTURE_BYTES || this.store.get('chatfile', id)?.size === size) continue;
@@ -355,7 +355,7 @@ export class Peers {
   // A page or file an agent shared on another computer: written here from the shared copy of the chat, so it opens like any local file.
   restoreEvidence(runId, file) {
     const item = this.store.get('chatfile', evidenceId(runId, file)); if (!item?.data) return false;
-    const folder = path.join(this.store.directory, 'artifacts', runId), target = path.join(folder, path.basename(file));
+    const folder = path.join(this.store.media('artifacts'), runId), target = path.join(folder, path.basename(file));
     mkdirSync(folder, { recursive: true }); writeFileSync(target, Buffer.from(item.data, 'base64')); return true;
   }
   evidencePicture(runId, file) {

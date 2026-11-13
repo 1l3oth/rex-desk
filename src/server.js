@@ -38,6 +38,8 @@ import { Commander } from './command.js';
 import { Awake } from './awake.js';
 import { scanRoots } from './placement.js';
 import { tursoSignIn, provisionDatabase } from './turso-setup.js';
+import { followDataMove, followMemoryMove, planDataMove, planMemoryMove, moveMedia, folderStatus, defaultMediaFolder, memoryFolder } from './folders.js';
+import { readdirSync } from 'node:fs';
 import { accountSignIn, accountDatabase, accountMe, accountReachable } from './rexdesk-account.js';
 
 const exec = promisify(execFile);
@@ -83,7 +85,15 @@ function serveFile(request, response, file, { sandbox = false, download = false,
 export const defaultPort = () => Number(process.env.PORT || (process.env.REX_DESK_VERSION ? 4317 : 4318));
 
 export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
-  const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
+  let dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
+  // The real app follows a data folder the person moved, or finishes a move they asked for, before anything opens it.
+  // The AI memory moves the same way. Tests pass their own folder and never move anything.
+  if (!dataDirectory && existsSync(dataRoot)) {
+    const lock = path.join(dataRoot, 'runtime.lock');
+    const waitForOld = async () => { const owner = Number(existsSync(lock) ? readFileSync(lock, 'utf8') : 0); const alive = () => { try { process.kill(owner, 0); return true; } catch { return false; } }; for (let i = 0; owner > 0 && owner !== process.pid && i < 240 && alive(); i++) await new Promise(resolve => setTimeout(resolve, 250)); };
+    dataRoot = await followDataMove(dataRoot, { waitForOld, log: message => console.log(message) });
+  }
+  if (!dataDirectory) followMemoryMove({ log: message => console.log(message) });
   // A folder that exists already (even a drive root such as F:\, where mkdir fails with EPERM) is used as it is.
   if (!existsSync(dataRoot)) mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataRoot, 'runtime.lock');
@@ -109,7 +119,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   const anywhere = anywhereFactory ? anywhereFactory() : new Anywhere({ root, dataRoot });
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
-  let session = null, address = '', tursoPending = null, tursoFound = null, accountPending = null, accountFound = null;
+  let restartWanted = false, session = null, address = '', tursoPending = null, tursoFound = null, accountPending = null, accountFound = null;
   // The Rex Desk account service (tests pass a pretend one).
   const accountOptions = { ...(accountFetcher ? { fetcher: accountFetcher } : {}), ...(accountApi ? { base: accountApi } : {}) };
   const cloud = cloudClientFactory || accountFetcher || accountApi ? { ...(cloudClientFactory ? { clientFactory: cloudClientFactory, retryMs: 50 } : {}), ...(accountFetcher ? { accountFetcher } : {}), ...(accountApi ? { accountApi } : {}) } : undefined;
@@ -122,6 +132,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       env: () => desk.agents.environment(store.config().provider), cwd: path.join(store.directory, 'coordinator'), webTask: text => desk.startWebTask(text) });
     // The real app (not tests) scans this computer's checkouts for Jev and catches up with tracker moves made while it was off.
     if (catchUp) {
+      // A new workspace keeps files from agents (screenshots, recordings, attachments) in Downloads\Rex Desk, where people look.
+      // Workspaces made before keep theirs where they are.
+      try { if (!store.config().mediaDirectory && !store.list('run').length && !readdirSync(path.join(store.directory, 'artifacts')).length) store.saveConfig({ ...store.publicConfig(), mediaDirectory: defaultMediaFolder() }); } catch (error) { store.event('', 'folders-error', { message: error.message }); }
       void desk.scanRepositories().catch(error => store.event('', 'repository-scan-error', { message: error.message }));
       if (store.config().sources.length) void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
     }
@@ -445,6 +458,25 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/query' && request.method === 'POST') return json(response, 200, await desk.query.ask((await body(request)).text));
       if (url.pathname === '/api/repositories/scan' && request.method === 'POST') { await desk.scanRepositories(); return json(response, 200, desk.snapshot().catalog); }
       if (url.pathname === '/api/repositories/catalog' && request.method === 'GET') return json(response, 200, store.list('repository'));
+      // Folders: where data, AI memory and files from agents are kept, and moving them.
+      if (url.pathname === '/api/folders' && request.method === 'GET') return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() }));
+      if (url.pathname === '/api/folders/files' && request.method === 'POST') { moveMedia(store, (await body(request)).to); return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() })); }
+      if (url.pathname === '/api/folders/move' && request.method === 'POST') {
+        const input = await body(request);
+        if (dataDirectory) throw new Error('This copy of Rex Desk runs with a fixed data folder, so it cannot move it.');
+        if ((desk.live?.size || 0) > 0) throw new Error('Agents are working. Wait until they finish, then move the folder.');
+        if (input.kind === 'memory') planMemoryMove(input.to); else planDataMove(dataRoot, input.to);
+        if (input.restart) { restartWanted = true; return json(response, 200, { restarting: true }); }
+        return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() }));
+      }
+      if (url.pathname === '/api/folders/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());
+      if (url.pathname === '/api/folders/open' && request.method === 'POST') {
+        const status = folderStatus({ dataRoot, store, memory: memoryFolder() }), folder = { data: status.data, memory: status.memory, files: status.files }[(await body(request)).kind];
+        if (!folder) throw new Error('Unknown folder.');
+        mkdirSync(folder, { recursive: true });
+        spawn(process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open', [folder], { detached: true, stdio: 'ignore' }).unref();
+        return json(response, 200, { opened: folder });
+      }
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
       if (url.pathname === '/api/update/check' && request.method === 'POST') return json(response, 200, await updates.check());
       if (url.pathname === '/api/update/install' && request.method === 'POST') {
@@ -705,7 +737,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       }
       // A file someone attached in a chat, to show in the chat's Media and Files tabs. Only files under Rex Desk's uploads folder.
       if (url.pathname === '/api/uploads/file' && request.method === 'GET') {
-        const uploads = path.resolve(store.directory, 'uploads'); let file = path.resolve(String(url.searchParams.get('path') || ''));
+        const uploads = path.resolve(store.media('uploads')); let file = path.resolve(String(url.searchParams.get('path') || ''));
         // A chat restored from the backup into another data folder (a reinstall, a new computer) still names the old folder.
         const moved = /[\\/]uploads[\\/]([^\\/]+)[\\/]([^\\/]+)$/.exec(String(url.searchParams.get('path') || ''));
         if (moved && !file.toLowerCase().startsWith(`${uploads.toLowerCase()}${path.sep}`)) { const here = path.join(uploads, moved[1], moved[2]); if (existsSync(here)) file = here; }
@@ -718,7 +750,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         return serveFile(request, response, file, { sandbox: /\.(html?|svg)$/i.test(file), download: url.searchParams.has('download'), cache: 'private, max-age=86400' });
       }
       if (url.pathname === '/api/uploads' && request.method === 'POST') {
-        const name = path.basename(String(url.searchParams.get('name') || 'file')).replace(/[^\p{L}\p{N}._ -]+/gu, '_').slice(0, 120) || 'file', folder = path.join(store.directory, 'uploads', randomUUID()), target = path.join(folder, name);
+        const name = path.basename(String(url.searchParams.get('name') || 'file')).replace(/[^\p{L}\p{N}._ -]+/gu, '_').slice(0, 120) || 'file', folder = path.join(store.media('uploads'), randomUUID()), target = path.join(folder, name);
         mkdirSync(folder, { recursive: true }); let size = 0; const out = createWriteStream(target);
         try { for await (const chunk of request) { size += chunk.length; if (size > 25 * 1024 * 1024) throw new Error('A file can be at most 25 MB.'); if (!out.write(chunk)) await new Promise(resolve => out.once('drain', resolve)); } await new Promise((resolve, reject) => { out.end(); out.once('finish', resolve); out.once('error', reject); }); }
         catch (error) { out.destroy(); rmSync(folder, { recursive: true, force: true }); throw error; }
@@ -757,14 +789,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (roomOnly && request.method === 'DELETE') return json(response, 200, desk.rooms.remove(roomOnly[1]));
       const roomImage = url.pathname.match(/^\/api\/rooms\/([^/]+)\/image$/);
       if (roomImage && request.method === 'GET') {
-        const room = desk.rooms.room(roomImage[1]), file = room.image && path.join(store.directory, 'room-images', path.basename(room.image));
+        const room = desk.rooms.room(roomImage[1]), file = room.image && path.join(store.media('room-images'), path.basename(room.image));
         if (!file || !existsSync(file)) return json(response, 404, { error: 'This room has no picture.' });
         return serveFile(request, response, file, { cache: 'no-cache' });
       }
       if (roomImage && request.method === 'POST') {
         const ext = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' }[String(request.headers['content-type'] || '').split(';')[0]];
         if (!ext) throw new Error('Choose a PNG, JPEG, WebP or GIF picture.');
-        const room = desk.rooms.room(roomImage[1]), folder = path.join(store.directory, 'room-images'), chunks = []; let size = 0;
+        const room = desk.rooms.room(roomImage[1]), folder = path.join(store.media('room-images')), chunks = []; let size = 0;
         for await (const chunk of request) { size += chunk.length; if (size > 5 * 1024 * 1024) throw new Error('The picture can be at most 5 MB.'); chunks.push(chunk); }
         mkdirSync(folder, { recursive: true });
         if (room.image && room.image !== room.id + ext) rmSync(path.join(folder, path.basename(room.image)), { force: true });
@@ -792,12 +824,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           if (picture) { response.writeHead(200, { 'Content-Type': mime[path.extname(picture.name).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Length': picture.data.length }); return response.end(picture.data); }
           return json(response, 404, { error: 'Artifact not found.' });
         }
-        const location = path.join(store.directory, 'artifacts', runId, path.basename(file));
+        const location = path.join(store.media('artifacts'), runId, path.basename(file));
         if (!existsSync(location)) desk.peers.restoreEvidence(runId, file);
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/classic': 'index.html', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/app.js': 'app.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/icons.svg': 'icons.svg', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
       // three.js ships from the installed package; the page loads no remote scripts.
       const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });
@@ -851,7 +883,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   const updateTimer = updates.state.supported ? setInterval(() => void updates.check(), 6 * 3600000) : null;
   const firstCheck = updates.state.supported ? setTimeout(() => void updates.check().then(notify), 30000) : null;
   updateTimer?.unref(); firstCheck?.unref();
-  const handle = { server, address, accounts, updates, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
+  const handle = { server, address, accounts, updates, get restartWanted() { return restartWanted; }, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
     awake.set(false); computer.stop(); voice.stopAll(); clearInterval(timer); for (const item of remoteServers) item.close(); clearInterval(updateTimer); clearTimeout(firstCheck); await closeSession(); for (const client of clients) client.end();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); unlinkSync(lockPath);
   } };
@@ -865,7 +897,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
 async function startReplacement(port) {
   const log = path.join(root, '.local', 'server-restart.log');
   if (process.platform === 'win32') {
-    const command = `cmd.exe /c "set REX_RESTART_AFTER=${process.pid}&& set PORT=${port}&& "${process.execPath}" src/server.js >> "${log}" 2>&1"`;
+    // WMI starts it with the user's plain environment, so the folders this server was given are passed on.
+    const carry = ['REX_DATA_DIR', 'REX_DESK_MEMORY'].filter(name => process.env[name]).map(name => `set "${name}=${process.env[name]}"&& `).join('');
+    const command = `cmd.exe /c "${carry}set REX_RESTART_AFTER=${process.pid}&& set PORT=${port}&& "${process.execPath}" src/server.js >> "${log}" 2>&1"`;
     const script = `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${command.replaceAll("'", "''")}'; CurrentDirectory = '${root.replaceAll("'", "''")}' }; exit $r.ReturnValue`;
     await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 30000 });
     return;
@@ -901,6 +935,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     if (/^package(-lock)?\.json$/m.test(changed)) run('npm', ['install', '--no-audit', '--no-fund']);
   };
   if (startedCode) { const pullTimer = setInterval(pullNewCode, 600000); pullTimer.unref(); setTimeout(pullNewCode, 60000).unref(); }
+  // A folder move asked for in Settings: start a fresh server, which does the move before it opens anything.
+  setInterval(() => {
+    if (closing || !app.restartWanted) return;
+    closing = true;
+    void startReplacement().then(() => Promise.race([app.close().catch(() => {}), new Promise(resolve => setTimeout(resolve, 10000))]).finally(() => process.exit(0)), () => { closing = false; });
+  }, 1000).unref();
   if (startedCode) setInterval(() => {
     if (closing || readCode() === startedCode || readCode() === '' || (app.desk?.live?.size || 0) > 0) return;
     closing = true;

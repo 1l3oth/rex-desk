@@ -482,9 +482,9 @@ export class Desk {
         } };
       // A headless agent works in a process of its own, so a Rex Desk restart (an update) does not cut it off.
       const hosted = attach || (!this.runnerFactory && this.store.config().agentHost !== false);
-      const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.directory, 'uploads') }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.hostOptions || {}) })
+      const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.hostOptions || {}) })
         : this.runnerFactory ? this.runnerFactory(options)
-        : new (run.provider === 'codex' ? CodexRunner : run.provider === 'gemini' ? AntigravityRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.directory, 'uploads') });
+        : new (run.provider === 'codex' ? CodexRunner : run.provider === 'gemini' ? AntigravityRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) });
       const entry = this.live.get(runId);
       if (entry?.controller !== controller) throw new Error('Run stopped.');
       entry.runner = runner;

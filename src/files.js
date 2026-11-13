@@ -32,7 +32,7 @@ export class Files {
   constructor(desk) { this.desk = desk; }
   // Folders the window may open: home, every project, the agents' worktrees, project memory, the notes vault, shared evidence.
   roots() {
-    const config = this.desk.store.config(), roots = [os.homedir(), this.desk.worktreeRoot, this.desk.memory?.directory, path.join(this.desk.store.directory, 'artifacts'), path.join(this.desk.store.directory, 'uploads')];
+    const config = this.desk.store.config(), roots = [os.homedir(), this.desk.worktreeRoot, this.desk.memory?.directory, path.join(this.desk.store.media('artifacts')), path.join(this.desk.store.media('uploads'))];
     // Every project Rex Desk knows: the ones set up, the ones it found on this computer, and Rex Desk itself.
     for (const repo of [...(config.repositories || []), ...(this.desk.store.list?.('repository') || [])]) roots.push(repo.path);
     roots.push(this.desk.root);
@@ -42,7 +42,7 @@ export class Files {
   }
   // The app's own data folder holds encrypted keys and sign-ins: never open it, except the evidence agents shared.
   check(file) {
-    const full = path.resolve(file), store = path.resolve(this.desk.store.directory), shared = [path.join(store, 'artifacts'), path.join(store, 'uploads')];
+    const full = path.resolve(file), store = path.resolve(this.desk.store.directory), shared = [this.desk.store.media('artifacts'), this.desk.store.media('uploads')];
     // Shared evidence and the files people attached open; the rest of the data folder (keys, sign-ins) never does.
     if (inside(full, store) && !shared.some(folder => inside(full, folder))) throw new Error('That file is part of Rex Desk\'s private data (keys and sign-ins), so it does not open here.');
     if (SECRET.test(full)) throw new Error('That looks like a private key or a sign-in file, so it does not open here.');
@@ -78,7 +78,7 @@ export class Files {
     const upload = text.match(/^\/api\/uploads\/file\?path=(.+)$/); if (upload) text = upload[1];
     // Evidence an agent shared is linked as /artifacts/<run>/<name>.
     const sharedLink = text.match(/^\/artifacts\/([\w-]+)\/([^/\\]+)$/);
-    if (sharedLink) return { file: this.check(path.join(this.desk.store.directory, 'artifacts', sharedLink[1], sharedLink[2])), line, endLine };
+    if (sharedLink) return { file: this.check(path.join(this.desk.store.media('artifacts'), sharedLink[1], sharedLink[2])), line, endLine };
     if (path.isAbsolute(text)) return { file: this.check(text), line, endLine };
     const bases = this.bases(runId, roomId);
     for (const base of bases) { const full = path.resolve(base, text); if (existsSync(full)) return { file: this.check(full), line, endLine }; }
@@ -91,7 +91,7 @@ export class Files {
   }
   // A page an agent shared from another computer is not on this disk yet: it is written from the shared copy of the chat.
   restoreShared(file) {
-    const root = path.join(this.desk.store.directory, 'artifacts') + path.sep, full = path.resolve(file);
+    const root = path.join(this.desk.store.media('artifacts')) + path.sep, full = path.resolve(file);
     if (!full.toLowerCase().startsWith(root.toLowerCase())) return;
     const [runId, name] = path.relative(root, full).split(path.sep); if (!runId || !name) return;
     try { this.desk.peers.restoreEvidence(runId, name); } catch {}
