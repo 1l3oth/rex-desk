@@ -892,7 +892,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (editorFile) return serveFile(request, response, path.join(root, 'node_modules', 'codemirror', ...editorFile[1].split('/')), { cache: 'public, max-age=604800' });
       // A page script or style added after this server started is served by its name too, so a server still waiting for
       // agents to finish before it restarts does not leave the page stuck on a missing file.
-      const file = publicFiles[url.pathname] || (/^\/[a-z0-9-]+\.(?:js|css)$/.test(url.pathname) ? url.pathname.slice(1) : '');
+      // The video guides and their chapter lists ship in public/guides.
+      const file = publicFiles[url.pathname] || (/^\/(?:guides\/)?[a-z0-9-]+\.(?:js|css)$/.test(url.pathname) || /^\/guides\/[a-z0-9-]+\.webm$/.test(url.pathname) ? url.pathname.slice(1) : '');
       if (!file || !existsSync(path.join(root, 'public', file))) return json(response, 404, { error: 'Page not found.' });
       return serveFile(request, response, path.join(root, 'public', file));
     } catch (error) { if (!response.headersSent) json(response, 400, { error: error.message }); else response.end(); }

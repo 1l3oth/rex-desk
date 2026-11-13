@@ -147,8 +147,8 @@ try {
   await tour.getByRole('heading', { name: 'Your AI sign-in' }).waitFor();
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
   await tour.getByRole('heading', { name: 'Where things are kept' }).waitFor();
-  await tour.locator('.st-folder', { hasText: 'Files from agents' }).locator('code').waitFor();
-  assert.match(await tour.locator('.st-folder', { hasText: 'Rex Desk data' }).locator('code').innerText(), /data/);
+  await tour.locator('.st-folder', { hasText: 'Files from agents' }).locator('code').first().waitFor();
+  assert.match(await tour.locator('.st-folder', { hasText: 'Rex Desk data' }).locator('code').first().innerText(), /data/);
   await page.screenshot({ path: path.join(screenshots, 'tour-folders.png') });
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
   // The first project is added in the tour; its commands come from the project's own files.

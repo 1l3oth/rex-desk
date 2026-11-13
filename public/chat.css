@@ -1680,3 +1680,12 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .rail-filter input{flex:1;min-width:0;min-height:0;padding:0;border:0;background:none;color:var(--ink);font-size:12.5px;outline:0;box-shadow:none}
 .rail-filter:focus-within{border-color:var(--accent)}
 @media (prefers-reduced-motion:reduce){.pin-btn,.sub-sec .chev{transition:none}}
+/* Settings: a "best use" note at the top of a section, and the video guide. */
+.st-tip{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;margin:0 0 14px;border-radius:11px;background:color-mix(in srgb,var(--accent) 9%,transparent);border:1px solid color-mix(in srgb,var(--accent) 28%,var(--line));font-size:13px;line-height:1.45}
+.st-tip svg{flex:none;margin-top:2px;color:var(--accent)}.st-tip span{flex:1}.st-tip b{font-weight:600;margin-right:4px}.st-tip .btn{flex:none;white-space:nowrap}
+.st-guide-btn{display:flex;align-items:center;gap:7px;margin:0 0 12px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer;width:100%}
+.st-guide-btn:hover{border-color:var(--accent)}.st-guide-btn svg{color:var(--accent)}
+.st-guide{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;background:rgba(0,0,0,.6);padding:20px}
+.st-guide-card{width:min(1100px,100%);background:var(--panel,#16181d);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.45)}
+.st-guide-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px}.st-guide-head .st-x{position:static}
+.st-guide video{display:block;width:100%;max-height:78vh;background:#000}
