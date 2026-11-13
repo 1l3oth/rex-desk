@@ -519,6 +519,7 @@ document.addEventListener('click', async event => {
     else if (action === 'sec-toggle') toggleSection(target.dataset.sec);
     else if (action === 'settings-open') openSettings(ctx);
     else if (action === 'settings-sources') { document.querySelector('.dialog-back:not(.settings)')?.remove(); openSettings(ctx, 'sources'); }
+    else if (action === 'know-tab') { ui.knowTab = target.dataset.tab; renderAll(true); }
     else if (action === 'kg-view') { try { localStorage.setItem('rex-knowledge-view', target.dataset.view); } catch {} renderAll(true); }
     else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
     else if (action === 'stop') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
@@ -659,32 +660,32 @@ function photoUrl() { return `/api/profile/photo?v=${encodeURIComponent(ui.profi
 function noteText(item) { const match = /^(.*?)\s+\((\d{4}-\d{2}-\d{2})(, may change)?\)$/.exec(item); return match ? { text: match[1], when: match[2], soft: Boolean(match[3]) } : { text: item, when: '', soft: false }; }
 function personPage() {
   const profile = ui.profile || { sections: [], projects: [], agents: [] }, name = profile.name || 'You';
-  const about = profile.sections.find(section => section.title === 'About them')?.items.map(noteText) || [];
-  const others = profile.sections.filter(section => section.title !== 'About them');
-  const photo = profile.photo ? `<img class="pf-photo" src="${photoUrl()}" alt="${esc(name)}">` : `<div class="pf-photo pf-initials" aria-hidden="true">${esc(initials(name))}</div>`;
-  const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
-  const stats = `Works on ${plural(profile.projects.length, 'project')} with ${plural(profile.agents.length, 'agent')}.`;
+  const photo = profile.photo ? `<img class="kl-photo" src="${photoUrl()}" alt="${esc(name)}">` : `<div class="kl-photo kl-initials" aria-hidden="true">${esc(initials(name))}</div>`;
   const plain = text => String(text || '').replace(/\*\*|__|`/g, '');
-  const hero = `<section class="pf-hero">${photo}<div class="pf-who"><h2>${esc(name)}</h2>${profile.email ? `<p class="muted">${esc(profile.email)}</p>` : ''}
-    <p class="pf-intro">${about.length ? about.map(item => esc(item.text)).join(' · ') : 'Your agents add what they learn about you here as you work with them.'}</p>
-    <p class="pf-stats">${stats}</p>
-    <div class="pf-actions"><label class="btn small pf-upload">${profile.photo ? 'Change photo' : 'Add a photo'}<input type="file" accept="image/png,image/jpeg,image/webp" data-photo-upload hidden></label>${profile.photo ? '<button class="btn small" data-action="photo-remove">Remove photo</button>' : ''}</div>
-    ${profile.photo ? '' : '<p class="muted small">Or let Rex Agent find a picture of you in your projects: it asks before using one.</p>'}</div></section>`;
-  // How agents should talk to you: every section is shown, so you can fill it in yourself; agents add to it as they learn.
-  const SECTIONS = [['explain', 'How to explain things to me', 'Format, length, level of detail, examples, what to always explain, what to skip.', 'Short answer first, then the steps as a numbered list'],
-    ['personality', 'Personality', 'How you think and work, so agents meet you where you are.', 'I learn by doing; show me, then explain'],
-    ['likes', 'Likes', 'What works well for you.', 'Plain words, no jargon'], ['dislikes', 'Dislikes', 'What agents should stop doing.', 'Long walls of text'],
-    ['works', 'How they work', 'Your habits and tools.', 'I work in Orca and test on my phone'], ['about', 'About them', 'Facts about you.', 'I speak Khmer, English and Korean']];
-  const card = ([kind, title, hint, example]) => {
-    const items = (profile.sections.find(section => section.title === title)?.items || []).map(noteText);
-    return `<div class="pf-card pf-notes${kind === 'explain' ? ' wide' : ''}"><h3>${esc(title)}</h3><p class="pf-hint">${esc(hint)}</p>
-      ${items.length ? `<ul>${items.map(item => `<li><span>${esc(item.text)}${item.when ? ` <small class="muted">${item.when}${item.soft ? ' · may change' : ''}</small>` : ''}</span><button type="button" class="ag-x" data-note-forget="${esc(kind)}" data-note-text="${esc(item.text)}" title="Remove this" aria-label="Remove this"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>` : ''}
-      <form class="pf-add" data-note-add="${esc(kind)}"><input name="text" type="text" maxlength="240" placeholder="For example: ${esc(example)}" aria-label="Add to ${esc(title)}" autocomplete="off"><button class="btn small">Add</button></form></div>`;
-  };
-  const notes = `<section><h3 class="pf-title">How your agents should talk to you</h3><p class="pf-hint">Every agent reads this before it answers you, including new ones. Agents add to it when they notice what works; you can add or remove anything.</p><div class="pf-grid pf-notes-grid">${SECTIONS.map(card).join('')}</div></section>`;
-  const projects = profile.projects.length ? `<section><h3 class="pf-title">Projects</h3><div class="pf-grid">${profile.projects.map(project => `<button class="pf-card pf-project" data-open="project" data-id="${esc(project.slug)}"><h3>${esc(project.slug)}</h3><p>${esc(plain(project.purpose) || 'No description yet.')}</p>${project.stack.filter(item => !/\.(json|toml|lock|txt)$/i.test(item)).length ? `<div class="pf-tags">${project.stack.filter(item => !/\.(json|toml|lock|txt)$/i.test(item)).slice(0, 5).map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''}</button>`).join('')}</div></section>` : '';
-  const agents = profile.agents.length ? `<section><h3 class="pf-title">Your agents</h3><div class="pf-agents">${profile.agents.map(agent => `<button class="pf-agent" data-open="specialist" data-id="${esc(agent.id)}">${avatarHtml(ctx, { name: agent.name, agent, size: 'sm' })}<span>${esc(agent.name)}<small>${esc(agent.project)}</small></span></button>`).join('')}</div></section>` : '';
-  return `<div class="page pf">${brainBanner()}${hero}${notes}${projects}${agents}<p class="muted small">Notes are kept in .rexdesk/user.md. Change or delete any line there and every agent follows it.</p></div>`;
+  // What the agents know, one tab for each kind. The title is the heading in .rexdesk/user.md.
+  const KINDS = [['explain', 'How to explain things to me', 'Explain', 'Format, length, detail, examples: how every agent answers you.', 'Short answer first, then the steps as a numbered list'],
+    ['likes', 'Likes', 'Likes', 'What works well for you.', 'Plain words, no jargon'],
+    ['dislikes', 'Dislikes', 'Dislikes', 'What agents should stop doing.', 'Long walls of text'],
+    ['works', 'How they work', 'How you work', 'Your habits, tools and rules.', 'I test on my phone before I merge'],
+    ['personality', 'Personality', 'Personality', 'How you think, so agents meet you where you are.', 'I learn by doing; show me, then explain'],
+    ['about', 'About them', 'About you', 'Facts about you.', 'I speak Khmer, English and Korean']];
+  const itemsOf = title => (profile.sections.find(section => section.title === title)?.items || []).map(noteText);
+  const tab = KINDS.some(kind => kind[0] === ui.knowTab) ? ui.knowTab : (KINDS.find(item => itemsOf(item[1]).length) || KINDS[0])[0];
+  const [kind, title, label, hint, example] = KINDS.find(item => item[0] === tab);
+  const total = KINDS.reduce((sum, item) => sum + itemsOf(item[1]).length, 0);
+  const items = itemsOf(title);
+  const tabs = `<div class="kl-tabs" role="tablist" aria-label="What the agents know">${KINDS.map(([key, heading, short]) => { const count = itemsOf(heading).length; return `<button type="button" role="tab" aria-selected="${key === tab}" class="${key === tab ? 'on' : ''}" data-action="know-tab" data-tab="${key}">${esc(short)}<span>${count}</span></button>`; }).join('')}</div>`;
+  const rows = items.length ? `<ul class="kl-list">${items.map(item => `<li><span class="kl-text">${esc(item.text)}</span><span class="kl-meta">${item.when ? esc(item.when) : ''}${item.soft ? '<em>may change</em>' : ''}</span><button type="button" class="kl-x" data-note-forget="${esc(kind)}" data-note-text="${esc(item.text)}" title="Remove" aria-label="Remove this"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>`
+    : `<p class="kl-empty">Nothing here yet. Agents add to it when they notice what works, or add your own above.</p>`;
+  const panel = `<section class="kl-panel" role="tabpanel"><header><h2>${esc(label)}</h2><p>${esc(hint)}</p></header>
+    <form class="kl-add" data-note-add="${esc(kind)}"><input name="text" type="text" maxlength="240" placeholder="Add one, for example: ${esc(example)}" aria-label="Add to ${esc(label)}" autocomplete="off"><button class="btn primary small">Add</button></form>${rows}</section>`;
+  const side = `<aside class="kl-side"><div class="kl-me">${photo}<div><h2>${esc(name)}</h2>${profile.email ? `<p>${esc(profile.email)}</p>` : ''}</div></div>
+    <div class="kl-stats"><div><b>${total}</b><span>things known</span></div><div><b>${profile.projects.length}</b><span>projects</span></div><div><b>${profile.agents.length}</b><span>agents</span></div></div>
+    <div class="kl-actions"><label class="btn small pf-upload">${profile.photo ? 'Change photo' : 'Add a photo'}<input type="file" accept="image/png,image/jpeg,image/webp" data-photo-upload hidden></label>${profile.photo ? '<button class="btn small" data-action="photo-remove">Remove</button>' : ''}</div>
+    ${profile.projects.length ? `<h3>Projects</h3><div class="kl-chips">${profile.projects.map(project => `<button type="button" data-open="project" data-id="${esc(project.slug)}" title="${esc(plain(project.purpose))}">${esc(project.slug)}</button>`).join('')}</div>` : ''}
+    ${profile.agents.length ? `<h3>Agents</h3><div class="kl-chips">${profile.agents.map(agent => `<button type="button" data-open="specialist" data-id="${esc(agent.id)}">${esc(agent.name)}</button>`).join('')}</div>` : ''}
+    <p class="kl-file">Kept in .rexdesk/user.md. Every agent reads it before it answers you.</p></aside>`;
+  return `<div class="page kl">${brainBanner()}<div class="kl-body">${side}<div class="kl-main">${tabs}${panel}</div></div></div>`;
 }
 // A chosen picture is made small (512 px) in the page before it is saved.
 document.addEventListener('change', async event => {
