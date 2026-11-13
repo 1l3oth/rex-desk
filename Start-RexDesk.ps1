@@ -21,7 +21,8 @@ if (-not $rexRunning) {
     if ($rexCreated.ReturnValue -ne 0) {
         Start-Process -FilePath $rexNode -ArgumentList @('src/server.js') -WorkingDirectory $rexProject -WindowStyle Hidden -RedirectStandardOutput (Join-Path $rexLocal 'server.log') -RedirectStandardError (Join-Path $rexLocal 'server-error.log')
     }
-    for ($rexAttempt = 0; $rexAttempt -lt 20; $rexAttempt++) {
+    # Startup can take 15s or more (it picks up agents still working from before), so wait up to 45s.
+    for ($rexAttempt = 0; $rexAttempt -lt 180; $rexAttempt++) {
         try {
             $rexResponse = Invoke-WebRequest -Uri "$rexAddress/api/auth" -UseBasicParsing -TimeoutSec 1
             if ($rexResponse.StatusCode -eq 200) { $rexRunning = $true; break }
