@@ -22,6 +22,7 @@
     "@libsql/client": "^0.18.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "codemirror": "^5.65.18",
+    "driver.js": "^1.14.0",
     "mammoth": "^1.8.0",
     "msedge-tts": "^2.1.1",
     "playwright": "^1.0.0",
