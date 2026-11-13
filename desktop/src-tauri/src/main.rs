@@ -81,13 +81,13 @@ struct Runtime {
     bundled: bool,
 }
 
-// REX_DESK_HOME wins; otherwise the checkout this window was built from, then the README's default folder.
+// REX_DESK_HOME wins; otherwise the checkout this window was built from.
 fn checkout() -> Option<PathBuf> {
     let built = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
     std::env::var_os("REX_DESK_HOME")
         .map(PathBuf::from)
         .into_iter()
-        .chain([built, PathBuf::from(r"F:\rex-desk")])
+        .chain([built])
         .find(|root| root.join("src").join("server.js").is_file())
 }
 
@@ -118,6 +118,25 @@ fn holds_workspace(folder: &PathBuf) -> bool {
     folder.join("accounts.json").is_file() || folder.join("desk.sqlite").is_file()
 }
 
+// Turns the folder the person picked into the folder that holds the data. People pick the folder they think of (a drive,
+// their projects folder, a Rex Desk checkout), not the data folder itself, so look one level down for a workspace:
+// <picked>/.local, <picked>/Rex Desk, or the same inside each folder in it (a drive finds <drive>/rex-desk/.local). When
+// none is found, a new workspace goes into a "Rex Desk" folder inside a drive root or a folder that already holds other
+// things, so its files never spread over them.
+fn workspace_in(picked: &PathBuf) -> PathBuf {
+    let inside = |folder: &PathBuf| -> Option<PathBuf> {
+        [folder.clone(), folder.join(".local"), folder.join("Rex Desk")].into_iter().find(|candidate| holds_workspace(candidate))
+    };
+    if let Some(found) = inside(picked) { return found; }
+    if let Ok(entries) = fs::read_dir(picked) {
+        let mut folders: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).filter(|path| path.is_dir()).collect();
+        folders.sort();
+        if let Some(found) = folders.iter().find_map(|folder| inside(folder)) { return found; }
+    }
+    let empty = fs::read_dir(picked).map(|mut entries| entries.next().is_none()).unwrap_or(true);
+    if picked.parent().is_none() || !empty { picked.join("Rex Desk") } else { picked.clone() }
+}
+
 // A folder picker, shown once before anything opens. None when the person cancels.
 fn pick_folder(message: &str) -> Option<PathBuf> {
     #[cfg(windows)]
@@ -143,14 +162,19 @@ fn pick_folder(message: &str) -> Option<PathBuf> {
 fn choose_data(default: PathBuf, ask: bool) -> PathBuf {
     let saved = saved_folder();
     if let Some(saved) = &saved {
-        if saved.is_dir() || !ask { return saved.clone(); }
+        if saved.is_dir() || !ask {
+            // An older pick may name a drive or a parent folder; settle it on the real data folder once.
+            let found = if saved.is_dir() { workspace_in(saved) } else { saved.clone() };
+            if &found != saved { remember_folder(&found); }
+            return found;
+        }
     }
     if saved.is_none() && holds_workspace(&default) {
         remember_folder(&default);
         return default;
     }
     if !ask { return default; }
-    let chosen = pick_folder("Where is your Rex Desk workspace? Pick the folder that holds it, or a new empty folder to start fresh. Cancel uses the default folder.").unwrap_or(default);
+    let chosen = pick_folder("Where is your Rex Desk workspace? Pick the folder that holds it (or the folder above it), or any folder to start fresh. Cancel uses the default folder.").map(|picked| workspace_in(&picked)).unwrap_or(default);
     remember_folder(&chosen);
     chosen
 }
