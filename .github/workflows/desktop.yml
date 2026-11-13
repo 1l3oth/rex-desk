@@ -54,8 +54,9 @@ jobs:
               desktop/src-tauri/target/release/bundle/nsis/*.exe
               desktop/src-tauri/target/release/bundle/msi/*.msi
               dist/*.zip
+          # "app" keeps Rex Desk.app after the .dmg is made, so it can be packed for self-update.
           - os: macos-latest
-            bundle: dmg
+            bundle: app,dmg
             name: macos
             files: |
               desktop/src-tauri/target/release/bundle/dmg/*.dmg
