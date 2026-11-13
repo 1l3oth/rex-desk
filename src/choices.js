@@ -29,6 +29,9 @@ export const GEMINI_MODES = [
   { id: 'manual', label: 'Ask first', hint: 'Asks you before each edit and command' },
   { id: 'plan', label: 'Plan', hint: 'Plans carefully before it does anything' },
 ];
+// The mode an agent starts in when nobody picked one: the person's choice in Settings (Dangerous unless they change it).
+// An AI that does not have that mode gets its asking mode, never a looser one.
+export const defaultModeFor = (provider, wanted) => { const ids = modesFor(provider).map(item => item.id), mode = wanted || 'bypassPermissions'; return ids.includes(mode) ? mode : 'manual'; };
 export const effortsFor = provider => provider === 'gemini' ? ['low', 'medium', 'high'] : EFFORTS;
 export const modesFor = provider => provider === 'gemini' ? GEMINI_MODES : provider === 'codex' ? [{ id: 'bypassPermissions', label: 'Dangerous' }, { id: 'manual', label: 'Workspace' }, { id: 'plan', label: 'Read only' }] : MODES;
 

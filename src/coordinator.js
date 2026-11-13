@@ -6,7 +6,7 @@ import { Memory } from './memory.js';
 import { Specialists, EVIDENCE_RULE, ELI5_RULE } from './specialists.js';
 import { ClaudeRunner } from './runners.js';
 import { Notifier } from './notify.js';
-import { EFFORTS, MODES, modesFor, effortsFor, runOptions, modelList, pickerModels } from './choices.js';
+import { EFFORTS, MODES, modesFor, effortsFor, defaultModeFor, runOptions, modelList, pickerModels } from './choices.js';
 import { fetchModels } from './models.js';
 import path from 'node:path';
 import os from 'node:os';
@@ -488,7 +488,8 @@ export class Desk {
       const owner = run.roomAgent || run.specialistId, ownHome = () => { const agent = owner && owner !== 'main' ? this.specialists.get(owner) : null; const folder = agent ? this.specialists.homeDirectory(agent) : path.join(this.store.directory, 'coordinator'); mkdirSync(folder, { recursive: true }); return folder; };
       const cwd = [run.cwd, run.worktree].find(folder => folder && existsSync(folder)) || (run.cwd || run.worktree ? ownHome() : path.join(this.store.directory, 'coordinator'));
       if (run.cwd && cwd !== run.cwd && !existsSync(run.cwd)) this.patchRun(run.id, { cwd });
-      const options = { run, cwd, projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : '', token,
+      // A run nobody picked a mode for starts in the person's default mode from Settings.
+      const options = { run: run.permissionMode ? run : { ...run, permissionMode: defaultModeFor(run.provider || 'claude', this.store.config().defaultMode) }, cwd, projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : '', token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),

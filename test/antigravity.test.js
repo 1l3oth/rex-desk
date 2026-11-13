@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AcpClient, AntigravityRunner, antigravityModels, antigravityMode, parseAgyModels } from '../src/antigravity.js';
 import { aiProvider, providerTitle } from '../src/codex.js';
-import { modesFor, effortsFor, runOptions } from '../src/choices.js';
+import { modesFor, effortsFor, runOptions, defaultModeFor } from '../src/choices.js';
 
 const fake = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-agy.mjs');
 const factory = options => new AcpClient({ ...options, spawnProcess: (command, args, spawnOptions) => spawn(process.execPath, [fake, ...args], spawnOptions) });
@@ -89,4 +89,11 @@ test('Gemini offers its own modes and efforts, not the Claude list', () => {
   assert.deepEqual(effortsFor('gemini'), ['low', 'medium', 'high']);
   assert.throws(() => runOptions({ provider: 'gemini', effort: 'max' }));
   assert.equal(runOptions({ provider: 'claude', effort: 'max' }).effort, 'max');
+});
+
+test('the default mode from Settings is used when nobody picked one, and an AI without it asks first', () => {
+  assert.equal(defaultModeFor('claude', ''), 'bypassPermissions');
+  assert.equal(defaultModeFor('gemini', 'auto'), 'auto');
+  assert.equal(defaultModeFor('codex', 'auto'), 'manual');
+  assert.equal(defaultModeFor('codex', 'plan'), 'plan');
 });
