@@ -17,7 +17,6 @@ import { promisify } from 'node:util';
 import { now, id, thisComputer, latestLocalMain, modelName, deskStatus, deskStatusLabels } from './store.js';
 import { Sources } from './providers.js';
 import { AgentProfiles, conversationHere } from './agents.js';
-import { OrcaRunner, AgentSession, sendToOrca, showWorktreesInOrca } from './orca.js';
 import { Evidence } from './browser.js';
 import { Monitor } from './monitor.js';
 import { Files } from './files.js';
@@ -106,8 +105,8 @@ const FILE_PLACES = ['side', 'right', 'left', 'top', 'center', 'corner', 'big'];
 export const WORKTREE_RULE = 'When you make a git worktree, call desk_worktree with action show (pass the folder, and taskId when it is for a task) so it shows in this chat as a card and joins the worktree history. A task that already lives in a worktree is worked on there.';
 
 export class Desk {
-  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, orcaOptions, memoryDirectory, peerTransport } = {}) {
-    this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher; this.orcaOptions = orcaOptions;
+  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport } = {}) {
+    this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
@@ -142,7 +141,7 @@ export class Desk {
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
       directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, choices: { models: modelList(this.store, this.store.config().provider), efforts: effortsFor(this.store.config().provider), modes: modesFor(this.store.config().provider), providers: Object.fromEntries(AI_PROVIDERS.map(provider => [provider, { models: pickerModels(this.store, provider), efforts: effortsFor(provider), modes: modesFor(provider) }])) }, mainAgent: (m => m && { id: m.id, name: m.name, provider: m.provider, model: m.model || '' })(this.store.get('specialist', 'main')), specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent), device: this.peers.deviceName(agent.node), remote: this.peers.isRemote(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
   }
-  // Run keys are kept as hashes in the database, so an agent still working in an Orca terminal keeps its connection through a restart.
+  // Run keys are kept as hashes in the database, so an agent that kept working through a restart keeps its connection.
   scopeToken(runId) {
     const token = randomBytes(32).toString('base64url');
     this.tokens.set(token, runId); this.store.put('token', createHash('sha256').update(token).digest('hex'), { id: createHash('sha256').update(token).digest('hex'), runId, createdAt: now() });
@@ -154,21 +153,6 @@ export class Desk {
     const runId = this.tokens.get(token) || this.store.get('token', createHash('sha256').update(String(token || '')).digest('hex'))?.runId;
     const run = runId && this.store.get('run', runId);
     return run ? { role: run.role, runId } : null;
-  }
-  // The conversation of an Orca run, read from the agent's own session log; a message sent from Rex Desk is shown at once, so its echo is skipped.
-  // The provider writes its own session log, and its name is the session id. A follow-up reopens that session so the
-  // agent keeps the conversation it already had, instead of starting an empty one in a new terminal.
-  agentSessionId(run) {
-    const file = run.mirror?.file;
-    if (!file || !existsSync(file)) return '';
-    return /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(path.basename(String(file)))?.[0] || '';
-  }
-  // Only the name of that log is kept, so a follow-up can reopen the session; what the agent said stays in its own terminal.
-  agentSessionFinder(run) {
-    const key = profileKey(run.provider);
-    return new AgentSession({ provider: run.provider, cwd: run.worktree, configDirectory: this.agents.environment(run.provider)[key],
-      since: run.turnStartedAt || run.startedAt || now(), state: run.mirror || {},
-      persist: state => this.store.put('run', run.id, { ...this.run(run.id), mirror: state }) });
   }
   // A message to an agent. A terminal agent gets it typed in. A headless agent that is mid-turn takes it as soon as the turn ends;
   // one that is idle takes it right now, resuming its session with the whole chat behind it.
@@ -235,13 +219,6 @@ export class Desk {
   async say(runId, text, picked = {}, { raw = false } = {}) {
     const run = this.run(runId), line = raw ? String(text || '').trim() : String(text || '').replace(/\s+/g, ' ').trim();
     if (!line) throw new Error('Write a message first.');
-    if (run.execution === 'orca' && this.live.has(runId)) {
-      await sendToOrca(run, text, this.orcaOptions);
-      const echoes = this.echoes || (this.echoes = new Map());
-      echoes.set(runId, [...(echoes.get(runId) || []), line].slice(-20));
-      this.store.event(runId, 'human-message', { text: line, via: 'rex' }, true);
-      return { sent: true };
-    }
     if (this.live.has(runId)) {
       this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
       this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
@@ -258,22 +235,6 @@ export class Desk {
       if (!run.host || (!hostAlive(run.host.pid) && !unread)) { this.patchRun(run.id, { reattach: undefined, host: undefined, state: 'interrupted', endedAt: now(), error: 'Server restarted. Resume this run to continue.' }); continue; }
       const controller = new AbortController(); this.live.set(run.id, { controller });
       void this.execute(run.id, controller, { attach: run.host }).catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
-    }
-  }
-  // Watch Orca runs that survived a restart until their terminal ends, then settle them like any finished run.
-  reattachOrca(options = {}) {
-    for (const run of this.store.list('run').filter(item => item.reattach === true)) {
-      const controller = new AbortController(), watcher = new OrcaRunner({ run, signal: controller.signal, orcaOptions: options.orcaOptions, pollMs: options.pollMs, isDone: () => terminalStates.has(this.run(run.id).state), session: run.worktree ? this.agentSessionFinder(run) : null, event: (kind, data) => this.store.event(run.id, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result'].includes(kind)) });
-      this.live.set(run.id, { controller, runner: watcher }); this.patchRun(run.id, { reattach: false });
-      this.store.event(run.id, 'phase', { text: 'Rex Desk restarted; still watching the Orca terminal' }, true);
-      void watcher.watch(run.sessionId.slice(5), { reattached: true })
-        .then(() => { if (!terminalStates.has(this.run(run.id).state)) this.patchRun(run.id, { state: 'needs_evidence', endedAt: now() }); })
-        .catch(error => { if (!terminalStates.has(this.run(run.id).state)) this.patchRun(run.id, { state: controller.signal.aborted ? 'stopped' : 'interrupted', error: error.message, endedAt: now() }); })
-        .finally(async () => {
-          await this.evidence.close(run.id).catch(() => {});
-          for (const key of this.store.list('token').filter(item => item.runId === run.id)) this.store.delete('token', key.id);
-          this.live.delete(run.id); void this.drain();
-        });
     }
   }
   authorize(scope, runId, { coordinator = false } = {}) {
@@ -343,7 +304,7 @@ export class Desk {
     if (answer.action !== 'accept') throw new Error('The human did not approve starting this run. Do not start it another way.');
     return this.startTask({ ...input, parentRunId });
   }
-  // A pull request opened outside Rex Desk, for example by an agent in its Orca terminal, still counts: it is found by the run's branch.
+  // A pull request opened outside Rex Desk, for example by an agent in its own terminal, still counts: it is found by the run's branch.
   async findPullRequests({ run = exec } = {}) {
     const candidates = this.store.list('run').filter(item => item.role === 'worker' && item.branch && !item.prUrl && item.repositoryId);
     for (const item of candidates) {
@@ -506,15 +467,11 @@ export class Desk {
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
-      const resumeSessionId = this.agentSessionId(run);
       // A headless agent works in a process of its own, so a Rex Desk restart (an update) does not cut it off.
-      const hosted = attach || (!this.runnerFactory && run.execution !== 'orca' && this.store.config().agentHost !== false);
+      const hosted = attach || (!this.runnerFactory && this.store.config().agentHost !== false);
       const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.directory, 'uploads') }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.hostOptions || {}) })
         : this.runnerFactory ? this.runnerFactory(options)
-        : run.execution !== 'orca' ? new (run.provider === 'codex' ? CodexRunner : run.provider === 'gemini' ? AntigravityRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.directory, 'uploads') })
-        : new OrcaRunner({ ...options, ...(run.worktree ? {} : { cwd: await this.agentWorkspace(), sourcePath: await this.agentWorkspace() }), dataDirectory: this.store.directory,
-          resumeSessionId, isDone: () => terminalStates.has(this.run(runId).state),
-          session: this.agentSessionFinder({ ...run, mirror: resumeSessionId ? run.mirror : undefined, turnStartedAt: now() }) });
+        : new (run.provider === 'codex' ? CodexRunner : run.provider === 'gemini' ? AntigravityRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.directory, 'uploads') });
       const entry = this.live.get(runId);
       if (entry?.controller !== controller) throw new Error('Run stopped.');
       entry.runner = runner;
@@ -527,7 +484,7 @@ export class Desk {
       this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), turnStartedAt: now(), endedAt: null, error: '' });
       this.store.event(runId, 'turn-start', { provider: run.provider, resumed: Boolean(run.startedAt) });
       // A headless session that is being reopened already holds the whole conversation, so it is given only what is new.
-      const reopened = run.execution !== 'orca' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && run.followUp;
+      const reopened = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && run.followUp;
       if (run.followUp) this.patchRun(runId, { followUp: '' });
       const chat = run.role === 'specialist' || run.role === 'web' || (run.role === 'coordinator' && (run.main || run.roomAgent));
       const owner = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
@@ -662,21 +619,6 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       `Instructions from the person: ${run.instructions || 'none: find the cause, fix it, test it and report.'}`,
       `Reminder: every desk_message, desk_ask and report to the human is in English.`].filter(Boolean).join('\n');
   }
-  // A main agent has no worktree, but an Orca terminal needs a folder Orca knows. This small repository
-  // inside Rex Desk's data folder is that place; it holds no project code, so nothing an agent does there touches a checkout.
-  agentWorkspace() { return (this.workspace ??= this.prepareWorkspace()); }
-  async prepareWorkspace() {
-    const directory = path.join(this.store.directory, 'agent-desk');
-    if (!existsSync(path.join(directory, '.git'))) {
-      mkdirSync(directory, { recursive: true });
-      writeFileSync(path.join(directory, 'README.md'), 'Rex Desk opens main agent and QA terminals in this folder. It holds no project code.\n');
-      await git(directory, ['init', '-q']);
-      await git(directory, ['add', '-A']);
-      await git(directory, ['-c', 'user.email=rex@localhost', '-c', 'user.name=Rex Desk', 'commit', '-q', '-m', 'Rex Desk agent workspace']);
-    }
-    await showWorktreesInOrca(directory, this.orcaOptions);
-    return directory;
-  }
   // A Java WAR project's worker finds JDK 8 first, so a plain java or javac never builds classes the server cannot load.
   javaEnv(run) {
     const javaHome = run.role === 'worker' && effectiveRepository(this.store.config().repositories.find(item => item.id === run.repositoryId))?.flowRuntime?.javaHome;
@@ -809,7 +751,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   async autoHandoff(runId) {
     const run = this.store.get('run', runId), limit = this.store.config().autoHandoff ?? 0.85;
     if (run?.autoHandoff && run.state === 'stopped') this.patchRun(runId, { autoHandoff: undefined });
-    if (!run || run.external || run.execution === 'orca' || limit === false || run.state === 'stopped') return false;
+    if (!run || run.external || limit === false || run.state === 'stopped') return false;
     if (run.autoHandoff === 'writing') {
       const note = this.store.events(runId, { visible: true, limit: 400 }).filter(event => event.kind === 'agent-text' && String(event.createdAt || '') >= String(run.turnStartedAt || '')).map(event => event.text).join('\n\n');
       this.patchRun(runId, { autoHandoff: undefined });
@@ -1126,7 +1068,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (this.live.has(runId)) throw new Error('Stop the active run before resuming.');
     // A Claude conversation started on another computer (an account restored from backup, an agent shared between computers) is not
     // here to reopen: the agent starts a fresh session that first reads a handoff of the chat, which this computer has in full.
-    if (run.provider === 'claude' && provider === 'claude' && run.execution !== 'orca' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && !this.runnerFactory && !conversationHere(run.sessionId)) {
+    if (run.provider === 'claude' && provider === 'claude' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && !this.runnerFactory && !conversationHere(run.sessionId)) {
       await this.freshStart(runId, { reason: 'because its earlier conversation is on another computer', notice: 'This conversation started on another computer, so it continues here in a fresh session that first reads a handoff of this chat.' });
       run = this.run(runId);
     }
@@ -1142,7 +1084,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), execution: 'headless' });
       void this.drain(); return this.run(runId);
     }
-    this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}), mirror: sameProvider ? run.mirror : undefined,
+    this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}),
       ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}),
       instructions: run.role === 'specialist' ? `${run.instructions || ''}${carried}` : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
       ...runOptions({ ...picked, provider }, this.store), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });

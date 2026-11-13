@@ -33,17 +33,6 @@ test('the main agent and a resumed run keep the model, effort and mode picked in
   await assert.rejects(desk.resume(main.id, { prompt: 'x', model: 'nope' }), /listed models/);
 });
 
-test('the Orca launcher passes effort and permission mode, and leaves Manual to Claude Code\'s own default', () => {
-  const directory = temporary('launch'), spec = path.join(directory, 'agent.json');
-  const probe = 'console.log("args=" + process.argv.slice(2).join(" ")); process.exit(0)';
-  const launch = extra => { writeFileSync(spec, JSON.stringify({ runId: 'r', provider: 'claude', cwd: directory, prompt: 'Go', token: 't', mcpUrl: 'http://127.0.0.1:4317/mcp', addDir: 'ART', uploadsDir: 'UP',
-    executable: { command: process.execPath, args: ['-e', probe, '--'] }, env: {}, unset: [], ...extra })); return spawnSync(process.execPath, [path.resolve('scripts/orca-agent.mjs'), spec], { encoding: 'utf8' }).stdout; };
-  const auto = launch({ effort: 'high', permissionMode: 'auto' });
-  assert.match(auto, /--effort high/); assert.match(auto, /--permission-mode auto/); assert.match(auto, /--add-dir ART UP/);
-  assert.doesNotMatch(launch({ permissionMode: 'manual' }), /--permission-mode/);
-  assert.doesNotMatch(launch({}), /--effort/);
-});
-
 test('an uploaded file is saved under the data folder, and the size limit and header are enforced', async () => {
   const app = await createApp({ dataDirectory: temporary('upload'), port: 0 });
   try {

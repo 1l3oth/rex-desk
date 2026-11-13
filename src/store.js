@@ -118,13 +118,11 @@ export class Store extends EventEmitter {
       });
     }
     // Running processes cannot be resurrected after a crash. Keep their history and make recovery explicit.
-    // An agent in an Orca terminal keeps running through a restart, so its run is reattached instead of interrupted.
     const reattached = new Set();
     for (const run of this.list('run')) {
       if (!['running', 'queued', 'waiting', 'verifying', 'starting'].includes(run.state)) continue;
-      if (run.execution === 'orca' && String(run.sessionId || '').startsWith('orca:') && ['running', 'waiting'].includes(run.state)) { this.put('run', run.id, { ...run, state: 'running', reattach: true }); reattached.add(run.id); }
-      // An agent in its own process (src/agent-host.js) keeps working through a restart too; Rex Desk follows it again.
-      else if (run.host && ['running', 'waiting', 'starting'].includes(run.state)) { this.put('run', run.id, { ...run, state: 'running', reattach: 'host' }); reattached.add(run.id); }
+      // An agent in its own process (src/agent-host.js) keeps working through a restart; Rex Desk follows it again.
+      if (run.host && ['running', 'waiting', 'starting'].includes(run.state)) { this.put('run', run.id, { ...run, state: 'running', reattach: 'host' }); reattached.add(run.id); }
       else this.put('run', run.id, { ...run, state: 'interrupted', endedAt: now(), error: 'Server restarted. Resume this run to continue.' });
     }
     for (const key of this.list('token')) if (!reattached.has(key.runId)) this.delete('token', key.id);

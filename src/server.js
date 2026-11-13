@@ -29,7 +29,6 @@ import { setupPrompt } from './setup-prompt.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
 import { weeklyReport } from './report.js';
-import { orcaStatus, showWorktreesInOrca, openInOrca } from './orca.js';
 import { Computer } from './computer.js';
 import { Voice } from './voice.js';
 import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
@@ -136,7 +135,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     desk.port = listenPort; desk.peers.port = listenPort;
     desk.peers.onRemoteChange = () => { remoteAt = '-'; remoteOpen(); }; remoteOpen();
     if (!process.env.NODE_TEST_CONTEXT) desk.peers.start();
-    desk.mcpUrl = `${address}/mcp`; desk.reattachHosts(); desk.reattachOrca(); void desk.findPullRequests();
+    desk.mcpUrl = `${address}/mcp`; desk.reattachHosts(); void desk.findPullRequests();
     void desk.resumeInterrupted(); desk.notifier.start(); void desk.fillEnglishNames(); desk.memory.ensure(); desk.rooms.cleanup(); desk.specialists.normalizeModels(); desk.specialists.ensureMain();
     if (!process.env.NODE_TEST_CONTEXT) void desk.refreshModels().catch(error => store.event('', 'models-error', { message: error.message }));
     // Antigravity's models fill its pickers when it is installed and signed in; otherwise this fails quietly.
@@ -433,12 +432,6 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
         desk.agents.invalidate(provider);
         return json(response, 200, { installed: desk.agents.mcpInstalled(provider), everywhere: results.every(item => item.installed), profiles: results });
       }
-      if (url.pathname === '/api/orca' && ['GET', 'POST'].includes(request.method)) {
-        const repository = store.config().repositories.find(item => item.id === url.searchParams.get('repositoryId'));
-        if (url.searchParams.get('repositoryId') && !repository) return json(response, 404, { error: 'Repository not found.' });
-        if (request.method === 'POST') { if (!repository) throw new Error('Choose a repository.'); await showWorktreesInOrca(repository.path); }
-        return json(response, 200, await orcaStatus(repository?.path));
-      }
       // The text a person pastes into any agent session so it can take the issue over with its full context.
       if (url.pathname === '/api/handoff' && request.method === 'POST') {
         const input = await body(request);
@@ -542,7 +535,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (interactionMatch && request.method === 'POST') { const owner = !store.get('interaction', interactionMatch[1]) && desk.peers.interactionOwner(interactionMatch[1]); return json(response, 200, owner ? await desk.peers.forward(owner, 'POST', url.pathname, await body(request)) : desk.answer(interactionMatch[1], await body(request))); }
       const unsendMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/messages\/(\d+)$/);
       if (unsendMatch && request.method === 'DELETE') return json(response, 200, desk.unsend(unsendMatch[1], unsendMatch[2]));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|orca|say|fresh))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|say|fresh))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         const runOwner = !store.get('run', runId) && desk.peers.runOwner(runId);
@@ -567,7 +560,6 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));
           if (action === 'verify') return json(response, 200, await desk.verify(runId));
           if (action === 'publish') return json(response, 200, await desk.publish(runId, { ...input, approved: true }));
-          if (action === 'orca') { const run = desk.run(runId); if (!run.worktree) throw new Error('This run has no worktree to open.'); return json(response, 200, await openInOrca(run)); }
         }
       }
       // The file window: open, view, save, format, and open in another program.
