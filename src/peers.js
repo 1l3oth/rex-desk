@@ -244,12 +244,14 @@ export class Peers {
   // With the same Turso database on every computer, the chats also arrive from there, even while the other computer is off.
   async pullTurso() {
     if (!this.store.cloud?.ready) return;
-    const settings = this.settings(), from = Math.max(0, (settings.tursoAt || 0) - 120000), since = `${from.toString(36).padStart(9, '0')}`;
+    // Under another computer id (a restore that got its own), what was skipped as "this computer's own" is read again from the start.
+    const settings = this.settings(), again = settings.tursoNode !== this.self.id, at = again ? 0 : settings.tursoAt || 0;
+    const since = `${Math.max(0, at - 120000).toString(36).padStart(9, '0')}`;
     try {
-      const rows = await this.store.cloud.pullShared(since); if (!rows?.length) return;
-      this.applyAll(rows);
-      const newest = Math.max(...rows.map(row => parseInt(String(row.v).split('.')[0], 36) || 0));
-      if (newest > (settings.tursoAt || 0)) this.save({ tursoAt: newest });
+      const rows = await this.store.cloud.pullShared(since);
+      if (rows?.length) this.applyAll(rows);
+      const newest = Math.max(at, ...(rows || []).map(row => parseInt(String(row.v).split('.')[0], 36) || 0));
+      if (again || newest > at) this.save({ tursoAt: newest, tursoNode: this.self.id });
     } catch { /* Turso shows its own state in Settings */ }
   }
   async presence() {
