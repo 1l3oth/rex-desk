@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { git } from './processes.js';
 
@@ -8,7 +8,10 @@ import { git } from './processes.js';
 // Records come from three places: worktrees Rex Desk made for a run, worktrees an agent shows with desk_worktree,
 // and every worktree `git worktree list` reports for a configured project. A worktree that is gone stays in the history.
 const now = () => new Date().toISOString();
-const clean = value => path.resolve(String(value || '')).replace(/[\\/]+$/, '');
+// Windows can name one folder two ways (C:\Users\RUNNER~1 and C:\Users\runneradmin); git reports the long one, so a short
+// name is turned into the long one before folders are compared. Every other path stays as it is written.
+export const longPath = value => { const folder = path.resolve(String(value || '')); if (!/~\d/.test(folder)) return folder; try { return realpathSync.native(folder); } catch { return folder; } };
+const clean = value => longPath(value).replace(/[\\/]+$/, '');
 const sameDir = (left, right) => clean(left).toLowerCase() === clean(right).toLowerCase();
 export const worktreeId = directory => createHash('sha256').update(clean(directory).toLowerCase()).digest('hex').slice(0, 12);
 // `git worktree list --porcelain`: blocks split by a blank line; the first is the main checkout.
