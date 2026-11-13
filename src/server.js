@@ -82,7 +82,9 @@ function serveFile(request, response, file, { sandbox = false, download = false,
 
 // The installed app (it sets REX_DESK_VERSION) is the real Rex Desk on 4317. A server run from a source checkout is
 // development and listens on 4318, so the real app never opens a development server by mistake. PORT overrides both.
-export const defaultPort = () => Number(process.env.PORT || (process.env.REX_DESK_VERSION ? 4317 : 4318));
+// A server taking over from an earlier one (REX_RESTART_AFTER) without a port is a checkout that updated itself from a version
+// that did not pass its port on: it was on 4317 and stays there, so a computer using a checkout as its real app keeps its address.
+export const defaultPort = () => Number(process.env.PORT || (process.env.REX_DESK_VERSION || process.env.REX_RESTART_AFTER ? 4317 : 4318));
 
 export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
   let dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
