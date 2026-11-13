@@ -247,3 +247,29 @@ html.has-win-bar .chat-shell{height:100dvh;padding-top:34px}
 .tk-sync.busy svg{animation:tk-spin 1s linear infinite}
 @keyframes tk-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.tk-sync.busy svg{animation:none}}
+
+/* Add agents / new group chat. */
+.icon-btn.head-add{width:34px;height:34px;border-radius:10px}
+.ra-dialog{width:min(720px,94vw);max-width:720px;max-height:min(760px,90vh);display:flex;flex-direction:column;gap:12px;padding:20px}
+.ra-head{display:flex;align-items:flex-start;gap:12px}.ra-head>div{flex:1}.ra-head h2{margin:0;font-size:19px}.ra-head p{margin:4px 0 0;font-size:13px;color:var(--muted)}
+.ra-x{width:30px;height:30px;border:0;border-radius:8px;background:none;color:var(--muted);font-size:20px;line-height:1}.ra-x:hover{background:var(--raised);color:var(--ink)}
+.ra-field{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--muted)}
+.ra-field input,.ra-search input{height:38px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:14px}
+.ra-field input:focus,.ra-search:focus-within{border-color:var(--accent);outline:0;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.ra-search{display:flex;align-items:center;gap:8px;padding-left:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--muted)}
+.ra-search input{flex:1;border:0;background:none;padding-left:0;outline:0}
+.ra-chosen{display:flex;flex-wrap:wrap;gap:6px;min-height:28px;align-items:center}
+.ra-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);border-radius:999px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--ink);font-size:12.5px}
+.ra-chip.fixed{border-style:dashed}.ra-chip span{color:var(--muted)}button.ra-chip:hover span{color:var(--bad)}
+.ra-none{font-size:12.5px;color:var(--muted)}
+.ra-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;overflow:auto;min-height:120px;padding:2px}
+.ra-card{position:relative;display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);text-align:left;color:var(--ink);transition:border-color .15s,background .15s,transform .15s}
+.ra-card:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--line));transform:translateY(-1px)}
+.ra-card[hidden]{display:none}
+.ra-card .ra-text{display:flex;flex-direction:column;min-width:0;flex:1}.ra-card b{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ra-card small{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ra-tick{display:grid;place-items:center;flex:none;width:20px;height:20px;border:1.5px solid var(--line);border-radius:50%;color:transparent;transition:background .15s,border-color .15s,color .15s}
+.ra-card.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--panel))}
+.ra-card.on .ra-tick{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.ra-foot{display:flex;align-items:center;gap:8px;padding-top:4px;border-top:1px solid var(--line)}.ra-count{flex:1;font-size:12.5px;color:var(--muted);padding-top:8px}.ra-foot .btn{margin-top:8px}
+@media (prefers-reduced-motion:reduce){.ra-card{transition:none}}
+.ra-dialog .ra-search input,.ra-dialog .ra-search input:focus{border:0;background:none;box-shadow:none;outline:0}

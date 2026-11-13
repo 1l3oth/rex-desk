@@ -83,3 +83,25 @@ if (shell === 'windows' || shell === 'macos') {
   bar.addEventListener('mousedown', event => { if (event.button === 0 && !event.target.closest('button') && event.detail === 1) ask('drag'); });
   bar.addEventListener('dblclick', event => { if (!event.target.closest('button')) ask('maximize'); });
 }
+
+// Each theme's own layer behind the app: Cyberpunk's grid, Gojo's stars and ring, Crayon's doodles, Sakura's petals.
+// Crayon also needs a small SVG filter that makes lines look drawn by hand.
+const fx = document.createElement('div'); fx.className = 'skin-fx'; fx.setAttribute('aria-hidden', 'true');
+document.body.prepend(fx);
+const rough = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+rough.setAttribute('width', '0'); rough.setAttribute('height', '0'); rough.setAttribute('aria-hidden', 'true');
+rough.innerHTML = '<filter id="crayon-rough"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="4"/></filter>';
+document.body.append(rough);
+function dressSkin() {
+  fx.replaceChildren();
+  if (root.dataset.skin !== 'sakura' || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  for (let i = 0; i < 18; i++) {
+    const petal = document.createElement('i');
+    petal.style.left = `${(i * 53) % 100}%`; petal.style.animationDuration = `${11 + (i * 7) % 9}s`; petal.style.animationDelay = `${-((i * 1.7) % 14)}s`;
+    petal.style.setProperty('--dx', `${((i % 5) - 2) * 60}px`); petal.style.setProperty('--turn', `${360 + (i % 4) * 120}deg`);
+    petal.style.scale = String(0.6 + (i % 4) * 0.2);
+    fx.append(petal);
+  }
+}
+dressSkin();
+new MutationObserver(dressSkin).observe(root, { attributes: true, attributeFilter: ['data-skin'] });

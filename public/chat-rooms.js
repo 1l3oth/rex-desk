@@ -179,16 +179,43 @@ function roomInfoHtml(ctx, room) {
 }
 
 export function newRoomDialog(ctx, from = null) {
-  const { ui, esc, toast, api, refresh, open } = ctx, agents = (ui.snap.specialists || []).filter(agent => agent.id !== from?.id);
+  const { ui, esc, toast, api, refresh, open } = ctx;
+  // Everyone who can join: Rex Agent first, then the agents, the one this chat is with left out (it comes along).
+  const people = [...(from?.id === 'main' ? [] : [{ id: 'main', name: 'Rex Agent', projectSlug: 'every project', main: true }]), ...(ui.snap.specialists || []).filter(agent => agent.kind !== 'main' && agent.id !== from?.id)];
+  const picked = new Set();
   const back = document.createElement('div'); back.className = 'dialog-back';
-  back.innerHTML = `<form class="dialog"><h2>${from ? `Group chat from your chat with ${esc(from.name)}` : 'New room'}</h2>${from ? `<p class="muted small">${esc(from.name)} comes along, and the last 20 messages are copied in, so everyone carries on with the same topic.</p>` : ''}<label>Name<input type="text" name="name" placeholder="Checkout bug" required maxlength="80" value="${from ? esc(`${from.name} and team`) : ''}"></label><label>Agents in the room</label>${from?.id === 'main' ? '' : '<label class="pick"><input type="checkbox" name="member" value="main"> Rex Agent <span class="muted">· knows every project</span></label>'}${agents.length ? agents.map(agent => `<label class="pick"><input type="checkbox" name="member" value="${esc(agent.id)}"> ${esc(agent.name)} <span class="muted">· ${esc(agent.projectSlug)}</span></label>`).join('') : '<p class="muted">No agents yet. Create one with the + next to Agents, then add it to a room.</p>'}<div class="row"><button class="btn primary">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`;
-  document.body.append(back); back.querySelector('input').focus();
-  back.addEventListener('click', event => { if (event.target === back || event.target.dataset.close !== undefined) back.remove(); });
-  back.querySelector('form').addEventListener('submit', async event => {
-    event.preventDefault(); const form = new FormData(event.target);
-    try { const room = from ? await api('/rooms/from-chat', { method: 'POST', data: { agentId: from.id, name: form.get('name'), members: form.getAll('member') } }) : await api('/rooms', { method: 'POST', data: { name: form.get('name'), members: form.getAll('member') } }); back.remove(); await refresh(); open('room', room.id); }
+  const card = person => `<button type="button" class="ra-card" data-pick="${esc(person.id)}" aria-pressed="false" data-find="${esc(`${person.name} ${person.projectSlug || ''}`.toLowerCase())}">
+    ${avatarHtml(ctx, { name: person.name, agent: person.main ? null : person, size: 'sm' })}<span class="ra-text"><b>${esc(person.name)}</b><small>${esc(person.projectSlug || '')}</small></span>
+    <span class="ra-tick" aria-hidden="true"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>`;
+  back.innerHTML = `<form class="dialog ra-dialog" aria-labelledby="ra-title">
+    <header class="ra-head"><div><h2 id="ra-title">${from ? 'Add agents' : 'New group chat'}</h2><p>${from ? `${esc(from.name)} comes along with the last 20 messages, so everyone carries on with the same topic.` : 'Pick who joins. You can add more later.'}</p></div><button type="button" class="ra-x" data-close aria-label="Close">×</button></header>
+    <label class="ra-field"><span>Name</span><input type="text" name="name" placeholder="Checkout bug" required maxlength="80" value="${from ? esc(`${from.name} and team`) : ''}"></label>
+    <div class="ra-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="search" placeholder="Find an agent or a project" aria-label="Find an agent or a project" data-ra-find></div>
+    <div class="ra-chosen" data-ra-chosen>${from ? `<span class="ra-chip fixed">${esc(from.name)}</span>` : ''}<span class="ra-none">Nobody picked yet</span></div>
+    <div class="ra-grid" role="group" aria-label="Agents">${people.length ? people.map(card).join('') : '<p class="muted">No agents yet. Create one with the + next to Agents.</p>'}</div>
+    <footer class="ra-foot"><span class="ra-count" data-ra-count>0 picked</span><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" data-ra-go disabled>${from ? 'Start group chat' : 'Create'}</button></footer></form>`;
+  document.body.append(back);
+  const form = back.querySelector('form'), chosen = back.querySelector('[data-ra-chosen]'), count = back.querySelector('[data-ra-count]'), go = back.querySelector('[data-ra-go]');
+  const draw = () => {
+    const names = people.filter(person => picked.has(person.id));
+    chosen.innerHTML = `${from ? `<span class="ra-chip fixed">${esc(from.name)}</span>` : ''}${names.map(person => `<button type="button" class="ra-chip" data-pick="${esc(person.id)}" title="Remove">${esc(person.name)} <span aria-hidden="true">×</span></button>`).join('') || '<span class="ra-none">Nobody picked yet</span>'}`;
+    count.textContent = `${picked.size} picked`; go.disabled = !picked.size && !from;
+    for (const button of back.querySelectorAll('.ra-card')) { const on = picked.has(button.dataset.pick); button.classList.toggle('on', on); button.setAttribute('aria-pressed', String(on)); }
+  };
+  back.querySelector('[data-ra-find]').addEventListener('input', event => { const words = event.target.value.trim().toLowerCase(); for (const button of back.querySelectorAll('.ra-card')) button.hidden = Boolean(words) && !button.dataset.find.includes(words); });
+  back.addEventListener('click', event => {
+    if (event.target === back || event.target.closest('[data-close]')) { back.remove(); return; }
+    const pick = event.target.closest('[data-pick]'); if (!pick) return;
+    if (picked.has(pick.dataset.pick)) picked.delete(pick.dataset.pick); else picked.add(pick.dataset.pick);
+    draw();
+  });
+  back.addEventListener('keydown', event => { if (event.key === 'Escape') back.remove(); });
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); const name = new FormData(form).get('name'), members = [...picked];
+    try { const room = from ? await api('/rooms/from-chat', { method: 'POST', data: { agentId: from.id, name, members } }) : await api('/rooms', { method: 'POST', data: { name, members } }); back.remove(); await refresh(); open('room', room.id); }
     catch (error) { toast(error.message, true); }
   });
+  back.querySelector('[data-ra-find]').focus();
 }
 
 // ---------- tasks ----------

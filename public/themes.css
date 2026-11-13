@@ -74,3 +74,83 @@ html[data-skin]:not([data-skin=midnight]) :is(.av.icon.accent,.av.icon.brandmark
 /* Crayon: a crayon stroke under the screen title. */
 html[data-skin=crayon] .stage-head h1{background:linear-gradient(transparent 62%,color-mix(in srgb,#ffd166 70%,transparent) 62% 88%,transparent 88%) no-repeat;padding:0 2px}
 html[data-skin=crayon][data-theme=dark] .stage-head h1{background:linear-gradient(transparent 62%,rgba(255,179,71,.35) 62% 88%,transparent 88%) no-repeat}
+
+/* ===== Each theme is its own world: shapes, type, backdrop and motion, not only colour. ===== */
+.skin-fx{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
+:is(.rail,.stage-main,.stage>.side){position:relative}
+
+/* --- Cyberpunk: a HUD. Cut corners, condensed type, scanlines, a neon grid floor, corner brackets. --- */
+html[data-skin=cyberpunk]{--sans:"Bahnschrift","DIN Alternate","Roboto Condensed","Segoe UI",sans-serif;--cut:14px}
+html[data-skin=cyberpunk] :is(.rail,.stage-main,.stage>.side,.dialog,.settings-pop,.kg-card,.nt-pane,.menu){border-radius:0;clip-path:polygon(var(--cut) 0,100% 0,100% calc(100% - var(--cut)),calc(100% - var(--cut)) 100%,0 100%,0 var(--cut))}
+html[data-skin=cyberpunk] :is(.btn,.place,.item,.composer .box2,.msg.mine .bubble,.kg-switch,.win-btn){border-radius:0;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px)}
+html[data-skin=cyberpunk] .av{border-radius:4px}
+html[data-skin=cyberpunk] :is(.stage-head h1,.rail-head strong,.welcome h2,.place>span,h2,h3){font-family:"Bahnschrift SemiBold Condensed","Bahnschrift","Roboto Condensed",sans-serif;text-transform:uppercase;letter-spacing:.08em}
+html[data-skin=cyberpunk] .place.active,html[data-skin=cyberpunk] .item.active{background:linear-gradient(90deg,rgba(255,43,214,.28),transparent);box-shadow:inset 3px 0 0 #00e5ff}
+html[data-skin=cyberpunk] .msg.mine .bubble{background:linear-gradient(135deg,rgba(0,229,255,.18),rgba(255,43,214,.16));border:1px solid rgba(0,229,255,.45)}
+html[data-skin=cyberpunk] .stage-head{border-bottom:1px solid rgba(0,229,255,.35)!important}
+html[data-skin=cyberpunk] .stage-head h1::before{content:"// ";color:#00e5ff}
+html[data-skin=cyberpunk] .stage-main::after{content:"";position:absolute;inset:6px;pointer-events:none;z-index:3;
+  background:linear-gradient(#00e5ff,#00e5ff) top right/22px 2px no-repeat,linear-gradient(#00e5ff,#00e5ff) top right/2px 22px no-repeat,linear-gradient(#ff2bd6,#ff2bd6) bottom left/22px 2px no-repeat,linear-gradient(#ff2bd6,#ff2bd6) bottom left/2px 22px no-repeat}
+html[data-skin=cyberpunk] .skin-fx{background:linear-gradient(transparent 0 60%,rgba(255,43,214,.10)),repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 3px)}
+html[data-skin=cyberpunk] .skin-fx::before{content:"";position:absolute;left:-60%;right:-60%;bottom:0;height:130%;transform:perspective(700px) rotateX(68deg);transform-origin:bottom;
+  background:linear-gradient(rgba(255,43,214,.85) 2px,transparent 2px) 0 0/80px 80px,linear-gradient(90deg,rgba(0,229,255,.7) 2px,transparent 2px) 0 0/80px 80px;
+  -webkit-mask-image:linear-gradient(transparent 35%,#000 85%);mask-image:linear-gradient(transparent 35%,#000 85%);animation:cp-grid 3s linear infinite}
+@keyframes cp-grid{to{background-position:0 80px,0 0}}
+html[data-skin=cyberpunk]:not([data-theme=dark]) .skin-fx::before{opacity:.35}
+
+/* --- Gojo: Infinity. A starfield, a slow glowing ring behind everything, thin light type, floating sheets. --- */
+html[data-skin=gojo]{--sans:"Segoe UI Variable Display","SF Pro Display","Segoe UI",system-ui,sans-serif}
+html[data-skin=gojo] :is(.rail,.stage-main,.stage>.side){border-radius:26px;border-color:rgba(140,200,255,.28);box-shadow:0 0 0 1px rgba(140,200,255,.08),0 20px 60px rgba(20,60,160,.35),inset 0 1px 0 rgba(255,255,255,.18)}
+html[data-skin=gojo] :is(.stage-head h1,.welcome h2,.rail-head strong){font-weight:300;letter-spacing:.06em}
+html[data-skin=gojo] .msg.mine .bubble{border-radius:22px 22px 6px 22px;background:linear-gradient(135deg,rgba(124,199,255,.32),rgba(47,140,255,.2));border:1px solid rgba(160,210,255,.4)}
+html[data-skin=gojo] .composer .box2{border-radius:999px;box-shadow:0 0 0 1px rgba(140,200,255,.25),0 0 24px rgba(89,180,255,.22)}
+html[data-skin=gojo] .skin-fx{background:
+  radial-gradient(1px 1px at 12% 18%,#fff,transparent),radial-gradient(1px 1px at 28% 72%,#cfe6ff,transparent),radial-gradient(1.5px 1.5px at 44% 34%,#fff,transparent),
+  radial-gradient(1px 1px at 63% 12%,#fff,transparent),radial-gradient(1.5px 1.5px at 78% 58%,#cfe6ff,transparent),radial-gradient(1px 1px at 90% 26%,#fff,transparent),
+  radial-gradient(1px 1px at 8% 88%,#fff,transparent),radial-gradient(1px 1px at 52% 92%,#cfe6ff,transparent),radial-gradient(1.5px 1.5px at 35% 52%,#fff,transparent),
+  radial-gradient(1px 1px at 70% 82%,#fff,transparent),radial-gradient(1px 1px at 18% 40%,#cfe6ff,transparent),radial-gradient(1px 1px at 86% 90%,#fff,transparent)}
+html[data-skin=gojo]:not([data-theme=dark]) .skin-fx{background:none}
+html[data-skin=gojo] .skin-fx::before{content:"";position:absolute;left:50%;top:46%;width:min(90vw,1100px);aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;
+  background:conic-gradient(from 0deg,transparent 0 10%,rgba(89,180,255,.6) 18%,transparent 30% 55%,rgba(200,230,255,.5) 63%,transparent 75% 100%);
+  -webkit-mask:radial-gradient(closest-side,transparent 86%,#000 88% 92%,transparent 94%);mask:radial-gradient(closest-side,transparent 86%,#000 88% 92%,transparent 94%);
+  filter:blur(2px);animation:gojo-turn 26s linear infinite}
+html[data-skin=gojo] .skin-fx::after{content:"";position:absolute;left:50%;top:46%;width:18vmin;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;
+  background:radial-gradient(circle,rgba(220,240,255,.9),rgba(89,180,255,.5) 30%,transparent 70%);filter:blur(10px);opacity:.5;animation:gojo-breathe 6s ease-in-out infinite}
+@keyframes gojo-turn{to{transform:translate(-50%,-50%) rotate(360deg)}}
+@keyframes gojo-breathe{50%{opacity:.8;transform:translate(-50%,-50%) scale(1.15)}}
+
+/* --- Crayon: drawn by hand. Wobbly outlines (a roughness filter on the frame only, never on text), handwriting,
+   sticky-note bubbles, doodles in the corners. --- */
+html[data-skin=crayon]{--sans:"Ink Free","Segoe Print","Bradley Hand","Chalkboard SE","Comic Sans MS",cursive}
+html[data-skin=crayon] body{font-size:15px}
+html[data-skin=crayon] :is(.rail,.stage-main,.stage>.side,.dialog,.settings-pop,.kg-card,.kl-side,.kl-panel){border-color:transparent!important;box-shadow:none!important}
+html[data-skin=crayon] :is(.rail,.stage-main,.stage>.side)::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:4;border:2.5px solid color-mix(in srgb,var(--ink) 70%,transparent);border-radius:20px 10px 22px 8px / 10px 22px 8px 20px;filter:url(#crayon-rough)}
+html[data-skin=crayon] .btn{border:2px solid color-mix(in srgb,var(--ink) 55%,transparent)}
+html[data-skin=crayon] .btn.primary{border-color:transparent}
+html[data-skin=crayon] .msg.mine .bubble{background:#fff3a6;color:#3a3122;border:0;border-radius:3px;box-shadow:2px 4px 0 rgba(60,45,30,.18);transform:rotate(-.6deg)}
+html[data-skin=crayon][data-theme=dark] .msg.mine .bubble{background:#f6e27a}
+html[data-skin=crayon] .place.active,html[data-skin=crayon] .item.active{background:color-mix(in srgb,#ffd166 45%,transparent);box-shadow:none;border-radius:14px 6px 15px 5px / 6px 15px 5px 14px}
+html[data-skin=crayon] .composer .box2{border:2.5px dashed color-mix(in srgb,var(--ink) 40%,transparent);background:var(--panel);border-radius:18px 8px 20px 8px / 8px 20px 8px 18px}
+html[data-skin=crayon] .av.icon{background:transparent;border:2px solid color-mix(in srgb,var(--ink) 50%,transparent);color:var(--ink)}
+html[data-skin=crayon] .skin-fx::before,html[data-skin=crayon] .skin-fx::after{content:"";position:absolute;width:420px;height:420px;opacity:.55;background-repeat:no-repeat;background-size:contain}
+html[data-skin=crayon] .skin-fx::before{right:-60px;top:-40px;background-image:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22%3E%3Cg fill=%22none%22 stroke-linecap=%22round%22 stroke-width=%226%22%3E%3Cpath d=%22M30 120c20-40 60-70 110-60%22 stroke=%22%23ffb703%22/%3E%3Cpath d=%22M40 140c30-30 70-40 120-20%22 stroke=%22%2376b9ff%22/%3E%3Ccircle cx=%22150%22 cy=%2250%22 r=%2222%22 stroke=%22%23e4572e%22/%3E%3Cpath d=%22M150 18v-10M150 92v10M118 50h-10M182 50h10M128 28l-7-7M172 72l7 7M172 28l7-7M128 72l-7 7%22 stroke=%22%23e4572e%22/%3E%3C/g%3E%3C/svg%3E")}
+html[data-skin=crayon] .skin-fx::after{left:-80px;bottom:-90px;background-image:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22%3E%3Cg fill=%22none%22 stroke-linecap=%22round%22 stroke-width=%226%22%3E%3Cpath d=%22M20 160c20-10 30-40 60-40s40 30 70 20 30-40 40-50%22 stroke=%22%2352b788%22/%3E%3Cpath d=%22M30 185c40-15 80-10 150-25%22 stroke=%22%23c77dff%22/%3E%3Cpath d=%22M60 90l10-20 10 20-20-12h20z%22 stroke=%22%23ffb703%22/%3E%3C/g%3E%3C/svg%3E")}
+html[data-skin=crayon][data-theme=dark] .skin-fx::before,html[data-skin=crayon][data-theme=dark] .skin-fx::after{opacity:.35}
+
+/* --- Sakura: soft and round. Pill shapes, rose headings, petals drifting down. --- */
+html[data-skin=sakura]{--sans:"Segoe UI Variable Text","Nunito","SF Pro Rounded","Segoe UI",system-ui,sans-serif}
+html[data-skin=sakura] :is(.rail,.stage-main,.stage>.side){border-radius:30px;border-color:rgba(232,85,154,.22)}
+html[data-skin=sakura] :is(.btn,.place,.item,.kg-switch,.kg-switch button){border-radius:999px}
+html[data-skin=sakura] .composer .box2{border-radius:28px;border-color:rgba(232,85,154,.35)}
+html[data-skin=sakura] .msg.mine .bubble{border-radius:22px 22px 6px 22px;background:linear-gradient(135deg,rgba(255,154,201,.4),rgba(190,160,255,.3));border:0}
+html[data-skin=sakura] :is(.stage-head h1,.welcome h2,.rail-head strong){font-weight:700;color:var(--accent)}
+html[data-skin=sakura] .skin-fx i{position:absolute;top:-6%;width:14px;height:11px;border-radius:14px 0 14px 0;background:linear-gradient(135deg,#ffd1e6,#ff8fc0);opacity:.75;animation:petal linear infinite;will-change:transform}
+@keyframes petal{to{transform:translate3d(var(--dx),112vh,0) rotate(var(--turn))}}
+
+/* Less motion asked for: everything holds still. */
+@media (prefers-reduced-motion:reduce){.skin-fx,.skin-fx::before,.skin-fx::after,.skin-fx i{animation:none!important}.skin-fx i{display:none}}
+/* Let each world show through: lighter blur where the backdrop is the point, and Sakura's petals drift in front. */
+html[data-skin=cyberpunk]{--blur:blur(5px) saturate(140%)}
+html[data-skin=gojo]{--blur:blur(10px) saturate(150%)}
+html[data-skin=sakura] .skin-fx{z-index:60}
+html[data-skin=sakura] .skin-fx i{opacity:.55}
