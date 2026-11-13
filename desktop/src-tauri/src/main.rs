@@ -91,16 +91,84 @@ fn checkout() -> Option<PathBuf> {
         .find(|root| root.join("src").join("server.js").is_file())
 }
 
-// The installed app carries its own Node and server next to the executable and keeps data in %APPDATA%\Rex Desk.
-// A development build falls back to a checkout and the system Node.
+// Where the person's workspace lives is remembered in one small file outside the app, so a reinstall (or a new build that
+// would look in another folder) opens the same workspace instead of an empty one.
+fn pointer_file() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let home = std::env::var_os("USERPROFILE");
+    #[cfg(not(windows))]
+    let home = std::env::var_os("HOME");
+    home.map(|home| PathBuf::from(home).join(".rexdesk").join("data-folder.txt"))
+}
+
+fn saved_folder() -> Option<PathBuf> {
+    let text = fs::read_to_string(pointer_file()?).ok()?;
+    let line = text.lines().next()?.trim().trim_start_matches('\u{feff}');
+    if line.is_empty() { None } else { Some(PathBuf::from(line)) }
+}
+
+fn remember_folder(folder: &PathBuf) {
+    if let Some(file) = pointer_file() {
+        if let Some(parent) = file.parent() { let _ = fs::create_dir_all(parent); }
+        let _ = fs::write(file, folder.to_string_lossy().as_bytes());
+    }
+}
+
+fn holds_workspace(folder: &PathBuf) -> bool {
+    folder.join("accounts.json").is_file() || folder.join("desk.sqlite").is_file()
+}
+
+// A folder picker, shown once before anything opens. None when the person cancels.
+fn pick_folder(message: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    let mut command = {
+        let script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = $env:REX_PICK; $d.ShowNewFolderButton = $true; $f = New-Object System.Windows.Forms.Form; $f.TopMost = $true; if ($d.ShowDialog($f) -eq 'OK') { [Console]::Out.Write($d.SelectedPath) }";
+        let mut command = Command::new("powershell.exe");
+        command.args(["-NoProfile", "-STA", "-Command", script]);
+        command
+    };
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut command = Command::new("osascript");
+        command.args(["-e", "POSIX path of (choose folder with prompt (system attribute \"REX_PICK\"))"]);
+        command
+    };
+    let output = hidden(command.env("REX_PICK", message)).output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() { None } else { Some(PathBuf::from(text)) }
+}
+
+// Which folder holds the data: the remembered one; else the app's default folder when it already holds a workspace
+// (an upgrade); else, when `ask` is set, the person picks one (cancel keeps the default and starts a new workspace).
+fn choose_data(default: PathBuf, ask: bool) -> PathBuf {
+    let saved = saved_folder();
+    if let Some(saved) = &saved {
+        if saved.is_dir() || !ask { return saved.clone(); }
+    }
+    if saved.is_none() && holds_workspace(&default) {
+        remember_folder(&default);
+        return default;
+    }
+    if !ask { return default; }
+    let chosen = pick_folder("Where is your Rex Desk workspace? Pick the folder that holds it, or a new empty folder to start fresh. Cancel uses the default folder.").unwrap_or(default);
+    remember_folder(&chosen);
+    chosen
+}
+
+// The installed app carries its own Node and server next to the executable and keeps data in %APPDATA%\Rex Desk
+// unless the person picked another folder. A development build falls back to a checkout and the system Node.
 // On a Mac the payload sits in Contents/Resources, and the data in ~/Library/Application Support/Rex Desk.
 fn runtime() -> Option<Runtime> {
+    runtime_with(false)
+}
+
+fn runtime_with(ask: bool) -> Option<Runtime> {
     let exe = std::env::current_exe().ok()?;
     let folder = exe.parent()?;
     for beside in [folder.join("payload"), folder.join("..").join("Resources").join("payload")] {
         let (node, app) = (beside.join("node").join(NODE), beside.join("app"));
         if node.is_file() && app.join("src").join("server.js").is_file() {
-            return Some(Runtime { node, app, data: data_home(&beside), bundled: true });
+            return Some(Runtime { node, app, data: choose_data(data_home(&beside), ask), bundled: true });
         }
     }
     checkout().map(|root| Runtime { node: PathBuf::from("node"), data: root.join(".local"), app: root, bundled: false })
@@ -263,7 +331,7 @@ fn main() {
             let home = window.url().ok();
             thread::spawn(move || {
                 let fail = |message: String| { let _ = window.eval(&format!("showError({message:?})")); };
-                let Some(runtime) = runtime() else {
+                let Some(runtime) = runtime_with(true) else {
                     return fail("Rex Desk files are missing. Reinstall Rex Desk.".into());
                 };
                 if !server_running() {

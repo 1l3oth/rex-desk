@@ -53,13 +53,21 @@ async function api(endpoint, { method = 'GET', data } = {}) {
   return result;
 }
 let toastTimer;
-function toast(message, error = false) {
+function toast(message, error = false, fix = null) {
   const element = document.querySelector('#toast'); element.textContent = message;
+  if (fix) { const button = document.createElement('button'); button.type = 'button'; button.className = 'small primary'; button.style.marginLeft = '10px'; button.textContent = fix.label; button.onclick = () => { element.className = ''; fix.run(); }; element.append(button); }
   element.className = `show${error ? ' error' : ''}`; clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => element.className = '', error ? 9000 : 4500);
+  toastTimer = setTimeout(() => element.className = '', fix ? 20000 : error ? 9000 : 4500);
+}
+// One click opens the AI provider's own sign-in (the browser), so a missing or lost sign-in is fixed where it is reported.
+function signInFix(provider, profile) {
+  return { label: 'Sign in', run: () => action(async () => { await api('/api/agents/login', { method: 'POST', data: { provider, profile: profile || '' } }); toast(`${providerName(provider)} sign-in opened. Finish it in the window that appeared, then try again.`); }) };
 }
 async function action(callback) {
-  try { return await callback(); } catch (error) { toast(error.message, true); return undefined; }
+  try { return await callback(); } catch (error) {
+    const needsSignIn = /is not signed in/i.test(error.message), provider = ui.snapshot?.config?.provider || 'claude';
+    toast(error.message, true, needsSignIn ? signInFix(provider, selectedProfile(provider)?.profile) : null); return undefined;
+  }
 }
 // Jev's labels, used for the badges and the filters. Unrated issues always stay visible: a filter hides what Jev
 // answered, never what it has not seen yet.
@@ -1828,7 +1836,7 @@ else try {
   if (!ui.snapshot.config.sources.length && !ui.snapshot.tasks.length) navigate('setup');
   void loadAgents().then(() => {
     const agent = selectedProfile(ui.snapshot.config.provider);
-    if (agent && !agent.loggedIn && ui.page === 'inbox' && !ui.autoTour) { ui.autoTour = true; ui.setupOpen = 'agent'; navigate('setup'); toast(`${providerName(ui.snapshot.config.provider)} is not signed in for the selected profile. Choose a signed-in profile to run agents.`, true); }
+    if (agent && !agent.loggedIn && ui.page === 'inbox' && !ui.autoTour) { ui.autoTour = true; ui.setupOpen = 'agent'; navigate('setup'); toast(`${providerName(ui.snapshot.config.provider)} needs a sign-in.`, true, signInFix(ui.snapshot.config.provider, agent.profile)); }
   });
   const stream = new EventSource('/api/events');
   let timer;
