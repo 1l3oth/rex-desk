@@ -11,13 +11,13 @@ let live = null;
 // Drift: the same lights floating, pulled by their links. Everything: drifting, with every note of the vault.
 const FOCUS_NOTES = 70;
 const style = () => { try { const saved = localStorage.getItem('rex-knowledge-style'); return ['tree', 'focus', 'all'].includes(saved) ? saved : 'tree'; } catch { return 'tree'; } };
-const TREE_NOTES = 260;
+const TREE_NOTES = 200;
 
 function mount(host) {
   if (live?.host === host) return;
   live?.stop();
   host.innerHTML = `<canvas class="kg-canvas" aria-label="Knowledge graph"></canvas>
-    <div class="kg-top"><div class="kg-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="search" placeholder="Find in your knowledge" aria-label="Find in your knowledge"></div><div class="kg-style" role="tablist" aria-label="How much to show"><button type="button" role="tab" data-kg-style="tree">Tree</button><button type="button" role="tab" data-kg-style="focus">Drift</button><button type="button" role="tab" data-kg-style="all">Everything</button></div><span class="kg-count" role="status"></span><span class="kg-grow"></span><button type="button" class="kg-edit" data-action="kg-view" data-view="list" title="Add or remove what the agents know about you">Edit as a list</button></div>
+    <div class="kg-top"><div class="kg-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="search" placeholder="Find in your knowledge" aria-label="Find in your knowledge"></div><div class="kg-style" role="tablist" aria-label="How much to show"><button type="button" role="tab" data-kg-style="tree">Tree</button><button type="button" role="tab" data-kg-style="focus">Drift</button><button type="button" role="tab" data-kg-style="all">Everything</button></div><span class="kg-count" role="status">Reading your knowledge…</span><span class="kg-grow"></span><button type="button" class="kg-edit" data-action="kg-view" data-view="list" title="Add or remove what the agents know about you">Edit as a list</button></div>
     <div class="kg-legend"></div><aside class="kg-card" hidden></aside><div class="kg-hint">Drag the space to move · scroll to zoom · click a light to read it</div>`;
   const canvas = host.querySelector('canvas'), context = canvas.getContext('2d'), card = host.querySelector('.kg-card'), count = host.querySelector('.kg-count');
   const state = { host, nodes: [], links: [], positions: new Float32Array(0), shown: new Float32Array(0), near: [], view: { x: 0, y: 0, k: 0.9 }, target: { x: 0, y: 0, k: 0.9 }, hover: -1, picked: -1, drag: null, match: null, born: performance.now(), alive: true };
@@ -72,23 +72,34 @@ function mount(host) {
   function plant() {
     const total = state.nodes.length, parent = new Int32Array(total).fill(-1), depth = new Int32Array(total).fill(-1), kids = state.nodes.map(() => []), order = [];
     const root = Math.max(0, state.nodes.findIndex(node => node.kind === 'you')); depth[root] = 0; order.push(root);
-    for (let at = 0; at < order.length; at++) { const from = order[at]; for (const to of [...state.near[from]].sort((a, b) => state.nodes[b].size - state.nodes[a].size)) if (depth[to] < 0) { depth[to] = depth[from] + 1; parent[to] = from; kids[from].push(to); order.push(to); } }
-    // Groups of notes that link only to each other hang from the second brain by their most linked note, and grow on from there.
-    const trunk = state.nodes.findIndex(node => node.kind === 'brain'), stem = trunk >= 0 ? trunk : root;
-    for (const i of state.nodes.map((_, position) => position).sort((a, b) => state.nodes[b].degree - state.nodes[a].degree)) {
-      if (depth[i] >= 0) continue;
-      depth[i] = depth[stem] + 1; parent[i] = stem; kids[stem].push(i); order.push(i);
-      for (let at = order.length - 1; at < order.length; at++) { const from = order[at]; for (const to of state.near[from]) if (depth[to] < 0) { depth[to] = depth[from] + 1; parent[to] = from; kids[from].push(to); order.push(to); } }
+    const hang = (child, from) => { depth[child] = depth[from] + 1; parent[child] = from; kids[from].push(child); order.push(child); };
+    const isNote = i => state.nodes[i].kind === 'note', trunk = state.nodes.findIndex(node => node.kind === 'brain'), stem = trunk >= 0 ? trunk : root;
+    // Three calm rings. 1: what hangs from you (branches, projects, agents, the second brain). 2: what each of those carries,
+    // and the vault's main topics. 3: the other notes, each under the main topic it links to.
+    for (let at = 0; at < order.length; at++) { const from = order[at]; for (const to of [...state.near[from]].sort((a, b) => state.nodes[b].size - state.nodes[a].size)) if (depth[to] < 0 && !isNote(to)) hang(to, from); }
+    const notes = state.nodes.map((_, position) => position).filter(isNote).sort((a, b) => state.nodes[b].degree - state.nodes[a].degree);
+    const topics = notes.slice(0, Math.min(16, Math.max(4, Math.round(notes.length / 16))));
+    for (const topic of topics) hang(topic, stem);
+    const isTopic = new Set(topics);
+    for (const note of notes) {
+      if (depth[note] >= 0) continue;
+      // Under a project that names it, else under the most linked topic it touches, else under the topic with the fewest notes.
+      const project = state.near[note].find(other => state.nodes[other].kind === 'project');
+      const topic = state.near[note].filter(other => isTopic.has(other)).sort((a, b) => state.nodes[b].degree - state.nodes[a].degree)[0];
+      hang(note, project ?? topic ?? topics.slice().sort((a, b) => kids[a].length - kids[b].length)[0] ?? stem);
     }
+    for (let i = 0; i < total; i++) if (depth[i] < 0) hang(i, root);
     order.sort((a, b) => depth[a] - depth[b]);
     // A branch's share of the circle grows with what it carries, but slowly, so one huge branch does not squeeze the rest.
     const leaves = new Float32Array(total); for (let at = order.length - 1; at >= 0; at--) { const i = order[at]; leaves[i] = (kids[i].length ? Math.pow(kids[i].reduce((sum, kid) => sum + leaves[kid], 0), 0.82) : 1) + (state.nodes[i].size >= 8 ? 2.5 : 0); }
     const perRing = []; for (const i of order) perRing[depth[i]] = (perRing[depth[i]] || 0) + 1;
     const from = new Float32Array(total), to = new Float32Array(total); to[root] = 6.2832;
-    for (const i of order) { const whole = kids[i].reduce((sum, kid) => sum + leaves[kid], 0); let start = from[i]; for (const kid of kids[i]) { const share = (to[i] - from[i]) * leaves[kid] / whole; from[kid] = start; to[kid] = start + share; start += share; } }
+    // Around you every branch gets an even slice, the second brain a third of the circle; further out, slices follow what each branch carries.
+    const brainShare = trunk >= 0 && kids[root].includes(trunk) ? 0.4 : 0, evenRoot = kid => kid === trunk ? brainShare * (kids[root].length - 1) / (1 - brainShare || 1) : 1;
+    for (const i of order) { const weigh = kid => i === root ? evenRoot(kid) : leaves[kid], whole = kids[i].reduce((sum, kid) => sum + weigh(kid), 0); let start = from[i]; for (const kid of kids[i]) { const share = (to[i] - from[i]) * weigh(kid) / whole; from[kid] = start; to[kid] = start + share; start += share; } }
     // Each ring is far enough out for its most crowded branch to fit its lights side by side.
     const ring = [0];
-    for (let d = 1; d < perRing.length; d++) { let need = ring[d - 1] + 110; for (const i of order) if (depth[i] === d - 1 && kids[i].length > 1) need = Math.max(need, Math.min(ring[d - 1] + 230, kids[i].reduce((sum, kid) => sum + state.nodes[kid].size * 2 + 9, 0) / Math.max(0.05, to[i] - from[i]))); ring[d] = need; }
+    for (let d = 1; d < perRing.length; d++) { let need = d === 1 ? Math.max(170, kids[root].length * 46 / (6.2832 * (1 - brainShare))) : ring[d - 1] + 150; for (const i of order) if (depth[i] === d - 1 && kids[i].length > 1) need = Math.max(need, Math.min(ring[d - 1] + 230, kids[i].reduce((sum, kid) => sum + state.nodes[kid].size * 2 + 9, 0) / Math.max(0.05, to[i] - from[i]))); ring[d] = need; }
     const final = new Float32Array(total * 2);
     for (const i of order) { const middle = (from[i] + to[i]) / 2 - 1.5708; final[i * 2] = Math.cos(middle) * ring[depth[i]]; final[i * 2 + 1] = Math.sin(middle) * ring[depth[i]]; }
     const edges = []; for (const i of order) if (parent[i] >= 0) edges.push(parent[i], i);
