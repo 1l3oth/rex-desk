@@ -16,7 +16,7 @@ export function showUpdateCard(update) {
   let card = document.getElementById('update-card');
   const version = update?.ready ? update.available?.version : '', later = laterChoice();
   if (!version || (later.version === version && later.until > Date.now())) { card?.remove(); return; }
-  if (card?.dataset.version === version) return;
+  if (card?.dataset.version === version) { renderFoot(card, update); return; }
   card?.remove();
   const items = noteItems(update.available.notes);
   card = document.createElement('aside'); card.id = 'update-card'; card.dataset.version = version;
@@ -25,8 +25,7 @@ export function showUpdateCard(update) {
       <button type="button" class="uc-close" data-action="update-later" aria-label="Remind me later">${CLOSE}</button></header>
     <ul class="uc-notes"></ul><button type="button" class="uc-more" hidden></button>
     <p class="uc-error" role="alert" hidden></p>
-    <footer class="uc-foot"><p class="uc-hint">Rex Desk restarts and opens again in about a minute.</p>
-      <div class="uc-actions"><button type="button" class="btn quiet" data-action="update-later">Later</button><button type="button" class="btn primary" data-action="update-install">Update now</button></div></footer>`;
+    <footer class="uc-foot"></footer>`;
   card.querySelector('h2').textContent = `Rex Desk ${version} is ready`;
   card.querySelector('.uc-meta').textContent = update.current ? `Downloaded and verified · you have ${update.current}` : 'Downloaded and verified';
   const list = card.querySelector('.uc-notes'), more = card.querySelector('.uc-more');
@@ -36,7 +35,32 @@ export function showUpdateCard(update) {
     more.hidden = false; more.textContent = `Show all ${items.length} changes`;
     more.onclick = () => { for (const item of list.children) item.hidden = false; more.remove(); };
   }
+  renderFoot(card, update);
   document.body.append(card);
+}
+
+const who = names => names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
+// The bottom of the card follows what is going on: free to update, agents working (updating would cut them off), or
+// waiting for them to finish. Only this part redraws, so an expanded list of changes stays open.
+function renderFoot(card, update) {
+  const busy = update.busy || [], key = `${busy.join('|')}#${update.whenIdle ? 1 : 0}`, foot = card.querySelector('.uc-foot');
+  if (foot.dataset.key === key) return; foot.dataset.key = key;
+  const one = busy.length === 1;
+  const [hint, actions] = update.whenIdle && busy.length
+    ? [`<span class="uc-wait" aria-hidden="true"></span>Installs by itself when ${esc(who(busy))} ${one ? 'finishes' : 'finish'}.`, '<button type="button" class="btn quiet" data-action="update-cancel">Don’t wait</button>']
+    : busy.length
+      ? [`${esc(who(busy))} ${one ? 'is' : 'are'} working. Updating restarts Rex Desk and would cut ${one ? 'it' : 'them'} off.`, `<button type="button" class="btn quiet" data-action="update-later">Later</button><button type="button" class="btn primary" data-action="update-when-idle">Update when ${one ? 'it finishes' : 'they finish'}</button>`]
+      : ['Rex Desk restarts and opens again in about a minute.', '<button type="button" class="btn quiet" data-action="update-later">Later</button><button type="button" class="btn primary" data-action="update-install">Update now</button>'];
+  foot.innerHTML = `<p class="uc-hint">${hint}</p><div class="uc-actions">${actions}</div>`;
+}
+const esc = text => String(text).replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
+
+// "Update when it finishes" (or cancel it): the server installs by itself once no agent is working.
+export async function updateWhenIdle(api, wait = true) {
+  const card = document.getElementById('update-card'), error = card?.querySelector('.uc-error');
+  if (error) error.hidden = true;
+  try { await api('/update/install', { method: 'POST', data: wait ? { whenIdle: true } : { cancel: true } }); }
+  catch (failure) { if (error) { error.textContent = failure.message; error.hidden = false; } }
 }
 
 export function updateLater() {

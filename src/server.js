@@ -121,6 +121,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   const anywhere = anywhereFactory ? anywhereFactory() : new Anywhere({ root, dataRoot });
   const clients = new Set();
   const notify = () => { for (const client of clients) client.write('event: change\ndata: {}\n\n'); };
+  // updateWhenIdle: the person chose "Update when it finishes"; the update installs once no agent is working.
+  let updateWhenIdle = false;
   let restartWanted = false, session = null, address = '', tursoPending = null, tursoFound = null, accountPending = null, accountFound = null;
   // The Rex Desk account service (tests pass a pretend one).
   const accountOptions = { ...(accountFetcher ? { fetcher: accountFetcher } : {}), ...(accountApi ? { base: accountApi } : {}) };
@@ -271,6 +273,19 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   let opening = Promise.resolve();
   if (!accounts) await openSession(null, null);
   else opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; });
+  // Agents working right now, by name: an update restarts Rex Desk and would cut them off.
+  function busyAgents(store) {
+    if (!store) return [];
+    const names = store.list('run').filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state))
+      .map(run => { const id = run.roomAgent || run.specialistId; return (id && id !== 'main' ? store.get('specialist', id)?.name : '') || (run.main || run.role === 'coordinator' ? 'Rex Agent' : run.title) || 'An agent'; });
+    return [...new Set(names)];
+  }
+  function installNow() {
+    updateWhenIdle = false;
+    updates.install(process.pid);
+    // The helper waits for this process to exit before the installer replaces its files.
+    setTimeout(() => void handle.close().finally(() => process.exit(0)), 300);
+  }
   const handler = async (request, response) => {
     await opening;
     response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -359,7 +374,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (input.action === 'remove') return json(response, 200, desk.peers.remove(input.id));
         throw new Error('Unknown action.');
       }
-      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: updates.status(), account: { email: session.email, role: role() }, code: codeVersion() }); }
+      if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: { ...updates.status(), whenIdle: updateWhenIdle, busy: busyAgents(store) }, account: { email: session.email, role: role() }, code: codeVersion() }); }
       // One-click cloud backup: start opens Turso's sign-in page in the browser; finish waits for it, makes the database and connects it.
       if (url.pathname === '/api/database/turso-start' && request.method === 'POST') { tursoPending?.cancel(); tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
       if (url.pathname === '/api/database/turso-finish' && request.method === 'POST') {
@@ -483,12 +498,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
       if (url.pathname === '/api/update/check' && request.method === 'POST') return json(response, 200, await updates.check());
       if (url.pathname === '/api/update/install' && request.method === 'POST') {
-        const busy = store.list('run').filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state)).length;
-        if (busy) throw new Error(`${busy} agent run${busy === 1 ? ' is' : 's are'} still active. Stop or finish them before updating.`);
-        updates.install(process.pid);
-        json(response, 200, { restarting: true });
-        // The helper waits for this process to exit before the installer replaces its files.
-        setTimeout(() => void handle.close().finally(() => process.exit(0)), 300); return;
+        const input = await body(request), busy = busyAgents(store);
+        if (input.cancel) { updateWhenIdle = false; notify(); return json(response, 200, { whenIdle: false }); }
+        if (busy.length) {
+          // Installing restarts Rex Desk and would cut the working agents off: it can wait for them instead.
+          if (input.whenIdle) { updateWhenIdle = true; notify(); return json(response, 200, { whenIdle: true, busy }); }
+          throw new Error(`${busy.join(', ')} ${busy.length === 1 ? 'is' : 'are'} still working. Update when ${busy.length === 1 ? 'it finishes' : 'they finish'}, or stop ${busy.length === 1 ? 'it' : 'them'} first.`);
+        }
+        installNow(); return json(response, 200, { restarting: true });
       }
       if (url.pathname === '/api/autostart' && request.method === 'GET') return json(response, 200, autostartStatus());
       if (url.pathname === '/api/autostart' && request.method === 'POST') return json(response, 200, await setAutostart(Boolean((await body(request)).enabled), root));
@@ -865,6 +882,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   const timer = setInterval(() => {
     if (!session) { awake.set(false); return; }
     const { store, desk } = session;
+    // "Update when it finishes": the last agent is done, so the update goes in now.
+    if (updateWhenIdle && updates.state.ready && !busyAgents(store).length && !(desk.live?.size > 0)) { try { installNow(); } catch (error) { updateWhenIdle = false; store.event('', 'update-error', { message: error.message }, true); notify(); } return; }
     const minutes = store.config().syncMinutes;
     if (minutes && Date.now() - lastSync >= minutes * 60000 && !desk.sources.syncing) {
       lastSync = Date.now(); void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
