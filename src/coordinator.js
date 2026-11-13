@@ -206,7 +206,8 @@ export class Desk {
   // When a turn stops because the account hit its usage limit, Rex Desk moves to another signed-in account and continues
   // the same conversation there (both accounts share their history folder), unless the person turned this off.
   async switchIfLimited(runId, message = '') {
-    const run = this.store.get('run', runId); if (!run || run.provider !== 'claude') return false;
+    const run = this.store.get('run', runId), provider = run?.provider || 'claude'; if (!run || !['claude', 'codex'].includes(provider)) return false;
+    const title = providerTitle(provider);
     const since = Date.parse(run.turnStartedAt || 0) || 0;
     // Only Claude's own limit notice counts: a rejected rate-limit report, an error, or a short reply that is nothing but the
     // notice ("Claude AI usage limit reached…"). An agent writing about limits (another service's quota, say) is not one.
@@ -215,17 +216,19 @@ export class Desk {
     const hit = message || (rejected ? 'Claude usage limit reached.' : '') || recent.filter(event => event.kind === 'error' || (['agent-text', 'agent-result'].includes(event.kind) && String(event.text || event.result || '').length <= 240))
       .map(event => String(event.text || event.message || event.result || '')).find(text => LIMIT.test(text));
     if (!hit) return false;
-    const pinned = this.accountFor(run), current = pinned || this.agents.selected('claude');
+    const pinned = this.accountFor(run), current = pinned || this.agents.selected(provider);
     this.agents.markLimited(current);
-    if (this.store.get('accounts', 'auto')?.off) { this.store.event(runId, 'account-limit', { text: 'This Claude account hit its usage limit. Switch accounts at the bottom left, then continue.' }, true); return false; }
+    if (this.store.get('accounts', 'auto')?.off) { this.store.event(runId, 'account-limit', { text: `This ${title} account hit its usage limit. Switch accounts at the bottom left, then continue.` }, true); return false; }
     if (run.accountSwitchedAt && Date.now() - Date.parse(run.accountSwitchedAt) < 120000) return false;
-    const next = await this.agents.alternative('claude', current);
-    if (!next) { this.store.event(runId, 'account-limit', { text: 'Every signed-in Claude account has hit its usage limit. The run continues when you send a message after one resets.' }, true); return false; }
+    const next = await this.agents.alternative(provider, current);
+    if (!next) { this.store.event(runId, 'account-limit', { text: `Every signed-in ${title} account has hit its usage limit. The run continues when you send a message after one resets.` }, true); return false; }
     const owner = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
     if (pinned && owner) this.store.put('specialist', owner, { ...this.store.get('specialist', owner), profile: next.profile });
-    else this.store.saveConfig({ ...this.store.publicConfig(), agentProfiles: { ...this.store.config().agentProfiles, claude: next.profile } });
-    this.agents.invalidate('claude');
-    this.store.event(runId, 'account-switched', { text: `Claude account hit its usage limit. Switched to ${next.account || next.label}${next.plan ? ` (${next.plan})` : ''} and continuing.` }, true);
+    else this.store.saveConfig({ ...this.store.publicConfig(), agentProfiles: { ...this.store.config().agentProfiles, [provider]: next.profile } });
+    this.agents.invalidate(provider);
+    this.store.event(runId, 'account-switched', { text: `${title} account hit its usage limit. Switched to ${next.account || next.label}${next.plan ? ` (${next.plan})` : ''} and continuing.` }, true);
+    // Only Claude accounts share their conversation history; Codex keeps it per account, so the chat moves over as a handoff.
+    if (provider !== 'claude') { this.live.delete(runId); await this.freshStart(runId, { reason: `because the ${title} account hit its usage limit and the chat moved to another account`, notice: `Moved to another ${title} account. It continues with a handoff of this chat.` }); }
     this.patchRun(runId, { accountSwitchedAt: now(), state: 'queued', queued: [], followUp: 'You were cut off by a usage limit. Continue exactly where you left off.' });
     this.live.delete(runId); void this.drain(); return true;
   }

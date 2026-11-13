@@ -55,3 +55,19 @@ test('an agent moved to another Claude account takes its conversation along', as
   assert.equal(carrySession('missing', cwd, second, { profiles }), false);
   assert.ok(!existsSync(pathModule.join(second, 'projects', folder, 'missing.jsonl')));
 });
+
+test('a Codex turn cut off by a usage limit moves to another signed-in Codex account and continues with a handoff', async () => {
+  const store = new Store(temporary('acct-codex')), turns = [];
+  const desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'),
+    runnerFactory: options => ({ start: async prompt => { turns.push({ env: options.agentEnv.CODEX_HOME || '', prompt }); if (turns.length === 1) options.event('agent-text', { text: "You've hit your usage limit. Try again later." }); else options.event('agent-text', { text: 'Done.' }); }, interrupt() {}, close() {} }) });
+  const first = temporary('codex1'), second = temporary('codex2');
+  store.saveConfig({ ...store.publicConfig(), provider: 'codex', agentProfiles: { codex: first } });
+  desk.agents.alternative = async (provider, current) => provider === 'codex' && current === first ? { profile: second, label: 'codex2', account: 'second@example.com', plan: 'plus' } : null;
+  const run = await desk.startMain({ prompt: 'Hello', provider: 'codex' });
+  const waitFor = async predicate => { for (let attempt = 0; attempt < 200; attempt++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 25)); } throw new Error('timed out'); };
+  await waitFor(() => turns.length >= 2 && desk.run(run.id).state === 'finished');
+  assert.equal(store.config().agentProfiles.codex, second);
+  assert.match(turns[1].env, /codex2/);
+  assert.ok(store.events(run.id, { limit: 50 }).some(event => event.kind === 'account-switched' && /Codex/.test(event.text) && /second@example\.com/.test(event.text)));
+  desk.closed = true;
+});
