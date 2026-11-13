@@ -54,7 +54,10 @@ function upload(out, manifest) {
   if (!bucket) throw new Error('Set RELEASE_S3_BUCKET (and AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY; RELEASE_S3_ENDPOINT for R2) to upload.');
   const endpoint = process.env.RELEASE_S3_ENDPOINT ? ['--endpoint-url', process.env.RELEASE_S3_ENDPOINT] : [];
   // R2 has one region called "auto" and rejects the extra checksums newer AWS CLIs send by default.
-  const env = { ...process.env, AWS_DEFAULT_REGION: process.env.RELEASE_S3_REGION || process.env.AWS_DEFAULT_REGION || 'auto',
+  // Each installer goes up in one piece: R2 now and then loses a part of a file sent in parallel pieces, and the whole upload fails.
+  const settings = path.join(mkdtempSync(path.join(os.tmpdir(), 'rex-desk-aws-')), 'config');
+  writeFileSync(settings, ['[default]', 's3 =', '  multipart_threshold = 4GB', ''].join('\n'));
+  const env = { ...process.env, AWS_CONFIG_FILE: settings, AWS_DEFAULT_REGION: process.env.RELEASE_S3_REGION || process.env.AWS_DEFAULT_REGION || 'auto',
     AWS_REQUEST_CHECKSUM_CALCULATION: 'when_required', AWS_RESPONSE_CHECKSUM_VALIDATION: 'when_required' };
   const aws = args => execFileSync('aws', ['s3', ...args, ...endpoint], { stdio: 'inherit', env });
   // Installers first, pointer last: an app that reads the pointer always finds the file it names.
