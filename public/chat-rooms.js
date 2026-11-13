@@ -48,7 +48,7 @@ export function roomStage(ctx) {
   const chip = member => `<span class="chip member ${esc(member.state)}"><button class="member-open" data-open="${member.runId ? 'run' : 'specialist'}" data-id="${esc(member.runId || member.id)}" title="Open ${esc(member.name)}"><span class="dot ${dotFor(member.state)}"></span><strong>${esc(member.name)}</strong><span class="mlabel">${esc(member.label)}</span></button><button class="btn small x" data-action="room-remove" data-id="${esc(member.id)}" title="Remove from the room">×</button></span>`;
   const awayBanner = room.away?.on ? `<div class="away-banner"><span class="dot working"></span><span><b>Away mode</b> · the agents keep working${room.away.goal ? ` on ${esc(room.away.goal)}` : ''} · ${room.away.every === 'auto' ? `next check-in in about ${room.away.nextMinutes || 30} min (auto)` : `check-in every ${room.away.every} min`}${room.away.until ? ` · until ${esc(new Date(room.away.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}` : ' · until you are back'}. Write here to end it.</span></div>` : '';
   return { title: room.name, meta: `${room.members.length} agents`, feedClass: 'room', banner: awayBanner,
-    composer: { placeholder: 'Message the room (Rex Agent answers unless you @mention someone)…', mentions: handles, noPickers: true },
+    composer: { placeholder: 'Message the room (Rex Agent answers unless you @mention someone)…', mentions: handles, noPickers: true, foot: `<span class="agents-pop-host"><button type="button" class="btn small agents-btn" data-action="agents-pop" aria-haspopup="true" title="Each agent's AI and model">AI · Model <span aria-hidden="true">▴</span></button><div class="agents-pop" id="agents-pop" role="dialog" aria-label="Agents" ${ui.agentsPop ? '' : 'hidden'}>${ui.agentsPop ? roomAgentsHtml(ctx, room) : ''}</div></span>` },
     side: ui.infoOpen === false ? '' : roomSideHtml(ctx, room), sideClass: 'info',
     actions: `${room.away?.on ? '<button class="btn small away-on" data-action="away-stop">Away mode on · Stop</button>' : '<button class="btn small" data-action="away-start" title="Let the agents keep working while you are away">Away mode</button>'} ${ui.infoOpen === false ? '<button class="btn small" data-action="info-toggle">Info</button>' : ''}`,
     members: ui.infoOpen !== false ? '' : `<div class="members">${room.members.map(chip).join('')}${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: 'Add an agent to this room', placeholder: '+ Add agent', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || 'Idle'}` })) }) : ''}</div>`,
@@ -107,9 +107,9 @@ function activityHtml(ctx, room) {
 // Two tabs, like a messenger's chat info: Chat info (members, and the media, files and links shared here) and Activity (what the agents are doing).
 function roomSideHtml(ctx, room) {
   const trees = chatWorktrees(ctx.ui, { roomId: room.id });
-  const tab = ['activity', 'worktrees', 'agents'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
+  const tab = ['activity', 'worktrees'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
   const close = '<button type="button" class="side-x" data-action="info-toggle" aria-label="Close the side panel" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
-  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'agents' ? 'on' : ''}" data-action="side-tab" data-tab="agents">Agents</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'agents' ? roomAgentsHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : activityHtml(ctx, room)}`;
+  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : activityHtml(ctx, room)}`;
 }
 // The Agents tab: each member's AI and model, changed right here. Saved at once on the agent itself, so it holds in every chat.
 const AIS = [{ value: 'claude', label: 'Claude Code', hint: 'Claude subscription' }, { value: 'codex', label: 'Codex', hint: 'ChatGPT subscription' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }];
@@ -282,7 +282,8 @@ export function initRoomInfo(ctx) {
       } catch (error) { toast(error.message, true); }
     }
   });
-  // The Agents tab: an AI or model picked for a member is saved on that agent at once.
+  document.addEventListener('click', event => { if (ctx.ui.agentsPop && !event.target.closest('.agents-pop-host, .pop')) { ctx.ui.agentsPop = false; fillAgentsPop(ctx); } });
+  // The agents popup: an AI or model picked for a member is saved on that agent at once.
   document.addEventListener('change', async event => {
     const match = /^ra-(provider|model)-(.+)$/.exec(event.target.id || ''); if (!match) return;
     const [, field, id] = match, agent = id === 'main' ? ctx.ui.snap.mainAgent : (ctx.ui.snap.specialists || []).find(item => item.id === id); if (!agent) return;
@@ -291,15 +292,21 @@ export function initRoomInfo(ctx) {
       await ctx.api(`/specialists/${id}`, { method: 'PUT', data: field === 'provider' ? { provider: event.target.value } : { model: event.target.value } });
       delete ctx.ui.picks?.[`ra-provider-${id}`]; delete ctx.ui.picks?.[`ra-model-${id}`];
       ctx.toast(field === 'provider' ? `${agent.name} now runs on ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : 'Claude Code'}.` : `${agent.name}'s model saved.`);
-      await ctx.refresh({ full: true });
+      await ctx.refresh({ full: true }); fillAgentsPop(ctx);
     } catch (error) { ctx.toast(error.message, true); }
   });
   document.addEventListener('keydown', event => { if (event.target.id === 'room-name' && event.key === 'Enter') { event.preventDefault(); event.target.blur(); } });
 }
 
 // ---------- actions ----------
+// The AI and model of each member, in a popup above the message box. Filled when it opens, and again after a change is saved.
+function fillAgentsPop(ctx) {
+  const pop = document.getElementById('agents-pop'), room = (ctx.ui.snap.rooms || []).find(item => item.id === ctx.ui.view.id); if (!pop || !room) return;
+  pop.hidden = !ctx.ui.agentsPop; pop.innerHTML = ctx.ui.agentsPop ? roomAgentsHtml(ctx, room) : '';
+}
 export async function roomAction(ctx, action, target) {
   const { ui, api, toast, refresh } = ctx;
+  if (action === 'agents-pop') { ui.agentsPop = !ui.agentsPop; fillAgentsPop(ctx); return; }
   if (action === 'side-tab') { ui.sideTab = target.dataset.tab; ctx.render(); return; }
   if (action === 'room-shared') { ui.roomShared = target.dataset.tab; ctx.render(); return; }
   if (action === 'info-toggle') { ui.infoOpen = ui.infoOpen === false; ctx.render(); return; }

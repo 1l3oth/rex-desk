@@ -443,7 +443,7 @@ document.addEventListener('click', async event => {
     else if (action === 'chat-to-room') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id), agent = personalAgent(run); if (agent) openRoomDialog(ctx, { id: agent.id, name: agent.name }); }
     else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
     else if (action === 'term-open') { ui.termOpen = true; renderAll(); }
-    else if (['room-shared', 'room-stop', 'room-remove', 'task-assign', 'info-toggle', 'room-image', 'room-delete', 'side-tab'].includes(action)) await roomAction(ctx, action, target);
+    else if (['room-shared', 'room-stop', 'room-remove', 'task-assign', 'info-toggle', 'room-image', 'room-delete', 'side-tab', 'agents-pop'].includes(action)) await roomAction(ctx, action, target);
     else if (action?.startsWith('dev-')) await devicesAction(ctx, action, target);
     else if (action?.startsWith('mo-')) await monitorAction(ctx, action, target);
     else if (action?.startsWith('nt-')) await noticesAction(ctx, action, target);

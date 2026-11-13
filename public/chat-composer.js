@@ -59,7 +59,7 @@ export function composerHtml(ctx, model) {
       <button class="send-btn" data-action="send" aria-label="Send" title="Send">${ICON.up}</button>
       <input type="file" id="file-input" multiple hidden>
     </div>
-    <div class="foot"><span class="hint">Type / for commands · hold Space to talk${model.composer.mentions?.length ? ' · @ to mention · # for a task' : ''}</span><span class="spacer"></span>
+    <div class="foot"><span class="hint">Type / for commands · hold Space to talk${model.composer.mentions?.length ? ' · @ to mention · # for a task' : ''}</span><span class="spacer"></span>${model.composer.foot || ''}
       ${model.composer.noPickers ? '' : `${optionPickers(ctx)}
       ${contextRing(ctx, working)}`}</div>
   </div></div>`;
