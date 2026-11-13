@@ -15,9 +15,6 @@ const readLine = file => { try { return readFileSync(file, 'utf8').split(/\r?\n/
 const inside = (child, parent) => { const relative = path.relative(parent, child); return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative)); };
 const holdsWorkspace = folder => existsSync(path.join(folder, 'desk.sqlite')) || existsSync(path.join(folder, 'accounts.json'));
 
-// For a new person, files start in their Downloads folder, where they look for things they saved.
-export const defaultMediaFolder = (home = os.homedir()) => path.join(home, 'Downloads', 'Rex Desk');
-
 // The AI memory folder: an override from the environment, else the folder it was moved to, else ~/.rexdesk.
 export function memoryFolder(env = process.env, home = os.homedir()) {
   if (env.REX_DESK_MEMORY) return path.resolve(env.REX_DESK_MEMORY);
@@ -132,5 +129,5 @@ export function folderStatus({ dataRoot, store, memory }) {
   const failed = (() => { try { return JSON.parse(readFileSync(path.join(dataRoot, 'move-pending.failed.json'), 'utf8')).error; } catch { return ''; } })();
   const memoryPending = (() => { try { return JSON.parse(readFileSync(path.join(pointerHome(), 'memory-move.json'), 'utf8')).to; } catch { return ''; } })();
   return { data: dataRoot, dataPending: pending, dataFailed: failed, memory, memoryPending, files: store.config().mediaDirectory || store.directory,
-    filesInData: !store.config().mediaDirectory, suggestedFiles: defaultMediaFolder() };
+    filesInData: !store.config().mediaDirectory };
 }

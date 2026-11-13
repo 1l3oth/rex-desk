@@ -16,8 +16,8 @@ export function foldersHtml({ esc }, state) {
   return `<div class="st-folders">${ROWS.map(([kind, label, help, when]) => `<div class="st-folder"><div class="st-folder-text"><b>${label}</b><small>${help}</small><code>${esc(folders[kind])}</code>
       ${pending[kind] ? `<small class="st-folder-note">Moves to ${esc(pending[kind])} when Rex Desk restarts.</small>` : ''}
       ${kind === 'data' && folders.dataFailed ? `<small class="error-text">The last move did not happen: ${esc(folders.dataFailed)}</small>` : ''}
-      ${kind === 'files' && folders.filesInData ? `<small class="st-folder-note">Kept inside the data folder. Most people keep these in ${esc(folders.suggestedFiles)}.</small>` : ''}</div>
-    <div class="st-folder-actions"><button type="button" class="btn small quiet" data-fd-open="${kind}">Open</button>${when === 'fixed' ? '' : `<button type="button" class="btn small" data-fd-change="${kind}" data-fd-when="${when}" title="Copies everything to a folder you pick, then uses it. The old folder stays as a backup.">Move…</button>`}${kind === 'files' && folders.filesInData ? '<button type="button" class="btn small primary" data-fd-downloads>Move to Downloads</button>' : ''}</div></div>`).join('')}</div>`;
+      ${kind === 'files' && folders.filesInData ? `<small class="st-folder-note">Kept with your Rex Desk data, so they are backed up with it.</small>` : ''}</div>
+    <div class="st-folder-actions"><button type="button" class="btn small quiet" data-fd-open="${kind}">Open</button>${when === 'fixed' ? '' : `<button type="button" class="btn small" data-fd-change="${kind}" data-fd-when="${when}" title="Copies everything to a folder you pick, then uses it. The old folder stays as a backup.">Move…</button>`}</div></div>`).join('')}</div>`;
 }
 
 // Clicks on the folder rows. Returns true when it handled the click.
@@ -25,7 +25,6 @@ export async function folderClick(ctx, state, target, draw) {
   const { api, toast } = ctx;
   const open = target.closest('[data-fd-open]');
   if (open) { await api('/folders/open', { method: 'POST', data: { kind: open.dataset.fdOpen } }); return true; }
-  if (target.closest('[data-fd-downloads]')) { state.folders = await api('/folders/files', { method: 'POST', data: { to: state.folders.suggestedFiles } }); toast(`Files from agents moved to ${state.folders.files}.`); draw(); return true; }
   const change = target.closest('[data-fd-change]');
   if (!change) return false;
   const kind = change.dataset.fdChange, label = ROWS.find(([id]) => id === kind)[1];

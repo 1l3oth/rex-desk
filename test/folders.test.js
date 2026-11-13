@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
-import { checkTarget, planDataMove, followDataMove, planMemoryMove, followMemoryMove, memoryFolder, moveMedia, defaultMediaFolder } from '../src/folders.js';
+import { checkTarget, planDataMove, followDataMove, planMemoryMove, followMemoryMove, memoryFolder, moveMedia } from '../src/folders.js';
 
 const temp = () => mkdtempSync(path.join(os.tmpdir(), 'rex-folders-'));
 
@@ -60,6 +60,5 @@ test('files from agents move at once, and new files go to the new folder', () =>
   assert.equal(readFileSync(path.join(to, 'artifacts', 'run-1', 'shot.png'), 'utf8'), 'png');
   assert.ok(!existsSync(path.join(store.directory, 'artifacts', 'run-1', 'shot.png')), 'The old copy is removed');
   assert.equal(store.media('uploads'), path.join(to, 'uploads'));
-  assert.equal(defaultMediaFolder('C:\\Users\\rex'), path.join('C:\\Users\\rex', 'Downloads', 'Rex Desk'));
   store.close?.();
 });

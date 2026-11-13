@@ -38,7 +38,7 @@ import { Commander } from './command.js';
 import { Awake } from './awake.js';
 import { scanRoots } from './placement.js';
 import { tursoSignIn, provisionDatabase } from './turso-setup.js';
-import { followDataMove, followMemoryMove, planDataMove, moveMedia, folderStatus, defaultMediaFolder, memoryFolder } from './folders.js';
+import { followDataMove, followMemoryMove, planDataMove, moveMedia, folderStatus, memoryFolder } from './folders.js';
 import { readdirSync } from 'node:fs';
 import { accountSignIn, accountDatabase, accountMe, accountReachable } from './rexdesk-account.js';
 
@@ -134,9 +134,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       env: () => desk.agents.environment(store.config().provider), cwd: path.join(store.directory, 'coordinator'), webTask: text => desk.startWebTask(text) });
     // The real app (not tests) scans this computer's checkouts for Jev and catches up with tracker moves made while it was off.
     if (catchUp) {
-      // A new workspace keeps files from agents (screenshots, recordings, attachments) in Downloads\Rex Desk, where people look.
-      // Workspaces made before keep theirs where they are.
-      try { if (!store.config().mediaDirectory && !store.list('run').length && !readdirSync(path.join(store.directory, 'artifacts')).length) store.saveConfig({ ...store.publicConfig(), mediaDirectory: defaultMediaFolder() }); } catch (error) { store.event('', 'folders-error', { message: error.message }); }
+      // Files from agents (screenshots, recordings, attachments) stay in the data folder unless the person moves them: they are
+      // important, and Downloads is a folder people clear out.
       void desk.scanRepositories().catch(error => store.event('', 'repository-scan-error', { message: error.message }));
       if (store.config().sources.length) void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
     }
