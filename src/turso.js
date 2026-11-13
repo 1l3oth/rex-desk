@@ -179,7 +179,7 @@ export class TursoSync {
       after = Number(page.rows.at(-1).sequence);
     }
   }
-  async pullLatest() {
+  async pullLatest({ live = new Set() } = {}) {
     await this.flush();
     if (this.state !== 'connected' || this.status().pending) return { pulled: false, reason: this.error || 'Local changes are still uploading.' };
     const records = { rows: await this.cloudRecords() };
@@ -196,7 +196,9 @@ export class TursoSync {
       for (const row of events.rows) event.run(Number(row.sequence), row.run_id, row.kind, Number(row.visible), row.value, row.created_at);
     });
     this.store.token = this.store.decrypt(this.store.get('secret', 'mcp-token'));
-    for (const run of this.store.list('run')) if (['running', 'queued', 'waiting', 'starting', 'verifying'].includes(run.state)) this.store.put('run', run.id, { ...run, state: 'interrupted', error: 'Opened on another computer. Resume this run explicitly.' });
+    // A chat still working on this computer (its agent process is alive) keeps going; only what stopped elsewhere is interrupted.
+    const alive = pid => { if (!pid) return false; try { process.kill(Number(pid), 0); return true; } catch { return false; } };
+    for (const run of this.store.list('run')) if (['running', 'queued', 'waiting', 'starting', 'verifying'].includes(run.state) && !live.has(run.id) && !alive(run.host?.pid)) this.store.put('run', run.id, { ...run, state: 'interrupted', error: 'Opened on another computer. Resume this run explicitly.' });
     this.notify(); return { pulled: true, records: records.rows.length, events: events.rows.length };
   }
   async restoreIfAvailable() {

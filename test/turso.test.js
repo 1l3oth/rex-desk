@@ -199,3 +199,17 @@ test('the cloud check passes when another computer added its own chats, and uplo
   assert.ok(turso.remote.prepare("SELECT 1 FROM rex_records WHERE workspace=? AND id='here'").get(workspace));
   await store.cloud.close(); store.close();
 });
+
+test('signing in again leaves a chat that is still working on this computer running', async () => {
+  const turso = fakeTurso(); turso.network.online = true;
+  const store = new Store(temporary('pull-live'));
+  store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await store.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' });
+  store.put('run', 'working', { id: 'working', state: 'running', host: { pid: process.pid } });
+  store.put('run', 'gone', { id: 'gone', state: 'running' });
+  await store.cloud.flush();
+  await store.cloud.pullLatest();
+  assert.equal(store.get('run', 'working').state, 'running');
+  assert.equal(store.get('run', 'gone').state, 'interrupted');
+  await store.cloud.close(); store.close();
+});

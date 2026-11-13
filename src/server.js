@@ -128,7 +128,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
       if (staySignedIn) await accounts.remember(entry.id, vaultKey).catch(error => { session.staySignedIn = false; console.error(`Stay signed in failed: ${error.message}`); });
       // Bring this computer up to date before anyone works: upload leftovers, then take the newest cloud copy.
       const status = await store.cloud.open();
-      if (status.state === 'connected' && !store.fresh) session.cloud = await store.cloud.pullLatest().catch(error => ({ pulled: false, reason: error.message }));
+      if (status.state === 'connected' && !store.fresh) session.cloud = await store.cloud.pullLatest({ live: new Set(desk.live?.keys?.() || []) }).catch(error => ({ pulled: false, reason: error.message }));
       else if (store.cloud.enabled) session.cloud = { pulled: false, reason: status.error || 'Cloud backup is offline; working from this computer’s copy.' };
     } else void store.cloud.open();
     notify(); return session;
