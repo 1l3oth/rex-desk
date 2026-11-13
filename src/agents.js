@@ -1,5 +1,5 @@
 import { AI_PROVIDERS, aiProvider, providerTitle, profileKey } from './codex.js';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -179,6 +179,8 @@ export class AgentProfiles {
   login(provider, profile) {
     const executable = cli(provider), env = profileEnvironment(provider, profile);
     if (provider === 'gemini' && executable.command === 'agy' && process.platform === 'win32') throw new Error('The Antigravity CLI (agy) is not installed on this computer. Install it with: winget install Google.AntigravityCLI');
+    // Codex keeps the saved account when it is asked to log in again, so a person who changed plan or account must be signed out first.
+    if (provider === 'codex') { try { execFileSync(executable.command, [...executable.args, 'logout'], { env, windowsHide: true, timeout: 15000, stdio: 'ignore' }); } catch {} }
     const child = spawn(executable.command, [...executable.args, ...loginArgs[provider]], { env, windowsHide: false, detached: true, stdio: 'ignore' });
     // A sign-in program that is not installed must never stop Rex Desk: the failure is only remembered for the status.
     child.on('error', error => { this.loginError = { provider, message: error.code === 'ENOENT' ? `${executable.command} is not installed on this computer.` : error.message, at: Date.now() }; this.invalidate(provider); });

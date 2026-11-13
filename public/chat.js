@@ -142,7 +142,7 @@ function renderItems(items, run, live) {
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="Tokens this reply used">${esc(tokenText(item.tokens))}</div>` : '') })
       : item.role === 'cleared' ? `<div class="cleared"><span>Chat cleared · ${esc(item.text)}</span>${item.earlier ? '<button type="button" class="btn small quiet" data-action="show-earlier">Show earlier messages</button>' : ''}</div>`
       : item.role === 'subagent' ? subagentHtml(item, live)
-      : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div></div>`
+      : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div>${/usage limit|limit reached|not signed in|not logged in|log ?in again|sign ?in again|unauthorized|401/i.test(item.text) ? `<button type="button" class="btn small primary" data-action="agent-signin" data-provider="${esc(run.provider || 'claude')}">Sign in again</button>` : ''}</div>`
       : note(`${esc(item.text)} · ${hhmm(item.at)}`));
   }
   flush(true);
@@ -438,6 +438,7 @@ document.addEventListener('click', async event => {
   try {
     if (action?.startsWith('spec-')) await agentAction(ctx, action, target);
     else if (action === 'send') await send();
+    else if (action === 'agent-signin') { try { await api('/agents/login', { method: 'POST', data: { provider: target.dataset.provider || 'claude', profile: '' } }); toast('Sign-in opened. Pick the account that has the plan, finish it, then start a fresh chat.'); } catch (error) { toast(error.message, true); } }
     else if (action === 'new-room') newRoomDialog();
     else if (action === 'show-earlier') { ui.showEarlier = { ...(ui.showEarlier || {}), [ui.view.type === 'main' ? mainRun()?.id : ui.view.id]: true }; renderAll(true); }
     else if (action === 'chat-to-room') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id), agent = personalAgent(run); if (agent) openRoomDialog(ctx, { id: agent.id, name: agent.name }); }
