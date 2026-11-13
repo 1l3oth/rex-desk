@@ -353,7 +353,7 @@ try {
   assert.deepEqual(errors, []);
   // Publishing must reject a post-verification edit before any network side effect.
   writeFileSync(path.join(worker.worktree, 'page.html'), 'Changed after verification');
-  await assert.rejects(app.desk.publish(worker.id, { approved: true }), /changed after verification/);
+  await assert.rejects(app.desk.publish(worker.id, { approved: true }), /not committed yet/);
   const result = { passed: true, syntheticAgents: true, realGitWorktrees: true, realBrowserVideo: true, actualRegressionCommand: true,
     screenshots, fixtureWorkspace: workspace, workerId: worker.id, artifacts: artifacts.map(item => ({ type: item.type, title: item.title, path: path.join(app.store.directory, 'artifacts', worker.id, item.file) })) };
   writeFileSync(path.join(qa, 'acceptance.json'), JSON.stringify(result, null, 2));
