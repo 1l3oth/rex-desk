@@ -1,3 +1,4 @@
+import { rexCore } from '/rex-core.js';
 import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter } from '/chat-sidebar.js';
 import { agentStage, agentAction, agentGroups, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
@@ -148,7 +149,7 @@ function renderRail() {
   const plus = (action, label) => `<button class="sec-add" data-action="${action}" title="${label}" aria-label="${label}">+</button>`;
   return `<div class="rail-head"><span class="brand">${iconAv('main', 'brandmark')}<strong>Rex Desk</strong></span><span class="spacer"></span></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
     <div class="sec-body top">
-      ${railItem('main', '', { avatar: withDot(iconAv('main', 'accent'), main ? stateTone(main) : ''), name: 'Rex Agent', sub: mainLive().state === 'idle' ? 'Asleep' : main ? stateLabel(main) : 'Not started', badge: unreadFor(ui, 'main:'), live: mainLive() })}
+      ${railItem('main', '', { avatar: withDot(rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : ''), name: 'Rex Agent', sub: mainLive().state === 'idle' ? 'Asleep' : main ? stateLabel(main) : 'Not started', badge: unreadFor(ui, 'main:'), live: mainLive() })}
       <nav class="places" aria-label="Places">${[
         place('notices', 'bell', 'Notifications', snap.notices?.unread || 0, true),
         place('inbox', 'inbox', 'Needs you', asks, true),
@@ -1178,7 +1179,7 @@ function phoneChats() {
   }
   rows.sort((left, right) => String(right.at).localeCompare(String(left.at)));
   const main = mainRun();
-  const pinned = phoneRow('main', '', iconAv('main', 'accent'), main ? stateTone(main) : '', 'Rex Agent', main ? stateLabel(main) : 'Your helper for everything', main?.updatedAt || '', unreadFor(ui, 'main:'));
+  const pinned = phoneRow('main', '', rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : '', 'Rex Agent', main ? stateLabel(main) : 'Your helper for everything', main?.updatedAt || '', unreadFor(ui, 'main:'));
   return `<div class="m-chats">${pinned}${rows.map(row => row.html).join('')}<p class="m-none" hidden>No chat matches.</p></div>`;
 }
 function phoneRow(type, id, avatar, dot, name, sub, at, badge) {

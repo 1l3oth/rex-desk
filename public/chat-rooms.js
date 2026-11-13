@@ -1,3 +1,4 @@
+import { rexCore } from '/rex-core.js';
 import { chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { speakButton } from '/chat-speak.js';
 import { pickerHtml } from '/chat-pick.js';
@@ -26,7 +27,7 @@ export function avatarHtml(ctx, { name, image = '', id = '', at = '', size = '',
   // Whoever this is gets their own picture wherever it shows (group chat messages, cards, lists): an agent its avatar,
   // the person their profile photo, Rex Agent the Rex Desk mark. Letters only for someone with no picture at all.
   if (!agent && !image && !members) {
-    if (name === 'Rex Agent') return `<span class="av av-agent ${size}"><img src="${REX_MARK}" alt=""></span>`;
+    if (name === 'Rex Agent') return rexCore(size, (ui?.snap?.specialists || []).filter(item => item.kind !== 'main').length);
     if ((name === 'You' || (ui?.profile?.name && name === ui.profile.name)) && ui?.profile?.photo) return `<span class="av ${size}"><img src="/api/profile/photo?v=${encodeURIComponent(ui.profile.photo.updatedAt || '')}" alt=""></span>`;
     agent = (ui?.snap?.specialists || []).find(item => item.name === name) || null;
   }

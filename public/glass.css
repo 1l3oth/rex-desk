@@ -399,3 +399,31 @@ html:not([data-theme=dark]) .tl-body{background:color-mix(in srgb,var(--ink) 5%,
 .tl-links{display:flex;gap:12px;margin-top:6px;font-size:11.5px}
 details.tl.flash>summary{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 45%,transparent)}
 details.tl[hidden]{display:none}
+
+/* ===== Rex Agent's face: a glowing core with your agents circling it. ===== */
+.av.rex-core{background:none;overflow:visible}
+.av.rex-core svg{width:100%;height:100%;overflow:visible;display:block}
+.rex-core .rc-orb{fill:url(#rex-core-orb)}
+.rex-core .rc-glow{fill:var(--core-a,#5aa2ff);opacity:.32;transform-origin:50px 50px;animation:rc-breathe 3.2s ease-in-out infinite}
+.rex-core .rc-ring{fill:none;stroke:color-mix(in srgb,var(--core-a,#5aa2ff) 45%,transparent);stroke-width:1.2}
+.rex-core .rc-moon{fill:#fff;filter:drop-shadow(0 0 2px var(--core-a,#5aa2ff))}
+.rex-core .rc-orbit{transform-origin:50px 50px;animation:rc-turn var(--t,8s) linear infinite}
+.rex-core .rc-o0{--t:6s}.rex-core .rc-o1{--t:9s;animation-direction:reverse}.rex-core .rc-o2{--t:7.5s;rotate:140deg}.rex-core .rc-o3{--t:12s;rotate:60deg}.rex-core .rc-o4{--t:10s;rotate:220deg;animation-direction:reverse}
+/* Working: the lights race and the core glows brighter. */
+.item.is-working .rex-core .rc-orbit{animation-duration:calc(var(--t,8s) / 4)}
+.item.is-working .rex-core .rc-glow{opacity:.6;animation-duration:1.2s}
+/* Asleep: the lights stop and the core dims. */
+.item.is-asleep .rex-core .rc-orbit,.item.is-asleep .rex-core .rc-glow{animation-play-state:paused}
+.item.is-asleep .rex-core{filter:grayscale(.4) brightness(.85)}
+@keyframes rc-turn{to{transform:rotate(360deg)}}
+@keyframes rc-breathe{50%{opacity:.55;transform:scale(1.12)}}
+html.fx-rest .rex-core *{animation-play-state:paused!important}
+@media (prefers-reduced-motion:reduce){.rex-core *{animation:none!important}}
+/* Each theme colours the core. */
+html[data-skin=cyberpunk]{--core-a:#ff2bd6;--core-b:#1b0a3a;--core-hi:#bff8ff}
+html[data-skin=gojo]{--core-a:#59b4ff;--core-b:#0b1d5a;--core-hi:#ffffff}
+html[data-skin=crayon]{--core-a:#e4572e;--core-b:#ffb703;--core-hi:#fff3a6}
+html[data-skin=sakura]{--core-a:#ff7ab8;--core-b:#8a5cff;--core-hi:#fff0f7}
+html[data-skin=forest]{--core-a:#3ddc84;--core-b:#0b3d24;--core-hi:#e6ffe9}
+html[data-skin=sunset]{--core-a:#ff7a45;--core-b:#7a1f3d;--core-hi:#fff0d9}
+.rc-s0{stop-color:var(--core-hi,#d9ecff)}.rc-s1{stop-color:var(--core-a,#5aa2ff)}.rc-s2{stop-color:var(--core-b,#3a2a9a)}
