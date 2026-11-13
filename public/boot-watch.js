@@ -24,7 +24,15 @@
   async function serverUp() { try { return (await fetch('/api/auth', { cache: 'no-store' })).ok; } catch { return false; } }
   let misses = 0, cover = null;
   setInterval(async () => {
+    // The first load failed (the server was restarting for an update): reload once it answers instead of staying on the error.
+    if (document.querySelector('#app > .boot-failed')) {
+      // At most 5 tries in a row, so a server that answers but cannot open the page does not reload it forever.
+      let tries = 0; try { tries = Number(sessionStorage.getItem('rex-boot-retries')) || 0; } catch {}
+      if (tries < 5 && await serverUp()) { try { sessionStorage.setItem('rex-boot-retries', String(tries + 1)); } catch {} location.reload(); }
+      return;
+    }
     if (document.querySelector('#app > .boot')) return;
+    try { sessionStorage.removeItem('rex-boot-retries'); } catch {}
     if (await serverUp()) { misses = 0; if (cover) location.reload(); return; }
     if (++misses < 2 || cover) return;
     cover = document.createElement('div'); cover.className = 'boot';

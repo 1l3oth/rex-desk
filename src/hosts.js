@@ -88,7 +88,19 @@ export class HostRunner {
     });
   }
   cleanup() { for (const file of [this.state?.journal, this.state?.stateFile]) { try { if (file) unlinkSync(file); } catch { /* gone */ } } }
-  async interrupt() { this.stopped = true; await this.post('/stop').catch(() => {}); }
+  // Stop asks the agent to stop. If it does not answer (stuck in a long tool call) or is still running 15 s later, its process
+  // ends, so it never keeps working after the person pressed Stop.
+  async interrupt() {
+    this.stopped = true;
+    const asked = await this.post('/stop').then(() => true, () => false), pid = Number(this.state?.pid);
+    if (!pid) return;
+    const end = () => {
+      if (!alive(pid)) return;
+      if (process.platform === 'win32') spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => {});
+      else { try { process.kill(-pid, 'SIGTERM'); } catch { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } } }
+    };
+    if (asked) setTimeout(end, 15000).unref(); else end();
+  }
   // Rex Desk is closing (a restart or an update): stop reading, and leave the agent working.
   detach() { this.detached = true; clearInterval(this.timer); this.timer = null; }
   close() {}

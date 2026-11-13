@@ -159,9 +159,11 @@ export class Rooms {
     // A person resets the count. An agent talking to another agent extends the thread's count by one.
     const agentToAgent = Boolean(fromAgentId) && targets.some(target => target !== HUMAN);
     const hops = fromAgentId ? (parent?.hops || 0) + (agentToAgent ? 1 : 0) : 0, paused = agentToAgent && hops > (room.away?.on ? AWAY_HOPS : MAX_HOPS);
-    const seq = room.seq + 1, from = system ? { type: 'system', id: 'system', label: 'Rex Desk' } : fromAgentId ? { type: 'agent', id: fromAgentId, label: this.member(fromAgentId).name } : { type: 'human', id: HUMAN, label: 'You' };
+    const from = system ? { type: 'system', id: 'system', label: 'Rex Desk' } : fromAgentId ? { type: 'agent', id: fromAgentId, label: this.member(fromAgentId).name } : { type: 'human', id: HUMAN, label: 'You' };
     // A task mentioned here gets its English name first, so everyone talks about it by that name.
     for (const taskId of this.tasksIn(body)) await this.desk.englishName(taskId).catch(() => {});
+    // The number is taken after that wait, from the room as it is now: a message posted meanwhile already used the old next number.
+    const seq = this.room(roomId).seq + 1;
     const message = { id: randomUUID(), roomId, seq, threadId: parent ? (parent.threadId || parent.id) : '', replyTo, from, text: body, to: paused ? targets.filter(target => target === HUMAN) : (targets.length ? targets : [HUMAN]),
       tasks: this.tasksIn(body), hops, paused, at: now(), ...(instruction ? { instruction: String(instruction).slice(0, 4000) } : {}) };
     this.store.put('room', roomId, { ...this.room(roomId), seq }); this.store.put('roommsg', message.id, message);
@@ -175,7 +177,7 @@ export class Rooms {
     // In auto timing, the lead says when it wants the next check-in.
     if (fromAgentId && room.away?.on && room.away.every === 'auto' && fromAgentId === this.lead(room)) { const next = /next check-?in:?\s*(\d{1,3})\s*(h|hour|min)/i.exec(body); if (next) this.store.put('room', roomId, { ...this.room(roomId), away: { ...this.room(roomId).away, nextMinutes: Math.min(240, Math.max(5, Number(next[1]) * (/^h/i.test(next[2]) ? 60 : 1))) } }); }
     // The person writing in the room means they are back: away mode ends and the lead sums up what happened.
-    if (!fromAgentId && !system && room.away?.on && !body.startsWith('/')) void this.endAway(roomId, { back: true });
+    if (!fromAgentId && !system && room.away?.on && !body.startsWith('/')) void this.endAway(roomId, { back: true }).catch(error => this.store.event('', 'room-error', { roomId, message: error.message }, true));
     else await this.deliver(room, message);
     return { id: message.id, seq, delivered: message.to, paused };
   }
@@ -230,8 +232,10 @@ export class Rooms {
     };
     if (!targets.length) return;
     const [first, ...rest] = targets;
-    if (this.typing(room.id, first).length) void this.waitQuiet(room.id, first).then(() => start(first)).then(() => this.queue(room.id, rest, start));
-    else { await start(first); void this.queue(room.id, rest, start); }
+    // Fire-and-forget work logs its failure (a room deleted meanwhile) instead of ending the server with an unhandled rejection.
+    const logged = error => this.store.event('', 'room-error', { roomId: room.id, message: error.message }, true);
+    if (this.typing(room.id, first).length) void this.waitQuiet(room.id, first).then(() => start(first)).then(() => this.queue(room.id, rest, start)).catch(logged);
+    else { await start(first); void this.queue(room.id, rest, start).catch(logged); }
   }
   async queue(roomId, agents, start) { for (const agentId of agents) { await this.waitQuiet(roomId, agentId); await start(agentId); } }
   // Agents in the room, other than this one, that are writing a reply right now.
@@ -272,12 +276,12 @@ export class Rooms {
   // when the time is up, or when the person turns it off; then the lead posts what happened while they were away.
   setAway(roomId, { on, hours = 0, every = 30, goal = '' } = {}) {
     const room = this.room(roomId);
-    if (!on) { void this.endAway(roomId, { back: true }); return this.room(roomId); }
+    if (!on) { void this.endAway(roomId, { back: true }).catch(error => this.store.event('', 'room-error', { roomId, message: error.message }, true)); return this.room(roomId); }
     const auto = every === 'auto', minutes = auto ? 'auto' : Math.min(240, Math.max(5, Number(every) || 30)), until = Number(hours) > 0 ? new Date(Date.now() + Math.min(72, Number(hours)) * 3600000).toISOString() : '';
     const away = { on: true, every: minutes, nextMinutes: 30, until, goal: String(goal || '').trim().slice(0, 600), startedAt: now(), lastTick: Date.now(), ticks: 0 };
     this.store.put('room', roomId, { ...room, away });
     this.system(roomId, `Away mode on. The agents keep working${away.goal ? ` on: ${away.goal}` : ''}, ${auto ? 'with check-ins the lead times itself' : `checking in every ${minutes} minutes`}${until ? ` until ${new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ' until you are back'}. Write here to end it.`);
-    void this.wakeLead(roomId, 'start'); return this.room(roomId);
+    void this.wakeLead(roomId, 'start').catch(error => this.store.event('', 'room-error', { roomId, message: error.message }, true)); return this.room(roomId);
   }
   lead(room) { return room.members.includes('main') ? 'main' : room.members.find(id => this.agent(id)) || ''; }
   async wakeLead(roomId, reason) {

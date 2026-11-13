@@ -76,7 +76,7 @@ export class Monitor {
         previews: groups.previews.map(item => shape(item, { label: /java/i.test(item.name) ? 'Tomcat preview' : 'Preview server', detail: item.cmd.replace(/^"?[^"\s]+"?\s*/, '').slice(0, 90) })),
         browsers: groups.browsers.map(item => shape(item, { label: 'Test browser', detail: '' })),
         leftovers: groups.leftovers.map(item => shape(item, { label: /playwright/i.test(item.cmd) ? 'Playwright browser tool' : /notebooklm/i.test(item.cmd) ? 'NotebookLM tool' : 'Tool server', detail: 'its app already closed' })),
-        servers: groups.servers.map(item => shape(item, { label: 'Old Rex Desk server', detail: 'not the one you are using' })),
+        servers: groups.servers.map(item => shape(item, { label: 'Another server (node src/server.js)', detail: 'another project, or another copy of Rex Desk' })),
         terminals: groups.terminals.map(item => shape(item, { label: `Claude Code · ${sessionLabel(item.cmd)}`, detail: `opened in ${item.app}${item.helpers ? ` · with ${item.helpers} tool${item.helpers === 1 ? '' : 's'}` : ''}`, app: item.app })),
       },
       cleaned: this.cleaned.slice(-20) };
@@ -105,7 +105,9 @@ export class Monitor {
     for (const runId of [...desk.evidence.previews.keys()]) if (!desk.live.has(runId)) { desk.evidence.stopPreview(runId); done.push(`preview of ${desk.store.get('run', runId)?.title || runId}`); }
     for (const runId of [...desk.evidence.sessions.keys()]) if (!desk.live.has(runId)) { await desk.evidence.close(runId).catch(() => {}); done.push(`browser of ${desk.store.get('run', runId)?.title || runId}`); }
     const value = await this.snapshot({ fresh: true });
-    for (const item of [...value.groups.leftovers, ...value.groups.servers]) { await this.endTree(item.pid); done.push(`${item.label} (${item.mb} MB)`); }
+    // Servers are never ended automatically: "node src/server.js" may be another project, or the other Rex Desk (the real
+    // app and a development copy run side by side). They stay on the Monitor for the person to end.
+    for (const item of value.groups.leftovers) { await this.endTree(item.pid); done.push(`${item.label} (${item.mb} MB)`); }
     if (done.length) this.cleaned.push({ at: new Date().toISOString(), reason, what: done });
     this.cache = null; return { cleaned: done };
   }
@@ -115,7 +117,7 @@ export class Monitor {
     const part = (title, items) => items.length ? `${title}:\n${items.map(line).join('\n')}` : '';
     return [`Memory: ${value.freeMb} MB free of ${value.totalMb} MB. Rex Desk itself uses ${value.deskMb} MB.`,
       part('Rex Desk agents working now', value.groups.agents), part('Rex Desk previews and test browsers', [...value.groups.previews, ...value.groups.browsers]),
-      part('Left behind (safe to end)', [...value.groups.leftovers, ...value.groups.servers]), part('Claude Code opened outside Rex Desk (ask the person before ending)', value.groups.terminals),
+      part('Left behind (safe to end)', value.groups.leftovers), part('Other servers: another project or another copy of Rex Desk (ask the person before ending)', value.groups.servers), part('Claude Code opened outside Rex Desk (ask the person before ending)', value.groups.terminals),
       value.others.length ? `Biggest other programs: ${value.others.map(item => `${item.name} ${item.mb} MB`).join(', ')}` : ''].filter(Boolean).join('\n\n');
   }
   // Every few minutes: when memory runs low (under 15% free), clean up by itself if the person allowed it.

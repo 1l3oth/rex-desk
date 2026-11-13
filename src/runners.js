@@ -6,20 +6,22 @@ import { carrySession } from './agents.js';
 // What one reply cost in tokens: new input, output, and the part of the context read from or written to the prompt cache.
 export const tokensOf = usage => usage ? { input: usage.input_tokens || 0, output: usage.output_tokens || 0, cacheRead: usage.cache_read_input_tokens || 0, cacheWrite: usage.cache_creation_input_tokens || 0 } : null;
 
+// A config file that is half-written (Claude Code saves .claude.json while it runs) or broken is skipped, not fatal.
+const readJson = file => { try { return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null; } catch { return null; } };
+
 export function existingMcpConnections(sourcePath, configDirectory = process.env.CLAUDE_CONFIG_DIR) {
   let connections = {};
   const configs = [...new Set([path.join(os.homedir(), '.claude.json'), configDirectory ? path.join(configDirectory, '.claude.json') : ''].filter(Boolean))];
-  for (const config of configs) if (existsSync(config)) {
-    const data = JSON.parse(readFileSync(config, 'utf8'));
+  for (const config of configs) {
+    const data = readJson(config);
+    if (!data) continue;
     connections = { ...connections, ...data.mcpServers };
     const canonical = value => String(value || '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
     const project = Object.entries(data.projects || {}).find(([key]) => canonical(key) === canonical(sourcePath));
     if (project) connections = { ...connections, ...project[1].mcpServers };
   }
-  if (sourcePath && existsSync(path.join(sourcePath, '.mcp.json'))) {
-    const data = JSON.parse(readFileSync(path.join(sourcePath, '.mcp.json'), 'utf8'));
-    connections = { ...connections, ...data.mcpServers };
-  }
+  const project = sourcePath ? readJson(path.join(sourcePath, '.mcp.json')) : null;
+  if (project) connections = { ...connections, ...project.mcpServers };
   return connections;
 }
 

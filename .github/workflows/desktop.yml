@@ -112,7 +112,8 @@ jobs:
   # The only job that holds the release key and the bucket keys; the build jobs above run third-party code without them.
   publish:
     needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.channel != 'none'
+    # Only master ships: a run started from another branch builds, but its code never gets the release key or reaches people.
+    if: github.event_name == 'workflow_dispatch' && inputs.channel != 'none' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:

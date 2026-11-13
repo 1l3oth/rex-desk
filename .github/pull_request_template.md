@@ -10,7 +10,7 @@
 
 - [ ] `npm test`
 - [ ] `npm run test:browser` (for anything a person sees or clicks)
-- [ ] Tried it in the running app (`npm start`, http://127.0.0.1:4317)
+- [ ] Tried it in the running app (`npm start`, http://127.0.0.1:4318)
 
 ## Screenshots
 

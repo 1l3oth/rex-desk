@@ -16,7 +16,9 @@ if (-not $rexRunning) {
     $rexNode = (Get-Command node -ErrorAction Stop).Source
     # Created through WMI so the server is not part of this window's job: closing the terminal or agent session that ran
     # this script must not end Rex Desk with it.
-    $rexCommand = "cmd.exe /c `"`"$rexNode`" src/server.js > `"$(Join-Path $rexLocal 'server.log')`" 2> `"$(Join-Path $rexLocal 'server-error.log')`"`""
+    # This launcher runs a checkout as the everyday Rex Desk, so it keeps the real address (4317); npm start is development (4318).
+    $env:PORT = '4317'
+    $rexCommand = "cmd.exe /c `"set PORT=4317&& `"$rexNode`" src/server.js > `"$(Join-Path $rexLocal 'server.log')`" 2> `"$(Join-Path $rexLocal 'server-error.log')`"`""
     $rexCreated = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $rexCommand; CurrentDirectory = $rexProject }
     if ($rexCreated.ReturnValue -ne 0) {
         Start-Process -FilePath $rexNode -ArgumentList @('src/server.js') -WorkingDirectory $rexProject -WindowStyle Hidden -RedirectStandardOutput (Join-Path $rexLocal 'server.log') -RedirectStandardError (Join-Path $rexLocal 'server-error.log')

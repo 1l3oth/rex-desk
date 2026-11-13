@@ -39,7 +39,13 @@
   // An opaque no-cors reply means it is up; a refused connection rejects.
   const server = 'http://127.0.0.1:4317/';
   async function open() { try { await fetch(server + 'api/auth', { mode: 'no-cors', cache: 'no-store' }); location.replace(server); return true; } catch { return false; } }
-  setInterval(open, 2000);
+  // The app keeps why the server could not start; asking for it means a fast failure is shown even if it happened
+  // before this page finished loading.
+  let shown = '';
+  async function lastError() {
+    try { const message = await window.__TAURI_INTERNALS__.invoke('startup_error'); if (message && message !== shown && !button.disabled) { shown = message; showError(message); } } catch {}
+  }
+  setInterval(() => { open(); lastError(); }, 2000);
   button.addEventListener('click', async () => {
     button.disabled = true; status.className = ''; status.textContent = 'Restarting Rex Desk…';
     try { await window.__TAURI_INTERNALS__.invoke('restart_server'); status.textContent = 'Rex Desk is back. Opening it…'; open(); }

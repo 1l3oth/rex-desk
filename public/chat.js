@@ -560,7 +560,7 @@ try {
   const stream = new EventSource('/api/events'); let timer;
   stream.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(() => void refresh().catch(() => {}), 700); });
   setInterval(() => void refresh().catch(() => {}), 15000);
-} catch (error) { app.innerHTML = `<div class="boot"><h2>Rex Desk is unavailable</h2><p>${esc(error.message)}</p><p>Start it with <code>npm start</code>, then reload.</p></div>`; }
+} catch (error) { app.innerHTML = `<div class="boot boot-failed"><h2>Rex Desk is unavailable</h2><p>${esc(error.message)}</p><p>Opening it again by itself as soon as the server answers.</p></div>`; }
 
 // A question card with several questions shows one at a time. Back and Next move between them; picking an answer moves on by itself.
 function answered(slide) {

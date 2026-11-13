@@ -2,10 +2,11 @@
 
 use std::{
     fs,
+    io::Write,
     net::{SocketAddr, TcpStream},
     path::PathBuf,
-    process::Command,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    process::{Child, Command},
+    sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -26,6 +27,20 @@ fn show_window(app: &tauri::AppHandle) {
 const ADDRESS: &str = "127.0.0.1:4317";
 static OPENED: AtomicUsize = AtomicUsize::new(0);
 static RESTARTING: AtomicBool = AtomicBool::new(false);
+// Why the server could not start, for the start page to show. The page asks for it (startup_error) instead of being told,
+// because a server that fails fast can fail before the page has loaded its script.
+static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
+
+fn set_error(message: &str) {
+    if let Ok(mut last) = LAST_ERROR.lock() {
+        *last = message.to_string();
+    }
+}
+
+#[tauri::command]
+fn startup_error() -> String {
+    LAST_ERROR.lock().map(|last| last.clone()).unwrap_or_default()
+}
 
 // A link Rex Desk opens in a new window: its own pages open in a child window of the app (same sign-in);
 // anything else opens in the person's browser.
@@ -208,18 +223,19 @@ fn hidden(command: &mut Command) -> &mut Command {
 }
 
 // The server outlives the window so closing it never interrupts running agents.
-fn start_server(runtime: &Runtime) -> std::io::Result<()> {
+fn start_server(runtime: &Runtime) -> std::io::Result<Child> {
     fs::create_dir_all(&runtime.data)?;
     let mut command = Command::new(&runtime.node);
     command
         .arg("src/server.js")
         .current_dir(&runtime.app)
         .env("REX_DATA_DIR", &runtime.data)
-        .stdout(fs::File::create(runtime.data.join("server.log"))?)
-        .stderr(fs::File::create(runtime.data.join("server-error.log"))?);
+        // The window talks to 4317. A checkout started by itself is development and would pick 4318.
+        .env("PORT", "4317")
+        .stdout(log_file(runtime, "server.log")?)
+        .stderr(log_file(runtime, "server-error.log")?);
     if runtime.bundled {
-        // Which app version started this server, so a newer app can tell a leftover server apart from its own.
-        let _ = fs::write(runtime.data.join("server.version"), env!("CARGO_PKG_VERSION"));
+        // The server writes server.version itself once it listens, so the file always names the server that answers.
         command.env("REX_DESK_VERSION", env!("CARGO_PKG_VERSION"));
         if let Ok(executable) = std::env::current_exe() {
             command.env("REX_DESK_EXE", executable);
@@ -228,7 +244,58 @@ fn start_server(runtime: &Runtime) -> std::io::Result<()> {
             command.env("REX_CLONE_DIR", PathBuf::from(home).join("Rex Desk repositories"));
         }
     }
-    hidden(&mut command).spawn().map(|_| ())
+    hidden(&mut command).spawn()
+}
+
+const START_MARK: &str = "=== Rex Desk server starting";
+
+// Each start appends to the log after a marker line instead of emptying it, so an earlier crash is still there to read
+// and a second start never wipes the log of a server that is running. A log over 5 MB moves to *.old first.
+fn log_file(runtime: &Runtime, name: &str) -> std::io::Result<fs::File> {
+    let path = runtime.data.join(name);
+    if fs::metadata(&path).map(|meta| meta.len() > 5 * 1024 * 1024).unwrap_or(false) {
+        let _ = fs::rename(&path, runtime.data.join(format!("{name}.old")));
+    }
+    let mut file = fs::OpenOptions::new().create(true).append(true).open(&path)?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|time| time.as_secs()).unwrap_or(0);
+    let _ = writeln!(file, "{START_MARK} (app {}, unix time {stamp}) ===", env!("CARGO_PKG_VERSION"));
+    Ok(file)
+}
+
+// The last lines this start wrote to server-error.log, which say why a server that just started has stopped.
+fn crash_log(runtime: &Runtime) -> String {
+    let text = fs::read_to_string(runtime.data.join("server-error.log")).unwrap_or_default();
+    text.rsplit_once(START_MARK).map(|(_, last)| last.split_once('\n').map(|(_, rest)| rest).unwrap_or("").to_string()).unwrap_or(text)
+}
+
+fn crash_reason(runtime: &Runtime) -> String {
+    let text = crash_log(runtime);
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|line| !line.is_empty() && !line.starts_with("at ")).collect();
+    let reason = lines[lines.len().saturating_sub(4)..].join("\n");
+    if reason.is_empty() { format!("Rex Desk stopped while starting. See {}", runtime.data.join("server-error.log").display()) } else { format!("Rex Desk stopped while starting:\n{reason}") }
+}
+
+// Waits until the server answers. A server that stops while starting (a broken file, a missing module) ends the wait
+// at once with its error instead of leaving the window waiting minutes for a server that is no longer there.
+fn wait_for_start(runtime: &Runtime, child: &mut Child, seconds: u64) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    loop {
+        if server_running() {
+            return Ok(());
+        }
+        if let Ok(Some(_)) = child.try_wait() {
+            // Another server (started at Windows sign-in, or by a second window) was already starting with this data folder:
+            // this one stops at once, and that one answers when it is ready, so keep waiting for it.
+            if crash_log(runtime).contains("already running") {
+                return if wait_for_server(deadline.saturating_duration_since(Instant::now()).as_secs().max(2)) { Ok(()) } else { Err(crash_reason(runtime)) };
+            }
+            return if wait_for_server(2) { Ok(()) } else { Err(crash_reason(runtime)) };
+        }
+        if Instant::now() > deadline {
+            return Err(format!("Rex Desk did not start. See {}", runtime.data.join("server-error.log").display()));
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
 }
 
 // Ends the running server (its process id is in runtime.lock) so a fresh one can start.
@@ -270,14 +337,11 @@ fn restart(runtime: &Runtime) -> Result<(), String> {
         while server_running() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(200));
         }
-        start_server(runtime).map_err(|error| format!("Could not start Rex Desk: {error}"))?;
-        if wait_for_server(240) {
-            Ok(())
-        } else {
-            Err(format!("Rex Desk did not start. See {}", runtime.data.join("server-error.log").display()))
-        }
+        let mut child = start_server(runtime).map_err(|error| format!("Could not start Rex Desk: {error}"))?;
+        wait_for_start(runtime, &mut child, 240)
     })();
     RESTARTING.store(false, Ordering::SeqCst);
+    set_error(result.as_ref().err().map(String::as_str).unwrap_or(""));
     result
 }
 
@@ -308,7 +372,7 @@ fn main() {
         if let Some(runtime) = runtime() {
             if server_running() && server_outdated(&runtime) {
                 let _ = restart(&runtime);
-            } else if !server_running() && start_server(&runtime).is_ok() {
+            } else if !server_running() && start_server(&runtime).map(drop).is_ok() {
                 ensure_browser(&runtime);
             }
         }
@@ -317,7 +381,7 @@ fn main() {
     tauri::Builder::default()
         // Opening Rex Desk again brings the existing window back instead of starting a second copy.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
-        .invoke_handler(tauri::generate_handler![restart_server])
+        .invoke_handler(tauri::generate_handler![restart_server, startup_error])
         .setup(|app| {
             let handle = app.handle().clone();
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -364,7 +428,7 @@ fn main() {
             });
             let home = window.url().ok();
             thread::spawn(move || {
-                let fail = |message: String| { let _ = window.eval(&format!("showError({message:?})")); };
+                let fail = |message: String| { set_error(&message); let _ = window.eval(&format!("showError({message:?})")); };
                 let Some(runtime) = runtime_with(true) else {
                     return fail("Rex Desk files are missing. Reinstall Rex Desk.".into());
                 };
@@ -373,17 +437,14 @@ fn main() {
                         return fail(error);
                     }
                 } else if !server_running() {
-                    if let Err(error) = start_server(&runtime) {
-                        return fail(format!("Could not start Rex Desk: {error}"));
-                    }
+                    let mut child = match start_server(&runtime) {
+                        Ok(child) => child,
+                        Err(error) => return fail(format!("Could not start Rex Desk: {error}")),
+                    };
                     ensure_browser(&runtime);
-                }
-                let deadline = Instant::now() + Duration::from_secs(90);
-                while !server_running() {
-                    if Instant::now() > deadline {
-                        return fail(format!("Rex Desk did not start. See {}", runtime.data.join("server-error.log").display()));
+                    if let Err(error) = wait_for_start(&runtime, &mut child, 90) {
+                        return fail(error);
                     }
-                    thread::sleep(Duration::from_millis(250));
                 }
                 let server: tauri::Url = format!("http://{ADDRESS}").parse().expect("valid URL");
                 let _ = window.navigate(server.clone());

@@ -86,7 +86,7 @@ npx playwright install chromium
 npm start
 ```
 
-Then open http://127.0.0.1:4317. Use `npm run dev` to restart on every change. A source checkout updates itself: when new commits reach its branch and no agent is working, it pulls them and restarts.
+Then open http://127.0.0.1:4318 (a checkout runs as development on 4318; the installed app is the real Rex Desk on 4317). Use `npm run dev` to restart on every change. A source checkout updates itself: when new commits reach its branch and no agent is working, it pulls them and restarts.
 
 ## Build the installers
 

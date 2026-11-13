@@ -78,7 +78,11 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
 }
 
-export async function createApp({ dataDirectory, port = Number(process.env.PORT || 4317), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
+// The installed app (it sets REX_DESK_VERSION) is the real Rex Desk on 4317. A server run from a source checkout is
+// development and listens on 4318, so the real app never opens a development server by mistake. PORT overrides both.
+export const defaultPort = () => Number(process.env.PORT || (process.env.REX_DESK_VERSION ? 4317 : 4318));
+
+export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
   const dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   // A folder that exists already (even a drive root such as F:\, where mkdir fails with EPERM) is used as it is.
   if (!existsSync(dataRoot)) mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
@@ -109,7 +113,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   // The Rex Desk account service (tests pass a pretend one).
   const accountOptions = { ...(accountFetcher ? { fetcher: accountFetcher } : {}), ...(accountApi ? { base: accountApi } : {}) };
   const cloud = cloudClientFactory || accountFetcher || accountApi ? { ...(cloudClientFactory ? { clientFactory: cloudClientFactory, retryMs: 50 } : {}), ...(accountFetcher ? { accountFetcher } : {}), ...(accountApi ? { accountApi } : {}) } : undefined;
-  async function openSession(entry, vaultKey, { staySignedIn = false } = {}) {
+  async function openSession(entry, vaultKey, { staySignedIn = false, remembered = false } = {}) {
     const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
     const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher });
     if (address) startDesk(desk, store);
@@ -125,7 +129,8 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     session = { id: entry?.id, email: entry?.email || '', store, desk, cookie: randomBytes(32).toString('base64url'), staySignedIn, cloud: null };
     if (accounts) {
       accounts.touch(entry.id);
-      if (staySignedIn) await accounts.remember(entry.id, vaultKey).catch(error => { session.staySignedIn = false; console.error(`Stay signed in failed: ${error.message}`); });
+      // A start that just opened the remembered key does not save it again (another PowerShell start, seconds at each open).
+      if (staySignedIn && !remembered) await accounts.remember(entry.id, vaultKey).catch(error => { session.staySignedIn = false; console.error(`Stay signed in failed: ${error.message}`); });
       // Bring this computer up to date before anyone works: upload leftovers, then take the newest cloud copy.
       const status = await store.cloud.open();
       if (status.state === 'connected' && !store.fresh) session.cloud = await store.cloud.pullLatest({ live: new Set(desk.live?.keys?.() || []) }).catch(error => ({ pulled: false, reason: error.message }));
@@ -251,7 +256,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   // Requests wait for it, so nobody sees the sign-in page or works on an out-of-date copy meanwhile.
   let opening = Promise.resolve();
   if (!accounts) await openSession(null, null);
-  else opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true })).catch(() => { session = null; });
+  else opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; });
   const handler = async (request, response) => {
     await opening;
     response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -810,6 +815,9 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   catch (error) { await closeSession(); unlinkSync(lockPath); throw error; }
   address = `http://127.0.0.1:${server.address().port}`;
   listenPort = server.address().port;
+  // The installed app's version of the server that is listening now, so a newer app can tell a leftover server from its own
+  // (written here, once this server owns the port, not by the app before it knows whether the start worked).
+  if (process.env.REX_DESK_VERSION && !dataDirectory) { try { writeFileSync(path.join(dataRoot, 'server.version'), process.env.REX_DESK_VERSION); } catch {} }
   // The person's other computers and phone reach this Rex Desk over Tailscale when they turned that on (see peers.js).
   remoteOpen = () => {
     const desk = session?.desk, wanted = desk?.peers.settings().remote ? tailscaleAddresses() : [], key = wanted.join(',');
@@ -853,19 +861,23 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
 // Starts the server that takes over from this one. On Windows it is created through WMI, so it does not live in the job of
 // whoever started this server (a terminal, an agent session, the desktop app): when that closes, Windows ends every process
 // in its job, and a plain detached child would die with it.
-async function startReplacement() {
+// The replacement keeps this server's port, so a checkout used as the real app (started on 4317) stays on 4317 after it updates.
+async function startReplacement(port) {
   const log = path.join(root, '.local', 'server-restart.log');
   if (process.platform === 'win32') {
-    const command = `cmd.exe /c "set REX_RESTART_AFTER=${process.pid}&& "${process.execPath}" src/server.js >> "${log}" 2>&1"`;
+    const command = `cmd.exe /c "set REX_RESTART_AFTER=${process.pid}&& set PORT=${port}&& "${process.execPath}" src/server.js >> "${log}" 2>&1"`;
     const script = `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${command.replaceAll("'", "''")}'; CurrentDirectory = '${root.replaceAll("'", "''")}' }; exit $r.ReturnValue`;
     await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 30000 });
     return;
   }
   let out = 'ignore'; try { out = openSync(log, 'a'); } catch {}
-  spawn(process.execPath, ['src/server.js'], { cwd: root, detached: true, stdio: ['ignore', out, out], env: { ...process.env, REX_RESTART_AFTER: String(process.pid) } }).unref();
+  spawn(process.execPath, ['src/server.js'], { cwd: root, detached: true, stdio: ['ignore', out, out], env: { ...process.env, REX_RESTART_AFTER: String(process.pid), PORT: String(port) } }).unref();
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  // A background job that fails without its own catch (a room deleted mid-reply, a peer gone mid-sync) is logged, not fatal:
+  // Node would otherwise end the whole server, and every agent's chat with it.
+  process.on('unhandledRejection', error => console.error(`Unhandled: ${error?.stack || error}`));
   const app = await createApp({ catchUp: true });
   console.log(`Rex Desk: ${app.address}\nMCP: ${app.address}/mcp\n${app.store ? `Keys and history stay in ${app.store.directory}` : 'Locked: sign in from the dashboard.'}`);
   let closing = false;
@@ -894,6 +906,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     closing = true;
     // If the new server could not be started, this one keeps running and tries again on the next tick.
     // Closing waits at most 10s: the new server waits up to 60s for this one to let go, and gives up after that.
-    void startReplacement().then(() => Promise.race([app.close().catch(() => {}), new Promise(resolve => setTimeout(resolve, 10000))]).finally(() => process.exit(0)), () => { closing = false; });
+    void startReplacement(Number(new URL(app.address).port)).then(() => Promise.race([app.close().catch(() => {}), new Promise(resolve => setTimeout(resolve, 10000))]).finally(() => process.exit(0)), () => { closing = false; });
   }, 20000).unref();
 }

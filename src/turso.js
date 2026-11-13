@@ -179,22 +179,49 @@ export class TursoSync {
       after = Number(page.rows.at(-1).sequence);
     }
   }
+  // Brings this computer up to date with the cloud copy (the same account works on other computers too). Only what differs
+  // moves: records are compared, and only the messages this computer does not have yet are downloaded, so opening Rex Desk
+  // does not fetch the whole history every time. What is kept out of the cloud (Store.isPrivate) is never deleted here,
+  // because the cloud never had it. This computer's own name, links and read positions (peers/main) stay as they are.
   async pullLatest({ live = new Set() } = {}) {
     await this.flush();
     if (this.state !== 'connected' || this.status().pending) return { pulled: false, reason: this.error || 'Local changes are still uploading.' };
-    const records = { rows: await this.cloudRecords() };
-    if (!records.rows.length) return { pulled: false, reason: 'The cloud copy is empty.' };
-    const events = { rows: await this.cloudEvents() };
-    // This computer's own name, links and read positions are not the other computer's: they stay as they are here.
-    const own = this.store.db.prepare("SELECT value FROM records WHERE kind='peers' AND id='main'").get();
-    if (own) records.rows = [...records.rows.filter(row => !(row.kind === 'peers' && row.id === 'main')), { kind: 'peers', id: 'main', value: own.value }];
+    const remote = await this.cloudRecords();
+    if (!remote.length) return { pulled: false, reason: 'The cloud copy is empty.' };
+    const db = this.store.db, key = (kind, id) => `${kind}\u0000${id}`, own = row => row.kind === 'peers' && row.id === 'main';
+    const remoteSequences = new Set(); let after = -1;
+    for (;;) {
+      const page = await this.client.execute({ sql: 'SELECT sequence FROM rex_events WHERE workspace=? AND sequence>? ORDER BY sequence LIMIT 20000', args: [this.workspace, after] });
+      for (const row of page.rows) remoteSequences.add(Number(row.sequence));
+      if (page.rows.length < 20000) break; after = Number(page.rows.at(-1).sequence);
+    }
+    const known = new Set(db.prepare('SELECT sequence FROM events').all().map(row => Number(row.sequence)));
+    const missing = [...remoteSequences].filter(sequence => !known.has(sequence)), arrived = [];
+    for (let index = 0; index < missing.length; index += 500) {
+      const part = missing.slice(index, index + 500);
+      const page = await this.client.execute({ sql: `SELECT * FROM rex_events WHERE workspace=? AND sequence IN (${part.map(() => '?').join(',')})`, args: [this.workspace, ...part] });
+      arrived.push(...page.rows);
+    }
+    // Something changed here while the cloud copy was downloading: it uploads first, and the next pull takes the rest.
+    if (this.status().pending) return { pulled: false, reason: 'Local changes arrived while pulling; they upload first.' };
+    const local = new Map(db.prepare('SELECT kind,id,value FROM records').all().map(row => [key(row.kind, row.id), row]));
+    const remoteKeys = new Set(remote.map(row => key(row.kind, row.id)));
+    const changed = remote.filter(row => !own(row) && local.get(key(row.kind, row.id))?.value !== row.value);
+    const gone = [...local.values()].filter(row => !own(row) && !remoteKeys.has(key(row.kind, row.id)) && !this.store.isPrivate(row.kind, JSON.parse(row.value)));
+    let removedEvents = 0;
     this.store.transaction(() => {
-      this.store.db.exec('DELETE FROM records; DELETE FROM events;');
-      const insert = this.store.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?)');
-      for (const row of records.rows) insert.run(row.kind, row.id, row.value);
-      const event = this.store.db.prepare('INSERT INTO events(sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?)');
-      for (const row of events.rows) event.run(Number(row.sequence), row.run_id, row.kind, Number(row.visible), row.value, row.created_at);
+      const put = db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value');
+      for (const row of changed) put.run(row.kind, row.id, row.value);
+      const drop = db.prepare('DELETE FROM records WHERE kind=? AND id=?');
+      for (const row of gone) drop.run(row.kind, row.id);
+      this.store.privateAgents = null;
+      const event = db.prepare('INSERT OR REPLACE INTO events(sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?)');
+      for (const row of arrived) event.run(Number(row.sequence), row.run_id, row.kind, Number(row.visible), row.value, row.created_at);
+      // A message deleted on another computer goes here too, unless its chat is kept out of the cloud.
+      const remove = db.prepare('DELETE FROM events WHERE sequence=?');
+      for (const row of db.prepare('SELECT sequence,run_id FROM events').all()) if (!remoteSequences.has(Number(row.sequence)) && !this.store.privateRun(row.run_id)) { remove.run(row.sequence); removedEvents++; }
     });
+    const records = { rows: remote }, events = { rows: arrived };
     this.store.token = this.store.decrypt(this.store.get('secret', 'mcp-token'));
     // A chat still working on this computer (its agent process is alive) keeps going; only what stopped elsewhere is interrupted.
     const alive = pid => { if (!pid) return false; try { process.kill(Number(pid), 0); return true; } catch { return false; } };

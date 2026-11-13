@@ -213,3 +213,32 @@ test('signing in again leaves a chat that is still working on this computer runn
   assert.equal(store.get('run', 'gone').state, 'interrupted');
   await store.cloud.close(); store.close();
 });
+
+test('signing in merges the cloud copy: only new messages come down, a chat kept out of the cloud stays, a change elsewhere arrives', async () => {
+  const turso = fakeTurso(); turso.network.online = true;
+  const store = new Store(temporary('pull-merge'));
+  store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await store.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' });
+  store.put('specialist', 'secret-agent', { id: 'secret-agent', name: 'Private', noCloud: true });
+  store.put('run', 'private-run', { id: 'private-run', specialistId: 'secret-agent', state: 'done' });
+  store.event('private-run', 'message', { text: 'Never in the cloud' }, true);
+  store.put('task', 'shared', { id: 'shared', title: 'Old title' });
+  store.event('run-1', 'message', { text: 'Here' }, true);
+  await store.cloud.flush();
+  assert.equal(store.isPrivate('run', store.get('run', 'private-run')), true);
+  const workspace = store.cloud.workspace;
+  turso.remote.prepare("UPDATE rex_records SET value=? WHERE workspace=? AND kind='task' AND id='shared'").run('{"id":"shared","title":"Renamed on the other computer"}', workspace);
+  turso.remote.prepare('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?)').run(workspace, 5, 'run-2', 'message', 1, '{"text":"From the other computer"}', '');
+  // Count what comes down: only the one new message, not the whole history again.
+  let fetched = 0; const execute = store.cloud.client.execute.bind(store.cloud.client);
+  store.cloud.client.execute = async query => { const result = await execute(query); if (/SELECT \* FROM rex_events/.test(query.sql)) fetched += result.rows.length; return result; };
+  const result = await store.cloud.pullLatest();
+  assert.equal(result.pulled, true);
+  assert.equal(fetched, 1);
+  assert.equal(store.get('task', 'shared').title, 'Renamed on the other computer');
+  assert.equal(store.events('run-2', { visible: true })[0].text, 'From the other computer');
+  assert.ok(store.get('run', 'private-run'), 'a chat kept out of the cloud is not deleted by the pull');
+  assert.equal(store.events('private-run', { visible: true })[0].text, 'Never in the cloud');
+  assert.equal(store.events('run-1', { visible: true })[0].text, 'Here');
+  await store.cloud.close(); store.close();
+});

@@ -411,7 +411,9 @@ export class Desk {
   }
   // attach: the agent's own process kept working through a Rex Desk restart; follow it from where reading stopped.
   async execute(runId, controller, { attach = null } = {}) {
-    let run = this.run(runId), token;
+    // handedOn: this turn ended by queueing the next one (another account, the default model). That turn owns the run's
+    // browser, tools, questions and room reply now, so this one's clean-up leaves them alone.
+    let run = this.run(runId), token, handedOn = false;
     try {
       // Check the selected CLI profile before creating worktrees or spending an agent turn.
       if (!this.runnerFactory && !attach) await this.agents.ensureSignedIn(run.provider, this.accountFor(run) || this.agents.selected(run.provider));
@@ -437,13 +439,20 @@ export class Desk {
           this.store.event(runId, 'flow-runtime-prepared', { ...prepared, note: 'Isolated Tomcat uses this branch with copied local JEX configuration and the selected product profile.' });
           this.store.event(runId, 'phase', { text: `Runtime profile: ${prepared.profile.name} (${prepared.profile.region})` }, true);
         }
-        if (repository.setupCommand) {
+        if (repository.setupCommand) run = this.patchRun(runId, { setupFailed: true }); // cleared below once it succeeds
+      }
+      // Dependencies for the worktree. A setup that failed (a network blip during npm ci) runs again when the run resumes,
+      // instead of the agent starting in a half-installed worktree.
+      if (run.role === 'worker' && run.worktree && run.setupFailed) {
+        const repository = effectiveRepository(this.store.config().repositories.find(item => item.id === run.repositoryId));
+        if (repository?.setupCommand) {
           this.store.event(runId, 'phase', { text: 'Preparing worktree dependencies' }, true);
           const setup = shellCommand(repository.setupCommand, { cwd: run.worktree, signal: controller.signal,
             env: { PORT: String(run.port) }, onData: text => this.store.event(runId, 'setup-output', { text }) });
           const result = await setup.done;
           if (result.exitCode !== 0) throw new Error('Worktree setup failed. See the activity journal.');
         }
+        run = this.patchRun(runId, { setupFailed: false });
       }
       if (controller.signal.aborted) throw new Error('Run stopped.');
       if (!attach) token = this.scopeToken(runId);
@@ -505,11 +514,11 @@ export class Desk {
 ${message}` : message);
       if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
       }
-      if (await this.switchIfLimited(runId)) return;
+      if (await this.switchIfLimited(runId)) { handedOn = true; return; }
       const current = this.run(runId);
       if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' ? 'finished' : 'needs_evidence', endedAt: now() });
     } catch (error) {
-      if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) return;
+      if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) { handedOn = true; return; }
       // The chosen model is not available on this Claude account: the turn runs again once on the account's default model, and the agent stops asking for that model.
       if (!controller.signal.aborted && MODEL_MISSING.test(error.message) && !run.modelFallback) {
         const agentId = run.roomAgent || run.specialistId, agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
@@ -518,12 +527,19 @@ ${message}` : message);
         const refused = error.message.match(/The '([^']+)' model/)?.[1], listKey = run.provider === 'claude' || !run.provider ? 'list' : run.provider, saved = this.store.get('models', listKey);
         if (refused && saved?.items?.some(item => item.id === refused)) this.store.put('models', listKey, { ...saved, items: saved.items.filter(item => item.id !== refused), refused: [...new Set([...(saved.refused || []), refused])], refusedItems: [...(saved.refusedItems || []).filter(item => item.id !== refused), saved.items.find(item => item.id === refused)] });
         this.patchRun(runId, { modelFallback: true, model: undefined, state: 'queued', followUp: run.followUp || '', error: '', endedAt: null });
+        handedOn = true;
         this.store.event(runId, 'message', { text: `The model this agent was set to is not available on this ${run.provider === 'codex' ? 'Codex (ChatGPT)' : run.provider === 'gemini' ? 'Antigravity (Google)' : 'Claude'} account, so it now uses the account's default model. Pick another one on the agent's card if you want.` }, true);
         return;
       }
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: error.message, endedAt: now() });
       this.store.event(runId, 'error', { message: error.message }, true);
     } finally {
+      if (handedOn) {
+        if (token) this.forgetToken(token);
+        if (this.live.get(runId)?.controller === controller) this.live.delete(runId);
+        void this.drain();
+        return;
+      }
       await this.evidence.close(runId).catch(error => this.store.event(runId, 'evidence-error', { message: error.message }, true));
       if (token) this.forgetToken(token);
       // A followed agent kept the key it was started with; it is done now.

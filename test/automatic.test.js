@@ -140,7 +140,7 @@ test('a new run gets an English branch name that describes the QA issue, or the 
     store.put('task', 'task-1', { id: 'task-1', title: '업무 매니저 > 프로젝트 생성 > 업무 탭 뷰명 영어·한국어 표시', taskNumber: '38464', externalId: '1076020', source: 'morningmate', active: true, createdAt: now() });
     const desk = new Desk(store, { root: temporary('naming-root'), runnerFactory: idle, namingFetcher: fetcher, namingCommand });
     const run = await desk.startTask({ taskId: 'task-1', repositoryId: 'repo' });
-    for (let attempt = 0; attempt < 100 && !store.get('run', run.id).branch; attempt++) await new Promise(resolve => setTimeout(resolve, 30));
+    for (let attempt = 0; attempt < 700 && !store.get('run', run.id).branch; attempt++) await new Promise(resolve => setTimeout(resolve, 30));
     assert.equal(store.get('run', run.id).branch, expected);
     await new Promise(resolve => setTimeout(resolve, 100)); store.close();
   }

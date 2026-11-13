@@ -107,7 +107,13 @@ export class Accounts {
   async rememberedSession() {
     const entry = this.workspaces.filter(item => item.remembered).sort((left, right) => String(right.lastUsedAt || '').localeCompare(String(left.lastUsedAt || '')))[0];
     if (!entry) return null;
-    try { return { entry, vaultKey: await protectForUser(Buffer.from(entry.remembered, 'base64'), true) }; }
-    catch { this.forget(entry.id); return null; }
+    // Only Windows refusing the key (another Windows user, a reset profile) forgets it. A slow or failed PowerShell start
+    // (antivirus, a busy computer right after sign-in) tries once more and keeps "stay signed in" for the next start.
+    const refused = error => /Cryptographic|key not valid|not valid for use/i.test(`${error?.stderr || ''} ${error?.message || ''}`);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { return { entry, vaultKey: await protectForUser(Buffer.from(entry.remembered, 'base64'), true) }; }
+      catch (error) { if (refused(error)) { this.forget(entry.id); return null; } }
+    }
+    return null;
   }
 }

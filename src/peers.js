@@ -247,11 +247,17 @@ export class Peers {
     if (!this.store.cloud?.ready) return;
     // Under another computer id (a restore that got its own), what was skipped as "this computer's own" is read again from the start.
     const settings = this.settings(), again = settings.tursoNode !== this.self.id, at = again ? 0 : settings.tursoAt || 0;
-    const since = `${Math.max(0, at - 120000).toString(36).padStart(9, '0')}`;
+    let since = `${Math.max(0, at - 120000).toString(36).padStart(9, '0')}`, newest = at;
     try {
-      const rows = await this.store.cloud.pullShared(since);
-      if (rows?.length) this.applyAll(rows);
-      const newest = Math.max(at, ...(rows || []).map(row => parseInt(String(row.v).split('.')[0], 36) || 0));
+      // Page by the last version read: more than one page of changes inside the 2-minute overlap (a first upload stamps
+      // everything at once) would otherwise re-read the same first page on every poll and never get past it.
+      for (let page = 0; page < 50; page++) {
+        const rows = await this.store.cloud.pullShared(since);
+        if (rows?.length) this.applyAll(rows);
+        newest = Math.max(newest, ...(rows || []).map(row => parseInt(String(row.v).split('.')[0], 36) || 0));
+        if (!rows || rows.length < 400) break;
+        since = String(rows.at(-1).v);
+      }
       if (again || newest > at) this.save({ tursoAt: newest, tursoNode: this.self.id });
     } catch { /* Turso shows its own state in Settings */ }
   }
