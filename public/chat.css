@@ -421,7 +421,7 @@ html[data-theme=light] .nc0{color:#3559c7}html[data-theme=light] .nc1{color:#c24
 .ag-main{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px}
 .ag-sec{display:flex;flex-direction:column;gap:8px}
 .room-agents{display:flex;flex-direction:column;padding:0 2px}
-.room-agent{display:flex;flex-direction:column;gap:6px;padding:14px 0;border-top:1px solid var(--line)}.room-agent:first-child{border-top:0;padding-top:6px}
+.room-agent{display:flex;flex-direction:column;gap:6px;padding:14px 0;border-top:1px solid var(--line)}.room-agent:first-child{border-top:0;padding-top:6px}.room-agent .ra-head{padding:0 0 4px;flex:none}
 .room-agent h3{margin:0;font-size:14px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink)}.room-agent-sub{margin:-4px 0 4px;font-size:12px;color:var(--muted,#888)}
 .room-agent-row{display:grid;grid-template-columns:52px minmax(0,1fr);align-items:center;gap:8px;font-size:13px;min-height:32px}.room-agent-row>span{color:var(--muted,#888)}.room-agent-row .pick{justify-self:start;max-width:100%}
 .room-agents>.muted{margin:6px 0 0;padding-top:12px;border-top:1px solid var(--line);font-size:12px;line-height:1.5}
