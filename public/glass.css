@@ -210,3 +210,40 @@ html:not([data-theme=dark]) .kg-kind{color:hsl(var(--h) 75% 34%)}
 .stage-head .kg-switch button{border:0;background:none;border-radius:7px;padding:4px 14px;font-size:12.5px;color:var(--muted)}
 .stage-head .kg-switch button.on{background:var(--raised);color:var(--ink);font-weight:600;box-shadow:inset 0 1px 0 var(--glass-edge)}
 .kl .kl-chips{max-height:none}
+
+/* The desktop app's own window bar (only inside the app). */
+.win-bar{position:fixed;inset:0 0 auto 0;z-index:90;height:34px;display:flex;align-items:center;gap:2px;padding:0 6px 0 10px;user-select:none;-webkit-user-select:none}
+.win-bar.macos{padding-left:78px}
+.win-fill{flex:1;height:100%;cursor:default}
+.win-btn{display:grid;place-items:center;width:40px;height:26px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);transition:background .15s,color .15s,border-color .15s}
+.win-btn:hover{background:var(--raised);border-color:var(--line);color:var(--ink)}
+.win-btn.close:hover{background:#e5484d;border-color:#e5484d;color:#fff}
+.win-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+html.has-win-bar .chat-shell{height:100dvh;padding-top:34px}
+@media (min-width:761px){html.has-win-bar .chat-shell{padding-top:34px}}
+
+/* Rail: the places you visit most, as a list with counts. */
+.places{display:flex;flex-direction:column;gap:1px;margin:6px 0 2px}
+.place{display:flex;align-items:center;gap:10px;width:100%;padding:6px 8px;border:0;border-radius:10px;background:none;color:var(--ink);font-size:13.5px;text-align:left}
+.place .av{flex:none;width:26px;height:26px;margin:0}
+.place>span:not(.av){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The bell keeps the old tile class the dropdown places itself by; it must not look like a tile. */
+.places .place.tile{flex-direction:row;align-items:center;gap:10px;padding:6px 8px;color:var(--ink)}
+.places .place.tile.active{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.place b{min-width:22px;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--ink) 9%,transparent);font-size:11.5px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums;color:var(--muted)}
+.place b.warn{background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}
+.place:hover{background:var(--raised)}
+.place.active{background:color-mix(in srgb,var(--accent) 14%,transparent);box-shadow:inset 3px 0 0 var(--accent)}
+.rail-tools{display:flex;gap:4px;padding:8px 14px 0;border-top:1px solid var(--line)}
+.rail-tools .tool{display:grid;place-items:center;width:36px;height:34px;border:1px solid transparent;border-radius:10px;background:none}
+.rail-tools .tool .av{width:26px;height:26px;margin:0;flex:none;display:grid;place-items:center}
+.rail-tools .tool .av svg{display:block;margin:auto}
+.rail-tools .tool:hover{background:var(--raised);border-color:var(--line)}
+.rail-tools+.rail-foot{border-top:0}
+/* Tasks: each tracker has its own sync button. */
+.tk-srow{display:flex;align-items:center;gap:2px}.tk-srow .tk-source{flex:1;min-width:0}
+.tk-sync{display:grid;place-items:center;flex:none;width:30px;height:30px;border:0;border-radius:8px;background:none;color:var(--muted)}
+.tk-sync:hover{background:var(--raised);color:var(--accent)}
+.tk-sync.busy svg{animation:tk-spin 1s linear infinite}
+@keyframes tk-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.tk-sync.busy svg{animation:none}}

@@ -646,7 +646,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const input = await body(request), source = store.saveConnection(input.source);
         return json(response, 200, { source, run: await desk.startConnectionAgent({ sourceId: source.id, provider: input.provider }) });
       }
-      if (url.pathname === '/api/sync' && request.method === 'POST') return json(response, 200, await desk.sources.sync());
+      if (url.pathname === '/api/sync' && request.method === 'POST') { const input = await body(request).catch(() => ({})); return json(response, 200, await desk.sources.sync({ only: String(input.sourceId || '') })); }
       if (url.pathname === '/api/jev/prioritize' && request.method === 'POST') return json(response, 200, await (async () => { const input = await body(request); return desk.jev.prioritize({ force: Boolean(input.force), taskId: String(input.taskId || '') }); })());
       if (url.pathname === '/api/runs' && request.method === 'POST') return json(response, 200, await desk.startTask(await body(request)));
       if (url.pathname === '/api/demo' && request.method === 'POST') return json(response, 200, desk.demo());

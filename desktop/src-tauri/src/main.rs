@@ -61,6 +61,20 @@ fn startup_error() -> String {
 // A link Rex Desk opens in a new window: its own pages open in a child window of the app (same sign-in);
 // anything else opens in the person's browser.
 fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::NewWindowFeatures) -> tauri::webview::NewWindowResponse<tauri::Wry> {
+    // Rex Desk draws its own window buttons: a button opens https://rexdesk.window/<action>, which never becomes a
+    // window; the action is done to the main window instead.
+    if url.host_str() == Some("rexdesk.window") {
+        if let Some(window) = app.get_webview_window("main") {
+            match url.path() {
+                "/minimize" => { let _ = window.minimize(); }
+                "/maximize" => { if window.is_maximized().unwrap_or(false) { let _ = window.unmaximize(); } else { let _ = window.maximize(); } }
+                "/close" => { let _ = window.hide(); }
+                "/drag" => { let _ = window.start_dragging(); }
+                _ => {}
+            }
+        }
+        return tauri::webview::NewWindowResponse::Deny;
+    }
     let own = url.host_str() == Some("127.0.0.1") && url.port() == Some(4317);
     if !own {
         if matches!(url.scheme(), "http" | "https" | "mailto") {
@@ -442,13 +456,19 @@ fn main() {
         .invoke_handler(tauri::generate_handler![restart_server, startup_error])
         .setup(|app| {
             let handle = app.handle().clone();
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .on_new_window(move |url, features| open_link(&handle, url, features))
+                .initialization_script(if cfg!(target_os = "macos") { "window.__REX_SHELL = 'macos';" } else { "window.__REX_SHELL = 'windows';" })
                 .title("Rex Desk Beta")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(900.0, 600.0)
-                .maximized(true)
-                .build()?;
+                .maximized(true);
+            // Windows: no system title bar, our own buttons instead. Mac: the three dots stay, floating over our bar.
+            #[cfg(target_os = "windows")]
+            let builder = builder.decorations(false).shadow(true);
+            #[cfg(target_os = "macos")]
+            let builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+            let window = builder.build()?;
             // Rex Desk lives in the system tray: closing the window hides it while the server keeps running agents.
             let open = MenuItem::with_id(app, "open", "Open Rex Desk", true, None::<&str>)?;
             let again = MenuItem::with_id(app, "restart", "Restart Rex Desk server", true, None::<&str>)?;

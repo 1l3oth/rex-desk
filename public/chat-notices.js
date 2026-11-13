@@ -52,8 +52,9 @@ let pane = null, paneHtml = '';
 function placePane() {
   if (!pane) return;
   const bell = document.querySelector('.tile[data-action="nt-panel"]'), box = bell?.getBoundingClientRect(), narrow = window.innerWidth < 640;
-  pane.style.left = narrow || !box ? '8px' : `${Math.round(box.left)}px`;
-  pane.style.top = narrow || !box ? '56px' : `${Math.round(box.bottom + 6)}px`;
+  // Beside the list, level with the bell row, and never past the bottom of the window.
+  pane.style.left = narrow || !box ? '8px' : `${Math.round(box.right + 14)}px`;
+  pane.style.top = narrow || !box ? '56px' : `${Math.round(Math.max(8, Math.min(box.top - 12, window.innerHeight - pane.offsetHeight - 12)))}px`;
 }
 function drawPane(ctx) {
   if (!pane) return;
