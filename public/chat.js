@@ -273,7 +273,8 @@ function stageModel() {
   if (type === 'worktrees') return worktreesStage(ctx);
   if (type === 'jev') return jevStage();
   if (type === 'person') { const graph = knowledgeView() === 'graph'; return { title: 'Knowledge', meta: graph ? 'You, your agents and your second brain' : 'Your profile, from what the agents learned', top: true,
-    feed: graph ? '<div class="kg" id="kg" data-keep="kg"></div>' : `<div class="kg-back"><button type="button" class="btn small" data-action="kg-view" data-view="graph">Back to the graph</button></div>${personPage()}` }; }
+    actions: `<div class="kg-switch" role="tablist" aria-label="How to look at your knowledge"><button type="button" role="tab" aria-selected="${graph}" class="${graph ? 'on' : ''}" data-action="kg-view" data-view="graph">Graph</button><button type="button" role="tab" aria-selected="${!graph}" class="${graph ? '' : 'on'}" data-action="kg-view" data-view="list">List</button></div>`,
+    feed: graph ? '<div class="kg" id="kg" data-keep="kg"></div>' : personPage() }; }
   if (type === 'project') {
     return { title: id, meta: 'Project memory', feed: `<div class="page"><div class="row"><button class="btn primary small" data-action="spec-new">Create agent for this project</button></div><div class="card"><div class="md">${markdown(ui.page || 'Loading…')}</div></div></div>` };
   }
