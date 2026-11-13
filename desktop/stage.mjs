@@ -11,5 +11,8 @@ if (!existsSync(path.join(project, 'node_modules', 'playwright'))) throw new Err
 rmSync(payload, { recursive: true, force: true });
 mkdirSync(path.join(payload, 'node'), { recursive: true });
 cpSync(process.execPath, path.join(payload, 'node', process.platform === 'win32' ? 'node.exe' : 'node'));
-for (const entry of ['src', 'public', 'scripts', 'package.json', 'node_modules']) cpSync(path.join(project, entry), path.join(payload, 'app', entry), { recursive: true, dereference: true });
+// Left out: the agent SDK's own copy of Claude Code (about 220 MB). Rex Desk runs the Claude Code installed on the
+// computer, which signing in needs anyway, so the copy was never used and only made the installer 400 MB.
+const skip = /[\\/]node_modules[\\/](@anthropic-ai[\\/]claude-agent-sdk-[^\\/]+|@types)([\\/]|$)/;
+for (const entry of ['src', 'public', 'scripts', 'package.json', 'node_modules']) cpSync(path.join(project, entry), path.join(payload, 'app', entry), { recursive: true, dereference: true, filter: source => !skip.test(source) });
 console.log(`Staged Node ${process.version} and Rex Desk into ${payload}`);

@@ -35,10 +35,15 @@
     status.textContent = 'Rex Desk stopped. Starting it again…';
     button.hidden = false;
   }
+  // Whatever state this page is in (starting, error, after Restart), open Rex Desk as soon as the server answers.
+  // An opaque no-cors reply means it is up; a refused connection rejects.
+  const server = 'http://127.0.0.1:4317/';
+  async function open() { try { await fetch(server + 'api/auth', { mode: 'no-cors', cache: 'no-store' }); location.replace(server); return true; } catch { return false; } }
+  setInterval(open, 2000);
   button.addEventListener('click', async () => {
     button.disabled = true; status.className = ''; status.textContent = 'Restarting Rex Desk…';
-    try { await window.__TAURI_INTERNALS__.invoke('restart_server'); status.textContent = 'Rex Desk is back. Opening it…'; }
-    catch (error) { showError(String(error)); }
+    try { await window.__TAURI_INTERNALS__.invoke('restart_server'); status.textContent = 'Rex Desk is back. Opening it…'; open(); }
+    catch (error) { if (!(await open())) showError(String(error)); }
   });
 </script>
 </body>

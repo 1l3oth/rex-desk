@@ -239,7 +239,7 @@ fn restart(runtime: &Runtime) -> Result<(), String> {
             thread::sleep(Duration::from_millis(200));
         }
         start_server(runtime).map_err(|error| format!("Could not start Rex Desk: {error}"))?;
-        if wait_for_server(40) {
+        if wait_for_server(240) {
             Ok(())
         } else {
             Err(format!("Rex Desk did not start. See {}", runtime.data.join("server-error.log").display()))
@@ -340,7 +340,7 @@ fn main() {
                     }
                     ensure_browser(&runtime);
                 }
-                let deadline = Instant::now() + Duration::from_secs(30);
+                let deadline = Instant::now() + Duration::from_secs(90);
                 while !server_running() {
                     if Instant::now() > deadline {
                         return fail(format!("Rex Desk did not start. See {}", runtime.data.join("server-error.log").display()));

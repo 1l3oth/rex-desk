@@ -136,6 +136,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
   // Once the server has its address: reconnect agents' terminals, resume interrupted runs, and get the agents ready.
   let listenPort = 0, remoteAt = '', remoteOpen = () => {}; const remoteServers = [];
   function startDesk(desk, store) {
+    if (desk.started) return; desk.started = true;
     desk.port = listenPort; desk.peers.port = listenPort;
     desk.peers.onRemoteChange = () => { remoteAt = '-'; remoteOpen(); }; remoteOpen();
     if (!process.env.NODE_TEST_CONTEXT) desk.peers.start();
@@ -219,8 +220,14 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     return json(response, 404, { error: 'Unknown sign-in action.' });
   }
   if (!accounts) await openSession(null, null);
-  else { const remembered = await accounts.rememberedSession(); if (remembered) await openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true }).catch(() => { session = null; }); }
+  // A remembered sign-in opens while the server already listens: opening it can take a while (it pulls the newest cloud
+  // backup first), and the desktop app and start script count a server that does not answer as one that failed to start.
+  // Requests wait for it, so nobody sees the sign-in page or works on an out-of-date copy meanwhile.
+  let opening = Promise.resolve();
+  if (!accounts) await openSession(null, null);
+  else opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true })).catch(() => { session = null; });
   const handler = async (request, response) => {
+    await opening;
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
@@ -772,7 +779,7 @@ export async function createApp({ dataDirectory, port = Number(process.env.PORT 
     for (const item of remoteServers.splice(0)) item.close();
     for (const host of wanted) { const item = http.createServer(handler); item.on('error', error => session?.store.event('', 'remote-listen-error', { message: error.message })); item.listen(listenPort, host); remoteServers.push(item); }
   };
-  if (session) startDesk(session.desk, session.store);
+  void opening.then(() => { if (session) startDesk(session.desk, session.store); });
   let lastSync = Date.now(), ticks = 0;
   const timer = setInterval(() => {
     if (!session) { awake.set(false); return; }
