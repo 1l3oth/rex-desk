@@ -543,6 +543,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/update/check' && request.method === 'POST') { const status = await updates.check(); notify(); return json(response, 200, status); }
       if (url.pathname === '/api/update/install' && request.method === 'POST') {
         const input = await body(request), busy = busyAgents(store);
+        // The update window takes the colours of the theme the person sees (sent by the page).
+        if (input.theme) updates.theme = input.theme;
         if (input.cancel) { updateWhenIdle = false; notify(); return json(response, 200, { whenIdle: false }); }
         if (busy.length) {
           // Installing restarts Rex Desk and would cut the working agents off: it can wait for them instead.

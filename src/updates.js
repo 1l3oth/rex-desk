@@ -39,6 +39,12 @@ export const updaters = { 'win32-x64': '-setup.exe', 'darwin-arm64': '.app.tar.g
 const quoted = value => `'${String(value).replaceAll("'", `'\\''`)}'`;
 // The Mac helper: waits for the server to exit, closes the app, unpacks the new app beside the old one (same disk, so the
 // swap is a rename), and reopens Rex Desk. When anything fails the old app is put back and opened, so nobody is left without it.
+// Only #rrggbb colours reach the update window's script, whatever the page sent.
+export function safeTheme(theme) {
+  const out = {};
+  for (const key of ['panel', 'ink', 'muted', 'accent', 'line']) if (/^#[0-9a-f]{6}$/i.test(String(theme?.[key] || ''))) out[key] = theme[key];
+  return out;
+}
 export function macInstallScript({ serverPid, archive, app, log }) {
   return `#!/bin/sh
 exec >${quoted(log)} 2>&1
@@ -125,7 +131,7 @@ export class Updates {
       return;
     }
     const helper = path.join(this.directory, 'install-update.ps1');
-    writeFileSync(path.join(this.directory, 'install-update.json'), JSON.stringify({ serverPid: Number(serverPid), installer: this.file, app: this.executable, version: this.state.available?.version || '', log: path.join(this.directory, 'install-update.log') }));
+    writeFileSync(path.join(this.directory, 'install-update.json'), JSON.stringify({ serverPid: Number(serverPid), installer: this.file, app: this.executable, version: this.state.available?.version || '', log: path.join(this.directory, 'install-update.log'), theme: safeTheme(this.theme) }));
     writeFileSync(helper, [
       '$settings = Get-Content -Raw (Join-Path $PSScriptRoot "install-update.json") | ConvertFrom-Json',
       '$ServerPid = [int]$settings.serverPid; $Installer = $settings.installer; $App = $settings.app; $Log = $settings.log',
@@ -134,14 +140,28 @@ export class Updates {
       // answers again. The window is a nicety: if it cannot be shown, the update goes on without it.
       '$Version = [string]$settings.version',
       '$ui = $null',
+      // The update window looks like Rex Desk: no Windows frame, rounded, the colours of the theme the person sees, the four-square
+      // logo, and a thin accent bar (a filled panel, not the green Windows progress bar).
+      '$t = $settings.theme; function Col($value, $fallback) { try { if ($value) { return [Drawing.ColorTranslator]::FromHtml($value) } } catch {}; return [Drawing.ColorTranslator]::FromHtml($fallback) }',
       'try { Add-Type -AssemblyName System.Windows.Forms, System.Drawing; [Windows.Forms.Application]::EnableVisualStyles()',
-      '  $form = New-Object Windows.Forms.Form -Property @{ Text = "Updating Rex Desk"; ClientSize = New-Object Drawing.Size(440, 120); StartPosition = "CenterScreen"; FormBorderStyle = "FixedDialog"; ControlBox = $false; TopMost = $true; ShowInTaskbar = $true; BackColor = [Drawing.Color]::FromArgb(27, 30, 36); ForeColor = [Drawing.Color]::FromArgb(230, 232, 235); Font = New-Object Drawing.Font("Segoe UI", 10) }',
-      '  $title = New-Object Windows.Forms.Label -Property @{ Text = "Updating Rex Desk $Version"; Location = New-Object Drawing.Point(20, 16); AutoSize = $true; Font = New-Object Drawing.Font("Segoe UI Semibold", 11) }',
-      '  $label = New-Object Windows.Forms.Label -Property @{ Text = "Getting ready"; Location = New-Object Drawing.Point(20, 46); Size = New-Object Drawing.Size(400, 22); ForeColor = [Drawing.Color]::FromArgb(154, 163, 177) }',
-      '  $bar = New-Object Windows.Forms.ProgressBar -Property @{ Location = New-Object Drawing.Point(20, 80); Size = New-Object Drawing.Size(400, 10); Minimum = 0; Maximum = 100; Style = "Continuous" }',
-      '  $form.Controls.AddRange(@($title, $label, $bar)); $form.Show(); [Windows.Forms.Application]::DoEvents(); $ui = $form } catch { $ui = $null }',
+      '  $panel = Col $t.panel "#16181d"; $ink = Col $t.ink "#e6e8eb"; $muted = Col $t.muted "#9aa3b1"; $accent = Col $t.accent "#5a97ff"; $line = Col $t.line "#2a2f37"',
+      '  $form = New-Object Windows.Forms.Form -Property @{ Text = "Updating Rex Desk"; ClientSize = New-Object Drawing.Size(460, 132); StartPosition = "CenterScreen"; FormBorderStyle = "None"; TopMost = $true; ShowInTaskbar = $true; BackColor = $panel }',
+      // The taskbar shows Rex Desk's own icon (taken from the app being updated), not PowerShell's.
+      '  try { $form.Icon = [Drawing.Icon]::ExtractAssociatedIcon($App) } catch {}',
+      '  $path = New-Object Drawing.Drawing2D.GraphicsPath; $r = 28; $w = $form.Width; $h = $form.Height; $path.AddArc(0, 0, $r, $r, 180, 90); $path.AddArc($w - $r, 0, $r, $r, 270, 90); $path.AddArc($w - $r, $h - $r, $r, $r, 0, 90); $path.AddArc(0, $h - $r, $r, $r, 90, 90); $path.CloseFigure(); $form.Region = New-Object Drawing.Region($path)',
+      '  $form.Add_Paint({ param($s, $e) $e.Graphics.SmoothingMode = "AntiAlias"; $pen = New-Object Drawing.Pen($line, 1); $e.Graphics.DrawPath($pen, $path); $pen.Dispose() })',
+      '  $logo = New-Object Windows.Forms.Panel -Property @{ Location = New-Object Drawing.Point(24, 24); Size = New-Object Drawing.Size(30, 30); BackColor = $panel }',
+      '  $logo.Add_Paint({ param($s, $e) $g = $e.Graphics; $g.SmoothingMode = "AntiAlias"; $brush = New-Object Drawing.SolidBrush($accent); foreach ($p in @(@(0,0),@(16,0),@(0,16),@(16,16))) { $box = New-Object Drawing.Drawing2D.GraphicsPath; $x = $p[0]; $y = $p[1]; $box.AddArc($x, $y, 6, 6, 180, 90); $box.AddArc($x + 8, $y, 6, 6, 270, 90); $box.AddArc($x + 8, $y + 8, 6, 6, 0, 90); $box.AddArc($x, $y + 8, 6, 6, 90, 90); $box.CloseFigure(); $g.FillPath($brush, $box) }; $brush.Dispose() })',
+      '  $title = New-Object Windows.Forms.Label -Property @{ Text = "Updating Rex Desk $Version"; Location = New-Object Drawing.Point(66, 22); AutoSize = $true; Font = New-Object Drawing.Font("Segoe UI Semibold", 11.5); ForeColor = $ink; BackColor = $panel }',
+      '  $label = New-Object Windows.Forms.Label -Property @{ Text = "Getting ready"; Location = New-Object Drawing.Point(67, 48); Size = New-Object Drawing.Size(370, 20); Font = New-Object Drawing.Font("Segoe UI", 9.5); ForeColor = $muted; BackColor = $panel }',
+      '  $track = New-Object Windows.Forms.Panel -Property @{ Location = New-Object Drawing.Point(24, 92); Size = New-Object Drawing.Size(412, 6); BackColor = $line }',
+      '  $fill = New-Object Windows.Forms.Panel -Property @{ Location = New-Object Drawing.Point(0, 0); Size = New-Object Drawing.Size(0, 6); BackColor = $accent }; $track.Controls.Add($fill)',
+      '  $foot = New-Object Windows.Forms.Label -Property @{ Text = "Rex Desk opens again by itself when this is done."; Location = New-Object Drawing.Point(23, 106); AutoSize = $true; Font = New-Object Drawing.Font("Segoe UI", 8.5); ForeColor = $muted; BackColor = $panel }',
+      '  $bar = [pscustomobject]@{ Track = $track; Fill = $fill }',
+      '  $form.Controls.AddRange(@($logo, $title, $label, $track, $foot)); $form.Show(); [Windows.Forms.Application]::DoEvents(); $ui = $form } catch { $ui = $null }',
+      'function Set-Bar($percent) { if ($ui) { $bar.Fill.Width = [int]($bar.Track.Width * [Math]::Min(100, [Math]::Max(0, $percent)) / 100) } }',
       'function Pump { if ($ui) { [Windows.Forms.Application]::DoEvents() } }',
-      'function Step($text, $say, $percent) { Add-Content -Path $Log -Value "$(Get-Date -Format s) $text"; if ($ui -and $say) { $label.Text = $say; if ($percent -ge 0) { $bar.Value = [Math]::Min(100, $percent) }; Pump } }',
+      'function Step($text, $say, $percent) { Add-Content -Path $Log -Value "$(Get-Date -Format s) $text"; if ($ui -and $say) { $label.Text = $say; if ($percent -ge 0) { Set-Bar $percent }; Pump } }',
       'Set-Content -Path $Log -Value "$(Get-Date -Format s) update helper started"',
       'Step "closing" "Closing Rex Desk" 5',
       '$until = (Get-Date).AddSeconds(60); while ((Get-Process -Id $ServerPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $until) { Pump; Start-Sleep -Milliseconds 200 }',
@@ -158,7 +178,7 @@ export class Updates {
       // report its own progress, so the bar moves on time (it usually takes about a minute) and never claims to be done early.
       // /D= installs over the copy that is running, wherever it is: the installer's own guess from the registry once put a second
       // copy in AppData while the person's Rex Desk stayed on the old version (0.0.21, after the publisher name changed).
-      'function Install($try) { Clear-Folder; Step "installing (try $try)" "Installing the new version" 20; try { $setup = Start-Process -FilePath $Installer -ArgumentList "/S /D=$folder" -PassThru; $started = Get-Date; while (-not $setup.HasExited) { if ($ui) { $bar.Value = [Math]::Min(80, 20 + [int](((Get-Date) - $started).TotalSeconds / 1.2)) }; Pump; Start-Sleep -Milliseconds 250 }; Step "installer exit code $($setup.ExitCode)" "Checking the install" 82; return ($setup.ExitCode -eq 0) } catch { Step "installer failed: $($_.Exception.Message)" "The installer did not finish" 82; return $false } }',
+      'function Install($try) { Clear-Folder; Step "installing (try $try)" "Installing the new version" 20; try { $setup = Start-Process -FilePath $Installer -ArgumentList "/S /D=$folder" -PassThru; $started = Get-Date; while (-not $setup.HasExited) { if ($ui) { Set-Bar ([Math]::Min(80, 20 + [int](((Get-Date) - $started).TotalSeconds / 1.2))) }; Pump; Start-Sleep -Milliseconds 250 }; Step "installer exit code $($setup.ExitCode)" "Checking the install" 82; return ($setup.ExitCode -eq 0) } catch { Step "installer failed: $($_.Exception.Message)" "The installer did not finish" 82; return $false } }',
       // Up to three tries; an install is only done when the app is whole, whatever the installer says.
       '$ok = $false; for ($try = 1; $try -le 3 -and -not $ok; $try++) { $ran = Install $try; $ok = $ran -and (Whole); if (-not $ok) { Step "install incomplete (node $(if (Test-Path $node) { (Get-Item $node).Length } else { 0 }) bytes)" "The install did not finish. Trying again" 20; Start-Sleep -Seconds 3 } }',
       'if ($ok) { Step "installed" "Installed" 85 } else { Step "install failed after 3 tries" "The update could not be installed. Run the installer again from the updates folder." 85 }',
