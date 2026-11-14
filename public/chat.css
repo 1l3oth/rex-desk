@@ -1715,3 +1715,6 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .driver-popover.rex-tour .driver-popover-close-btn{color:var(--muted)}
 .driver-popover.rex-tour .driver-popover-arrow-side-left{border-left-color:var(--panel,#16181d)}.driver-popover.rex-tour .driver-popover-arrow-side-right{border-right-color:var(--panel,#16181d)}
 .driver-popover.rex-tour .driver-popover-arrow-side-top{border-top-color:var(--panel,#16181d)}.driver-popover.rex-tour .driver-popover-arrow-side-bottom{border-bottom-color:var(--panel,#16181d)}
+
+/* Read replies aloud: the speaker in the chat header, lit while it is on. */
+.read-aloud.on{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
