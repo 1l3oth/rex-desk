@@ -1703,7 +1703,7 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .driver-active .driver-active-element{outline:3px solid #f5b83d;outline-offset:4px;border-radius:12px;animation:rt-ring 1.6s ease-in-out infinite}
 @keyframes rt-ring{0%,100%{box-shadow:0 0 0 0 rgba(245,184,61,.45)}50%{box-shadow:0 0 0 10px rgba(245,184,61,0)}}
 @media (prefers-reduced-motion:reduce){.driver-active .driver-active-element{animation:none}}
-.driver-popover.rex-tour{background:var(--panel,#16181d);color:var(--ink,#e8eaf0);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.45);max-width:360px;padding:16px 18px}
+.driver-popover.rex-tour{background:var(--solid,var(--panel,#16181d));color:var(--ink,#e8eaf0);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.45);max-width:360px;padding:16px 18px}
 .driver-popover.rex-tour .driver-popover-description{margin:0}
 .rex-tour .rt-km{margin:0 0 6px;font:500 17px/1.75 'Noto Sans Khmer','Khmer UI',var(--font,system-ui),sans-serif}
 .rex-tour .rt-en{margin:0;font-size:13px;line-height:1.45;color:var(--muted)}
@@ -1713,8 +1713,8 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .driver-popover.rex-tour .driver-popover-next-btn{background:var(--accent);border-color:var(--accent);color:#fff}
 .rex-tour .rt-sound{margin-right:auto;color:var(--muted)}
 .driver-popover.rex-tour .driver-popover-close-btn{color:var(--muted)}
-.driver-popover.rex-tour .driver-popover-arrow-side-left{border-left-color:var(--panel,#16181d)}.driver-popover.rex-tour .driver-popover-arrow-side-right{border-right-color:var(--panel,#16181d)}
-.driver-popover.rex-tour .driver-popover-arrow-side-top{border-top-color:var(--panel,#16181d)}.driver-popover.rex-tour .driver-popover-arrow-side-bottom{border-bottom-color:var(--panel,#16181d)}
+.driver-popover.rex-tour .driver-popover-arrow-side-left{border-left-color:var(--solid,var(--panel,#16181d))}.driver-popover.rex-tour .driver-popover-arrow-side-right{border-right-color:var(--solid,var(--panel,#16181d))}
+.driver-popover.rex-tour .driver-popover-arrow-side-top{border-top-color:var(--solid,var(--panel,#16181d))}.driver-popover.rex-tour .driver-popover-arrow-side-bottom{border-bottom-color:var(--solid,var(--panel,#16181d))}
 
 /* Read replies aloud: the speaker in the chat header, lit while it is on. */
 .read-aloud.on{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
