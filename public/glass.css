@@ -235,7 +235,7 @@ html.has-win-bar .chat-shell{height:100dvh;padding-top:34px}
 .place:hover{background:var(--raised)}
 .place.active{background:color-mix(in srgb,var(--accent) 14%,transparent);box-shadow:inset 3px 0 0 var(--accent)}
 .rail-tools{display:flex;gap:4px;padding:8px 14px 0;border-top:1px solid var(--line)}
-.rail-tools .tool{display:grid;place-items:center;width:36px;height:34px;border:1px solid transparent;border-radius:10px;background:none}
+.rail-tools .tool{display:grid;place-items:center;width:36px;height:34px;padding:0;border:1px solid transparent;border-radius:10px;background:none}
 .rail-tools .tool .av{width:26px;height:26px;margin:0;flex:none;display:grid;place-items:center}
 .rail-tools .tool .av svg{display:block;margin:auto}
 .rail-tools .tool:hover{background:var(--raised);border-color:var(--line)}
