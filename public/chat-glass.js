@@ -57,11 +57,13 @@ document.addEventListener('keydown', event => {
 });
 // The app redraws its header and list from time to time: keep the buttons' pressed state right, and tell the
 // stylesheet how wide the side panel is so the chat takes exactly that room back.
-new MutationObserver(() => {
+let paneQueued = false;
+new MutationObserver(() => { if (paneQueued) return; paneQueued = true; requestAnimationFrame(() => { paneQueued = false; syncPanes(); }); }).observe(document.body, { childList: true, subtree: true });
+function syncPanes() {
   for (const pane of ['rail', 'side']) for (const button of document.querySelectorAll(`[data-pane="${pane}"]`)) { const pressed = String(!paneOff(pane)); if (button.getAttribute('aria-pressed') !== pressed) button.setAttribute('aria-pressed', pressed); }
   const side = document.querySelector('.stage > .side.on');
   if (side && !paneOff('side')) { const width = `${side.offsetWidth}px`; if (root.style.getPropertyValue('--side-w') !== width) root.style.setProperty('--side-w', width); }
-}).observe(document.body, { childList: true, subtree: true });
+}
 
 // The desktop app's own window bar. Windows: no system title bar, so Rex Desk draws minimize, maximize and close in glass.
 // Mac: the three dots stay where they are, over the left end of the same bar. In a plain browser nothing is added.
@@ -111,7 +113,8 @@ new MutationObserver(dressSkin).observe(root, { attributes: true, attributeFilte
 
 // Settings > General > Look: picking a theme changes the app at once.
 const paintSwatches = () => { for (const button of document.querySelectorAll('.st-skin:not([data-painted])')) { button.dataset.painted = '1'; button.style.setProperty('--a', button.dataset.a); button.style.setProperty('--b', button.dataset.b); button.style.setProperty('--base', button.dataset.base); } };
-new MutationObserver(paintSwatches).observe(document.body, { childList: true, subtree: true });
+const onceAFrame = fn => { let queued = false; return () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; fn(); }); }; };
+new MutationObserver(onceAFrame(paintSwatches)).observe(document.body, { childList: true, subtree: true });
 document.addEventListener('click', event => {
   const pick = event.target.closest('[data-st-skin]'); if (!pick) return;
   window.rexSkin?.set(pick.dataset.stSkin);
@@ -136,4 +139,4 @@ const tickWarm = () => {
   }
 };
 setInterval(() => { if (!document.hidden) tickWarm(); }, 1000);
-new MutationObserver(tickWarm).observe(document.body, { childList: true, subtree: true });
+new MutationObserver(onceAFrame(tickWarm)).observe(document.body, { childList: true, subtree: true });

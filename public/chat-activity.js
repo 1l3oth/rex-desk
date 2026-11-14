@@ -84,7 +84,8 @@ document.addEventListener('click', event => {
   if (copy) { const entry = document.getElementById(`term-${copy.dataset.termCopy}`); void navigator.clipboard?.writeText(`${entry.querySelector('.tl-cmd').textContent.trim()}\n${entry.querySelector('.tl-full').textContent}`); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1200); }
 });
 document.addEventListener('input', event => { if (!event.target.matches?.('[data-term-find]')) return; termFilter.words = event.target.value.trim().toLowerCase(); applyTerm(); });
-new MutationObserver(() => { if (termFilter.show !== 'all' || termFilter.words) applyTerm(); }).observe(document.documentElement, { childList: true, subtree: true });
+let termQueued = false;
+new MutationObserver(() => { if (termQueued || (termFilter.show === 'all' && !termFilter.words)) return; termQueued = true; requestAnimationFrame(() => { termQueued = false; applyTerm(); }); }).observe(document.documentElement, { childList: true, subtree: true });
 
 // A file change the agent made: the file, +added −removed, and the changed lines when opened.
 // Which ones the reader opened is remembered, so the next redraw of the chat does not close them again.

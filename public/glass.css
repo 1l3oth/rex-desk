@@ -436,3 +436,22 @@ html.has-win-bar .rail-head{display:none}
 html.has-win-bar .rail{padding-top:8px}
 html.has-win-bar .chat-shell{padding-top:40px}
 .win-bar{height:40px}
+
+/* ===== Speed. The backdrop behind the big panels is already soft light, so blurring it again changes almost nothing you
+   can see, but the graphics card had to redo that blur on every scroll and every new word. The big panels are now plain
+   translucent glass; only things that float (menus, dialogs, pop-ups) still blur what is under them. ===== */
+.rail,.stage-main,.stage>.side,.stage-head,.composer,.side.info,.st-nav,.side{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+:root{--panel:color-mix(in srgb,#fff calc(var(--solid-mix) + 18%),rgba(255,255,255,.42))}
+html[data-theme=dark]{--panel:color-mix(in srgb,#151922 calc(var(--solid-mix) + 22%),rgba(255,255,255,.04))}
+/* Each panel draws on its own, so a change inside one never repaints the others. */
+.rail,.stage-main,.stage>.side{contain:layout paint}
+.feed{contain:content;overscroll-behavior:contain}
+/* The window never scrolls as a whole: only the panels inside it do. */
+html,body{height:100%;overflow:hidden}
+.chat-shell{height:100dvh;max-height:100dvh;overflow:hidden}
+/* Phones have their own tab bar (Jev and Settings live there), so the desktop footer icons stay hidden. */
+@media (max-width:760px){.rail-tools{display:none!important}}
+/* The add-agents button now carries its own icon: the phone layout must not draw a second one over it. */
+.head-actions [data-action="chat-to-room"].head-add::before{content:none}
+@media (max-width:760px){.head-actions .head-add{width:38px;height:38px;border-radius:50%}.head-actions .head-add svg{width:19px;height:19px}}
+.welcome .rex-core.xl{width:96px;height:96px}
