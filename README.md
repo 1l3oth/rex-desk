@@ -120,3 +120,7 @@ npm run test:browser
 ## Contributing
 
 Read [docs/ONBOARDING.md](docs/ONBOARDING.md) to get started and [CONTRIBUTING.md](CONTRIBUTING.md) for how changes are made. Please send outside contributions as pull requests.
+
+## Author and licence
+
+Rex Desk is made and maintained by **Vong Pichdaraboth**. It is open source under the [MIT License](LICENSE).

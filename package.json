@@ -2,6 +2,8 @@
   "name": "rex-desk",
   "version": "0.1.0",
   "private": true,
+  "author": "Vong Pichdaraboth",
+  "license": "MIT",
   "type": "module",
   "description": "A local, chat-first desk where AI agents work on your projects with you: personal chats, group rooms and tasks",
   "engines": {
