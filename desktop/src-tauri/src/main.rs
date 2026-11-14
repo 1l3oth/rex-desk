@@ -255,28 +255,8 @@ fn workspace_in(picked: &PathBuf) -> PathBuf {
     if picked.parent().is_none() || !empty { picked.join("Rex Desk") } else { picked.clone() }
 }
 
-// A folder picker, shown once before anything opens. None when the person cancels.
-fn pick_folder(message: &str) -> Option<PathBuf> {
-    #[cfg(windows)]
-    let mut command = {
-        let script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = $env:REX_PICK; $d.ShowNewFolderButton = $true; $f = New-Object System.Windows.Forms.Form; $f.TopMost = $true; if ($d.ShowDialog($f) -eq 'OK') { [Console]::Out.Write($d.SelectedPath) }";
-        let mut command = Command::new("powershell.exe");
-        command.args(["-NoProfile", "-STA", "-Command", script]);
-        command
-    };
-    #[cfg(not(windows))]
-    let mut command = {
-        let mut command = Command::new("osascript");
-        command.args(["-e", "POSIX path of (choose folder with prompt (system attribute \"REX_PICK\"))"]);
-        command
-    };
-    let output = hidden(command.env("REX_PICK", message)).output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if text.is_empty() { None } else { Some(PathBuf::from(text)) }
-}
-
 // Which folder holds the data: the remembered one; else the app's default folder when it already holds a workspace
-// (an upgrade); else, when `ask` is set, the person picks one (cancel keeps the default and starts a new workspace).
+// (an upgrade); else the default folder, remembered for next time.
 fn choose_data(default: PathBuf, ask: bool) -> PathBuf {
     let saved = saved_folder();
     if let Some(saved) = &saved {
@@ -291,10 +271,10 @@ fn choose_data(default: PathBuf, ask: bool) -> PathBuf {
         remember_folder(&default);
         return default;
     }
-    if !ask { return default; }
-    let chosen = pick_folder("Where is your Rex Desk workspace? Pick the folder that holds it (or the folder above it), or any folder to start fresh. Cancel uses the default folder.").map(|picked| workspace_in(&picked)).unwrap_or(default);
-    remember_folder(&chosen);
-    chosen
+    // A first install never asks where to keep things: a folder question before anything opens looked suspicious. The data
+    // goes to the default folder, and the person can move it later in Settings, Folders.
+    if ask { remember_folder(&default); }
+    default
 }
 
 // The installed app carries its own Node and server next to the executable and keeps data in %APPDATA%\Rex Desk
