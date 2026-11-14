@@ -81,16 +81,32 @@ test('an existing single-folder workspace is claimed with an email and keeps its
   } finally { await app.close(); }
 });
 
+test('cloud backup comes only with a Rex Desk account: a typed database address, or an own Turso account, is refused', async () => {
+  const app = await accountApp(temporary('account-only'), { cloudClientFactory: fakeTurso().clientFactory }), client = browser(app);
+  try {
+    await client('/api/auth/create', { method: 'POST', data: { email: 'owner@example.com', passphrase } });
+    for (const route of ['/api/database/connect', '/api/database/turso-start']) {
+      const reply = await client(route, { method: 'POST', data: { url: 'libsql://mine.example.invalid', authToken: 'mine' } });
+      assert.notEqual(reply.status, 200, route); assert.match(reply.body.error, /comes with your Rex Desk account/);
+    }
+    assert.equal(app.store.cloud.enabled, false, 'nothing was connected');
+    await client('/api/auth/logout', { method: 'POST' });
+    const typed = await client('/api/auth/cloud', { method: 'POST', data: { url: 'libsql://mine.example.invalid', authToken: 'mine', email: 'owner@example.com', passphrase } });
+    assert.match(typed.body.error, /comes with your Rex Desk account/);
+  } finally { await app.close(); }
+});
+
+// The sync itself, with a database of the owner's own (only allowed with REX_DESK_OWN_DATABASE=1 now).
 test('the same account opens on another computer from its own Turso database and both computers stay in step', async () => {
   const turso = fakeTurso(), url = 'libsql://owner-db.example.invalid', authToken = 'owner-token';
-  const home = await accountApp(temporary('home'), { cloudClientFactory: turso.clientFactory }), atHome = browser(home);
+  const home = await accountApp(temporary('home'), { cloudClientFactory: turso.clientFactory, ownDatabase: true }), atHome = browser(home);
   await atHome('/api/auth/create', { method: 'POST', data: { email: 'owner@example.com', passphrase } });
   home.store.put('task', 'task-home', { id: 'task-home', title: 'Created at home', active: true });
   assert.equal((await atHome('/api/database/connect', { method: 'POST', data: { url, authToken } })).body.state, 'connected');
   await atHome('/api/auth/logout', { method: 'POST' });
   await home.close();
 
-  const work = await accountApp(temporary('work'), { cloudClientFactory: turso.clientFactory }), atWork = browser(work);
+  const work = await accountApp(temporary('work'), { cloudClientFactory: turso.clientFactory, ownDatabase: true }), atWork = browser(work);
   try {
     assert.match((await atWork('/api/auth/cloud', { method: 'POST', data: { url, authToken, email: 'owner@example.com', passphrase: 'wrong passphrase' } })).body.error, /incorrect/);
     const opened = await atWork('/api/auth/cloud', { method: 'POST', data: { url, authToken, email: 'owner@example.com', passphrase } });

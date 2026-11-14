@@ -43,11 +43,11 @@ test('branches read as English summaries, never internal IDs, and a taken name g
   assert.equal(provisionalTitle({ title: '업무 매니저 > 프로젝트 생성', taskNumber: '38464', externalId: '1076020' }), 'issue 38464', 'Non-Latin titles use the tracker number until the worker names the branch');
   assert.equal(provisionalTitle({ title: 'Safari list view broken', taskNumber: '1' }), 'Safari list view broken');
   const { original, trees } = await repository(), { store, desk } = workspace(original);
-  await git(original, ['branch', 'temp/rex/fix/download-button-blank-preview']);
-  const worktree = await createWorktree({ path: original, baseBranch: 'develop' }, trees, 'temp/rex/fix/issue-38464');
-  store.put('run', 'run-1', { id: 'run-1', role: 'worker', taskId: 'task-1', repositoryId: 'repo', worktree: worktree.directory, branch: 'temp/rex/fix/issue-38464', state: 'running', createdAt: now() });
+  await git(original, ['branch', 'rex-desk/fix/download-button-blank-preview']);
+  const worktree = await createWorktree({ path: original, baseBranch: 'develop' }, trees, 'rex-desk/fix/issue-38464');
+  store.put('run', 'run-1', { id: 'run-1', role: 'worker', taskId: 'task-1', repositoryId: 'repo', worktree: worktree.directory, branch: 'rex-desk/fix/issue-38464', state: 'running', createdAt: now() });
   const renamed = await desk.renameBranch('run-1', { title: 'Download button blank preview', type: 'fix' });
-  assert.equal(renamed.branch, 'temp/rex/fix/download-button-blank-preview-2');
+  assert.equal(renamed.branch, 'rex-desk/fix/download-button-blank-preview-2');
   assert.equal(await git(worktree.directory, ['branch', '--show-current']), renamed.branch);
   assert.equal(store.get('run', 'run-1').branch, renamed.branch);
   await assert.rejects(desk.renameBranch('run-1', { title: '다운로드 버튼' }), /English words/);
@@ -134,7 +134,7 @@ test('a new run gets an English branch name that describes the QA issue, or the 
   const { original } = await repository();
   // Without a key the signed-in Claude Code names it; when that fails too, the tracker number.
   const cli = answer => (command, args, options, callback) => { assert.ok(args.includes('haiku') && args.at(-1).includes('업무 매니저')); callback(answer ? null : new Error('not signed in'), answer); };
-  for (const [key, expected, namingCommand] of [['or-key', 'temp/rex/fix/project-view-names-ignore-language'], ['', 'temp/rex/fix/views-keep-english-names', cli('{"type":"fix","name":"views keep english names"}')], ['', 'temp/rex/fix/issue-38464', cli('')]]) {
+  for (const [key, expected, namingCommand] of [['or-key', 'rex-desk/fix/project-view-names-ignore-language'], ['', 'rex-desk/fix/views-keep-english-names', cli('{"type":"fix","name":"views keep english names"}')], ['', 'rex-desk/fix/issue-38464', cli('')]]) {
     const store = new Store(path.join(temporary('naming'), 'data')); // its own worktrees folder beside it
     store.saveConfig({ ...defaults, repositories: [{ id: 'repo', name: 'repo', path: original, baseBranch: 'develop', targetBranch: 'develop' }], jev: { apiKey: key } });
     store.put('task', 'task-1', { id: 'task-1', title: '업무 매니저 > 프로젝트 생성 > 업무 탭 뷰명 영어·한국어 표시', taskNumber: '38464', externalId: '1076020', source: 'morningmate', active: true, createdAt: now() });

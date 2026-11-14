@@ -2,6 +2,8 @@
   "name": "rex-desk",
   "version": "0.1.0",
   "private": true,
+  "author": "Vong Pichdaraboth",
+  "license": "MIT",
   "type": "module",
   "description": "A local, chat-first desk where AI agents work on your projects with you: personal chats, group rooms and tasks",
   "engines": {
@@ -22,6 +24,7 @@
     "@libsql/client": "^0.18.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "codemirror": "^5.65.18",
+    "driver.js": "^1.14.0",
     "mammoth": "^1.8.0",
     "msedge-tts": "^2.1.1",
     "playwright": "^1.0.0",

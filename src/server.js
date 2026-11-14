@@ -50,7 +50,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const startedCode = process.env.REX_DESK_VERSION ? '' : readCode();
 function readCode() { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } }
 function codeVersion() { return startedCode; }
-const mime = { '.webmanifest': 'application/manifest+json', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.json': 'application/json; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+const mime = { '.webmanifest': 'application/manifest+json', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.json': 'application/json; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 const json = (response, code, data) => { response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(data)); };
 // Recorded speech for transcription arrives as raw WAV bytes, not JSON.
 async function rawBody(request, limit = 20 * 1024 * 1024) {
@@ -88,7 +88,11 @@ function serveFile(request, response, file, { sandbox = false, download = false,
 // that did not pass its port on: it was on 4317 and stays there, so a computer using a checkout as its real app keeps its address.
 export const defaultPort = () => Number(process.env.PORT || (process.env.REX_DESK_VERSION || process.env.REX_RESTART_AFTER ? 4317 : 4318));
 
-export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
+export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, ownDatabase = process.env.REX_DESK_OWN_DATABASE === '1', updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
+  // Cloud backup comes with a Rex Desk account (a paid plan later): a database address and key typed by hand, or a Turso
+  // account of the person's own, are turned off unless this copy is started with REX_DESK_OWN_DATABASE=1.
+  const ACCOUNT_ONLY = 'Cloud backup comes with your Rex Desk account. Turn it on in Settings, Backup and updates.';
+  const ownDatabaseOnly = () => { if (!ownDatabase) throw Object.assign(new Error(ACCOUNT_ONLY), { status: 403 }); };
   let dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   // The real app follows a data folder the person moved, or finishes a move they asked for, before anything opens it.
   // The AI memory moves the same way. Tests pass their own folder and never move anything.
@@ -239,6 +243,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); linked(); return respond(); }
     if (url.pathname === '/api/auth/login') { await activate(await accounts.signIn(input.email, input.passphrase, { claimId: input.claimId }).catch(slow)); linked(); return respond(); }
     // A new computer, from the sign-in screen: Turso's browser sign-in finds the person's existing Rex Desk backup, so they never type its address or key.
+    if (url.pathname === '/api/auth/turso-start' || url.pathname === '/api/auth/turso-finish') ownDatabaseOnly();
     if (url.pathname === '/api/auth/turso-start') { tursoPending?.cancel(); tursoFound = null; tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
     if (url.pathname === '/api/auth/turso-finish') {
       if (!tursoPending) throw new Error('Start the Turso sign-in first.');
@@ -263,6 +268,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     }
     if (url.pathname === '/api/auth/account-forget') { accountPending?.cancel(); accountPending = null; accountFound = null; return json(response, 200, { ok: true }); }
     if (url.pathname === '/api/auth/cloud' && input.account) { if (!accountFound?.database) throw new Error('Sign in with Rex Desk first.'); input.url = accountFound.database.url; input.authToken = accountFound.database.authToken; }
+    if (url.pathname === '/api/auth/cloud' && !input.account) ownDatabaseOnly();
     if (url.pathname === '/api/auth/cloud' && input.turso) { if (!tursoFound) throw new Error('Sign in with Turso first.'); input.url = tursoFound.url; input.authToken = tursoFound.authToken; }
     if (url.pathname === '/api/auth/cloud') {
       // A new computer: find the account in the person's own Turso database, unseal its key, then restore everything before answering.
@@ -402,6 +408,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       }
       if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: { ...updates.status(), whenIdle: updateWhenIdle, busy: busyAgents(store) }, cloudSync: session.cloud || null, account: { email: session.email, role: role() }, code: codeVersion() }); }
       // One-click cloud backup: start opens Turso's sign-in page in the browser; finish waits for it, makes the database and connects it.
+      if (['/api/database/turso-start', '/api/database/turso-finish', '/api/database/connect'].includes(url.pathname)) ownDatabaseOnly();
       if (url.pathname === '/api/database/turso-start' && request.method === 'POST') { tursoPending?.cancel(); tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
       if (url.pathname === '/api/database/turso-finish' && request.method === 'POST') {
         if (!tursoPending) throw new Error('Start the Turso sign-in first.');
@@ -430,6 +437,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       // Signing the account out stops key renewal. The backup keeps working until its current key runs out (about a month).
       if (url.pathname === '/api/database/account-signout' && request.method === 'POST') { await store.cloud.account.signOut(); notify(); return json(response, 200, store.cloud.status()); }
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
+      // What goes to the cloud backup; each switch saves at once.
+      if (url.pathname === '/api/database/parts' && request.method === 'PUT') { const parts = store.cloud.setParts(await body(request)); notify(); return json(response, 200, { parts, status: store.cloud.status() }); }
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
       if (url.pathname === '/api/repositories/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());
@@ -695,7 +704,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (interactionMatch && request.method === 'POST') { const owner = !store.get('interaction', interactionMatch[1]) && desk.peers.interactionOwner(interactionMatch[1]); return json(response, 200, owner ? await desk.peers.forward(owner, 'POST', url.pathname, await body(request)) : desk.answer(interactionMatch[1], await body(request))); }
       const unsendMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/messages\/(\d+)$/);
       if (unsendMatch && request.method === 'DELETE') return json(response, 200, desk.unsend(unsendMatch[1], unsendMatch[2]));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|say|fresh))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|say|fresh|app))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         const runOwner = !store.get('run', runId) && desk.peers.runOwner(runId);
@@ -894,13 +903,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
       const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/glass.css': 'glass.css', '/rex-core.js': 'rex-core.js', '/chat-palette.js': 'chat-palette.js', '/chat-split.js': 'chat-split.js', '/themes.css': 'themes.css', '/chat-glass.js': 'chat-glass.js', '/chat-graph.js': 'chat-graph.js', '/graph-worker.js': 'graph-worker.js', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
       // three.js ships from the installed package; the page loads no remote scripts.
-      const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js' };
+      const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js', '/vendor/driver/driver.js.mjs': 'driver.js/dist/driver.js.mjs', '/vendor/driver/driver.css': 'driver.js/dist/driver.css' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });
       const editorFile = url.pathname.match(/^\/vendor\/codemirror\/((?:lib|mode\/[a-z0-9-]+|addon\/[a-z]+)\/[a-z0-9-]+\.(?:js|css))$/);
       if (editorFile) return serveFile(request, response, path.join(root, 'node_modules', 'codemirror', ...editorFile[1].split('/')), { cache: 'public, max-age=604800' });
       // A page script or style added after this server started is served by its name too, so a server still waiting for
       // agents to finish before it restarts does not leave the page stuck on a missing file.
-      const file = publicFiles[url.pathname] || (/^\/[a-z0-9-]+\.(?:js|css)$/.test(url.pathname) ? url.pathname.slice(1) : '');
+      // The Settings tours: their steps in public/guides, and the voice of each step in public/guides/voice.
+      const file = publicFiles[url.pathname] || (/^\/(?:guides\/)?[a-z0-9-]+\.(?:js|css)$/.test(url.pathname) || /^\/guides\/voice\/[a-z0-9-]+\.m4a$/.test(url.pathname) ? url.pathname.slice(1) : '');
       if (!file || !existsSync(path.join(root, 'public', file))) return json(response, 404, { error: 'Page not found.' });
       return serveFile(request, response, path.join(root, 'public', file));
     } catch (error) { if (!response.headersSent) json(response, 400, { error: error.message }); else response.end(); }

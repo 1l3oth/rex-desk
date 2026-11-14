@@ -3,6 +3,7 @@ import { noticeSettingsHtml } from '/chat-notices.js';
 import { voicesFor, chosenVoice } from '/chat-speak.js';
 import { loadFolders, foldersHtml, folderClick, startTour } from '/chat-tour.js';
 import { trackerDraft, readTrackers, trackersHtml, trackerSources, trackerClick, trackerInput } from '/chat-trackers.js';
+import { runSettingsTour } from '/chat-settings-tour.js';
 // Settings, as a popup over the chat: the sections on the left, one section's settings on the right. Each section saves on its own,
 // so a change never waits for the rest. It replaces the old "Issues & settings" page.
 const SECTIONS = [
@@ -43,6 +44,33 @@ const ST_ICON = {
   backup: '<path d="M7 18a5 5 0 1 1 .9-9.9A6 6 0 0 1 19 10a4 4 0 0 1-1 7.9"/><path d="M12 12v8M9 15l3-3 3 3"/>',
   connect: '<path d="M9 15l6-6M10 6l1-1a4.2 4.2 0 0 1 6 6l-1 1M14 18l-1 1a4.2 4.2 0 0 1-6-6l1-1"/>',
 };
+// Cloud backup, as a new person first meets it: a picture of what it does (one desk in the cloud, on a laptop and a
+// desktop), and why it is worth turning on.
+const CLOUD_ART = `<svg class="st-cloud-art" viewBox="0 0 220 96" width="220" height="96" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path class="sca-line" d="M62 66c10-10 22-14 32-14M158 66c-10-10-22-14-32-14" stroke-dasharray="3 5"/>
+  <path class="sca-cloud" d="M88 50a16 16 0 0 1 2-31.8A22 22 0 0 1 131 22a14 14 0 0 1 1 28z"/>
+  <path class="sca-mark" d="M110 30v12M104.5 35.5 110 30l5.5 5.5"/>
+  <rect class="sca-dev" x="14" y="58" width="44" height="28" rx="4"/><path class="sca-dev" d="M8 90h56"/>
+  <rect class="sca-dev" x="162" y="56" width="44" height="30" rx="4"/><path class="sca-dev" d="M178 90h12M184 86v4"/>
+  <path class="sca-dot" d="M27 70h18M27 76h11M175 68h18M175 74h11"/>
+</svg>`;
+const CLOUD_WHY = [
+  ['<rect x="2.5" y="4" width="13" height="9.5" rx="1.5"/><path d="M6 17h6M9 13.5V17"/><rect x="15.5" y="9" width="6" height="11" rx="1.2"/>', 'Pick up on any computer', 'Sign in at work or at home and the same agents, chats and settings are there.'],
+  ['<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4.5v4h4"/><path d="M12 8v4.5l3 1.8"/>', 'Nothing lost', 'After a reinstall, a broken drive or a new computer, everything comes back with your passphrase.'],
+  ['<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/>', 'Private to you', 'A database of your own that only your account can open. Nothing to set up: no address and no key.'],
+];
+// What goes to the cloud backup, once it is on. Agents, rooms, projects and settings always go: they make the desk follow
+// the person. The rest can stay on this computer only; each switch saves at once.
+const BACKUP_PARTS = [
+  ['chats', 'Chat history', 'Every message with your agents. Off: your other computers start these chats empty.'],
+  ['rooms', 'Group chat messages', 'Off: group chat messages stay on this computer, and your other computers do not see them.'],
+  ['tasks', 'Tasks', 'Rex Desk tasks and the Flow and Morningmate issues you synced.'],
+  ['files', 'Pictures and files', 'Screenshots, recordings and files in your chats. Usually the biggest part of a backup.'],
+];
+const backupPartsHtml = parts => `<h3>What goes to the cloud</h3><p class="muted">Changes save at once. Turning one off deletes it from the cloud; turning it on sends it back.</p>
+  <label class="st-check"><input type="checkbox" checked disabled><span><b>Agents, rooms, projects and settings</b><small>Always backed up: they are what makes your desk follow you to another computer.</small></span></label>
+  ${BACKUP_PARTS.map(([part, title, help]) => `<label class="st-check"><input type="checkbox" data-st-part="${part}" ${parts[part] !== false ? 'checked' : ''}><span><b>${title}</b><small>${help}</small></span></label>`).join('')}
+  <p class="muted">To keep one whole project out of the cloud, use Settings, Projects.</p>`;
 const stIcon = id => `<span class="st-ic st-ic-${id}" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ST_ICON[id] || ''}</svg></span>`;
 const ASKS = { quit_app: 'Close an app', hibernate: 'Hibernate', shutdown: 'Shut down', restart: 'Restart', sign_out: 'Sign out', stop_program: 'Stop a program', empty_trash: 'Empty the Recycle Bin' };
 const LANGS = [['en', 'English'], ['km', 'Khmer'], ['ko', 'Korean']];
@@ -58,6 +86,11 @@ export function openSettings(ctx, section = 'general') {
   const field = (label, control, help = '') => `<label class="st-field"><span>${label}</span>${control}${help ? `<small>${help}</small>` : ''}</label>`;
   const check = (name, on, label, help = '') => `<label class="st-check"><input type="checkbox" name="${name}" ${on ? 'checked' : ''}><span><b>${label}</b>${help ? `<small>${help}</small>` : ''}</span></label>`;
   const input = (name, value, attrs = '') => `<input name="${name}" value="${esc(value ?? '')}" ${attrs}>`;
+  // Flow, Morningmate and Orbit only matter once one is connected; until then their settings stay out of the way.
+  const hasTracker = () => (config().sources || []).some(source => source.type === 'flow' || source.type === 'morningmate');
+  const hasOrbit = () => (config().sources || []).some(source => source.type === 'orbit');
+  // A short "best use" note at the top of a section, with a button that walks through that section on the real controls.
+  const tip = (id, text) => `<div class="st-tip"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3Z"/></svg><span><b>Best use</b> ${text}</span><button type="button" class="btn small quiet" data-st-show="${id}">Show me</button></div>`;
   // GitHub accounts come from the GitHub CLI. Signing in runs GitHub's device flow: approve the shown code on github.com.
   const githubHtml = () => {
     const github = state.extra.github;
@@ -93,6 +126,7 @@ export function openSettings(ctx, section = 'general') {
   const readSignins = () => signins().forEach((account, index) => { for (const key of ['site', 'username', 'password']) { const input = back.querySelector(`[name="ta.${index}.${key}"]`); if (input) account[key] = input.value; } });
   const panels = {
     general: () => `<h2>General</h2>
+      ${tip('general', 'Set your name so agents call you by it, and turn on "Start Rex Desk when I sign in" so schedules and your phone keep working.')}
       ${ui.snap.account?.email ? `<div class="st-account"><span class="si-avatar">${esc(ui.snap.account.email[0].toUpperCase())}</span><span><b>${esc(ui.snap.account.email)}</b><small>${ui.snap.account.role === 'superadmin' ? 'Superadmin' : 'Member'} · this computer</small></span><button type="button" class="btn small" data-st-signout>Sign out</button></div>` : ''}
       ${field('Your name', input('name', config().name, 'maxlength="60"'), 'Agents call you by this name.')}
       ${field('Look', `<div class="st-skins" role="radiogroup" aria-label="Look">${[['midnight', 'Midnight', '#5b8def', '#7c5cf0', '#0e1220'], ['cyberpunk', 'Cyberpunk', '#ff2bd6', '#00e5ff', '#06030d'], ['gojo', 'Gojo', '#59b4ff', '#e6f2ff', '#040817'], ['crayon', 'Crayon', '#e4572e', '#ffd166', '#fbf5e6'], ['sakura', 'Sakura', '#ff7ab8', '#c4a8ff', '#fff2f7'], ['forest', 'Forest', '#3ddc84', '#a3d977', '#06100b'], ['sunset', 'Sunset', '#ff7a45', '#ff5a8a', '#120708']].map(([key, label, a, b, base]) => `<button type="button" role="radio" class="st-skin${(window.rexSkin?.value || 'midnight') === key ? ' on' : ''}" aria-checked="${(window.rexSkin?.value || 'midnight') === key}" data-st-skin="${key}" data-a="${a}" data-b="${b}" data-base="${base}"><span class="st-skin-swatch"><i></i><i></i></span><span>${label}</span></button>`).join('')}</div>`)}
@@ -101,19 +135,20 @@ export function openSettings(ctx, section = 'general') {
       ${['en', 'ko', 'km'].map(lang => field(`Reading voice, ${{ en: 'English', ko: 'Korean', km: 'Khmer' }[lang]}`, `<select data-st-voice="${lang}"><option value="">Natural voice (recommended)</option><optgroup label="Natural voices">${(state.extra.neural?.[lang] || []).map(([id, label]) => `<option value="${esc(id)}" ${chosenVoice(lang) === id ? 'selected' : ''}>${esc(label)}</option>`).join('')}</optgroup>${(state.extra.voices?.[lang] || []).length ? `<optgroup label="This computer's voices">${state.extra.voices[lang].map(voice => `<option value="${esc(voice.name)}" ${chosenVoice(lang) === voice.name ? 'selected' : ''}>${esc(voice.name)}</option>`).join('')}</optgroup>` : ''}</select>`, lang === 'en' ? "For the speaker button on agent messages. Natural voices are Microsoft's Edge voices (the same studybook uses): the text is sent to Microsoft to be read. This computer's voices stay on this computer." : '')).join('')}
       <div class="st-actions"><button type="button" class="btn small" data-st-tour>Show the setup tour again</button></div>
       ${check('autostart', state.extra.autostart?.enabled, 'Start Rex Desk when I sign in to Windows', 'So schedules, away mode and your phone keep working without opening the app.')}`,
-    folders: () => `<h2>Folders</h2><p class="muted">Where Rex Desk keeps things on this computer. Move copies everything to the folder you pick and keeps the old folder as a backup. Moving the data restarts Rex Desk.</p>${foldersHtml(ctx, state)}`,
-    notify: () => `<h2>Notifications</h2><p class="muted">Changes save as you make them.</p>${noticeSettingsHtml(ctx)}`,
+    folders: () => `<h2>Folders</h2><p class="muted">Where Rex Desk keeps things on this computer. Move copies everything to the folder you pick and keeps the old folder as a backup. Moving the data restarts Rex Desk.</p>
+      ${tip('folders', 'Leave Rex Desk data where it is. Move "Files from agents" to a big drive if screenshots and recordings fill your C: drive.')}${foldersHtml(ctx, state)}`,
+    notify: () => `<h2>Notifications</h2><p class="muted">Changes save as you make them.</p>${tip('notify', 'Keep pop-ups for questions only, and set quiet hours for the night. Agents that need you then wait in Needs you.')}${noticeSettingsHtml(ctx)}`,
     agents: () => `<h2>Agents</h2>
-      <div class="st-row">${field('Agents working at once', input('concurrency', config().concurrency, 'type="number" min="1" max="6"'), '1 to 6. Each runs in its own copy of the project.')}
-      ${field('Sync tasks every', `<span class="st-unit">${input('syncMinutes', config().syncMinutes, 'type="number" min="0" max="1440"')}<em>minutes</em></span>`, '0 syncs only when you press Sync.')}</div>
+      ${tip('agents', 'Start with Auto mode and 2 agents at once. Turn on "Save my Claude usage" if you hit your Claude limit. Leave the branch name as it is unless your team has a naming rule.')}
+      ${field('Agents working at once', input('concurrency', config().concurrency, 'type="number" min="1" max="6"'), '1 to 6. Each works in its own copy of the project. More at once uses your Claude limit faster.')}
       ${field('Default model', pickerHtml(ctx, { id: 'st-model', name: 'model', label: 'Default model', value: config().models?.claude || '', items: [{ value: '', label: 'Claude Code default' }, ...(ui.snap.choices?.models || []).map(model => ({ value: model.id, label: model.label }))] }), 'An agent can have its own model on its card.')}
-      ${field('Branch names start with', input('branchPrefix', config().branchPrefix, 'spellcheck="false"'), 'For example temp/rex. New branches look like temp/rex/49760-cart-total.')}
+      ${field('Branch names start with', input('branchPrefix', config().branchPrefix, 'spellcheck="false"'), `New branches look like ${esc(String(config().branchPrefix || 'rex-desk').replace(/\/+$/, ''))}/fix-login-button. Change it only if your team has a rule for branch names.`)}
       ${field('New agents and chats start in', `<select name="defaultMode">${[['bypassPermissions', 'Dangerous: run everything without asking'], ['auto', 'Auto: safe steps run, risky ones ask'], ['acceptEdits', 'Accept edits: edit files freely, ask before commands'], ['manual', 'Ask first: ask before each step'], ['plan', 'Plan: plan only, change nothing']].map(([value, label]) => `<option value="${value}" ${(config().defaultMode || 'bypassPermissions') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`, 'Used when you have not picked a mode for a chat. An AI without that mode asks first instead. You can still change the mode under the message box.')}
       ${check('autonomy', config().autonomy !== false, 'Let agents act on their own', 'They start work and open draft pull requests without asking you each time. Nothing is ever merged. Off: they ask first.')}
       ${check('saver', config().saver !== false, 'Save my Claude usage', 'Room chat and Away mode check-ins run on Sonnet, which uses much less of your subscription. Code changes, personal chats and Rex Agent keep the model you chose. An agent with its own model always uses it.')}
       ${check('autoPrLowRisk', config().autoPrLowRisk, 'Open draft pull requests for small, safe fixes on their own', 'Only style, text, docs or test changes with passing tests. Nothing is ever merged on its own.')}
-      ${check('reportToOrbit', config().reportToOrbit, 'Let agents send their final report to Orbit', 'Through your Orbit connection, when it is set up.')}`,
-    accounts: () => `<h2>Claude accounts</h2><p class="muted">Agents run on a Claude Code sign-in. You can add more accounts and switch when one runs out.</p><button type="button" class="btn primary" data-st-open="accounts">Open Claude accounts</button>`,
+      ${hasOrbit() ? check('reportToOrbit', config().reportToOrbit, 'Let agents send their final report to Orbit', 'Through your Orbit connection.') : ''}`,
+    accounts: () => `<h2>Claude accounts</h2><p class="muted">Agents run on a Claude Code sign-in. You can add more accounts and switch when one runs out.</p>${tip('accounts', 'One account is enough to start. Add a second only if you often hit the usage limit.')}<button type="button" class="btn primary" data-st-open="accounts">Open Claude accounts</button>`,
     projects: () => {
       // Each project that has agents: where its agents may work, and whether their chats may go to the cloud.
       const projectRulesHtml = () => {
@@ -132,22 +167,26 @@ export function openSettings(ctx, section = 'general') {
         ${field('How changes go out', `<select name="repo.${index}.push"><option value="pr" ${repo.push !== 'direct' ? 'selected' : ''}>Draft pull request</option><option value="direct" ${repo.push === 'direct' ? 'selected' : ''}>Push straight to the branch</option></select>`, 'Push straight: agents push their commits onto the target branch, with no pull request. Saying "no PR" in a chat does the same for one change.')}
         <button type="button" class="btn small quiet danger" data-st-repo-remove="${index}">Remove this project</button></details>`;
       return `<h2>Projects</h2><p class="muted">The code your agents work on. Each run gets its own copy, so your own checkout is never touched. Rex Agent can also add a project when you name it in chat.</p>
+        ${tip('projects', 'Add each code folder once, set where new work starts and where pull requests go, and let Rex Desk find the set up, run and test commands. Only fill those in when it guesses wrong.')}
         ${repositories.length ? repositories.map(row).join('') : '<p class="muted">No projects yet.</p>'}
         ${projectRulesHtml()}
         <div class="st-add"><input data-st-repo-path placeholder="A folder, like D:\\dev\\my-app, or owner/name on GitHub to clone" spellcheck="false" aria-label="Folder of a project, or a GitHub repository to clone"><button type="button" class="btn small" data-st-repo-pick>Browse…</button><button type="button" class="btn small primary" data-st-repo-add>Add</button></div>
         ${githubHtml()}`;
     },
-    sources: () => `<h2>Task sources</h2><p class="muted">Where tasks come from. Rex Desk tasks are built in.</p>
+    sources: () => `<h2>Task sources</h2><p class="muted">Where tasks come from. Rex Desk tasks are built in, so you need nothing here to start.</p>
+      ${tip('sources', 'Only connect a tracker your team already uses, like Flow, Morningmate or Orbit. Pick just the projects you work on, so agents see your tasks and nothing else.')}
+      ${hasTracker() || hasOrbit() ? field('Check for new tasks every', `<span class="st-unit">${input('syncMinutes', config().syncMinutes, 'type="number" min="0" max="1440"')}<em>minutes</em></span>`, '0 checks only when you press Sync.') : ''}
       <ul class="st-list">${(config().sources || []).filter(source => source.type === 'orbit').map(source => `<li><b>${esc(source.name)}</b><span class="muted">${esc(source.type)}${source.hasKey ? '' : ' · no key'}</span></li>`).join('') || '<li class="muted">No Orbit goal connected.</li>'}</ul>
       <div class="st-actions"><button type="button" class="btn" data-st-open="sources">Orbit and Rex Desk tasks</button></div>
       ${trackersHtml(ctx, state)}`,
     jev: () => `<h2>Jev and voice</h2>
-      <h3>Ranking your issues</h3>
-      ${field('OpenRouter key', `<input type="password" name="jev.apiKey" autocomplete="off" spellcheck="false" placeholder="${config().jev?.hasKey ? 'Saved. Paste a new key to replace it.' : 'sk-or-…'}">`, 'Kept encrypted on this computer and sent only to OpenRouter. Also used for the Gemini voice engine.')}
+      ${tip('jev', 'Talk to Jev to run this computer by voice: open apps, change volume, read the screen. Keep "Ask me before shutting down" on.')}
+      ${field('OpenRouter key', `<input type="password" name="jev.apiKey" autocomplete="off" spellcheck="false" placeholder="${config().jev?.hasKey ? 'Saved. Paste a new key to replace it.' : 'sk-or-…'}">`, 'Optional. For issue ranking and the Gemini voice engine. Kept encrypted on this computer and sent only to OpenRouter.')}
       ${config().jev?.hasKey ? check('jev.clearKey', false, 'Remove the saved key') : ''}
+      ${hasTracker() ? `<h3>Ranking your issues</h3>
       <div class="st-row">${field('Jev model', input('jev.model', config().jev?.model, 'placeholder="Newest Jev release" spellcheck="false"'))}${field('Versions you ship now', input('jev.versions', config().jev?.versions, 'placeholder="App 2.0.1, website current release"'))}</div>
       ${check('jev.auto', config().jev?.auto !== false, 'Rank new and changed issues after each sync')}
-      ${config().jev?.hasKey ? `<div class="st-actions"><button type="button" class="btn small" data-st-rank ${state.extra.ranking ? 'disabled' : ''}>${state.extra.ranking ? 'Ranking…' : 'Rank my issues now'}</button><small class="muted">Shift-click to check every issue again.</small></div>` : ''}
+      ${config().jev?.hasKey ? `<div class="st-actions"><button type="button" class="btn small" data-st-rank ${state.extra.ranking ? 'disabled' : ''}>${state.extra.ranking ? 'Ranking…' : 'Rank my issues now'}</button><small class="muted">Shift-click to check every issue again.</small></div>` : ''}` : '<p class="muted">Jev can also rank the issues from Flow or Morningmate by what to fix first. That shows here once you connect one in Task sources.</p>'}
       <h3>Controlling this computer</h3>
       ${check('control.enabled', config().control?.enabled !== false, 'Let Jev control this computer when I ask')}
       ${check('control.confirm', config().control?.confirm !== false, 'Ask me before shutting down, restarting, signing out, closing apps or emptying the Recycle Bin')}
@@ -155,28 +194,27 @@ export function openSettings(ctx, section = 'general') {
       ${(config().control?.allow || []).length ? `<div class="st-field"><span>Done without asking</span><div class="st-chips">${config().control.allow.map(action => `<span class="st-chip">${esc(ASKS[action] || action.replaceAll('_', ' '))}<button type="button" class="ag-x" data-st-allow-off="${esc(action)}" aria-label="Ask again before this">×</button></span>`).join('')}</div><small>Press × to have Jev ask you again first. "Yes, always" on a Jev question adds one here.</small></div>` : ''}
       ${field('Voice language', `<select name="control.language">${LANGS.map(([value, label]) => `<option value="${value}" ${(config().control?.language || 'en') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
       <div class="st-actions"><button type="button" class="btn" data-st-open="voice">Voice engine and compare</button></div>`,
-    schedule: () => { const schedule = config().schedule || {}; const days = schedule.days || [1, 2, 3, 4, 5]; return `<h2>Schedule</h2><p class="muted">At the set time Rex Desk syncs, Rex Agent sorts new issues, and it starts work up to your daily limit. Questions wait in Needs you.</p>
+    schedule: () => { const schedule = config().schedule || {}; const days = schedule.days || [1, 2, 3, 4, 5]; return `<h2>Schedule</h2><p class="muted">At the set time Rex Desk looks for new tasks, Rex Agent sorts them, and agents start work up to your daily limit. Questions wait in Needs you.</p>
+      ${tip('schedule', 'Set it for when you start your day, with a small limit like 3 runs. You come back to finished work and a short list of questions.')}
       ${check('schedule.enabled', schedule.enabled, 'Start work on its own on a schedule')}
       <div class="st-row">${field('Time', input('schedule.time', schedule.time || '09:00', 'type="time"'))}${field('Most runs a day', input('schedule.maxRuns', schedule.maxRuns || 6, 'type="number" min="1" max="20"'), 'Runs use your Claude subscription.')}</div>
       <fieldset class="st-days"><legend>Days</legend>${DAYS.map((day, index) => `<label><input type="checkbox" name="schedule.days" value="${index}" ${days.includes(index) ? 'checked' : ''}><span>${day}</span></label>`).join('')}</fieldset>
-      ${check('schedule.fix', schedule.fix !== false, 'Start runs for the top-ranked issues', 'Needs a project for them.')}
+      ${hasTracker() ? check('schedule.fix', schedule.fix !== false, 'Start runs for the top-ranked issues', 'Jev ranks the Flow or Morningmate issues; the top ones start first. Needs a project for them.') : ''}
       <div class="st-actions"><button type="button" class="btn small" data-st-schedule-run ${state.extra.scheduling ? 'disabled' : ''}>${state.extra.scheduling ? 'Starting…' : 'Run it now'}</button></div>`; },
     signins: () => `<h2>Test sign-ins</h2><p class="muted">An agent can sign in to a preview it starts with these, without ever seeing the password. Never used on a live production site.</p>
+      ${tip('signins', 'Add a test account for your app, so agents can sign in to their preview and check their own fix on screen.')}
       ${signins().map((account, index) => `<div class="st-signin"><input name="ta.${index}.site" value="${esc(account.site || '')}" placeholder="Site, like localhost or staging.example.com" aria-label="Site"><input name="ta.${index}.username" value="${esc(account.username || '')}" placeholder="User name or email" aria-label="User name"><input type="password" name="ta.${index}.password" value="${esc(account.password || '')}" placeholder="${account.hasPassword ? 'Saved' : 'Password'}" aria-label="Password" autocomplete="new-password"><button type="button" class="ag-x" data-st-signin-remove="${index}" aria-label="Remove this sign-in">×</button></div>`).join('')}
       <button type="button" class="btn small" data-st-signin-add>+ Add a sign-in</button>`,
-    devices: () => `<h2>Devices and phone</h2><p class="muted">Use Rex Desk on your phone and your other computers over Tailscale. The Devices page has the QR code for your phone.</p><button type="button" class="btn primary" data-st-go="devices">Open Devices</button>`,
+    devices: () => `<h2>Devices and phone</h2><p class="muted">Use Rex Desk on your phone and your other computers over Tailscale. The Devices page has the QR code for your phone.</p>${tip('devices', 'Scan the QR code once with your phone, so you can answer agents from anywhere.')}<button type="button" class="btn primary" data-st-go="devices">Open Devices</button>`,
     backup: () => { const database = ui.snap.database || {}, update = ui.snap.update || {}, account = database.account, hosted = Boolean(account && account.url === database.url); return `<h2>Backup and updates</h2>
+      ${tip('backup', 'Sign in with your Rex Desk account to back up, and your agents and chats follow you to your other computers.')}
       <h3>Cloud backup</h3><p>${esc((hosted ? { connected: 'Backed up with your Rex Desk account.', syncing: 'Uploading your backup…', connecting: 'Connecting to your backup…', offline: 'Your backup is offline; changes wait and upload later.', error: 'Your backup needs attention.' } : { connected: 'Copied to your Turso database.', syncing: 'Uploading to Turso…', connecting: 'Connecting to Turso…', offline: 'Turso is offline; changes wait and upload later.', error: 'Turso needs attention.' })[database.state] || 'Kept on this computer only.')}${database.pending ? ` ${Number(database.pending)} changes waiting.` : ''}</p>
       ${account ? `<div class="st-account st-cloud-account"><span class="si-avatar">${esc((account.name || account.email || '?')[0].toUpperCase())}</span><span><b>${esc(account.name || account.email)}</b><small>${esc(hosted ? `Rex Desk account${account.name ? ` · ${account.email}` : ''}. This computer renews its backup key by itself.` : `Rex Desk account${account.name ? ` · ${account.email}` : ''}. Signed in, but the backup uses another database.`)}</small></span><button type="button" class="btn small" data-st-account-out>Sign out</button></div>` : ''}
-      ${database.configured ? '' : `<div class="st-cloud"><div class="st-cloud-head">${stIcon('backup')}<div><b>Back up with your Rex Desk account</b><small>Sign in with your email and password, Google or GitHub. Rex Desk makes a private cloud database for you, and your agents, chats and settings follow you to every computer you sign in on.</small></div></div><button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || 'Sign in with Rex Desk')}</button><p class="st-cloud-fine">Nothing to type: no address and no key. Your backup is kept in Rex Desk's cloud, in a database only your account can open.</p><p class="st-cloud-fine">No account yet? <a href="https://rexdesk.app/signup" target="_blank" rel="noopener">Create one on rexdesk.app</a></p></div>`}${database.accountNote ? `<p class="error-text" role="alert">${esc(database.accountNote)}</p>` : ''}${database.configured ? '<button type="button" class="btn" data-st-db-sync>Upload now and check</button>' : ''}
-      <details class="st-db-manual"><summary>${database.configured ? 'Use another database' : 'Use my own Turso account instead'}</summary>
-        ${database.configured ? '' : `<p class="muted">Keep the backup in a Turso account of your own. Sign in to Turso with GitHub or Google and Rex Desk makes the database there.</p><button type="button" class="btn" data-st-turso ${state.extra.turso ? 'disabled' : ''}>${esc(state.extra.turso || 'Set up with my Turso account')}</button><p class="muted">Or type the address and key of a database you already have:</p>`}
-        <label class="st-field"><span>Database address</span><input data-st-db-url value="${esc(database.url || '')}" placeholder="libsql://your-database.turso.io" autocomplete="off" spellcheck="false"></label>
-        <label class="st-field"><span>Database key${database.configured ? ' (saved; leave empty to keep it)' : ''}</span><input data-st-db-token type="password" autocomplete="new-password"></label>
-        <button type="button" class="btn small" data-st-db-connect>Connect</button>
-      </details>${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}
+      ${database.configured ? '' : `<div class="st-cloud">${CLOUD_ART}<div class="st-cloud-head"><b>Back up with your Rex Desk account</b><small>Your whole desk, kept safe in the cloud and ready on every computer you sign in on.</small></div><ul class="st-cloud-why">${CLOUD_WHY.map(([icon, title, text]) => `<li><span class="st-cloud-why-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span><span><b>${title}</b><small>${text}</small></span></li>`).join('')}</ul><button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || 'Sign in with Rex Desk')}</button><p class="st-cloud-fine">No account yet? <a href="https://rexdesk.app/signup" target="_blank" rel="noopener">Create one on rexdesk.app</a></p></div>`}${database.accountNote ? `<p class="error-text" role="alert">${esc(database.accountNote)}</p>` : ''}${database.configured ? `<div class="st-actions"><button type="button" class="btn" data-st-db-sync>Upload now and check</button></div>${backupPartsHtml(database.parts || {})}` : ''}
+${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}
       <h3>App updates</h3><p>${esc(update.supported ? `This is Rex Desk ${[update.current, update.stage].filter(Boolean).join(' ')}. ` : '')}${esc(update.ready ? `Version ${update.available?.version} is downloaded and checked.` : update.available ? `Version ${update.available.version} is available.` : update.supported ? (update.checkedAt ? 'Rex Desk is up to date.' : 'Not checked yet.') : 'This copy runs from source code and updates with Git.')}</p>${update.error ? `<p class="error-text">${esc(update.error)}</p>` : ''}<div class="st-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${state.extra.checking ? 'disabled' : ''}>${state.extra.checking ? 'Checking…' : 'Check now'}</button>` : ''}${update.ready ? '<button type="button" class="btn primary" data-action="update-install">Install and restart</button>' : ''}</div>`; },
     connect: () => `<h2>Connect another AI</h2><p class="muted">Give this to another Claude Code session (or another assistant) so it can read your tasks and ask you questions through Rex Desk. No key is needed on this computer.</p>
+      ${tip('connect', 'Use this when you already have a Claude Code window open and want it to see your tasks and ask you things here.')}
       <button type="button" class="btn" data-st-prompt>Show the setup text</button>${state.extra.prompt ? `<pre class="st-prompt">${esc(state.extra.prompt)}</pre><button type="button" class="btn small" data-st-copy-prompt>Copy</button>` : ''}`,
   };
   const saves = new Set(['general', 'agents', 'projects', 'sources', 'jev', 'schedule', 'signins']);
@@ -185,7 +223,7 @@ export function openSettings(ctx, section = 'general') {
     const keep = back.dataset.section === state.section ? back.querySelector('.st-panel')?.scrollTop || 0 : 0;
     queueMicrotask(() => { back.dataset.section = state.section; const panel = back.querySelector('.st-panel'); if (panel && keep) panel.scrollTop = keep; });
     const title = (SECTIONS.find(([id]) => id === state.section) || [])[1] || 'Settings';
-    back.innerHTML = `<form class="settings-pop${state.list ? ' st-listing' : ' st-open'}" aria-label="Settings"><nav class="st-nav"><div class="st-navhead"><h1>Settings</h1><button type="button" class="st-done" data-st-close>Done</button></div>${GROUPS.map(([group, ids]) => `<div class="st-group" role="group" aria-label="${group}"><span class="st-glabel" aria-hidden="true">${group}</span>${ids.map(id => SECTIONS.find(([key]) => key === id)).filter(Boolean).map(([id, label, hint]) => `<button type="button" class="${state.section === id && !state.list ? 'on' : ''}" data-st-section="${id}">${stIcon(id)}<span class="st-nl"><b>${label}</b><small>${hint}</small></span><svg class="st-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`).join('')}</div>`).join('')}</nav>
+    back.innerHTML = `<form class="settings-pop${state.list ? ' st-listing' : ' st-open'}" aria-label="Settings"><nav class="st-nav"><div class="st-navhead"><h1>Settings</h1><button type="button" class="st-done" data-st-close>Done</button></div><button type="button" class="st-guide-btn" data-st-show-all><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>Take the tour</button>${GROUPS.map(([group, ids]) => `<div class="st-group" role="group" aria-label="${group}"><span class="st-glabel" aria-hidden="true">${group}</span>${ids.map(id => SECTIONS.find(([key]) => key === id)).filter(Boolean).map(([id, label, hint]) => `<button type="button" class="${state.section === id && !state.list ? 'on' : ''}" data-st-section="${id}">${stIcon(id)}<span class="st-nl"><b>${label}</b><small>${hint}</small></span><svg class="st-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`).join('')}</div>`).join('')}</nav>
       <div class="st-body"><div class="st-mhead"><button type="button" class="st-back" data-st-back aria-label="Back to Settings"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span>Settings</span></button><b>${esc(title)}</b></div><div class="st-panel" data-st-panel>${panels[state.section]()}</div>
       <div class="st-foot">${saves.has(state.section) ? '<button type="button" class="btn primary" data-st-save>Save</button>' : ''}<span class="spacer"></span><button type="button" class="btn" data-st-close>Close</button></div></div>
       <button type="button" class="st-x" data-st-close aria-label="Close settings">×</button></form>`;
@@ -195,22 +233,37 @@ export function openSettings(ctx, section = 'general') {
   async function save() {
     const base = JSON.parse(JSON.stringify(config())), v = values(), next = { ...base };
     if (state.section === 'general') { next.name = v.name; window.rexTheme?.set(v.theme); await api('/autostart', { method: 'POST', data: { enabled: checked('autostart') } }).catch(() => {}); }
-    if (state.section === 'agents') Object.assign(next, { defaultMode: v.defaultMode, concurrency: Number(v.concurrency), syncMinutes: Number(v.syncMinutes), branchPrefix: v.branchPrefix, autoPrLowRisk: checked('autoPrLowRisk'), reportToOrbit: checked('reportToOrbit'), saver: checked('saver'), autonomy: checked('autonomy'), models: { ...base.models, claude: back.querySelector('#st-model')?.value ?? base.models?.claude } });
+    if (state.section === 'agents') Object.assign(next, { defaultMode: v.defaultMode, concurrency: Number(v.concurrency), branchPrefix: v.branchPrefix, autoPrLowRisk: checked('autoPrLowRisk'), reportToOrbit: back.querySelector('[name="reportToOrbit"]') ? checked('reportToOrbit') : Boolean(base.reportToOrbit), saver: checked('saver'), autonomy: checked('autonomy'), models: { ...base.models, claude: back.querySelector('#st-model')?.value ?? base.models?.claude } });
     if (state.section === 'projects') next.repositories = base.repositories.map((repo, index) => ({ ...repo, ...Object.fromEntries(['baseBranch', 'targetBranch', 'setupCommand', 'devCommand', 'testCommand', 'push'].map(key => [key, v[`repo.${index}.${key}`] ?? repo[key]])) }));
-    if (state.section === 'jev') { next.jev = { ...base.jev, apiKey: v['jev.apiKey'] || '', clearKey: checked('jev.clearKey'), model: v['jev.model'], versions: v['jev.versions'], auto: checked('jev.auto') }; next.control = { enabled: checked('control.enabled'), confirm: checked('control.confirm'), agents: checked('control.agents'), language: v['control.language'] }; }
-    if (state.section === 'schedule') next.schedule = { enabled: checked('schedule.enabled'), time: v['schedule.time'], maxRuns: Number(v['schedule.maxRuns']), fix: checked('schedule.fix'), days: [...back.querySelectorAll('[name="schedule.days"]:checked')].map(box => Number(box.value)) };
-    if (state.section === 'sources') { readTrackers(back, state); next.sources = trackerSources(ui, state); }
+    if (state.section === 'jev') next.jev = { ...base.jev, apiKey: v['jev.apiKey'] || '', clearKey: checked('jev.clearKey'), ...(back.querySelector('[name="jev.model"]') ? { model: v['jev.model'], versions: v['jev.versions'], auto: checked('jev.auto') } : {}) };
+    if (state.section === 'jev') { next.control = { enabled: checked('control.enabled'), confirm: checked('control.confirm'), agents: checked('control.agents'), language: v['control.language'] }; }
+    const schedule0 = base.schedule || {};
+    if (state.section === 'schedule') next.schedule = { enabled: checked('schedule.enabled'), time: v['schedule.time'], maxRuns: Number(v['schedule.maxRuns']), fix: back.querySelector('[name="schedule.fix"]') ? checked('schedule.fix') : schedule0.fix !== false, days: [...back.querySelectorAll('[name="schedule.days"]:checked')].map(box => Number(box.value)) };
+    if (state.section === 'sources') { readTrackers(back, state); next.sources = trackerSources(ui, state); if (v.syncMinutes != null) next.syncMinutes = Number(v.syncMinutes); }
     if (state.section === 'signins') { readSignins(); next.testAccounts = state.signins.filter(account => account.username.trim()); }
     ui.snap.config = await api('/config', { method: 'PUT', data: next }); await refresh(); if (state.section === 'sources') state.trackers = trackerDraft(ui); state.signins = null; toast('Saved.'); draw();
+  }
+  // Open one section and resolve once what it shows is loaded (the tours wait for it before circling its controls).
+  async function goSection(id) {
+    state.section = id; state.list = false;
+    if (id === 'sources') state.trackers = trackerDraft(ui);
+    if (id === 'projects') void loadGithub();
+    if (id === 'general') state.extra.autostart = await api('/autostart').catch(() => null);
+    draw();
+    if (id === 'folders') { await loadFolders(ctx, state); if (state.section === 'folders') draw(); }
+    back.querySelector('[data-st-panel]')?.scrollTo({ top: 0 });
   }
   back.addEventListener('click', async event => {
     const target = event.target;
     try {
       if (target === back || target.closest('[data-st-close]')) { back.remove(); return; }
       if (target.closest('[data-st-back]')) { state.list = true; draw(); return; }
-      const section = target.closest('[data-st-section]'); if (section) { state.section = section.dataset.stSection; state.list = false; if (state.section === 'sources') state.trackers = trackerDraft(ui); if (state.section === 'projects') void loadGithub(); if (state.section === 'folders') void loadFolders(ctx, state).then(() => state.section === 'folders' && draw()); if (state.section === 'general') state.extra.autostart = await api('/autostart').catch(() => null); draw(); return; }
+      const section = target.closest('[data-st-section]'); if (section) { await goSection(section.dataset.stSection); return; }
       if (await trackerClick(ctx, state, target, back, draw)) return;
       if (await folderClick(ctx, state, target, draw)) return;
+      // A feature tour circles the real controls of a section; "Take the tour" goes through every section.
+      const show = target.closest('[data-st-show]'); if (show) { await runSettingsTour(goSection, { section: show.dataset.stShow }); return; }
+      if (target.closest('[data-st-show-all]')) { await runSettingsTour(goSection, { all: true }); return; }
       if (target.closest('[data-st-tour]')) { back.remove(); startTour(ctx); return; }
       if (await githubClick(target)) return;
       if (target.closest('[data-st-rank]')) {
@@ -250,23 +303,6 @@ export function openSettings(ctx, section = 'general') {
         if (!confirm('Sign this computer out of your Rex Desk account? The backup keeps working for up to 30 days, then stops until you sign in again.')) return;
         await api('/database/account-signout', { method: 'POST' }); toast('Signed out of your Rex Desk account on this computer.'); await refresh(); draw(); return;
       }
-      if (target.closest('[data-st-turso]')) {
-        // One click: Turso's sign-in opens in the browser; Rex Desk then makes the person's own database and connects it.
-        state.extra.turso = 'Opening Turso sign-in…'; draw();
-        try {
-          const { url } = await api('/database/turso-start', { method: 'POST' }); window.open(url, '_blank', 'noopener');
-          state.extra.turso = 'Waiting for you to sign in to Turso in the browser…'; draw();
-          const status = await api('/database/turso-finish', { method: 'POST' });
-          toast(status.state === 'connected' ? 'Cloud backup is on. Your own Turso database was made and your history was uploaded.' : `Database made. Turso is ${status.state}; changes wait and upload later.`, status.state !== 'connected');
-          await refresh();
-        } finally { state.extra.turso = ''; draw(); }
-        return;
-      }
-      // Cloud backup by hand (an existing database), and the upload check: these lived only in the old screen before.
-      if (target.closest('[data-st-db-connect]')) {
-        const status = await api('/database/connect', { method: 'POST', data: { url: back.querySelector('[data-st-db-url]').value.trim(), authToken: back.querySelector('[data-st-db-token]').value } });
-        toast(status.state === 'connected' ? 'Turso connected. Your history was uploaded.' : `Saved. Turso is ${status.state}; changes wait and upload later.`, status.state !== 'connected'); await refresh(); draw(); return;
-      }
       if (target.closest('[data-st-db-sync]')) {
         const button = target.closest('[data-st-db-sync]'); button.disabled = true; button.textContent = 'Uploading…';
         try { const result = await api('/database/sync', { method: 'POST' }); toast(result.matched ? `Everything on this computer is in the cloud: ${result.localRecords} records and ${result.localEvents} messages.` : `${result.missingRecords} records and ${result.missingEvents} messages from this computer did not reach the cloud. Check the connection and try again.`, !result.matched); }
@@ -292,10 +328,18 @@ export function openSettings(ctx, section = 'general') {
       }
     } catch (error) { toast(error.message, true); back.querySelector('[data-st-save]')?.removeAttribute('disabled'); }
   });
-  back.addEventListener('keydown', event => { if (event.key === 'Escape') back.remove(); });
+  back.addEventListener('keydown', event => { if (event.key === 'Escape' && !document.body.classList.contains('driver-active')) back.remove(); });
   back.addEventListener('input', event => { trackerInput(back, state, event, draw); });
   back.addEventListener('change', event => { trackerInput(back, state, event, draw); });
   back.addEventListener('toggle', event => { const card = event.target.dataset?.trCard; if (card && event.target.open) state.openTracker = card; }, true);
+  // A backup part saves at once; turning one off asks first, because it deletes that part from the cloud.
+  back.addEventListener('change', async event => {
+    const part = event.target.dataset?.stPart; if (!part) return;
+    const on = event.target.checked, name = event.target.closest('label').querySelector('b').textContent;
+    if (!on && !confirm(`Stop backing up ${name.toLowerCase()}? It is deleted from the cloud and stays on this computer.`)) { event.target.checked = true; return; }
+    try { const reply = await api('/database/parts', { method: 'PUT', data: { [part]: on } }); ui.snap.database = reply.status; toast(on ? `${name} is backed up again. Uploading it now.` : `${name} stays on this computer only. Its cloud copy is being deleted.`); draw(); }
+    catch (error) { event.target.checked = !on; toast(error.message, true); }
+  });
   // A project's two rules save at once.
   back.addEventListener('change', async event => {
     const rule = event.target.dataset?.stRule; if (!rule) return;
