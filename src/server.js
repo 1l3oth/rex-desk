@@ -324,7 +324,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (!early) await opening;
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
-    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'");
+    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'");
     try {
       const host = request.headers.host;
       const hostname = host ? new URL(`http://${host}`).hostname : '';
