@@ -59,8 +59,11 @@ document.addEventListener('keydown', event => {
 // stylesheet how wide the side panel is so the chat takes exactly that room back.
 let paneQueued = false;
 new MutationObserver(() => { if (paneQueued) return; paneQueued = true; requestAnimationFrame(() => { paneQueued = false; syncPanes(); }); }).observe(document.body, { childList: true, subtree: true });
+let badgeShown = -1;
 function syncBar() {
   const snap = window.__rexCtx?.ui?.snap; if (!snap) return;
+  const waiting = (snap.notices?.unread || 0) + (snap.interactions || []).filter(item => item.state === 'pending').length;
+  if (shell && waiting !== badgeShown) { badgeShown = waiting; window.open(`https://rexdesk.window/badge?n=${waiting}`, '_blank'); }
   const working = (snap.specialists || []).filter(agent => ['busy', 'replying'].includes(agent.status?.state)).length + ((snap.runs || []).some(run => run.role === 'coordinator' && run.main && ['starting', 'running', 'queued', 'verifying'].includes(run.state)) ? 1 : 0);
   const pill = document.querySelector('.win-working'); if (pill) { pill.hidden = !working; const text = `${working} working`; if (pill.lastElementChild.textContent !== text) pill.lastElementChild.textContent = text; }
   const badge = document.querySelector('.win-bell b'), unread = snap.notices?.unread || 0; if (badge) { badge.hidden = !unread; const text = unread > 99 ? '99+' : String(unread); if (badge.textContent !== text) badge.textContent = text; }
@@ -75,7 +78,7 @@ function syncPanes() {
 // The desktop app's own window bar. Windows: no system title bar, so Rex Desk draws minimize, maximize and close in glass.
 // Mac: the three dots stay where they are, over the left end of the same bar. In a plain browser nothing is added.
 // A button asks the app by opening https://rexdesk.window/<action>; the app does it and no window opens.
-const shell = window.__REX_SHELL;
+const shell = document.documentElement.classList.contains('embed') ? '' : window.__REX_SHELL;
 if (shell === 'windows' || shell === 'macos') {
   const ask = action => { window.open(`https://rexdesk.window/${action}`, '_blank'); };
   const bar = document.createElement('div');
@@ -151,3 +154,9 @@ const tickWarm = () => {
 };
 setInterval(() => { if (!document.hidden) tickWarm(); }, 1000);
 new MutationObserver(onceAFrame(tickWarm)).observe(document.body, { childList: true, subtree: true });
+
+document.addEventListener('click', event => {
+  const pick = event.target.closest('[data-st-size]'); if (!pick) return;
+  window.rexSize?.set(pick.dataset.stSize);
+  for (const button of document.querySelectorAll('[data-st-size]')) { const on = button === pick; button.classList.toggle('on', on); button.setAttribute('aria-checked', String(on)); }
+});

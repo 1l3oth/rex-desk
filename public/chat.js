@@ -1,3 +1,4 @@
+import { splitStage } from '/chat-split.js';
 import { rexCore } from '/rex-core.js';
 import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter } from '/chat-sidebar.js';
 import { agentStage, agentAction, agentGroups, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
@@ -22,7 +23,7 @@ import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttach
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
 // Which screen is open lives in the address (#/room/ID) and is also saved, so a refresh or a restart comes back to the same place.
-const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'jev', 'monitor', 'worktrees'];
+const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'jev', 'monitor', 'worktrees', 'split'];
 const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
 function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash); return match && SCREENS.includes(match[1]) ? { type: match[1], id: match[2] ? decodeURIComponent(match[2]) : '' } : null; }
 function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
@@ -122,6 +123,7 @@ function railItem(type, id, { dot = '', avatar = '', name, sub = '', badge = 0, 
 // Sidebar pieces: an icon or a picture for every row, a status dot on agents, and sections that fold and remember it.
 const SVG = {
   main: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.4 5 5.6.8-4 3.9.9 5.5L12 15.6 7.1 18.2 8 12.7 4 8.8l5.6-.8z"/></svg>',
+  split: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M12 4v16M3 12h9"/></svg>',
   inbox: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/></svg>',
   person: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
   mic: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
@@ -155,6 +157,7 @@ function renderRail() {
         place('inbox', 'inbox', 'Needs you', asks, true),
         place('tasks', 'tasks', 'Tasks', busy || tasks.length, false, busy ? `${busy} being worked on` : ''),
         place('person', 'person', 'Knowledge', 0),
+        place('split', 'split', 'Split view', 0),
       ].join('')}</nav>
     </div>
     ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} ${room.members.length === 1 ? 'agent' : 'agents'}`, badge: unreadFor(ui, `room:${room.id}`) })) : '<p class="rail-empty">No rooms yet.</p>')}
@@ -287,6 +290,7 @@ function stageModel() {
   if (type === 'monitor') return monitorStage(ctx);
   if (type === 'worktrees') return worktreesStage(ctx);
   if (type === 'jev') return jevStage();
+  if (type === 'split') return splitStage();
   if (type === 'person') { const graph = knowledgeView() === 'graph'; return { title: 'Knowledge', meta: graph ? 'You, your agents and your second brain' : 'Your profile, from what the agents learned', top: true,
     actions: `<div class="kg-switch" role="tablist" aria-label="How to look at your knowledge"><button type="button" role="tab" aria-selected="${graph}" class="${graph ? 'on' : ''}" data-action="kg-view" data-view="graph">Graph</button><button type="button" role="tab" aria-selected="${!graph}" class="${graph ? '' : 'on'}" data-action="kg-view" data-view="list">List</button></div>`,
     feed: graph ? '<div class="kg" id="kg" data-keep="kg"></div>' : personPage() }; }
@@ -409,7 +413,7 @@ async function loadView() {
       const events = await api(`/runs/${run.id}/messages`); ui.events.set(run.id, events);
     } else if (type === 'room') {
       const room = ui.snap.rooms.find(item => item.id === id);
-      if (room && ui.infoOpen !== false && ui.sideTab === 'activity') await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
+      if (room && ui.infoOpen !== false && ['activity', 'terminal'].includes(ui.sideTab)) await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
     } else if (type === 'worktrees') { await api('/worktrees');
     } else if (type === 'monitor') { ui.monitor = await api('/monitor'); 
     } else if (type === 'person') { ui.page = (await api('/memory/page?name=user')).text; }
@@ -433,7 +437,7 @@ async function refresh({ full = false } = {}) {
 }
 function open(type, id = '') {
   ui.view = { type, id }; ui.page = ''; window.rexView = noticeKey(ui.view); window.rexPresence?.();
-  try { localStorage.setItem('rex-desk-view', JSON.stringify(ui.view)); } catch { /* private window */ }
+  if (!document.documentElement.classList.contains('embed')) try { localStorage.setItem('rex-desk-view', JSON.stringify(ui.view)); } catch { /* private window */ }
   if (location.hash !== hashOf(ui.view)) { ui.fromOpen = true; location.hash = hashOf(ui.view); } document.querySelector('.chat-shell')?.classList.remove('show-rail'); void refresh({ full: true }); }
 
 // ---------- actions ----------

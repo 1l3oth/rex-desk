@@ -3,7 +3,7 @@ import { chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { speakButton } from '/chat-speak.js';
 import { pickerHtml } from '/chat-pick.js';
 import { collectShared, sharedTabsHtml, sharedCount } from '/chat-media.js';
-import { toolLine, changeHtml } from '/chat-activity.js';
+import { toolLine, changeHtml, terminalHtml } from '/chat-activity.js';
 import { AVATARS } from '/avatars.js';
 // Rooms (group chats with agents) and Tasks. Both are their own screens, apart from the main agent.
 const WORKING = ['starting', 'running', 'queued', 'verifying'];
@@ -102,6 +102,16 @@ export function roomRunIds(ui, room) {
   }
   return [...new Set(ids)];
 }
+// The terminal of a group chat: every command any member ran, one line each, starting with the face of who ran it.
+function roomTerminalHtml(ctx, room) {
+  const { ui, esc, hhmm } = ctx, entries = [];
+  for (const member of room.members) for (const runId of roomRunIds(ui, { id: room.id, members: [member] })) {
+    const events = ui.events.get(runId) || [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event]));
+    for (const event of events) if (event.kind === 'agent-tool' && (event.tool === 'Bash' || event.tool === 'PowerShell') && event.id) entries.push({ id: event.id, tool: event.tool, input: event.input, output: results.get(event.id), at: event.createdAt, who: member.name });
+  }
+  entries.sort((left, right) => String(left.at).localeCompare(String(right.at)));
+  return terminalHtml(entries, { esc, hhmm, who: item => `<span title="${esc(item.who)}">${avatarHtml(ctx, { name: item.who, size: 'xs' })}</span>` }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="tl-bar)/, '');
+}
 const HIDDEN_STEPS = ['desk_ask', 'desk_message', 'desk_elicit', 'desk_room_post'];
 // What everyone in the room is doing, newest at the bottom: their steps, the commands they ran (with output), and when they replied.
 function activityHtml(ctx, room) {
@@ -136,9 +146,9 @@ function activityHtml(ctx, room) {
 // Two tabs, like a messenger's chat info: Chat info (members, and the media, files and links shared here) and Activity (what the agents are doing).
 function roomSideHtml(ctx, room) {
   const trees = chatWorktrees(ctx.ui, { roomId: room.id });
-  const tab = ['activity', 'worktrees'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
+  const tab = ['activity', 'worktrees', 'terminal'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
   const close = '<button type="button" class="side-x" data-action="info-toggle" aria-label="Close the side panel" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
-  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : activityHtml(ctx, room)}`;
+  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button><button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="side-tab" data-tab="terminal">Terminal</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : tab === 'terminal' ? roomTerminalHtml(ctx, room) : activityHtml(ctx, room)}`;
 }
 // The Agents tab: each member's AI and model, changed right here. Saved at once on the agent itself, so it holds in every chat.
 const AIS = [{ value: 'claude', label: 'Claude Code', hint: 'Claude subscription' }, { value: 'codex', label: 'Codex', hint: 'ChatGPT subscription' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }];

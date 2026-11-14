@@ -60,6 +60,25 @@ fn startup_error() -> String {
 
 // A link Rex Desk opens in a new window: its own pages open in a child window of the app (same sign-in);
 // anything else opens in the person's browser.
+// A small red dot with a white rim, 16 by 16 pixels, for the taskbar icon while something waits for the person.
+#[cfg(target_os = "windows")]
+fn badge_dot() -> &'static [u8] {
+    use std::sync::OnceLock;
+    static DOT: OnceLock<Vec<u8>> = OnceLock::new();
+    DOT.get_or_init(|| {
+        let mut pixels = vec![0u8; 16 * 16 * 4];
+        for y in 0..16 {
+            for x in 0..16 {
+                let distance = (((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)) as f32).sqrt();
+                let at = (y * 16 + x) * 4;
+                let (r, g, b, a) = if distance <= 6.0 { (229, 72, 77, 255) } else if distance <= 7.6 { (255, 255, 255, 255) } else { (0, 0, 0, 0) };
+                pixels[at..at + 4].copy_from_slice(&[r, g, b, a]);
+            }
+        }
+        pixels
+    })
+}
+
 fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::NewWindowFeatures) -> tauri::webview::NewWindowResponse<tauri::Wry> {
     // Rex Desk draws its own window buttons: a button opens https://rexdesk.window/<action>, which never becomes a
     // window; the action is done to the main window instead.
@@ -70,6 +89,14 @@ fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::
                 "/maximize" => { if window.is_maximized().unwrap_or(false) { let _ = window.unmaximize(); } else { let _ = window.maximize(); } }
                 "/close" => { let _ = window.hide(); }
                 "/drag" => { let _ = window.start_dragging(); }
+                "/badge" => {
+                    // How many things wait for the person: a dot on the taskbar icon (Windows), the number on the Dock (Mac).
+                    let count = url.query_pairs().find(|(key, _)| key == "n").and_then(|(_, value)| value.parse::<i64>().ok()).unwrap_or(0);
+                    #[cfg(target_os = "windows")]
+                    { let _ = window.set_overlay_icon(if count > 0 { Some(tauri::image::Image::new(badge_dot(), 16, 16)) } else { None }); }
+                    #[cfg(not(target_os = "windows"))]
+                    { let _ = window.set_badge_count(if count > 0 { Some(count) } else { None }); }
+                }
                 _ => {}
             }
         }

@@ -489,3 +489,49 @@ html.has-win-bar .places .place[data-action="nt-panel"]{display:none}
 .cp-foot{display:flex;gap:16px;padding:8px 14px;border-top:1px solid var(--line);font-size:11.5px;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){.cp{animation:none}}
 .win-bar .win-brand img{width:20px;height:20px;border-radius:5px;display:block}.rail-head .brand-logo{width:26px;height:26px;border-radius:7px;display:block}
+
+/* ===== Split view: up to four chats side by side. ===== */
+.feed-inner:has(#sp-grid){max-width:none;height:100%;padding:8px}
+.feed:has(#sp-grid){overflow:hidden}
+.sp-grid{display:grid;gap:8px;height:100%;min-height:0}
+.sp-grid.sp-n1{grid-template-columns:1fr}
+.sp-grid.sp-n2{grid-template-columns:1fr 1fr}
+.sp-grid.sp-n3{grid-template-columns:1fr 1fr 1fr}
+.sp-grid.sp-n4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+.sp-pane{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel);box-shadow:inset 0 1px 0 var(--glass-edge);transition:box-shadow .15s,transform .15s}
+.sp-bar{display:flex;align-items:center;gap:8px;height:34px;padding:0 6px 0 10px;border-bottom:1px solid var(--line);cursor:grab;user-select:none;font-size:13px}
+.sp-bar:active{cursor:grabbing}.sp-grip{color:var(--muted);letter-spacing:-2px;font-size:12px}
+.sp-btn{display:grid;place-items:center;width:26px;height:26px;border:0;border-radius:7px;background:none;color:var(--muted)}.sp-btn:hover{background:var(--raised);color:var(--ink)}
+.sp-frame{flex:1;min-height:0;width:100%;border:0;background:transparent}
+.sp-dragging .sp-frame{pointer-events:none}
+.sp-pane.sp-over{box-shadow:0 0 0 2px var(--accent),inset 0 1px 0 var(--glass-edge);transform:scale(.995)}
+.sp-add{border-style:dashed;background:color-mix(in srgb,var(--panel) 60%,transparent)}
+.sp-add-in{display:flex;flex-direction:column;gap:8px;padding:18px;overflow:auto;height:100%}
+.sp-add h3{margin:0;font-size:16px}.sp-add p{margin:0;font-size:13px;color:var(--muted)}
+.sp-find input{width:100%;height:36px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+.sp-choices{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}
+.sp-choices button{display:flex;flex-direction:column;align-items:flex-start;width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);text-align:left}
+.sp-choices button:hover{border-color:var(--accent)}.sp-choices small{font-size:11.5px;color:var(--muted)}
+@media (max-width:900px){.sp-grid.sp-n2,.sp-grid.sp-n3,.sp-grid.sp-n4{grid-template-columns:1fr;grid-template-rows:none;overflow:auto}.sp-pane{min-height:420px}}
+/* A chat inside a pane: only the chat. */
+html.embed .rail,html.embed .win-bar,html.embed [data-pane],html.embed .m-menu{display:none!important}
+html.embed .chat-shell{grid-template-columns:minmax(0,1fr)!important;padding:0!important;gap:0!important}
+html.embed .stage-main{border:0!important;border-radius:0!important;box-shadow:none!important}
+html.embed body::before,html.embed .skin-fx{display:none}
+html.embed,html.embed body{background:transparent}
+html.embed .stage-head{padding:8px 12px}
+html.embed .tour-back{display:none!important}
+
+/* ===== Text size. Compact (the default) scales the whole app down a step, so more of every chat fits; split panes go a step further. ===== */
+html[data-size=compact] .chat-shell{zoom:.9}
+html[data-size=large] .chat-shell{zoom:1.1}
+html[data-size=compact] .chat-shell{height:calc(100dvh / .9);max-height:calc(100dvh / .9)}
+html[data-size=large] .chat-shell{height:calc(100dvh / 1.1);max-height:calc(100dvh / 1.1)}
+html.has-win-bar[data-size=compact] .chat-shell{padding-top:calc(40px / .9)}
+html.has-win-bar[data-size=large] .chat-shell{padding-top:calc(40px / 1.1)}
+html.embed .chat-shell{zoom:.88;height:calc(100dvh / .88);max-height:calc(100dvh / .88)}
+.st-size{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.st-size button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:9px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--ink);text-align:left}
+.st-size button small{font-size:11.5px;color:var(--muted)}
+.st-size button.on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+.st-size button:nth-child(1) b{font-size:12.5px}.st-size button:nth-child(3) b{font-size:15.5px}
