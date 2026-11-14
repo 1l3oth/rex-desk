@@ -28,6 +28,7 @@ import { effectiveRepository } from './project-detect.js';
 import { inspectRepository } from './repositories.js';
 import { Worktrees, longPath } from './worktrees.js';
 import { ProjectRules } from './project-rules.js';
+import { lowDiskMessage, friendlyDiskError } from './disk.js';
 import { HostRunner, hostAlive } from './hosts.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
@@ -417,6 +418,8 @@ export class Desk {
     // browser, tools, questions and room reply now, so this one's clean-up leaves them alone.
     let run = this.run(runId), token, handedOn = false;
     try {
+      // A nearly full drive makes the agent fail half way with "ENOSPC"; say so before it starts instead.
+      const noRoom = lowDiskMessage([this.store.directory, os.tmpdir()], { min: this.minFreeBytes }); if (noRoom) throw new Error(noRoom);
       // Check the selected CLI profile before creating worktrees or spending an agent turn.
       if (!this.runnerFactory && !attach) await this.agents.ensureSignedIn(run.provider, this.accountFor(run) || this.agents.selected(run.provider));
       if (run.role === 'worker' && !run.worktree && run.placement?.state === 'pending') run = await this.place(run);
@@ -545,8 +548,8 @@ ${message}` : message);
         this.store.event(runId, 'message', { text: `The model this agent was set to is not available on this ${run.provider === 'codex' ? 'Codex (ChatGPT)' : run.provider === 'gemini' ? 'Antigravity (Google)' : 'Claude'} account, so it now uses the account's default model. Pick another one on the agent's card if you want.` }, true);
         return;
       }
-      this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: error.message, endedAt: now() });
-      this.store.event(runId, 'error', { message: error.message }, true);
+      this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: friendlyDiskError(error.message), endedAt: now() });
+      this.store.event(runId, 'error', { message: friendlyDiskError(error.message) }, true);
     } finally {
       if (handedOn) {
         if (token) this.forgetToken(token);
