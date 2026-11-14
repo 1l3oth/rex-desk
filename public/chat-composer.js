@@ -204,7 +204,9 @@ async function startHold(ctx) {
   // While Space is held, quiet does not end the recording; only letting go does (or a minute at most).
   const recording = startRecorder(stream, { onQuiet: () => { if (performance.now() - recording.started > 60000) void finishMic(ctx); } });
   listening = recording; hold.pending = false;
-  micButton()?.classList.add('rec'); document.body.classList.add('ptt');
+  micButton()?.classList.add('rec');
+  const box = document.getElementById('composer')?.getBoundingClientRect(); if (box) document.body.style.setProperty('--ptt-bottom', `${Math.max(16, Math.round(innerHeight - box.top + 12))}px`);
+  document.body.classList.add('ptt');
   if (hold.releasedEarly) { hold.releasedEarly = false; hold.active = false; document.body.classList.remove('ptt'); void finishMic(ctx); }
 }
 function initPushToTalk(ctx) {
