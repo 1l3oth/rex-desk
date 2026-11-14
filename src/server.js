@@ -474,7 +474,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (url.pathname === '/api/voice/install' && request.method === 'POST') { void voice.install().then(notify, notify); return json(response, 202, voice.status()); }
         if (url.pathname === '/api/voice/prepare' && request.method === 'POST') return json(response, 200, { ready: chosen() === 'local' ? await voice.prepare(language) : true });
         if (url.pathname === '/api/voice/transcribe' && request.method === 'POST') {
-          const audio = await rawBody(request), engine = url.searchParams.get('engine') || chosen();
+          const audio = await rawBody(request), wanted = url.searchParams.get('engine') || chosen(), ready = engines();
+          // The chosen engine is not ready (like "On this computer" before its model is installed): use one that is, and say so.
+          const engine = ready[wanted] ? wanted : ['gemini', 'elevenlabs', 'local'].find(name => ready[name]) || wanted;
+          const switched = engine !== wanted ? `${wanted === 'local' ? 'The on-computer voice model is not installed' : 'The chosen voice engine is not set up'}, so ${engine === 'gemini' ? 'Gemini' : engine === 'elevenlabs' ? 'ElevenLabs' : 'the on-computer model'} was used.` : '';
+          if (!ready[engine]) return json(response, 400, { error: 'No voice engine is ready. Install the on-computer model, or add an OpenRouter key, in Settings → Jev and voice.' });
+          if (switched && engine !== 'local') { const started = Date.now(); return json(response, 200, { ...await run(engine, audio), ms: Date.now() - started, fallback: switched }); }
           // An online engine that fails falls back to the on-computer model, and the answer says so.
           if (engine !== 'local') try { const started = Date.now(); return json(response, 200, { ...await run(engine, audio), ms: Date.now() - started }); } catch (error) { if (!engines().local) throw error; return json(response, 200, { ...await voice.transcribe(audio, language), fallback: `${error.message} Used the voice model on this computer instead.` }); }
           return json(response, 200, await voice.transcribe(audio, language));
