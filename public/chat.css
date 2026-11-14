@@ -1347,7 +1347,7 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 
 /* Picture viewer: a picture in a chat opens full screen inside Rex Desk. */
 .md-media-link img.md-media{cursor:zoom-in}
-.iv{width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;padding:0;border:0;background:rgba(8,10,13,.97);backdrop-filter:blur(6px);color:#e6e8eb;display:none}
+.iv{inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;padding:0;border:0;background:rgba(8,10,13,.97);backdrop-filter:blur(6px);color:#e6e8eb;display:none}
 .iv[open]{display:grid;grid-template-rows:auto minmax(0,1fr)}
 .iv::backdrop{background:transparent}
 .iv-head{display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(0,0,0,.35)}
@@ -1357,7 +1357,9 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 .iv-btn:hover{background:rgba(255,255,255,.12);text-decoration:none}
 .iv-stage{display:grid;place-items:center;min-height:0;overflow:hidden;padding:16px 64px 24px}
 .iv-stage img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;cursor:zoom-in;box-shadow:0 8px 40px rgba(0,0,0,.5)}
-.iv-stage.actual{overflow:auto;place-items:start center}.iv-stage.actual img{max-width:none;max-height:none;cursor:zoom-out}
+.iv-stage{touch-action:none;-webkit-user-select:none;user-select:none}
+.iv-stage img{transform-origin:center center;transition:transform .12s ease-out;will-change:transform}.iv-stage img.zoomed{cursor:grab;box-shadow:none;border-radius:0}
+@media (max-width:700px){.iv-stage{padding:8px}.iv-head{padding:8px 10px;gap:4px}.iv-head strong{font-size:14px}.iv-nav{width:38px;height:38px;background:rgba(0,0,0,.45)}.iv-nav.prev{left:6px}.iv-nav.next{right:6px}}
 .iv-nav{position:fixed;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:44px;height:44px;border:0;border-radius:50%;background:rgba(255,255,255,.1);color:#fff}
 .iv-nav:hover{background:rgba(255,255,255,.22)}.iv-nav.prev{left:12px}.iv-nav.next{right:12px}
 .fw-ic.fw-away{display:inline-grid;place-items:center}.fw-ic.fw-away.on{color:var(--accent)}
