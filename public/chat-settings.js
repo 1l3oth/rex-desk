@@ -43,6 +43,33 @@ const ST_ICON = {
   backup: '<path d="M7 18a5 5 0 1 1 .9-9.9A6 6 0 0 1 19 10a4 4 0 0 1-1 7.9"/><path d="M12 12v8M9 15l3-3 3 3"/>',
   connect: '<path d="M9 15l6-6M10 6l1-1a4.2 4.2 0 0 1 6 6l-1 1M14 18l-1 1a4.2 4.2 0 0 1-6-6l1-1"/>',
 };
+// Cloud backup, as a new person first meets it: a picture of what it does (one desk in the cloud, on a laptop and a
+// desktop), and why it is worth turning on.
+const CLOUD_ART = `<svg class="st-cloud-art" viewBox="0 0 220 96" width="220" height="96" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path class="sca-line" d="M62 66c10-10 22-14 32-14M158 66c-10-10-22-14-32-14" stroke-dasharray="3 5"/>
+  <path class="sca-cloud" d="M88 50a16 16 0 0 1 2-31.8A22 22 0 0 1 131 22a14 14 0 0 1 1 28z"/>
+  <path class="sca-mark" d="M110 30v12M104.5 35.5 110 30l5.5 5.5"/>
+  <rect class="sca-dev" x="14" y="58" width="44" height="28" rx="4"/><path class="sca-dev" d="M8 90h56"/>
+  <rect class="sca-dev" x="162" y="56" width="44" height="30" rx="4"/><path class="sca-dev" d="M178 90h12M184 86v4"/>
+  <path class="sca-dot" d="M27 70h18M27 76h11M175 68h18M175 74h11"/>
+</svg>`;
+const CLOUD_WHY = [
+  ['<rect x="2.5" y="4" width="13" height="9.5" rx="1.5"/><path d="M6 17h6M9 13.5V17"/><rect x="15.5" y="9" width="6" height="11" rx="1.2"/>', 'Pick up on any computer', 'Sign in at work or at home and the same agents, chats and settings are there.'],
+  ['<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4.5v4h4"/><path d="M12 8v4.5l3 1.8"/>', 'Nothing lost', 'After a reinstall, a broken drive or a new computer, everything comes back with your passphrase.'],
+  ['<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/>', 'Private to you', 'A database of your own that only your account can open. Nothing to set up: no address and no key.'],
+];
+// What goes to the cloud backup, once it is on. Agents, rooms, projects and settings always go: they make the desk follow
+// the person. The rest can stay on this computer only; each switch saves at once.
+const BACKUP_PARTS = [
+  ['chats', 'Chat history', 'Every message with your agents. Off: your other computers start these chats empty.'],
+  ['rooms', 'Group chat messages', 'Off: group chat messages stay on this computer, and your other computers do not see them.'],
+  ['tasks', 'Tasks', 'Rex Desk tasks and the Flow and Morningmate issues you synced.'],
+  ['files', 'Pictures and files', 'Screenshots, recordings and files in your chats. Usually the biggest part of a backup.'],
+];
+const backupPartsHtml = parts => `<h3>What goes to the cloud</h3><p class="muted">Changes save at once. Turning one off deletes it from the cloud; turning it on sends it back.</p>
+  <label class="st-check"><input type="checkbox" checked disabled><span><b>Agents, rooms, projects and settings</b><small>Always backed up: they are what makes your desk follow you to another computer.</small></span></label>
+  ${BACKUP_PARTS.map(([part, title, help]) => `<label class="st-check"><input type="checkbox" data-st-part="${part}" ${parts[part] !== false ? 'checked' : ''}><span><b>${title}</b><small>${help}</small></span></label>`).join('')}
+  <p class="muted">To keep one whole project out of the cloud, use Settings, Projects.</p>`;
 const stIcon = id => `<span class="st-ic st-ic-${id}" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ST_ICON[id] || ''}</svg></span>`;
 const ASKS = { quit_app: 'Close an app', hibernate: 'Hibernate', shutdown: 'Shut down', restart: 'Restart', sign_out: 'Sign out', stop_program: 'Stop a program', empty_trash: 'Empty the Recycle Bin' };
 const LANGS = [['en', 'English'], ['km', 'Khmer'], ['ko', 'Korean']];
@@ -166,7 +193,7 @@ export function openSettings(ctx, section = 'general') {
     backup: () => { const database = ui.snap.database || {}, update = ui.snap.update || {}, account = database.account, hosted = Boolean(account && account.url === database.url); return `<h2>Backup and updates</h2>
       <h3>Cloud backup</h3><p>${esc((hosted ? { connected: 'Backed up with your Rex Desk account.', syncing: 'Uploading your backup…', connecting: 'Connecting to your backup…', offline: 'Your backup is offline; changes wait and upload later.', error: 'Your backup needs attention.' } : { connected: 'Copied to your Turso database.', syncing: 'Uploading to Turso…', connecting: 'Connecting to Turso…', offline: 'Turso is offline; changes wait and upload later.', error: 'Turso needs attention.' })[database.state] || 'Kept on this computer only.')}${database.pending ? ` ${Number(database.pending)} changes waiting.` : ''}</p>
       ${account ? `<div class="st-account st-cloud-account"><span class="si-avatar">${esc((account.name || account.email || '?')[0].toUpperCase())}</span><span><b>${esc(account.name || account.email)}</b><small>${esc(hosted ? `Rex Desk account${account.name ? ` · ${account.email}` : ''}. This computer renews its backup key by itself.` : `Rex Desk account${account.name ? ` · ${account.email}` : ''}. Signed in, but the backup uses another database.`)}</small></span><button type="button" class="btn small" data-st-account-out>Sign out</button></div>` : ''}
-      ${database.configured ? '' : `<div class="st-cloud"><div class="st-cloud-head">${stIcon('backup')}<div><b>Back up with your Rex Desk account</b><small>Sign in with your email and password, Google or GitHub. Rex Desk makes a private cloud database for you, and your agents, chats and settings follow you to every computer you sign in on.</small></div></div><button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || 'Sign in with Rex Desk')}</button><p class="st-cloud-fine">Nothing to type: no address and no key. Your backup is kept in Rex Desk's cloud, in a database only your account can open.</p><p class="st-cloud-fine">No account yet? <a href="https://rexdesk.app/signup" target="_blank" rel="noopener">Create one on rexdesk.app</a></p></div>`}${database.accountNote ? `<p class="error-text" role="alert">${esc(database.accountNote)}</p>` : ''}${database.configured ? '<button type="button" class="btn" data-st-db-sync>Upload now and check</button>' : ''}
+      ${database.configured ? '' : `<div class="st-cloud">${CLOUD_ART}<div class="st-cloud-head"><b>Back up with your Rex Desk account</b><small>Your whole desk, kept safe in the cloud and ready on every computer you sign in on.</small></div><ul class="st-cloud-why">${CLOUD_WHY.map(([icon, title, text]) => `<li><span class="st-cloud-why-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span><span><b>${title}</b><small>${text}</small></span></li>`).join('')}</ul><button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || 'Sign in with Rex Desk')}</button><p class="st-cloud-fine">No account yet? <a href="https://rexdesk.app/signup" target="_blank" rel="noopener">Create one on rexdesk.app</a></p></div>`}${database.accountNote ? `<p class="error-text" role="alert">${esc(database.accountNote)}</p>` : ''}${database.configured ? `<div class="st-actions"><button type="button" class="btn" data-st-db-sync>Upload now and check</button></div>${backupPartsHtml(database.parts || {})}` : ''}
 ${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}
       <h3>App updates</h3><p>${esc(update.supported ? `This is Rex Desk ${[update.current, update.stage].filter(Boolean).join(' ')}. ` : '')}${esc(update.ready ? `Version ${update.available?.version} is downloaded and checked.` : update.available ? `Version ${update.available.version} is available.` : update.supported ? (update.checkedAt ? 'Rex Desk is up to date.' : 'Not checked yet.') : 'This copy runs from source code and updates with Git.')}</p>${update.error ? `<p class="error-text">${esc(update.error)}</p>` : ''}<div class="st-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${state.extra.checking ? 'disabled' : ''}>${state.extra.checking ? 'Checking…' : 'Check now'}</button>` : ''}${update.ready ? '<button type="button" class="btn primary" data-action="update-install">Install and restart</button>' : ''}</div>`; },
     connect: () => `<h2>Connect another AI</h2><p class="muted">Give this to another Claude Code session (or another assistant) so it can read your tasks and ask you questions through Rex Desk. No key is needed on this computer.</p>
@@ -272,6 +299,14 @@ ${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p
   back.addEventListener('input', event => { trackerInput(back, state, event, draw); });
   back.addEventListener('change', event => { trackerInput(back, state, event, draw); });
   back.addEventListener('toggle', event => { const card = event.target.dataset?.trCard; if (card && event.target.open) state.openTracker = card; }, true);
+  // A backup part saves at once; turning one off asks first, because it deletes that part from the cloud.
+  back.addEventListener('change', async event => {
+    const part = event.target.dataset?.stPart; if (!part) return;
+    const on = event.target.checked, name = event.target.closest('label').querySelector('b').textContent;
+    if (!on && !confirm(`Stop backing up ${name.toLowerCase()}? It is deleted from the cloud and stays on this computer.`)) { event.target.checked = true; return; }
+    try { const reply = await api('/database/parts', { method: 'PUT', data: { [part]: on } }); ui.snap.database = reply.status; toast(on ? `${name} is backed up again. Uploading it now.` : `${name} stays on this computer only. Its cloud copy is being deleted.`); draw(); }
+    catch (error) { event.target.checked = !on; toast(error.message, true); }
+  });
   // A project's two rules save at once.
   back.addEventListener('change', async event => {
     const rule = event.target.dataset?.stRule; if (!rule) return;

@@ -256,3 +256,36 @@ test('shared agents and computers belong to one account: another account (or a d
   assert.deepEqual((await store.cloud.presence('Here', {})).map(row => row.name), ['Laptop']);
   await store.cloud.close(); store.close();
 });
+
+test('a part left out of the backup is deleted from the cloud, skipped from then on, and sent back when turned on again', async () => {
+  const directory = temporary('parts'), turso = fakeTurso(); turso.network.online = true;
+  const store = new Store(directory);
+  store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 40 });
+  await store.cloud.connect({ url: 'libsql://rex-parts.example.invalid', authToken: 'parts-token' });
+  store.put('task', 'task-1', { id: 'task-1', title: 'A task' });
+  store.put('specialist', 'agent-1', { id: 'agent-1', name: 'Agent' });
+  store.event('run-1', 'message', { text: 'Hello' }, true);
+  await store.cloud.flush();
+  const count = (sql, ...args) => turso.remote.prepare(sql).get(...args).n;
+  assert.equal(count("SELECT COUNT(*) n FROM rex_records WHERE kind='task'"), 1);
+  assert.equal(count('SELECT COUNT(*) n FROM rex_events'), 1);
+  assert.deepEqual(store.cloud.status().parts, { chats: true, rooms: true, tasks: true, files: true });
+
+  // Off: the cloud copy goes, new ones are not sent, and the cloud check still passes.
+  store.cloud.setParts({ tasks: false, chats: false }); await store.cloud.flush();
+  assert.equal(count("SELECT COUNT(*) n FROM rex_records WHERE kind='task'"), 0);
+  assert.equal(count('SELECT COUNT(*) n FROM rex_events'), 0);
+  store.put('task', 'task-2', { id: 'task-2', title: 'Stays here' }); store.event('run-1', 'message', { text: 'Not sent' }, true);
+  await store.cloud.flush();
+  assert.equal(count("SELECT COUNT(*) n FROM rex_records WHERE kind='task'"), 0);
+  assert.equal(count('SELECT COUNT(*) n FROM rex_events'), 0);
+  assert.equal(count("SELECT COUNT(*) n FROM rex_records WHERE kind='specialist'"), 1, 'agents always go up');
+  assert.equal((await store.cloud.verify()).matched, true);
+  assert.equal(store.list('task').length, 2, 'nothing is deleted on this computer');
+
+  // On again: this computer's copy goes back up.
+  store.cloud.setParts({ tasks: true, chats: true }); await store.cloud.flush();
+  assert.equal(count("SELECT COUNT(*) n FROM rex_records WHERE kind='task'"), 2);
+  assert.equal(count('SELECT COUNT(*) n FROM rex_events'), 2);
+  await store.cloud.close(); store.close();
+});
