@@ -73,3 +73,17 @@ test('only the newest installer is kept, and an update is not installed without 
   updates.freeSpace = () => 100 * 1024 * 1024;
   assert.throws(() => updates.install(1), /Not enough free space to install the update: 100 MB free/);
 });
+
+test('the Windows update installs over the copy that is running, not where the installer would guess', async () => {
+  const { readFileSync: read } = await import('node:fs');
+  const data = temporary('install-folder');
+  const updates = new Updates(data, { version: '0.2.0', executable: String.raw`D:\Rex Desk\rex-desk.exe`, key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
+  assert.equal((await updates.check()).ready, true);
+  updates.freeSpace = () => 10 * 2 ** 30; let started = '';
+  updates.startHelper = helper => { started = helper; };
+  updates.install(1);
+  const script = read(started, 'utf8'), settings = JSON.parse(read(path.join(path.dirname(started), 'install-update.json'), 'utf8'));
+  assert.equal(settings.app, String.raw`D:\Rex Desk\rex-desk.exe`);
+  assert.match(script, /\$folder = Split-Path -Parent \$App/);
+  assert.match(script, /-ArgumentList "\/S \/D=\$folder"/, 'the installer is told the folder of the running copy');
+});

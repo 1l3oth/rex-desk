@@ -15,7 +15,6 @@
   },
   "bundle": {
     "active": true,
-    "publisher": "Vong Pichdaraboth",
     "copyright": "Copyright (c) 2026 Vong Pichdaraboth",
     "targets": [
       "nsis"

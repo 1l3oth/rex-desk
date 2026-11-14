@@ -156,7 +156,9 @@ export class Updates {
       'function Whole { (Test-Path $node) -and ((Get-Item $node).Length -gt 1000000) -and (Test-Path $server) }',
       // Waits for the installer process only (-Wait would also wait for anything the installer starts). The installer does not
       // report its own progress, so the bar moves on time (it usually takes about a minute) and never claims to be done early.
-      'function Install($try) { Clear-Folder; Step "installing (try $try)" "Installing the new version" 20; try { $setup = Start-Process -FilePath $Installer -ArgumentList "/S" -PassThru; $started = Get-Date; while (-not $setup.HasExited) { if ($ui) { $bar.Value = [Math]::Min(80, 20 + [int](((Get-Date) - $started).TotalSeconds / 1.2)) }; Pump; Start-Sleep -Milliseconds 250 }; Step "installer exit code $($setup.ExitCode)" "Checking the install" 82; return ($setup.ExitCode -eq 0) } catch { Step "installer failed: $($_.Exception.Message)" "The installer did not finish" 82; return $false } }',
+      // /D= installs over the copy that is running, wherever it is: the installer's own guess from the registry once put a second
+      // copy in AppData while the person's Rex Desk stayed on the old version (0.0.21, after the publisher name changed).
+      'function Install($try) { Clear-Folder; Step "installing (try $try)" "Installing the new version" 20; try { $setup = Start-Process -FilePath $Installer -ArgumentList "/S /D=$folder" -PassThru; $started = Get-Date; while (-not $setup.HasExited) { if ($ui) { $bar.Value = [Math]::Min(80, 20 + [int](((Get-Date) - $started).TotalSeconds / 1.2)) }; Pump; Start-Sleep -Milliseconds 250 }; Step "installer exit code $($setup.ExitCode)" "Checking the install" 82; return ($setup.ExitCode -eq 0) } catch { Step "installer failed: $($_.Exception.Message)" "The installer did not finish" 82; return $false } }',
       // Up to three tries; an install is only done when the app is whole, whatever the installer says.
       '$ok = $false; for ($try = 1; $try -le 3 -and -not $ok; $try++) { $ran = Install $try; $ok = $ran -and (Whole); if (-not $ok) { Step "install incomplete (node $(if (Test-Path $node) { (Get-Item $node).Length } else { 0 }) bytes)" "The install did not finish. Trying again" 20; Start-Sleep -Seconds 3 } }',
       'if ($ok) { Step "installed" "Installed" 85 } else { Step "install failed after 3 tries" "The update could not be installed. Run the installer again from the updates folder." 85 }',
@@ -173,6 +175,7 @@ export class Updates {
     ].join('\r\n'));
     // Task Scheduler runs the helper in this person's desktop session, outside this server's process tree and free of the
     // memory limits a WMI-created process gets (which cut the installer off mid-copy). Settings travel in the JSON beside it.
+    if (this.startHelper) return this.startHelper(helper); // tests read the helper instead of running it
     const task = `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${helper}"`;
     if (task.length > 260) throw new Error('The update folder path is too long for Windows Task Scheduler.');
     execFileSync('schtasks.exe', ['/Create', '/TN', 'Rex Desk update', '/TR', task, '/SC', 'ONCE', '/ST', '00:00', '/RL', 'LIMITED', '/F'], { windowsHide: true, timeout: 30000, stdio: 'ignore' });
