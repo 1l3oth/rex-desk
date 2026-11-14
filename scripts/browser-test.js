@@ -144,6 +144,13 @@ try {
   await page.screenshot({ path: path.join(screenshots, 'tour-welcome.png') });
   await tour.locator('[data-tour-name]').fill('Synthetic Tester');
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
+  // Two welcome questions, answered here: an age range and where the person heard about Rex Desk.
+  await tour.getByRole('heading', { name: 'A little about you' }).waitFor();
+  await tour.locator('.tour-chip', { hasText: '25 to 34' }).click();
+  await tour.locator('.tour-chip', { hasText: 'YouTube' }).click(); await tour.locator('.tour-chip', { hasText: 'Somewhere else' }).click();
+  await tour.locator('[data-tour-other]').fill('A meetup');
+  await page.screenshot({ path: path.join(screenshots, 'tour-about.png') });
+  await tour.getByRole('button', { name: 'Next', exact: true }).click();
   await tour.getByRole('heading', { name: 'Your AI sign-in' }).waitFor();
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
   await tour.getByRole('heading', { name: 'Where things are kept' }).waitFor();
@@ -161,6 +168,7 @@ try {
   await tour.waitFor({ state: 'detached' });
   assert.equal(app.store.config().name, 'Synthetic Tester');
   assert.equal(app.store.config().tourDismissed, true, 'The tour does not come back once finished');
+  assert.deepEqual(((({ age, heard, other }) => ({ age, heard, other }))(app.store.get('survey', 'main') || {})), { age: '25 to 34', heard: ['youtube', 'other'], other: 'A meetup' }, 'the welcome answers are kept');
   assert.equal(app.store.config().repositories.length, 1);
 
   // Settings, Projects lists it, with GitHub accounts below.

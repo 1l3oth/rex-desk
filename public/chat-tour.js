@@ -1,3 +1,4 @@
+import { SOCIAL } from '/social-icons.js';
 // Where Rex Desk keeps things (shown in Settings, Folders and in the setup tour), and the setup tour a new person gets.
 const ROWS = [
   ['data', 'Rex Desk data', 'Chats, tasks, settings and saved keys.', 'restart'],
@@ -53,7 +54,16 @@ export async function folderClick(ctx, state, target, draw) {
 }
 
 // The setup tour. It opens by itself for a new person (no project yet, never finished), and from Settings, General.
-const STEPS = ['welcome', 'ai', 'folders', 'project', 'done'];
+const STEPS = ['welcome', 'about', 'ai', 'folders', 'project', 'done'];
+// The two welcome questions (both can be skipped): an age range, and where the person heard about Rex Desk.
+const AGES = ['Under 18', '18 to 24', '25 to 34', '35 to 44', '45 to 54', '55 or older', 'Prefer not to say'];
+const HEARD = ['tiktok', 'youtube', 'facebook', 'instagram', 'x', 'linkedin', 'reddit', 'github', 'telegram', 'discord', 'threads', 'friend', 'search', 'other'];
+const OTHER_ICON = {
+  friend: '<path d="M8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2 20a6 6 0 0 1 12 0M16.5 11a3 3 0 1 0 0-6M18 20a5 5 0 0 0-3-4.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-4.8-4.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  other: '<circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/>',
+};
+const HEARD_NAME = { friend: 'A friend or colleague', search: 'A search engine', other: 'Somewhere else' };
 export function maybeStartTour(ctx) {
   const config = ctx.ui.snap?.config;
   if (!config || config.tourDismissed || (config.repositories || []).length || document.querySelector('.tour-back')) return;
@@ -64,7 +74,7 @@ export function startTour(ctx) {
   const { ui, esc, api, toast, refresh } = ctx;
   document.querySelector('.tour-back')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back tour-back'; document.body.append(back);
-  const state = { step: 0 };
+  const state = { step: 0, survey: { age: '', heard: [], other: '' } };
   void loadFolders(ctx, state).then(() => { if (STEPS[state.step] === 'folders') draw(); });
   const account = () => { const list = ui.accounts?.claude, current = list?.profiles?.find(item => item.profile === list.selected) || list?.profiles?.[0]; return current; };
   const picture = step => `<svg class="tour-pic" viewBox="0 0 120 80" aria-hidden="true">${{
@@ -75,8 +85,15 @@ export function startTour(ctx) {
     done: '<circle cx="60" cy="40" r="24" class="tp-fill"/><path d="M48 40l8 8 16-16" class="tp-check"/>',
   }[step]}</svg>`;
   const body = {
-    welcome: () => `<h2>Welcome to Rex Desk</h2><p>AI agents work on your projects here, and you chat with them like teammates. Four short steps get you ready.</p>
+    welcome: () => `<h2>Welcome to Rex Desk</h2><p>AI agents work on your projects here, and you chat with them like teammates. A few short steps get you ready.</p>
       <label class="st-field"><span>What should agents call you?</span><input data-tour-name value="${esc(ui.snap.config?.name || '')}" maxlength="60"></label>`,
+    about: () => {
+      const icon = id => { const brand = SOCIAL[id]; return `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">${brand ? brand.svg || `<path d="${brand.path}" fill="${brand.color}"/>` : OTHER_ICON[id]}</svg>`; };
+      return `<h2>A little about you</h2><p>Two quick questions so we can make Rex Desk better for people like you. Skip them if you like.</p>
+      <fieldset class="tour-q"><legend>Your age</legend><div class="tour-chips">${AGES.map(age => `<label class="tour-chip"><input type="radio" name="tour-age" value="${esc(age)}" ${state.survey.age === age ? 'checked' : ''}><span>${esc(age)}</span></label>`).join('')}</div></fieldset>
+      <fieldset class="tour-q"><legend>Where did you hear about Rex Desk? Pick any that apply.</legend><div class="tour-chips tour-heard">${HEARD.map(id => `<label class="tour-chip"><input type="checkbox" name="tour-heard" value="${id}" ${state.survey.heard.includes(id) ? 'checked' : ''}>${icon(id)}<span>${esc(SOCIAL[id]?.name || HEARD_NAME[id])}</span></label>`).join('')}</div>
+      <input class="tour-other" data-tour-other maxlength="120" placeholder="Where? (optional)" value="${esc(state.survey.other)}" ${state.survey.heard.includes('other') ? '' : 'hidden'} aria-label="Where you heard about Rex Desk"></fieldset>`;
+    },
     ai: () => { const current = account(); return `<h2>Your AI sign-in</h2><p>Agents run on your own Claude subscription, through Claude Code on this computer.</p>
       ${current?.loggedIn ? `<p class="tour-ok">Signed in as <b>${esc(current.account || current.label)}</b>. You are set.</p>` : '<p class="tour-warn">No Claude sign-in found yet.</p>'}
       <button type="button" class="btn" data-action="accounts">${current?.loggedIn ? 'Add or switch accounts' : 'Sign in to Claude'}</button>`; },
@@ -97,13 +114,21 @@ export function startTour(ctx) {
     const name = back.querySelector('[data-tour-name]')?.value.trim();
     if (name && name !== ui.snap.config?.name) ui.snap.config = await api('/config', { method: 'PUT', data: { ...ui.snap.config, name } });
   };
+  const readSurvey = () => {
+    state.survey.age = back.querySelector('[name="tour-age"]:checked')?.value || state.survey.age;
+    if (back.querySelector('[name="tour-heard"]')) state.survey.heard = [...back.querySelectorAll('[name="tour-heard"]:checked')].map(box => box.value);
+    state.survey.other = back.querySelector('[data-tour-other]')?.value.trim() ?? state.survey.other;
+  };
+  // Ticking "Somewhere else" shows a box for where.
+  back.addEventListener('change', event => { if (event.target.name === 'tour-heard' && event.target.value === 'other') { const box = back.querySelector('[data-tour-other]'); box.hidden = !event.target.checked; if (event.target.checked) box.focus(); } });
   back.addEventListener('click', async event => {
     const target = event.target;
     try {
       if (target.closest('[data-tour-skip]')) { await finish(); return; }
-      if (target.closest('[data-tour-back]')) { state.step = Math.max(0, state.step - 1); draw(); return; }
+      if (target.closest('[data-tour-back]')) { if (STEPS[state.step] === 'about') readSurvey(); state.step = Math.max(0, state.step - 1); draw(); return; }
       if (target.closest('[data-tour-next]')) {
         if (STEPS[state.step] === 'welcome') await saveName();
+        if (STEPS[state.step] === 'about') { readSurvey(); if (state.survey.age || state.survey.heard.length) void api('/survey', { method: 'POST', data: state.survey }).catch(() => {}); }
         if (STEPS[state.step] === 'done') { await finish(); return; }
         state.step += 1; draw(); return;
       }

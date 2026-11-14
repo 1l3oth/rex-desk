@@ -571,6 +571,16 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const input = await body(request);
         return json(response, 200, { branch: issueBranch(input.pattern, { prefix: input.prefix || 'temp/rex' }) });
       }
+      // The welcome questions (age range, where the person heard about Rex Desk): kept here, and sent to the Rex Desk account
+      // service when this person is signed in to it, so the owner sees them. Only the listed answers are kept.
+      if (url.pathname === '/api/survey' && request.method === 'POST') {
+        const input = await body(request), clean = value => String(value || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 120);
+        const answer = { age: clean(input.age).slice(0, 40), heard: (Array.isArray(input.heard) ? input.heard : []).map(item => clean(item).slice(0, 30)).filter(Boolean).slice(0, 20), other: clean(input.other), at: new Date().toISOString() };
+        store.put('survey', 'main', answer);
+        const token = session.account?.token || store.cloud.account?.saved?.token;
+        if (token) void (accountOptions.fetcher || fetch)(`${accountOptions.base || ACCOUNT_API}/v1/survey`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(answer), signal: AbortSignal.timeout(15000) }).catch(() => {});
+        return json(response, 200, { saved: true });
+      }
       if (url.pathname === '/api/config' && request.method === 'PUT') { const saved = store.saveConfig(await body(request)); desk.agents.invalidate(); void desk.refreshModels().catch(() => {}); return json(response, 200, saved); }
       // The skills, commands and MCP servers an agent has (or Rex Agent, with agent=main), for the / menu and its profile.
       if (url.pathname === '/api/agents/tools' && request.method === 'GET') {
