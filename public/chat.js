@@ -315,7 +315,7 @@ function stageModel() {
   const side = personal ? (ui.chatInfo === false ? '' : personalSide(run, personal, items, shells)) : shells.length && ui.termOpen ? terminalHtml(shells, { esc, hhmm }) : '';
   const actions = appControl(run, live) + (personal ? `<button class="icon-btn head-add" data-action="chat-to-room" title="Add agents: start a group chat with this agent and others" aria-label="Add agents"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></button> ${ui.chatInfo === false ? '<button class="btn small" data-action="chat-info">Info</button> ' : ''}${live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : ''}` : run.inApp ? '' : stop);
   return { title: personal ? personal.name : runTitle(run), meta: personal ? '' : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: run.inApp ? '<span class="chip working">In Claude app</span>' : personal ? '' : `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
-    working: workingStates.includes(run.state), composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : (run.provider === 'codex' ? 'Message Claude Code. It takes over from Codex with the chat so far…' : `Message ${provider(run.provider)}. It picks up where it left off…`), mentions: [] } };
+    working: workingStates.includes(run.state), composer: { placeholder: composerHint(run, workingStates.includes(run.state)), mentions: [] } };
 }
 // Until the second brain is set up, the main agent's screen and About you offer to do it.
 const brainBanner = () => ui.snap?.memory?.secondBrain === false ? `<div class="card brainbar"><div><b>Your agents don't know your second brain yet.</b><span class="muted small">${ui.snap.memory.brainCandidates?.length ? ` Found ${esc(ui.snap.memory.brainCandidates[0])}.` : ''} Rex Agent can set it up for all of them.</span></div><button class="btn primary small" data-action="brain-setup">Set it up</button></div>` : '';
@@ -361,6 +361,8 @@ function renderStage(full) {
     stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}${model.top ? '' : '<button type="button" class="to-end" id="to-end" hidden aria-label="Go to the newest messages"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span class="to-end-new">New messages</span></button>'}</div><aside class="side" id="side"></aside>`;
     ui.stick = !model.top; redrawAttachments(ctx); if (model.top) document.getElementById('feed').scrollTop = 0;
   } else { document.getElementById('head').innerHTML = head; const slot = document.getElementById('members'); if (!slot.contains(document.activeElement) && !pickerOpen()) slot.innerHTML = model.members || ''; }
+  // The hint in the message box follows the AI picked under it without redrawing what is typed.
+  const draftBox = document.getElementById('draft'); if (draftBox && model.composer?.placeholder && draftBox.placeholder !== model.composer.placeholder) draftBox.placeholder = model.composer.placeholder;
   document.getElementById('feed').className = `feed ${model.feedClass || ''}`;
   const banner = document.getElementById('banner'); if (banner && banner.innerHTML !== (model.banner || '')) banner.innerHTML = model.banner || '';
   drawSide(model.side || '', model.sideClass || '');
@@ -383,6 +385,12 @@ function drawSide(html, extra = '') {
   const fresh = document.getElementById('side-body'); if (fresh) fresh.scrollTop = keep.bottom ? fresh.scrollHeight : keep.top;
 }
 const draftKey = () => `${ui.view.type}:${ui.view.id || ''}`;
+// The message box names the AI the next message goes to: the one picked under the box, else the chat's own.
+function composerHint(run, working) {
+  const next = ui.providerPick?.[draftKey()] || (run.provider === 'codex' ? 'claude' : run.provider);
+  if (working) return `Message ${provider(run.provider)}…`;
+  return next !== run.provider ? `Message ${provider(next)}. It takes over from ${provider(run.provider)} with the chat so far…` : `Message ${provider(next)}. It picks up where it left off…`;
+}
 
 function renderAll(full = false) {
   queueMicrotask(drawReplyBar);

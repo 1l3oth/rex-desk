@@ -237,8 +237,20 @@ function mount(host) {
 
   // Pointer: drag a light to move it, drag the space to pan, a short press picks.
   const point = event => { const box = canvas.getBoundingClientRect(); return [event.clientX - box.left, event.clientY - box.top]; };
-  canvas.addEventListener('pointerdown', event => { const [px, py] = point(event), index = nodeAt(px, py); state.drag = { index, px, py, moved: false, x: state.target.x, y: state.target.y }; state.touched = true; canvas.setPointerCapture(event.pointerId); });
+  // Two fingers pinch to zoom around the point between them (a phone has no wheel); one finger drags like the mouse.
+  const fingers = new Map();
+  const pinchStart = () => { const [a, b] = [...fingers.values()], mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, [wx, wy] = toWorld(mx, my); state.pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, k: state.target.k, wx, wy }; state.drag = null; };
+  canvas.addEventListener('pointerdown', event => { const [px, py] = point(event); fingers.set(event.pointerId, [px, py]); canvas.setPointerCapture(event.pointerId); state.touched = true; if (fingers.size === 2) { pinchStart(); return; } if (fingers.size > 2) return; const index = nodeAt(px, py); state.drag = { index, px, py, moved: false, x: state.target.x, y: state.target.y }; });
   canvas.addEventListener('pointermove', event => {
+    if (!fingers.has(event.pointerId) || fingers.size < 2 || !state.pinch) return;
+    fingers.set(event.pointerId, point(event));
+    const [a, b] = [...fingers.values()], pinch = state.pinch, px = (a[0] + b[0]) / 2, py = (a[1] + b[1]) / 2;
+    const k = Math.min(6, Math.max(0.12, pinch.k * (Math.hypot(a[0] - b[0], a[1] - b[1]) || 1) / pinch.d));
+    state.target = { k, x: (px - width / 2) / k - pinch.wx, y: (py - height / 2) / k - pinch.wy }; state.view = { ...state.target };
+  });
+  const lift = event => { fingers.delete(event.pointerId); if (fingers.size < 2 && state.pinch) { state.pinch = null; state.drag = null; state.lifted = true; } };
+  canvas.addEventListener('pointermove', event => {
+    if (state.pinch) return;
     const [px, py] = point(event), drag = state.drag;
     if (!drag) { const over = nodeAt(px, py); if (over !== state.hover) { state.hover = over; canvas.style.cursor = over >= 0 ? 'pointer' : 'grab'; } return; }
     if (Math.abs(px - drag.px) + Math.abs(py - drag.py) > 4) drag.moved = true;
@@ -246,7 +258,8 @@ function mount(host) {
     if (drag.index >= 0 && !state.tree) { const [wx, wy] = toWorld(px, py); worker.postMessage({ type: 'drag', index: drag.index, x: wx, y: wy }); }
     else { state.target.x = state.view.x = drag.x + (px - drag.px) / state.view.k; state.target.y = state.view.y = drag.y + (py - drag.py) / state.view.k; }
   });
-  canvas.addEventListener('pointerup', () => { const drag = state.drag; state.drag = null; if (!drag) return; if (drag.index >= 0 && drag.moved) worker.postMessage({ type: 'drop', index: drag.index }); else if (!drag.moved) show(drag.index); });
+  canvas.addEventListener('pointercancel', lift);
+  canvas.addEventListener('pointerup', event => { const pinched = state.lifted || state.pinch; lift(event); if (pinched) { if (!fingers.size) state.lifted = false; return; } const drag = state.drag; state.drag = null; if (!drag) return; if (drag.index >= 0 && drag.moved) worker.postMessage({ type: 'drop', index: drag.index }); else if (!drag.moved) show(drag.index); });
   canvas.addEventListener('pointerleave', () => { state.hover = -1; });
   canvas.addEventListener('wheel', event => {
     event.preventDefault(); state.touched = true;

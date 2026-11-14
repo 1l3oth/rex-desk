@@ -538,3 +538,12 @@ html.embed .chat-shell{zoom:.88;height:calc(100dvh / .88);max-height:calc(100dvh
 .st-size button small{font-size:11.5px;color:var(--muted)}
 .st-size button.on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
 .st-size button:nth-child(1) b{font-size:12.5px}.st-size button:nth-child(3) b{font-size:15.5px}
+/* Phone and narrow windows: the add-agents sheet keeps its search box and picked names at full size and scrolls the
+   list instead of squeezing everything, and the Knowledge look buttons keep their words on one line. */
+.ra-dialog>*{flex-shrink:0}.ra-dialog .ra-grid{flex:1 1 auto;min-height:0}
+.kg-style{flex:none}.kg-style button{white-space:nowrap}
+@media (max-width:600px){.kg-top{flex-wrap:wrap;gap:8px}.kg-search{flex:1 1 100%;width:auto}.kg-style button{padding:0 11px}}
+@media (max-width:760px){.ra-dialog .ra-chosen{max-height:84px;overflow:auto}.ra-dialog .ra-chip{font-size:13px!important;padding:4px 10px!important;min-height:0!important;height:auto!important;border-radius:999px!important}.ra-dialog .ra-grid{min-height:200px}}
+/* Phones: no text-size zoom on the whole screen. iPhone Safari zooms the screen but not the height made to make up for
+   it, which left an empty strip under the tab bar (about a tenth of the screen at Compact). Phones keep their own sizes. */
+@media (max-width:760px){html[data-size] .chat-shell{zoom:1;height:100dvh;max-height:100dvh}}
