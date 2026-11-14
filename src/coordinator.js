@@ -1077,7 +1077,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const owner = lead || agent;
     const repository = config.repositories.find(item => item.id === owner.repositoryId) || config.repositories.find(item => owner.projectPath && path.resolve(item.path).toLowerCase() === path.resolve(owner.projectPath).toLowerCase());
     const base = repository?.baseBranch || 'main', project = repository?.path || owner.projectPath || '';
-    const branch = `${config.branchPrefix || 'temp/rex'}/${String(number).toLowerCase()}-${slug(name).slice(0, 40)}`.replace(/\/+/g, '/');
+    const branch = `${config.branchPrefix || 'rex-desk'}/${String(number).toLowerCase()}-${slug(name).slice(0, 40)}`.replace(/\/+/g, '/');
     const others = team.filter(id => id !== agent.id).map(id => this.specialists.get(id)?.name).filter(Boolean);
     const brief = [`${by} gave you this task to do here in the room: #${number} ${name}.${others.length ? ` You work on it together with ${others.join(', ')}${owner.id !== agent.id ? ` (${owner.name} leads it)` : ''}: split the work in the room, and say what you take before you start.` : ''}`,
       task.url ? `Tracker link: ${task.url}` : '', `What it says:\n${String(task.description || task.title || '').slice(0, 4000)}`, instructions ? `Notes from the person: ${instructions}` : '',

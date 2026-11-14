@@ -26,7 +26,7 @@ export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd', 'chat
 const shared = (kind, key) => SHARED.has(kind) && !(kind === 'specialist' && key === 'main');
 export const id = () => randomUUID();
 export const defaults = {
-  name: 'Rex', notify: true, provider: 'claude', concurrency: 2, branchPrefix: 'temp/rex',
+  name: 'Rex', notify: true, provider: 'claude', concurrency: 2, branchPrefix: 'rex-desk',
   syncMinutes: 5, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
   models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, mediaDirectory: '', execution: 'headless', defaultMode: 'bypassPermissions',
   schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], fix: true, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
@@ -307,7 +307,7 @@ export class Store extends EventEmitter {
       const commands = ['setupCommand', 'devCommand', 'testCommand'].reduce((result, key) => ({ ...result, [key]: String(repository[key] || '') }), {});
       if (repository.devCommand && !repository.devCommand.includes('{port}')) throw new Error('Dev command must contain {port}, so concurrent runs use separate ports.');
       const branchPattern = String(repository.branchPattern || '').trim();
-      issueBranch(branchPattern, { prefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, '') });
+      issueBranch(branchPattern, { prefix: String(input.branchPrefix || 'rex-desk').replace(/^\/+|\/+$/g, '') });
       return { id: repository.id || id(), name: repository.name || path.basename(repository.path), path: path.resolve(repository.path),
         baseBranch: repository.baseBranch || 'develop', targetBranch: repository.targetBranch || repository.baseBranch || 'develop',
         branchPattern, flowRuntime: validateFlowRuntime(repository.flowRuntime), electronRuntime: validateElectronRuntime(repository.electronRuntime), ...commands, browserPath: repository.browserPath || '/', push: repository.push === 'direct' ? 'direct' : 'pr' };
@@ -317,7 +317,7 @@ export class Store extends EventEmitter {
       id: String(account.id || id()), site: String(account.site || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').slice(0, 200),
       username: String(account.username || '').trim().slice(0, 200) })).filter(account => account.username);
     const config = { ...defaults, name: String(input.name || 'Rex'), notify: input.notify !== false, autonomy: input.autonomy !== false, provider: aiProvider(input.provider || 'claude'),
-      concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'temp/rex').replace(/^\/+|\/+$/g, ''),
+      concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'rex-desk').replace(/^\/+|\/+$/g, ''),
       syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), saver: input.saver !== false, autoFree: input.autoFree !== false, models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex), gemini: modelName('gemini', input.models?.gemini) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex'), gemini: agentProfile(input.agentProfiles?.gemini, 'Gemini') },
       tourDismissed: Boolean(input.tourDismissed), mediaDirectory: path.isAbsolute(String(input.mediaDirectory || '')) ? path.resolve(input.mediaDirectory) : '', execution: 'headless', testAccounts: accounts,
