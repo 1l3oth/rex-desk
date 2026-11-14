@@ -141,3 +141,34 @@ test('the Tailscale https address (tailscale serve) is treated like another devi
     assert.equal((await ask('/api/state', { 'x-rex-peer-key': key })).status, 200, 'with the key it works');
   } finally { await app.close(); }
 });
+
+test('stay signed in opens only a window holding the window key, never any program that asks', async () => {
+  const root = temporary('window-key');
+  const app = await accountApp(root, { requireAccount: false });
+  const call = (route, { method = 'GET', data, cookie = '' } = {}) => fetch(app.address + route, { method, redirect: 'manual', headers: { 'x-rex-desk': '1', 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, ...(data ? { body: JSON.stringify(data) } : {}) });
+  const cookies = response => (response.headers.getSetCookie?.() || []).map(item => item.split(';')[0]);
+  try {
+    const created = await call('/api/auth/create', { method: 'POST', data: { email: 'owner@example.com', passphrase, staySignedIn: true } });
+    assert.equal(created.status, 200);
+    // Signing in with the passphrase gives this browser the window key as well as the session.
+    const given = cookies(created);
+    assert.ok(given.some(item => item.startsWith('rex_session=')) && given.some(item => item.startsWith('rex_window=')));
+    const key = readFileSync(path.join(root, 'window.key'), 'utf8').trim();
+    assert.ok(key.length >= 32);
+    // Another program (or Windows user) asking without the key gets no session.
+    const stranger = await call('/api/auth');
+    assert.deepEqual(cookies(stranger), []); assert.equal((await stranger.json()).current, null);
+    assert.equal((await call('/api/auth', { cookie: 'rex_window=wrong-key-wrong-key-wrong-key-wrong' })).headers.getSetCookie().length, 0);
+    // The desktop app opens /?window=<key>: the key becomes a cookie and leaves the address.
+    const opened = await call(`/?window=${key}`);
+    assert.equal(opened.status, 303); assert.equal(opened.headers.get('location'), '/');
+    const windowCookie = cookies(opened).find(item => item.startsWith('rex_window='));
+    assert.equal(windowCookie, `rex_window=${key}`);
+    assert.deepEqual(cookies(await call('/?window=guess')), []);
+    // With the key, the window is signed in without the passphrase.
+    const handed = await call('/api/auth', { cookie: windowCookie });
+    const session = cookies(handed).find(item => item.startsWith('rex_session='));
+    assert.ok(session); assert.equal((await handed.json()).current.email, 'owner@example.com');
+    assert.equal((await call('/api/agents', { cookie: session })).status, 200);
+  } finally { await app.close(); }
+});

@@ -12,7 +12,7 @@ import { Store } from './store.js';
 import { Accounts, cleanEmail } from './accounts.js';
 import { findCloudWorkspace } from './turso.js';
 import { Updates } from './updates.js';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { Desk } from './coordinator.js';
 import { handleMcp } from './mcp.js';
 import { git, resolveCommand } from './processes.js';
@@ -201,6 +201,21 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   const cookieOf = request => /(?:^|;\s*)rex_session=([^;]+)/.exec(request.headers.cookie || '')?.[1];
   const sessionCookie = value => `rex_session=${value}; HttpOnly; SameSite=Strict; Path=/`;
   const signedIn = request => Boolean(session) && (!accounts || cookieOf(request) === session.cookie);
+  // "Stay signed in" opens Rex Desk without the passphrase only in a window that proves it is this person's: it holds the
+  // window key, a random value kept in a file in their own data folder (other Windows users cannot read it). The desktop app
+  // and the start script read the file and open /?window=<key>; a browser that signed in with the passphrase gets the key as a
+  // cookie too. Any other program or user on this computer asking /api/auth gets the sign-in screen, not the session.
+  let windowKeyValue = '';
+  const windowKey = () => {
+    if (windowKeyValue) return windowKeyValue;
+    const file = path.join(dataRoot, 'window.key');
+    try { windowKeyValue = readFileSync(file, 'utf8').trim(); } catch {}
+    if (windowKeyValue.length < 32) { windowKeyValue = randomBytes(32).toString('base64url'); try { mkdirSync(dataRoot, { recursive: true }); writeFileSync(file, windowKeyValue, { mode: 0o600 }); } catch (error) { console.error(`Could not write the window key: ${error.message}`); } }
+    return windowKeyValue;
+  };
+  const windowCookie = () => `rex_window=${windowKey()}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`;
+  const sameSecret = (left, right) => { const a = Buffer.from(String(left || '')), b = Buffer.from(String(right || '')); return a.length === b.length && a.length > 0 && timingSafeEqual(a, b); };
+  const holdsWindowKey = request => sameSecret(/(?:^|;\s*)rex_window=([^;]+)/.exec(request.headers.cookie || '')?.[1], windowKey());
   // What this computer holds for the signed-in Rex Desk account: its workspace (here), one from before accounts to claim,
   // a backup in the account's cloud database, or nothing yet (new).
   async function workspaceFor(email, database) {
@@ -210,10 +225,11 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     return accounts.workspaces.some(item => !item.email) ? 'claim' : 'new';
   }
   const accountView = () => ({ email: accountFound.session.user?.email || '', name: accountFound.session.user?.name || '', image: accountFound.session.user?.image || '', workspace: accountFound.workspace });
-  async function handleAuth(request, response, url) {
+  async function handleAuth(request, response, url, peerSignedIn = false) {
     if (url.pathname === '/api/auth' && request.method === 'GET') {
-      // A session that chose to stay signed in on this computer hands its cookie to the local app window.
-      if (session && accounts && session.staySignedIn && !signedIn(request)) {
+      // A session that chose to stay signed in on this computer hands its cookie to the person's own window (it holds the window
+      // key) or to their phone or other computer signed in with the device key.
+      if (session && accounts && session.staySignedIn && !signedIn(request) && (holdsWindowKey(request) || peerSignedIn)) {
         response.setHeader('Set-Cookie', sessionCookie(session.cookie));
         return json(response, 200, { mode: 'accounts', workspaces: accounts.summary(), current: { id: session.id, email: session.email, role: role(), staySignedIn: true, cloud: session.cloud } });
       }
@@ -231,7 +247,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (input.staySignedIn && !session.staySignedIn) { await accounts.remember(entry.id, vaultKey).catch(() => {}); session.staySignedIn = true; }
       } else { await closeSession(); await openSession(entry, vaultKey, { staySignedIn: Boolean(input.staySignedIn) }); }
     };
-    const respond = () => { response.setHeader('Set-Cookie', sessionCookie(session.cookie)); return json(response, 200, { current: describe() }); };
+    // Signing in with the passphrase also gives this browser the window key, so "stay signed in" works in it from then on.
+    const respond = () => { response.setHeader('Set-Cookie', [sessionCookie(session.cookie), windowCookie()]); return json(response, 200, { current: describe() }); };
     const slow = async error => { await new Promise(resolve => setTimeout(resolve, 700)); throw error; };
     // The front door: the Rex Desk account signs in first, and its email names the workspace the passphrase opens.
     // Only when the account service cannot be reached does a workspace already on this computer open with its passphrase alone.
@@ -373,7 +390,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const origin = request.headers.origin;
       if (origin && origin !== `http://${host}` && origin !== `https://${host}`) return json(response, 403, { error: 'Cross-origin dashboard requests are blocked.' });
       if (request.method !== 'GET' && request.headers['x-rex-desk'] !== '1') return json(response, 403, { error: 'Missing dashboard request header.' });
-      if (url.pathname === '/api/auth' || url.pathname.startsWith('/api/auth/')) return await handleAuth(request, response, url);
+      // The desktop app and the start script open /?window=<key>: the key becomes this window's cookie and leaves the address.
+      if (request.method === 'GET' && url.searchParams.has('window') && !url.pathname.startsWith('/api/')) {
+        const given = url.searchParams.get('window'); url.searchParams.delete('window');
+        response.writeHead(303, { Location: url.pathname + url.search, 'Cache-Control': 'no-store', ...(sameSecret(given, windowKey()) ? { 'Set-Cookie': windowCookie() } : {}) });
+        return response.end();
+      }
+      if (url.pathname === '/api/auth' || url.pathname.startsWith('/api/auth/')) return await handleAuth(request, response, url, peerSignedIn);
       // Everything else that touches a workspace needs this window's sign-in.
       if ((url.pathname.startsWith('/api/') || url.pathname.startsWith('/artifacts/')) && !signedIn(request) && !peerSignedIn) return json(response, 401, { error: 'Sign in to Rex Desk.', signIn: true });
       const store = session?.store, desk = session?.desk;
@@ -934,6 +957,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       return serveFile(request, response, path.join(root, 'public', file));
     } catch (error) { if (!response.headersSent) json(response, 400, { error: error.message }); else response.end(); }
   };
+  // The window key file exists before the server answers, so the desktop app can read it as soon as it sees the server up.
+  windowKey();
   const server = http.createServer(handler);
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); }); }
   catch (error) { await closeSession(); unlinkSync(lockPath); throw error; }

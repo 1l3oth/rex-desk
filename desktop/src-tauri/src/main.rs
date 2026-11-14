@@ -192,6 +192,19 @@ fn data_home(fallback: &PathBuf) -> PathBuf {
     base.unwrap_or_else(|| fallback.clone()).join("Rex Desk")
 }
 
+// Rex Desk's address with the window key from the data folder, so "stay signed in" opens this window without the
+// passphrase. Other programs and Windows users cannot read the key, so they get the sign-in screen.
+fn server_url(runtime: &Runtime) -> tauri::Url {
+    let key = fs::read_to_string(runtime.data.join("window.key")).unwrap_or_default();
+    let key = key.trim();
+    let address = if !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        format!("http://{ADDRESS}/?window={key}")
+    } else {
+        format!("http://{ADDRESS}")
+    };
+    address.parse().expect("valid URL")
+}
+
 struct Runtime {
     node: PathBuf,
     app: PathBuf,
@@ -554,8 +567,7 @@ fn main() {
                         return fail(error);
                     }
                 }
-                let server: tauri::Url = format!("http://{ADDRESS}").parse().expect("valid URL");
-                let _ = window.navigate(server.clone());
+                let _ = window.navigate(server_url(&runtime));
                 // Watchdog: when the server stops answering for about 8 seconds (longer than a self-update handover), the window
                 // shows the app's own page with a Restart button and the app starts the server again by itself. When the server
                 // answers again, the window goes back to Rex Desk.
@@ -567,7 +579,7 @@ fn main() {
                         down = 0;
                         if away {
                             away = false;
-                            let _ = window.navigate(server.clone());
+                            let _ = window.navigate(server_url(&runtime));
                         }
                         continue;
                     }
