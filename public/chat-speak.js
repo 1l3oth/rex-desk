@@ -59,13 +59,17 @@ function stop() {
 async function playLocal(text, lang, mine) {
   const voice = await voiceFor(lang), parts = pieces(text);
   if (!voice && lang === 'en') ctxToast?.('No English voice is installed on this computer. Add one in Windows Settings, Time & language, Speech.');
-  parts.forEach((part, index) => {
-    const utterance = new SpeechSynthesisUtterance(part);
-    utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice;
-    utterance.rate = 1.05;
-    if (index === parts.length - 1) utterance.onend = () => { if (playing === mine) stop(); };
-    utterance.onerror = () => { if (playing === mine) stop(); };
-    speechSynthesis.speak(utterance);
+  // Resolves when the last piece has been spoken, so replies read one after another do not cut each other off.
+  return new Promise(resolve => {
+    if (!parts.length) { resolve(); return; }
+    parts.forEach((part, index) => {
+      const utterance = new SpeechSynthesisUtterance(part);
+      utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice;
+      utterance.rate = 1.05;
+      if (index === parts.length - 1) utterance.onend = () => { if (playing === mine) stop(); resolve(); };
+      utterance.onerror = () => { if (playing === mine) stop(); resolve(); };
+      speechSynthesis.speak(utterance);
+    });
   });
 }
 async function play(button) {
@@ -97,6 +101,33 @@ async function play(button) {
   button.classList.remove('loading');
   if ('speechSynthesis' in window) await playLocal(text, lang, mine); else stop();
 }
+// Read replies aloud: a switch in every chat that has the play button (personal chats, Rex Agent and group chats). While
+// it is on, each new reply is read out once it is finished (not while the AI is still typing), one after another, in the
+// voice picked in Settings. Replies that were there when it was switched on, or when the chat was opened, are not read.
+const AUTO = 'rex-read-aloud', heard = new Map();
+let reading = Promise.resolve();
+const autoChats = () => { try { return new Set(JSON.parse(localStorage.getItem(AUTO) || '[]')); } catch { return new Set(); } };
+export const readAloudOn = key => autoChats().has(key);
+const replies = () => [...document.querySelectorAll('#feed-inner .msg:not(.mine) [data-speak]')];
+const replyId = button => { const message = button.closest('.msg'), text = button.closest('.bubble')?.querySelector('.md')?.textContent || ''; return message?.dataset.msg || (text ? `${text.length}:${text.slice(0, 120)}` : ''); };
+const markAll = key => heard.set(key, new Set(replies().map(replyId)));
+export function toggleReadAloud(key) {
+  const chats = autoChats(), on = !chats.has(key);
+  if (on) { chats.add(key); unlockSound(); markAll(key); } else { chats.delete(key); stop(); }
+  try { localStorage.setItem(AUTO, JSON.stringify([...chats])); } catch { /* private window */ }
+  return on;
+}
+// After each redraw: finished replies not read yet are read, oldest first.
+export function readNewReplies(key) {
+  if (!heard.has(key) || !readAloudOn(key)) { markAll(key); return; }
+  if (document.querySelector('#feed-inner .bubble.typing')) return;
+  const seen = heard.get(key);
+  for (const button of replies()) {
+    const id = replyId(button); if (!id || seen.has(id)) continue;
+    seen.add(id); reading = reading.then(() => (readAloudOn(key) && document.body.contains(button) ? play(button) : null)).catch(() => {});
+  }
+}
+export const readAloudButton = key => { const on = readAloudOn(key); return `<button type="button" class="icon-btn read-aloud${on ? ' on' : ''}" data-action="read-aloud" aria-pressed="${on}" title="${on ? 'Replies are read aloud. Press to stop' : 'Read replies aloud'}" aria-label="Read replies aloud">${SPEAKER}</button>`; };
 let ctxToast = null;
 export function wireSpeak(toast) {
   ctxToast = toast;
@@ -108,4 +139,6 @@ export function wireSpeak(toast) {
   }, true);
   // Leaving the chat stops the voice.
   window.addEventListener('hashchange', stop);
+  // Opening another chat starts fresh there: replies it already had are not read out.
+  window.addEventListener('hashchange', () => { heard.clear(); reading = Promise.resolve(); });
 }

@@ -16,7 +16,7 @@ import { maybeStartTour } from '/chat-tour.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
-import { wireSpeak, speakButton } from '/chat-speak.js';
+import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies } from '/chat-speak.js';
 import { openAvatarPicker } from '/chat-avatar.js';
 import { showUpdateCard, updateLater, updateShow, installUpdate, updateWhenIdle, watchForUpdates, showSyncNote } from '/chat-update.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
@@ -355,7 +355,7 @@ const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="em
 
 function renderStage(full) {
   const model = stageModel(), stage = document.getElementById('stage');
-  const head = `<div class="stage-head"><button type="button" class="pane-toggle" data-pane="rail" aria-pressed="true" aria-label="Show or hide the list" title="Show or hide the list (Ctrl+B)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="3" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M9.5 4v16"/></svg></button><button class="m-menu" data-action="m-rail" aria-label="Back to the list"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="head-title"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}</div><span class="spacer"></span><div class="head-actions">${model.actions || ''}</div><button type="button" class="pane-toggle" data-pane="side" aria-pressed="true" aria-label="Show or hide the side panel" title="Show or hide the side panel (Ctrl+.)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="14.5" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M14.5 4v16"/></svg></button></div>`;
+  const head = `<div class="stage-head"><button type="button" class="pane-toggle" data-pane="rail" aria-pressed="true" aria-label="Show or hide the list" title="Show or hide the list (Ctrl+B)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="3" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M9.5 4v16"/></svg></button><button class="m-menu" data-action="m-rail" aria-label="Back to the list"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="head-title"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}</div><span class="spacer"></span><div class="head-actions">${model.composer && ['run', 'main', 'room'].includes(ui.view.type) ? readAloudButton(draftKey()) : ''}${model.actions || ''}</div><button type="button" class="pane-toggle" data-pane="side" aria-pressed="true" aria-label="Show or hide the side panel" title="Show or hide the side panel (Ctrl+.)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="14.5" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M14.5 4v16"/></svg></button></div>`;
   // A view that needs the message box always gets it, even when an earlier view had none.
   if (full || !document.getElementById('feed') || Boolean(model.composer) !== Boolean(document.getElementById('composer'))) {
     stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}${model.top ? '' : '<button type="button" class="to-end" id="to-end" hidden aria-label="Go to the newest messages"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span class="to-end-new">New messages</span></button>'}</div><aside class="side" id="side"></aside>`;
@@ -394,6 +394,7 @@ function composerHint(run, working) {
 
 function renderAll(full = false) {
   queueMicrotask(drawReplyBar);
+  queueMicrotask(() => readNewReplies(draftKey()));
   if (!ui.snap) return;
   // On a phone Rex Desk opens on the list, like a messaging app; a chat slides in over it and the back arrow returns.
   if (!document.getElementById('rail')) ui.railHtml = '', app.innerHTML = `<div class="chat-shell${phone() && !location.hash ? ' show-rail' : ''}"><aside class="rail" id="rail"></aside><main class="stage" id="stage"></main></div>`;
@@ -522,6 +523,7 @@ document.addEventListener('click', async event => {
     else if (action === 'agent-signin') { try { await api('/agents/login', { method: 'POST', data: { provider: target.dataset.provider || 'claude', profile: '' } }); toast('Sign-in opened. Pick the account that has the plan, finish it, then start a fresh chat.'); } catch (error) { toast(error.message, true); } }
     else if (action === 'update-install') await installUpdate(api);
     else if (action === 'update-later') updateLater();
+    else if (action === 'read-aloud') { const on = toggleReadAloud(draftKey()); toast(on ? 'New replies in this chat are read aloud.' : 'Replies are no longer read aloud.'); renderAll(); }
     else if (action === 'update-show') updateShow(ui.snap.update);
     else if (action === 'avatar-pick') { const agent = (ui.snap.specialists || []).find(item => item.id === target.closest('[data-agent-id]')?.dataset.agentId); if (agent) openAvatarPicker(ctx, agent); }
     else if (action === 'pin-toggle') togglePin(ctx, target.dataset.kind, target.dataset.id);
