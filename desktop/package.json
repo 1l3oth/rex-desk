@@ -10,6 +10,7 @@
     "icon": "tauri icon src-tauri/app-icon.png"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0"
+    "@tauri-apps/cli": "^2.0.0",
+    "esbuild": "^0.25.12"
   }
 }
