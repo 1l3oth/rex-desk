@@ -513,7 +513,7 @@ html.has-win-bar .places .place[data-action="nt-panel"]{display:none}
 .sp-add h3{margin:0;font-size:16px}.sp-add p{margin:0;font-size:13px;color:var(--muted)}
 .sp-find input{width:100%;height:36px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
 .sp-choices{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}
-.sp-choices button{display:flex;flex-direction:column;align-items:flex-start;width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);text-align:left}
+.sp-choices button{display:flex;flex-direction:row;align-items:center;gap:10px;width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);text-align:left}
 .sp-choices button:hover{border-color:var(--accent)}.sp-choices small{font-size:11.5px;color:var(--muted)}
 @media (max-width:900px){.sp-grid.sp-n2,.sp-grid.sp-n3,.sp-grid.sp-n4{grid-template-columns:1fr;grid-template-rows:none;overflow:auto}.sp-pane{min-height:420px}}
 /* A chat inside a pane: only the chat. */
@@ -547,3 +547,10 @@ html.embed .chat-shell{zoom:.88;height:calc(100dvh / .88);max-height:calc(100dvh
 /* Phones: no text-size zoom on the whole screen. iPhone Safari zooms the screen but not the height made to make up for
    it, which left an empty strip under the tab bar (about a tenth of the screen at Compact). Phones keep their own sizes. */
 @media (max-width:760px){html[data-size] .chat-shell{zoom:1;height:100dvh;max-height:100dvh}}
+
+/* Split view picker: each agent's face with its status dot, and what it is doing in colour. */
+.sp-choices .avwrap{position:relative;flex:none}.sp-ct{display:flex;flex-direction:column;min-width:0}.sp-ct b,.sp-ct small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sp-st{font-weight:600}.sp-st.working{color:var(--accent)}.sp-st.warn{color:var(--warn)}.sp-st.good{color:var(--good)}.sp-st.off{opacity:.7}
+.sp-dialog{position:relative;width:min(860px,94vw);max-height:min(640px,86vh);display:flex;flex-direction:column;padding:6px}.sp-dialog .sp-add-in{height:auto}
+.sp-dialog .ra-x{position:absolute;top:12px;right:12px}
+.sp-pop{z-index:40}

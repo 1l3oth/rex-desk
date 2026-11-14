@@ -60,19 +60,37 @@ fn startup_error() -> String {
 
 // A link Rex Desk opens in a new window: its own pages open in a child window of the app (same sign-in);
 // anything else opens in the person's browser.
-// A small red dot with a white rim, 16 by 16 pixels, for the taskbar icon while something waits for the person.
+// A red dot for the taskbar icon while something waits for the person. Drawn at 32 by 32 with smooth edges (each pixel
+// is sampled 16 times), so Windows scales it down cleanly at any display scale instead of showing jagged steps.
+#[cfg(target_os = "windows")]
+const DOT_SIZE: u32 = 32;
 #[cfg(target_os = "windows")]
 fn badge_dot() -> &'static [u8] {
     use std::sync::OnceLock;
     static DOT: OnceLock<Vec<u8>> = OnceLock::new();
     DOT.get_or_init(|| {
-        let mut pixels = vec![0u8; 16 * 16 * 4];
-        for y in 0..16 {
-            for x in 0..16 {
-                let distance = (((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)) as f32).sqrt();
-                let at = (y * 16 + x) * 4;
-                let (r, g, b, a) = if distance <= 6.0 { (229, 72, 77, 255) } else if distance <= 7.6 { (255, 255, 255, 255) } else { (0, 0, 0, 0) };
-                pixels[at..at + 4].copy_from_slice(&[r, g, b, a]);
+        let size = DOT_SIZE as usize;
+        let centre = size as f32 / 2.0;
+        // A thin white ring keeps the dot readable on any icon; the red fills the rest.
+        let (outer, inner) = (centre - 1.0, centre - 3.2);
+        let mut pixels = vec![0u8; size * size * 4];
+        for y in 0..size {
+            for x in 0..size {
+                let (mut red, mut ring) = (0.0f32, 0.0f32);
+                for sy in 0..4 {
+                    for sx in 0..4 {
+                        let (px, py) = (x as f32 + (sx as f32 + 0.5) / 4.0, y as f32 + (sy as f32 + 0.5) / 4.0);
+                        let distance = ((px - centre).powi(2) + (py - centre).powi(2)).sqrt();
+                        if distance <= inner { red += 1.0 } else if distance <= outer { ring += 1.0 }
+                    }
+                }
+                let (red, ring) = (red / 16.0, ring / 16.0);
+                let alpha = red + ring;
+                if alpha <= 0.0 { continue; }
+                // Straight (not premultiplied) colour: the mix of red and white, at the coverage of both.
+                let mix = |r: f32, w: f32| ((r * red + w * ring) / alpha).round() as u8;
+                let at = (y * size + x) * 4;
+                pixels[at..at + 4].copy_from_slice(&[mix(229.0, 255.0), mix(57.0, 255.0), mix(70.0, 255.0), (alpha * 255.0).round() as u8]);
             }
         }
         pixels
@@ -93,7 +111,7 @@ fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::
                     // How many things wait for the person: a dot on the taskbar icon (Windows), the number on the Dock (Mac).
                     let count = url.query_pairs().find(|(key, _)| key == "n").and_then(|(_, value)| value.parse::<i64>().ok()).unwrap_or(0);
                     #[cfg(target_os = "windows")]
-                    { let _ = window.set_overlay_icon(if count > 0 { Some(tauri::image::Image::new(badge_dot(), 16, 16)) } else { None }); }
+                    { let _ = window.set_overlay_icon(if count > 0 { Some(tauri::image::Image::new(badge_dot(), DOT_SIZE, DOT_SIZE)) } else { None }); }
                     #[cfg(not(target_os = "windows"))]
                     { let _ = window.set_badge_count(if count > 0 { Some(count) } else { None }); }
                 }
