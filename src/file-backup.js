@@ -39,6 +39,27 @@ export class FileBackup {
     const index = this.index(); if (!index) return;
     for (const key of Object.keys(index.files)) if (prefixes.some(prefix => key.startsWith(prefix))) delete index.files[key];
     this.saveIndex(index);
+    // The private folder forgets them too (the database copy is deleted by the caller's SQL).
+    if (this.hosted()) void this.removeFromFolder(prefixes).catch(error => { this.error = String(error.message || error); });
+  }
+  async removeFromFolder(prefixes) {
+    const mine = `${this.sync.workspace}/`;
+    for (const file of await this.sync.account.listFiles()) if (file.path.startsWith(mine) && prefixes.some(prefix => file.path.slice(mine.length).startsWith(prefix))) await this.sync.account.deleteFile(file.path);
+  }
+  // A new computer or a reinstall on an account backup: every file of this workspace that is missing here comes back.
+  async restoreFromFolder() {
+    const { store, account } = this.sync, mine = `${this.sync.workspace}/`;
+    let restored = 0; const index = { files: {} };
+    for (const item of await account.listFiles()) {
+      if (!item.path.startsWith(mine)) continue;
+      const key = item.path.slice(mine.length), file = this.local(key);
+      if (!file || existsSync(file)) continue;
+      const bytes = await account.getFile(item.path); if (!bytes) continue;
+      try { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, store.decryptBytes(bytes.toString('base64'))); restored += 1;
+        const stat = statSync(file); index.files[key] = `${stat.size}:${Math.floor(stat.mtimeMs)}`; } catch { /* another vault key, or no room */ }
+    }
+    this.saveIndex(index);
+    return { restored };
   }
   walk() {
     const found = [];
@@ -58,6 +79,22 @@ export class FileBackup {
     }
     return found;
   }
+  // A backup on the person's Rex Desk account keeps its files in the account's private folder, not in the database.
+  // A database of the person's own (set up by hand) keeps them in the database, as before.
+  hosted() { const { account, connection } = this.sync; return Boolean(account?.signedIn && connection?.url && account.saved?.url === connection.url); }
+  remoteKey(key) { return `${this.sync.workspace}/${key}`; }
+  // A workspace that kept its files in the database before moves them to the private folder once, then empties them
+  // out of the database, which is what made the backup big.
+  async moveToFolder(index) {
+    const { client, store, workspace, account } = this.sync;
+    const listed = await client.execute({ sql: 'SELECT path FROM rex_files WHERE workspace=?', args: [workspace] });
+    for (const row of listed.rows) {
+      const got = await client.execute({ sql: 'SELECT data FROM rex_files WHERE workspace=? AND path=?', args: [workspace, row.path] });
+      if (got.rows[0]) await account.putFile(this.remoteKey(String(row.path)), Buffer.from(String(got.rows[0].data), 'base64'));
+      await client.execute({ sql: 'DELETE FROM rex_files WHERE workspace=? AND path=?', args: [workspace, row.path] });
+    }
+    index.inFolder = true; this.saveIndex(index); void store;
+  }
   index() { try { return JSON.parse(readFileSync(this.indexFile, 'utf8')); } catch { return null; } }
   saveIndex(index) { const temporary = `${this.indexFile}.tmp`; writeFileSync(temporary, JSON.stringify(index), { mode: 0o600 }); renameSync(temporary, this.indexFile); }
   // Upload new and changed files, one at a time. Files deleted here stay in the backup.
@@ -67,7 +104,8 @@ export class FileBackup {
     for (const item of this.walk()) {
       if (index.files[item.key] === item.stamp) continue;
       let data; try { data = readFileSync(item.file); } catch { continue; }
-      await client.execute({ sql: 'INSERT INTO rex_files(workspace,path,size,data,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace,path) DO UPDATE SET size=excluded.size,data=excluded.data,updated_at=excluded.updated_at',
+      if (this.hosted()) await this.sync.account.putFile(this.remoteKey(item.key), Buffer.from(store.encryptBytes(data), 'base64'));
+      else await client.execute({ sql: 'INSERT INTO rex_files(workspace,path,size,data,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace,path) DO UPDATE SET size=excluded.size,data=excluded.data,updated_at=excluded.updated_at',
         args: [workspace, item.key, data.length, store.encryptBytes(data), new Date().toISOString()] });
       index.files[item.key] = item.stamp; uploaded += 1;
       if (uploaded % 20 === 0) this.saveIndex(index);
@@ -78,9 +116,11 @@ export class FileBackup {
   // A workspace without its file list lost its files (a reinstall, a cleared data folder, a new computer): put back every
   // backed-up file that is missing here. Files already here are kept as they are.
   async restoreMissing() {
+    // An account backup takes its folder first, then anything another computer still kept in the database (it moves it later).
+    const fromFolder = this.hosted() ? (await this.restoreFromFolder()).restored : 0;
     const { client, store, workspace } = this.sync;
     const listed = await client.execute({ sql: 'SELECT path FROM rex_files WHERE workspace=?', args: [workspace] });
-    let restored = 0; const index = { files: {} };
+    let restored = fromFolder; const index = this.index() || { files: {} };
     for (const row of listed.rows) {
       const file = this.local(String(row.path));
       if (!file || existsSync(file)) continue;
@@ -106,6 +146,7 @@ export class FileBackup {
     this.running = (async () => {
       try {
         if (!this.index()) { const result = await this.restoreMissing(); this.lastRestored = result.restored; if (result.restored) this.sync.notify(); }
+        if (this.hosted() && !this.index()?.inFolder) await this.moveToFolder(this.index() || { files: {} });
         await this.backup(); this.error = '';
       } catch (error) { this.error = String(error.message || error); }
       finally { this.running = null; if (this.again && !this.sync.closed) { this.again = false; this.running = this.run(); } }

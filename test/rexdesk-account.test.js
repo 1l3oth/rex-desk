@@ -17,6 +17,7 @@ const API = 'https://accounts.test';
 // A stand-in for the Rex Desk account service: one person, one database, a new key on every ask.
 function fakeAccounts() {
   const service = { calls: [], codes: new Map(), sessions: new Set(), keys: 0, signedOut: false, url: 'libsql://rd-test-person.example.invalid' };
+  service.files = new Map();
   const reply = (status, data) => ({ status, ok: status >= 200 && status < 300, json: async () => data });
   service.fetcher = async (url, options = {}) => {
     const route = `${options.method || 'GET'} ${String(url).replace(API, '')}`, token = (options.headers?.authorization || '').replace(/^Bearer /, '');
@@ -33,6 +34,16 @@ function fakeAccounts() {
     if (route === 'GET /v1/me') return reply(200, { user: { id: 'u1', email: 'person@example.com' }, plan: 'free', sync: { on: service.keys > 0 } });
     if (route === 'POST /v1/sync/database') { service.keys += 1; return reply(200, { url: service.url, authToken: `database-key-${service.keys}`, expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(), database: 'rd-test-person', created: service.keys === 1 }); }
     if (route === 'DELETE /v1/session') { service.sessions.delete(token); return reply(200, { ok: true }); }
+    // The account's private file folder.
+    const file = route.match(/^(GET|PUT|DELETE) \/v1\/files(?:\/(.+?))?(?:\?.*)?$/);
+    if (file) {
+      const [, method, name] = file, key = name ? name.split('/').map(decodeURIComponent).join('/') : '';
+      if (method === 'GET' && !key) return reply(200, { files: [...service.files].map(([path, bytes]) => ({ path, size: bytes.length })), cursor: null });
+      if (method === 'PUT') { service.files.set(key, Buffer.from(options.body)); return reply(200, { path: key }); }
+      if (method === 'DELETE') { service.files.delete(key); return reply(200, { deleted: true }); }
+      const bytes = service.files.get(key); if (!bytes) return reply(404, { error: { code: 'not_found', message: 'That file is not in your backup.' } });
+      return { status: 200, ok: true, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length) };
+    }
     return reply(404, { error: { code: 'not_found', message: 'There is nothing at this address.' } });
   };
   // What the browser does: the person signs in on the service's page, and it sends them back to this computer with a code.
@@ -122,6 +133,13 @@ test('a new computer finds the backup with the same Rex Desk sign-in, then opens
     const started = await owner('/api/database/account-start', { method: 'POST' });
     await Promise.all([owner('/api/database/account-finish', { method: 'POST' }), service.browser(started.body.url)]);
     await owner('/api/database/sync', { method: 'POST' });
+    // A picture from a chat goes to the account's private folder, encrypted, and not into the cloud database.
+    const { writeFileSync: write, mkdirSync: make } = await import('node:fs');
+    const uploads = first.store.media('uploads'); make(uploads, { recursive: true }); write(path.join(uploads, 'pic.png'), 'the picture');
+    await first.store.cloud.files.run();
+    const sent = [...service.files.keys()].find(key => key.endsWith('/data/uploads/pic.png'));
+    assert.ok(sent, 'the picture is in the account folder'); assert.ok(!service.files.get(sent).includes('the picture'), 'only encrypted bytes leave this computer');
+    assert.equal(turso.remote.prepare('SELECT COUNT(*) n FROM rex_files').get().n, 0, 'the cloud database holds no files');
   } finally { await first.close(); }
 
   const second = await accountApp(temporary('account-second'), options), visitor = browser(second);
@@ -139,6 +157,9 @@ test('a new computer finds the backup with the same Rex Desk sign-in, then opens
     const state = await visitor('/api/state');
     assert.equal(state.body.database.configured, true); assert.equal(state.body.database.url, service.url);
     assert.equal(state.body.database.account.email, 'person@example.com', 'the new computer keeps the sign-in, so it can renew its key');
+    const { readFileSync: read, existsSync: exists } = await import('node:fs'), picture = path.join(second.store.media('uploads'), 'pic.png');
+    for (let tries = 0; tries < 100 && !exists(picture); tries++) await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(read(picture, 'utf8'), 'the picture', 'the picture comes back from the account folder');
   } finally { await second.close(); }
 });
 
