@@ -57,11 +57,20 @@ document.addEventListener('keydown', event => {
 });
 // The app redraws its header and list from time to time: keep the buttons' pressed state right, and tell the
 // stylesheet how wide the side panel is so the chat takes exactly that room back.
-new MutationObserver(() => {
+let paneQueued = false;
+new MutationObserver(() => { if (paneQueued) return; paneQueued = true; requestAnimationFrame(() => { paneQueued = false; syncPanes(); }); }).observe(document.body, { childList: true, subtree: true });
+function syncBar() {
+  const snap = window.__rexCtx?.ui?.snap; if (!snap) return;
+  const working = (snap.specialists || []).filter(agent => ['busy', 'replying'].includes(agent.status?.state)).length + ((snap.runs || []).some(run => run.role === 'coordinator' && run.main && ['starting', 'running', 'queued', 'verifying'].includes(run.state)) ? 1 : 0);
+  const pill = document.querySelector('.win-working'); if (pill) { pill.hidden = !working; const text = `${working} working`; if (pill.lastElementChild.textContent !== text) pill.lastElementChild.textContent = text; }
+  const badge = document.querySelector('.win-bell b'), unread = snap.notices?.unread || 0; if (badge) { badge.hidden = !unread; const text = unread > 99 ? '99+' : String(unread); if (badge.textContent !== text) badge.textContent = text; }
+}
+function syncPanes() {
+  syncBar();
   for (const pane of ['rail', 'side']) for (const button of document.querySelectorAll(`[data-pane="${pane}"]`)) { const pressed = String(!paneOff(pane)); if (button.getAttribute('aria-pressed') !== pressed) button.setAttribute('aria-pressed', pressed); }
   const side = document.querySelector('.stage > .side.on');
   if (side && !paneOff('side')) { const width = `${side.offsetWidth}px`; if (root.style.getPropertyValue('--side-w') !== width) root.style.setProperty('--side-w', width); }
-}).observe(document.body, { childList: true, subtree: true });
+}
 
 // The desktop app's own window bar. Windows: no system title bar, so Rex Desk draws minimize, maximize and close in glass.
 // Mac: the three dots stay where they are, over the left end of the same bar. In a plain browser nothing is added.
@@ -72,12 +81,16 @@ if (shell === 'windows' || shell === 'macos') {
   const bar = document.createElement('div');
   bar.className = `win-bar ${shell}`; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Window');
   // The Rex Desk name sits in the window bar, where a window's title belongs; the list below starts with Rex Agent.
-  const brand = '<span class="win-brand"><span class="av icon brandmark"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.4 5 5.6.8-4 3.9.9 5.5L12 15.6 7.1 18.2 8 12.7 4 8.8l5.6-.8z"/></svg></span><b>Rex Desk</b></span>';
-  bar.innerHTML = shell === 'windows' ? `${brand}<span class="win-fill"></span>
+  const brand = '<span class="win-brand"><img src="/favicon.svg" alt="" width="20" height="20"><b>Rex Desk</b></span>';
+  const mac = shell === 'macos', key = mac ? '⌘ K' : 'Ctrl K';
+  const middle = `<span class="win-fill"></span><button type="button" class="win-search" data-palette-open title="Search or jump to anything (${key})"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search or jump to a chat, agent or task</span><kbd>${key}</kbd></button><span class="win-fill"></span>
+    <button type="button" class="win-working" data-open="main" data-id="" hidden title="Agents working right now"><i></i><span></span></button>
+    <button type="button" class="win-bell tile" data-action="nt-panel" aria-label="Notifications" title="Notifications"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><b hidden></b></button>`;
+  bar.innerHTML = shell === 'windows' ? `${brand}${middle}
     <button type="button" class="win-btn" data-win="minimize" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 6.5h8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
     <button type="button" class="win-btn" data-win="maximize" aria-label="Maximize or restore" title="Maximize"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2.2" y="2.2" width="7.6" height="7.6" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
     <button type="button" class="win-btn close" data-win="close" aria-label="Close" title="Close (Rex Desk keeps running in the tray)"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>`
-    : `${brand}<span class="win-fill"></span>`;
+    : `${brand}${middle}`;
   document.documentElement.classList.add('has-win-bar', `shell-${shell}`);
   document.body.prepend(bar);
   bar.addEventListener('click', event => { const button = event.target.closest('[data-win]'); if (button) ask(button.dataset.win); });
@@ -111,7 +124,8 @@ new MutationObserver(dressSkin).observe(root, { attributes: true, attributeFilte
 
 // Settings > General > Look: picking a theme changes the app at once.
 const paintSwatches = () => { for (const button of document.querySelectorAll('.st-skin:not([data-painted])')) { button.dataset.painted = '1'; button.style.setProperty('--a', button.dataset.a); button.style.setProperty('--b', button.dataset.b); button.style.setProperty('--base', button.dataset.base); } };
-new MutationObserver(paintSwatches).observe(document.body, { childList: true, subtree: true });
+const onceAFrame = fn => { let queued = false; return () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; fn(); }); }; };
+new MutationObserver(onceAFrame(paintSwatches)).observe(document.body, { childList: true, subtree: true });
 document.addEventListener('click', event => {
   const pick = event.target.closest('[data-st-skin]'); if (!pick) return;
   window.rexSkin?.set(pick.dataset.stSkin);
@@ -136,4 +150,4 @@ const tickWarm = () => {
   }
 };
 setInterval(() => { if (!document.hidden) tickWarm(); }, 1000);
-new MutationObserver(tickWarm).observe(document.body, { childList: true, subtree: true });
+new MutationObserver(onceAFrame(tickWarm)).observe(document.body, { childList: true, subtree: true });

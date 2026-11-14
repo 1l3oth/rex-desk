@@ -147,7 +147,7 @@ function renderRail() {
   const snap = ui.snap, asks = pending().length;
   const main = mainRun(), agents = snap.specialists || [], tasks = (snap.tasks || []).filter(task => task.active && !task.demo), busy = agents.filter(agent => agent.status?.state === 'busy').length;
   const plus = (action, label) => `<button class="sec-add" data-action="${action}" title="${label}" aria-label="${label}">+</button>`;
-  return `<div class="rail-head"><span class="brand">${iconAv('main', 'brandmark')}<strong>Rex Desk</strong></span><span class="spacer"></span></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
+  return `<div class="rail-head"><span class="brand"><img class="brand-logo" src="/favicon.svg" alt="" width="26" height="26"><strong>Rex Desk</strong></span><span class="spacer"></span></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
     <div class="sec-body top">
       ${railItem('main', '', { avatar: withDot(rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : ''), name: 'Rex Agent', sub: mainLive().state === 'idle' ? 'Asleep' : main ? stateLabel(main) : 'Not started', badge: unreadFor(ui, 'main:'), live: mainLive() })}
       <nav class="places" aria-label="Places">${[
@@ -317,7 +317,7 @@ function stageModel() {
 const brainBanner = () => ui.snap?.memory?.secondBrain === false ? `<div class="card brainbar"><div><b>Your agents don't know your second brain yet.</b><span class="muted small">${ui.snap.memory.brainCandidates?.length ? ` Found ${esc(ui.snap.memory.brainCandidates[0])}.` : ''} Rex Agent can set it up for all of them.</span></div><button class="btn primary small" data-action="brain-setup">Set it up</button></div>` : '';
 const quick = (label, text) => `<button class="chip-btn" data-action="quick" data-text="${esc(text)}">${esc(label)}</button>`;
 const welcomeStage = () => ({ title: 'Rex', meta: 'Rex Agent',
-  feed: `${brainBanner()}<div class="welcome"><div class="avatar big">RX</div><h2>Hi, I am Rex</h2><p>I get to know your projects, set up an agent for each one, and help you work through your issues. Pick a start, or just type.</p><div class="chips">${quick('Meet my projects', 'Meet my projects: go through them one by one, ask me what you are unsure about, and set up an agent for each.')}${quick('Triage my issues', 'Look at my assigned issues and tell me what to do first.')}${quick('What can you do?', 'What can you do for me here?')}</div></div>`,
+  feed: `${brainBanner()}<div class="welcome">${rexCore('xl', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length)}<h2>Hi, I am Rex</h2><p>I get to know your projects, set up an agent for each one, and help you work through your issues. Pick a start, or just type.</p><div class="chips">${quick('Meet my projects', 'Meet my projects: go through them one by one, ask me what you are unsure about, and set up an agent for each.')}${quick('Triage my issues', 'Look at my assigned issues and tell me what to do first.')}${quick('What can you do?', 'What can you do for me here?')}</div></div>`,
   composer: { placeholder: 'Message Rex…', mentions: [] } });
 // The chat is not drawn again from nothing when something changes: only the messages that differ are swapped, and new
 // ones are added at the end. Messages already on screen stay as they are (a playing video, selected text, an open step).

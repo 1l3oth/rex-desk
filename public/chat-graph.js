@@ -274,5 +274,6 @@ function mount(host) {
 
 // The page draws itself again from time to time; the graph mounts whenever its box appears, and stops when it is gone.
 const look = () => { const host = document.getElementById('kg'); if (host && !host.querySelector('canvas')) mount(host); else if (!host && live) live.stop(); };
-new MutationObserver(look).observe(document.body, { childList: true, subtree: true });
+let lookQueued = false;
+new MutationObserver(() => { if (lookQueued) return; lookQueued = true; requestAnimationFrame(() => { lookQueued = false; look(); }); }).observe(document.body, { childList: true, subtree: true });
 look();
