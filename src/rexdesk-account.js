@@ -73,6 +73,26 @@ export class AccountLink {
     writeFileSync(this.file, this.store.encrypt(JSON.stringify(this.saved)), { mode: 0o600 });
   }
   clear() { this.saved = null; rmSync(this.file, { force: true }); }
+  // The account's private file folder on the account service (users/<id>/ in a private bucket). The bytes are already
+  // encrypted on this computer; the service only ever stores them.
+  async fileCall(method, pathname, body) {
+    let response;
+    try { response = await this.fetcher(`${this.base}/v1/files${pathname}`, { method, headers: { authorization: `Bearer ${this.saved?.token || ''}`, ...(body ? { 'content-type': 'application/octet-stream' } : {}) }, ...(body ? { body } : {}), signal: AbortSignal.timeout(120000) }); }
+    catch { throw new Error('Rex Desk could not reach its account service to back up files.'); }
+    if (response.ok) return response;
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) { this.clear(); this.ended = 'Your Rex Desk account sign-in ended. Sign in again in Settings to keep cloud backup running.'; }
+    throw Object.assign(new Error(data.error?.message || `The Rex Desk account service answered ${response.status}.`), { status: response.status, code: data.error?.code || '' });
+  }
+  static filePath = key => `/${key.split('/').map(encodeURIComponent).join('/')}`;
+  async putFile(key, bytes) { await this.fileCall('PUT', AccountLink.filePath(key), bytes); }
+  async getFile(key) { try { return Buffer.from(await (await this.fileCall('GET', AccountLink.filePath(key))).arrayBuffer()); } catch (error) { if (error.status === 404) return null; throw error; } }
+  async deleteFile(key) { await this.fileCall('DELETE', AccountLink.filePath(key)); }
+  async listFiles() {
+    const files = []; let cursor = '';
+    do { const page = await (await this.fileCall('GET', cursor ? `?cursor=${encodeURIComponent(cursor)}` : '')).json(); files.push(...page.files); cursor = page.cursor || ''; } while (cursor);
+    return files;
+  }
   async signOut() {
     const token = this.saved?.token; this.clear();
     if (token) await accountSignOut(token, this).catch(() => {});

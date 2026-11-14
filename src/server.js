@@ -277,6 +277,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       try { opened = accounts.workspaces.some(item => item.id === found.id) ? await accounts.signIn(found.name, input.passphrase) : accounts.create(found.name, input.passphrase, { id: found.id, sealed: found.sealed }); }
       catch (error) { return slow(error); }
       await activate(opened);
+      // The account sign-in is kept before connecting, so the restore knows the files are in the account's private folder.
+      if (input.account && !session.store.cloud.enabled) session.store.cloud.account.save(accountFound.session, accountFound.database);
       if (!session.store.cloud.enabled) { await session.store.cloud.connect({ url: input.url, authToken: input.authToken }); session.cloud = { pulled: !session.store.fresh, restored: true }; }
       if (input.turso) tursoFound = null;
       // Keep the account sign-in in the restored workspace, so this computer can renew the database key by itself.
