@@ -71,11 +71,13 @@ if (shell === 'windows' || shell === 'macos') {
   const ask = action => { window.open(`https://rexdesk.window/${action}`, '_blank'); };
   const bar = document.createElement('div');
   bar.className = `win-bar ${shell}`; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Window');
-  bar.innerHTML = shell === 'windows' ? `<span class="win-fill"></span>
+  // The Rex Desk name sits in the window bar, where a window's title belongs; the list below starts with Rex Agent.
+  const brand = '<span class="win-brand"><span class="av icon brandmark"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.4 5 5.6.8-4 3.9.9 5.5L12 15.6 7.1 18.2 8 12.7 4 8.8l5.6-.8z"/></svg></span><b>Rex Desk</b></span>';
+  bar.innerHTML = shell === 'windows' ? `${brand}<span class="win-fill"></span>
     <button type="button" class="win-btn" data-win="minimize" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 6.5h8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
     <button type="button" class="win-btn" data-win="maximize" aria-label="Maximize or restore" title="Maximize"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2.2" y="2.2" width="7.6" height="7.6" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
     <button type="button" class="win-btn close" data-win="close" aria-label="Close" title="Close (Rex Desk keeps running in the tray)"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>`
-    : '<span class="win-fill"></span>';
+    : `${brand}<span class="win-fill"></span>`;
   document.documentElement.classList.add('has-win-bar', `shell-${shell}`);
   document.body.prepend(bar);
   bar.addEventListener('click', event => { const button = event.target.closest('[data-win]'); if (button) ask(button.dataset.win); });

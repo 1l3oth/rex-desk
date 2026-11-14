@@ -427,3 +427,12 @@ html[data-skin=sakura]{--core-a:#ff7ab8;--core-b:#8a5cff;--core-hi:#fff0f7}
 html[data-skin=forest]{--core-a:#3ddc84;--core-b:#0b3d24;--core-hi:#e6ffe9}
 html[data-skin=sunset]{--core-a:#ff7a45;--core-b:#7a1f3d;--core-hi:#fff0d9}
 .rc-s0{stop-color:var(--core-hi,#d9ecff)}.rc-s1{stop-color:var(--core-a,#5aa2ff)}.rc-s2{stop-color:var(--core-b,#3a2a9a)}
+
+/* Inside the desktop app the Rex Desk name lives in the window bar, so the list loses its own heading. */
+.win-bar .win-brand{display:flex;align-items:center;gap:8px;padding:0 6px;font-size:13px;pointer-events:none}
+.win-bar .win-brand .av{width:20px;height:20px}
+.win-bar .win-brand b{font-weight:600;letter-spacing:.01em}
+html.has-win-bar .rail-head{display:none}
+html.has-win-bar .rail{padding-top:8px}
+html.has-win-bar .chat-shell{padding-top:40px}
+.win-bar{height:40px}
