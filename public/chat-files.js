@@ -199,6 +199,8 @@ function layout() {
   return { main, side, composer, W: window.innerWidth, H: window.innerHeight };
 }
 function setBox(geo, { keep = true, minW = MIN_W } = {}) {
+  // The file window in a window of its own stays full size; places are for the window inside the chat.
+  if (state.standalone) return;
   const box = shell(); state.big = false; box.classList.remove('big');
   const width = Math.min(Math.max(geo.w, minW), window.innerWidth - 16), height = Math.min(Math.max(geo.h, MIN_H), window.innerHeight - 16);
   const at = { w: width, h: height, x: Math.min(Math.max(geo.x, 0), window.innerWidth - width), y: Math.min(Math.max(geo.y, 0), window.innerHeight - height) };

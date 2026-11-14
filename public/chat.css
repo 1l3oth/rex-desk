@@ -1243,7 +1243,8 @@ code.md-file{cursor:pointer;text-decoration:underline dotted;text-underline-offs
 
 /* The file window in a window of its own */
 body.fw-alone{margin:0;background:var(--panel);overflow:hidden}
-body.fw-alone .fw{inset:0;width:auto;height:auto;border:0;border-radius:0;box-shadow:none}
+/* A window of its own always fills it: a place an agent asks for, or a size saved in the chat, never shrinks it. */
+body.fw-alone .fw{inset:0!important;width:auto!important;height:auto!important;border:0;border-radius:0;box-shadow:none}
 body.fw-alone .fw-rs,body.fw-alone [data-fw="hide"],body.fw-alone [data-fw="big"],body.fw-alone [data-fw="popout"]{display:none}
 body.fw-alone .fw-head{cursor:default}
 
