@@ -488,3 +488,4 @@ html.has-win-bar .places .place[data-action="nt-panel"]{display:none}
 .cp-empty{justify-content:center;color:var(--muted);cursor:default!important}
 .cp-foot{display:flex;gap:16px;padding:8px 14px;border-top:1px solid var(--line);font-size:11.5px;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){.cp{animation:none}}
+.win-bar .win-brand img{width:20px;height:20px;border-radius:5px;display:block}.rail-head .brand-logo{width:26px;height:26px;border-radius:7px;display:block}

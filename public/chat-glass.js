@@ -81,7 +81,7 @@ if (shell === 'windows' || shell === 'macos') {
   const bar = document.createElement('div');
   bar.className = `win-bar ${shell}`; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Window');
   // The Rex Desk name sits in the window bar, where a window's title belongs; the list below starts with Rex Agent.
-  const brand = '<span class="win-brand"><span class="av icon brandmark"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.4 5 5.6.8-4 3.9.9 5.5L12 15.6 7.1 18.2 8 12.7 4 8.8l5.6-.8z"/></svg></span><b>Rex Desk</b></span>';
+  const brand = '<span class="win-brand"><img src="/favicon.svg" alt="" width="20" height="20"><b>Rex Desk</b></span>';
   const mac = shell === 'macos', key = mac ? '⌘ K' : 'Ctrl K';
   const middle = `<span class="win-fill"></span><button type="button" class="win-search" data-palette-open title="Search or jump to anything (${key})"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search or jump to a chat, agent or task</span><kbd>${key}</kbd></button><span class="win-fill"></span>
     <button type="button" class="win-working" data-open="main" data-id="" hidden title="Agents working right now"><i></i><span></span></button>
