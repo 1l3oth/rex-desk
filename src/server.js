@@ -88,7 +88,11 @@ function serveFile(request, response, file, { sandbox = false, download = false,
 // that did not pass its port on: it was on 4317 and stays there, so a computer using a checkout as its real app keeps its address.
 export const defaultPort = () => Number(process.env.PORT || (process.env.REX_DESK_VERSION || process.env.REX_RESTART_AFTER ? 4317 : 4318));
 
-export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
+export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, ownDatabase = process.env.REX_DESK_OWN_DATABASE === '1', updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
+  // Cloud backup comes with a Rex Desk account (a paid plan later): a database address and key typed by hand, or a Turso
+  // account of the person's own, are turned off unless this copy is started with REX_DESK_OWN_DATABASE=1.
+  const ACCOUNT_ONLY = 'Cloud backup comes with your Rex Desk account. Turn it on in Settings, Backup and updates.';
+  const ownDatabaseOnly = () => { if (!ownDatabase) throw Object.assign(new Error(ACCOUNT_ONLY), { status: 403 }); };
   let dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   // The real app follows a data folder the person moved, or finishes a move they asked for, before anything opens it.
   // The AI memory moves the same way. Tests pass their own folder and never move anything.
@@ -239,6 +243,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); linked(); return respond(); }
     if (url.pathname === '/api/auth/login') { await activate(await accounts.signIn(input.email, input.passphrase, { claimId: input.claimId }).catch(slow)); linked(); return respond(); }
     // A new computer, from the sign-in screen: Turso's browser sign-in finds the person's existing Rex Desk backup, so they never type its address or key.
+    if (url.pathname === '/api/auth/turso-start' || url.pathname === '/api/auth/turso-finish') ownDatabaseOnly();
     if (url.pathname === '/api/auth/turso-start') { tursoPending?.cancel(); tursoFound = null; tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
     if (url.pathname === '/api/auth/turso-finish') {
       if (!tursoPending) throw new Error('Start the Turso sign-in first.');
@@ -263,6 +268,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     }
     if (url.pathname === '/api/auth/account-forget') { accountPending?.cancel(); accountPending = null; accountFound = null; return json(response, 200, { ok: true }); }
     if (url.pathname === '/api/auth/cloud' && input.account) { if (!accountFound?.database) throw new Error('Sign in with Rex Desk first.'); input.url = accountFound.database.url; input.authToken = accountFound.database.authToken; }
+    if (url.pathname === '/api/auth/cloud' && !input.account) ownDatabaseOnly();
     if (url.pathname === '/api/auth/cloud' && input.turso) { if (!tursoFound) throw new Error('Sign in with Turso first.'); input.url = tursoFound.url; input.authToken = tursoFound.authToken; }
     if (url.pathname === '/api/auth/cloud') {
       // A new computer: find the account in the person's own Turso database, unseal its key, then restore everything before answering.
@@ -402,6 +408,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       }
       if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: { ...updates.status(), whenIdle: updateWhenIdle, busy: busyAgents(store) }, cloudSync: session.cloud || null, account: { email: session.email, role: role() }, code: codeVersion() }); }
       // One-click cloud backup: start opens Turso's sign-in page in the browser; finish waits for it, makes the database and connects it.
+      if (['/api/database/turso-start', '/api/database/turso-finish', '/api/database/connect'].includes(url.pathname)) ownDatabaseOnly();
       if (url.pathname === '/api/database/turso-start' && request.method === 'POST') { tursoPending?.cancel(); tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
       if (url.pathname === '/api/database/turso-finish' && request.method === 'POST') {
         if (!tursoPending) throw new Error('Start the Turso sign-in first.');
@@ -430,6 +437,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       // Signing the account out stops key renewal. The backup keeps working until its current key runs out (about a month).
       if (url.pathname === '/api/database/account-signout' && request.method === 'POST') { await store.cloud.account.signOut(); notify(); return json(response, 200, store.cloud.status()); }
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
+      // What goes to the cloud backup; each switch saves at once.
+      if (url.pathname === '/api/database/parts' && request.method === 'PUT') { const parts = store.cloud.setParts(await body(request)); notify(); return json(response, 200, { parts, status: store.cloud.status() }); }
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
       if (url.pathname === '/api/repositories/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());

@@ -23,6 +23,10 @@ export const isLocalMain = run => run?.role === 'coordinator' && Boolean(run.mai
 export const latestLocalMain = runs => runs.filter(isLocalMain).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
 // Records every computer of the person shares (see peers.js). The Rex Agent record is each computer's own.
 export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd', 'chatcopy', 'chatfile']);
+// What the person can leave out of the cloud backup (Settings, Backup and updates). Agents, rooms, projects and settings
+// always go up: they are what makes the desk follow the person to another computer.
+export const BACKUP_PARTS = { chats: true, rooms: true, tasks: true, files: true };
+const BACKUP_PART = { roommsg: 'rooms', task: 'tasks', priority: 'tasks', chatfile: 'files', artifact: 'files' };
 const shared = (kind, key) => SHARED.has(kind) && !(kind === 'specialist' && key === 'main');
 export const id = () => randomUUID();
 export const defaults = {
@@ -172,8 +176,11 @@ export class Store extends EventEmitter {
     const run = this.get('run', runId);
     return Boolean(run) && (this.privateAgent(run.specialistId) || this.privateAgent(run.roomAgent));
   }
+  // A part of the backup the person turned off (kept in the record backup/parts, so it is the same on every computer).
+  backupOff(part) { return this.get('backup', 'parts')?.[part] === false; }
   isPrivate(kind, value) {
     if (!value) return false;
+    if (BACKUP_PART[kind] && this.backupOff(BACKUP_PART[kind])) return true;
     if (kind === 'run') return this.privateAgent(value.specialistId) || this.privateAgent(value.roomAgent);
     if (kind === 'chatcopy' || kind === 'peercmd' || kind === 'chatfile') return this.privateAgent(value.agentId);
     if (kind === 'interaction' || kind === 'artifact') return this.privateRun(value.runId);
