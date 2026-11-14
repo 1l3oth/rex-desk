@@ -326,8 +326,8 @@ code,pre{font-family:var(--mono);font-size:12px}
 .feed.room .msg:not(.mine) .rwho{display:flex}.feed.room .rwho strong{font-weight:700}
 .nc0{color:#7aa2ff}.nc1{color:#ff8f7a}.nc2{color:#4fd1a5}.nc3{color:#f08bd0}.nc4{color:#f6c453}.nc5{color:#5cc8f0}.nc6{color:#8fd47a}.nc7{color:#b79cff}
 html[data-theme=light] .nc0{color:#3559c7}html[data-theme=light] .nc1{color:#c2410c}html[data-theme=light] .nc2{color:#047857}html[data-theme=light] .nc3{color:#be185d}html[data-theme=light] .nc4{color:#a16207}html[data-theme=light] .nc5{color:#0369a1}html[data-theme=light] .nc6{color:#3f7d1f}html[data-theme=light] .nc7{color:#6d28d9}
-/* ---- the sender of a long message stays in view while you scroll through it ---- */
-.feed.room .rmsg .rwho{position:sticky;top:0;z-index:2;background:var(--bg);padding:6px 0 4px;margin-top:-6px;box-shadow:0 6px 8px -8px rgba(0,0,0,.6)}
+/* The name row of a group chat message sits plainly on the chat, like a personal chat reply: no band behind it. */
+.feed.room .rmsg .rwho{padding:6px 0 4px;margin-top:-6px}
 .feed.room .rmsg .ravcol .av{position:sticky;top:6px;z-index:2}
 /* sticky headers stick flush to the top: the scrolling box has no padding of its own */
 .feed{padding:0}.feed-inner{padding-top:20px;padding-bottom:20px}
