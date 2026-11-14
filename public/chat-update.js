@@ -82,6 +82,17 @@ export function watchForUpdates(api) {
   document.addEventListener('visibilitychange', ask); addEventListener('focus', ask);
 }
 
+// The version whose card the person put off with Later, while it is still waiting: the window bar shows an Update button for it.
+export function updateDeferred(update) {
+  const version = update?.ready ? update.available?.version : update?.downloading?.version || '', later = laterChoice();
+  return version && later.version === version && later.until > Date.now() ? version : '';
+}
+// The Update button in the window bar brings the card back.
+export function updateShow(update) {
+  try { localStorage.removeItem(LATER); } catch { /* private window */ }
+  showUpdateCard(update);
+}
+
 export function updateLater() {
   const card = document.getElementById('update-card'); if (!card) return;
   try { localStorage.setItem(LATER, JSON.stringify({ version: card.dataset.version, until: Date.now() + 24 * 3600000 })); } catch { /* private window */ }

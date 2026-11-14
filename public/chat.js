@@ -18,7 +18,7 @@ import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
 import { wireSpeak, speakButton } from '/chat-speak.js';
 import { openAvatarPicker } from '/chat-avatar.js';
-import { showUpdateCard, updateLater, installUpdate, updateWhenIdle, watchForUpdates, showSyncNote } from '/chat-update.js';
+import { showUpdateCard, updateLater, updateShow, installUpdate, updateWhenIdle, watchForUpdates, showSyncNote } from '/chat-update.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
@@ -514,6 +514,7 @@ document.addEventListener('click', async event => {
     else if (action === 'agent-signin') { try { await api('/agents/login', { method: 'POST', data: { provider: target.dataset.provider || 'claude', profile: '' } }); toast('Sign-in opened. Pick the account that has the plan, finish it, then start a fresh chat.'); } catch (error) { toast(error.message, true); } }
     else if (action === 'update-install') await installUpdate(api);
     else if (action === 'update-later') updateLater();
+    else if (action === 'update-show') updateShow(ui.snap.update);
     else if (action === 'avatar-pick') { const agent = (ui.snap.specialists || []).find(item => item.id === target.closest('[data-agent-id]')?.dataset.agentId); if (agent) openAvatarPicker(ctx, agent); }
     else if (action === 'pin-toggle') togglePin(ctx, target.dataset.kind, target.dataset.id);
     else if (action === 'app-on' || action === 'app-off') {

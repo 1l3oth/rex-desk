@@ -463,6 +463,9 @@ html,body{height:100%;overflow:hidden}
 .win-bar kbd,.cp kbd{padding:0 5px;border:1px solid var(--line);border-radius:5px;font:10.5px/16px var(--mono);color:var(--muted);background:color-mix(in srgb,var(--ink) 4%,transparent)}
 .win-working{display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;margin-right:4px;border:0;border-radius:999px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:color-mix(in srgb,var(--accent) 40%,var(--ink));font-size:12px;font-weight:600;white-space:nowrap}
 .win-working[hidden]{display:none}
+/* An update put off with Later, waiting in the window bar. */
+.win-update{display:flex;align-items:center;gap:6px;height:26px;padding:0 11px;margin-right:4px;border:0;border-radius:999px;background:var(--accent);color:#fff;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.win-update:hover{filter:brightness(1.08)}.win-update[hidden]{display:none}
 .win-working i{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:lp-ping 1.6s ease-out infinite;box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 60%,transparent)}
 .win-bell{position:relative;display:grid;place-items:center;width:34px;height:28px;margin-right:6px;border:1px solid transparent;border-radius:8px;background:none;color:var(--muted)}
 .win-bell:hover,.win-bell.active{background:var(--raised);border-color:var(--line);color:var(--ink)}

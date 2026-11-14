@@ -1,3 +1,4 @@
+import { updateDeferred } from '/chat-update.js';
 // The glass controls: a slider that changes how see-through Rex Desk is while you drag it, and buttons (and Ctrl+B,
 // Ctrl+.) that slide the list and the side panel away and back. Choices are remembered on this computer.
 const root = document.documentElement;
@@ -65,6 +66,9 @@ function syncBar() {
   const waiting = (snap.notices?.unread || 0) + (snap.interactions || []).filter(item => item.state === 'pending').length;
   if (shell && waiting !== badgeShown) { badgeShown = waiting; window.open(`https://rexdesk.window/badge?n=${waiting}`, '_blank'); }
   const working = (snap.specialists || []).filter(agent => ['busy', 'replying'].includes(agent.status?.state)).length + ((snap.runs || []).some(run => run.role === 'coordinator' && run.main && ['starting', 'running', 'queued', 'verifying'].includes(run.state)) ? 1 : 0);
+  // An update put off with Later waits here as a small button; pressing it opens the card again.
+  const update = document.querySelector('.win-update'), deferred = updateDeferred(snap.update) && !document.getElementById('update-card') ? updateDeferred(snap.update) : '';
+  if (update) { update.hidden = !deferred; const title = deferred ? `Rex Desk ${deferred} is ${snap.update?.ready ? 'ready to install' : 'downloading'}` : ''; if (update.title !== title) update.title = title; }
   const pill = document.querySelector('.win-working'); if (pill) { pill.hidden = !working; const text = `${working} working`; if (pill.lastElementChild.textContent !== text) pill.lastElementChild.textContent = text; }
   const badge = document.querySelector('.win-bell b'), unread = snap.notices?.unread || 0; if (badge) { badge.hidden = !unread; const text = unread > 99 ? '99+' : String(unread); if (badge.textContent !== text) badge.textContent = text; }
 }
@@ -87,6 +91,7 @@ if (shell === 'windows' || shell === 'macos') {
   const brand = '<span class="win-brand"><img src="/favicon.svg" alt="" width="20" height="20"><b>Rex Desk</b></span>';
   const mac = shell === 'macos', key = mac ? '⌘ K' : 'Ctrl K';
   const middle = `<span class="win-fill"></span><button type="button" class="win-search" data-palette-open title="Search or jump to anything (${key})"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search or jump to a chat, agent or task</span><kbd>${key}</kbd></button><span class="win-fill"></span>
+    <button type="button" class="win-update" data-action="update-show" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span>Update</span></button>
     <button type="button" class="win-working" data-open="main" data-id="" hidden title="Agents working right now"><i></i><span></span></button>
     <button type="button" class="win-bell tile" data-action="nt-panel" aria-label="Notifications" title="Notifications"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><b hidden></b></button>`;
   bar.innerHTML = shell === 'windows' ? `${brand}${middle}
