@@ -545,7 +545,8 @@ p.pf-stats{display:block;margin:2px 0 0;font-size:13px;color:var(--muted)}
 .src-dialog details{font-size:13px;color:var(--muted)}.src-dialog details label{margin-top:6px}
 /* holding Space to talk: the mic pulses and a small label says what to do */
 body.ptt .icon-btn[data-action="mic"]{animation:ptt-pulse 1s ease-in-out infinite}
-body.ptt::after{content:"Listening… let go of Space to stop";position:fixed;left:50%;bottom:96px;transform:translateX(-50%);padding:6px 14px;border-radius:999px;background:var(--bad);color:#fff;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.35);z-index:30}
+/* Sits just above the message box (its height is measured when listening starts) and above the glass panels, so it is never covered or blurred. */
+body.ptt::after{content:"Listening… let go of Space to stop";position:fixed;left:50%;bottom:var(--ptt-bottom,96px);transform:translateX(-50%);padding:7px 16px;border-radius:999px;background:var(--bad);color:#fff;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.35);z-index:1000;pointer-events:none}
 @keyframes ptt-pulse{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--bad) 30%,transparent)}}
 @media (prefers-reduced-motion:reduce){body.ptt .icon-btn[data-action="mic"]{animation:none}}
 
