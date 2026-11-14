@@ -1,10 +1,21 @@
 // Voice recording shared by the dashboard and the Jev bar: the microphone at its own rate, turned into 16 kHz mono WAV,
 // which the speech model reads. It stops by itself after a second and a half of quiet once you have spoken, or after 20 seconds.
+// iPhone (every browser there runs on WebKit) starts an audio context paused unless it is made, or resumed, inside the
+// tap itself. openMicrophone is the first thing a tap calls, before any await, so the context is made and unlocked
+// here and handed to startRecorder; made later, after the microphone answers, it stayed paused and heard nothing.
+let primed = null;
+const AudioContextClass = () => window.AudioContext || window.webkitAudioContext;
 export async function openMicrophone() {
-  return navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  if (!primed || primed.state === 'closed') primed = new (AudioContextClass())();
+  const unlocking = primed.resume?.().catch(() => {});
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  await unlocking;
+  return stream;
 }
 export function startRecorder(stream, { onQuiet = () => {}, onLevel = () => {} } = {}) {
-  const context = new AudioContext(), source = context.createMediaStreamSource(stream), processor = context.createScriptProcessor(4096, 1, 1);
+  const context = primed && primed.state !== 'closed' ? primed : new (AudioContextClass())(); primed = null;
+  if (context.state !== 'running') void context.resume?.().catch(() => {});
+  const source = context.createMediaStreamSource(stream), processor = context.createScriptProcessor(4096, 1, 1);
   const recorder = { chunks: [], rate: context.sampleRate, started: performance.now(), heard: false, quietSince: 0, stopped: false };
   processor.onaudioprocess = event => {
     if (recorder.stopped) return;
