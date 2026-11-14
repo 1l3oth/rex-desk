@@ -18,6 +18,7 @@ import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
 import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies } from '/chat-speak.js';
 import { openAvatarPicker } from '/chat-avatar.js';
+import { watchForStar } from '/chat-star.js';
 import { showUpdateCard, updateLater, updateShow, installUpdate, updateWhenIdle, watchForUpdates, showSyncNote } from '/chat-update.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
@@ -441,7 +442,7 @@ async function refresh({ full = false } = {}) {
     ui.snap = await api('/state');
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
     if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = await api('/memory').catch(() => ui.memory); ui.profile = await api('/profile').catch(() => ui.profile);
-    await loadView(); renderAll(full); maybeStartTour(ctx); showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
+    await loadView(); renderAll(full); maybeStartTour(ctx); if (!window.__starWatch && !document.documentElement.classList.contains('embed')) { window.__starWatch = true; watchForStar(); } showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
   } finally { busy = false; if (again) { again = false; void refresh(); } }
 }
 function open(type, id = '') {
