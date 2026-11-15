@@ -309,6 +309,35 @@ export function createMcp(desk, scope) {
       return desk.shareTask({ taskId: findTask(input.task).id, add: (input.add || []).map(name => findAgent(name).id), pass: input.passTo ? findAgent(input.passTo).id : '', from: me, roomId, by: who || 'An agent' });
     });
   tool('desk_tell_run', 'Main agent only: send a message to any run or agent session, as if the person typed it there. A working run gets it next; a finished one is reopened with it.', { runId: z.string().min(1), text: z.string().min(1).max(8000) }, async input => { desk.authorize(scope, null, { coordinator: true }); const run = desk.run(input.runId); if (run.id === scope.runId) throw new Error('That is your own session.'); return desk.live.has(run.id) || ['starting', 'running', 'queued', 'verifying'].includes(run.state) ? desk.say(run.id, input.text, {}) : desk.resume(run.id, { prompt: input.text }); });
+  // Doing things for the person by name, so they never have to click (Voice mode above all): make a group chat, say
+  // something in one as the person, or write to an agent's personal chat as the person.
+  const findRoom = text => { const key = String(text || '').trim().toLowerCase(); const room = desk.rooms.list().find(item => item.id === text || String(item.name || '').toLowerCase() === key) || desk.rooms.list().find(item => String(item.name || '').toLowerCase().includes(key)); if (!room) throw new Error(`No group chat "${text}". Read desk_rooms_all.`); return room; };
+  tool('desk_rooms_all', 'Main agent only: every group chat, with its members, so you can find the one the person means.', {}, () => { desk.authorize(scope, null, { coordinator: true }); return desk.rooms.list().map(room => ({ id: room.id, name: room.name, members: (room.members || []).map(id => desk.rooms.member(id)?.name || id) })); });
+  tool('desk_room_create', 'Main agent only: make a group chat for the person, with the agents they name, when they ask for one. Optionally post their first message in it, as them. Say in one line what you made.',
+    { name: z.string().min(1).max(80), agents: z.array(z.string()).max(12).default([]).describe('Agent names or handles to add. "Rex Agent" adds you.'), message: z.string().max(8000).optional().describe('The person\'s first message in it, posted as them.') },
+    async input => {
+      desk.authorize(scope, null, { coordinator: true });
+      const members = [...new Set(input.agents.map(name => (/^@?(rex|rex agent|main)$/i.test(String(name).trim()) ? 'main' : findAgent(name).id)))];
+      const room = desk.rooms.create(input.name, members);
+      if (input.message?.trim()) await desk.rooms.post(room.id, { text: input.message, to: members.filter(id => id !== 'main').map(id => desk.rooms.member(id)?.name).filter(Boolean) });
+      return { roomId: room.id, name: room.name, members: room.members.map(id => desk.rooms.member(id)?.name || id), posted: Boolean(input.message?.trim()) };
+    });
+  tool('desk_room_say', 'Main agent only: post a message in a group chat as the person, when they ask you to ("tell the design room…", "reply in the group chat…"). The agents it is for answer there. Use your own desk_room_post (or just answer in the room) for your own words.',
+    { room: z.string().describe('Group chat name or id.'), text: z.string().min(1).max(8000), to: z.array(z.string()).max(12).optional().describe('Agent names it is for. Omit it for every agent in the room.') },
+    async input => {
+      desk.authorize(scope, null, { coordinator: true });
+      const room = findRoom(input.room), agents = (room.members || []).filter(id => id !== 'main' && id !== 'you').map(id => desk.rooms.member(id)?.name).filter(Boolean);
+      const message = await desk.rooms.post(room.id, { text: input.text, to: input.to?.length ? input.to : agents });
+      return { posted: true, room: room.name, to: input.to?.length ? input.to : agents, messageId: message?.id || '' };
+    });
+  tool('desk_agent_say', 'Main agent only: write to an agent in its personal chat as the person, when they ask you to ("tell ReelHome to…", "ask the web agent…"). The agent answers there; read its reply later with desk_specialists or its chat.',
+    { agent: z.string().describe('Agent name or handle.'), text: z.string().min(1).max(4000) },
+    async input => {
+      desk.authorize(scope, null, { coordinator: true });
+      const agent = findAgent(input.agent);
+      await desk.specialistTurn(agent.id, { prompt: input.text });
+      return { sent: true, agent: agent.name };
+    });
   tool('desk_my_chat', 'Read your personal chat with the person (a separate conversation from your group chats), most recent last.', { limit: z.number().int().min(1).max(100).default(30) }, input => ({ messages: desk.personalChat(myAgent().id, input.limit) }), true);
   tool('desk_room_history', 'Read the recent messages of one of your group chats, as a person catching up on a chat would.', { roomId: z.string().optional().describe('Omit it when you are in one room.'), limit: z.number().int().min(1).max(100).default(30) }, input => {
     // A group chat session reads only its own room: what is said in one group chat stays there.

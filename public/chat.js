@@ -381,7 +381,14 @@ function renderStage(full) {
 }
 // Voice mode's screen: Rex's body over the chat, nothing else but a faint way out (or Esc). It is made once and kept
 // (re-attached after a redraw), so its animation never restarts. What it shows comes from what is happening right now.
-let voiceStage = null, voiceOrb = null;
+let voiceStage = null, voiceOrb = null, voiceBeat = 0;
+// While the body is on screen it says so every two seconds (this window and the split view's panes read it): no
+// notification pop-ups or sounds talk over the voice.
+const voiceLive = () => { try { localStorage.setItem('rex-voice-live', String(Date.now())); } catch { /* private window */ } };
+function closeVoiceStage() {
+  clearInterval(voiceBeat); voiceBeat = 0; try { localStorage.removeItem('rex-voice-live'); } catch { /* private window */ }
+  voiceOrb?.destroy(); voiceStage?.remove(); voiceStage = voiceOrb = null;
+}
 function voiceNow() {
   const heard = voiceListening();
   if (!speechIdle()) return { state: 'speaking', level: outputLevel() };
@@ -393,16 +400,17 @@ const VOICE_WORDS = { idle: '', listening: 'Listening', thinking: 'Thinking', sp
 function syncVoiceStage() {
   const main = document.querySelector('#stage .stage-main'), on = Boolean(main) && voiceModeOn(draftKey()) && Boolean(ctx.currentRunId());
   if (!on) {
-    if (voiceStage) { void api(`/runs/${voiceStage.dataset.run}/voice`, { method: 'POST', data: { on: false } }).catch(() => {}); voiceOrb?.destroy(); voiceStage.remove(); voiceStage = voiceOrb = null; }
+    if (voiceStage) { void api(`/runs/${voiceStage.dataset.run}/voice`, { method: 'POST', data: { on: false } }).catch(() => {}); closeVoiceStage(); }
     return;
   }
-  if (voiceStage && voiceStage.dataset.run !== ctx.currentRunId()) { voiceOrb?.destroy(); voiceStage.remove(); voiceStage = voiceOrb = null; }
+  if (voiceStage && voiceStage.dataset.run !== ctx.currentRunId()) { closeVoiceStage(); }
   if (!voiceStage) {
     voiceStage = document.createElement('div'); voiceStage.className = 'voice-stage'; voiceStage.dataset.run = ctx.currentRunId();
     // The briefing is made now, while the body opens (code, not AI): the first question is answered from it at once.
     void api(`/runs/${voiceStage.dataset.run}/voice`, { method: 'POST', data: { on: true } }).catch(() => {});
     voiceStage.innerHTML = '<button type="button" class="voice-exit" data-action="voice-mode" aria-label="End voice mode" title="End voice mode (Esc)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><p class="voice-word" aria-live="polite"></p>';
     const word = voiceStage.querySelector('.voice-word');
+    voiceLive(); voiceBeat = setInterval(voiceLive, 2000);
     voiceOrb = mountOrb(voiceStage, () => { const now = voiceNow(), text = VOICE_WORDS[now.state]; if (word.textContent !== text) word.textContent = text; return now; });
   }
   if (voiceStage.parentElement !== main) main.append(voiceStage);
