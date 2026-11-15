@@ -1,3 +1,4 @@
+import { loadTourAi, tourAiHtml, tourAiClick } from '/chat-tour-ai.js';
 import { SOCIAL } from '/social-icons.js';
 // Where Rex Desk keeps things (shown in Settings, Folders and in the setup tour), and the setup tour a new person gets.
 const ROWS = [
@@ -76,7 +77,6 @@ export function startTour(ctx) {
   const back = document.createElement('div'); back.className = 'dialog-back tour-back'; document.body.append(back);
   const state = { step: 0, survey: { age: '', heard: [], other: '' } };
   void loadFolders(ctx, state).then(() => { if (STEPS[state.step] === 'folders') draw(); });
-  const account = () => { const list = ui.accounts?.claude, current = list?.profiles?.find(item => item.profile === list.selected) || list?.profiles?.[0]; return current; };
   const picture = step => `<svg class="tour-pic" viewBox="0 0 120 80" aria-hidden="true">${{
     welcome: '<rect x="14" y="14" width="92" height="52" rx="8" class="tp-line"/><circle cx="38" cy="40" r="10" class="tp-fill"/><path d="M58 34h34M58 46h22" class="tp-line"/>',
     ai: '<circle cx="40" cy="40" r="16" class="tp-fill"/><path d="M62 40h20M74 32l8 8-8 8" class="tp-line"/><rect x="86" y="26" width="22" height="28" rx="5" class="tp-line"/>',
@@ -94,9 +94,7 @@ export function startTour(ctx) {
       <fieldset class="tour-q"><legend>Where did you hear about Rex Desk? Pick any that apply.</legend><div class="tour-chips tour-heard">${HEARD.map(id => `<label class="tour-chip"><input type="checkbox" name="tour-heard" value="${id}" ${state.survey.heard.includes(id) ? 'checked' : ''}>${icon(id)}<span>${esc(SOCIAL[id]?.name || HEARD_NAME[id])}</span></label>`).join('')}</div>
       <input class="tour-other" data-tour-other maxlength="120" placeholder="Where? (optional)" value="${esc(state.survey.other)}" ${state.survey.heard.includes('other') ? '' : 'hidden'} aria-label="Where you heard about Rex Desk"></fieldset>`;
     },
-    ai: () => { const current = account(); return `<h2>Your AI sign-in</h2><p>Agents run on your own Claude plan, through Claude Code on this computer.</p>
-      ${current?.loggedIn ? `<p class="tour-ok">Signed in as <b>${esc(current.account || current.label)}</b>. You are set.</p>` : '<p class="tour-warn">No Claude sign-in found yet.</p>'}
-      <button type="button" class="btn" data-action="accounts">${current?.loggedIn ? 'Add or switch accounts' : 'Sign in to Claude'}</button>`; },
+    ai: () => tourAiHtml(ctx, state),
     folders: () => `<h2>Where things are kept</h2><p>These are good places to start. You can change any of them now, or later in Settings, Folders.</p>${foldersHtml(ctx, state)}`,
     project: () => `<h2>Add your first project</h2><p>Pick the folder of some code you work on, or type owner/name to bring it from GitHub. Rex Desk never changes your own copy: agents work in their own.</p>
       <div class="st-add"><input data-tour-repo placeholder="A folder, or owner/name on GitHub" spellcheck="false" aria-label="Project folder or GitHub project"><button type="button" class="btn small" data-tour-browse>Browse…</button><button type="button" class="btn small primary" data-tour-add>Add</button></div>
@@ -130,8 +128,11 @@ export function startTour(ctx) {
         if (STEPS[state.step] === 'welcome') await saveName();
         if (STEPS[state.step] === 'about') { readSurvey(); if (state.survey.age || state.survey.heard.length) void api('/survey', { method: 'POST', data: state.survey }).catch(() => {}); }
         if (STEPS[state.step] === 'done') { await finish(); return; }
-        state.step += 1; draw(); return;
+        state.step += 1; draw();
+        if (STEPS[state.step] === 'ai') void loadTourAi(ctx, state).then(() => { if (STEPS[state.step] === 'ai' && document.body.contains(back)) draw(); });
+        return;
       }
+      if (STEPS[state.step] === 'ai' && await tourAiClick(ctx, state, target, () => { if (STEPS[state.step] === 'ai' && document.body.contains(back)) draw(); })) return;
       if (await folderClick(ctx, state, target, draw)) return;
       if (target.closest('[data-tour-browse]')) { const picked = await api('/repositories/pick', { method: 'POST', data: {} }).catch(() => null); if (picked?.path) back.querySelector('[data-tour-repo]').value = picked.path; return; }
       if (target.closest('[data-tour-add]')) {
