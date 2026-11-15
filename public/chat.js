@@ -16,7 +16,7 @@ import { maybeStartTour } from '/chat-tour.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
-import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive, voiceModeButton, toggleVoiceMode, voiceModeOn, speechIdle, stopLive, outputLevel } from '/chat-speak.js';
+import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive, voiceModeButton, toggleVoiceMode, voiceModeOn, speechIdle, stopLive, outputLevel, welcome } from '/chat-speak.js';
 import { mountOrb } from '/voice-orb.js';
 import { openAvatarPicker } from '/chat-avatar.js';
 import { watchForStar } from '/chat-star.js';
@@ -425,6 +425,10 @@ function syncVoiceStage() {
     voiceStage.innerHTML = `<button type="button" class="voice-exit" data-action="voice-mode" aria-label="End voice mode" title="End voice mode (Esc)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><div class="voice-cue" data-state="idle" role="status" aria-live="polite"><span class="vc-dot" aria-hidden="true"></span>${MIC_ICON}<span class="vc-text">One moment</span></div>`;
     const cue = voiceStage.querySelector('.voice-cue'), word = cue.querySelector('.vc-text');
     voiceLive(); voiceBeat = setInterval(voiceLive, 2000);
+    // The welcome is said by Rex Desk itself the moment the body has formed (about 2.3 s), not written by the AI, which
+    // takes a few seconds more; the mic opens after it.
+    const hour = new Date().getHours(), part = hour < 5 ? 'Hey' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+    welcome(`${part}! I'm here. What's on your mind?`, performance.now() + 2300); voiceRest = Date.now() + 3200;
     voiceOrb = mountOrb(voiceStage, () => {
       const now = voiceNow(), text = VOICE_WORDS[now.state];
       if (cue.dataset.state !== now.state) { if (now.state === 'listening') micOpenTone(); cue.dataset.state = now.state; word.textContent = text; }

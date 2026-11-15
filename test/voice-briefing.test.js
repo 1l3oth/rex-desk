@@ -37,14 +37,18 @@ test('turning Voice mode on gives the agent the report at once and asks only for
   try {
     const run = await desk.startWebTask('hello');
     await waitFor(() => store.get('run', run.id).state === 'finished', 'the first turn');
+    const spoken = []; store.on('partial', data => { if (data.text) spoken.push(data.text); });
     const result = desk.voiceMode(run.id, true);
     assert.equal(result.greeting, true);
     await waitFor(() => prompts.length === 2, 'the greeting turn');
-    assert.match(prompts[1], /# Briefing for Voice mode/); assert.match(prompts[1], /Just greet the person/); assert.match(prompts[1], /Do not summarise it/);
+    assert.match(prompts[1], /# Briefing for Voice mode/); assert.match(prompts[1], /Reply with only the word: Ready/); assert.match(prompts[1], /Do not summarise it/);
     assert.ok(!store.events(run.id, { visible: true }).some(event => event.kind === 'human-message' && /Briefing/.test(event.text)), 'the report is not shown in the chat');
     await waitFor(() => store.get('run', run.id).state === 'finished', 'the greeting');
+    assert.deepEqual(spoken, [], 'the quiet report turn is not said: Rex Desk welcomed the person itself');
+    assert.equal(store.get('run', run.id).voice.reading, false);
     await desk.say(run.id, 'what is ReelHome doing', { voice: true });
     await waitFor(() => prompts.length === 3, 'the spoken question');
+    await waitFor(() => spoken.length > 0, 'the answer to be said');
     assert.match(prompts[2], /\(Voice mode: you are heard[\s\S]*what is ReelHome doing/);
     assert.doesNotMatch(prompts[2], /# Briefing/, 'the report is not sent again');
     assert.equal(store.events(run.id, { visible: true }).filter(event => event.kind === 'human-message').at(-1).text, 'what is ReelHome doing', 'the chat shows only what was said');

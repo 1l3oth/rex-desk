@@ -286,7 +286,7 @@ export class Desk {
     if (!on) { this.patchRun(runId, { voice: undefined }); return { on: false }; }
     const briefing = voiceBriefing({ store: this.store, memoryDirectory: this.memory?.directory || '' });
     const now_ = now(), busy = this.live.has(runId) || run.external;
-    this.patchRun(runId, { voice: { at: now_, briefing, sent: !busy } });
+    this.patchRun(runId, { voice: { at: now_, briefing, sent: !busy, reading: !busy } });
     if (!busy) void this.resume(runId, { silent: true, prompt: `${VOICE_RULE}\n\n${briefing}\n\n${VOICE_GREETING}` }).catch(error => this.store.event(runId, 'error', { message: error.message }, true));
     return { on: true, briefing: briefing.length, greeting: !busy };
   }
@@ -564,8 +564,11 @@ export class Desk {
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), requeue: text => this.requeue(runId, text), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
-          if (kind === 'agent-text-partial') { this.store.emit('partial', { runId, text: String(data.text || '') }); return; }
-          if (kind === 'agent-text') this.store.emit('partial', { runId, text: String(data.text || ''), done: true });
+          // The quiet turn that reads Voice mode's report is not said: Rex Desk has welcomed the person already.
+          const reading = this.store.get('run', runId)?.voice?.reading;
+          if (kind === 'agent-text-partial') { if (!reading) this.store.emit('partial', { runId, text: String(data.text || '') }); return; }
+          if (kind === 'agent-text' && !reading) this.store.emit('partial', { runId, text: String(data.text || ''), done: true });
+          if (kind === 'agent-result' && reading) { const voice = this.store.get('run', runId)?.voice; if (voice) this.patchRun(runId, { voice: { ...voice, reading: false } }); }
           // A step the agent takes (reading files, running a command, searching), so Voice mode can say what it is doing.
           if (kind === 'agent-tool' && !data.parent) this.store.emit('partial', { runId, tool: String(data.tool || ''), input: { description: String(data.input?.description || '').slice(0, 120) } });
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
@@ -631,6 +634,8 @@ ${message}` : message);
       const current = this.run(runId);
       if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' || run.role === 'helper' ? 'finished' : 'needs_evidence', endedAt: now() });
       if (run.role === 'helper') this.helperDone(runId);
+      // The quiet turn that read Voice mode's report is over: what the agent says next is said out loud.
+      const voiceAfter = this.store.get('run', runId)?.voice; if (voiceAfter?.reading) this.patchRun(runId, { voice: { ...voiceAfter, reading: false } });
     } catch (error) {
       if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) { handedOn = true; return; }
       // The chosen model is not available on this Claude account: the turn runs again once on the account's default model, and the agent stops asking for that model.

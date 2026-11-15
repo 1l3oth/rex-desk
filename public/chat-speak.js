@@ -192,12 +192,15 @@ function phraseEnd(pending, finished) {
   if (end < 0 && pending.length > 90) for (const match of pending.matchAll(/[,;:](?=\s)/g)) if (match.index > 30) end = match.index + 1;
   return end;
 }
-function sayPhrase(phrase, token) {
+// notBefore: a time (performance.now()) the phrase must not start before; its sound is still fetched at once, so it is
+// ready the moment it is due (the welcome waits for the body's opening this way).
+function sayPhrase(phrase, token, notBefore = 0) {
   const text = cleanPhrase(phrase); if (!/[\p{L}\p{N}]/u.test(text)) return;
   const lang = language(text), chosen = chosenVoice(lang);
+  const due = () => (notBefore > performance.now() ? new Promise(resolve => setTimeout(resolve, notBefore - performance.now())) : null);
   if (chosen && !/Neural$/.test(chosen)) {
     // The computer's own voice queues phrases by itself.
-    void voiceFor(lang).then(voice => { if (token !== live.token) return; const utterance = new SpeechSynthesisUtterance(text); utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice; utterance.rate = 1.05; speechSynthesis.speak(utterance); });
+    void Promise.all([voiceFor(lang), due()]).then(([voice]) => { if (token !== live.token) return; const utterance = new SpeechSynthesisUtterance(text); utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice; utterance.rate = 1.05; speechSynthesis.speak(utterance); });
     return;
   }
   // The neural voice: each phrase is fetched at once, and played in order as soon as the one before it ends.
@@ -205,6 +208,7 @@ function sayPhrase(phrase, token) {
     .then(response => (response.ok ? response.blob() : null)).then(blob => (blob ? URL.createObjectURL(blob) : null)).catch(() => null);
   live.pending += 1;
   live.queue = live.queue.then(async () => {
+    await due();
     const url = await sound; if (token !== live.token) { if (url) URL.revokeObjectURL(url); return; }
     // The online voice did not answer (no network, the service down): this computer's own voice says it instead of silence.
     if (!url) { await sayHere(text, lang, token); return; }
@@ -257,6 +261,9 @@ export function speakLive({ runId, text = '', done = false, tool = '', input = {
   if (end > 0) { sayPhrase(pending.slice(0, end), live.token); live.said += end; live.spokenAt = Date.now(); }
   if (done) { live.spoken.add(fingerprint(cleanPhrase(text))); if (live.spoken.size > 50) live.spoken.delete(live.spoken.values().next().value); live.said = 0; live.text = ''; }
 }
+// Voice mode's welcome, said by Rex Desk itself (no AI, so no wait) the moment the body has formed: its sound is fetched
+// now, during the opening, and played at `at`. The agent meanwhile reads its report quietly.
+export function welcome(text, at) { sayPhrase(text, live.token, at); }
 // Stops live speech (read-aloud turned off, another chat opened).
 export function stopLive() { live.token += 1; live.queue = Promise.resolve(); live.pending = 0; live.said = 0; live.text = ''; live.runId = ''; try { speechSynthesis.cancel(); } catch { /* no voices */ } if (player) { try { player.pause(); } catch { /* not playing */ } } }
 export const readAloudButton = key => { const on = readAloudOn(key); return `<button type="button" class="icon-btn read-aloud${on ? ' on' : ''}" data-action="read-aloud" aria-pressed="${on}" title="${on ? 'Replies are read aloud. Press to stop' : 'Read replies aloud'}" aria-label="Read replies aloud">${SPEAKER}</button>`; };
