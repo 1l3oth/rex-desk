@@ -210,9 +210,12 @@ function sayPhrase(phrase, token, notBefore = 0) {
     return;
   }
   // The neural voice: each phrase is fetched at once, and played in order as soon as the one before it ends.
-  // A voice that has not come back in 15 seconds is given up (the computer's own voice says it), so nothing waits for ever.
-  const sound = fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text, lang, voice: chosen }), signal: AbortSignal.timeout?.(15000) })
+  // A different voice in the middle of a conversation sounds like a different person, so the computer's own voice is the
+  // last resort: a slow answer is waited for (up to 30 seconds) and asked for once more; only when Rex Desk's voice
+  // service cannot be reached at all, or fails twice, does the computer's voice say it.
+  const ask = wait => fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text, lang, voice: chosen }), signal: AbortSignal.timeout?.(wait) })
     .then(response => (response.ok ? response.blob() : null)).then(blob => (blob ? URL.createObjectURL(blob) : null)).catch(() => null);
+  const sound = ask(30000).then(url => url || new Promise(resolve => setTimeout(resolve, 1500)).then(() => ask(30000)));
   live.pending += 1;
   live.queue = live.queue.then(async () => {
     await due();
@@ -271,7 +274,12 @@ export function speakLive({ runId, text = '', done = false, tool = '', input = {
   if (runId !== live.runId || !said.startsWith(live.text.slice(0, live.said))) { live.runId = runId; live.said = 0; }
   live.text = said;
   const pending = said.slice(live.said), end = phraseEnd(pending, done);
-  if (end > 0) { sayPhrase(pending.slice(0, end), live.token); live.said += end; live.spokenAt = Date.now(); }
+  // One sentence at a time, each made side by side: a whole paragraph in one piece took the voice service so long that
+  // the computer's voice stood in for it. The first sentence is short, so it starts quickly; the rest follow while it plays.
+  if (end > 0) {
+    for (const sentence of pending.slice(0, end).split(/(?<=[.!?。…])\s+|\n+/)) if (sentence.trim()) sayPhrase(sentence, live.token);
+    live.said += end; live.spokenAt = Date.now();
+  }
   if (done) { live.spoken.add(fingerprint(cleanPhrase(text))); if (live.spoken.size > 50) live.spoken.delete(live.spoken.values().next().value); live.said = 0; live.text = ''; }
 }
 // Voice mode's welcome, said by Rex Desk itself (no AI, so no wait) the moment the body has formed: its sound is fetched

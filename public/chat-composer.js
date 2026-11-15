@@ -18,11 +18,27 @@ function remember(patch) { try { localStorage.setItem(KEY, JSON.stringify({ ...s
 
 // What the pickers show: the run's own choice when it has one, else what the person last picked, else the defaults.
 // The AI a chat runs on: the one picked for it here, else the run's own, else the default in Settings.
-function providerOf(ctx, run) { const picked = ctx.ui.providerPick?.[ctx.draftKey()]; return picked || run?.provider || ctx.ui.snap?.config?.provider || 'claude'; }
-function choicesFor(ctx, provider) { const all = ctx.ui.snap?.choices || { models: [], efforts: [], modes: [] }; return all.providers?.[provider] || all; }
+// Local AI is offered as an AI of its own (the models on this computer), though it runs through Claude Code: a chat on
+// a local model shows "Local AI", Claude Code's list shows only Claude's models, and the message goes out as Claude Code.
+const LOCAL = 'local';
+const isLocalId = id => String(id || '').startsWith('local:');
+function providerOf(ctx, run) {
+  const picked = ctx.ui.providerPick?.[ctx.draftKey()]; if (picked) return picked;
+  const own = run?.provider || ctx.ui.snap?.config?.provider || 'claude';
+  return own === 'claude' && isLocalId(run ? run.model : ctx.ui.snap?.config?.models?.claude) ? LOCAL : own;
+}
+function choicesFor(ctx, provider) {
+  const all = ctx.ui.snap?.choices || { models: [], efforts: [], modes: [] };
+  if (provider !== LOCAL && provider !== 'claude') return all.providers?.[provider] || all;
+  const claude = all.providers?.claude || all, local = provider === LOCAL;
+  const models = claude.models.filter(item => isLocalId(item.id) === local);
+  // No model on this computer yet: say where to get one instead of an empty list.
+  return { ...claude, models: models.length || !local ? models : [{ id: '', label: 'No models yet', hint: 'Open Settings, Local AI, and press Set up: it installs Ollama and a starter model.', disabled: true }] };
+}
+const sentProvider = provider => (provider === LOCAL ? 'claude' : provider);
 export function currentOptions(ctx) {
   const { ui } = ctx, run = ui.view.type === 'main' ? ctx.mainRun() : ui.view.type === 'run' ? ctx.runById(ui.view.id) : null, last = saved(), provider = providerOf(ctx, run), choices = choicesFor(ctx, provider);
-  const configured = ui.snap?.config?.models?.[provider];
+  const configured = ui.snap?.config?.models?.[sentProvider(provider)];
   // Only a model that is on the current list is shown and sent; anything else falls back to the first one (the recommended default).
   const ids = choices.models.filter(item => !item.disabled).map(item => item.id), model = [run?.model, last.model, configured].find(value => value && ids.includes(value)) || ids[0] || '';
   const modeIds = choices.modes.map(item => item.id), wanted = ui.snap?.config?.defaultMode || DEFAULT_MODE, mode = [run?.permissionMode, last.permissionMode, wanted].find(value => value && modeIds.includes(value)) || (modeIds.includes('manual') ? 'manual' : modeIds[0]);
@@ -31,7 +47,7 @@ export function currentOptions(ctx) {
 }
 export function pickedOptions(ctx) {
   const read = id => document.getElementById(id)?.value || '';
-  return { provider: read('opt-provider') || undefined, model: read('opt-model') || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
+  return { provider: sentProvider(read('opt-provider')) || undefined, model: read('opt-model') || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
 }
 
 // The AI, model, effort and mode pickers under the message box, for the AI picked now.
@@ -39,7 +55,7 @@ function optionPickers(ctx) {
   const now = currentOptions(ctx), choices = choicesFor(ctx, now.provider);
   const select = (id, label, items, value) => pickerHtml(ctx, { id, label, compact: true, value, items: items.map(item => ({ value: item.id, label: item.label, hint: item.hint, disabled: item.disabled })) });
   const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? 'Dangerous' : item.label, hint: item.hint || MODE_HINT[item.id] }));
-  return `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude plan' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT plan' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}`;
+  return `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude plan' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT plan' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }, { id: LOCAL, label: 'Local AI', hint: 'A model on this computer: free and private, no account needed' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}`;
 }
 // The message box is not redrawn while the chat updates (it would lose what is typed), so a new AI redraws only its pickers.
 function redrawOptionPickers(ctx) {
@@ -237,8 +253,11 @@ async function toggleMic(ctx) {
 // not start (already listening, the microphone is blocked).
 export const voiceBusy = () => Boolean(listening || transcribing);
 // What the body in Voice mode shows: listening (with how loud the person is), or turning speech into words.
-let micLevel = 0;
-export const voiceListening = () => ({ listening: Boolean(listening), transcribing, level: micLevel });
+// heardAt: the last moment the person's voice was loud enough to be talking, so Voice mode never takes them for silent
+// (and never interrupts them with "are you still there?") while they talk.
+let micLevel = 0, heardAt = 0;
+const hearLevel = level => { micLevel = level; if (level > 0.12) heardAt = Date.now(); };
+export const voiceListening = () => ({ listening: Boolean(listening), transcribing, level: micLevel, heardAt });
 // The words go to the agent as a message, as if typed.
 async function sendSpoken(ctx, text) {
   const box = document.getElementById('draft'); if (!text || !box) return;
@@ -255,7 +274,7 @@ function listenLevel(stream) {
   const context = new (window.AudioContext || window.webkitAudioContext)(), analyser = context.createAnalyser(); analyser.fftSize = 1024;
   context.createMediaStreamSource(stream).connect(analyser);
   const data = new Float32Array(analyser.fftSize); let timer = 0;
-  const tick = () => { analyser.getFloatTimeDomainData(data); let sum = 0; for (const value of data) sum += value * value; micLevel = Math.min(1, Math.sqrt(sum / data.length) * 6); timer = requestAnimationFrame(tick); };
+  const tick = () => { analyser.getFloatTimeDomainData(data); let sum = 0; for (const value of data) sum += value * value; hearLevel(Math.min(1, Math.sqrt(sum / data.length) * 6)); timer = requestAnimationFrame(tick); };
   tick();
   return () => { cancelAnimationFrame(timer); micLevel = 0; stream.getTracks().forEach(track => track.stop()); void context.close(); };
 }
@@ -299,7 +318,7 @@ export async function voiceTurn(ctx, { onState = () => {} } = {}) {
   let stream;
   try { stream = await openMicrophone(); } catch { ctx.toast('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.', true); return false; }
   onState('listening');
-  const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => { micLevel = Math.min(1, level * 6); } });
+  const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => hearLevel(Math.min(1, level * 6)), longest: 90000, pause: 1800 });
   listening = recording; micButton()?.classList.add('rec');
   async function finish() {
     if (listening !== recording) return;
@@ -397,7 +416,7 @@ export function initComposer(ctx) {
   document.addEventListener('change', event => {
     if (event.target.id === 'file-input') { for (const file of event.target.files) void upload(ctx, file); event.target.value = ''; return; }
     // Switching the AI shows that AI's models and modes; the next message goes to it, with the chat so far handed over.
-    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : 'Claude Code'}.`); return; }
+    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : event.target.value === LOCAL ? 'Local AI, on this computer' : 'Claude Code'}.`); return; }
     if (event.target.id === 'opt-model') remember({ model: event.target.value });
     if (event.target.id === 'opt-effort') remember({ effort: event.target.value });
     if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast('Dangerous: the agent runs tools without asking.'); }

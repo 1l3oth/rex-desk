@@ -123,6 +123,12 @@ export class Desk {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     this.localAi = new LocalAi(store);
+    // The models on this computer (Ollama, LM Studio, Colibri…) are looked up a moment after start and every two minutes,
+    // so a model the person adds shows in the AI picker by itself, without opening Settings.
+    if (!runnerFactory) {
+      const look = () => { if (!this.closed) void this.localAi.status().catch(() => {}); };
+      this.localTimers = [setTimeout(look, 5000), setInterval(look, 120000)]; for (const timer of this.localTimers) timer.unref?.();
+    }
     // The installed app on Windows copies itself beside the data once per version, in the background; agents started after
     // that run from the copy, so an update installs while they work (see prepareRuntime). Until it is ready they start as before.
     if (!runnerFactory && process.env.REX_DESK_VERSION) void prepareRuntime(path.join(store.directory, 'runtime')).then(runtime => { this.runtime = runtime; }, () => {});
@@ -206,6 +212,11 @@ export class Desk {
   orbitAccountMcp() { const account = this.orbitAccount(); return account?.token ? { orbit: { type: 'http', url: `${account.base.replace(/\/$/, '')}/mcp`, headers: { Authorization: `Bearer ${account.token}` } } } : {}; }
   // Usage saver (on unless the person turns it off): talking in rooms and away check-ins run on Sonnet, which uses much less of the
   // Claude subscription than the top model; changing code, personal chats and Rex Agent keep the model the person chose.
+  // A Claude Code turn that runs on a model on this computer (Local AI), by the same choice the turn itself makes.
+  usesLocalModel(run) {
+    if ((run.provider || 'claude') !== 'claude' || run.modelFallback) return false;
+    return isLocalModel(run.model || this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider]));
+  }
   saverModel(run) {
     if (run.provider !== 'claude' || this.store.config().saver === false || !run.roomAgent) return '';
     const agent = this.store.get('specialist', run.roomAgent);
@@ -511,8 +522,10 @@ export class Desk {
     try {
       // A nearly full drive makes the agent fail half way with "ENOSPC"; say so before it starts instead.
       const noRoom = lowDiskMessage([this.store.directory, os.tmpdir()], { min: this.minFreeBytes }); if (noRoom) throw new Error(noRoom);
-      // Check the selected CLI profile before creating worktrees or spending an agent turn.
-      if (!this.runnerFactory && !attach) await this.agents.ensureSignedIn(run.provider, this.accountFor(run) || this.agents.selected(run.provider));
+      // Check the selected CLI profile before creating worktrees or spending an agent turn. A Claude Code agent on a local
+      // model needs no Claude account (Rex Desk gives it the local server's address and key), so it is not asked for one:
+      // on a computer where nobody signed in to Claude, every turn stopped at "profile is not signed in".
+      if (!this.runnerFactory && !attach && !this.usesLocalModel(run)) await this.agents.ensureSignedIn(run.provider, this.accountFor(run) || this.agents.selected(run.provider));
       if (run.role === 'worker' && !run.worktree && run.placement?.state === 'pending') run = await this.place(run);
       if (run.role === 'worker' && !run.worktree) {
         const config = this.store.config();
@@ -1617,5 +1630,5 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     }
   }
   // Closing Rex Desk (a restart or an update) leaves agents in their own process working; the next start follows them again.
-  async shutdown() { this.closed = true; this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
+  async shutdown() { this.closed = true; for (const timer of this.localTimers || []) { clearTimeout(timer); clearInterval(timer); } this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
 }

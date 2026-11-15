@@ -36,7 +36,9 @@ async function workingMicrophone() {
   // None opened unmuted: the browser's own choice, so the person still gets its error or its silence.
   return open('');
 }
-export function startRecorder(stream, { onQuiet = () => {}, onLevel = () => {} } = {}) {
+// longest: how long a recording may go on in all (Voice mode lets the person talk for longer than a dictation).
+// pause: how long a silence after speech ends it.
+export function startRecorder(stream, { onQuiet = () => {}, onLevel = () => {}, longest = 20000, pause = 1500 } = {}) {
   const context = primed && primed.state !== 'closed' ? primed : new (AudioContextClass())(); primed = null;
   if (context.state !== 'running') void context.resume?.().catch(() => {});
   const source = context.createMediaStreamSource(stream), processor = context.createScriptProcessor(4096, 1, 1);
@@ -48,7 +50,7 @@ export function startRecorder(stream, { onQuiet = () => {}, onLevel = () => {} }
     const level = Math.sqrt(sum / data.length), time = performance.now();
     onLevel(level);
     if (level > 0.012) { recorder.heard = true; recorder.quietSince = 0; } else if (recorder.heard && !recorder.quietSince) recorder.quietSince = time;
-    if ((recorder.heard && recorder.quietSince && time - recorder.quietSince > 1500) || time - recorder.started > 20000) onQuiet();
+    if ((recorder.heard && recorder.quietSince && time - recorder.quietSince > pause) || time - recorder.started > longest) onQuiet();
   };
   source.connect(processor); processor.connect(context.destination);
   recorder.stop = () => {
