@@ -4,7 +4,9 @@ Rex Desk is a desktop workspace for your AI coding agents. It runs on your own c
 
 It works with the AI subscriptions you already have: **Claude Code**, **Codex** (ChatGPT) and **Gemini** (through Google's Antigravity CLI). Rex Desk never asks for or stores those sign-ins.
 
-**Website: [rex-desk-site.vercel.app](https://rex-desk-site.vercel.app)** (English and Khmer, with a demo you can click).
+**Website: [rexdesk.app](https://rexdesk.app)** (English and Khmer, with a demo you can click).
+
+Made and maintained by **Vong Pichdaraboth** ([vongpichdarabot@gmail.com](mailto:vongpichdarabot@gmail.com)). Rex Desk is free, open source software under the MIT License.
 
 ![An agent finds a bug, asks one question as a card, and fixes it](docs/showcase/ask-and-answer.gif)
 
