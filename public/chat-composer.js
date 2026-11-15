@@ -167,8 +167,37 @@ function menuItems(ctx, box) {
 let listening = null, transcribing = false;
 const micButton = () => document.querySelector('[data-action="mic"]');
 const voiceLanguage = ctx => { try { return localStorage.getItem('jev-language') || ctx.ui.snap?.config?.control?.language || 'en'; } catch { return ctx.ui.snap?.config?.control?.language || 'en'; } };
+// Dictation with the browser's own speech recognition (Chrome, Edge; see Voice mode below): it works the words out while
+// they are said, so they are in the box the moment the person stops, instead of being worked out from a recording after.
+// Where it cannot be used (the desktop app's window, no network), Rex Desk's own engine records as before.
+function putInBox(ctx, text) {
+  const box = document.getElementById('draft'); if (!box || !text) return;
+  ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(ctx.draftKey());
+  box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + text; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); box.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function browserDictate(ctx, { untilRelease = false } = {}) {
+  if (browserSpeech === 'no') return false;
+  let recognition; try { recognition = new Recognition(); } catch { browserSpeech = 'no'; return false; }
+  recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = untilRelease;
+  let said = '';
+  const turn = { browser: true, stop: () => { try { recognition.stop(); } catch { /* already over */ } } };
+  recognition.onresult = event => { said = [...event.results].map(result => result[0].transcript).join(' ').replace(/\s+/g, ' ').trim(); };
+  recognition.onerror = event => { turn.failed = event.error; if (['network', 'not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(event.error)) browserSpeech = 'no'; };
+  recognition.onend = () => {
+    if (listening === turn) listening = null;
+    micButton()?.classList.remove('rec'); document.body.classList.remove('ptt');
+    if (said) { putInBox(ctx, said); return; }
+    ctx.toast(turn.failed && browserSpeech === 'no' ? 'The browser could not turn speech into words here. Press the mic again to use Rex Desk\'s own voice engine.' : 'Nothing was heard. Hold Space (or press the mic) and speak.', true);
+  };
+  try { recognition.start(); } catch { browserSpeech = 'no'; return false; }
+  if (browserSpeech === 'try') browserSpeech = 'yes';
+  listening = turn; micButton()?.classList.add('rec');
+  return true;
+}
 async function finishMic(ctx) {
   const recording = listening; if (!recording) return;
+  // The browser's recognition puts the words in the box itself when it ends.
+  if (recording.browser) { recording.stop(); return; }
   listening = null; recording.stop(); micButton()?.classList.remove('rec');
   if (!recording.heard) { ctx.toast('Nothing was heard. Hold Space (or press the mic) and speak.', true); return; }
   transcribing = true; micButton()?.classList.add('busy');
@@ -183,6 +212,7 @@ async function finishMic(ctx) {
 async function toggleMic(ctx) {
   if (transcribing) return;
   if (listening) return finishMic(ctx);
+  if (browserDictate(ctx)) return;
   void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
   let stream;
   try { stream = await openMicrophone(); } catch { ctx.toast('Rex Desk could not use the microphone. Allow it, then press the mic again.', true); return; }
@@ -201,7 +231,7 @@ export const voiceListening = () => ({ listening: Boolean(listening), transcribi
 async function sendSpoken(ctx, text) {
   const box = document.getElementById('draft'); if (!text || !box) return;
   box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + text; ctx.ui.drafts.set(ctx.draftKey(), box.value);
-  box.dispatchEvent(new Event('input', { bubbles: true })); await ctx.send();
+  box.dispatchEvent(new Event('input', { bubbles: true })); ctx.ui.voiceNext = true; await ctx.send();
 }
 // The browser's own speech recognition (Chrome, Edge): free, no key, it hears the words while they are said and knows by
 // itself when the person stopped. The desktop app's window has none that works, and a browser whose service fails (no
@@ -272,6 +302,14 @@ const holdable = target => target?.id === 'draft' || !(target?.closest?.('input,
 async function startHold(ctx) {
   if (listening || transcribing) return;
   hold.active = true; hold.pending = true;
+  // The browser's own recognition, until Space is let go: the words are ready the moment it is.
+  if (browserDictate(ctx, { untilRelease: true })) {
+    hold.pending = false;
+    const box = document.getElementById('composer')?.getBoundingClientRect(); if (box) document.body.style.setProperty('--ptt-bottom', `${Math.max(16, Math.round(innerHeight - box.top + 12))}px`);
+    document.body.classList.add('ptt');
+    if (hold.releasedEarly) { hold.releasedEarly = false; hold.active = false; document.body.classList.remove('ptt'); void finishMic(ctx); }
+    return;
+  }
   void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
   let stream;
   try { stream = await openMicrophone(); } catch { hold.active = hold.pending = false; ctx.toast('Rex Desk could not use the microphone. Allow it, then try again.', true); return; }

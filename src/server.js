@@ -815,6 +815,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
           // Continue in Claude app (on), or bring the chat back to Rex Desk only (on: false).
           if (action === 'app') return json(response, 200, await desk.continueInApp(runId, input.on !== false));
+          // Voice mode on (the briefing is made now) or off.
+          if (action === 'voice') return json(response, 200, desk.voiceMode(runId, input.on !== false));
           if (action === 'fresh') return json(response, 200, await desk.freshStart(runId));
           if (action === 'say') return json(response, 200, await desk.say(runId, input.text, input));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));

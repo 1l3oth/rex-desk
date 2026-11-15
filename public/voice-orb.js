@@ -17,6 +17,7 @@ const RINGS = Array.from({ length: 13 }, (_, index) => {
     gold: index % 4 === 2,                      // a few warm rings among the violet ones
     hero: index % 3 === 0,                      // the brightest, thickest lines
     bright: 0.55 + random(14) * 0.45,
+    order: index,                               // when it arrives in the opening
   };
 });
 const STARS = Array.from({ length: 140 }, (_, index) => {
@@ -31,6 +32,12 @@ const MOODS = {
   speaking: { speed: 1.1, bend: 0.95, glow: 1.15, follow: 4.5 },
 };
 const colour = spec => (spec.gold ? [255, 176, 92] : [178, 140, 255]);
+// The opening, about 2.5 seconds: a spark flashes, the core grows out of it, then the rings arrive one after another,
+// each growing outwards into place. Calm (reduced motion) skips it.
+const OPENING = 2500;
+const clamp = value => Math.max(0, Math.min(1, value));
+const easeOut = value => 1 - Math.pow(1 - value, 3);
+const easeBack = value => { const c = 1.4; return 1 + (c + 1) * Math.pow(value - 1, 3) + c * Math.pow(value - 1, 2); };
 
 export function mountOrb(element, read) {
   const canvas = document.createElement('canvas'); canvas.className = 'orb-canvas'; canvas.setAttribute('aria-hidden', 'true');
@@ -44,6 +51,10 @@ export function mountOrb(element, read) {
   // Smoothed values, so changes of state glide instead of jumping.
   const now = { speed: 0.6, bend: 0.8, glow: 0.75, energy: 0.1 };
   let width = 0, height = 0, scale = 1, frame = 0, clock = 0, last = performance.now();
+  const born = performance.now();
+  let opening = calm ? 1 : 0;
+  // How far each ring has arrived (0 to 1), and how big it is on the way.
+  const arrived = spec => clamp((opening - 0.22 - spec.order * 0.032) / 0.3);
   const fit = () => {
     scale = Math.min(devicePixelRatio || 1, 1.5); const box = element.getBoundingClientRect();
     width = Math.max(1, Math.round(box.width * scale)); height = Math.max(1, Math.round(box.height * scale));
@@ -63,22 +74,22 @@ export function mountOrb(element, read) {
       const angle = (step / points) * TAU;
       let radius = spec.radius;
       for (let wave = 0; wave < 3; wave++) radius += spec.depth[wave] * bend * Math.sin(spec.waves[wave] * angle + clock * spec.drift[wave] * now.speed);
-      radius *= size * (1 + energy * 0.12);
+      radius *= size * (1 + energy * 0.12) * (0.35 + 0.65 * easeBack(arrived(spec)));
       const x = Math.cos(angle) * radius, y = Math.sin(angle) * radius * spec.squash;
       const px = cx + x * cosT - y * sinT, py = cy + x * sinT + y * cosT;
       if (step === 0) path.moveTo(px, py); else path.lineTo(px, py);
     }
     return path;
   }
-  const lightOf = (spec, energy) => spec.bright * now.glow * (0.7 + energy * 0.6);
+  const lightOf = (spec, energy) => spec.bright * now.glow * (0.7 + energy * 0.6) * easeOut(arrived(spec));
 
   function paintGlow(energy) {
     const w = soft.width, h = soft.height, cx = w / 2, cy = h / 2, size = Math.min(w, h) * 0.36, unit = scale * SOFT;
     glow.globalCompositeOperation = 'source-over';
     glow.fillStyle = '#05030c'; glow.fillRect(0, 0, w, h);
     // The space around it: a violet haze that breathes with it, two slow drifting clouds, and a fog where the rings are.
-    let fill = glow.createRadialGradient(cx, cy, size * 0.2, cx, cy, size * 2.6);
-    fill.addColorStop(0, `rgba(88,44,170,${0.32 + energy * 0.25})`); fill.addColorStop(0.45, 'rgba(40,18,90,0.18)'); fill.addColorStop(1, 'rgba(5,3,12,0)');
+    let fill = glow.createRadialGradient(cx, cy, size * 0.2, cx, cy, size * 2.6), open = easeOut(clamp(opening / 0.7));
+    fill.addColorStop(0, `rgba(88,44,170,${(0.32 + energy * 0.25) * open})`); fill.addColorStop(0.45, 'rgba(40,18,90,0.18)'); fill.addColorStop(1, 'rgba(5,3,12,0)');
     glow.fillStyle = fill; glow.fillRect(0, 0, w, h);
     glow.globalCompositeOperation = 'lighter';
     for (const [phase, reach, alpha] of [[0, 1.9, 0.07], [2.1, 1.6, 0.05]]) {
@@ -107,6 +118,7 @@ export function mountOrb(element, read) {
     now.energy += (target - now.energy) * (1 - Math.pow(state === 'speaking' || state === 'listening' ? 0.0005 : 0.05, seconds));
     clock += seconds * (calm ? 0.25 : 1) * now.speed;
     const energy = now.energy;
+    opening = calm ? 1 : clamp((time - born) / OPENING);
 
     paintGlow(energy);
     draw.globalCompositeOperation = 'source-over'; draw.imageSmoothingEnabled = true; draw.imageSmoothingQuality = 'high';
@@ -123,7 +135,7 @@ export function mountOrb(element, read) {
     }
     // The core: dark glass with a lit rim, then its stars.
     draw.globalCompositeOperation = 'source-over';
-    const core = size * (0.44 + energy * 0.03);
+    const grown = easeBack(clamp(opening / 0.4)), core = size * (0.44 + energy * 0.03) * Math.max(0.02, grown);
     const glass = draw.createRadialGradient(cx, cy, 0, cx, cy, core);
     glass.addColorStop(0, '#2a1760'); glass.addColorStop(0.55, '#170c3a'); glass.addColorStop(0.9, '#2c1668'); glass.addColorStop(1, '#5a34b8');
     draw.fillStyle = glass; draw.beginPath(); draw.arc(cx, cy, core, 0, TAU); draw.fill();
@@ -134,13 +146,20 @@ export function mountOrb(element, read) {
     for (const star of STARS) {
       const angle = star.angle + clock * star.speed, distance = star.distance * core * 0.92, dot = star.size * scale * 1.6;
       const twinkle = 0.35 + 0.65 * Math.abs(Math.sin(time / 900 + star.twinkle));
-      draw.fillStyle = `rgba(225,215,255,${twinkle * (0.45 + energy * 0.5)})`;
+      draw.fillStyle = `rgba(225,215,255,${twinkle * (0.45 + energy * 0.5) * grown})`;
       draw.fillRect(cx + Math.cos(angle) * distance - dot / 2, cy + Math.sin(angle) * distance - dot / 2, dot, dot);
     }
     // The heart of it: a soft light that swells with the voice.
     const heart = draw.createRadialGradient(cx, cy, 0, cx, cy, core * (0.55 + energy * 0.35));
     heart.addColorStop(0, `rgba(210,190,255,${0.1 + energy * 0.35})`); heart.addColorStop(1, 'rgba(0,0,0,0)');
     draw.fillStyle = heart; draw.beginPath(); draw.arc(cx, cy, core, 0, TAU); draw.fill();
+    // The spark that starts it: a point of light that flashes and fades as the body forms around it.
+    if (opening < 0.6) {
+      const flash = Math.sin(clamp(opening / 0.6) * Math.PI), reach = size * (0.15 + opening * 1.4);
+      const spark = draw.createRadialGradient(cx, cy, 0, cx, cy, reach);
+      spark.addColorStop(0, `rgba(255,250,255,${0.95 * flash})`); spark.addColorStop(0.12, `rgba(210,180,255,${0.6 * flash})`); spark.addColorStop(1, 'rgba(0,0,0,0)');
+      draw.fillStyle = spark; draw.beginPath(); draw.arc(cx, cy, reach, 0, TAU); draw.fill();
+    }
   }
   frame = requestAnimationFrame(paint);
   return { destroy() { cancelAnimationFrame(frame); resize.disconnect(); canvas.remove(); } };

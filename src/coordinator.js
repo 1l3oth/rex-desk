@@ -30,6 +30,7 @@ import { inspectRepository } from './repositories.js';
 import { Worktrees, longPath } from './worktrees.js';
 import { ProjectRules } from './project-rules.js';
 import { lowDiskMessage, friendlyDiskError } from './disk.js';
+import { voiceBriefing, VOICE_RULE, VOICE_REMINDER, VOICE_GREETING } from './voice-briefing.js';
 import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
@@ -238,11 +239,37 @@ export class Desk {
     this.patchRun(runId, { accountSwitchedAt: now(), state: 'queued', queued: [], followUp: 'You were cut off by a usage limit. Continue exactly where you left off.' });
     this.live.delete(runId); void this.drain(); return true;
   }
+  // Voice mode on or off for a chat. On: the report is made now (code, milliseconds) and given to the agent at once, while
+  // the body's opening animation plays: it reads it and only greets the person, like picking up a call. Its answers later
+  // come from it. An agent still busy with a turn gets it with the first spoken message instead. Off: messages are ordinary again.
+  voiceMode(runId, on = true) {
+    const run = this.run(runId);
+    if (!on) { this.patchRun(runId, { voice: undefined }); return { on: false }; }
+    const briefing = voiceBriefing({ store: this.store, memoryDirectory: this.memory?.directory || '' });
+    const now_ = now(), busy = this.live.has(runId) || run.external;
+    this.patchRun(runId, { voice: { at: now_, briefing, sent: !busy } });
+    if (!busy) void this.resume(runId, { silent: true, prompt: `${VOICE_RULE}\n\n${briefing}\n\n${VOICE_GREETING}` }).catch(error => this.store.event(runId, 'error', { message: error.message }, true));
+    return { on: true, briefing: briefing.length, greeting: !busy };
+  }
+  // A spoken message as the agent gets it: with the briefing the first time, then with a short reminder to talk, not write.
+  spoken(runId, line) {
+    const voice = this.store.get('run', runId)?.voice; if (!voice) return '';
+    if (!voice.sent) { this.patchRun(runId, { voice: { ...voice, sent: true } }); return `${VOICE_RULE}\n\n${voice.briefing}\n\nThe person said: ${line}`; }
+    return `${VOICE_REMINDER}\n\n${line}`;
+  }
   async say(runId, text, picked = {}, { raw = false } = {}) {
     const run = this.run(runId), line = raw ? String(text || '').trim() : String(text || '').replace(/\s+/g, ' ').trim();
     if (!line) throw new Error('Write a message first.');
     // The person wrote: the count of fresh sessions that carried on by themselves starts again.
     if (run.autoContinues) this.patchRun(runId, { autoContinues: 0 });
+    // In Voice mode the agent gets the briefing and how to talk; the chat shows only what the person said.
+    const spoken = picked.voice ? this.spoken(runId, line) : '';
+    if (spoken) {
+      if (this.live.has(runId)) { const current = this.store.get('run', runId); this.store.put('run', runId, { ...current, queued: [...(current.queued || []), spoken], updatedAt: now() }); this.store.event(runId, 'human-message', { text: line, via: 'voice', queued: true }, true); return { queued: true }; }
+      this.store.event(runId, 'human-message', { text: line, via: 'voice' }, true);
+      await this.resume(runId, { provider: picked.provider || run.provider, prompt: spoken, silent: true, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });
+      return { sent: true };
+    }
     if (this.live.has(runId)) {
       this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
       this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);

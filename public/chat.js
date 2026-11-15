@@ -392,9 +392,15 @@ function voiceNow() {
 const VOICE_WORDS = { idle: '', listening: 'Listening', thinking: 'Thinking', speaking: '' };
 function syncVoiceStage() {
   const main = document.querySelector('#stage .stage-main'), on = Boolean(main) && voiceModeOn(draftKey()) && Boolean(ctx.currentRunId());
-  if (!on) { if (voiceStage) { voiceOrb?.destroy(); voiceStage.remove(); voiceStage = voiceOrb = null; } return; }
+  if (!on) {
+    if (voiceStage) { void api(`/runs/${voiceStage.dataset.run}/voice`, { method: 'POST', data: { on: false } }).catch(() => {}); voiceOrb?.destroy(); voiceStage.remove(); voiceStage = voiceOrb = null; }
+    return;
+  }
+  if (voiceStage && voiceStage.dataset.run !== ctx.currentRunId()) { voiceOrb?.destroy(); voiceStage.remove(); voiceStage = voiceOrb = null; }
   if (!voiceStage) {
-    voiceStage = document.createElement('div'); voiceStage.className = 'voice-stage';
+    voiceStage = document.createElement('div'); voiceStage.className = 'voice-stage'; voiceStage.dataset.run = ctx.currentRunId();
+    // The briefing is made now, while the body opens (code, not AI): the first question is answered from it at once.
+    void api(`/runs/${voiceStage.dataset.run}/voice`, { method: 'POST', data: { on: true } }).catch(() => {});
     voiceStage.innerHTML = '<button type="button" class="voice-exit" data-action="voice-mode" aria-label="End voice mode" title="End voice mode (Esc)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><p class="voice-word" aria-live="polite"></p>';
     const word = voiceStage.querySelector('.voice-word');
     voiceOrb = mountOrb(voiceStage, () => { const now = voiceNow(), text = VOICE_WORDS[now.state]; if (word.textContent !== text) word.textContent = text; return now; });
@@ -495,7 +501,10 @@ async function send() {
       const away = run.remote ? { text, at: new Date().toISOString() } : null;
       if (away) { (ui.outbox ||= new Map()).set(run.id, [...(ui.outbox.get(run.id) || []), away]); box.value = ''; renderAll(); }
       try {
-        if (workingStates.includes(run.state)) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text, ...picked } });
+        // Spoken in Voice mode: always through "say", which gives the agent its briefing and how to talk.
+        const spoken = ui.voiceNext; ui.voiceNext = false;
+        if (spoken) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text, ...picked, voice: true } });
+        else if (workingStates.includes(run.state)) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text, ...picked } });
         else await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text, ...picked } });
       } catch (error) { if (away) { ui.outbox.set(run.id, ui.outbox.get(run.id).filter(item => item !== away)); box.value = typed; } throw error; }
       if (away) away.sent = true;
