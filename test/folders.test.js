@@ -59,6 +59,17 @@ test('a data move reports its progress, and a move that stopped the server twice
   assert.ok(!existsSync(pending));
 });
 
+test('moved data is not left compressed by Windows', { skip: process.platform !== 'win32' }, async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { uncompress } = await import('../src/folders.js');
+  const folder = temp(); writeFileSync(path.join(folder, 'desk.sqlite'), 'x'.repeat(200000));
+  execFileSync('compact.exe', ['/c', '/s', '/i', '/q'], { cwd: folder, windowsHide: true });
+  const state = () => execFileSync('compact.exe', [path.join(folder, 'desk.sqlite')], { encoding: 'utf8', windowsHide: true });
+  assert.match(state(), /\bC desk\.sqlite/);
+  await uncompress(folder);
+  assert.doesNotMatch(state(), /\bC desk\.sqlite/);
+});
+
 test('the AI memory moves on the next start and is read from its new place', async () => {
   const home = temp(), env = { REX_DESK_VERSION: '0.0.10' }, brain = path.join(home, '.rexdesk'), to = path.join(home, 'Brain');
   mkdirSync(path.join(brain, 'agents'), { recursive: true }); writeFileSync(path.join(brain, 'user.md'), 'about me'); writeFileSync(path.join(brain, 'data-folder.txt'), 'X:\\data');

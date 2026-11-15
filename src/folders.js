@@ -4,6 +4,7 @@
 // - files: screenshots, recordings and attachments. Moved at once, since nothing holds them open.
 // A move copies first and switches only after the copy is complete; the old folder stays as a backup the person can delete.
 import { copyFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { constants, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -68,6 +69,14 @@ async function copyAll(from, to, skip = () => false, progress = () => {}) {
   progress(files.length, files.length);
 }
 
+// Files copied into a folder Windows compresses (a whole drive can be set to save space) are compressed too, and a compressed
+// database on a hard disk is read so slowly that Rex Desk stopped answering for minutes. The moved data is kept uncompressed.
+// Best effort: elsewhere, or when it fails, the move still counts.
+export async function uncompress(folder, platform = process.platform) {
+  if (platform !== 'win32') return;
+  await new Promise(resolve => execFile('compact.exe', ['/u', '/s', '/i', '/q'], { cwd: folder, windowsHide: true, timeout: 600000 }, () => resolve()));
+}
+
 // People pick the folder they think of (Documents, a drive), not an empty one: a picked folder that already holds things
 // gets a named folder inside it instead.
 const settle = (to, name) => { const target = path.resolve(String(to || '')); return path.isAbsolute(String(to || '')) && existsSync(target) && statSync(target).isDirectory() && readdirSync(target).length ? path.join(target, name) : to; };
@@ -95,6 +104,7 @@ export async function followDataMove(dataRoot, { home = os.homedir(), waitForOld
     await waitForOld();
     const target = checkTarget(dataRoot, plan.to);
     await copyAll(dataRoot, target, source => [PENDING, 'runtime.lock'].includes(path.basename(source)) && path.dirname(source) === dataRoot, progress);
+    await uncompress(target);
     writeFileSync(path.join(dataRoot, MOVED), target);
     // The desktop app reads this pointer to find the workspace on its next launch.
     mkdirSync(pointerHome(home), { recursive: true }); writeFileSync(path.join(pointerHome(home), 'data-folder.txt'), target);
