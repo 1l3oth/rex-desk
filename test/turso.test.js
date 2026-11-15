@@ -81,7 +81,7 @@ test('a fresh workspace restores records, events, and its access token from Turs
   await second.cloud.close(); second.close();
 });
 
-test('a reinstall gets back the files too: chat pictures, room pictures, evidence and the memory folder', async () => {
+test('a backup to your own Turso database keeps no files in it, and a reinstall still gets back files an older version put there', async () => {
   const original = temporary('files-a'), restored = temporary('files-b'), memory = temporary('files-memory'), turso = fakeTurso();
   turso.network.online = true;
   const { mkdirSync, writeFileSync, readFileSync, rmSync } = await import('node:fs');
@@ -96,8 +96,13 @@ test('a reinstall gets back the files too: chat pictures, room pictures, evidenc
   first.event('run-1', 'human-message', { text: 'Keep me' }, true); first.event('run-1', 'human-message', { text: 'Unsend me' }, true);
   first.unsendEvent('run-1', first.events('run-1').at(-1).sequence);
   await first.cloud.flush(); await first.cloud.files.run();
-  assert.equal(turso.remote.prepare('SELECT COUNT(*) AS n FROM rex_files').get().n, 4, 'node_modules and copies of source code in evidence are skipped');
-  assert.doesNotMatch(String(turso.remote.prepare("SELECT data FROM rex_files WHERE path='memory/user.md'").get().data), /short answers/, 'files are sealed with the vault key');
+  assert.equal(turso.remote.prepare('SELECT COUNT(*) AS n FROM rex_files').get().n, 0, 'files never go into the database');
+  // Versions before this one did keep files in the database (sealed with the vault key): those still come back on a reinstall.
+  const { readFileSync: read } = await import('node:fs');
+  const older = [['data/uploads/u1/shot.png', path.join(original, 'uploads', 'u1', 'shot.png')], ['data/room-images/room-1.png', path.join(original, 'room-images', 'room-1.png')],
+    ['data/artifacts/run-1/screen.png', path.join(original, 'artifacts', 'run-1', 'screen.png')], ['memory/user.md', path.join(memory, 'user.md')]];
+  const workspace = first.cloud.workspace;
+  for (const [key, file] of older) { const data = read(file); turso.remote.prepare('INSERT INTO rex_files(workspace,path,size,data,updated_at) VALUES(?,?,?,?,?)').run(workspace, key, data.length, first.encryptBytes(data), new Date().toISOString()); }
   await first.cloud.close(); first.close();
   // Uninstall: the data folder and the memory folder are gone. Only the workspace identity and key come back (from the passphrase).
   rmSync(memory, { recursive: true, force: true });

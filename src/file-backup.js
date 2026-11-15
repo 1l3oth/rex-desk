@@ -98,15 +98,16 @@ export class FileBackup {
   index() { try { return JSON.parse(readFileSync(this.indexFile, 'utf8')); } catch { return null; } }
   saveIndex(index) { const temporary = `${this.indexFile}.tmp`; writeFileSync(temporary, JSON.stringify(index), { mode: 0o600 }); renameSync(temporary, this.indexFile); }
   // Upload new and changed files, one at a time. Files deleted here stay in the backup.
+  // Files go only to the Rex Desk account's private folder, never into a database: a backup to a Turso database of the
+  // person's own keeps the chats and settings, and leaves pictures and files on this computer (files made a database big).
   async backup() {
-    const { client, store, workspace } = this.sync;
+    if (!this.hosted()) return { uploaded: 0, skipped: 'Files are kept only with a Rex Desk account backup.' };
+    const { store } = this.sync;
     const index = this.index() || { files: {} }; let uploaded = 0;
     for (const item of this.walk()) {
       if (index.files[item.key] === item.stamp) continue;
       let data; try { data = readFileSync(item.file); } catch { continue; }
-      if (this.hosted()) await this.sync.account.putFile(this.remoteKey(item.key), Buffer.from(store.encryptBytes(data), 'base64'));
-      else await client.execute({ sql: 'INSERT INTO rex_files(workspace,path,size,data,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace,path) DO UPDATE SET size=excluded.size,data=excluded.data,updated_at=excluded.updated_at',
-        args: [workspace, item.key, data.length, store.encryptBytes(data), new Date().toISOString()] });
+      await this.sync.account.putFile(this.remoteKey(item.key), Buffer.from(store.encryptBytes(data), 'base64'));
       index.files[item.key] = item.stamp; uploaded += 1;
       if (uploaded % 20 === 0) this.saveIndex(index);
     }
