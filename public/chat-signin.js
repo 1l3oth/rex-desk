@@ -6,7 +6,7 @@ import { windowBar } from '/win-bar.js';
 windowBar();
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const root = document.getElementById('signin');
-const TABS = [['signin', 'Sign in'], ['create', 'New account'], ['cloud', 'Restore from backup']];
+const TABS = [['signin', 'Sign in'], ['create', 'New account'], ['cloud', 'Bring back from backup']];
 const state = { auth: null, tab: '', error: '', email: '', scene: undefined, account: '', offline: false };
 const SIGNUP = 'https://rexdesk.app/signup';
 const ICON = {
@@ -33,8 +33,8 @@ function drawAccount() {
   let body;
   if (!account && state.offline) {
     // The account service cannot be reached: a workspace already on this computer still opens with its passphrase.
-    body = `<h2 class="si-title">You are offline</h2><p class="si-note">Rex Desk cannot reach its account service. A workspace already on this computer opens with its passphrase; sign in to your Rex Desk account again when you are back online.</p>
-      <form id="si-form" data-mode="offline">${known.length ? `<label class="st-field"><span>Workspace</span><select name="email">${known.map(item => `<option>${esc(item.email)}</option>`).join('')}</select></label>${secret('Passphrase')}${stay}<button class="btn primary si-submit" type="submit">Open workspace</button>` : '<p class="si-note warn">This computer has no workspace yet, so the first sign-in needs the internet.</p>'}
+    body = `<h2 class="si-title">You are offline</h2><p class="si-note">Rex Desk cannot reach its account service. A desk already on this computer opens with its password; sign in to your Rex Desk account again when you are back online.</p>
+      <form id="si-form" data-mode="offline">${known.length ? `<label class="st-field"><span>Desk</span><select name="email">${known.map(item => `<option>${esc(item.email)}</option>`).join('')}</select></label>${secret('Password')}${stay}<button class="btn primary si-submit" type="submit">Open my desk</button>` : '<p class="si-note warn">This computer has no desk yet, so the first sign-in needs the internet.</p>'}
       <button type="button" class="btn si-submit" data-retry>Try the Rex Desk sign-in again</button><p class="si-error" role="alert">${esc(state.error)}</p></form>`;
   } else if (!account) {
     const waiting = state.account === 'waiting';
@@ -48,10 +48,10 @@ function drawAccount() {
     const who = `<div class="si-who"><span class="si-avatar">${account.image ? `<img src="${esc(account.image)}" alt="" referrerpolicy="no-referrer">` : esc((account.name || account.email || '?')[0].toUpperCase())}</span><span><b>${esc(account.name || account.email)}</b><small>${esc(account.name ? account.email : 'Rex Desk account')}</small></span><button type="button" class="si-link" data-switch>Not you?</button></div>`;
     const unclaimed = auth.workspaces.find(item => !item.claimed);
     const steps = {
-      here: { title: 'Enter your passphrase', note: 'It unlocks your workspace on this computer.', fields: `${secret('Passphrase')}${stay}`, submit: 'Open my desk' },
-      claim: { title: 'Claim this computer’s workspace', note: 'This computer has a workspace from before Rex Desk accounts. Choose a passphrase (8 or more characters) to lock it with your account. You become this computer’s superadmin.', fields: `<input type="hidden" name="claimId" value="${esc(unclaimed?.id || '')}">${secret('New passphrase', 'passphrase', 'new-password')}${secret('Repeat passphrase', 'repeat', 'new-password')}${stay}`, submit: 'Claim and open' },
-      backup: { title: 'Your backup is here', note: 'Rex Desk found your cloud backup. Enter its passphrase and your agents, chats, pictures and settings come back.', fields: `<input type="hidden" name="account" value="1">${secret('Passphrase')}${stay}`, submit: 'Restore my desk' },
-      new: { title: 'Choose a passphrase', note: `It locks the API keys and tokens your agents use on this computer. Rex Desk cannot recover a forgotten passphrase.${known.length ? ' Your workspace stays apart from the other accounts on this computer.' : ''}`, fields: `${secret('Passphrase', 'passphrase', 'new-password')}${secret('Repeat passphrase', 'repeat', 'new-password')}${stay}`, submit: 'Set up my desk' },
+      here: { title: 'Enter your password', note: 'It opens Rex Desk on this computer.', fields: `${secret('Password')}${stay}`, submit: 'Open my desk' },
+      claim: { title: 'Make this computer’s desk yours', note: 'This computer has a desk from before Rex Desk accounts. Create a password (8 or more letters or numbers) to lock it with your account. You become the owner of this computer.', fields: `<input type="hidden" name="claimId" value="${esc(unclaimed?.id || '')}">${secret('New password', 'passphrase', 'new-password')}${secret('Type it again', 'repeat', 'new-password')}${stay}`, submit: 'Claim and open' },
+      backup: { title: 'Your backup is here', note: 'Rex Desk found your cloud backup. Enter its password and your agents, chats, pictures and settings come back.', fields: `<input type="hidden" name="account" value="1">${secret('Password')}${stay}`, submit: 'Bring back my desk' },
+      new: { title: 'Create a password', note: `This password opens Rex Desk on this computer and keeps your agents' keys safe. If you forget it, Rex Desk cannot get it back.${known.length ? ' Your desk stays apart from the other accounts on this computer.' : ''}`, fields: `${secret('Password', 'passphrase', 'new-password')}${secret('Type it again', 'repeat', 'new-password')}${stay}`, submit: 'Set up my desk' },
     };
     const step = steps[account.workspace] || steps.new;
     const mode = account.workspace === 'backup' ? 'cloud' : account.workspace === 'new' ? 'create' : 'signin';
@@ -60,7 +60,7 @@ function drawAccount() {
       <form id="si-form" data-mode="${mode}">${step.fields}<button class="btn primary si-submit" type="submit">${step.submit}</button><p class="si-error" role="alert">${esc(state.error)}</p></form>`;
   }
   root.innerHTML = `<section class="si-card" aria-labelledby="si-brand"><div class="si-brand"><img src="/favicon.svg" alt="" width="28" height="28"><h1 id="si-brand">Rex Desk</h1></div>
-    ${auth.occupied ? `<p class="si-note warn">${esc(auth.occupied)} is signed in on this computer. Signing in to another account closes that workspace and stops its running agents.</p>` : ''}${body}</section>`;
+    ${auth.occupied ? `<p class="si-note warn">${esc(auth.occupied)} is signed in on this computer. Signing in to another account closes that desk and stops its working agents.</p>` : ''}${body}</section>`;
   root.querySelector('input[type=password], select')?.focus();
   mountScene();
 }
@@ -72,17 +72,17 @@ function drawLocal() {
   const secret = (label, name = 'passphrase', complete = 'current-password') => `<label class="st-field"><span>${label}</span><input name="${name}" type="password" autocomplete="${complete}" minlength="8" required></label>`;
   const stay = '<label class="st-check"><input type="checkbox" name="staySignedIn" checked><span><b>Stay signed in on this computer</b></span></label>';
   // A reinstall, a cleared data folder or a new computer: the account and everything in it come back from the cloud backup.
-  const back = `<p class="si-note">Reinstalled Rex Desk, or your chats are gone? <button type="button" class="si-link" data-tab="cloud">Restore from backup</button> brings back your agents, chats, pictures and settings.</p>`;
+  const back = `<p class="si-note">Reinstalled Rex Desk, or your chats are gone? <button type="button" class="si-link" data-tab="cloud">Bring back from backup</button> brings back your agents, chats, pictures and settings.</p>`;
   const forms = {
-    signin: `${unclaimed ? `<p class="si-note warn">This computer has a workspace from before accounts. Sign in with your email and a new passphrase (8 or more characters) to claim it. The first claim becomes this computer's superadmin.</p><input type="hidden" name="claimId" value="${esc(unclaimed.id)}">` : ''}
-      ${known.length ? `<div class="si-known">${known.map(item => `<button type="button" class="si-account" data-email="${esc(item.email)}"><span class="si-avatar">${esc(item.email[0].toUpperCase())}</span><span><b>${esc(item.email)}</b><small>${item.role === 'superadmin' ? 'Superadmin' : 'Member'}</small></span></button>`).join('')}</div>` : ''}
-      ${email(state.email || (known.length === 1 ? known[0].email : ''))}${secret('Passphrase')}${stay}<button class="btn primary si-submit" type="submit">Sign in</button>${back}`,
-    create: `${email(state.email)}${secret('Passphrase', 'passphrase', 'new-password')}${secret('Repeat passphrase', 'repeat', 'new-password')}${stay}<p class="si-note">${auth.workspaces.length ? 'Your account gets its own workspace: tasks, keys and history stay apart from other accounts on this computer.' : 'The first account on this computer becomes its superadmin.'} Rex Desk cannot recover a forgotten passphrase.</p><button class="btn primary si-submit" type="submit">Create account</button>${back}`,
+    signin: `${unclaimed ? `<p class="si-note warn">This computer has a desk from before accounts. Sign in with your email and a new password (8 or more letters or numbers) to make it yours. The first person to do this becomes the owner of this computer.</p><input type="hidden" name="claimId" value="${esc(unclaimed.id)}">` : ''}
+      ${known.length ? `<div class="si-known">${known.map(item => `<button type="button" class="si-account" data-email="${esc(item.email)}"><span class="si-avatar">${esc(item.email[0].toUpperCase())}</span><span><b>${esc(item.email)}</b><small>${item.role === 'superadmin' ? 'Owner' : 'Member'}</small></span></button>`).join('')}</div>` : ''}
+      ${email(state.email || (known.length === 1 ? known[0].email : ''))}${secret('Password')}${stay}<button class="btn primary si-submit" type="submit">Sign in</button>${back}`,
+    create: `${email(state.email)}${secret('Password', 'passphrase', 'new-password')}${secret('Type it again', 'repeat', 'new-password')}${stay}<p class="si-note">${auth.workspaces.length ? 'Your account gets its own desk: tasks, keys and history stay apart from other accounts on this computer.' : 'The first account on this computer becomes its owner.'} If you forget your password, Rex Desk cannot get it back.</p><button class="btn primary si-submit" type="submit">Create account</button>${back}`,
     // The Rex Desk account's browser sign-in finds the backup, so no database address or key is ever typed.
-    cloud: `<p class="si-note">Open your account from its cloud backup (Settings, Backup and updates): after a reinstall, after this computer's data was cleared, or on a new computer. Your agents, chats, pictures and settings come back.</p>${state.account === 'found' ? '<p class="si-note"><b>Found the backup of your Rex Desk account.</b> Now enter the email and passphrase of the workspace in it.</p><input type="hidden" name="account" value="1">' : `<button type="button" class="btn primary si-submit" data-account ${state.account ? 'disabled' : ''}>${state.account ? 'Waiting for you to sign in in the browser…' : 'Sign in with Rex Desk to find my backup'}</button>`}${email(state.email)}${secret('Passphrase')}${stay}<button class="btn primary si-submit" type="submit">Open my account</button>`,
+    cloud: `<p class="si-note">Open your account from its cloud backup (Settings, Backup and updates): after a reinstall, after this computer's data was cleared, or on a new computer. Your agents, chats, pictures and settings come back.</p>${state.account === 'found' ? '<p class="si-note"><b>Found the backup of your Rex Desk account.</b> Now enter the email and password you used for it.</p><input type="hidden" name="account" value="1">' : `<button type="button" class="btn primary si-submit" data-account ${state.account ? 'disabled' : ''}>${state.account ? 'Waiting for you to sign in in the browser…' : 'Sign in with Rex Desk to find my backup'}</button>`}${email(state.email)}${secret('Password')}${stay}<button class="btn primary si-submit" type="submit">Open my account</button>`,
   };
   root.innerHTML = `<section class="si-card" aria-labelledby="si-title"><div class="si-brand"><img src="/favicon.svg" alt="" width="28" height="28"><h1 id="si-title">Rex Desk</h1></div>
-    ${auth.occupied ? `<p class="si-note warn">${esc(auth.occupied)} is signed in on this computer. Signing in to another account closes that workspace and stops its running agents.</p>` : ''}
+    ${auth.occupied ? `<p class="si-note warn">${esc(auth.occupied)} is signed in on this computer. Signing in to another account closes that desk and stops its working agents.</p>` : ''}
     <div class="si-tabs" role="tablist">${TABS.map(([key, label]) => `<button type="button" role="tab" aria-selected="${key === tab}" class="${key === tab ? 'on' : ''}" data-tab="${key}">${label}</button>`).join('')}</div>
     <form id="si-form" data-mode="${tab}">${forms[tab]}<p class="si-error" role="alert">${esc(state.error)}</p></form></section>`;
   (root.querySelector('input[name=email]:not([value=""])') ? root.querySelector('input[type=password]') : root.querySelector('input:not([type=hidden])'))?.focus();
@@ -128,7 +128,7 @@ root.addEventListener('submit', async event => {
   const form = event.target, data = Object.fromEntries(new FormData(form)), mode = form.dataset.mode, submit = form.querySelector('[type=submit]');
   state.tab = mode; state.email = data.email || '';
   if (mode === 'cloud' && !data.account) { state.error = 'Sign in with Rex Desk first to find your backup.'; draw(); return; }
-  if ((mode === 'create' || data.claimId) && data.repeat !== undefined && data.passphrase !== data.repeat) { state.error = 'The passphrases do not match.'; draw(); return; }
+  if ((mode === 'create' || data.claimId) && data.repeat !== undefined && data.passphrase !== data.repeat) { state.error = 'The two passwords are not the same.'; draw(); return; }
   if (mode === 'offline') data.offline = '1';
   submit.disabled = true; submit.textContent = mode === 'cloud' ? 'Restoring your account…' : 'Signing in…';
   try {

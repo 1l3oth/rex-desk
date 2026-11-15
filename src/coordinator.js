@@ -30,7 +30,7 @@ import { inspectRepository } from './repositories.js';
 import { Worktrees, longPath } from './worktrees.js';
 import { ProjectRules } from './project-rules.js';
 import { lowDiskMessage, friendlyDiskError } from './disk.js';
-import { HostRunner, hostAlive } from './hosts.js';
+import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
 import { Jev } from './jev.js';
@@ -113,6 +113,9 @@ export class Desk {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     this.localAi = new LocalAi(store);
+    // The installed app on Windows copies itself beside the data once per version, in the background; agents started after
+    // that run from the copy, so an update installs while they work (see prepareRuntime). Until it is ready they start as before.
+    if (!runnerFactory && process.env.REX_DESK_VERSION) void prepareRuntime(path.join(store.directory, 'runtime')).then(runtime => { this.runtime = runtime; }, () => {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
     this.localTasks = new LocalTasks(store);
@@ -217,7 +220,10 @@ export class Desk {
       .map(event => String(event.text || event.message || event.result || '')).find(text => LIMIT.test(text));
     if (!hit) return false;
     const pinned = this.accountFor(run), current = pinned || this.agents.selected(provider);
-    this.agents.markLimited(current);
+    // Limited until the reset Claude reported for this account, not a blind 5 hours: an account whose window reset minutes
+    // later was skipped for hours, and Rex Desk said every account was full while one was at 7%.
+    const usage = this.store.get('usage', `${provider}:${current || 'default'}`)?.windows || {};
+    this.agents.markLimited(current, Math.max(0, ...Object.values(usage).filter(window => window?.status === 'rejected' || Number(window?.used) >= 100).map(window => Number(window.resetsAt) || 0)));
     if (this.store.get('accounts', 'auto')?.off) { this.store.event(runId, 'account-limit', { text: `This ${title} account hit its usage limit. Switch accounts at the bottom left, then continue.` }, true); return false; }
     if (run.accountSwitchedAt && Date.now() - Date.parse(run.accountSwitchedAt) < 120000) return false;
     const next = await this.agents.alternative(provider, current);
@@ -235,6 +241,8 @@ export class Desk {
   async say(runId, text, picked = {}, { raw = false } = {}) {
     const run = this.run(runId), line = raw ? String(text || '').trim() : String(text || '').replace(/\s+/g, ' ').trim();
     if (!line) throw new Error('Write a message first.');
+    // The person wrote: the count of fresh sessions that carried on by themselves starts again.
+    if (run.autoContinues) this.patchRun(runId, { autoContinues: 0 });
     if (this.live.has(runId)) {
       this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
       this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
@@ -254,7 +262,7 @@ export class Desk {
     }
   }
   authorize(scope, runId, { coordinator = false } = {}) {
-    if (!scope) throw new Error('Authentication required.');
+    if (!scope) throw new Error('Sign in first.');
     const scoped = scope.role === 'worker';
     if (coordinator && (scoped || scope.role === 'specialist')) throw new Error('Only the main agent can do this.');
     if (runId && scoped && scope.runId !== runId) throw new Error('Worker token is restricted to its own run.');
@@ -396,7 +404,7 @@ export class Desk {
     const chosen = config.repositories.find(item => item.id === repositoryId);
     const placeable = this.store.list('repository').length > 1 && (!chosen || !baseBranch) && !parentRunId;
     const repository = effectiveRepository(chosen || config.repositories.find(item => item.id === task.repositoryId) || (config.repositories.length === 1 ? config.repositories[0] : null));
-    if (!repository && !placeable) throw new Error('Select a repository for this task.');
+    if (!repository && !placeable) throw new Error('Choose a project for this task.');
     const parent = parentRunId ? this.run(parentRunId) : {};
     const run = { id: id(), role: 'worker', taskId, title: titleEn || task.title, repositoryId: repository?.id || '', ...(specialistId ? { specialistId } : {}), ...(roomId ? { roomId } : {}),
       ...(placeable ? { placement: { state: 'pending', repository: Boolean(chosen), base: Boolean(baseBranch) } } : {}),
@@ -514,7 +522,7 @@ export class Desk {
       }
       // A headless agent works in a process of its own, so a Rex Desk restart (an update) does not cut it off.
       const hosted = attach || (!this.runnerFactory && this.store.config().agentHost !== false);
-      const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.hostOptions || {}) })
+      const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.runtime ? { runtime: this.runtime } : {}), ...(this.hostOptions || {}) })
         : this.runnerFactory ? this.runnerFactory(options)
         : new (run.provider === 'codex' ? CodexRunner : run.provider === 'gemini' ? AntigravityRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) });
       const entry = this.live.get(runId);
@@ -603,7 +611,7 @@ ${message}` : message);
         apiKey: this.jev.apiKey(), model: config.jev?.model || undefined, fetcher: this.jev.fetcher, versions: config.jev?.versions });
     } catch (error) { this.store.event(run.id, 'placement-error', { message: error.message }, true); }
     if (!placed) {
-      if (!run.repositoryId) throw new Error('Rex Desk could not tell which repository this issue belongs to. Choose one and start it again.');
+      if (!run.repositoryId) throw new Error('Rex Desk could not tell which project this issue belongs to. Choose one and start it again.');
       return this.patchRun(run.id, { placement: { ...run.placement, state: 'default' } });
     }
     // A checkout Jev chose that is not in Settings yet is added with what its own files say; commands are detected later.
@@ -635,6 +643,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       'You are the main agent of Rex Desk, the first agent the person talks to. Keep every message short and plain. Work in small steps.', "When the person asks about memory, a slow computer, or what is running, read desk_monitor; free unused memory with desk_free_memory, and end one process with desk_end_process (anything opened outside Rex Desk only with their OK). A task on a project that has its own agent always goes to that agent with desk_assign_task (in a room, pass roomId so they do it in the room); do not do it yourself or start a new run for it, unless the person asks you to. You run the desk for the person: with desk_runs, desk_stop_run, desk_assign_task and desk_tell_run you can stop or close any run, give a task to an agent, and tell any run what to do. Do it when the person asks; when you do it on your own judgment, say what you did in one line.",
       this.memory.chatStyle(), this.memory.person() ? `What you know about the person (all agents share this). Follow "How to explain things to me" in every answer:\n${this.memory.person()}` : '', this.specialists.lessonsText('main'), "Notice what the person likes and dislikes from how they react to you: corrections, praise, frustration, things they ask for again. Save what you notice with desk_learn_person; lessons about your own work go to desk_learn. Preferences can change with time and events: treat the notes about the person as hints, prefer the newest, and when what the person says now differs, follow what they say now and update the note with replaces.", this.memory.secondBrain(), "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
       'While you read projects and the second brain, notice pictures that may be the person (a portfolio, about page, avatar or profile folder). If the About you page has no photo yet, ask the person with desk_ask whether that file is them, and only if they say yes, set it with desk_set_profile_photo.',
+      'The person can ask you for any kind of agent, not only one for code: a writer, a researcher, a study partner, a planner, a helper for their shop, anything. Make it with desk_create_specialist and leave project out: give it a short human name, say in purpose exactly what it is for, and put what the person told you in rules. Ask at most 2 short questions first, only if you cannot tell what they want. Never say you can only make coding agents.',
       'When the person names a project that is not in the index or not in desk_repositories, find its folder on this computer (ask if there are several) and add it yourself with desk_add_project. Never ask the person to add a repository in Settings.',
       'Where tasks come from: the person may work on company projects (tasks in Flow or Morningmate), personal projects, or anything else. For each project, ask the person with desk_ask where its tasks live, with options for each connected tracker, "Rex Desk tasks (kept here)", and "Somewhere else". Save the answer with desk_set_task_sources. Never assume a project uses Flow or Morningmate. A project whose tasks live elsewhere can still use Rex Desk tasks: create them with desk_create_task when the person describes the work.',
       '1. Read desk_memory with page "index", and desk_specialists. Greet the person in one or two lines: how many projects you found, and how many already have a specialist agent.',
@@ -814,6 +823,15 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       await this.freshStart(runId, { note, reason: `automatically, because the conversation filled ${Math.round(100 * (run.handoffShare || limit))}% of the context` });
       const waiting = this.store.get('run', runId);
       if (waiting?.queued?.length && !this.closed) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
+      // Nothing waiting: the fresh session carries on by itself from the handoff, so the person does not have to say "continue".
+      // It stops at once when the handoff shows the work is done. Config autoContinue: false waits for the next message instead.
+      // At most three in a row without the person writing, so a session that fills up again at once cannot loop for ever.
+      else if (waiting && !this.closed && this.store.config().autoContinue !== false && (waiting.autoContinues || 0) < 3) {
+        this.patchRun(runId, { autoContinues: (waiting.autoContinues || 0) + 1 });
+        this.store.event(runId, 'phase', { text: 'Fresh session: reading the handoff and carrying on' }, true);
+        void this.resume(runId, { silent: true, prompt: 'Your earlier session filled its context, so this is a fresh session. Carry on with the work from the handoff: do the next step now, without asking the person to say continue. If the handoff shows that everything the person asked for is already done, say so in one line and stop.' })
+          .catch(error => this.store.event(runId, 'error', { message: error.message }, true));
+      }
       return true;
     }
     const share = Number(run.contextUsed || 0) / Number(run.contextWindow || 200000);
@@ -1255,7 +1273,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   repositoryFor(run) {
     const repository = this.store.config().repositories.find(item => item.id === run.repositoryId);
-    if (!repository?.path) throw new Error('This run has no source repository, so nothing can be pushed.');
+    if (!repository?.path) throw new Error('This run has no project, so nothing can be pushed.');
     return repository;
   }
   gh(args, options = {}) { return exec('gh', args, { windowsHide: true, timeout: 120000, ...options }); }
@@ -1273,6 +1291,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // A project agent works in its own project like a person on that team: it reads, changes, runs, commits and pushes there when asked.
   ownProjectRule(agent) {
     const folder = agent?.projectPath || '';
+    // An agent with no code project: no git rules, only where it keeps its files.
+    if (agent?.general) return `You have no code project. Keep the files you make in ${folder || 'your own folder (your working folder)'}, and show them to the person with desk_show_file. Answer from this chat and from what the person gives you. When the person asks you to look at or change a project or folder, do it.`;
     return [`Your project${folder ? ` is at ${folder}` : ''}. You work in it directly: read it, change the code, run it, test it, commit, and push or open a pull request when the person asks (desk_publish with worktree set to the folder you worked in, or git yourself). Work the way the person says (straight in the folder, on a branch, or in a worktree); when they say nothing, use a branch in the project folder and leave others' uncommitted changes alone.`, WORKTREE_RULE, 'When you point the person at code, write it as `path:start-end` in backticks (like `src/server.js:42-58`): a click opens the file with those lines highlighted.',
       'Answer from your project and from this chat. Do not bring other projects or other chats into your answers on your own. When the person asks you to look at or change another project or folder, do it.'].join(' ');
   }

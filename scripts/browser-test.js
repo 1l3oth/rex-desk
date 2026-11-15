@@ -151,7 +151,7 @@ try {
   await tour.locator('[data-tour-other]').fill('A meetup');
   await page.screenshot({ path: path.join(screenshots, 'tour-about.png') });
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
-  await tour.getByRole('heading', { name: 'Your AI sign-in' }).waitFor();
+  await tour.getByRole('heading', { name: 'Choose your AI' }).waitFor();
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
   await tour.getByRole('heading', { name: 'Where things are kept' }).waitFor();
   await tour.locator('.st-folder', { hasText: 'Files from agents' }).locator('code').first().waitFor();

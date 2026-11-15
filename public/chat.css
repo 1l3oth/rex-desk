@@ -1774,3 +1774,51 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .la-row{display:flex;gap:8px;align-items:center;margin:8px 0}
 .la-row input{flex:1;min-width:0}
 .la-add{display:flex;flex-direction:column;gap:6px;margin-top:8px;padding:12px 14px;border:1px solid var(--line);border-radius:12px}
+/* Welcome tour, Choose your AI: one row per AI, with what it needs, whether it is ready, and one button. */
+.tai-list{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column;flex:none;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tai-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 14px;align-items:center;padding:13px 16px;border-left:3px solid transparent}
+.tai-row+.tai-row{border-top:1px solid var(--line)}
+.tai-row.on{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.tai-mark{display:grid;place-items:center;width:40px;height:40px;border-radius:11px;color:var(--ink);background:color-mix(in srgb,var(--ink) 6%,transparent);border:1px solid var(--line)}
+.tai-text .tai-status.bad{color:var(--bad,#dc2626)}
+.tai-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.tai-text b{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:15px}
+.tai-text small{color:var(--muted);font-size:13px;line-height:1.4}
+.tai-best{font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;color:var(--accent);background:color-mix(in srgb,var(--accent) 13%,transparent)}
+.tai-status{display:flex;align-items:center;gap:5px}
+.tai-text .tai-status.good{color:var(--good,#16a34a)}
+.tai-action{display:flex;justify-content:flex-end;min-width:76px}
+.tai-wait{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);max-width:150px;line-height:1.3}
+@media (max-width:560px){.tai-row{grid-template-columns:auto minmax(0,1fr)}.tai-action{grid-column:2;justify-content:flex-start}}
+
+
+/* The version, small, at the end of the list's bottom row: a click opens Settings > About. A dot when an update is ready. */
+.rail-ver{margin-left:auto;align-self:center;border:0;background:transparent;color:var(--muted);font:600 11px/1 ui-monospace,SFMono-Regular,Consolas,monospace;padding:4px 6px;border-radius:6px;cursor:pointer;font-variant-numeric:tabular-nums;position:relative}
+.rail-ver:hover{color:var(--ink);background:var(--raised)}
+.rail-ver.new::after{content:"";position:absolute;top:1px;right:0;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+/* Settings > About */
+.ab-hero{display:flex;align-items:center;gap:20px;padding:6px 0 18px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.ab-hero svg{flex:none;filter:drop-shadow(0 10px 24px rgba(40,90,220,.35))}
+.ab-hero h2{margin:0;font-size:24px;letter-spacing:-.01em}
+.ab-ver{margin:2px 0 0;color:var(--ink);font-variant-numeric:tabular-nums}
+.ab-status{margin:2px 0 0;color:var(--muted);font-size:13px}.ab-status.new{color:var(--accent)}
+.ab-actions{display:flex;gap:8px;margin-top:10px}
+.ab-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:8px 0 6px}
+.ab-tile{display:grid;gap:2px;padding:14px 14px 12px;border:1px solid var(--line);border-radius:14px;background:var(--raised)}
+.ab-tile b{font-size:26px;line-height:1.1;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--ink)}
+.ab-tile span{font-size:12px;color:var(--muted)}
+.ab-loading .ab-tile b,.ab-loading .ab-tile span{background:linear-gradient(90deg,var(--line),transparent,var(--line));background-size:200% 100%;border-radius:6px;animation:ab-shimmer 1.4s linear infinite;color:transparent}
+@keyframes ab-shimmer{to{background-position:-200% 0}}
+.ab-big{margin:6px 0 10px;color:var(--muted)}.ab-big b{color:var(--ink);font-size:18px}
+.ab-bar{display:flex;height:12px;border-radius:999px;overflow:hidden;background:color-mix(in srgb,var(--accent) 10%,var(--raised));border:1px solid var(--line)}
+.ab-bar i{display:block;height:100%}
+.ab-desk{background:var(--accent)}.ab-other{background:color-mix(in srgb,var(--muted) 45%,transparent)}.ab-free{background:color-mix(in srgb,var(--accent) 10%,var(--raised));border:1px solid var(--line)}
+.ab-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin:8px 0 4px;font-size:12px;color:var(--muted)}
+.ab-legend span{display:inline-flex;align-items:center;gap:6px}.ab-legend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+.ab-places{display:grid;gap:8px;margin-top:6px}
+.ab-place{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
+.ab-place>span{display:grid;gap:2px;min-width:0;flex:1}.ab-place small{color:var(--muted);font-size:11px}
+.ab-place code{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+.ab-foot{margin-top:14px}
+@media (prefers-reduced-motion:reduce){.ab-loading .ab-tile b,.ab-loading .ab-tile span{animation:none}}
+.ab-w1{width:2%}.ab-w2{width:4%}.ab-w3{width:6%}.ab-w4{width:8%}.ab-w5{width:10%}.ab-w6{width:12%}.ab-w7{width:14%}.ab-w8{width:16%}.ab-w9{width:18%}.ab-w10{width:20%}.ab-w11{width:22%}.ab-w12{width:24%}.ab-w13{width:26%}.ab-w14{width:28%}.ab-w15{width:30%}.ab-w16{width:32%}.ab-w17{width:34%}.ab-w18{width:36%}.ab-w19{width:38%}.ab-w20{width:40%}.ab-w21{width:42%}.ab-w22{width:44%}.ab-w23{width:46%}.ab-w24{width:48%}.ab-w25{width:50%}.ab-w26{width:52%}.ab-w27{width:54%}.ab-w28{width:56%}.ab-w29{width:58%}.ab-w30{width:60%}.ab-w31{width:62%}.ab-w32{width:64%}.ab-w33{width:66%}.ab-w34{width:68%}.ab-w35{width:70%}.ab-w36{width:72%}.ab-w37{width:74%}.ab-w38{width:76%}.ab-w39{width:78%}.ab-w40{width:80%}.ab-w41{width:82%}.ab-w42{width:84%}.ab-w43{width:86%}.ab-w44{width:88%}.ab-w45{width:90%}.ab-w46{width:92%}.ab-w47{width:94%}.ab-w48{width:96%}.ab-w49{width:98%}.ab-w50{width:100%}

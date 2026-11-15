@@ -310,7 +310,7 @@ export class Store extends EventEmitter {
         repositoryId: source.repositoryId || (input.repositories.length === 1 ? input.repositories[0].id || '' : ''), statusFilter: ['active', 'unfinished', 'all'].includes(source.statusFilter) ? source.statusFilter : 'active', statuses: [...new Set((Array.isArray(source.statuses) ? source.statuses : String(source.statuses || '').split('\n')).map(name => String(name).trim()).filter(Boolean))].slice(0, 100), statusMap: source.statusMap || {} };
     });
     const repositories = input.repositories.map(repository => {
-      if (!path.isAbsolute(repository.path || '')) throw new Error('Repository path must be absolute.');
+      if (!path.isAbsolute(repository.path || '')) throw new Error('Give the full path of the project folder.');
       const commands = ['setupCommand', 'devCommand', 'testCommand'].reduce((result, key) => ({ ...result, [key]: String(repository[key] || '') }), {});
       if (repository.devCommand && !repository.devCommand.includes('{port}')) throw new Error('Dev command must contain {port}, so concurrent runs use separate ports.');
       const branchPattern = String(repository.branchPattern || '').trim();
@@ -332,6 +332,8 @@ export class Store extends EventEmitter {
       defaultMode: ['bypassPermissions', 'auto', 'acceptEdits', 'manual', 'plan'].includes(input.defaultMode) ? input.defaultMode : 'bypassPermissions',
       // How full a chat's context may get before it hands over to a fresh session by itself (false: never).
       autoHandoff: input.autoHandoff === false ? false : Math.min(0.98, Math.max(0.5, Number(input.autoHandoff) || 0.85)),
+      // After such a handoff the fresh session carries on by itself (false: it waits for the person's next message).
+      autoContinue: input.autoContinue !== false,
       schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false, versions: String(input.jev?.versions || '').trim().slice(0, 300) },
       control: { enabled: input.control?.enabled !== false, confirm: input.control?.confirm !== false, agents: input.control?.agents === true, language: ['km', 'en', 'ko'].includes(input.control?.language) ? input.control.language : 'en', allow: Array.isArray(input.control?.allow) ? [...new Set(input.control.allow.map(String).filter(item => /^[a-z_]{2,40}$/.test(item)))].slice(0, 60) : defaults.control.allow } };
     for (const account of accounts) {

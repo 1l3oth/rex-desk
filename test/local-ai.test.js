@@ -83,3 +83,30 @@ test('a streamed OpenAI answer comes back as Claude stream events, text and tool
   assert.equal(events[9].delta.stop_reason, 'tool_use');
   assert.equal(events[9].usage.output_tokens, 4);
 });
+
+test('Set up installs Ollama when it is missing, starts it, and downloads a starter model that fits the computer', async () => {
+  const s = store(), steps = []; let installed = false, running = false, pulled = false;
+  const fetcher = async (url) => {
+    if (!running) throw new Error('not running');
+    if (url.endsWith('/api/version')) return reply({ version: '1' });
+    if (url.endsWith('/api/tags')) return reply({ models: pulled ? [{ name: 'qwen3:4b', size: 2.6e9, details: {} }] : [] });
+    if (url.endsWith('/api/show')) return reply({ capabilities: ['completion', 'tools'], model_info: {} });
+    if (url.endsWith('/api/pull')) { steps.push('pull'); pulled = true; return { ok: true, status: 200, body: [new TextEncoder().encode('{"status":"success"}\n')] }; }
+    throw new Error(`unexpected ${url}`);
+  };
+  const local = new LocalAi(s, { fetcher });
+  const job = local.setup({ platform: 'win32', wait: 10, memory: 16 * 2 ** 30, free: () => 50e9,
+    find: () => installed ? 'ollama.exe' : '', run: async () => { steps.push('install'); installed = true; return true; }, start: () => { steps.push('start'); running = true; } });
+  assert.equal(job.model, 'qwen3:4b', 'a small model for an ordinary laptop');
+  for (let i = 0; i < 400 && job.state === 'downloading'; i++) await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(job.state, 'done', job.error);
+  assert.deepEqual(steps, ['install', 'start', 'pull']);
+  assert.ok(modelList(s, 'claude').some(item => item.id === 'local:ollama/qwen3:4b'));
+
+  // A full disk is said plainly, before a long download starts.
+  pulled = false;
+  const full = new LocalAi(s, { fetcher }).setup({ wait: 10, free: () => 1e9, find: () => 'ollama.exe', run: async () => true, start: () => {} });
+  for (let i = 0; i < 200 && full.state === 'downloading'; i++) await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(full.state, 'failed'); assert.match(full.error, /Not enough free space/);
+  s.close();
+});

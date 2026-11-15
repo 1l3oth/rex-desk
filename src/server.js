@@ -14,6 +14,7 @@ import { findCloudWorkspace } from './turso.js';
 import { Updates } from './updates.js';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { Desk } from './coordinator.js';
+import { aboutRexDesk } from './about.js';
 import { handleMcp } from './mcp.js';
 import { git, resolveCommand } from './processes.js';
 import { execFile, execFileSync, spawn } from 'node:child_process';
@@ -186,7 +187,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         else opened.cloud = { pulled: false, reason: 'No cloud backup.' };
         if (session === opened) notify();
       };
-      if (store.fresh) { if (bootStage) bootStage = 'Restoring your workspace from your cloud backup'; await sync(); }
+      if (store.fresh) { if (bootStage) bootStage = 'Bringing your desk back from your cloud backup'; await sync(); }
       else { opened.cloud = { pulled: false, syncing: true }; void sync().catch(error => { opened.cloud = { pulled: false, reason: error.message }; }); }
     } else void store.cloud.open();
     notify(); return session;
@@ -334,13 +335,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   // Requests wait for it, so nobody sees the sign-in page or works on an out-of-date copy meanwhile.
   let opening = Promise.resolve();
   if (!accounts) await openSession(null, null);
-  else { bootStage = 'Unlocking your workspace'; opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; }); }
+  else { bootStage = 'Opening your desk'; opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; }); }
   void opening.finally(() => { bootStage = ''; });
   // Agents working right now, by name: an update restarts Rex Desk and would cut them off.
   function busyAgents(store) {
     if (!store) return [];
     // A chat open in the Claude app is a session waiting for the person, not work in progress: it does not hold an update back.
-    const names = store.list('run').filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state) && !run.inApp)
+    // Nor does an agent running from Rex Desk's private copy (host.outside): the update leaves it running and the new server attaches to it.
+    const names = store.list('run').filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state) && !run.inApp && !run.host?.outside)
       .map(run => { const id = run.roomAgent || run.specialistId; return (id && id !== 'main' ? store.get('specialist', id)?.name : '') || (run.main || run.role === 'coordinator' ? 'Rex Agent' : run.title) || 'An agent'; });
     return [...new Set(names)];
   }
@@ -457,6 +459,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (input.action === 'remove') return json(response, 200, desk.peers.remove(input.id));
         throw new Error('Unknown action.');
       }
+      // Settings › About: version, counts and storage.
+      if (url.pathname === '/api/about' && request.method === 'GET') return json(response, 200, await aboutRexDesk({ store, rooms: desk.rooms.list(), update: updates.status(), install: process.env.REX_DESK_EXE ? path.dirname(process.env.REX_DESK_EXE) : root, fresh: url.searchParams.has('fresh') }));
       if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: { ...updates.status(), whenIdle: updateWhenIdle, busy: busyAgents(store) }, cloudSync: session.cloud || null, account: { email: session.email, role: role() }, code: codeVersion() }); }
       // One-click cloud backup: start opens Turso's sign-in page in the browser; finish waits for it, makes the database and connects it.
       if (['/api/database/turso-start', '/api/database/turso-finish', '/api/database/connect'].includes(url.pathname)) ownDatabaseOnly();
@@ -637,6 +641,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/local-ai/servers' && request.method === 'POST') { const input = await body(request); desk.localAi.addServer(input); return json(response, 200, await desk.localAi.status()); }
       if (url.pathname === '/api/local-ai/servers' && request.method === 'DELETE') { desk.localAi.removeServer(String(url.searchParams.get('id') || '')); return json(response, 200, await desk.localAi.status()); }
       if (url.pathname === '/api/local-ai/servers' && request.method === 'PUT') { const input = await body(request); desk.localAi.updateServer(String(input.id || ''), input); return json(response, 200, await desk.localAi.status()); }
+      if (url.pathname === '/api/local-ai/setup' && request.method === 'POST') return json(response, 200, desk.localAi.setup());
       if (url.pathname === '/api/local-ai/pull' && request.method === 'POST') return json(response, 200, desk.localAi.pull((await body(request)).model));
       if (url.pathname === '/api/local-ai/models' && request.method === 'DELETE') { const status = await desk.localAi.remove(String(url.searchParams.get('model') || '')); desk.specialists.normalizeModels(); return json(response, 200, status); }
       if (url.pathname === '/api/local-ai/huggingface' && request.method === 'GET') return json(response, 200, { items: await desk.localAi.searchHuggingFace(url.searchParams.get('q')) });
@@ -654,6 +659,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         input.provider = aiProvider(input.provider || 'claude');
         const config = store.publicConfig();
         store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [input.provider]: input.profile ?? null } });
+        // Picked by the person: an old "limited" mark does not keep the automatic switch away from it.
+        if (input.profile) desk.agents.clearLimited(input.profile);
         desk.agents.invalidate(input.provider);
         return json(response, 200, await desk.agents.overview());
       }
@@ -750,7 +757,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const branchMatch = url.pathname.match(/^\/api\/repositories\/([^/]+)\/branches$/);
       if (branchMatch) {
         const repository = store.config().repositories.find(item => item.id === decodeURIComponent(branchMatch[1]));
-        if (!repository) return json(response, 404, { error: 'Repository not found.' });
+        if (!repository) return json(response, 404, { error: 'Project not found.' });
         const branches = (await git(repository.path, ['for-each-ref', '--format=%(refname:short)', 'refs/heads', 'refs/remotes/origin'])).split('\n').filter(Boolean);
         return json(response, 200, { branches });
       }
@@ -977,7 +984,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/glass.css': 'glass.css', '/rex-core.js': 'rex-core.js', '/chat-palette.js': 'chat-palette.js', '/chat-split.js': 'chat-split.js', '/themes.css': 'themes.css', '/chat-glass.js': 'chat-glass.js', '/chat-local-ai.js': 'chat-local-ai.js', '/win-bar.js': 'win-bar.js', '/chat-graph.js': 'chat-graph.js', '/graph-worker.js': 'graph-worker.js', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/glass.css': 'glass.css', '/rex-core.js': 'rex-core.js', '/chat-palette.js': 'chat-palette.js', '/chat-split.js': 'chat-split.js', '/themes.css': 'themes.css', '/chat-glass.js': 'chat-glass.js', '/ai-logos.js': 'ai-logos.js', '/chat-tour-ai.js': 'chat-tour-ai.js', '/chat-local-ai.js': 'chat-local-ai.js', '/win-bar.js': 'win-bar.js', '/chat-graph.js': 'chat-graph.js', '/graph-worker.js': 'graph-worker.js', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
       // three.js ships from the installed package; the page loads no remote scripts.
       const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js', '/vendor/driver/driver.js.mjs': 'driver.js/dist/driver.js.mjs', '/vendor/driver/driver.css': 'driver.js/dist/driver.css' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });

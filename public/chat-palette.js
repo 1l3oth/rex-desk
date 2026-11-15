@@ -11,7 +11,7 @@ const ICON = {
 };
 const KIND_LABEL = { chat: 'Chat', agent: 'Agent', room: 'Group chat', task: 'Task', place: 'Place', setting: 'Settings' };
 const PLACES = [['inbox', 'Needs you'], ['tasks', 'Tasks'], ['person', 'Knowledge'], ['jev', 'Jev'], ['monitor', 'Memory'], ['devices', 'Devices'], ['worktrees', 'Worktrees']];
-const SETTINGS = [['general', 'General, look and theme'], ['notify', 'Notifications'], ['agents', 'Agents'], ['accounts', 'Claude accounts'], ['localai', 'Local AI'], ['projects', 'Projects'], ['sources', 'Task sources'], ['jev', 'Jev and voice'], ['schedule', 'Schedule'], ['devices', 'Devices and phone'], ['backup', 'Backup and updates'], ['folders', 'Folders'], ['connect', 'Connect another AI']];
+const SETTINGS = [['general', 'General, look and theme'], ['notify', 'Notifications'], ['agents', 'Agents'], ['accounts', 'AI accounts'], ['localai', 'Local AI'], ['projects', 'Projects'], ['sources', 'Task sources'], ['jev', 'Jev and voice'], ['schedule', 'Schedule'], ['devices', 'Devices and phone'], ['backup', 'Backup and updates'], ['folders', 'Folders'], ['connect', 'Connect another AI']];
 
 function everything() {
   const ui = window.__rexCtx?.ui, snap = ui?.snap || {};
