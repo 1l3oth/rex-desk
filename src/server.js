@@ -135,7 +135,10 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   writeFileSync(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 });
   // One workspace is open at a time. A plain data folder (tests, scripts) opens immediately; account mode waits for sign-in.
   const accounts = dataDirectory ? null : new Accounts(dataRoot);
-  const updates = new Updates(dataRoot, updateOptions);
+  // A copy started with its own data folder (a test, a screenshot script) never updates itself. Agents run inside the
+  // installed app and their shells carry its version and path, so every such copy took itself for the app and downloaded
+  // the 31 MB installer into its temporary folder: hundreds of them filled drive C:.
+  const updates = new Updates(dataRoot, updateOptions || (dataDirectory ? { version: '' } : undefined));
   // One computer and one voice engine for every account on it: the models are large, so they live beside the accounts.
   const computer = computerFactory ? computerFactory() : new Computer({ directory: path.join(dataRoot, 'screens') });
   // A plain data folder (tests, scripts) never holds the computer awake.
