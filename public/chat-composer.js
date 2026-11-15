@@ -18,11 +18,27 @@ function remember(patch) { try { localStorage.setItem(KEY, JSON.stringify({ ...s
 
 // What the pickers show: the run's own choice when it has one, else what the person last picked, else the defaults.
 // The AI a chat runs on: the one picked for it here, else the run's own, else the default in Settings.
-function providerOf(ctx, run) { const picked = ctx.ui.providerPick?.[ctx.draftKey()]; return picked || run?.provider || ctx.ui.snap?.config?.provider || 'claude'; }
-function choicesFor(ctx, provider) { const all = ctx.ui.snap?.choices || { models: [], efforts: [], modes: [] }; return all.providers?.[provider] || all; }
+// Local AI is offered as an AI of its own (the models on this computer), though it runs through Claude Code: a chat on
+// a local model shows "Local AI", Claude Code's list shows only Claude's models, and the message goes out as Claude Code.
+const LOCAL = 'local';
+const isLocalId = id => String(id || '').startsWith('local:');
+function providerOf(ctx, run) {
+  const picked = ctx.ui.providerPick?.[ctx.draftKey()]; if (picked) return picked;
+  const own = run?.provider || ctx.ui.snap?.config?.provider || 'claude';
+  return own === 'claude' && isLocalId(run ? run.model : ctx.ui.snap?.config?.models?.claude) ? LOCAL : own;
+}
+function choicesFor(ctx, provider) {
+  const all = ctx.ui.snap?.choices || { models: [], efforts: [], modes: [] };
+  if (provider !== LOCAL && provider !== 'claude') return all.providers?.[provider] || all;
+  const claude = all.providers?.claude || all, local = provider === LOCAL;
+  const models = claude.models.filter(item => isLocalId(item.id) === local);
+  // No model on this computer yet: say where to get one instead of an empty list.
+  return { ...claude, models: models.length || !local ? models : [{ id: '', label: 'No models yet', hint: 'Open Settings, Local AI, and press Set up: it installs Ollama and a starter model.', disabled: true }] };
+}
+const sentProvider = provider => (provider === LOCAL ? 'claude' : provider);
 export function currentOptions(ctx) {
   const { ui } = ctx, run = ui.view.type === 'main' ? ctx.mainRun() : ui.view.type === 'run' ? ctx.runById(ui.view.id) : null, last = saved(), provider = providerOf(ctx, run), choices = choicesFor(ctx, provider);
-  const configured = ui.snap?.config?.models?.[provider];
+  const configured = ui.snap?.config?.models?.[sentProvider(provider)];
   // Only a model that is on the current list is shown and sent; anything else falls back to the first one (the recommended default).
   const ids = choices.models.filter(item => !item.disabled).map(item => item.id), model = [run?.model, last.model, configured].find(value => value && ids.includes(value)) || ids[0] || '';
   const modeIds = choices.modes.map(item => item.id), wanted = ui.snap?.config?.defaultMode || DEFAULT_MODE, mode = [run?.permissionMode, last.permissionMode, wanted].find(value => value && modeIds.includes(value)) || (modeIds.includes('manual') ? 'manual' : modeIds[0]);
@@ -31,7 +47,7 @@ export function currentOptions(ctx) {
 }
 export function pickedOptions(ctx) {
   const read = id => document.getElementById(id)?.value || '';
-  return { provider: read('opt-provider') || undefined, model: read('opt-model') || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
+  return { provider: sentProvider(read('opt-provider')) || undefined, model: read('opt-model') || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
 }
 
 // The AI, model, effort and mode pickers under the message box, for the AI picked now.
@@ -39,7 +55,7 @@ function optionPickers(ctx) {
   const now = currentOptions(ctx), choices = choicesFor(ctx, now.provider);
   const select = (id, label, items, value) => pickerHtml(ctx, { id, label, compact: true, value, items: items.map(item => ({ value: item.id, label: item.label, hint: item.hint, disabled: item.disabled })) });
   const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? 'Dangerous' : item.label, hint: item.hint || MODE_HINT[item.id] }));
-  return `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude plan' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT plan' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}`;
+  return `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude plan' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT plan' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }, { id: LOCAL, label: 'Local AI', hint: 'A model on this computer: free and private, no account needed' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}`;
 }
 // The message box is not redrawn while the chat updates (it would lose what is typed), so a new AI redraws only its pickers.
 function redrawOptionPickers(ctx) {
@@ -400,7 +416,7 @@ export function initComposer(ctx) {
   document.addEventListener('change', event => {
     if (event.target.id === 'file-input') { for (const file of event.target.files) void upload(ctx, file); event.target.value = ''; return; }
     // Switching the AI shows that AI's models and modes; the next message goes to it, with the chat so far handed over.
-    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : 'Claude Code'}.`); return; }
+    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : event.target.value === LOCAL ? 'Local AI, on this computer' : 'Claude Code'}.`); return; }
     if (event.target.id === 'opt-model') remember({ model: event.target.value });
     if (event.target.id === 'opt-effort') remember({ effort: event.target.value });
     if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast('Dangerous: the agent runs tools without asking.'); }

@@ -95,7 +95,8 @@ export class LocalAi {
       if (!server.running) { items.push(...previous.filter(item => item.id.startsWith(`local:${server.id}/`))); continue; }
       for (const model of server.models) if (model.tools) items.push({ id: localModelId(server.id, model.name), label: `${model.name} · on this computer`, hint: `Free and private, runs with ${server.name}. Slower than Claude.`, local: true });
     }
-    this.store.put('models', 'local', { id: 'local', items, at: new Date().toISOString() });
+    // Saved (and the pickers updated) only when the list changed: it is checked every few minutes.
+    if (JSON.stringify(items) !== JSON.stringify(previous)) this.store.put('models', 'local', { id: 'local', items, at: new Date().toISOString() });
     return { servers, pulls: [...this.pulls.values()] };
   }
 

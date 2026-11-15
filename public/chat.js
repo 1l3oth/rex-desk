@@ -459,9 +459,11 @@ function drawSide(html, extra = '') {
 const draftKey = () => `${ui.view.type}:${ui.view.id || ''}`;
 // The message box names the AI the next message goes to: the one picked under the box, else the chat's own.
 function composerHint(run, working) {
-  const next = ui.providerPick?.[draftKey()] || (run.provider === 'codex' ? 'claude' : run.provider);
-  if (working) return `Message ${provider(run.provider)}…`;
-  return next !== run.provider ? `Message ${provider(next)}. It takes over from ${provider(run.provider)} with the chat so far…` : `Message ${provider(next)}. It picks up where it left off…`;
+  // Local AI runs through Claude Code: switching between them keeps the same conversation.
+  const picked = ui.providerPick?.[draftKey()], next = picked === 'local' ? 'claude' : picked || (run.provider === 'codex' ? 'claude' : run.provider);
+  const name = id => (id === 'claude' && (picked === 'local' || (!picked && String(run.model || '').startsWith('local:'))) ? 'Local AI' : provider(id));
+  if (working) return `Message ${name(run.provider)}…`;
+  return next !== run.provider ? `Message ${name(next)}. It takes over from ${provider(run.provider)} with the chat so far…` : `Message ${name(next)}. It picks up where it left off…`;
 }
 
 function renderAll(full = false) {
