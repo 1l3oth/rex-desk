@@ -99,9 +99,23 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   if (!dataDirectory && existsSync(dataRoot)) {
     const lock = path.join(dataRoot, 'runtime.lock');
     const waitForOld = async () => { const owner = Number(existsSync(lock) ? readFileSync(lock, 'utf8') : 0); const alive = () => { try { process.kill(owner, 0); return true; } catch { return false; } }; for (let i = 0; owner > 0 && owner !== process.pid && i < 240 && alive(); i++) await new Promise(resolve => setTimeout(resolve, 250)); };
-    dataRoot = await followDataMove(dataRoot, { waitForOld, log: message => console.log(message) });
+    // A move copies the whole folder, which can take a minute. Meanwhile a small stand-in answers on the port with how far the
+    // copy is, so the window shows progress instead of a black screen, and the desktop app does not take the busy server for
+    // a stopped one and start a second server over it. It opens once the old server has let go of the port.
+    let moveStage = 'Moving your Rex Desk data to its new folder', standIn = null;
+    const holdPort = () => new Promise(resolve => {
+      const item = http.createServer((request, response) => {
+        if (new URL(request.url, 'http://local').pathname === '/api/boot') return json(response, 200, { stage: moveStage, ready: false });
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(`<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="2"><title>Rex Desk</title><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0a0e19;color:#cbd5e1;font:16px/1.5 system-ui,sans-serif"><p>${moveStage.replace(/[<>&]/g, '')}…<br><small style="color:#64748b">Rex Desk opens by itself when the move is done. Keep this window open.</small></p></body>`);
+      });
+      item.once('error', () => resolve(null)); item.listen(port, '127.0.0.1', () => resolve(item));
+    });
+    dataRoot = await followDataMove(dataRoot, { waitForOld: async () => { await waitForOld(); standIn = await holdPort(); }, log: message => console.log(message),
+      progress: (done, total) => { moveStage = `Moving your Rex Desk data to its new folder: ${done} of ${total} files`; } });
+    if (standIn) { standIn.closeAllConnections(); await new Promise(resolve => standIn.close(resolve)); }
   }
-  if (!dataDirectory) followMemoryMove({ log: message => console.log(message) });
+  if (!dataDirectory) await followMemoryMove({ log: message => console.log(message) });
   // A folder that exists already (even a drive root such as F:\, where mkdir fails with EPERM) is used as it is.
   if (!existsSync(dataRoot)) mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataRoot, 'runtime.lock');
@@ -550,7 +564,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         store.put('sidebar', 'main', next); notify(); return json(response, 200, next);
       }
       if (url.pathname === '/api/folders' && request.method === 'GET') return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() }));
-      if (url.pathname === '/api/folders/files' && request.method === 'POST') { moveMedia(store, (await body(request)).to); return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() })); }
+      if (url.pathname === '/api/folders/files' && request.method === 'POST') { await moveMedia(store, (await body(request)).to); return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() })); }
       if (url.pathname === '/api/folders/move' && request.method === 'POST') {
         const input = await body(request);
         if (dataDirectory) throw new Error('This copy of Rex Desk runs with a fixed data folder, so it cannot move it.');
@@ -1018,10 +1032,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
 // in its job, and a plain detached child would die with it.
 // The replacement keeps this server's port, so a checkout used as the real app (started on 4317) stays on 4317 after it updates.
 async function startReplacement(port) {
-  const log = path.join(root, '.local', 'server-restart.log');
+  // The log goes in the data folder. The installed app has no .local folder, and cmd.exe does not start a command whose
+  // log folder is missing: the replacement never started, and Rex Desk stayed down after "Move" until the window restarted it.
+  const log = path.join(process.env.REX_DATA_DIR || path.join(root, '.local'), 'server-restart.log');
+  try { mkdirSync(path.dirname(log), { recursive: true }); } catch {}
   if (process.platform === 'win32') {
-    // WMI starts it with the user's plain environment, so the folders this server was given are passed on.
-    const carry = ['REX_DATA_DIR', 'REX_DESK_MEMORY'].filter(name => process.env[name]).map(name => `set "${name}=${process.env[name]}"&& `).join('');
+    // WMI starts it with the user's plain environment, so the folders and the installed app's details this server was given are passed on.
+    const carry = ['REX_DATA_DIR', 'REX_DESK_MEMORY', 'REX_DESK_VERSION', 'REX_DESK_EXE', 'REX_CLONE_DIR'].filter(name => process.env[name]).map(name => `set "${name}=${process.env[name]}"&& `).join('');
     const command = `cmd.exe /c "${carry}set REX_RESTART_AFTER=${process.pid}&& set PORT=${port}&& "${process.execPath}" src/server.js >> "${log}" 2>&1"`;
     const script = `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${command.replaceAll("'", "''")}'; CurrentDirectory = '${root.replaceAll("'", "''")}' }; exit $r.ReturnValue`;
     await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 30000 });

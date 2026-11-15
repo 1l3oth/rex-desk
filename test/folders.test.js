@@ -39,23 +39,43 @@ test('a failed data move keeps the old folder and says why', async () => {
   assert.match(readFileSync(path.join(data, 'move-pending.failed.json'), 'utf8'), /empty folder/);
 });
 
-test('the AI memory moves on the next start and is read from its new place', () => {
+test('a data move reports its progress, and a move that stopped the server twice is given up so Rex Desk opens', async () => {
+  const root = temp(), data = path.join(root, 'old'), to = path.join(root, 'new');
+  mkdirSync(path.join(data, 'workspaces', 'w1'), { recursive: true });
+  for (let i = 0; i < 45; i++) writeFileSync(path.join(data, 'workspaces', 'w1', `f${i}.txt`), `file ${i}`);
+  writeFileSync(path.join(data, 'accounts.json'), '{}');
+  planDataMove(data, to);
+  const seen = [];
+  assert.equal(await followDataMove(data, { home: path.join(root, 'home'), progress: (done, total) => seen.push([done, total]) }), to);
+  assert.deepEqual(seen.at(-1), [46, 46]); assert.ok(seen.length > 2, 'progress comes in steps');
+  assert.equal(readFileSync(path.join(to, 'workspaces', 'w1', 'f44.txt'), 'utf8'), 'file 44');
+
+  const other = temp(), stuck = path.join(other, 'old'); mkdirSync(stuck); writeFileSync(path.join(stuck, 'accounts.json'), '{}');
+  planDataMove(stuck, path.join(other, 'new'));
+  const pending = path.join(stuck, 'move-pending.json');
+  writeFileSync(pending, JSON.stringify({ ...JSON.parse(readFileSync(pending, 'utf8')), tries: 2 }));
+  assert.equal(await followDataMove(stuck, { home: path.join(other, 'home') }), stuck);
+  assert.match(readFileSync(path.join(stuck, 'move-pending.failed.json'), 'utf8'), /stopped while moving/);
+  assert.ok(!existsSync(pending));
+});
+
+test('the AI memory moves on the next start and is read from its new place', async () => {
   const home = temp(), env = { REX_DESK_VERSION: '0.0.10' }, brain = path.join(home, '.rexdesk'), to = path.join(home, 'Brain');
   mkdirSync(path.join(brain, 'agents'), { recursive: true }); writeFileSync(path.join(brain, 'user.md'), 'about me'); writeFileSync(path.join(brain, 'data-folder.txt'), 'X:\\data');
   assert.equal(memoryFolder(env, home), brain);
   planMemoryMove(to, { env, home });
-  assert.equal(followMemoryMove({ env, home }), to);
+  assert.equal(await followMemoryMove({ env, home }), to);
   assert.equal(readFileSync(path.join(to, 'user.md'), 'utf8'), 'about me');
   assert.ok(!existsSync(path.join(to, 'data-folder.txt')), 'Pointer files stay behind');
   assert.equal(memoryFolder(env, home), to);
   assert.throws(() => planMemoryMove(path.join(home, 'Other'), { env: { REX_DESK_MEMORY: brain }, home }), /REX_DESK_MEMORY/);
 });
 
-test('files from agents move at once, and new files go to the new folder', () => {
+test('files from agents move at once, and new files go to the new folder', async () => {
   const root = temp(), store = new Store(path.join(root, 'data')), to = path.join(root, 'Downloads', 'Rex Desk');
   mkdirSync(path.join(store.directory, 'artifacts', 'run-1'), { recursive: true }); writeFileSync(path.join(store.directory, 'artifacts', 'run-1', 'shot.png'), 'png');
   assert.equal(store.media('artifacts'), path.join(store.directory, 'artifacts'), 'Without a choice, files stay in the data folder');
-  moveMedia(store, to);
+  await moveMedia(store, to);
   assert.equal(store.config().mediaDirectory, to);
   assert.equal(readFileSync(path.join(to, 'artifacts', 'run-1', 'shot.png'), 'utf8'), 'png');
   assert.ok(!existsSync(path.join(store.directory, 'artifacts', 'run-1', 'shot.png')), 'The old copy is removed');
