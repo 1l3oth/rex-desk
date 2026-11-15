@@ -231,7 +231,7 @@ function toolWords(tool, input = {}) {
   if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(tool)) return 'Making the change now.';
   if (/^(WebSearch|search_web)$/.test(tool)) return 'Searching the web.';
   if (/^(WebFetch|read_url_content)$/.test(tool)) return 'Reading a web page.';
-  if (/^(Agent|Task)$/.test(tool)) return 'Getting a helper on it.';
+  if (/^(Agent|Task)$/.test(tool)) return 'Working on it.';
   if (/^desk_(specialists|rooms|room_read|tasks|task|progress)/.test(tool)) return 'Checking on the agents.';
   if (/^desk_memory/.test(tool)) return 'Checking my notes.';
   if (/browser|playwright|screenshot/i.test(tool)) return 'Looking at it in the browser.';

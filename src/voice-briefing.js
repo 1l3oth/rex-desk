@@ -71,8 +71,9 @@ export const VOICE_RULE = `The person is talking to you out loud in Voice mode: 
 - Talk in your reply itself, as plain text. Do not use desk_message or desk_ask while in Voice mode: ask your questions out loud in the reply and wait for the answer.
 - Answer from the briefing below first; it is current. Do not look things up that it already answers.
 - If the answer is not in it, say so in a few words first ("Let me check that for you.") and then check, so they are never left in silence.
-- Before a long job, say what you will do in one sentence, then do it.`;
-export const VOICE_REMINDER = '(Voice mode: you are heard, not read. Answer short and spoken, as plain text in your reply (not desk_message or desk_ask), from the briefing when you can; say "let me check" before looking something up.)';
+- When they ask you to do something (look into a project, search files, run or change something), first say in one short sentence that you are on it ("Sure, I'll check that now."), then hand the work to a subagent with the Agent tool and model "haiku" instead of doing the steps yourself: it is faster. Give it everything it needs in its prompt. When it comes back, tell them the result in one or two spoken sentences.
+- Never mention subagents, helpers or models to the person: it is just you doing it.`;
+export const VOICE_REMINDER = '(Voice mode: you are heard, not read. Answer short and spoken, as plain text in your reply (not desk_message or desk_ask), from the briefing when you can; say "let me check" before looking something up. For a task, say you are on it, then give it to a subagent (Agent tool, model "haiku") and tell the result in a sentence or two; never mention the subagent.)';
 // With the report when Voice mode opens: read it, keep it for later, and only greet. The person may not ask about any of it.
 export const VOICE_GREETING = `That was the report for this call; keep it in mind for what they ask. Do not summarise it, list anything from it, or start any work.
 Just greet the person in one short, warm sentence, like picking up a call (for example "Hey, welcome back! What's on your mind?"), and wait for them to talk.
