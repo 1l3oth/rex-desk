@@ -129,7 +129,11 @@ export class AntigravityRunner {
   notification(method, params) {
     if (method !== 'session/update' || (this.sessionId && params.sessionId !== this.sessionId) || !this.live) return;
     const update = params.update || {};
-    if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') { this.text += update.content.text; this.pendingText += update.content.text; }
+    if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
+      this.text += update.content.text; this.pendingText += update.content.text;
+      // The words so far, for read-aloud to speak while Gemini is still writing (as Claude's do).
+      if (Date.now() - (this.partialAt || 0) > 120) { this.partialAt = Date.now(); this.event('agent-text-partial', { text: this.pendingText }); }
+    }
     if (update.sessionUpdate === 'tool_call') {
       this.flush();
       this.event('agent-tool', { id: update.toolCallId, ...antigravityTool(update.name || update.kind || 'tool', update.rawInput || update.args || {}) });

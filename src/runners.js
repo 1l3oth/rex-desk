@@ -87,7 +87,8 @@ export class ClaudeRunner {
     const mode = sdkMode(this.run.permissionMode), resume = sessionId(this.run.sessionId);
     if (resume) { try { carrySession(resume, this.cwd, env.CLAUDE_CONFIG_DIR || ''); } catch { /* the resume reports it if the conversation is really gone */ } }
     // Rex Desk refuses nothing here: every team works its own way, so the agent decides from what the person says, and asks them when unsure.
-    const options = { cwd: this.cwd, env, abortController: this.controller,
+    // includePartialMessages: the reply arrives word by word as it is written, so read-aloud can speak it while it is written.
+    const options = { cwd: this.cwd, env, abortController: this.controller, includePartialMessages: true,
       permissionMode: mode, ...(mode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
       ...(this.run.effort ? { effort: this.run.effort } : {}),
       // Claude Code's own question prompt would not reach the dashboard; the agent asks through desk_ask instead.
@@ -137,6 +138,19 @@ ${news}` } } : {};
         error => this.event('remote-control', { error: String(error?.message || error) }));
     }
     for await (const message of this.query) {
+      // The agent's own words as they are written (not a sub-agent's): the text so far of the current block, a few times a
+      // second. Shown and spoken live; the finished block still arrives as agent-text below and is what is saved.
+      if (message.type === 'stream_event') {
+        const part = message.event || {};
+        if (!message.parent_tool_use_id) {
+          if (part.type === 'content_block_start') this.partial = '';
+          if (part.type === 'content_block_delta' && part.delta?.type === 'text_delta') {
+            this.partial = `${this.partial || ''}${part.delta.text || ''}`;
+            if (Date.now() - (this.partialAt || 0) > 120) { this.partialAt = Date.now(); this.event('agent-text-partial', { text: this.partial }); }
+          }
+        }
+        continue;
+      }
       if (message.type === 'system' && message.subtype === 'init') { this.apiKeySource = message.apiKeySource; this.event('session', { sessionId: message.session_id, apiKeySource: message.apiKeySource }); }
       // How much of the account's 5-hour and weekly limits is used, as Claude Code reports it during a turn.
       if (message.type === 'rate_limit_event' && message.rate_limit_info) this.event('rate-limit', { ...message.rate_limit_info });

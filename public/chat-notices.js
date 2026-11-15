@@ -183,13 +183,28 @@ function popUp(ctx, item, more) {
   });
   arm();
 }
+// The chats open in the split view's panes (each pane is an embedded page): the person is looking at them already.
+function openInPanes() {
+  const keys = new Set();
+  for (const frame of document.querySelectorAll('.sp-frame')) {
+    const hash = decodeURIComponent((frame.getAttribute('src') || '').split('#')[1] || ''), [, type, id] = hash.split('/');
+    if (type === 'main') keys.add('main:'); else if (['run', 'room'].includes(type) && id) keys.add(`${type}:${id}`);
+  }
+  return keys;
+}
+// Voice mode is on screen somewhere in this window (its body writes this every few seconds): no pop-ups, no sounds.
+const voiceOnScreen = () => { try { return Date.now() - Number(localStorage.getItem('rex-voice-live') || 0) < 5000; } catch { return false; } };
+const embedded = new URLSearchParams(location.search).has('embed');
 export function watchNotices(ctx) {
   const { ui } = ctx, recent = ui.snap?.notices?.recent || [], prefs = ui.snap?.notices?.prefs || {};
   drawPane(ctx); window.__rexNoticeSettingsRedraw?.();
   const key = noticeKey(ui.view); if (window.rexView !== key) { window.rexView = key; window.rexPresence?.(); }
   if (!seen) { seen = new Set(recent.map(item => item.id)); return; }
-  const fresh = recent.filter(item => !seen.has(item.id) && item.alert && !item.read && item.key !== key);
+  const looking = openInPanes();
+  const fresh = recent.filter(item => !seen.has(item.id) && item.alert && !item.read && item.key !== key && !looking.has(item.key));
   for (const item of recent) seen.add(item.id);
+  // A pane of the split view is a page of its own: only the window around it pops up, once, not every pane.
+  if (embedded || voiceOnScreen()) return;
   if (!fresh.length || prefs.inapp === false) return;
   popUp(ctx, fresh[0], fresh.length - 1);
   if (prefs.sound !== false) playTone(prefs.tone, fresh[0].kind, prefs.volume ?? 0.6);

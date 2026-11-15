@@ -170,6 +170,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (store.config().sources.length) void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
     }
     store.on('change', notify);
+    // An agent's words as they are written, for read-aloud to speak live (see chat-speak.js speakLive).
+    store.on('partial', data => { const line = `event: partial\ndata: ${JSON.stringify(data)}\n\n`; for (const client of clients) client.write(line); });
     session = { id: entry?.id, email: entry?.email || '', store, desk, cookie: randomBytes(32).toString('base64url'), staySignedIn, cloud: null };
     if (accounts) {
       accounts.touch(entry.id);
@@ -787,7 +789,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (interactionMatch && request.method === 'POST') { const owner = !store.get('interaction', interactionMatch[1]) && desk.peers.interactionOwner(interactionMatch[1]); return json(response, 200, owner ? await desk.peers.forward(owner, 'POST', url.pathname, await body(request)) : desk.answer(interactionMatch[1], await body(request))); }
       const unsendMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/messages\/(\d+)$/);
       if (unsendMatch && request.method === 'DELETE') return json(response, 200, desk.unsend(unsendMatch[1], unsendMatch[2]));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|say|fresh|app))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|say|fresh|app|voice))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         const runOwner = !store.get('run', runId) && desk.peers.runOwner(runId);
@@ -813,6 +815,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
           // Continue in Claude app (on), or bring the chat back to Rex Desk only (on: false).
           if (action === 'app') return json(response, 200, await desk.continueInApp(runId, input.on !== false));
+          // Voice mode on (the briefing is made now) or off.
+          if (action === 'voice') return json(response, 200, desk.voiceMode(runId, input.on !== false));
           if (action === 'fresh') return json(response, 200, await desk.freshStart(runId));
           if (action === 'say') return json(response, 200, await desk.say(runId, input.text, input));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));

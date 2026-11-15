@@ -30,6 +30,7 @@ import { inspectRepository } from './repositories.js';
 import { Worktrees, longPath } from './worktrees.js';
 import { ProjectRules } from './project-rules.js';
 import { lowDiskMessage, friendlyDiskError } from './disk.js';
+import { voiceBriefing, VOICE_RULE, VOICE_REMINDER, VOICE_GREETING } from './voice-briefing.js';
 import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
@@ -44,6 +45,15 @@ import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from '
 const exec = promisify(execFile);
 const EVIDENCE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.pdf': 'application/pdf', '.txt': 'text/plain', '.log': 'text/plain', '.json': 'application/json', '.html': 'text/html', '.zip': 'application/zip' };
 // qa_* belong to QA checks, which Rex Desk no longer runs; they stay listed so older runs still count as finished.
+// What a background job is told (desk_background): do the one task, quickly, without asking anyone, and end with a short
+// result that is read out loud to the person.
+const helperPrompt = (task, helperFor) => [
+  `You are a quick background job for ${helperFor}, who is talking with the person and handed you this task so they do not have to wait.`,
+  `The task: ${task}`,
+  'Do only this, with as few steps as you can. Do not ask the person anything and do not use desk_ask or desk_message: nobody is watching this job.',
+  'If something is missing or fails, stop and say so in your last reply instead of trying for long.',
+  'End with your result as plain spoken words, one to three short sentences, no lists, code, paths or links: it is read out loud to the person as it is.',
+].join('\n');
 // What a browser agent is told: use a real browser, keep the person informed, and stop before anything that costs money or cannot be undone.
 const webAgentPrompt = task => [
   `You are Rex Desk's web agent. Do this for the person on the web: ${task}`,
@@ -238,11 +248,68 @@ export class Desk {
     this.patchRun(runId, { accountSwitchedAt: now(), state: 'queued', queued: [], followUp: 'You were cut off by a usage limit. Continue exactly where you left off.' });
     this.live.delete(runId); void this.drain(); return true;
   }
+  // A background job for an agent (desk_background): a quick helper on Claude Haiku does one task in a run of its own, so the
+  // agent answers the person at once and stays free to talk; they never wait for its steps. When it ends, its short result
+  // is posted in the agent's chat (said out loud in Voice mode) and given to the agent with the person's next message.
+  startHelper(parentRunId, { task, title = '' }) {
+    const parent = this.run(parentRunId), text = String(task || '').trim().slice(0, 6000);
+    if (!text) throw new Error('Say what the job is.');
+    const name = String(title || text).replace(/\s+/g, ' ').trim();
+    const who = parent.roomAgent || parent.specialistId || (parent.main ? 'main' : '');
+    const helperFor = who === 'main' || !who ? 'Rex Agent' : this.specialists.get(who)?.name || 'an agent';
+    const run = { id: id(), role: 'helper', parentRunId, helperFor, title: `Job · ${name.length > 60 ? `${name.slice(0, 60)}…` : name}`, provider: 'claude', model: 'haiku', effort: 'low',
+      permissionMode: 'bypassPermissions', state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless',
+      cwd: parent.worktree || parent.projectPath || parent.cwd || path.join(this.store.directory, 'coordinator'), projectPath: parent.projectPath || '', instructions: text };
+    this.store.put('run', run.id, run);
+    void this.drain();
+    return { started: true, jobId: run.id, note: 'It runs on its own. Tell the person you are on it and end your reply; its result reaches them, and you, when it is done.' };
+  }
+  helperDone(runId, failure = '') {
+    const run = this.store.get('run', runId), parent = run?.parentRunId && this.store.get('run', run.parentRunId); if (!parent) return;
+    const said = this.store.events(runId, { visible: true, limit: 60 }).filter(event => event.kind === 'agent-text' && event.text).at(-1)?.text || '';
+    const result = failure ? `That job did not work: ${failure}` : said.trim().slice(0, 1200) || 'That job is done.';
+    // Posted in the agent's chat (in Voice mode it is said out loud), and kept for the agent's next turn.
+    this.message(parent.id, result);
+    this.patchRun(parent.id, { jobResults: [...(parent.jobResults || []), `${run.title.replace(/^Job · /, '')}: ${result}`].slice(-8) });
+  }
+  // What the agent's jobs found since its last turn, given with the person's next message (once).
+  takeJobResults(runId) {
+    const results = this.store.get('run', runId)?.jobResults || []; if (!results.length) return '';
+    this.patchRun(runId, { jobResults: [] });
+    return `Results of the jobs you started (the person has heard them already):\n${results.map(line => `- ${line}`).join('\n')}`;
+  }
+  // Voice mode on or off for a chat. On: the report is made now (code, milliseconds) and given to the agent at once, while
+  // the body's opening animation plays: it reads it and only greets the person, like picking up a call. Its answers later
+  // come from it. An agent still busy with a turn gets it with the first spoken message instead. Off: messages are ordinary again.
+  voiceMode(runId, on = true) {
+    const run = this.run(runId);
+    if (!on) { this.patchRun(runId, { voice: undefined }); return { on: false }; }
+    const briefing = voiceBriefing({ store: this.store, memoryDirectory: this.memory?.directory || '' });
+    const now_ = now(), busy = this.live.has(runId) || run.external;
+    this.patchRun(runId, { voice: { at: now_, briefing, sent: !busy } });
+    if (!busy) void this.resume(runId, { silent: true, prompt: `${VOICE_RULE}\n\n${briefing}\n\n${VOICE_GREETING}` }).catch(error => this.store.event(runId, 'error', { message: error.message }, true));
+    return { on: true, briefing: briefing.length, greeting: !busy };
+  }
+  // A spoken message as the agent gets it: with the briefing the first time, then with a short reminder to talk, not write.
+  spoken(runId, line) {
+    const voice = this.store.get('run', runId)?.voice; if (!voice) return '';
+    const jobs = this.takeJobResults(runId), said = jobs ? `${jobs}\n\nThe person said: ${line}` : line;
+    if (!voice.sent) { this.patchRun(runId, { voice: { ...voice, sent: true } }); return `${VOICE_RULE}\n\n${voice.briefing}\n\nThe person said: ${said}`; }
+    return `${VOICE_REMINDER}\n\n${said}`;
+  }
   async say(runId, text, picked = {}, { raw = false } = {}) {
     const run = this.run(runId), line = raw ? String(text || '').trim() : String(text || '').replace(/\s+/g, ' ').trim();
     if (!line) throw new Error('Write a message first.');
     // The person wrote: the count of fresh sessions that carried on by themselves starts again.
     if (run.autoContinues) this.patchRun(runId, { autoContinues: 0 });
+    // In Voice mode the agent gets the briefing and how to talk; the chat shows only what the person said.
+    const spoken = picked.voice ? this.spoken(runId, line) : '';
+    if (spoken) {
+      if (this.live.has(runId)) { const current = this.store.get('run', runId); this.store.put('run', runId, { ...current, queued: [...(current.queued || []), spoken], updatedAt: now() }); this.store.event(runId, 'human-message', { text: line, via: 'voice', queued: true }, true); return { queued: true }; }
+      this.store.event(runId, 'human-message', { text: line, via: 'voice' }, true);
+      await this.resume(runId, { provider: picked.provider || run.provider, prompt: spoken, silent: true, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });
+      return { sent: true };
+    }
     if (this.live.has(runId)) {
       this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
       this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
@@ -496,6 +563,11 @@ export class Desk {
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), requeue: text => this.requeue(runId, text), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
+          // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
+          if (kind === 'agent-text-partial') { this.store.emit('partial', { runId, text: String(data.text || '') }); return; }
+          if (kind === 'agent-text') this.store.emit('partial', { runId, text: String(data.text || ''), done: true });
+          // A step the agent takes (reading files, running a command, searching), so Voice mode can say what it is doing.
+          if (kind === 'agent-tool' && !data.parent) this.store.emit('partial', { runId, tool: String(data.tool || ''), input: { description: String(data.input?.description || '').slice(0, 120) } });
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           // How full the chat's context is, for the ring by the message box. A 1M-context model says so in its name.
@@ -557,7 +629,8 @@ ${message}` : message);
       }
       if (await this.switchIfLimited(runId)) { handedOn = true; return; }
       const current = this.run(runId);
-      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' ? 'finished' : 'needs_evidence', endedAt: now() });
+      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' || run.role === 'helper' ? 'finished' : 'needs_evidence', endedAt: now() });
+      if (run.role === 'helper') this.helperDone(runId);
     } catch (error) {
       if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) { handedOn = true; return; }
       // The chosen model is not available on this Claude account: the turn runs again once on the account's default model, and the agent stops asking for that model.
@@ -574,6 +647,7 @@ ${message}` : message);
       }
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: friendlyDiskError(error.message), endedAt: now() });
       this.store.event(runId, 'error', { message: friendlyDiskError(error.message) }, true);
+      if (run.role === 'helper') this.helperDone(runId, friendlyDiskError(error.message));
     } finally {
       if (handedOn) {
         if (token) this.forgetToken(token);
@@ -654,6 +728,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       '5. When every project has an agent, offer to look at the assigned issues with desk_tasks and desk_repositories. Never start a run except through desk_dispatch, which the person approves.',
       `The person's first message: ${run.prompt || '(none: start with step 1)'}`].join('\n');
     if (run.role === 'web') return [common, webAgentPrompt(run.instructions)].join('\n\n');
+    if (run.role === 'helper') return [common, helperPrompt(run.instructions, run.helperFor)].join('\n\n');
     if (run.role === 'coordinator' && !run.roomAgent) return `${common}\nYou are the main coordinator. Read desk_tasks and desk_task for the selected IDs ${JSON.stringify(run.taskIds)}. Classify issues by affected module, severity, likely dependency, and reproduction path. Do not guess fixes. Use desk_categorize to label tasks and desk_dispatch to start a run for an issue${repositories ? '' : ' (unavailable: no source repository is configured, so say which issues are waiting for one)'}. Respect dependencies: serialize related changes and parallelize independent tasks. Do not modify source code yourself. Each dispatched run gets its own branch, worktree, and port, and investigates one issue. Choose the repository for every issue yourself and pass it as repositoryId: read desk_repositories, and match the issue to the project whose code holds the reported behaviour, by its product, module, screen, platform and the file or class names in its description and comments. Do not fall back to the connection default because it is there, and never send an issue to a repository that cannot contain the cause. If more than one could fit, or the right one is not listed, ask the human once with desk_ask, naming the candidates you found and saying the repository may need adding in Settings. Use desk_runs to track runs; report what you dispatched through desk_message.${run.maxDispatch ? ` This is a scheduled run: start at most ${run.maxDispatch} runs, prioritize by severity, and end with one desk_message summary for the human: what started, what was skipped and why.` : ''} Never mark a source task complete without verified evidence. Base override: ${run.baseBranch || 'repository setting'}. PR target override: ${run.targetBranch || 'repository setting'}. User instruction: ${run.prompt || 'Analyze and dispatch these assigned issues.'}`;
     const roomNote = 'This is your group-chat session: you use it for every room you are in. Your personal chat with the person is a separate conversation; read it with desk_my_chat when you need it.';
     const personalNote = 'This is your personal chat with the person. Group chats are a separate conversation of yours; read them with desk_rooms and desk_room_history when you need them.';
@@ -725,6 +800,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     return { id: interaction.id, promise };
   }
   ask(runId, request) {
+    // In Voice mode a question card is also said out loud, so the person hears it.
+    if (this.store.get('run', runId)?.voice && request?.title) this.store.emit('partial', { runId, text: String(request.title).slice(0, 600), done: true });
     return this.beginAsk(runId, request).promise;
   }
   // An agent asks the person to fill in a file (an API key in .env, a value only they know). The person edits it in Rex Desk;
@@ -805,6 +882,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   message(runId, text) {
     const run = this.run(runId); this.store.event(runId, 'message', { text: String(text).slice(0, 50000) }, true);
+    // In Voice mode what the agent sends with desk_message is said out loud too.
+    if (run.voice) this.store.emit('partial', { runId, text: String(text).slice(0, 4000), done: true });
     // What an agent reports on a task it was given in a room is also said in that room.
     if (run.role === 'worker' && run.roomId && run.specialistId) void this.rooms.post(run.roomId, { fromAgentId: run.specialistId, text: String(text).slice(0, 8000) }).catch(() => {});
     return { delivered: true };

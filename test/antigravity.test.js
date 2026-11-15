@@ -42,7 +42,7 @@ test('a Gemini turn streams text, tools and the result, and asks before a tool i
   const { item, events, asks } = runner({ permissionMode: 'manual', effort: 'max' });
   await item.start('hello');
   const kinds = events.map(event => event.kind);
-  assert.deepEqual(kinds.filter(kind => kind !== 'context'), ['session', 'agent-text', 'agent-tool', 'agent-tool-result', 'agent-text', 'agent-result']);
+  assert.deepEqual(kinds.filter(kind => kind !== 'context' && kind !== 'agent-text-partial'), ['session', 'agent-text', 'agent-tool', 'agent-tool-result', 'agent-text', 'agent-result']);
   assert.equal(events[0].data.sessionId, '11111111-2222-3333-4444-555555555555');
   assert.equal(asks.length, 1);
   assert.match(asks[0].title, /git --version/);
