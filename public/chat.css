@@ -1826,10 +1826,20 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 /* Voice mode: Rex's body fills the chat (the sidebars stay). Only a faint way out and a quiet word for what it is doing. */
 .voice-stage{position:absolute;inset:0;z-index:40;background:#05030c;overflow:hidden;animation:vs-in .6s ease-out}
 @keyframes vs-in{from{opacity:0}}
-.orb-canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-.voice-exit{position:absolute;top:14px;right:14px;z-index:1;display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:50%;background:transparent;color:rgba(214,200,255,.45);cursor:pointer;transition:color .2s,background .2s}
+.orb-canvas{position:absolute;z-index:0;inset:0;width:100%;height:100%;display:block}
+.voice-exit{position:absolute;top:14px;right:14px;z-index:2;display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:50%;background:transparent;color:rgba(214,200,255,.45);cursor:pointer;transition:color .2s,background .2s}
 .voice-exit:hover,.voice-exit:focus-visible{color:#efe8ff;background:rgba(160,130,255,.14);outline:none}
 .voice-word{position:absolute;left:0;right:0;bottom:7%;margin:0;text-align:center;font:500 14px/1 var(--font,system-ui),sans-serif;letter-spacing:.18em;color:rgba(206,190,255,.5);pointer-events:none;transition:opacity .4s}
 .voice-word:empty{opacity:0}
 .icon-btn.voice-mode.on{color:#b9a2ff;background:color-mix(in srgb,#8b6cff 16%,transparent)}
 @media (prefers-reduced-motion:reduce){.voice-stage{animation:none}}
+/* Voice mode's badge: whether to talk now. Green and alive only while the mic is open; quiet otherwise. */
+.voice-cue{position:absolute;z-index:2;left:50%;bottom:6%;transform:translateX(-50%);display:flex;align-items:center;gap:9px;padding:9px 16px 9px 13px;border-radius:999px;border:1px solid rgba(190,170,255,.18);background:rgba(16,10,34,.62);backdrop-filter:blur(8px);color:rgba(214,202,255,.62);font:500 14px/1 var(--font,system-ui),sans-serif;letter-spacing:.01em;pointer-events:none;transition:color .25s,border-color .25s,background .25s,box-shadow .25s}
+.voice-cue .vc-dot{width:9px;height:9px;border-radius:50%;background:rgba(206,190,255,.4);transition:background .25s,transform .08s linear}
+.voice-cue[data-state="listening"]{color:#d9ffe8;border-color:rgba(74,222,128,.55);background:rgba(6,40,24,.66);box-shadow:0 0 0 1px rgba(74,222,128,.12),0 0 28px rgba(74,222,128,.22)}
+.voice-cue[data-state="listening"] .vc-dot{background:#4ade80;transform:scale(calc(1 + var(--level,0) * 1.4));box-shadow:0 0 12px #4ade80;animation:vc-pulse 1.4s ease-in-out infinite}
+@keyframes vc-pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.voice-cue[data-state="speaking"]{color:#efe8ff;border-color:rgba(190,160,255,.45)}
+.voice-cue[data-state="speaking"] .vc-dot{background:#b9a2ff}
+.voice-cue[data-state="thinking"] .vc-dot{background:#f5c46b;animation:vc-pulse .9s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.voice-cue .vc-dot{animation:none!important}}

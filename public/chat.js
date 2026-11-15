@@ -396,7 +396,21 @@ function voiceNow() {
   if (heard.transcribing || document.querySelector('#feed-inner .bubble.typing')) return { state: 'thinking', level: 0 };
   return { state: 'idle', level: 0 };
 }
-const VOICE_WORDS = { idle: '', listening: 'Listening', thinking: 'Thinking', speaking: '' };
+// The badge under the body says plainly whether to talk: green "Listening, go ahead" only while the mic is open.
+const VOICE_WORDS = { idle: 'One moment', listening: 'Listening, go ahead', thinking: 'Thinking', speaking: 'Speaking' };
+const MIC_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+// A soft short tone each time the mic opens, so the person knows when to talk without looking.
+let voiceTone = null;
+function micOpenTone() {
+  try {
+    voiceTone ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (voiceTone.state !== 'running') void voiceTone.resume();
+    const at = voiceTone.currentTime, tone = voiceTone.createOscillator(), gain = voiceTone.createGain();
+    tone.type = 'sine'; tone.frequency.setValueAtTime(880, at); tone.frequency.exponentialRampToValueAtTime(1320, at + 0.09);
+    gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.12, at + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.22);
+    tone.connect(gain).connect(voiceTone.destination); tone.start(at); tone.stop(at + 0.25);
+  } catch { /* no sound: the badge still shows it */ }
+}
 function syncVoiceStage() {
   const main = document.querySelector('#stage .stage-main'), on = Boolean(main) && voiceModeOn(draftKey()) && Boolean(ctx.currentRunId());
   if (!on) {
@@ -408,10 +422,16 @@ function syncVoiceStage() {
     voiceStage = document.createElement('div'); voiceStage.className = 'voice-stage'; voiceStage.dataset.run = ctx.currentRunId();
     // The briefing is made now, while the body opens (code, not AI): the first question is answered from it at once.
     void api(`/runs/${voiceStage.dataset.run}/voice`, { method: 'POST', data: { on: true } }).catch(() => {});
-    voiceStage.innerHTML = '<button type="button" class="voice-exit" data-action="voice-mode" aria-label="End voice mode" title="End voice mode (Esc)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><p class="voice-word" aria-live="polite"></p>';
-    const word = voiceStage.querySelector('.voice-word');
+    voiceStage.innerHTML = `<button type="button" class="voice-exit" data-action="voice-mode" aria-label="End voice mode" title="End voice mode (Esc)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><div class="voice-cue" data-state="idle" role="status" aria-live="polite"><span class="vc-dot" aria-hidden="true"></span>${MIC_ICON}<span class="vc-text">One moment</span></div>`;
+    const cue = voiceStage.querySelector('.voice-cue'), word = cue.querySelector('.vc-text');
     voiceLive(); voiceBeat = setInterval(voiceLive, 2000);
-    voiceOrb = mountOrb(voiceStage, () => { const now = voiceNow(), text = VOICE_WORDS[now.state]; if (word.textContent !== text) word.textContent = text; return now; });
+    voiceOrb = mountOrb(voiceStage, () => {
+      const now = voiceNow(), text = VOICE_WORDS[now.state];
+      if (cue.dataset.state !== now.state) { if (now.state === 'listening') micOpenTone(); cue.dataset.state = now.state; word.textContent = text; }
+      // The dot grows with the person's voice while it listens, so they can see it hears them.
+      cue.style.setProperty('--level', now.state === 'listening' ? Math.min(1, now.level).toFixed(2) : '0');
+      return now;
+    });
   }
   if (voiceStage.parentElement !== main) main.append(voiceStage);
 }
