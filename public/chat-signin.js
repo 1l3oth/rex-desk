@@ -5,7 +5,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&a
 const root = document.getElementById('signin');
 const TABS = [['signin', 'Sign in'], ['create', 'New account'], ['cloud', 'Restore from backup']];
 const state = { auth: null, tab: '', error: '', email: '', scene: undefined, turso: '', account: '', offline: false };
-const SIGNUP = 'https://rexdesk.app/signup';
+const SIGNUP = 'https://rexdesk.app/signup', RESET = 'https://api.rexdesk.dev/reset';
 const ICON = {
   key: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3m-4 4 3 3m-5-1 2 2"/></svg>',
   mail: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
@@ -34,12 +34,18 @@ function drawAccount() {
       <form id="si-form" data-mode="offline">${known.length ? `<label class="st-field"><span>Workspace</span><select name="email">${known.map(item => `<option>${esc(item.email)}</option>`).join('')}</select></label>${secret('Passphrase')}${stay}<button class="btn primary si-submit" type="submit">Open workspace</button>` : '<p class="si-note warn">This computer has no workspace yet, so the first sign-in needs the internet.</p>'}
       <button type="button" class="btn si-submit" data-retry>Try the Rex Desk sign-in again</button><p class="si-error" role="alert">${esc(state.error)}</p></form>`;
   } else if (!account) {
-    const waiting = state.account === 'waiting';
-    body = `<h2 class="si-title">Sign in to your desk</h2><p class="si-note">Use your Rex Desk account. The sign-in opens in your browser.</p>
-      <div class="si-ways" aria-label="Ways to sign in"><span>${ICON.mail} Email</span><span>${ICON.google} Google</span><span>${ICON.github} GitHub</span></div>
-      <button type="button" class="btn primary si-submit si-big" data-account ${waiting ? 'disabled' : ''}>${waiting ? 'Waiting for you in the browser…' : 'Sign in with Rex Desk'}</button>
+    // Email and password sign in right here; only Google and GitHub need the browser.
+    const waiting = state.account === 'waiting', busy = state.account === 'password';
+    body = `<h2 class="si-title">Sign in to your desk</h2><p class="si-note">Use your Rex Desk account.</p>
+      <form id="si-form" data-mode="account" class="si-account-form">
+        <label class="st-field"><span>Email</span><input name="email" type="email" autocomplete="username" required value="${esc(state.email)}" ${waiting ? 'disabled' : ''}></label>
+        <label class="st-field"><span class="si-label-row">Password<a href="${RESET}" target="_blank" rel="noopener" class="si-forgot">Forgot password?</a></span><input name="password" type="password" autocomplete="current-password" required ${waiting ? 'disabled' : ''}></label>
+        <button class="btn primary si-submit si-big" type="submit" ${waiting || busy ? 'disabled' : ''}>${busy ? 'Signing in…' : 'Sign in'}</button>
+        <p class="si-error" role="alert">${esc(state.error)}</p>
+      </form>
+      <div class="si-or" role="separator"><span>or</span></div>
+      ${waiting ? '<p class="si-note si-center">Finish signing in in your browser…</p>' : `<div class="si-socials"><button type="button" class="btn si-social" data-account="google" ${busy ? 'disabled' : ''}>${ICON.google}<span>Google</span></button><button type="button" class="btn si-social" data-account="github" ${busy ? 'disabled' : ''}>${ICON.github}<span>GitHub</span></button></div>`}
       ${waiting ? '<button type="button" class="si-link si-center" data-cancel>Cancel</button>' : ''}
-      <p class="si-error" role="alert">${esc(state.error)}</p>
       <p class="si-foot">No account yet? <a href="${SIGNUP}" target="_blank" rel="noopener">Create one on rexdesk.app</a></p>`;
   } else {
     const who = `<div class="si-who"><span class="si-avatar">${account.image ? `<img src="${esc(account.image)}" alt="" referrerpolicy="no-referrer">` : esc((account.name || account.email || '?')[0].toUpperCase())}</span><span><b>${esc(account.name || account.email)}</b><small>${esc(account.name ? account.email : 'Rex Desk account')}</small></span><button type="button" class="si-link" data-switch>Not you?</button></div>`;
@@ -58,7 +64,7 @@ function drawAccount() {
   }
   root.innerHTML = `<section class="si-card" aria-labelledby="si-brand"><div class="si-brand"><img src="/favicon.svg" alt="" width="28" height="28"><h1 id="si-brand">Rex Desk</h1></div>
     ${auth.occupied ? `<p class="si-note warn">${esc(auth.occupied)} is signed in on this computer. Signing in to another account closes that workspace and stops its running agents.</p>` : ''}${body}</section>`;
-  root.querySelector('input[type=password], select')?.focus();
+  (root.querySelector('input[name=email]:placeholder-shown, input[name=email][value=""]') || root.querySelector('input[type=password], select'))?.focus();
   mountScene();
 }
 
@@ -98,10 +104,11 @@ root.addEventListener('click', event => {
   const tab = event.target.closest('[data-tab]'); if (tab) { state.tab = tab.dataset.tab; state.error = ''; draw(); return; }
   const account = event.target.closest('[data-email]'); if (account) { state.email = account.dataset.email; draw(); return; }
   if (event.target.closest('[data-account]')) {
+    const provider = event.target.closest('[data-account]').dataset.account || '';
     state.email = root.querySelector('input[name=email]')?.value || state.email; state.account = 'waiting'; state.error = ''; state.offline = false; draw();
     void (async () => {
       try {
-        const { url } = await post('/auth/account-start', {}); window.open(url, '_blank', 'noopener');
+        const { url } = await post('/auth/account-start', { provider }); window.open(url, '_blank', 'noopener');
         const found = await post('/auth/account-finish', {});
         if (state.auth.requireAccount) { state.auth.account = found; state.account = ''; state.turso = ''; }
         else { state.account = 'found'; state.email ||= found?.email || ''; }
@@ -131,6 +138,12 @@ root.addEventListener('click', event => {
 root.addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.target, data = Object.fromEntries(new FormData(form)), mode = form.dataset.mode, submit = form.querySelector('[type=submit]');
+  if (mode === 'account') {
+    state.email = data.email || ''; state.account = 'password'; state.error = ''; draw();
+    try { const found = await post('/auth/account-password', { email: data.email, password: data.password }); state.auth.account = found; state.turso = ''; }
+    catch (error) { state.error = error.message; if (/could not reach its account service/i.test(error.message)) { state.offline = true; state.error = ''; } }
+    state.account = ''; draw(); return;
+  }
   state.tab = mode; state.email = data.email || '';
   if (mode === 'cloud' && !data.turso && !data.account && (!data.url || !data.authToken)) { state.error = 'Sign in with Rex Desk or Turso first, or type the database address and key.'; draw(); return; }
   if ((mode === 'create' || data.claimId) && data.repeat !== undefined && data.passphrase !== data.repeat) { state.error = 'The passphrases do not match.'; draw(); return; }

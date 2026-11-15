@@ -1,6 +1,12 @@
 import path from 'node:path';
 import { createHash, createPublicKey, verify } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statfsSync } from 'node:fs';
+import os from 'node:os';
+
+// Free space an install needs on the drive of the temp folder: the installer unpacks there first. On a full drive the
+// 0.0.15 install wrote an empty node.exe and Rex Desk could not start.
+const INSTALL_ROOM = 500 * 1024 * 1024;
+export const freeSpace = folder => { try { const disk = statfsSync(folder); return Number(disk.bavail) * Number(disk.bsize); } catch { return Infinity; } };
 import { execFileSync, spawn } from 'node:child_process';
 
 // Installers are published with an Ed25519 signature made by the release key, which only the release workflow holds.
@@ -84,6 +90,8 @@ export class Updates {
     const file = path.join(this.directory, `Rex-Desk-${String(version).replace(/[^0-9.]/g, '')}${updaters[this.platform]}`);
     if (this.file === file && this.state.ready) return;
     mkdirSync(this.directory, { recursive: true });
+    // Only the newest installer is kept: older ones are not needed and took hundreds of MB on a nearly full drive.
+    for (const name of readdirSync(this.directory)) if (/^Rex-Desk-.+-setup\.exe$|^Rex-Desk-.+\.app\.tar\.gz$/i.test(name) && path.join(this.directory, name) !== file) rmSync(path.join(this.directory, name), { force: true });
     let bytes = existsSync(file) ? readFileSync(file) : null;
     if (!bytes) {
       const response = await this.fetcher(update.url, { redirect: 'follow', signal: AbortSignal.timeout(15 * 60000) });
@@ -107,6 +115,8 @@ export class Updates {
   // PowerShell has no console and never starts. A WMI-created process inherits no environment, so values go as arguments.
   install(serverPid) {
     if (!this.state.ready || !this.file) throw new Error('No verified update is ready yet.');
+    const free = (this.freeSpace || freeSpace)(os.tmpdir());
+    if (free < INSTALL_ROOM) throw new Error(`Not enough free space to install the update: ${Math.max(0, Math.round(free / 1048576))} MB free on the drive of ${os.tmpdir()}, and it needs 500 MB. Free some space, then press Update now again.`);
     if (this.platform.startsWith('darwin')) {
       // The executable is "Rex Desk.app/Contents/MacOS/rex-desk"; the app is the folder three levels up.
       const helper = path.join(this.directory, 'install-update.sh');
@@ -137,13 +147,19 @@ export class Updates {
       '$until = (Get-Date).AddSeconds(60); while ((Get-Process -Id $ServerPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $until) { Pump; Start-Sleep -Milliseconds 200 }',
       'Step "server stopped" "Closing Rex Desk" 15',
       // The window and any bundled Node still running from the install folder would lock files the installer replaces.
-      '$folder = Split-Path -Parent $App',
-      'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($folder, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue',
-      'for ($i = 0; $i -lt 10; $i++) { Pump; Start-Sleep -Milliseconds 200 }',
-      'Step "installing" "Installing the new version" 20',
+      '$folder = Split-Path -Parent $App; $node = Join-Path $folder "payload\\node\\node.exe"; $server = Join-Path $folder "payload\\app\\src\\server.js"',
+      // Everything running from the install folder ends first, and stays ended: the installer cannot replace a file that is
+      // open (a 0.0.15 update left node.exe empty when something still held it). Antivirus may hold a file for a moment too,
+      // so the helper waits until node.exe can really be written.
+      'function Clear-Folder { for ($i = 0; $i -lt 40; $i++) { $left = @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($folder, [StringComparison]::OrdinalIgnoreCase) }); if (-not $left.Count) { break }; $left | Stop-Process -Force -ErrorAction SilentlyContinue; Pump; Start-Sleep -Milliseconds 300 }; for ($i = 0; $i -lt 40; $i++) { try { if (-not (Test-Path $node)) { break }; $handle = [IO.File]::Open($node, "Open", "ReadWrite", "None"); $handle.Close(); break } catch { Pump; Start-Sleep -Milliseconds 300 } } }',
+      // A good install has the whole app: node.exe at full size and the server code.
+      'function Whole { (Test-Path $node) -and ((Get-Item $node).Length -gt 1000000) -and (Test-Path $server) }',
       // Waits for the installer process only (-Wait would also wait for anything the installer starts). The installer does not
       // report its own progress, so the bar moves on time (it usually takes about a minute) and never claims to be done early.
-      'try { $setup = Start-Process -FilePath $Installer -ArgumentList "/S" -PassThru; $started = Get-Date; while (-not $setup.HasExited) { if ($ui) { $bar.Value = [Math]::Min(80, 20 + [int](((Get-Date) - $started).TotalSeconds / 1.2)) }; Pump; Start-Sleep -Milliseconds 250 }; Step "installer exit code $($setup.ExitCode)" "Installed" 85 } catch { Step "installer failed: $($_.Exception.Message)" "The installer did not finish. Opening the version you had." 85 }',
+      'function Install($try) { Clear-Folder; Step "installing (try $try)" "Installing the new version" 20; try { $setup = Start-Process -FilePath $Installer -ArgumentList "/S" -PassThru; $started = Get-Date; while (-not $setup.HasExited) { if ($ui) { $bar.Value = [Math]::Min(80, 20 + [int](((Get-Date) - $started).TotalSeconds / 1.2)) }; Pump; Start-Sleep -Milliseconds 250 }; Step "installer exit code $($setup.ExitCode)" "Checking the install" 82; return ($setup.ExitCode -eq 0) } catch { Step "installer failed: $($_.Exception.Message)" "The installer did not finish" 82; return $false } }',
+      // Up to three tries; an install is only done when the app is whole, whatever the installer says.
+      '$ok = $false; for ($try = 1; $try -le 3 -and -not $ok; $try++) { $ran = Install $try; $ok = $ran -and (Whole); if (-not $ok) { Step "install incomplete (node $(if (Test-Path $node) { (Get-Item $node).Length } else { 0 }) bytes)" "The install did not finish. Trying again" 20; Start-Sleep -Seconds 3 } }',
+      'if ($ok) { Step "installed" "Installed" 85 } else { Step "install failed after 3 tries" "The update could not be installed. Run the installer again from the updates folder." 85 }',
       // Rex Desk opens again whatever happened, so an update never leaves it closed.
       'Start-Process -FilePath $App; Step "app opened" "Starting Rex Desk" 90',
       // The window stays until Rex Desk answers (at most two minutes), so there is never a gap with nothing on screen.

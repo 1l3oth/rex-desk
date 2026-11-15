@@ -2,6 +2,7 @@ import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter } 
 import { agentStage, agentAction, agentGroups, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
+import { showToast } from '/toast.js';
 import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.js';
 import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction, initRoomInfo, avatarHtml, roomRunIds, initLocalTasks, sharedTabButtons } from '/chat-rooms.js';
 import { collectShared, sharedTabsHtml } from '/chat-media.js';
@@ -54,11 +55,7 @@ async function api(path, { method = 'GET', data, retry = false } = {}) {
   if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
   return body;
 }
-let toastTimer;
-function toast(text, bad = false) {
-  const box = document.getElementById('toast'); box.textContent = text; box.className = `on${bad ? ' bad' : ''}`;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { box.className = ''; }, 3500);
-}
+function toast(text, bad = false) { showToast(text, bad); }
 
 const workingStates = ['starting', 'running', 'queued', 'waiting', 'verifying'];
 const reviewStates = ['ready_for_review', 'needs_evidence', 'qa_passed', 'qa_failed', 'qa_blocked', 'published'];
@@ -490,7 +487,8 @@ document.addEventListener('click', async event => {
     else if (action === 'sec-toggle') toggleSection(target.dataset.sec);
     else if (action === 'settings-open') openSettings(ctx);
     else if (action === 'settings-sources') { document.querySelector('.dialog-back:not(.settings)')?.remove(); openSettings(ctx, 'sources'); }
-    else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+    // The Theme button walks through every theme, the Khmer ones included.
+    else if (action === 'theme') { const order = ['light', 'dark', 'angkor', 'lacquer', 'tonle'], now = document.documentElement.dataset.palette || document.documentElement.dataset.theme; window.rexTheme?.set(order[(order.indexOf(now) + 1) % order.length]); }
     else if (action === 'stop') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
     else if (action === 'scan') await scanProjects();
     else if (action === 'wake-approve') { await api(`/rooms/x/wakes/${target.dataset.id}`, { method: 'POST', data: {} }); toast('Agent resumed.'); await refresh(); }
