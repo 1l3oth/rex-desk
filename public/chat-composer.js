@@ -187,13 +187,16 @@ async function browserDictate(ctx, { untilRelease = false } = {}) {
   let recognition; try { recognition = new Recognition(); } catch { browserSpeech = 'no'; return false; }
   let stream = null; try { stream = await openMicrophone(); } catch { /* the browser asks for the microphone itself */ }
   const release = () => stream?.getTracks().forEach(track => track.stop());
-  recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = untilRelease;
-  let said = '';
-  const turn = { browser: true, stop: () => { try { recognition.stop(); } catch { /* already over */ } } };
-  recognition.onresult = event => { said = [...event.results].map(result => result[0].transcript).join(' ').replace(/\s+/g, ' ').trim(); };
+  // Always continuous (on its own it stops at the first breath). Held Space ends when it is let go; the mic button ends after
+  // a pause of two seconds with no new words, or when it is pressed again.
+  recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = true;
+  let said = '', lastWords = 0;
+  const watch = untilRelease ? 0 : setInterval(() => { if (said && performance.now() - lastWords > 2000) turn.stop(); }, 200);
+  const turn = { browser: true, stop: () => { clearInterval(watch); try { recognition.stop(); } catch { /* already over */ } } };
+  recognition.onresult = event => { said = [...event.results].map(result => result[0].transcript).join(' ').replace(/\s+/g, ' ').trim(); lastWords = performance.now(); };
   recognition.onerror = event => { turn.failed = event.error; if (['network', 'not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(event.error)) browserSpeech = 'no'; };
   recognition.onend = () => {
-    release(); if (listening === turn) listening = null;
+    clearInterval(watch); release(); if (listening === turn) listening = null;
     micButton()?.classList.remove('rec'); document.body.classList.remove('ptt');
     if (said) { putInBox(ctx, said); return; }
     ctx.toast(turn.failed && browserSpeech === 'no' ? 'The browser could not turn speech into words here. Press the mic again to use Rex Desk\'s own voice engine.' : 'Nothing was heard. Hold Space (or press the mic) and speak.', true);
@@ -259,13 +262,22 @@ function listenLevel(stream) {
 async function browserTurn(ctx, onState) {
   let stream; try { stream = await openMicrophone(); } catch { return 'blocked'; }
   const stopLevel = listenLevel(stream), recognition = new Recognition();
-  recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = false; recognition.maxAlternatives = 1;
-  let said = '', failed = '';
-  recognition.onresult = event => { said = [...event.results].filter(result => result.isFinal).map(result => result[0].transcript).join(' ').trim() || said; if (!said) { const last = event.results[event.results.length - 1]; if (last?.isFinal) said = last[0].transcript.trim(); } };
+  // Continuous: on its own the recognition ends a turn at the first breath, cutting the person off mid-sentence. Rex Desk
+  // decides the end itself: once something was said, a pause of PAUSE_MS with no new words and a quiet microphone.
+  recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = true; recognition.maxAlternatives = 1;
+  let said = '', failed = '', lastWords = 0, ended = false;
+  const PAUSE_MS = 1800, LONGEST_MS = 90000, started = performance.now();
+  recognition.onresult = event => { said = [...event.results].map(result => result[0].transcript).join(' ').replace(/\s+/g, ' ').trim(); lastWords = performance.now(); };
   recognition.onerror = event => { failed = event.error || 'error'; if (['network', 'not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(failed)) browserSpeech = 'no'; };
-  const turn = { stop: () => { try { recognition.abort(); } catch { /* already over */ } } };
+  const finish = () => { if (ended) return; ended = true; clearInterval(watch); try { recognition.stop(); } catch { /* already over */ } };
+  const watch = setInterval(() => {
+    const now = performance.now();
+    if (said && now - lastWords > PAUSE_MS && micLevel < 0.08) finish();
+    else if (now - started > LONGEST_MS) finish();
+  }, 150);
+  const turn = { stop: () => { ended = true; clearInterval(watch); try { recognition.abort(); } catch { /* already over */ } } };
   recognition.onend = async () => {
-    stopLevel(); if (listening !== turn) return;
+    clearInterval(watch); stopLevel(); if (listening !== turn) return;
     listening = null; micButton()?.classList.remove('rec');
     if (!said) { onState('idle'); return; }
     transcribing = true; onState('thinking');
