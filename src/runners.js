@@ -180,6 +180,11 @@ ${news}` } } : {};
         if (/not logged in|please run \/login/i.test(String(message.result || ''))) throw new Error(`Claude Code profile ${env.CLAUDE_CONFIG_DIR || '~/.claude'} is not signed in. Open Setup, choose a signed-in Claude Code profile, then continue this run.`);
         // An open Claude-app session carries on after one failed reply; the person sees it and writes again.
         if (message.is_error && !remote) throw new Error(message.errors?.join('\n') || message.result || `Claude ended with ${message.subtype}.`);
+        // The reply is the end of the turn. Claude Code itself keeps running while a task the agent started in the background
+        // (a test, a dev server) is still going, and a stuck one held the turn open for good: the chat showed it still working,
+        // and every new message waited for a step that never came. Leaving the loop ends Claude Code and its background tasks;
+        // the next message starts a new turn in the same conversation.
+        if (!remote) break;
       }
     }
     return { status: 'completed' };
