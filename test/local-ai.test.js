@@ -110,3 +110,17 @@ test('Set up installs Ollama when it is missing, starts it, and downloads a star
   assert.equal(full.state, 'failed'); assert.match(full.error, /Not enough free space/);
   s.close();
 });
+
+test('an agent on a local model needs no Claude account: the "is it signed in" check is skipped for it', async () => {
+  const { Desk } = await import('../src/coordinator.js');
+  const data = store(), desk = new Desk(data, { root: mkdtempSync(path.join(os.tmpdir(), 'rex-desk-local-root-')) });
+  try {
+    assert.equal(desk.usesLocalModel({ provider: 'claude', model: 'local:ollama/qwen3-coder:30b' }), true);
+    assert.equal(desk.usesLocalModel({ model: 'local:colibri/qwen3-coder-30b-a3b' }), true, 'Claude Code is the default AI');
+    assert.equal(desk.usesLocalModel({ provider: 'claude', model: 'opus' }), false, 'a Claude model still needs the account');
+    assert.equal(desk.usesLocalModel({ provider: 'codex', model: 'local:ollama/qwen3-coder:30b' }), false, 'Local AI runs through Claude Code only');
+    assert.equal(desk.usesLocalModel({ provider: 'claude', model: 'local:ollama/qwen3-coder:30b', modelFallback: true }), false, 'a fallback turn uses the account default');
+    data.saveConfig({ ...data.publicConfig(), models: { ...data.config().models, claude: 'local:ollama/qwen3-coder:30b' } });
+    if (data.config().models.claude === 'local:ollama/qwen3-coder:30b') assert.equal(desk.usesLocalModel({ provider: 'claude' }), true, 'chosen as the default model in Settings');
+  } finally { await desk.shutdown(); data.close(); }
+});
