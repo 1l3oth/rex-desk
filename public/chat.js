@@ -965,7 +965,7 @@ async function accountsDialog() {
     back.innerHTML = `<form class="dialog acct-dialog"><div class="acct-head"><h2>AI accounts</h2><button type="button" class="side-x" data-close aria-label="Close" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>
       <div class="acct-tabs" role="tablist">${Object.entries(NAMES).map(([key, [, title]]) => `<button type="button" role="tab" aria-selected="${name === key}" class="acct-tab${name === key ? ' on' : ''}" data-acct-tab="${key}"><b>${title}</b>${defaultAi === key ? '<span class="acct-default-badge">Default</span>' : ''}</button>`).join('')}</div>
       <div class="acct-intro"><p>Agents on ${product} run on the account marked <b>In use</b>. Click another account to switch.</p>${defaultAi === name ? `<span class="acct-note">New agents and chats use ${product}</span>` : `<button type="button" class="btn small" data-acct-default="${name}">Use ${product} for new agents</button>`}</div>
-      ${signedIn.length ? `<div class="acct-list">${signedIn.map(row).join('')}</div>` : `<p class="acct-empty">No ${service} account is signed in yet${name === 'codex' ? '. Install the Codex CLI (npm install -g @openai/codex) if it is missing, then add an account below.' : name === 'gemini' ? '. Install the Antigravity CLI (winget install Google.AntigravityCLI) if it is missing, then press Sign in.' : '.'}</p>`}
+      ${signedIn.length ? `<div class="acct-list">${signedIn.map(row).join('')}</div>` : `<p class="acct-empty">No ${service} account is signed in yet. Press Sign in: a window opens, installs ${name === 'codex' ? 'the Codex CLI' : name === 'gemini' ? 'the Antigravity CLI' : 'Claude Code'} if this computer does not have it yet, and opens the sign-in in your browser.</p>`}
       ${signedOut.length ? `<details class="acct-out"${signedIn.length ? '' : ' open'}><summary>Not signed in <span>${signedOut.length}</span></summary><ul>${signedOut.map(out).join('')}</ul></details>` : ''}
       ${name === 'gemini' ? '' : `<div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="Name for the new account, like work or personal" aria-label="Name for the new account"><button type="button" class="btn small primary" data-acct-create>Create and sign in</button><button type="button" class="btn small" data-acct-cancel>Cancel</button>` : `<button type="button" class="btn small" data-acct-new>+ Add a ${short} account</button>`}</div>`}
       ${ui.acctWaiting ? `<p class="acct-wait"><span class="dot working"></span> Finish signing in to ${service} in the window that opened. This list updates by itself.</p>` : ''}
@@ -986,11 +986,13 @@ async function accountsDialog() {
     if (login || create) {
       event.preventDefault(); const name = tab(), signedIn = () => (ui.accounts?.[name]?.profiles || []).filter(item => item.loggedIn).length;
       try {
-        if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast('Give the account a name first.', true); await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; }
-        else await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin, provider: name } });
+        let started;
+        if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast('Give the account a name first.', true); started = await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; }
+        else started = await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin, provider: name } });
+        if (started?.installing) toast('A sign-in window opened. It installs the tool first, then opens the browser.');
         ui.acctWaiting = true; await loadAccounts(true); draw();
-        // Sign-in happens in the browser; look again every few seconds for up to three minutes.
-        for (let tries = 0; tries < 60 && ui.acctWaiting && document.body.contains(back); tries++) {
+        // Sign-in happens in the browser; look again every few seconds for up to three minutes, or ten while the tool installs.
+        for (let tries = 0; tries < (started?.installing ? 200 : 60) && ui.acctWaiting && document.body.contains(back); tries++) {
           await new Promise(resolve => setTimeout(resolve, 3000));
           const before = signedIn(); await loadAccounts(true);
           if (signedIn() > before) { ui.acctWaiting = false; toast('Signed in. You can pick this account now.'); }
