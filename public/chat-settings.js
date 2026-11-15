@@ -23,16 +23,18 @@ const SECTIONS = [
   ['devices', 'Devices and phone', 'Your other computers, your phone'],
   ['backup', 'Backup and updates', 'Cloud copy, app updates'],
   ['connect', 'Connect another AI', 'Let another assistant use Rex Desk'],
+  ['about', 'About', 'Version, storage and what it holds'],
 ];
 // The sections in groups by what they are about, so the list reads in a few chunks instead of thirteen rows.
 const GROUPS = [
   ['You', ['general', 'notify', 'jev']],
   ['Agents', ['agents', 'accounts', 'localai', 'schedule', 'signins']],
   ['Work', ['projects', 'sources', 'connect']],
-  ['Data and devices', ['folders', 'backup', 'devices']],
+  ['Data and devices', ['folders', 'backup', 'devices', 'about']],
 ];
 // An icon for each section, shown in the phone's list of sections.
 const ST_ICON = {
+  about: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   general: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
   folders: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5 12 16l2.5-2.5"/>',
   notify: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
@@ -79,6 +81,40 @@ const stIcon = id => `<span class="st-ic st-ic-${id}" aria-hidden="true"><svg vi
 const ASKS = { quit_app: 'Close an app', hibernate: 'Hibernate', shutdown: 'Shut down', restart: 'Restart', sign_out: 'Sign out', stop_program: 'Stop a program', empty_trash: 'Empty the Recycle Bin' };
 const LANGS = [['en', 'English'], ['km', 'Khmer'], ['ko', 'Korean']];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Settings > About, drawn like a product's About page: the mark and version first, then what this Rex Desk holds and
+// how much room it takes on this computer. No inline styles (the page rules forbid them): bar widths come from classes.
+const ABOUT_MARK = '<svg viewBox="0 0 64 64" width="72" height="72" aria-hidden="true"><defs><linearGradient id="ab-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#78a8ff"/><stop offset="1" stop-color="#3170e6"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="14" fill="url(#ab-g)"/><g fill="#fff"><rect x="16" y="16" width="14" height="14" rx="3"/><rect x="34" y="16" width="14" height="14" rx="3"/><rect x="16" y="34" width="14" height="14" rx="3"/><rect x="34" y="34" width="14" height="14" rx="3" opacity=".47"/></g></svg>';
+const sizeText = value => { if (value == null) return 'unknown'; const units = ['B', 'KB', 'MB', 'GB', 'TB']; let size = value, at = 0; while (size >= 1024 && at < units.length - 1) { size /= 1024; at++; } return `${size >= 100 || at === 0 ? Math.round(size) : size.toFixed(1)} ${units[at]}`; };
+const countText = value => Number(value || 0).toLocaleString();
+// A bar part's width as one of 50 classes (ab-w0 to ab-w50, 2% each), set in chat.css.
+const widthClass = share => `ab-w${Math.max(1, Math.min(50, Math.round(share * 50)))}`;
+export function aboutHtml(about, update, checking) {
+  const e = value => String(value ?? '').replace(/[&<>"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]));
+  const version = update.current || about?.version || '';
+  const status = !update.supported ? 'Runs from source code and updates with Git.' : update.ready ? `Version ${e(update.available?.version)} is downloaded and ready.` : update.available ? `Version ${e(update.available.version)} is on its way.` : update.checkedAt ? 'Up to date.' : 'Not checked yet.';
+  const head = `<div class="ab-hero">${ABOUT_MARK}<div><h2>Rex Desk</h2><p class="ab-ver">${version ? `Version ${e(version)}${update.stage ? ` · ${e(update.stage)}` : ''}` : 'Development copy'}</p><p class="ab-status${update.ready || update.available ? ' new' : ''}">${status}</p>
+    <div class="ab-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${checking ? 'disabled' : ''}>${checking ? 'Checking…' : 'Check for updates'}</button>` : ''}${update.ready ? '<button type="button" class="btn small primary" data-action="update-install">Install and restart</button>' : ''}</div></div></div>`;
+  if (!about) return `${head}<h3>What it holds</h3><div class="ab-tiles ab-loading">${'<div class="ab-tile"><b>&nbsp;</b><span>&nbsp;</span></div>'.repeat(5)}</div><p class="muted small">Counting what Rex Desk holds…</p>`;
+  if (about.error) return `${head}<p class="error-text">${e(about.error)}</p>`;
+  const c = about.counts || {}, st = about.storage || {}, disk = st.disk;
+  const tiles = [['Agents', c.agents], ['Chats', c.chats], ['Group chats', c.rooms], ['Tasks', c.tasks], ['Files from agents', c.files]]
+    .map(([label, value]) => `<div class="ab-tile"><b>${countText(value)}</b><span>${label}</span></div>`).join('');
+  const used = (st.data || 0) + (st.files || 0);
+  const bar = disk ? (() => {
+    const total = disk.total || 1, other = Math.max(0, total - disk.free - used);
+    return `<div class="ab-bar" role="img" aria-label="${e(`${sizeText(used)} used by Rex Desk, ${sizeText(disk.free)} free of ${sizeText(disk.total)}`)}"><i class="ab-desk ${widthClass(used / total)}"></i><i class="ab-other ${widthClass(other / total)}"></i></div>
+      <div class="ab-legend"><span><i class="ab-desk"></i>Rex Desk ${sizeText(used)}</span><span><i class="ab-other"></i>Other apps and files ${sizeText(other)}</span><span><i class="ab-free"></i>Free ${sizeText(disk.free)} of ${sizeText(disk.total)}</span></div>`;
+  })() : '';
+  const places = [['Your data', about.places?.data], ['Files from agents', about.places?.files], ['Rex Desk is installed in', about.places?.install]]
+    .filter(([, where], index, all) => where && (index !== 1 || where !== all[0][1]))
+    .map(([label, where]) => `<div class="ab-place"><span><small>${label}</small><code>${e(where)}</code></span><button type="button" class="btn small" data-st-copy-path="${e(where)}">Copy</button></div>`).join('');
+  return `${head}<h3>What it holds</h3><div class="ab-tiles">${tiles}</div>
+    <h3>Storage</h3><p class="ab-big"><b>${sizeText(used)}</b> used by Rex Desk${disk ? ` · ${sizeText(disk.free)} free on this drive` : ''}</p>${bar}
+    <p class="muted small">${countText(st.dataFiles)} files of chats, tasks and settings${st.fileCount != null ? `, and ${countText(st.fileCount)} files from agents in their own folder` : ''}.</p>
+    <h3>Where it lives</h3><div class="ab-places">${places}</div>
+    <div class="ab-foot"><button type="button" class="btn small" data-st-about-refresh>Count again</button></div>`;
+}
 
 export function openSettings(ctx, section = 'general') {
   const { ui, esc, api, toast, refresh } = ctx;
@@ -129,6 +165,7 @@ export function openSettings(ctx, section = 'general') {
   const signins = () => (state.signins ||= (config().testAccounts || []).map(account => ({ ...account, password: '' })));
   const readSignins = () => signins().forEach((account, index) => { for (const key of ['site', 'username', 'password']) { const input = back.querySelector(`[name="ta.${index}.${key}"]`); if (input) account[key] = input.value; } });
   const panels = {
+    about: () => aboutHtml(state.extra.about, ui.snap.update || {}, state.extra.checking),
     general: () => `<h2>General</h2>
       ${tip('general', 'Set your name so agents call you by it, and turn on "Start Rex Desk when I sign in" so schedules and your phone keep working.')}
       ${ui.snap.account?.email ? `<div class="st-account"><span class="si-avatar">${esc(ui.snap.account.email[0].toUpperCase())}</span><span><b>${esc(ui.snap.account.email)}</b><small>${ui.snap.account.role === 'superadmin' ? 'Superadmin' : 'Member'} · this computer</small></span><button type="button" class="btn small" data-st-signout>Sign out</button></div>` : ''}
@@ -249,6 +286,11 @@ ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on 
     if (state.section === 'signins') { readSignins(); next.testAccounts = state.signins.filter(account => account.username.trim()); }
     ui.snap.config = await api('/config', { method: 'PUT', data: next }); await refresh(); if (state.section === 'sources') state.trackers = trackerDraft(ui); state.signins = null; toast('Saved.'); draw();
   }
+  // Settings > About: asks the server for the version, counts and sizes, then draws them.
+  async function loadAbout(fresh = false) {
+    try { state.extra.about = await api(`/about${fresh ? '?fresh=1' : ''}`); } catch (error) { state.extra.about = { error: error.message }; }
+    if (state.section === 'about' && document.body.contains(back)) draw();
+  }
   // Open one section and resolve once what it shows is loaded (the tours wait for it before circling its controls).
   async function goSection(id) {
     state.section = id; state.list = false;
@@ -256,6 +298,7 @@ ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on 
     if (id === 'projects') void loadGithub();
     if (id === 'general') state.extra.autostart = await api('/autostart').catch(() => null);
     draw();
+    if (id === 'about') await loadAbout();
     if (id === 'folders') { await loadFolders(ctx, state); if (state.section === 'folders') draw(); }
     if (id === 'localai') { await loadLocalAi(ctx, state); if (state.section === 'localai') draw(); }
     if (id === 'accounts') { await loadTourAi(ctx, state); if (state.section === 'accounts') draw(); }
@@ -267,6 +310,8 @@ ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on 
       if (target === back || target.closest('[data-st-close]')) { back.remove(); return; }
       if (target.closest('[data-st-back]')) { state.list = true; draw(); return; }
       const section = target.closest('[data-st-section]'); if (section) { await goSection(section.dataset.stSection); return; }
+      if (target.closest('[data-st-about-refresh]')) { state.extra.about = null; draw(); await loadAbout(true); return; }
+      const copyPath = target.closest('[data-st-copy-path]'); if (copyPath) { await navigator.clipboard.writeText(copyPath.dataset.stCopyPath); toast('Copied.'); return; }
       if (await trackerClick(ctx, state, target, back, draw)) return;
       if (await folderClick(ctx, state, target, draw)) return;
       if (state.section === 'localai' && await localAiClick(ctx, state, target, draw)) return;
@@ -364,6 +409,7 @@ ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on 
   if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); if (state.section === 'general' && document.body.contains(back)) draw(); });
   back.addEventListener('change', event => { const lang = event.target.dataset?.stVoice; if (!lang) return; try { if (event.target.value) localStorage.setItem(`rex-desk-voice-${lang}`, event.target.value); else localStorage.removeItem(`rex-desk-voice-${lang}`); } catch { /* private window */ } toast('Reading voice saved.'); });
   if (section === 'projects') void loadGithub();
+  if (section === 'about') void loadAbout();
   if (section === 'folders') void loadFolders(ctx, state).then(() => state.section === 'folders' && draw());
   if (section === 'localai') void loadLocalAi(ctx, state).then(() => state.section === 'localai' && draw());
   if (section === 'accounts') void loadTourAi(ctx, state).then(() => state.section === 'accounts' && draw());

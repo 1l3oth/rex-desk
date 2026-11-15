@@ -14,6 +14,7 @@ import { findCloudWorkspace } from './turso.js';
 import { Updates } from './updates.js';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { Desk } from './coordinator.js';
+import { aboutRexDesk } from './about.js';
 import { handleMcp } from './mcp.js';
 import { git, resolveCommand } from './processes.js';
 import { execFile, execFileSync, spawn } from 'node:child_process';
@@ -458,6 +459,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (input.action === 'remove') return json(response, 200, desk.peers.remove(input.id));
         throw new Error('Unknown action.');
       }
+      // Settings › About: version, counts and storage.
+      if (url.pathname === '/api/about' && request.method === 'GET') return json(response, 200, await aboutRexDesk({ store, rooms: desk.rooms.list(), update: updates.status(), install: process.env.REX_DESK_EXE ? path.dirname(process.env.REX_DESK_EXE) : root, fresh: url.searchParams.has('fresh') }));
       if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: { ...updates.status(), whenIdle: updateWhenIdle, busy: busyAgents(store) }, cloudSync: session.cloud || null, account: { email: session.email, role: role() }, code: codeVersion() }); }
       // One-click cloud backup: start opens Turso's sign-in page in the browser; finish waits for it, makes the database and connects it.
       if (['/api/database/turso-start', '/api/database/turso-finish', '/api/database/connect'].includes(url.pathname)) ownDatabaseOnly();
