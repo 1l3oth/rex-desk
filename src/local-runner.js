@@ -47,7 +47,7 @@ export class LocalRunner {
     try {
       for (let round = 0; round < ROUNDS; round++) {
         if (signal.aborted) throw new Error('Local AI run interrupted.');
-        const answer = await this.ask(messages, tools.list, signal, text => this.event('agent-text-partial', { text }));
+        const answer = await this.chat(messages, tools.list, signal, text => this.event('agent-text-partial', { text }));
         used.input += answer.inputTokens || 0; used.output += answer.outputTokens || 0;
         if (answer.inputTokens) this.event('context', { used: answer.inputTokens, window: CONTEXT });
         const calls = answer.toolCalls || [];
@@ -72,7 +72,7 @@ export class LocalRunner {
 
   // One call to the model. Ollama: its own chat API, which takes the context size (a small one: it loads in seconds and
   // fits in memory) and streams the words. Another local server: the OpenAI-style API most of them speak.
-  async ask(messages, tools, signal, onText) {
+  async chat(messages, tools, signal, onText) {
     const server = this.server(), model = this.local.model, auth = server.apiKey ? { Authorization: `Bearer ${server.apiKey}` } : {};
     if (server.kind === 'ollama') {
       const response = await fetch(`${server.url}/api/chat`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
