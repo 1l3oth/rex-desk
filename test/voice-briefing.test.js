@@ -69,3 +69,32 @@ test('in Voice mode, what the agent sends with desk_message or asks with a quest
     assert.ok(heard.every(item => item.done && item.runId === run.id));
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('a background job does the task on its own (Haiku), so the agent answers at once; its result reaches the chat, and the agent with the next message', async () => {
+  const store = new Store(temporary('jobs')), runs = [];
+  const desk = new Desk(store, { root: temporary('jobs-root'), runnerFactory: options => ({ async start(prompt) {
+    runs.push({ run: options.run, prompt, model: options.model });
+    options.event('session', { sessionId: '7c3a8d71-d78d-409a-9a84-91fb162c1be3' });
+    if (options.run.role === 'helper') { await new Promise(resolve => setTimeout(resolve, 150)); options.event('agent-text', { text: 'ReelHome rendered all twelve stills without errors.' }); }
+    else options.event('agent-text', { text: 'Sure, I am on it.' });
+  }, async interrupt() {} }) });
+  try {
+    const rex = await desk.startWebTask('hello');
+    await waitFor(() => store.get('run', rex.id).state === 'finished', 'the first turn');
+    store.put('run', rex.id, { ...store.get('run', rex.id), voice: { at: '', briefing: 'B', sent: true } });
+    const heard = []; store.on('partial', data => { if (data.done) heard.push(data.text); });
+    const started = desk.startHelper(rex.id, { task: 'Check whether ReelHome rendered the stills', title: 'Check the stills' });
+    assert.equal(started.started, true);
+    const job = store.get('run', started.jobId);
+    assert.equal(job.role, 'helper'); assert.equal(job.model, 'haiku'); assert.equal(job.parentRunId, rex.id);
+    assert.equal(store.get('run', rex.id).state, 'finished', 'the agent is free at once');
+    await waitFor(() => store.events(rex.id, { visible: true }).some(event => event.kind === 'message' && /twelve stills/.test(event.text)), "the job's result in the chat");
+    assert.match(runs.find(item => item.run.role === 'helper').prompt, /quick background job for/);
+    assert.ok(heard.some(text => /twelve stills/.test(text)), 'said out loud in Voice mode');
+    await desk.say(rex.id, 'so is it done', { voice: true });
+    await waitFor(() => runs.filter(item => item.run.id === rex.id).length === 2, 'the next spoken message');
+    const next = runs.filter(item => item.run.id === rex.id).at(-1).prompt;
+    assert.match(next, /Results of the jobs you started[\s\S]*Check the stills: ReelHome rendered all twelve stills/);
+    assert.deepEqual(store.get('run', rex.id).jobResults, [], 'given once');
+  } finally { await desk.shutdown(); store.close(); }
+});

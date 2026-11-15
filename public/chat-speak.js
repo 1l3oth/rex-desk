@@ -226,6 +226,8 @@ async function sayHere(text, lang, token) {
 // While the agent works instead of talking, Voice mode says so in a few words ("Let me look at the files."), at most one
 // line every few seconds and never the same line twice in a row, so the person is not left in silence.
 function toolWords(tool, input = {}) {
+  // Rex says itself that it is on it; starting a job or acting for the person needs no extra words.
+  if (/^desk_(background|agent_say|room_say|room_create|rooms_all|room_manage)$/.test(tool)) return '';
   if (/^(Read|Glob|Grep|LS|NotebookRead|view_file|read_file|list_dir|grep_search|find_by_name)$/.test(tool)) return 'Let me look at the files.';
   if (/^(Bash|PowerShell|run_command)$/.test(tool)) return input.description && input.description.length < 70 ? `${input.description.replace(/\.$/, '')}.` : 'Running a command.';
   if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(tool)) return 'Making the change now.';
@@ -239,7 +241,7 @@ function toolWords(tool, input = {}) {
 }
 const told = { at: 0, last: '' };
 function sayTool(tool, input) {
-  const line = toolWords(tool, input), now = Date.now();
+  const line = toolWords(tool, input), now = Date.now(); if (!line) return;
   if (line === told.last && now - told.at < 30000) return;
   if (now - told.at < 6000 || live.pending > 1) return;
   told.at = now; told.last = line; sayPhrase(line, live.token);
