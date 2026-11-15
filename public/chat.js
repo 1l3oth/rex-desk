@@ -488,12 +488,12 @@ function renderAll(full = false) {
 }
 
 // ---------- data ----------
-async function loadView() {
+async function loadView(early = null) {
   const { type, id } = ui.view;
   try {
     if (type === 'main' || type === 'run') {
       const run = type === 'main' ? mainRun() : runById(id); if (!run) return;
-      const events = await api(`/runs/${run.id}/messages`); ui.events.set(run.id, events);
+      const events = await (early && type === 'run' ? early : api(`/runs/${run.id}/messages`)); ui.events.set(run.id, events);
     } else if (type === 'room') {
       const room = ui.snap.rooms.find(item => item.id === id);
       if (room && ui.infoOpen !== false && ['activity', 'terminal'].includes(ui.sideTab)) await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
@@ -503,25 +503,38 @@ async function loadView() {
     else if (type === 'project') ui.page = (await api(`/memory/page?name=${encodeURIComponent(id)}`)).text;
   } catch (error) { if (type === 'project') ui.page = error.message; }
 }
-let busy = false, again = false, lastTyped = 0, typingHold = 0;
+let busy = false, again = false, againFull = false, lastTyped = 0, typingHold = 0;
 // While the person types, the page is not redrawn: a redraw of a long chat takes the main thread and the letters lag.
 // Updates wait until they pause for a moment, then everything catches up at once.
 document.addEventListener('input', event => { if (event.target.id === 'draft' || event.target.closest?.('#composer')) lastTyped = performance.now(); }, true);
 async function refresh({ full = false } = {}) {
   const sinceTyping = performance.now() - lastTyped;
   if (!full && sinceTyping < 1200) { clearTimeout(typingHold); typingHold = setTimeout(() => void refresh().catch(() => {}), 1250 - sinceTyping); return; }
-  if (busy) { again = true; return; } busy = true;
+  // A refresh asked for while one is running comes after it, and a full one (another chat was opened) stays full.
+  if (busy) { again = true; againFull ||= full; return; } busy = true;
   try {
-    ui.snap = await api('/state');
+    // Everything the page needs is asked for at once, not one after another: opening a chat waited for four answers in a row.
+    const view = ui.view, early = view.type === 'run' ? api(`/runs/${view.id}/messages`).catch(() => null) : null;
+    const [snap, memory, profile] = await Promise.all([api('/state'), api('/memory').catch(() => ui.memory), api('/profile').catch(() => ui.profile)]);
+    ui.snap = snap;
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
-    if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = await api('/memory').catch(() => ui.memory); ui.profile = await api('/profile').catch(() => ui.profile);
-    await loadView(); renderAll(full); maybeStartTour(ctx); if (!window.__starWatch && !document.documentElement.classList.contains('embed')) { window.__starWatch = true; watchForStar(); } showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
-  } finally { busy = false; if (again) { again = false; void refresh(); } }
+    if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = memory; ui.profile = profile;
+    await loadView(view === ui.view && early ? early.then(events => events || api(`/runs/${view.id}/messages`)) : null); renderAll(full); maybeStartTour(ctx); if (!window.__starWatch && !document.documentElement.classList.contains('embed')) { window.__starWatch = true; watchForStar(); } showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
+  } finally { busy = false; if (again) { const wasFull = againFull; again = false; againFull = false; void refresh({ full: wasFull }); } }
+}
+// A chat opened is drawn at once from what the page already holds (its messages from the last visit), and brought up to
+// date a moment later; before, the screen stayed on the old chat until the server had answered everything.
+function showNow() {
+  const { type, id } = ui.view; if (!ui.snap) return;
+  const run = type === 'main' ? mainRun() : type === 'run' ? runById(id) : null;
+  if (['main', 'run'].includes(type) && !(run && ui.events.has(run.id))) return;
+  if (!['main', 'run', 'room'].includes(type)) return;
+  try { renderAll(true); } catch { /* the refresh below draws it */ }
 }
 function open(type, id = '') {
   ui.view = { type, id }; ui.page = ''; window.rexView = noticeKey(ui.view); window.rexPresence?.();
   if (!document.documentElement.classList.contains('embed')) try { localStorage.setItem('rex-desk-view', JSON.stringify(ui.view)); } catch { /* private window */ }
-  if (location.hash !== hashOf(ui.view)) { ui.fromOpen = true; location.hash = hashOf(ui.view); } document.querySelector('.chat-shell')?.classList.remove('show-rail'); void refresh({ full: true }); }
+  if (location.hash !== hashOf(ui.view)) { ui.fromOpen = true; location.hash = hashOf(ui.view); } document.querySelector('.chat-shell')?.classList.remove('show-rail'); showNow(); void refresh({ full: true }); }
 
 // ---------- actions ----------
 let voiceRest = 0;
@@ -685,7 +698,7 @@ document.addEventListener('click', event => { const head = event.target.closest?
 window.addEventListener('hashchange', () => {
   if (ui.fromOpen) { ui.fromOpen = false; return; }
   const view = viewFromHash(); if (!view) return;
-  ui.view = view; ui.page = ''; void refresh({ full: true });
+  ui.view = view; ui.page = ''; showNow(); void refresh({ full: true });
 });
 setPickActions({ 'room-add': async agentId => { try { await api(`/rooms/${ui.view.id}/members`, { method: 'POST', data: { agentId } }); await refresh(); } catch (error) { toast(error.message, true); } } });
 // Yes and No answers.
