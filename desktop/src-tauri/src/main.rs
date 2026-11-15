@@ -497,6 +497,8 @@ fn main() {
             let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .on_new_window(move |url, features| open_link(&handle, url, features))
                 .initialization_script(if cfg!(target_os = "macos") { "window.__REX_SHELL = 'macos';" } else { "window.__REX_SHELL = 'windows';" })
+                // Dark before the first page paints, so the window never flashes white while Rex Desk starts.
+                .background_color(tauri::window::Color(10, 14, 25, 255))
                 .title("Rex Desk Beta")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(900.0, 600.0)

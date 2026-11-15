@@ -21,6 +21,28 @@ code,pre{font-family:var(--mono);font-size:12px}
 /* Loading screen: the mark breathes over a thin running bar. If the page cannot start, the same spot becomes a card that says why and retries. */
 .boot{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;background:var(--bg);color:var(--muted);font-size:13px;text-align:center}
 .boot-mark{width:44px;height:44px;border-radius:11px;animation:boot-breathe 1.8s ease-in-out infinite}
+.boot .rex-anim.boot-mark{--s:72px;width:var(--s);height:var(--s);border-radius:0;animation:none;margin-bottom:4px}
+/* The animated Rex Desk mark: four robot agents look around, then become the four white tiles of the logo (the last one 
+   faint: an agent waiting), a light sweeps across, and they turn back into agents. Pure CSS, loops every 4.2 s. */ 
+.rex-anim{--s:96px;position:relative;display:block;width:var(--s);height:var(--s);flex:none} 
+.rex-anim i{position:absolute;display:block} 
+.ra-base{inset:3.1%;border-radius:23.3%;background:linear-gradient(150deg,#78a8ff 0%,#4c8dff 42%,#3170e6 100%);box-shadow:inset 0 calc(var(--s)*.008) 0 rgba(255,255,255,.45),0 calc(var(--s)*.06) calc(var(--s)*.16) rgba(40,90,220,.4);overflow:hidden} 
+.ra-sheen{top:-30%;bottom:-30%;left:-60%;width:36%;transform:skewX(-18deg);background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);animation:ra-sheen 4.2s infinite} 
+.ra-t{width:21.9%;height:21.9%;border-radius:50%;overflow:hidden;box-shadow:0 calc(var(--s)*.012) calc(var(--s)*.03) rgba(10,30,90,.28);animation:ra-move 4.2s cubic-bezier(.65,0,.35,1) infinite both,ra-shape 4.2s cubic-bezier(.65,0,.35,1) infinite both} 
+.ra-t b{position:absolute;inset:0;background:#fff} 
+.ra-t svg{position:absolute;inset:0;width:100%;height:100%;display:block;animation:ra-face 4.2s cubic-bezier(.65,0,.35,1) infinite both} 
+.ra-1{left:25%;top:25%;--dx:calc(var(--s)*-.02);--dy:calc(var(--s)*-.02);--r:8deg} 
+.ra-2{left:53.1%;top:25%;--dx:calc(var(--s)*.02);--dy:calc(var(--s)*-.02);--r:-7deg;animation-delay:.07s} 
+.ra-3{left:25%;top:53.1%;--dx:calc(var(--s)*-.02);--dy:calc(var(--s)*.02);--r:-9deg;animation-delay:.14s} 
+.ra-4{left:53.1%;top:53.1%;--dx:calc(var(--s)*.02);--dy:calc(var(--s)*.02);--r:7deg;animation-delay:.21s} 
+.ra-2 svg,.ra-2 b{animation-delay:.07s}.ra-3 svg,.ra-3 b{animation-delay:.14s}.ra-4 svg{animation-delay:.21s} 
+.ra-4 b{animation:ra-wait 4.2s infinite both} 
+@keyframes ra-move{0%,6%{transform:translate(var(--dx),var(--dy)) scale(1.22) rotate(0)}14%{transform:translate(var(--dx),calc(var(--dy) - var(--s)*.03)) scale(1.24) rotate(var(--r))}23%{transform:translate(var(--dx),var(--dy)) scale(1.22) rotate(calc(var(--r)*-1))}31%,37%{transform:translate(var(--dx),var(--dy)) scale(1.22) rotate(0)}49%{transform:translate(0,0) scale(.94)}53%,86%{transform:translate(0,0) scale(1)}100%{transform:translate(var(--dx),var(--dy)) scale(1.22) rotate(0)}} 
+@keyframes ra-shape{0%,37%{border-radius:50%}50%,86%{border-radius:21.4%}100%{border-radius:50%}} 
+@keyframes ra-face{0%,37%{opacity:1}50%,86%{opacity:0}100%{opacity:1}} 
+@keyframes ra-wait{0%,52%{opacity:1}60%,84%{opacity:.47}94%,100%{opacity:1}} 
+@keyframes ra-sheen{0%,58%{left:-60%}74%,100%{left:140%}} 
+@media (prefers-reduced-motion:reduce){.rex-anim *{animation:none!important}.ra-t{border-radius:21.4%}.ra-t svg{opacity:0}.ra-4 b{opacity:.47}}
 .boot-bar{position:relative;display:block;width:120px;height:2px;border-radius:2px;background:var(--line);overflow:hidden}
 .boot-bar::after{content:"";position:absolute;inset:0 auto 0 0;width:40%;border-radius:2px;background:var(--accent);animation:boot-run 1.2s ease-in-out infinite}
 @keyframes boot-breathe{50%{transform:scale(.94);opacity:.75}}
