@@ -20,7 +20,7 @@ test('Rex Agent makes a group chat, talks in it and in an agent\'s personal chat
     const project = temporary('acts-project');
     const reel = app.desk.specialists.create({ name: 'ReelHome', projectPath: project, purpose: 'Captions', by: 'you' });
     const web = app.desk.specialists.create({ name: 'Web', projectPath: project, purpose: 'Web pages', by: 'you' });
-    app.store.put('run', 'rex', { id: 'rex', role: 'coordinator', main: true, state: 'running', createdAt: now() });
+    app.store.put('run', 'rex', { id: 'rex', role: 'coordinator', main: true, state: 'finished', createdAt: now() });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${app.address}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${app.desk.scopeToken('rex')}` } } }));
 
     const made = await result(client, 'desk_room_create', { name: 'Launch', agents: ['ReelHome', 'Web'], message: 'Plan the launch video together.' });
@@ -42,7 +42,8 @@ test('Rex Agent makes a group chat, talks in it and in an agent\'s personal chat
     assert.ok(rooms.some(item => item.name === 'Launch'));
     // The agents woken in the room and in the personal chat answer in the background: let them finish before closing.
     const quiet = () => app.desk.live.size === 0 && !app.store.list('run').some(run => ['queued', 'starting', 'running', 'verifying'].includes(run.state));
-    for (let calm = 0; calm < 10;) { await new Promise(resolve => setTimeout(resolve, 100)); calm = quiet() ? calm + 1 : 0; }
+    // At most 10 seconds, so a test can never hang the whole run.
+    for (let calm = 0, tries = 0; calm < 10 && tries < 100; tries++) { await new Promise(resolve => setTimeout(resolve, 100)); calm = quiet() ? calm + 1 : 0; }
   } finally { await client.close().catch(() => {}); await app.close(); }
 });
 
