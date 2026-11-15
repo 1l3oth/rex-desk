@@ -30,7 +30,10 @@ export const chosenVoice = lang => { try { return localStorage.getItem(`rex-desk
 export async function voicesFor(lang) { return (await voices()).filter(voice => voice.lang.toLowerCase().replace('_', '-').startsWith(lang)); }
 async function voiceFor(lang) {
   const list = await voicesFor(lang), picked = chosenVoice(lang);
-  return list.find(voice => voice.name === picked) || list.find(voice => /natural|online|neural/i.test(voice.name) && /en-us|ko-kr|km-kh/i.test(voice.lang)) || list.find(voice => /natural|online|neural/i.test(voice.name)) || list.find(voice => /en-us/i.test(voice.lang)) || list[0] || null;
+  // The natural voice Rex Desk uses (Ava) is a woman's: when the computer's own voice has to stand in, a woman's voice
+  // (Zira, Aria, Jenny…) sounds like the same Rex, not a different person.
+  const female = voice => /zira|aria|jenny|ava|emma|michelle|samantha|susan|hazel|heami|sunhi|sreymom|female/i.test(voice.name);
+  return list.find(voice => voice.name === picked) || list.find(voice => /natural|online|neural/i.test(voice.name) && /en-us|ko-kr|km-kh/i.test(voice.lang) && female(voice)) || list.find(voice => /natural|online|neural/i.test(voice.name) && /en-us|ko-kr|km-kh/i.test(voice.lang)) || list.find(voice => /natural|online|neural/i.test(voice.name)) || list.find(voice => /en-us/i.test(voice.lang) && female(voice)) || list.find(voice => /en-us/i.test(voice.lang)) || list[0] || null;
 }
 // Pieces of about two sentences: browsers stop very long utterances part way.
 function pieces(text) {
