@@ -237,8 +237,11 @@ async function toggleMic(ctx) {
 // not start (already listening, the microphone is blocked).
 export const voiceBusy = () => Boolean(listening || transcribing);
 // What the body in Voice mode shows: listening (with how loud the person is), or turning speech into words.
-let micLevel = 0;
-export const voiceListening = () => ({ listening: Boolean(listening), transcribing, level: micLevel });
+// heardAt: the last moment the person's voice was loud enough to be talking, so Voice mode never takes them for silent
+// (and never interrupts them with "are you still there?") while they talk.
+let micLevel = 0, heardAt = 0;
+const hearLevel = level => { micLevel = level; if (level > 0.12) heardAt = Date.now(); };
+export const voiceListening = () => ({ listening: Boolean(listening), transcribing, level: micLevel, heardAt });
 // The words go to the agent as a message, as if typed.
 async function sendSpoken(ctx, text) {
   const box = document.getElementById('draft'); if (!text || !box) return;
@@ -255,7 +258,7 @@ function listenLevel(stream) {
   const context = new (window.AudioContext || window.webkitAudioContext)(), analyser = context.createAnalyser(); analyser.fftSize = 1024;
   context.createMediaStreamSource(stream).connect(analyser);
   const data = new Float32Array(analyser.fftSize); let timer = 0;
-  const tick = () => { analyser.getFloatTimeDomainData(data); let sum = 0; for (const value of data) sum += value * value; micLevel = Math.min(1, Math.sqrt(sum / data.length) * 6); timer = requestAnimationFrame(tick); };
+  const tick = () => { analyser.getFloatTimeDomainData(data); let sum = 0; for (const value of data) sum += value * value; hearLevel(Math.min(1, Math.sqrt(sum / data.length) * 6)); timer = requestAnimationFrame(tick); };
   tick();
   return () => { cancelAnimationFrame(timer); micLevel = 0; stream.getTracks().forEach(track => track.stop()); void context.close(); };
 }
@@ -299,7 +302,7 @@ export async function voiceTurn(ctx, { onState = () => {} } = {}) {
   let stream;
   try { stream = await openMicrophone(); } catch { ctx.toast('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.', true); return false; }
   onState('listening');
-  const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => { micLevel = Math.min(1, level * 6); } });
+  const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => hearLevel(Math.min(1, level * 6)), longest: 90000, pause: 1800 });
   listening = recording; micButton()?.classList.add('rec');
   async function finish() {
     if (listening !== recording) return;
