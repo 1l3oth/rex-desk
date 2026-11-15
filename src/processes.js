@@ -7,6 +7,17 @@ import net from 'node:net';
 import { createHash } from 'node:crypto';
 
 const exec = promisify(execFile);
+// A Mac app opened from the Dock or Finder gets only the system PATH (/usr/bin:/bin:/usr/sbin:/sbin), not the one the
+// person's terminal has. Claude Code, Codex and Antigravity install into ~/.local/bin, and Homebrew into /opt/homebrew/bin
+// or /usr/local/bin, so without these folders an installed tool looks missing. ~/.local/bin is added even before it exists,
+// so a tool installed while Rex Desk runs is found without a restart.
+export function userBinPath(current = '', home = os.homedir(), exists = existsSync) {
+  const parts = String(current).split(':').filter(Boolean);
+  const wanted = [path.posix.join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', path.posix.join(home, '.npm-global', 'bin'), path.posix.join(home, '.bun', 'bin')]
+    .filter((folder, index) => index === 0 || exists(folder)).filter(folder => !parts.includes(folder));
+  return [...wanted, ...parts].join(':');
+}
+if (process.platform !== 'win32') process.env.PATH = userBinPath(process.env.PATH);
 export async function git(cwd, args) {
   const { stdout } = await exec('git', ['-C', cwd, ...args], { windowsHide: true, maxBuffer: 8 * 1024 * 1024, timeout: 120000 });
   return stdout.trim();
@@ -24,7 +35,9 @@ export function resolveCommand(name) {
   const folders = [...new Set([path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData/Roaming'), 'npm'), path.dirname(process.execPath),
     ...String(process.env.PATH || '').split(path.delimiter).filter(Boolean)].map(folder => path.resolve(folder).toLowerCase()))];
   if (name === 'codex') {
-    const native = folders.map(folder => path.join(folder, 'codex.exe')).find(target => existsSync(target));
+    // Codex's own installer puts it in %LOCALAPPDATA%\Programs\OpenAI\Codex\bin (a Rex Desk started before that has an older PATH).
+    const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    const native = [...folders, path.join(local, 'Programs', 'OpenAI', 'Codex', 'bin')].map(folder => path.join(folder, 'codex.exe')).find(target => existsSync(target));
     if (native) return { command: native, args: [] };
     const entry = folders.map(folder => path.join(folder, 'node_modules', '@openai', 'codex', 'bin', 'codex.js')).find(target => existsSync(target));
     if (entry) return { command: process.execPath, args: [entry] };
