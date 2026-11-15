@@ -390,11 +390,17 @@ function closeVoiceStage() {
   clearInterval(voiceBeat); voiceBeat = 0; try { localStorage.removeItem('rex-voice-live'); } catch { /* private window */ }
   voiceOrb?.destroy(); voiceStage?.remove(); voiceStage = voiceOrb = null;
 }
+// The agent is writing a reply the person waits for. Its quiet turn reading Voice mode's report does not count: the mic
+// opens right after the welcome, and what the person says reaches the agent as soon as it has read.
+function agentWriting() {
+  if (!document.querySelector('#feed-inner .bubble.typing')) return false;
+  return !runById(ctx.currentRunId())?.voice?.reading;
+}
 function voiceNow() {
   const heard = voiceListening();
   if (!speechIdle()) return { state: 'speaking', level: outputLevel() };
   if (heard.listening) return { state: 'listening', level: heard.level };
-  if (heard.transcribing || document.querySelector('#feed-inner .bubble.typing')) return { state: 'thinking', level: 0 };
+  if (heard.transcribing || agentWriting()) return { state: 'thinking', level: 0 };
   return { state: 'idle', level: 0 };
 }
 // The badge under the body says plainly whether to talk: green "Listening, go ahead" only while the mic is open.
@@ -732,7 +738,7 @@ try {
   // there; after two minutes it says it will be there when needed and ends Voice mode, so the mic is not left open.
   setInterval(() => {
     if (!voiceModeOn(draftKey())) { voiceQuiet.since = 0; return; }
-    const agentBusy = Boolean(document.querySelector('#feed-inner .bubble.typing')) || !speechIdle() || voiceListening().transcribing;
+    const agentBusy = agentWriting() || !speechIdle() || voiceListening().transcribing;
     if (agentBusy) voiceQuiet.since = 0; else if (!voiceQuiet.since) { voiceQuiet.since = Date.now(); voiceQuiet.asked = false; }
     if (voiceQuiet.since && !agentBusy) {
       const quiet = Date.now() - voiceQuiet.since;
