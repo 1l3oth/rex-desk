@@ -170,6 +170,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (store.config().sources.length) void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
     }
     store.on('change', notify);
+    // An agent's words as they are written, for read-aloud to speak live (see chat-speak.js speakLive).
+    store.on('partial', data => { const line = `event: partial\ndata: ${JSON.stringify(data)}\n\n`; for (const client of clients) client.write(line); });
     session = { id: entry?.id, email: entry?.email || '', store, desk, cookie: randomBytes(32).toString('base64url'), staySignedIn, cloud: null };
     if (accounts) {
       accounts.touch(entry.id);

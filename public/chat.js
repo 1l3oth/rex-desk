@@ -16,7 +16,7 @@ import { maybeStartTour } from '/chat-tour.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
-import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies } from '/chat-speak.js';
+import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive } from '/chat-speak.js';
 import { openAvatarPicker } from '/chat-avatar.js';
 import { watchForStar } from '/chat-star.js';
 import { showUpdateCard, updateLater, updateShow, installUpdate, updateWhenIdle, watchForUpdates, showSyncNote } from '/chat-update.js';
@@ -657,6 +657,8 @@ try {
   await refresh({ full: true });
   const stream = new EventSource('/api/events'); let timer;
   stream.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(() => void refresh().catch(() => {}), 700); });
+  // An agent's words as they are written: read-aloud speaks them a phrase behind, without waiting for the whole reply.
+  stream.addEventListener('partial', event => { try { speakLive(JSON.parse(event.data), draftKey(), ctx.currentRunId()); } catch { /* a broken message is skipped */ } });
   setInterval(() => void refresh().catch(() => {}), 15000);
 } catch (error) { app.innerHTML = `<div class="boot boot-failed"><h2>Rex Desk is unavailable</h2><p>${esc(error.message)}</p><p>Opening it again by itself as soon as the server answers.</p></div>`; }
 

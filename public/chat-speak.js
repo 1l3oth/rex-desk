@@ -113,20 +113,77 @@ const replyId = button => { const message = button.closest('.msg'), text = butto
 const markAll = key => heard.set(key, new Set(replies().map(replyId)));
 export function toggleReadAloud(key) {
   const chats = autoChats(), on = !chats.has(key);
-  if (on) { chats.add(key); unlockSound(); markAll(key); } else { chats.delete(key); stop(); }
+  if (on) { chats.add(key); unlockSound(); markAll(key); } else { chats.delete(key); stop(); stopLive(); }
   try { localStorage.setItem(AUTO, JSON.stringify([...chats])); } catch { /* private window */ }
   return on;
 }
-// After each redraw: finished replies not read yet are read, oldest first.
+// After each redraw: finished replies not read yet are read, oldest first. One already spoken live (below) is not read again.
 export function readNewReplies(key) {
   if (!heard.has(key) || !readAloudOn(key)) { markAll(key); return; }
-  if (document.querySelector('#feed-inner .bubble.typing')) return;
-  const seen = heard.get(key);
+  // While the agent is still writing, a reply waits (it is read once all of it is there), unless it was already spoken live.
+  const seen = heard.get(key), writing = Boolean(document.querySelector('#feed-inner .bubble.typing'));
   for (const button of replies()) {
     const id = replyId(button); if (!id || seen.has(id)) continue;
-    seen.add(id); reading = reading.then(() => (readAloudOn(key) && document.body.contains(button) ? play(button) : null)).catch(() => {});
+    if (spokenLive(button.closest('.bubble')?.querySelector('.md')?.textContent || '')) { seen.add(id); continue; }
+    if (writing) continue;
+    seen.add(id);
+    reading = reading.then(() => (readAloudOn(key) && document.body.contains(button) ? play(button) : null)).catch(() => {});
   }
 }
+
+// Live read-aloud: while an agent is still writing, each finished phrase (a sentence, or a long clause at a comma) is
+// spoken at once, so the voice follows the words a phrase behind instead of starting after the whole reply. The server
+// sends the text so far of the block being written (event "partial"); "done" carries the finished block.
+const fingerprint = text => String(text).toLowerCase().replace(/[^a-z0-9ក-៿가-힯]+/g, '').slice(0, 60);
+const live = { runId: '', text: '', said: 0, token: 0, queue: Promise.resolve(), spoken: new Set(), spokenAt: 0 };
+const spokenLive = text => { const print = fingerprint(text); return print.length > 8 && live.spoken.has(print); };
+// What is read: code is said as "code", a block still open is not read yet, links and markdown marks are dropped.
+function sayable(raw) {
+  let text = String(raw).replace(/```[\s\S]*?```/g, ' (code) ');
+  const open = text.indexOf('```'); if (open >= 0) text = text.slice(0, open);
+  return text;
+}
+const cleanPhrase = phrase => phrase.replace(/`[^`]*`/g, match => (match.length > 40 ? ' (code) ' : match.slice(1, -1))).replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+  .replace(/https?:\/\/\S+/g, 'a link').replace(/(\*{1,3}|_{1,3})([^*_\n]+?)\1/g, '$2').replace(/[*#>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+// The end of the last whole phrase in what is not said yet: a sentence end or a line break, or a comma once enough is waiting.
+function phraseEnd(pending, finished) {
+  if (finished) return pending.length;
+  let end = -1;
+  for (const match of pending.matchAll(/[.!?。…](?=\s)|\n/g)) end = match.index + 1;
+  if (end < 0 && pending.length > 90) for (const match of pending.matchAll(/[,;:](?=\s)/g)) if (match.index > 30) end = match.index + 1;
+  return end;
+}
+function sayPhrase(phrase, token) {
+  const text = cleanPhrase(phrase); if (!/[\p{L}\p{N}]/u.test(text)) return;
+  const lang = language(text), chosen = chosenVoice(lang);
+  if (chosen && !/Neural$/.test(chosen)) {
+    // The computer's own voice queues phrases by itself.
+    void voiceFor(lang).then(voice => { if (token !== live.token) return; const utterance = new SpeechSynthesisUtterance(text); utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice; utterance.rate = 1.05; speechSynthesis.speak(utterance); });
+    return;
+  }
+  // The neural voice: each phrase is fetched at once, and played in order as soon as the one before it ends.
+  const sound = fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text, lang, voice: chosen }) })
+    .then(response => (response.ok ? response.blob() : null)).then(blob => (blob ? URL.createObjectURL(blob) : null)).catch(() => null);
+  live.queue = live.queue.then(async () => {
+    const url = await sound; if (!url) return;
+    if (token !== live.token) { URL.revokeObjectURL(url); return; }
+    const audio = player || new Audio(); audio.src = url;
+    await new Promise(resolve => { audio.onended = resolve; audio.onerror = resolve; audio.play().catch(resolve); });
+    URL.revokeObjectURL(url);
+  });
+}
+export function speakLive({ runId, text = '', done = false }, key, openRunId) {
+  if (!runId || runId !== openRunId || !readAloudOn(key)) return;
+  const said = sayable(text);
+  // A new block (the agent wrote, used a tool, and writes again) starts over.
+  if (runId !== live.runId || !said.startsWith(live.text.slice(0, live.said))) { live.runId = runId; live.said = 0; }
+  live.text = said;
+  const pending = said.slice(live.said), end = phraseEnd(pending, done);
+  if (end > 0) { sayPhrase(pending.slice(0, end), live.token); live.said += end; live.spokenAt = Date.now(); }
+  if (done) { live.spoken.add(fingerprint(cleanPhrase(text))); if (live.spoken.size > 50) live.spoken.delete(live.spoken.values().next().value); live.said = 0; live.text = ''; }
+}
+// Stops live speech (read-aloud turned off, another chat opened).
+function stopLive() { live.token += 1; live.queue = Promise.resolve(); live.said = 0; live.text = ''; live.runId = ''; try { speechSynthesis.cancel(); } catch { /* no voices */ } if (player) { try { player.pause(); } catch { /* not playing */ } } }
 export const readAloudButton = key => { const on = readAloudOn(key); return `<button type="button" class="icon-btn read-aloud${on ? ' on' : ''}" data-action="read-aloud" aria-pressed="${on}" title="${on ? 'Replies are read aloud. Press to stop' : 'Read replies aloud'}" aria-label="Read replies aloud">${SPEAKER}</button>`; };
 let ctxToast = null;
 export function wireSpeak(toast) {
@@ -140,5 +197,5 @@ export function wireSpeak(toast) {
   // Leaving the chat stops the voice.
   window.addEventListener('hashchange', stop);
   // Opening another chat starts fresh there: replies it already had are not read out.
-  window.addEventListener('hashchange', () => { heard.clear(); reading = Promise.resolve(); });
+  window.addEventListener('hashchange', () => { heard.clear(); reading = Promise.resolve(); stopLive(); });
 }
