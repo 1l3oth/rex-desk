@@ -52,3 +52,20 @@ test('turning Voice mode on gives the agent the report at once and asks only for
     assert.equal(store.get('run', run.id).voice, undefined);
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('in Voice mode, what the agent sends with desk_message or asks with a question card is said out loud too', async () => {
+  const store = new Store(temporary('voice-said'));
+  const desk = new Desk(store, { root: temporary('voice-said-root'), runnerFactory: options => ({ async start() { options.event('session', { sessionId: '7c3a8d71-d78d-409a-9a84-91fb162c1be3' }); }, async interrupt() {} }) });
+  try {
+    const run = await desk.startWebTask('hello');
+    await waitFor(() => store.get('run', run.id).state === 'finished', 'the first turn');
+    const heard = []; store.on('partial', data => heard.push(data));
+    desk.message(run.id, 'Not in voice mode yet.');
+    assert.equal(heard.length, 0);
+    store.put('run', run.id, { ...store.get('run', run.id), voice: { at: '', briefing: '', sent: true } });
+    desk.message(run.id, 'No projects are set up yet.');
+    void desk.ask(run.id, { kind: 'question', title: 'Where do you keep your notes?' }).catch(() => {});
+    assert.deepEqual(heard.map(item => item.text), ['No projects are set up yet.', 'Where do you keep your notes?']);
+    assert.ok(heard.every(item => item.done && item.runId === run.id));
+  } finally { await desk.shutdown(); store.close(); }
+});

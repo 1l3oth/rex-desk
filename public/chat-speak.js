@@ -141,7 +141,7 @@ export const voiceModeOn = key => voiceChats().has(key);
 export function toggleVoiceMode(key) {
   const chats = voiceChats(), on = !chats.has(key);
   // Turned on by a click: the player and its level meter start inside that click, so the browser lets them make sound.
-  if (on) { chats.add(key); unlockSound(); measure(player); void meter?.context?.resume?.().catch(() => {}); } else { chats.delete(key); stopLive(); }
+  if (on) { chats.add(key); unlockSound(); } else { chats.delete(key); stopLive(); }
   try { localStorage.setItem(VOICE, JSON.stringify([...chats])); } catch { /* private window */ }
   return on;
 }
@@ -149,24 +149,28 @@ const WAVE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke
 export const voiceModeButton = key => { const on = voiceModeOn(key); return `<button type="button" class="icon-btn voice-mode${on ? ' on' : ''}" data-action="voice-mode" aria-pressed="${on}" title="${on ? 'Voice mode is on: talk, and the reply is spoken as it is written. Press to end' : 'Voice mode: talk with this agent'}" aria-label="Voice mode">${WAVE}</button>`; };
 // Nothing is being said or waiting to be said.
 export const speechIdle = () => live.pending === 0 && !(typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking);
-// How loud Rex's own voice is right now (0 to 1), for the body in Voice mode to glow with. The neural voice plays through
-// one player, measured here; the computer's own voices cannot be measured, so they get a gentle made-up rhythm.
+// How loud Rex's own voice is right now (0 to 1), for the body in Voice mode to glow with. It listens to a copy of the
+// player's sound (captureStream), so the voice itself always plays straight out: routing the player through a meter made
+// it silent whenever the browser had not let the meter start yet. Where no copy can be taken, and for the computer's own
+// voices, the body gets a gentle made-up rhythm while it speaks.
 let meter = null;
 function measure(audio) {
-  if (meter || !audio) return;
+  if (!audio || typeof audio.captureStream !== 'function') return;
   try {
-    const context = new (window.AudioContext || window.webkitAudioContext)(), analyser = context.createAnalyser(); analyser.fftSize = 512;
-    context.createMediaElementSource(audio).connect(analyser); analyser.connect(context.destination);
-    meter = { context, analyser, data: new Float32Array(analyser.fftSize) };
-  } catch { meter = { failed: true }; }
+    meter ||= (() => { const context = new (window.AudioContext || window.webkitAudioContext)(), analyser = context.createAnalyser(); analyser.fftSize = 512; return { context, analyser, data: new Float32Array(analyser.fftSize), source: null }; })();
+    const stream = audio.captureStream(); if (!stream.getAudioTracks().length) return;
+    meter.source?.disconnect(); meter.source = meter.context.createMediaStreamSource(stream); meter.source.connect(meter.analyser);
+  } catch { /* the made-up rhythm stands in */ }
 }
+const rhythm = () => 0.18 + 0.12 * Math.abs(Math.sin(performance.now() / 160));
 export function outputLevel() {
-  if (meter?.analyser && live.pending) {
+  if (live.pending && meter?.source) {
     if (meter.context.state !== 'running') void meter.context.resume().catch(() => {});
     meter.analyser.getFloatTimeDomainData(meter.data); let sum = 0; for (const value of meter.data) sum += value * value;
-    return Math.min(1, Math.sqrt(sum / meter.data.length) * 3);
+    const level = Math.sqrt(sum / meter.data.length) * 3;
+    return level > 0.01 ? Math.min(1, level) : rhythm();
   }
-  if (typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking) return 0.18 + 0.12 * Math.abs(Math.sin(performance.now() / 160));
+  if (live.pending || (typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking)) return rhythm();
   return 0;
 }
 const fingerprint = text => String(text).toLowerCase().replace(/[^a-z0-9ក-៿가-힯]+/g, '').slice(0, 60);
@@ -201,12 +205,23 @@ function sayPhrase(phrase, token) {
     .then(response => (response.ok ? response.blob() : null)).then(blob => (blob ? URL.createObjectURL(blob) : null)).catch(() => null);
   live.pending += 1;
   live.queue = live.queue.then(async () => {
-    const url = await sound; if (!url) return;
-    if (token !== live.token) { URL.revokeObjectURL(url); return; }
-    player ||= new Audio(); const audio = player; audio.src = url; measure(audio);
-    await new Promise(resolve => { audio.onended = resolve; audio.onerror = resolve; audio.play().catch(resolve); });
+    const url = await sound; if (token !== live.token) { if (url) URL.revokeObjectURL(url); return; }
+    // The online voice did not answer (no network, the service down): this computer's own voice says it instead of silence.
+    if (!url) { await sayHere(text, lang, token); return; }
+    player ||= new Audio(); const audio = player; audio.src = url;
+    const played = await new Promise(resolve => { audio.onended = () => resolve(true); audio.onerror = () => resolve(false); audio.onplaying = () => measure(audio); audio.play().catch(() => resolve(false)); });
     URL.revokeObjectURL(url);
+    if (!played && token === live.token) await sayHere(text, lang, token);
   }).finally(() => { live.pending = Math.max(0, live.pending - 1); });
+}
+// One phrase in this computer's own voice, resolved when it has been said.
+async function sayHere(text, lang, token) {
+  if (typeof speechSynthesis === 'undefined' || token !== live.token) return;
+  const voice = await voiceFor(lang);
+  await new Promise(resolve => {
+    const utterance = new SpeechSynthesisUtterance(text); utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice; utterance.rate = 1.05;
+    utterance.onend = resolve; utterance.onerror = resolve; speechSynthesis.speak(utterance); setTimeout(resolve, 20000);
+  });
 }
 // While the agent works instead of talking, Voice mode says so in a few words ("Let me look at the files."), at most one
 // line every few seconds and never the same line twice in a row, so the person is not left in silence.
