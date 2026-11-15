@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { Awake, awakeCommand } from '../src/awake.js';
+import { Awake, awakeCommand, keepInMemory, keepInMemoryCommand } from '../src/awake.js';
 
 const fakeSpawner = () => {
   const started = [];
@@ -36,4 +36,14 @@ test('does nothing where it has no way to keep the computer awake', () => {
   assert.equal(awake.set(true), false);
   assert.equal(started.length, 0);
   assert.equal(awakeCommand('linux'), null);
+});
+
+test('Windows keeps the server memory in RAM, so a hard drive page file never freezes it for minutes', () => {
+  const [program, args] = keepInMemoryCommand('win32', 4242, 384 * 1024 * 1024);
+  assert.equal(program, 'powershell.exe');
+  const script = args.at(-1);
+  assert.match(script, /SetProcessWorkingSetSizeEx/); assert.match(script, /OpenProcess\(0x0500, \$false, 4242\)/); assert.match(script, /402653184/);
+  assert.equal(keepInMemoryCommand('darwin', 4242), null); assert.equal(keepInMemoryCommand('linux', 4242), null);
+  const spawned = []; assert.equal(keepInMemory({ platform: 'win32', ownerPid: 7, spawner: (...call) => { spawned.push(call); return { on() {}, unref() {} }; } }), true);
+  assert.equal(spawned.length, 1); assert.equal(spawned[0][2].windowsHide, true);
 });

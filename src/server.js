@@ -38,7 +38,7 @@ import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
 import { orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
-import { Awake } from './awake.js';
+import { Awake, keepInMemory } from './awake.js';
 import { scanRoots } from './placement.js';
 import { tursoSignIn, provisionDatabase } from './turso-setup.js';
 import { followDataMove, followMemoryMove, planDataMove, moveMedia, folderStatus, memoryFolder } from './folders.js';
@@ -171,6 +171,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (catchUp) {
       // The freeze log: when the server is stuck, server-error.log says for how long and what it was doing.
       watchStalls({ logFile: path.join(dataRoot, 'server-error.log') });
+      // Windows must not move the server's memory to the page file (a black window for minutes on a hard drive).
+      keepInMemory();
       // Files from agents (screenshots, recordings, attachments) stay in the data folder unless the person moves them: they are
       // important, and Downloads is a folder people clear out.
       void desk.scanRepositories().catch(error => store.event('', 'repository-scan-error', { message: error.message }));
