@@ -10,7 +10,7 @@ const SECTIONS = [
   { side: 'left', title: 'Left behind', help: 'Nothing uses these any more. Free memory now ends them all.', groups: [
     ['leftovers', 'Tools whose app closed', 'End', ''], ['servers', 'Other servers (another project or another Rex Desk)', 'End', ''] ] },
   { side: 'outside', title: 'Outside Rex Desk', help: 'Claude Code you opened yourself, in Orca, a terminal or an editor. Rex Desk never ends these by itself. Ending one closes that conversation; anything it was doing stops.', groups: [
-    ['terminals', 'Claude Code sessions', 'End', 'None open.'] ] },
+    ['terminals', 'Claude Code windows', 'End', 'None open.'] ] },
 ];
 
 function row(ctx, key, item, verb, side) {

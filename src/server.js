@@ -186,7 +186,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         else opened.cloud = { pulled: false, reason: 'No cloud backup.' };
         if (session === opened) notify();
       };
-      if (store.fresh) { if (bootStage) bootStage = 'Restoring your workspace from your cloud backup'; await sync(); }
+      if (store.fresh) { if (bootStage) bootStage = 'Bringing your desk back from your cloud backup'; await sync(); }
       else { opened.cloud = { pulled: false, syncing: true }; void sync().catch(error => { opened.cloud = { pulled: false, reason: error.message }; }); }
     } else void store.cloud.open();
     notify(); return session;
@@ -334,7 +334,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   // Requests wait for it, so nobody sees the sign-in page or works on an out-of-date copy meanwhile.
   let opening = Promise.resolve();
   if (!accounts) await openSession(null, null);
-  else { bootStage = 'Unlocking your workspace'; opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; }); }
+  else { bootStage = 'Opening your desk'; opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; }); }
   void opening.finally(() => { bootStage = ''; });
   // Agents working right now, by name: an update restarts Rex Desk and would cut them off.
   function busyAgents(store) {
@@ -638,6 +638,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/local-ai/servers' && request.method === 'POST') { const input = await body(request); desk.localAi.addServer(input); return json(response, 200, await desk.localAi.status()); }
       if (url.pathname === '/api/local-ai/servers' && request.method === 'DELETE') { desk.localAi.removeServer(String(url.searchParams.get('id') || '')); return json(response, 200, await desk.localAi.status()); }
       if (url.pathname === '/api/local-ai/servers' && request.method === 'PUT') { const input = await body(request); desk.localAi.updateServer(String(input.id || ''), input); return json(response, 200, await desk.localAi.status()); }
+      if (url.pathname === '/api/local-ai/setup' && request.method === 'POST') return json(response, 200, desk.localAi.setup());
       if (url.pathname === '/api/local-ai/pull' && request.method === 'POST') return json(response, 200, desk.localAi.pull((await body(request)).model));
       if (url.pathname === '/api/local-ai/models' && request.method === 'DELETE') { const status = await desk.localAi.remove(String(url.searchParams.get('model') || '')); desk.specialists.normalizeModels(); return json(response, 200, status); }
       if (url.pathname === '/api/local-ai/huggingface' && request.method === 'GET') return json(response, 200, { items: await desk.localAi.searchHuggingFace(url.searchParams.get('q')) });
@@ -753,7 +754,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const branchMatch = url.pathname.match(/^\/api\/repositories\/([^/]+)\/branches$/);
       if (branchMatch) {
         const repository = store.config().repositories.find(item => item.id === decodeURIComponent(branchMatch[1]));
-        if (!repository) return json(response, 404, { error: 'Repository not found.' });
+        if (!repository) return json(response, 404, { error: 'Project not found.' });
         const branches = (await git(repository.path, ['for-each-ref', '--format=%(refname:short)', 'refs/heads', 'refs/remotes/origin'])).split('\n').filter(Boolean);
         return json(response, 200, { branches });
       }
@@ -980,7 +981,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/glass.css': 'glass.css', '/rex-core.js': 'rex-core.js', '/chat-palette.js': 'chat-palette.js', '/chat-split.js': 'chat-split.js', '/themes.css': 'themes.css', '/chat-glass.js': 'chat-glass.js', '/chat-local-ai.js': 'chat-local-ai.js', '/win-bar.js': 'win-bar.js', '/chat-graph.js': 'chat-graph.js', '/graph-worker.js': 'graph-worker.js', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/glass.css': 'glass.css', '/rex-core.js': 'rex-core.js', '/chat-palette.js': 'chat-palette.js', '/chat-split.js': 'chat-split.js', '/themes.css': 'themes.css', '/chat-glass.js': 'chat-glass.js', '/ai-logos.js': 'ai-logos.js', '/chat-tour-ai.js': 'chat-tour-ai.js', '/chat-local-ai.js': 'chat-local-ai.js', '/win-bar.js': 'win-bar.js', '/chat-graph.js': 'chat-graph.js', '/graph-worker.js': 'graph-worker.js', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
       // three.js ships from the installed package; the page loads no remote scripts.
       const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js', '/vendor/driver/driver.js.mjs': 'driver.js/dist/driver.js.mjs', '/vendor/driver/driver.css': 'driver.js/dist/driver.css' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });

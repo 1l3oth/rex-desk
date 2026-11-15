@@ -60,7 +60,7 @@ test('accounts gate the dashboard, the first account is superadmin, and each acc
     assert.equal(memberState.body.database.state, 'local');
     assert.notEqual((await member('/api/database/sync', { method: 'POST' })).status, 403, 'a member may manage its own backup');
 
-    assert.match((await admin('/api/auth/login', { method: 'POST', data: { email: 'owner@example.com', passphrase: 'wrong passphrase' } })).body.error, /incorrect/);
+    assert.match((await admin('/api/auth/login', { method: 'POST', data: { email: 'owner@example.com', passphrase: 'wrong passphrase' } })).body.error, /password is wrong/);
     assert.equal((await admin('/api/auth/login', { method: 'POST', data: { email: 'owner@example.com', passphrase } })).body.current.role, 'superadmin');
     assert.equal((await admin('/api/auth/logout', { method: 'POST' })).status, 200);
     assert.equal((await admin('/api/state')).status, 401);
@@ -108,7 +108,7 @@ test('the same account opens on another computer from its own Turso database and
 
   const work = await accountApp(temporary('work'), { cloudClientFactory: turso.clientFactory, ownDatabase: true }), atWork = browser(work);
   try {
-    assert.match((await atWork('/api/auth/cloud', { method: 'POST', data: { url, authToken, email: 'owner@example.com', passphrase: 'wrong passphrase' } })).body.error, /incorrect/);
+    assert.match((await atWork('/api/auth/cloud', { method: 'POST', data: { url, authToken, email: 'owner@example.com', passphrase: 'wrong passphrase' } })).body.error, /password is wrong/);
     const opened = await atWork('/api/auth/cloud', { method: 'POST', data: { url, authToken, email: 'owner@example.com', passphrase } });
     assert.equal(opened.body.current.role, 'superadmin');
     assert.ok((await atWork('/api/state')).body.tasks.some(task => task.id === 'task-home'), 'Work restores what was done at home');

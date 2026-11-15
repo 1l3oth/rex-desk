@@ -120,7 +120,7 @@ export class Updates {
   // Windows creates it through WMI: a child of this server would be killed when the server exits, and a detached
   // PowerShell has no console and never starts. A WMI-created process inherits no environment, so values go as arguments.
   install(serverPid) {
-    if (!this.state.ready || !this.file) throw new Error('No verified update is ready yet.');
+    if (!this.state.ready || !this.file) throw new Error('No checked update is ready yet.');
     const free = (this.freeSpace || freeSpace)(os.tmpdir());
     if (free < INSTALL_ROOM) throw new Error(`Not enough free space to install the update: ${Math.max(0, Math.round(free / 1048576))} MB free on the drive of ${os.tmpdir()}, and it needs 500 MB. Free some space, then press Update now again.`);
     if (this.platform.startsWith('darwin')) {

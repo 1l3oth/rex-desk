@@ -1774,3 +1774,19 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .la-row{display:flex;gap:8px;align-items:center;margin:8px 0}
 .la-row input{flex:1;min-width:0}
 .la-add{display:flex;flex-direction:column;gap:6px;margin-top:8px;padding:12px 14px;border:1px solid var(--line);border-radius:12px}
+/* Welcome tour, Choose your AI: one row per AI, with what it needs, whether it is ready, and one button. */
+.tai-list{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column;flex:none;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tai-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 14px;align-items:center;padding:13px 16px;border-left:3px solid transparent}
+.tai-row+.tai-row{border-top:1px solid var(--line)}
+.tai-row.on{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.tai-mark{display:grid;place-items:center;width:40px;height:40px;border-radius:11px;color:var(--ink);background:color-mix(in srgb,var(--ink) 6%,transparent);border:1px solid var(--line)}
+.tai-text .tai-status.bad{color:var(--bad,#dc2626)}
+.tai-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.tai-text b{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:15px}
+.tai-text small{color:var(--muted);font-size:13px;line-height:1.4}
+.tai-best{font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;color:var(--accent);background:color-mix(in srgb,var(--accent) 13%,transparent)}
+.tai-status{display:flex;align-items:center;gap:5px}
+.tai-text .tai-status.good{color:var(--good,#16a34a)}
+.tai-action{display:flex;justify-content:flex-end;min-width:76px}
+.tai-wait{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);max-width:150px;line-height:1.3}
+@media (max-width:560px){.tai-row{grid-template-columns:auto minmax(0,1fr)}.tai-action{grid-column:2;justify-content:flex-start}}

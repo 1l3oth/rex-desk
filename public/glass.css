@@ -554,3 +554,7 @@ html.embed .chat-shell{zoom:.88;height:calc(100dvh / .88);max-height:calc(100dvh
 .sp-dialog{position:relative;width:min(860px,94vw);max-height:min(640px,86vh);display:flex;flex-direction:column;padding:6px}.sp-dialog .sp-add-in{height:auto}
 .sp-dialog .ra-x{position:absolute;top:12px;right:12px}
 .sp-pop{z-index:40}
+/* The file window never covers the desktop app's own window bar. */
+html.has-win-bar .fw.big{top:48px}
+
+html.has-win-bar .fw:not(.big){max-height:calc(100vh - 60px)}

@@ -161,3 +161,21 @@ test('the first task on a project ends with the person checking its workflow, on
   desk.memory.confirmWorkflow('shop');
   assert.ok(!/whose workflow the person has not checked/.test(desk.prompt(run)), 'not asked again');
 });
+
+test('an agent can be made for anything, with no code project: only a name and what it is for', () => {
+  const { desk } = setup();
+  assert.throws(() => desk.specialists.create({ name: 'Writer' }), /what this agent is for/);
+  assert.throws(() => desk.specialists.create({ name: 'Writer', purpose: 'Writes posts', folder: 'not/a/real/folder' }), /full path of a folder/);
+  const agent = desk.specialists.create({ name: 'Writer', purpose: 'Writes posts for my bakery in a warm, simple voice.', rules: 'Keep posts under 100 words.', by: 'main agent' });
+  assert.equal(agent.general, true); assert.equal(agent.projectSlug, ''); assert.equal(agent.projectPath, '');
+  const identity = desk.specialists.identity(agent);
+  assert.match(identity, /You are Writer, an agent the person made for this: Writes posts for my bakery/);
+  assert.match(identity, /not tied to a code project/);
+  assert.doesNotMatch(identity, /desk_memory\(""\)|the specialist agent for the project/);
+  assert.match(desk.ownProjectRule(agent), /You have no code project/);
+  assert.match(readFileSync(desk.specialists.cardFile(agent), 'utf8'), /For: anything the person asks/);
+  // A project agent is unchanged.
+  const coder = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop' });
+  assert.match(desk.specialists.identity(coder), /the specialist agent for the project "shop"/);
+  assert.equal(desk.snapshot().specialists.length, 2);
+});

@@ -315,7 +315,7 @@ export class TursoSync {
     const parsed = new URL(url);
     if (!['libsql:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('Use a libsql:// or HTTPS Turso database URL without credentials in the URL.');
     const token = String(authToken || (this.connection?.url === url ? this.connection.authToken : '') || '').trim();
-    if (!token) throw new Error('Enter the Turso database token.');
+    if (!token) throw new Error('Enter the Turso database key.');
     const backups = path.join(this.store.directory, 'backups'); mkdirSync(backups, { recursive: true, mode: 0o700 });
     await backup(this.store.db, path.join(backups, `before-turso-${Date.now()}.sqlite`));
     this.connection = { url, authToken: token }; this.ready = false;
@@ -395,7 +395,7 @@ export async function findCloudWorkspace({ url, authToken, name }, clientFactory
     const result = await client.execute({ sql: 'SELECT workspace,name,kdf,sealed_key FROM rex_workspaces WHERE lower(name)=lower(?)', args: [String(name || '').trim()] })
       .catch(error => { if (/no such table/i.test(error.message)) return { rows: [] }; throw new Error(hide(error.message)); });
     const row = result.rows[0];
-    if (!row) throw new Error('No workspace with that name is published in this database. On the first computer, sign in with a passphrase and connect Cloud backup.');
+    if (!row) throw new Error('No desk with that name is in this backup. On your first computer, sign in and turn on Cloud backup.');
     return { id: row.workspace, name: row.name, sealed: { kdf: JSON.parse(row.kdf), sealedKey: row.sealed_key } };
   } finally { client.close(); }
 }

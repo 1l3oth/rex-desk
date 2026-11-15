@@ -1,4 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { spawn, execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { freeBytes } from './disk.js';
 
 // Local AI: agents keep Claude Code and all its tools, but the model behind it runs on this computer.
 // Two kinds of local server:
@@ -99,7 +104,7 @@ export class LocalAi {
     const model = String(name || '').trim().replace(/^https:\/\/huggingface\.co\//i, 'hf.co/');
     if (!/^[\w.\-/:]{2,200}$/.test(model)) throw new Error('Give a model name, like qwen3:8b or hf.co/Qwen/Qwen3-8B-GGUF.');
     const server = this.server('ollama');
-    const existing = [...this.pulls.values()].find(item => item.model === model && item.state === 'downloading'); if (existing) return existing;
+    const existing = [...this.pulls.values()].find(item => !item.setup && item.model === model && item.state === 'downloading'); if (existing) return existing;
     const job = { id: randomUUID(), model, state: 'downloading', status: 'Starting', completed: 0, total: 0, error: '' };
     this.pulls.set(job.id, job);
     void (async () => {
@@ -122,6 +127,45 @@ export class LocalAi {
       } catch (error) {
         job.state = 'failed'; job.error = /fetch failed|ECONNREFUSED/i.test(error.message) ? 'Ollama is not running. Open Ollama, then try again.' : error.message;
       }
+      setTimeout(() => this.pulls.delete(job.id), 10 * 60000).unref?.();
+    })();
+    return job;
+  }
+  // One button for someone who has nothing: installs Ollama if it is missing, starts it, and downloads a starter model that
+  // fits this computer. Each step shows in the same list as downloads. Nothing is typed.
+  setup({ platform = process.platform, run = runInstaller, start = startOllama, find = findOllama, memory = os.totalmem(), free = freeBytes, wait = 3000 } = {}) {
+    const busy = [...this.pulls.values()].find(item => item.setup && item.state === 'downloading'); if (busy) return busy;
+    // A small model for an ordinary laptop, a better one when there is plenty of memory.
+    const [model, size] = memory >= 24 * 2 ** 30 ? ['qwen3:8b', 5.2e9] : ['qwen3:4b', 2.6e9];
+    const job = { id: randomUUID(), setup: true, model, state: 'downloading', status: 'Checking this computer', completed: 0, total: 0, error: '' };
+    this.pulls.set(job.id, job);
+    const server = this.server('ollama');
+    const answers = async () => { try { await getJson(`${server.url}/api/version`, { fetcher: this.fetcher, timeoutMs: 2500 }); return true; } catch { return false; } };
+    const until = async (minutes) => { for (let tries = 0; tries < (minutes * 60000) / wait; tries++) { if (await answers()) return true; await new Promise(resolve => setTimeout(resolve, wait)); } return false; };
+    void (async () => {
+      try {
+        if (!(await answers())) {
+          if (!find()) {
+            job.status = 'Installing Ollama (a few minutes)';
+            await run(platform);
+            if (!find() && !(await until(1))) throw new Error('Ollama could not be installed by itself. Get it from ollama.com/download, open it, then press Set up again.');
+          }
+          job.status = 'Starting Ollama';
+          if (!(await answers())) { start(find()); if (!(await until(2))) throw new Error('Ollama is installed but did not start. Open Ollama from the Start menu, then press Set up again.'); }
+        }
+        const have = await this.serverModels(server).catch(() => []);
+        if (!have.some(item => item.tools)) {
+          // Ollama keeps models in the home folder: say so plainly when the disk has no room, before a long download fails.
+          if (free(os.homedir()) < size + 2 * 2 ** 30) throw new Error(`Not enough free space for a model (about ${sizeLabel(size)} is needed, plus 2 GB to spare). Free some space, then press Set up again.`);
+          job.status = `Downloading ${model}`;
+          const pull = this.pull(model);
+          while (pull.state === 'downloading') { job.status = pull.total ? `Downloading ${model}` : pull.status; job.total = pull.total; job.completed = pull.completed; await new Promise(resolve => setTimeout(resolve, 1000)); }
+          this.pulls.delete(pull.id);
+          if (pull.state === 'failed') throw new Error(pull.error);
+        }
+        job.state = 'done'; job.status = 'Ready';
+        await this.status().catch(() => {});
+      } catch (error) { job.state = 'failed'; job.error = error.message; }
       setTimeout(() => this.pulls.delete(job.id), 10 * 60000).unref?.();
     })();
     return job;
@@ -258,4 +302,31 @@ export async function bridge(localAi, serverId, pathname, request, response, bod
   try { await streamToAnthropic(upstream.body, text => response.write(text), body.model); }
   catch (error) { response.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: error.message } })}\n\n`); }
   response.end();
+}
+
+// ---- Installing and starting Ollama for the person. ----
+
+// Where Ollama is on this computer, or '' when it is not installed.
+export function findOllama() {
+  const places = process.platform === 'win32' ? [path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama.exe'), path.join(process.env.ProgramFiles || '', 'Ollama', 'ollama.exe')]
+    : ['/usr/local/bin/ollama', '/opt/homebrew/bin/ollama', '/usr/bin/ollama', '/Applications/Ollama.app/Contents/Resources/ollama'];
+  const found = places.find(place => place && existsSync(place)); if (found) return found;
+  try { return execFileSync(process.platform === 'win32' ? 'where' : 'which', ['ollama'], { windowsHide: true, timeout: 10000, encoding: 'utf8' }).split(/\r?\n/)[0].trim(); } catch { return ''; }
+}
+// Starts Ollama's server in the background; it keeps running after Rex Desk closes, like the Ollama app does.
+export function startOllama(executable) {
+  if (!executable) return;
+  const child = spawn(executable, ['serve'], { detached: true, windowsHide: true, stdio: 'ignore' });
+  child.on('error', () => {}); child.unref();
+}
+// Installs Ollama without asking anything: winget on Windows, Homebrew on a Mac, Ollama's own script on Linux.
+export function runInstaller(platform = process.platform) {
+  const [command, args] = platform === 'win32' ? ['winget', ['install', '--id', 'Ollama.Ollama', '-e', '--silent', '--accept-source-agreements', '--accept-package-agreements']]
+    : platform === 'darwin' ? ['brew', ['install', 'ollama']] : ['sh', ['-c', 'curl -fsSL https://ollama.com/install.sh | sh']];
+  return new Promise(resolve => {
+    const child = spawn(command, args, { windowsHide: true, stdio: 'ignore' });
+    const timer = setTimeout(() => { try { child.kill(); } catch {} resolve(false); }, 15 * 60000);
+    child.on('error', () => { clearTimeout(timer); resolve(false); });
+    child.on('exit', code => { clearTimeout(timer); resolve(code === 0); });
+  });
 }
