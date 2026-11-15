@@ -39,7 +39,9 @@ export class LocalRunner {
     // The newest message: the turn's own text when it is short (a spoken message, a job's outcome), else the person's last
     // message (a first turn arrives wrapped in Rex Desk's long instructions, which are not for a small model).
     const input = String(prompt || '').length <= 6000 ? String(prompt || '').trim() : (this.lastPersonMessage || String(prompt).slice(-2000));
-    const messages = [{ role: 'system', content: this.system }, ...(this.history || []), { role: 'user', content: input || 'Hello' }];
+    const messages = [{ role: 'system', content: this.system }, ...(this.history || []),
+      ...(this.report ? [{ role: 'system', content: `Rex Desk right now (current; earlier replies in this chat may be out of date):\n${this.report}` }] : []),
+      { role: 'user', content: input || 'Hello' }];
     let tools = { list: [], call: async () => '' };
     try { tools = await this.tools(); } catch (error) { this.event('agent-tool', { tool: 'result', failed: true, text: `Rex Desk's tools could not be reached: ${error.message}` }); }
     const used = { input: 0, output: 0 };
@@ -103,19 +105,18 @@ export class LocalRunner {
 const safeJson = text => { try { return typeof text === 'string' ? JSON.parse(text || '{}') : text || {}; } catch { return {}; } };
 
 // What a local agent is told: short, so a small model reads it in a moment and keeps it in mind.
-// report: what Rex Desk holds right now (agents, chats, waiting questions, tasks), made by code for this turn: a small model
-// answers from facts it is given far more reliably than it decides to look them up (it tends to repeat its own last answer).
+// report: true when the turn carries a code-made report of what Rex Desk holds right now (the runner puts it next to the
+// newest message): a small model answers from facts it is given far more reliably than it decides to look them up.
 export function lightSystem({ name, about = '', person = '', voice = false, report = '' }) {
   return [
     `You are ${name}, an assistant inside Rex Desk, running on a model on the person's own computer.${about ? ` ${about}` : ''}`,
     'Answer the person directly, in short plain sentences.',
-    report ? 'The report below is what Rex Desk holds right now; it is current. Answer questions about agents, chats, tasks and what is waiting from it. Never guess or make up names: if something is not in it, look it up with a tool.' : 'You do not know which agents, group chats, tasks or notes exist until you look them up. For any question about them, call the tool first and answer only from what it returns. Never guess or make up names.',
+    report ? 'Just before the newest message you get a report of what Rex Desk holds right now. Answer questions about agents, chats, tasks and what is waiting from that report, not from your earlier replies. Never guess or make up names: if something is not in it, look it up with a tool.' : 'You do not know which agents, group chats, tasks or notes exist until you look them up. For any question about them, call the tool first and answer only from what it returns. Never guess or make up names.',
     'Agents: desk_specialists. Group chats: desk_rooms_all and desk_room_history. Tasks: desk_tasks. Shared notes: desk_memory.',
     'To act for the person: desk_room_create makes a group chat, desk_room_say posts in one as them, desk_agent_say writes to an agent as them.',
     'For real work on code, files or the web, hand it on with desk_background and say you are on it; do not try it yourself.',
     voice ? 'The person hears you (Voice mode): one to three spoken sentences, no lists or code.' : '',
     person ? `About the person:\n${person}` : '',
     `Today is ${new Date().toDateString()}.`,
-    report ? `\n${report}` : '',
   ].filter(Boolean).join('\n');
 }

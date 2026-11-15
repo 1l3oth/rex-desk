@@ -42,6 +42,8 @@ test('Local AI light mode: a short instruction, the key Rex Desk tools, a real t
     await runner.start('x'.repeat(9000)); // a first turn arrives wrapped in Rex Desk's long instructions: the person's message is used instead
     assert.equal(asked[0].model, 'qwen3:1.7b'); assert.equal(asked[0].options.num_ctx, 12288); assert.equal(asked[0].think, false);
     assert.equal(asked[0].messages.at(-1).content, 'Which agents do I have?');
+    // What Rex Desk holds right now sits next to the question, where a small model reads it, not only at the top.
+    assert.equal(asked[0].messages.at(-2).role, 'system'); assert.match(asked[0].messages.at(-2).content, /Rex Desk right now[\s\S]*ReelHome/);
     assert.deepEqual(asked[0].tools.map(tool => tool.function.name).sort(), LIGHT_TOOLS.filter(name => asked[0].tools.some(tool => tool.function.name === name)).sort());
     assert.ok(asked[0].tools.length >= 8 && asked[0].tools.length <= LIGHT_TOOLS.length, 'only the key Rex Desk tools');
     assert.ok(events.some(([kind, data]) => kind === 'agent-tool' && data.tool === 'desk_specialists'));
