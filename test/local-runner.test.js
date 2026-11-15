@@ -39,7 +39,8 @@ test('Local AI light mode: a short instruction, the key Rex Desk tools, a real t
     const runner = new LocalRunner({ ...turn, run: app.store.get('run', 'rex'), mcpUrl: `${app.address}/mcp`, token: app.desk.scopeToken('rex'), event: (kind, data) => events.push([kind, data]), inbox: () => '',
       // What Rex Desk hands every runner: the person's question cards. Talking to the model must never open one.
       ask: async request => { throw new Error(`A question card was opened: ${JSON.stringify(request).slice(0, 80)}`); } });
-    await runner.start('x'.repeat(9000)); // a first turn arrives wrapped in Rex Desk's long instructions: the person's message is used instead
+    // A turn arrives wrapped in Rex Desk's lessons and instructions: the person's own message is sent instead.
+    await runner.start(`Lessons you learned from the person (follow them):\n- Keep it short.\n\n${'x'.repeat(200)}\n\nWhich agents do I have?`);
     assert.equal(asked[0].model, 'qwen3:1.7b'); assert.equal(asked[0].options.num_ctx, 12288); assert.equal(asked[0].think, false);
     assert.equal(asked[0].messages.at(-1).content, 'Which agents do I have?');
     // What Rex Desk holds right now sits next to the question, where a small model reads it, not only at the top.

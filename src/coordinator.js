@@ -231,7 +231,7 @@ export class Desk {
       // The same code-made report Voice mode uses (agents, chats, waiting questions, tasks), kept short for a small model.
       // It goes next to the newest message, not in the instruction at the top: a small model reads what is nearest the
       // question and otherwise repeats its own earlier reply from the chat.
-      report: voiceBriefing({ store: this.store }).replace(/^# Briefing for Voice mode.*$/m, '').trim().slice(0, 3000) };
+      report: voiceBriefing({ store: this.store, skip: run.id }).replace(/^# Briefing for Voice mode.*$/m, '').trim().slice(0, 3000) };
   }
   // A Claude Code turn that runs on a model on this computer (Local AI), by the same choice the turn itself makes.
   usesLocalModel(run) {

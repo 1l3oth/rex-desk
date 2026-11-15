@@ -38,7 +38,10 @@ export class LocalRunner {
     const signal = AbortSignal.any ? AbortSignal.any([this.controller.signal, ...(this.signal ? [this.signal] : [])]) : this.controller.signal;
     // The newest message: the turn's own text when it is short (a spoken message, a job's outcome), else the person's last
     // message (a first turn arrives wrapped in Rex Desk's long instructions, which are not for a small model).
-    const input = String(prompt || '').length <= 6000 ? String(prompt || '').trim() : (this.lastPersonMessage || String(prompt).slice(-2000));
+    // A resumed turn wraps the person's message in Rex Desk's lessons and reply style, which a small model takes for the
+    // question: when the message is inside the prompt, the message alone is sent.
+    const text = String(prompt || '').trim(), mine = String(this.lastPersonMessage || '').trim();
+    const input = mine && text.includes(mine) ? mine : text.length <= 6000 ? text : (mine || text.slice(-2000));
     const messages = [{ role: 'system', content: this.system }, ...(this.history || []),
       ...(this.report ? [{ role: 'system', content: `Rex Desk right now (current; earlier replies in this chat may be out of date):\n${this.report}` }] : []),
       { role: 'user', content: input || 'Hello' }];
