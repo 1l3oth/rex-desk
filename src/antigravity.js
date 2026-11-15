@@ -17,7 +17,7 @@ export function agyCommand(env = process.env) {
   const folders = String(env.PATH || '').split(path.delimiter).filter(Boolean);
   const packages = path.join(local, 'Microsoft', 'WinGet', 'Packages');
   try { for (const entry of readdirSync(packages)) if (/^Google\.AntigravityCLI/i.test(entry)) folders.push(path.join(packages, entry)); } catch {}
-  folders.push(path.join(local, 'Microsoft', 'WinGet', 'Links'), path.join(local, 'Programs', 'Antigravity', 'bin'), path.join(local, 'agy'), path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.gemini', 'antigravity-cli', 'bin'));
+  folders.push(path.join(local, 'Microsoft', 'WinGet', 'Links'), path.join(local, 'Programs', 'Antigravity', 'bin'), path.join(local, 'agy'), path.join(local, 'agy', 'bin'), path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.gemini', 'antigravity-cli', 'bin'));
   return folders.map(folder => path.join(folder, 'agy.exe')).find(file => existsSync(file)) || 'agy';
 }
 
@@ -40,7 +40,7 @@ export class AcpClient {
   async open() {
     if (this.cwd && !existsSync(this.cwd)) throw new Error(`The agent's folder does not exist: ${this.cwd}`);
     this.child = this.spawnProcess(agyCommand(this.env), ['acp', ...this.args],{ env: this.env, cwd: this.cwd, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
-    this.child.once('error', error => this.fail(error.code === 'ENOENT' ? new Error('The Antigravity CLI (agy) is not installed. Install it with: winget install Google.AntigravityCLI') : error));
+    this.child.once('error', error => this.fail(error.code === 'ENOENT' ? new Error(`The Antigravity CLI (agy) is not installed. Install it with: ${process.platform === 'win32' ? 'irm https://antigravity.google/cli/install.ps1 | iex (in PowerShell)' : 'curl -fsSL https://antigravity.google/cli/install.sh | bash'}`) : error));
     this.child.once('exit', code => { if (!this.closed) this.fail(new Error(`Antigravity CLI exited (${code}).`)); });
     this.child.stdin.on('error', error => { if (!this.closed) this.fail(error); });
     this.child.stderr.resume();

@@ -13,8 +13,10 @@ const statusArgs = { claude: ['auth', 'status', '--json'], codex: ['login', 'sta
 const loginArgs = { claude: ['auth', 'login'], codex: ['login'], gemini: ['acp', '--login'] };
 // What the sign-in window runs first when the CLI is not on this computer yet.
 const installCommands = {
-  win32: { claude: 'irm https://claude.ai/install.ps1 | iex', codex: 'npm install -g @openai/codex', gemini: 'winget install --id Google.AntigravityCLI -e --accept-source-agreements --accept-package-agreements' },
-  other: { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'npm install -g @openai/codex', gemini: '' }
+  // Each tool's own installer, using only what Windows (PowerShell) and macOS (curl, bash) already have: no Node, npm, winget
+  // or Homebrew, so a computer never set up for coding can install them too. On a Mac all three go to ~/.local/bin.
+  win32: { claude: 'irm https://claude.ai/install.ps1 | iex', codex: 'irm https://chatgpt.com/codex/install.ps1 | iex', gemini: 'irm https://antigravity.google/cli/install.ps1 | iex' },
+  other: { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh', gemini: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' }
 };
 const bareName = { claude: 'claude', codex: 'codex', gemini: 'agy' };
 const cliFound = ({ command }) => {
@@ -212,7 +214,7 @@ export class AgentProfiles {
         `Write-Host 'Rex Desk: signing in to ${name}. Your browser opens next.'`, "Write-Host ''",
         ...(found ? [] : [`Write-Host '${name} is not on this computer yet. Installing it first...'`, install,
           "$env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + $env:Path",
-          "$env:Path = (Join-Path $HOME '.local\\bin') + ';' + (Join-Path $env:APPDATA 'npm') + ';' + $env:Path"]),
+          "$env:Path = (Join-Path $HOME '.local\\bin') + ';' + (Join-Path $env:LOCALAPPDATA 'Programs\\OpenAI\\Codex\\bin') + ';' + (Join-Path $env:LOCALAPPDATA 'agy\\bin') + ';' + (Join-Path $env:APPDATA 'npm') + ';' + $env:Path"]),
         run, "Write-Host ''", "Write-Host 'When the browser says you are signed in, close this window and go back to Rex Desk.'"
       ].join('\n');
       // `start` gives it a window of its own (a console started straight from Rex Desk closes at once), and the encoded script
