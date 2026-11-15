@@ -1,6 +1,6 @@
-// The welcome tour's "Choose your AI" step: every AI Rex Desk can run agents on, as one list. Each row says in plain
+// "Choose your AI", in the welcome tour and in Settings, AI accounts: every AI Rex Desk can run agents on, as one list. Each row says in plain
 // words what it needs, whether it is ready on this computer, and has one button to get it ready. Picking a ready row
-// makes it the AI for new agents. Used only inside the tour (chat-tour.js).
+// makes it the AI for new agents.
 import { aiLogo } from '/ai-logos.js';
 const AIS = [
   { id: 'claude', name: 'Claude Code', needs: 'Needs a Claude plan (Pro or Max).', best: 'Best for most people', service: 'Claude' },
@@ -36,8 +36,13 @@ function statusOf(ui, state, ai) {
   return installed ? { ready: false, text: 'On this computer, not signed in yet' } : { ready: false, missing: true, text: 'Not on this computer yet. Set up installs it, then you sign in.' };
 }
 
-export function tourAiHtml({ ui, esc }, state) {
+export function tourAiHtml(ctx, state) {
   if (!state.ai?.loaded) return '<h2>Choose your AI</h2><p>Checking which AI is ready on this computer…</p>';
+  return `<h2>Choose your AI</h2><p>Your agents need an AI to think with. Pick one you already pay for, or the free one. You can add more later in Settings.</p>${aiListHtml(ctx, state)}`;
+}
+// The list itself: one row per AI.
+export function aiListHtml({ ui, esc }, state) {
+  if (!state.ai?.loaded) return '<p class="muted">Checking which AI is ready on this computer…</p>';
   const chosen = ui.snap.config?.provider || 'claude', anyReady = AIS.some(ai => statusOf(ui, state, ai).ready);
   const row = ai => {
     const status = statusOf(ui, state, ai), picked = ai.id === chosen && status.ready, waiting = state.aiWaiting === ai.id;
@@ -51,13 +56,12 @@ export function tourAiHtml({ ui, esc }, state) {
         <small class="tai-status${status.ready ? ' good' : status.failed ? ' bad' : ''}">${status.ready ? TICK : ''}${esc(status.text)}${picked ? '. Your agents use this one.' : ''}</small></span>
       <span class="tai-action">${action}</span></li>`;
   };
-  return `<h2>Choose your AI</h2><p>Your agents need an AI to think with. Pick one you already pay for, or the free one. You can add more later in Settings.</p>
-    <ul class="tai-list">${AIS.map(row).join('')}</ul>
+  return `<ul class="tai-list">${AIS.map(row).join('')}</ul>
     ${anyReady ? '' : '<p class="muted">Nothing to install yourself. Press Set up or Sign in on one: Rex Desk installs what is missing, then opens the sign-in in your browser.</p>'}`;
 }
 
 // Returns true when the click belonged to this step.
-export async function tourAiClick(ctx, state, target, draw) {
+export async function tourAiClick(ctx, state, target, draw, alive = () => Boolean(document.querySelector('.tour-back'))) {
   const { ui, api, toast, refresh } = ctx;
   const use = target.closest('[data-tai-use]');
   if (use) {
@@ -69,7 +73,7 @@ export async function tourAiClick(ctx, state, target, draw) {
     await api('/local-ai/setup', { method: 'POST', data: {} });
     await loadTourAi(ctx, state, false); draw();
     // Follow the steps (install, start, download) until it is ready or stops with a reason.
-    while (document.querySelector('.tour-back')) {
+    while (alive()) {
       await new Promise(resolve => setTimeout(resolve, 2000));
       await loadTourAi(ctx, state, false);
       const job = (state.ai?.local?.pulls || []).find(item => item.setup);
@@ -86,7 +90,7 @@ export async function tourAiClick(ctx, state, target, draw) {
   toast(started?.installing ? `A window opened. It installs ${ai.name} first, then opens the ${ai.service} sign-in.` : `A window opened for the ${ai.service} sign-in.`);
   state.aiWaiting = id; draw();
   // The sign-in happens in the browser: look again every few seconds, for up to three minutes (ten while it installs).
-  for (let tries = 0; tries < (started?.installing ? 200 : 60) && state.aiWaiting === id && document.querySelector('.tour-back'); tries++) {
+  for (let tries = 0; tries < (started?.installing ? 200 : 60) && state.aiWaiting === id && alive(); tries++) {
     await new Promise(resolve => setTimeout(resolve, 3000));
     await loadTourAi(ctx, state);
     if (ready()) {

@@ -5,6 +5,7 @@ import { loadFolders, foldersHtml, folderClick, startTour } from '/chat-tour.js'
 import { trackerDraft, readTrackers, trackersHtml, trackerSources, trackerClick, trackerInput } from '/chat-trackers.js';
 import { runSettingsTour } from '/chat-settings-tour.js';
 import { loadLocalAi, localAiHtml, localAiClick } from '/chat-local-ai.js';
+import { loadTourAi, aiListHtml, tourAiClick } from '/chat-tour-ai.js';
 // Settings, as a popup over the chat: the sections on the left, one section's settings on the right. Each section saves on its own,
 // so a change never waits for the rest. It replaces the old "Issues & settings" page.
 const SECTIONS = [
@@ -12,7 +13,7 @@ const SECTIONS = [
   ['folders', 'Folders', 'Where data, AI memory and files are kept'],
   ['notify', 'Notifications', 'Pop-ups, sound, phone, quiet hours'],
   ['agents', 'Agents', 'Workers, model, branches, pull requests'],
-  ['accounts', 'Claude accounts', 'Which Claude plan agents use'],
+  ['accounts', 'AI accounts', 'Claude Code, Codex, Gemini, Local AI'],
   ['localai', 'Local AI', 'Models that run on this computer'],
   ['projects', 'Projects', 'Repositories, branches and commands'],
   ['sources', 'Task sources', 'Rex Desk, Orbit, Flow, Morningmate'],
@@ -151,7 +152,8 @@ export function openSettings(ctx, section = 'general') {
       ${check('saver', config().saver !== false, 'Save my Claude usage', 'Room chat and Away mode check-ins run on Sonnet, which uses much less of your Claude plan. Code changes, personal chats and Rex Agent keep the model you chose. An agent with its own model always uses it.')}
       ${check('autoPrLowRisk', config().autoPrLowRisk, 'Open draft pull requests for small, safe fixes on their own', 'Only style, text, docs or test changes with passing tests. Nothing is ever merged on its own.')}
       ${hasOrbit() ? check('reportToOrbit', config().reportToOrbit, 'Let agents send their final report to Orbit', 'Through your Orbit connection.') : ''}`,
-    accounts: () => `<h2>Claude accounts</h2><p class="muted">Agents run on a Claude Code sign-in. You can add more accounts and switch when one runs out.</p>${tip('accounts', 'One account is enough to start. Add a second only if you often hit the usage limit.')}<button type="button" class="btn primary" data-st-open="accounts">Open Claude accounts</button>`,
+    accounts: () => `<h2>AI accounts</h2><p class="muted">The AI your agents think with. Press Set up or Sign in on one: Rex Desk installs what is missing, then opens the sign-in in your browser. Use this picks the one new agents use.</p>${aiListHtml(ctx, state)}
+      <h3>More accounts</h3><p class="muted">Add a second account of the same AI, switch between them, and see how much of each plan is used.</p>${tip('accounts', 'One account is enough to start. Add a second only if you often hit the usage limit.')}<button type="button" class="btn" data-st-open="accounts">Manage accounts</button>`,
     localai: () => `<h2>Local AI</h2>${localAiHtml(ctx, state)}`,
     projects: () => {
       // Each project that has agents: where its agents may work, and whether their chats may go to the cloud.
@@ -256,6 +258,7 @@ ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on 
     draw();
     if (id === 'folders') { await loadFolders(ctx, state); if (state.section === 'folders') draw(); }
     if (id === 'localai') { await loadLocalAi(ctx, state); if (state.section === 'localai') draw(); }
+    if (id === 'accounts') { await loadTourAi(ctx, state); if (state.section === 'accounts') draw(); }
     back.querySelector('[data-st-panel]')?.scrollTo({ top: 0 });
   }
   back.addEventListener('click', async event => {
@@ -267,6 +270,8 @@ ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on 
       if (await trackerClick(ctx, state, target, back, draw)) return;
       if (await folderClick(ctx, state, target, draw)) return;
       if (state.section === 'localai' && await localAiClick(ctx, state, target, draw)) return;
+      if (state.section === 'accounts' && target.closest('[data-tai-local]')) { await goSection('localai'); return; }
+      if (state.section === 'accounts' && await tourAiClick(ctx, state, target, () => { if (state.section === 'accounts' && document.body.contains(back)) draw(); }, () => state.section === 'accounts' && document.body.contains(back))) return;
       // A feature tour circles the real controls of a section; "Take the tour" goes through every section.
       const show = target.closest('[data-st-show]'); if (show) { await runSettingsTour(goSection, { section: show.dataset.stShow }); return; }
       if (target.closest('[data-st-show-all]')) { await runSettingsTour(goSection, { all: true }); return; }
@@ -361,6 +366,7 @@ ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on 
   if (section === 'projects') void loadGithub();
   if (section === 'folders') void loadFolders(ctx, state).then(() => state.section === 'folders' && draw());
   if (section === 'localai') void loadLocalAi(ctx, state).then(() => state.section === 'localai' && draw());
+  if (section === 'accounts') void loadTourAi(ctx, state).then(() => state.section === 'accounts' && draw());
   if (section === 'general') void api('/autostart').then(result => { state.extra.autostart = result; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
   // The Notifications tab saves on change; redraw it when its settings come back changed, keeping the scroll.
   let noticeHtml = '';

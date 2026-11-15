@@ -1775,7 +1775,7 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .la-row input{flex:1;min-width:0}
 .la-add{display:flex;flex-direction:column;gap:6px;margin-top:8px;padding:12px 14px;border:1px solid var(--line);border-radius:12px}
 /* Welcome tour, Choose your AI: one row per AI, with what it needs, whether it is ready, and one button. */
-.tai-list{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tai-list{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column;flex:none;border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .tai-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 14px;align-items:center;padding:13px 16px;border-left:3px solid transparent}
 .tai-row+.tai-row{border-top:1px solid var(--line)}
 .tai-row.on{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
