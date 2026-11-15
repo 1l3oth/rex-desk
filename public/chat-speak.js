@@ -135,14 +135,16 @@ export function readNewReplies(key) {
 // the agent's reply while the agent is still writing it (each finished phrase at once, a phrase behind the words), and
 // listens again once the reply is spoken. The server sends the text so far of the block being written (event "partial");
 // "done" carries the finished block. Switched on per chat with its own button in the chat header.
-const VOICE = 'rex-voice-mode';
-const voiceChats = () => { try { return new Set(JSON.parse(localStorage.getItem(VOICE) || '[]')); } catch { return new Set(); } };
-export const voiceModeOn = key => voiceChats().has(key);
+// Kept only while the page is open, never saved: after a reload Voice mode is off until the person turns it on again with
+// a click. A Voice mode that came back by itself could make no sound (browsers block sound a page starts without a click)
+// and would open the microphone unasked.
+const voiceOnIn = new Set();
+try { localStorage.removeItem('rex-voice-mode'); } catch { /* private window */ }
+export const voiceModeOn = key => voiceOnIn.has(key);
 export function toggleVoiceMode(key) {
-  const chats = voiceChats(), on = !chats.has(key);
-  // Turned on by a click: the player and its level meter start inside that click, so the browser lets them make sound.
-  if (on) { chats.add(key); unlockSound(); } else { chats.delete(key); stopLive(); }
-  try { localStorage.setItem(VOICE, JSON.stringify([...chats])); } catch { /* private window */ }
+  const on = !voiceOnIn.has(key);
+  // Turned on by a click: the player starts inside that click, so the browser lets it make sound.
+  if (on) { voiceOnIn.add(key); unlockSound(); } else { voiceOnIn.delete(key); stopLive(); }
   return on;
 }
 const WAVE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>';

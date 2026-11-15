@@ -35,6 +35,6 @@ export async function speak(text, { lang = 'en', voice = '' } = {}) {
   const parts = []; for (const piece of pieces(clean)) parts.push(await one(piece, chosen));
   const audio = Buffer.concat(parts);
   if (!audio.length) throw new Error('The voice service sent no sound.');
-  cache.set(key, audio); if (cache.size > 60) cache.delete(cache.keys().next().value);
+  cache.set(key, audio); if (cache.size > 120) cache.delete(cache.keys().next().value);
   return audio;
 }
