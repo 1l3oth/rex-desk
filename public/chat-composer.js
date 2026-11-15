@@ -175,21 +175,30 @@ function putInBox(ctx, text) {
   ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(ctx.draftKey());
   box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + text; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); box.dispatchEvent(new Event('input', { bubbles: true }));
 }
-function browserDictate(ctx, { untilRelease = false } = {}) {
+// The browser's recognition listens to the browser's own microphone choice, which can be a muted virtual one (iVCam): it
+// is handed the microphone Rex Desk found working instead, where the browser allows that (Chrome does).
+function startOn(recognition, stream) {
+  const track = stream?.getAudioTracks?.()[0];
+  if (track) { try { recognition.start(track); return; } catch { /* an older browser: its own microphone */ } }
+  recognition.start();
+}
+async function browserDictate(ctx, { untilRelease = false } = {}) {
   if (browserSpeech === 'no') return false;
   let recognition; try { recognition = new Recognition(); } catch { browserSpeech = 'no'; return false; }
+  let stream = null; try { stream = await openMicrophone(); } catch { /* the browser asks for the microphone itself */ }
+  const release = () => stream?.getTracks().forEach(track => track.stop());
   recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = untilRelease;
   let said = '';
   const turn = { browser: true, stop: () => { try { recognition.stop(); } catch { /* already over */ } } };
   recognition.onresult = event => { said = [...event.results].map(result => result[0].transcript).join(' ').replace(/\s+/g, ' ').trim(); };
   recognition.onerror = event => { turn.failed = event.error; if (['network', 'not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(event.error)) browserSpeech = 'no'; };
   recognition.onend = () => {
-    if (listening === turn) listening = null;
+    release(); if (listening === turn) listening = null;
     micButton()?.classList.remove('rec'); document.body.classList.remove('ptt');
     if (said) { putInBox(ctx, said); return; }
     ctx.toast(turn.failed && browserSpeech === 'no' ? 'The browser could not turn speech into words here. Press the mic again to use Rex Desk\'s own voice engine.' : 'Nothing was heard. Hold Space (or press the mic) and speak.', true);
   };
-  try { recognition.start(); } catch { browserSpeech = 'no'; return false; }
+  try { startOn(recognition, stream); } catch { release(); browserSpeech = 'no'; return false; }
   if (browserSpeech === 'try') browserSpeech = 'yes';
   listening = turn; micButton()?.classList.add('rec');
   return true;
@@ -212,7 +221,7 @@ async function finishMic(ctx) {
 async function toggleMic(ctx) {
   if (transcribing) return;
   if (listening) return finishMic(ctx);
-  if (browserDictate(ctx)) return;
+  if (await browserDictate(ctx)) return;
   void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
   let stream;
   try { stream = await openMicrophone(); } catch { ctx.toast('Rex Desk could not use the microphone. Allow it, then press the mic again.', true); return; }
@@ -262,7 +271,7 @@ async function browserTurn(ctx, onState) {
     transcribing = true; onState('thinking');
     try { await sendSpoken(ctx, said); } finally { transcribing = false; onState('idle'); }
   };
-  try { recognition.start(); } catch { stopLevel(); browserSpeech = 'no'; return 'failed'; }
+  try { startOn(recognition, stream); } catch { stopLevel(); browserSpeech = 'no'; return 'failed'; }
   listening = turn; micButton()?.classList.add('rec'); onState('listening');
   if (browserSpeech === 'try') browserSpeech = 'yes';
   return 'started';
@@ -303,7 +312,7 @@ async function startHold(ctx) {
   if (listening || transcribing) return;
   hold.active = true; hold.pending = true;
   // The browser's own recognition, until Space is let go: the words are ready the moment it is.
-  if (browserDictate(ctx, { untilRelease: true })) {
+  if (await browserDictate(ctx, { untilRelease: true })) {
     hold.pending = false;
     const box = document.getElementById('composer')?.getBoundingClientRect(); if (box) document.body.style.setProperty('--ptt-bottom', `${Math.max(16, Math.round(innerHeight - box.top + 12))}px`);
     document.body.classList.add('ptt');
