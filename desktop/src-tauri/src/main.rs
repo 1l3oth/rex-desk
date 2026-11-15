@@ -124,7 +124,9 @@ fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::
     if !own {
         if matches!(url.scheme(), "http" | "https" | "mailto") {
             #[cfg(windows)]
-            let mut command = { let mut command = Command::new("cmd"); command.args(["/c", "start", "", url.as_str()]); command };
+            // Not `cmd /c start`: cmd reads every `&` as "run the next command", so a link like ...?port=1&state=2&challenge=3
+            // reached the browser as ...?port=1 and the Rex Desk sign-in answered "This sign-in link is not complete".
+            let mut command = { let mut command = Command::new("rundll32.exe"); command.args(["url.dll,FileProtocolHandler", url.as_str()]); command };
             #[cfg(not(windows))]
             let mut command = { let mut command = Command::new("open"); command.arg(url.as_str()); command };
             let _ = hidden(&mut command).spawn();
