@@ -1075,7 +1075,7 @@ async function startReplacement(port) {
   try { mkdirSync(path.dirname(log), { recursive: true }); } catch {}
   if (process.platform === 'win32') {
     // WMI starts it with the user's plain environment, so the folders and the installed app's details this server was given are passed on.
-    const carry = ['REX_DATA_DIR', 'REX_DESK_MEMORY', 'REX_DESK_VERSION', 'REX_DESK_EXE', 'REX_CLONE_DIR'].filter(name => process.env[name]).map(name => `set "${name}=${process.env[name]}"&& `).join('');
+    const carry = ['REX_DATA_DIR', 'REX_DESK_MEMORY', 'REX_DESK_VERSION', 'REX_DESK_EXE', 'REX_CLONE_DIR', 'REX_NO_AUTO_PULL', 'TEMP', 'TMP'].filter(name => process.env[name]).map(name => `set "${name}=${process.env[name]}"&& `).join('');
     const command = `cmd.exe /c "${carry}set REX_RESTART_AFTER=${process.pid}&& set PORT=${port}&& "${process.execPath}" src/server.js >> "${log}" 2>&1"`;
     const script = `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${command.replaceAll("'", "''")}'; CurrentDirectory = '${root.replaceAll("'", "''")}' }; exit $r.ReturnValue`;
     await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 30000 });

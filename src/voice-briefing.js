@@ -13,7 +13,8 @@ const ago = when => {
   return minutes < 2 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 48 * 60 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} days ago`;
 };
 
-export function voiceBriefing({ store, memoryDirectory = '', now = Date.now() }) {
+// skip: a chat left out of the chat list (the one asking: its own earlier replies would only be repeated back).
+export function voiceBriefing({ store, memoryDirectory = '', now = Date.now(), skip = '' }) {
   const since = now - DAYS * 86400000, recent = item => Date.parse(item?.updatedAt || item?.createdAt || 0) > since;
   const agents = store.list('specialist').filter(agent => agent && !agent.deleted);
   const agentName = id => (id === 'main' ? 'Rex Agent' : agents.find(agent => agent.id === id)?.name || '');
@@ -37,7 +38,7 @@ export function voiceBriefing({ store, memoryDirectory = '', now = Date.now() })
   }
 
   // The chats of the last few days: what the person asked last and what the agent said last.
-  const chats = runs.filter(recent).slice(0, 10);
+  const chats = runs.filter(run => recent(run) && run.id !== skip).slice(0, 10);
   if (chats.length) {
     lines.push('', `## Chats in the last ${DAYS} days (newest first)`);
     for (const run of chats) {
