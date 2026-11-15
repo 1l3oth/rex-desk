@@ -16,8 +16,9 @@ import { maybeStartTour } from '/chat-tour.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
-import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive, voiceModeButton, toggleVoiceMode, voiceModeOn, speechIdle, stopLive, outputLevel } from '/chat-speak.js';
+import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive, voiceModeButton, toggleVoiceMode, voiceModeOn, speechIdle, speechPlaying, stopLive, outputLevel, welcome } from '/chat-speak.js';
 import { mountOrb } from '/voice-orb.js';
+import { welcomeLine, STILL_THERE, GOODBYE } from '/voice-phrases.js';
 import { openAvatarPicker } from '/chat-avatar.js';
 import { watchForStar } from '/chat-star.js';
 import { showUpdateCard, updateLater, updateShow, installUpdate, updateWhenIdle, watchForUpdates, showSyncNote } from '/chat-update.js';
@@ -389,11 +390,19 @@ function closeVoiceStage() {
   clearInterval(voiceBeat); voiceBeat = 0; try { localStorage.removeItem('rex-voice-live'); } catch { /* private window */ }
   voiceOrb?.destroy(); voiceStage?.remove(); voiceStage = voiceOrb = null;
 }
+// The agent is writing a reply the person waits for. Its quiet turn reading Voice mode's report does not count: the mic
+// opens right after the welcome, and what the person says reaches the agent as soon as it has read.
+function agentWriting() {
+  if (!document.querySelector('#feed-inner .bubble.typing')) return false;
+  return !runById(ctx.currentRunId())?.voice?.reading;
+}
 function voiceNow() {
   const heard = voiceListening();
-  if (!speechIdle()) return { state: 'speaking', level: outputLevel() };
+  // "Speaking" only while sound is coming out; while a sentence's voice is still being made it is "Thinking".
+  if (speechPlaying()) return { state: 'speaking', level: outputLevel() };
+  if (!speechIdle()) return { state: 'thinking', level: 0 };
   if (heard.listening) return { state: 'listening', level: heard.level };
-  if (heard.transcribing || document.querySelector('#feed-inner .bubble.typing')) return { state: 'thinking', level: 0 };
+  if (heard.transcribing || agentWriting()) return { state: 'thinking', level: 0 };
   return { state: 'idle', level: 0 };
 }
 // The badge under the body says plainly whether to talk: green "Listening, go ahead" only while the mic is open.
@@ -425,6 +434,9 @@ function syncVoiceStage() {
     voiceStage.innerHTML = `<button type="button" class="voice-exit" data-action="voice-mode" aria-label="End voice mode" title="End voice mode (Esc)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><div class="voice-cue" data-state="idle" role="status" aria-live="polite"><span class="vc-dot" aria-hidden="true"></span>${MIC_ICON}<span class="vc-text">One moment</span></div>`;
     const cue = voiceStage.querySelector('.voice-cue'), word = cue.querySelector('.vc-text');
     voiceLive(); voiceBeat = setInterval(voiceLive, 2000);
+    // The welcome is said by Rex Desk itself the moment the body has formed (about 2.3 s), not written by the AI, which
+    // takes a few seconds more; the mic opens after it.
+    welcome(welcomeLine(), performance.now() + 2300); voiceRest = Date.now() + 3200;
     voiceOrb = mountOrb(voiceStage, () => {
       const now = voiceNow(), text = VOICE_WORDS[now.state];
       if (cue.dataset.state !== now.state) { if (now.state === 'listening') micOpenTone(); cue.dataset.state = now.state; word.textContent = text; }
@@ -511,6 +523,7 @@ function open(type, id = '') {
 
 // ---------- actions ----------
 let voiceRest = 0;
+const voiceQuiet = { since: 0, asked: false };
 async function send() {
   const box = document.getElementById('draft'), typed = box?.value.trim(), hasFiles = ui.attachments.some(file => file.path);
   if (!typed && !hasFiles) return;
@@ -723,10 +736,20 @@ try {
   stream.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(() => void refresh().catch(() => {}), 700); });
   // Voice mode: when nothing is being written or said, listen for the person's next turn; after they spoke, give the
   // agent a moment to start replying before listening again.
+  // When the person says nothing for a while (only listening, no agent at work), Rex asks once whether they are still
+  // there; after two minutes it says it will be there when needed and ends Voice mode, so the mic is not left open.
   setInterval(() => {
-    if (!voiceModeOn(draftKey()) || voiceBusy() || Date.now() < voiceRest || document.hidden) return;
-    if (document.querySelector('#feed-inner .bubble.typing') || !speechIdle()) { voiceRest = Date.now() + 600; return; }
-    void voiceTurn(ctx, { onState: state => { if (state === 'thinking') voiceRest = Date.now() + 4000; } }).then(started => { if (!started) { toggleVoiceMode(draftKey()); renderAll(); } });
+    if (!voiceModeOn(draftKey())) { voiceQuiet.since = 0; return; }
+    const agentBusy = agentWriting() || !speechIdle() || voiceListening().transcribing;
+    if (agentBusy) voiceQuiet.since = 0; else if (!voiceQuiet.since) { voiceQuiet.since = Date.now(); voiceQuiet.asked = false; }
+    if (voiceQuiet.since && !agentBusy) {
+      const quiet = Date.now() - voiceQuiet.since;
+      if (quiet > 120000) { voiceQuiet.since = 0; cancelVoiceTurn(); welcome(GOODBYE, 0); setTimeout(() => { if (voiceModeOn(draftKey())) { toggleVoiceMode(draftKey()); renderAll(); } }, 3500); return; }
+      if (quiet > 25000 && !voiceQuiet.asked) { voiceQuiet.asked = true; cancelVoiceTurn(); welcome(STILL_THERE, 0); voiceRest = Date.now() + 1500; return; }
+    }
+    if (voiceBusy() || Date.now() < voiceRest || document.hidden) return;
+    if (agentBusy) { voiceRest = Date.now() + 600; return; }
+    void voiceTurn(ctx, { onState: state => { if (state === 'thinking') { voiceRest = Date.now() + 4000; voiceQuiet.since = 0; } } }).then(started => { if (!started) { toggleVoiceMode(draftKey()); renderAll(); } });
   }, 400);
   // An agent's words as they are written: Voice mode speaks them a phrase behind, without waiting for the whole reply.
   stream.addEventListener('partial', event => { try { speakLive(JSON.parse(event.data), draftKey(), ctx.currentRunId()); } catch { /* a broken message is skipped */ } });

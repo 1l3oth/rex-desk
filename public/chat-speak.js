@@ -30,7 +30,10 @@ export const chosenVoice = lang => { try { return localStorage.getItem(`rex-desk
 export async function voicesFor(lang) { return (await voices()).filter(voice => voice.lang.toLowerCase().replace('_', '-').startsWith(lang)); }
 async function voiceFor(lang) {
   const list = await voicesFor(lang), picked = chosenVoice(lang);
-  return list.find(voice => voice.name === picked) || list.find(voice => /natural|online|neural/i.test(voice.name) && /en-us|ko-kr|km-kh/i.test(voice.lang)) || list.find(voice => /natural|online|neural/i.test(voice.name)) || list.find(voice => /en-us/i.test(voice.lang)) || list[0] || null;
+  // The natural voice Rex Desk uses (Ava) is a woman's: when the computer's own voice has to stand in, a woman's voice
+  // (Zira, Aria, Jenny…) sounds like the same Rex, not a different person.
+  const female = voice => /zira|aria|jenny|ava|emma|michelle|samantha|susan|hazel|heami|sunhi|sreymom|female/i.test(voice.name);
+  return list.find(voice => voice.name === picked) || list.find(voice => /natural|online|neural/i.test(voice.name) && /en-us|ko-kr|km-kh/i.test(voice.lang) && female(voice)) || list.find(voice => /natural|online|neural/i.test(voice.name) && /en-us|ko-kr|km-kh/i.test(voice.lang)) || list.find(voice => /natural|online|neural/i.test(voice.name)) || list.find(voice => /en-us/i.test(voice.lang) && female(voice)) || list.find(voice => /en-us/i.test(voice.lang)) || list[0] || null;
 }
 // Pieces of about two sentences: browsers stop very long utterances part way.
 function pieces(text) {
@@ -119,7 +122,8 @@ export function toggleReadAloud(key) {
 }
 // After each redraw: finished replies not read yet are read, oldest first. A reply Voice mode already spoke is not read again.
 export function readNewReplies(key) {
-  if (!heard.has(key) || !readAloudOn(key)) { markAll(key); return; }
+  // In Voice mode, Voice mode alone decides what is said (never a written report or code), so read-aloud stays quiet.
+  if (!heard.has(key) || !readAloudOn(key) || voiceModeOn(key)) { markAll(key); return; }
   if (document.querySelector('#feed-inner .bubble.typing')) return;
   const seen = heard.get(key);
   for (const button of replies()) {
@@ -135,14 +139,16 @@ export function readNewReplies(key) {
 // the agent's reply while the agent is still writing it (each finished phrase at once, a phrase behind the words), and
 // listens again once the reply is spoken. The server sends the text so far of the block being written (event "partial");
 // "done" carries the finished block. Switched on per chat with its own button in the chat header.
-const VOICE = 'rex-voice-mode';
-const voiceChats = () => { try { return new Set(JSON.parse(localStorage.getItem(VOICE) || '[]')); } catch { return new Set(); } };
-export const voiceModeOn = key => voiceChats().has(key);
+// Kept only while the page is open, never saved: after a reload Voice mode is off until the person turns it on again with
+// a click. A Voice mode that came back by itself could make no sound (browsers block sound a page starts without a click)
+// and would open the microphone unasked.
+const voiceOnIn = new Set();
+try { localStorage.removeItem('rex-voice-mode'); } catch { /* private window */ }
+export const voiceModeOn = key => voiceOnIn.has(key);
 export function toggleVoiceMode(key) {
-  const chats = voiceChats(), on = !chats.has(key);
-  // Turned on by a click: the player and its level meter start inside that click, so the browser lets them make sound.
-  if (on) { chats.add(key); unlockSound(); } else { chats.delete(key); stopLive(); }
-  try { localStorage.setItem(VOICE, JSON.stringify([...chats])); } catch { /* private window */ }
+  const on = !voiceOnIn.has(key);
+  // Turned on by a click: the player starts inside that click, so the browser lets it make sound.
+  if (on) { voiceOnIn.add(key); unlockSound(); } else { voiceOnIn.delete(key); stopLive(); }
   return on;
 }
 const WAVE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>';
@@ -174,7 +180,7 @@ export function outputLevel() {
   return 0;
 }
 const fingerprint = text => String(text).toLowerCase().replace(/[^a-z0-9ក-៿가-힯]+/g, '').slice(0, 60);
-const live = { runId: '', text: '', said: 0, token: 0, queue: Promise.resolve(), spoken: new Set(), spokenAt: 0, pending: 0 };
+const live = { runId: '', text: '', said: 0, token: 0, queue: Promise.resolve(), spoken: new Set(), spokenAt: 0, pending: 0, playing: false };
 const spokenLive = text => { const print = fingerprint(text); return print.length > 8 && live.spoken.has(print); };
 // What is read: code is said as "code", a block still open is not read yet, links and markdown marks are dropped.
 function sayable(raw) {
@@ -192,28 +198,39 @@ function phraseEnd(pending, finished) {
   if (end < 0 && pending.length > 90) for (const match of pending.matchAll(/[,;:](?=\s)/g)) if (match.index > 30) end = match.index + 1;
   return end;
 }
-function sayPhrase(phrase, token) {
+// notBefore: a time (performance.now()) the phrase must not start before; its sound is still fetched at once, so it is
+// ready the moment it is due (the welcome waits for the body's opening this way).
+function sayPhrase(phrase, token, notBefore = 0) {
   const text = cleanPhrase(phrase); if (!/[\p{L}\p{N}]/u.test(text)) return;
   const lang = language(text), chosen = chosenVoice(lang);
+  const due = () => (notBefore > performance.now() ? new Promise(resolve => setTimeout(resolve, notBefore - performance.now())) : null);
   if (chosen && !/Neural$/.test(chosen)) {
     // The computer's own voice queues phrases by itself.
-    void voiceFor(lang).then(voice => { if (token !== live.token) return; const utterance = new SpeechSynthesisUtterance(text); utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice; utterance.rate = 1.05; speechSynthesis.speak(utterance); });
+    void Promise.all([voiceFor(lang), due()]).then(([voice]) => { if (token !== live.token) return; const utterance = new SpeechSynthesisUtterance(text); utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice; utterance.rate = 1.05; speechSynthesis.speak(utterance); });
     return;
   }
   // The neural voice: each phrase is fetched at once, and played in order as soon as the one before it ends.
-  const sound = fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text, lang, voice: chosen }) })
+  // A voice that has not come back in 15 seconds is given up (the computer's own voice says it), so nothing waits for ever.
+  const sound = fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text, lang, voice: chosen }), signal: AbortSignal.timeout?.(15000) })
     .then(response => (response.ok ? response.blob() : null)).then(blob => (blob ? URL.createObjectURL(blob) : null)).catch(() => null);
   live.pending += 1;
   live.queue = live.queue.then(async () => {
+    await due();
     const url = await sound; if (token !== live.token) { if (url) URL.revokeObjectURL(url); return; }
     // The online voice did not answer (no network, the service down): this computer's own voice says it instead of silence.
     if (!url) { await sayHere(text, lang, token); return; }
     player ||= new Audio(); const audio = player; audio.src = url;
-    const played = await new Promise(resolve => { audio.onended = () => resolve(true); audio.onerror = () => resolve(false); audio.onplaying = () => measure(audio); audio.play().catch(() => resolve(false)); });
+    const played = await new Promise(resolve => {
+      audio.onended = () => { live.playing = false; resolve(true); }; audio.onerror = () => { live.playing = false; resolve(false); };
+      audio.onplaying = () => { live.playing = true; measure(audio); };
+      audio.play().catch(() => { live.playing = false; resolve(false); });
+    });
     URL.revokeObjectURL(url);
     if (!played && token === live.token) await sayHere(text, lang, token);
   }).finally(() => { live.pending = Math.max(0, live.pending - 1); });
 }
+// Sound is coming out right now (not only waiting to be made): what the body's "Speaking" means.
+export const speechPlaying = () => live.playing || (typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking);
 // One phrase in this computer's own voice, resolved when it has been said.
 async function sayHere(text, lang, token) {
   if (typeof speechSynthesis === 'undefined' || token !== live.token) return;
@@ -257,8 +274,11 @@ export function speakLive({ runId, text = '', done = false, tool = '', input = {
   if (end > 0) { sayPhrase(pending.slice(0, end), live.token); live.said += end; live.spokenAt = Date.now(); }
   if (done) { live.spoken.add(fingerprint(cleanPhrase(text))); if (live.spoken.size > 50) live.spoken.delete(live.spoken.values().next().value); live.said = 0; live.text = ''; }
 }
+// Voice mode's welcome, said by Rex Desk itself (no AI, so no wait) the moment the body has formed: its sound is fetched
+// now, during the opening, and played at `at`. The agent meanwhile reads its report quietly.
+export function welcome(text, at) { sayPhrase(text, live.token, at); }
 // Stops live speech (read-aloud turned off, another chat opened).
-export function stopLive() { live.token += 1; live.queue = Promise.resolve(); live.pending = 0; live.said = 0; live.text = ''; live.runId = ''; try { speechSynthesis.cancel(); } catch { /* no voices */ } if (player) { try { player.pause(); } catch { /* not playing */ } } }
+export function stopLive() { live.token += 1; live.queue = Promise.resolve(); live.pending = 0; live.playing = false; live.said = 0; live.text = ''; live.runId = ''; try { speechSynthesis.cancel(); } catch { /* no voices */ } if (player) { try { player.pause(); } catch { /* not playing */ } } }
 export const readAloudButton = key => { const on = readAloudOn(key); return `<button type="button" class="icon-btn read-aloud${on ? ' on' : ''}" data-action="read-aloud" aria-pressed="${on}" title="${on ? 'Replies are read aloud. Press to stop' : 'Read replies aloud'}" aria-label="Read replies aloud">${SPEAKER}</button>`; };
 let ctxToast = null;
 export function wireSpeak(toast) {

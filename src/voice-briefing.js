@@ -75,7 +75,8 @@ export const VOICE_RULE = `The person is talking to you out loud in Voice mode: 
 - Quick things you can do in one step (making a group chat, telling an agent something, answering from the briefing) you do yourself, at once.
 - Never mention jobs, helpers, subagents or models to the person: it is just you doing it.`;
 export const VOICE_REMINDER = '(Voice mode: you are heard, not read. Answer short and spoken, as plain text in your reply (not desk_message or desk_ask), from the briefing when you can. For anything that takes more than a moment, start it with desk_background, say you are on it, and end your reply; never mention it.)';
-// With the report when Voice mode opens: read it, keep it for later, and only greet. The person may not ask about any of it.
+// With the report when Voice mode opens: read it and keep it for later. Rex Desk itself has already welcomed the person
+// out loud (at once, while this is read), so this reply is not said: it is only "Ready."
 export const VOICE_GREETING = `That was the report for this call; keep it in mind for what they ask. Do not summarise it, list anything from it, or start any work.
-Just greet the person in one short, warm sentence, like picking up a call (for example "Hey, welcome back! What's on your mind?"), and wait for them to talk.
+Rex Desk has already welcomed the person for you ("I'm here. What's on your mind?"). Reply with only the word: Ready.
 Do not use any tool for this reply.`;

@@ -24,9 +24,10 @@ test('Voice mode speaks each finished phrase while the agent is still writing, i
   globalThis.localStorage = { store: { 'rex-read-aloud': JSON.stringify(['main:']) }, getItem(key) { return this.store[key] ?? null; }, setItem(key, value) { this.store[key] = value; }, removeItem(key) { delete this.store[key]; } };
   globalThis.fetch = async (url, { body }) => { const { text } = JSON.parse(body); fetched.push(text); return { ok: true, blob: async () => new Blob([text]) }; };
   globalThis.Audio = class { play() { played.push(this.src); setTimeout(() => this.onended?.(), 5); return Promise.resolve(); } pause() {} };
-  const { speakLive } = await import('../public/chat-speak.js');
+  const { speakLive, toggleVoiceMode } = await import('../public/chat-speak.js');
+  toggleVoiceMode('main:');
+  played.length = 0; // the moment of silence that unlocks sound on the click is not a sentence
   const say = (text, done = false) => speakLive({ runId: 'r1', text, done }, 'main:', 'r1');
-  globalThis.localStorage.store['rex-voice-mode'] = JSON.stringify(['main:']);
   say('Hello');
   assert.deepEqual(fetched, [], 'half a phrase waits');
   say('Hello! I checked');
@@ -46,7 +47,8 @@ test('Voice mode says in a few words what the agent is doing while it works, wit
   globalThis.localStorage = { store: { 'rex-voice-mode': JSON.stringify(['main:']) }, getItem(key) { return this.store[key] ?? null; }, setItem(key, value) { this.store[key] = value; }, removeItem(key) { delete this.store[key]; } };
   globalThis.fetch = async (url, { body }) => { fetched.push(JSON.parse(body).text); return { ok: true, blob: async () => new Blob(['x']) }; };
   globalThis.Audio = class { play() { setTimeout(() => this.onended?.(), 1); return Promise.resolve(); } pause() {} };
-  const { speakLive } = await import('../public/chat-speak.js?tools');
+  const { speakLive, toggleVoiceMode } = await import('../public/chat-speak.js?tools');
+  toggleVoiceMode('main:');
   speakLive({ runId: 'r1', tool: 'Grep' }, 'main:', 'r1');
   speakLive({ runId: 'r1', tool: 'Read' }, 'main:', 'r1');
   assert.deepEqual(fetched, ['Let me look at the files.'], 'one line, not one per step');

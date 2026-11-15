@@ -26,6 +26,7 @@ import { issueBranch } from './branches.js';
 import { profileEnvironment, discoverProfiles } from './agents.js';
 import { kindOf, mimeOf } from './files.js';
 import { speak, NEURAL_VOICES } from './voice-out.js';
+import { readyLines } from '../public/voice-phrases.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
@@ -816,7 +817,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           // Continue in Claude app (on), or bring the chat back to Rex Desk only (on: false).
           if (action === 'app') return json(response, 200, await desk.continueInApp(runId, input.on !== false));
           // Voice mode on (the briefing is made now) or off.
-          if (action === 'voice') return json(response, 200, desk.voiceMode(runId, input.on !== false));
+          if (action === 'voice') {
+            // The sentences Voice mode says often are made now, while the body opens, so they play at once: the welcome
+            // first, then the rest, a few at a time.
+            if (input.on !== false) { const lines = readyLines(); let next = 0; const work = async () => { while (next < lines.length) { const line = lines[next++]; await speak(line, { lang: 'en' }).catch(() => {}); } }; void work(); void work(); void work(); }
+            return json(response, 200, desk.voiceMode(runId, input.on !== false));
+          }
           if (action === 'fresh') return json(response, 200, await desk.freshStart(runId));
           if (action === 'say') return json(response, 200, await desk.say(runId, input.text, input));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));

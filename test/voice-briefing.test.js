@@ -37,14 +37,18 @@ test('turning Voice mode on gives the agent the report at once and asks only for
   try {
     const run = await desk.startWebTask('hello');
     await waitFor(() => store.get('run', run.id).state === 'finished', 'the first turn');
+    const spoken = []; store.on('partial', data => { if (data.text) spoken.push(data.text); });
     const result = desk.voiceMode(run.id, true);
     assert.equal(result.greeting, true);
     await waitFor(() => prompts.length === 2, 'the greeting turn');
-    assert.match(prompts[1], /# Briefing for Voice mode/); assert.match(prompts[1], /Just greet the person/); assert.match(prompts[1], /Do not summarise it/);
+    assert.match(prompts[1], /# Briefing for Voice mode/); assert.match(prompts[1], /Reply with only the word: Ready/); assert.match(prompts[1], /Do not summarise it/);
     assert.ok(!store.events(run.id, { visible: true }).some(event => event.kind === 'human-message' && /Briefing/.test(event.text)), 'the report is not shown in the chat');
     await waitFor(() => store.get('run', run.id).state === 'finished', 'the greeting');
+    assert.deepEqual(spoken, [], 'the quiet report turn is not said: Rex Desk welcomed the person itself');
+    assert.equal(store.get('run', run.id).voice.reading, false);
     await desk.say(run.id, 'what is ReelHome doing', { voice: true });
     await waitFor(() => prompts.length === 3, 'the spoken question');
+    await waitFor(() => spoken.length > 0, 'the answer to be said');
     assert.match(prompts[2], /\(Voice mode: you are heard[\s\S]*what is ReelHome doing/);
     assert.doesNotMatch(prompts[2], /# Briefing/, 'the report is not sent again');
     assert.equal(store.events(run.id, { visible: true }).filter(event => event.kind === 'human-message').at(-1).text, 'what is ReelHome doing', 'the chat shows only what was said');
@@ -70,31 +74,33 @@ test('in Voice mode, what the agent sends with desk_message or asks with a quest
   } finally { await desk.shutdown(); store.close(); }
 });
 
-test('a background job does the task on its own (Haiku), so the agent answers at once; its result reaches the chat, and the agent with the next message', async () => {
+test('a background job does the task on its own (Haiku), so the agent answers at once; its report goes in the chat unspoken, and the agent itself says the outcome', async () => {
   const store = new Store(temporary('jobs')), runs = [];
   const desk = new Desk(store, { root: temporary('jobs-root'), runnerFactory: options => ({ async start(prompt) {
     runs.push({ run: options.run, prompt, model: options.model });
     options.event('session', { sessionId: '7c3a8d71-d78d-409a-9a84-91fb162c1be3' });
-    if (options.run.role === 'helper') { await new Promise(resolve => setTimeout(resolve, 150)); options.event('agent-text', { text: 'ReelHome rendered all twelve stills without errors.' }); }
+    if (options.run.role === 'helper') { await new Promise(resolve => setTimeout(resolve, 150)); options.event('agent-text', { text: 'Report:\n1. **Stills**: all twelve rendered (`src/render.mjs:40`).' }); }
+    else if (/Your background job/.test(prompt)) options.event('agent-text', { text: 'All twelve stills are rendered.' });
     else options.event('agent-text', { text: 'Sure, I am on it.' });
   }, async interrupt() {} }) });
   try {
     const rex = await desk.startWebTask('hello');
     await waitFor(() => store.get('run', rex.id).state === 'finished', 'the first turn');
     store.put('run', rex.id, { ...store.get('run', rex.id), voice: { at: '', briefing: 'B', sent: true } });
-    const heard = []; store.on('partial', data => { if (data.done) heard.push(data.text); });
+    // What the open window would say: only Rex's own chat is spoken (the job's chat is never open in Voice mode).
+    const heard = []; store.on('partial', data => { if (data.done && data.runId === rex.id) heard.push(data.text); });
     const started = desk.startHelper(rex.id, { task: 'Check whether ReelHome rendered the stills', title: 'Check the stills' });
     assert.equal(started.started, true);
     const job = store.get('run', started.jobId);
     assert.equal(job.role, 'helper'); assert.equal(job.model, 'haiku'); assert.equal(job.parentRunId, rex.id);
     assert.equal(store.get('run', rex.id).state, 'finished', 'the agent is free at once');
-    await waitFor(() => store.events(rex.id, { visible: true }).some(event => event.kind === 'message' && /twelve stills/.test(event.text)), "the job's result in the chat");
+    await waitFor(() => store.events(rex.id, { visible: true }).some(event => event.kind === 'message' && event.job === 'Check the stills'), "the job's report in the chat");
+    assert.match(store.events(rex.id, { visible: true }).find(event => event.job).text, /^\*\*Background job: Check the stills\*\*[\s\S]*src\/render\.mjs/, 'marked as a background job, shown in full');
     assert.match(runs.find(item => item.run.role === 'helper').prompt, /quick background job for/);
-    assert.ok(heard.some(text => /twelve stills/.test(text)), 'said out loud in Voice mode');
-    await desk.say(rex.id, 'so is it done', { voice: true });
-    await waitFor(() => runs.filter(item => item.run.id === rex.id).length === 2, 'the next spoken message');
-    const next = runs.filter(item => item.run.id === rex.id).at(-1).prompt;
-    assert.match(next, /Results of the jobs you started[\s\S]*Check the stills: ReelHome rendered all twelve stills/);
-    assert.deepEqual(store.get('run', rex.id).jobResults, [], 'given once');
+    // The agent is given the report and tells the person the outcome itself, short.
+    await waitFor(() => heard.includes('All twelve stills are rendered.'), 'the agent to say the outcome');
+    const told = runs.filter(item => item.run.id === rex.id).at(-1).prompt;
+    assert.match(told, /Your background job "Check the stills" has finished[\s\S]*one or two short spoken sentences/);
+    assert.ok(!heard.some(text => /render\.mjs|\*\*|Report:/.test(text)), 'the report itself is never read out');
   } finally { await desk.shutdown(); store.close(); }
 });
