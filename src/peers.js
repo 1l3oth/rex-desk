@@ -2,6 +2,7 @@
 // worktrees and sessions stay there. Rooms, messages, agent cards, what the agents learned, and commands for an agent on
 // another computer are copied between the person's computers over their private network (Tailscale), so every computer
 // and the phone shows the same chats. A computer that is off only takes its own agents offline; messages for them wait.
+import { doing } from './stall-watch.js';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -132,6 +133,7 @@ export class Peers {
 
   // ---------- the copy that comes in ----------
   async pullFrom(peer) {
+    doing('sync: reading another computer');
     if (!peer) return;
     const settings = this.settings(); let cursor = settings.cursors?.[peer.id] || 0, filesCursor = settings.files?.[peer.id] || 0, page;
     try {
@@ -244,6 +246,7 @@ export class Peers {
 
   // With the same Turso database on every computer, the chats also arrive from there, even while the other computer is off.
   async pullTurso() {
+    doing('sync: reading other computers');
     if (!this.store.cloud?.ready) return;
     // Under another computer id (a restore that got its own), what was skipped as "this computer's own" is read again from the start.
     const settings = this.settings(), again = settings.tursoNode !== this.self.id, at = again ? 0 : settings.tursoAt || 0;
