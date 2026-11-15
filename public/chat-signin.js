@@ -1,6 +1,9 @@
 // Sign in to Rex Desk. With the account service on (the real app): the Rex Desk account signs in first in the browser
 // (email and password, Google or GitHub; accounts are made on rexdesk.app only), then the workspace passphrase opens,
 // sets up or restores this person's workspace. Without it (tests, scripts): email and passphrase, as before.
+import { windowBar } from '/win-bar.js';
+// In the desktop app the sign-in page has the window bar too, so the window can be moved, minimized and closed.
+windowBar();
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const root = document.getElementById('signin');
 const TABS = [['signin', 'Sign in'], ['create', 'New account'], ['cloud', 'Restore from backup']];

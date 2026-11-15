@@ -1,4 +1,5 @@
 import { updateDeferred } from '/chat-update.js';
+import { windowBar, windowShell } from '/win-bar.js';
 // The glass controls: a slider that changes how see-through Rex Desk is while you drag it, and buttons (and Ctrl+B,
 // Ctrl+.) that slide the list and the side panel away and back. Choices are remembered on this computer.
 const root = document.documentElement;
@@ -79,32 +80,15 @@ function syncPanes() {
   if (side && !paneOff('side')) { const width = `${side.offsetWidth}px`; if (root.style.getPropertyValue('--side-w') !== width) root.style.setProperty('--side-w', width); }
 }
 
-// The desktop app's own window bar. Windows: no system title bar, so Rex Desk draws minimize, maximize and close in glass.
-// Mac: the three dots stay where they are, over the left end of the same bar. In a plain browser nothing is added.
-// A button asks the app by opening https://rexdesk.window/<action>; the app does it and no window opens.
-const shell = document.documentElement.classList.contains('embed') ? '' : window.__REX_SHELL;
+// The desktop app's own window bar (win-bar.js), with search, update, working and notifications in the middle.
+const shell = windowShell();
 if (shell === 'windows' || shell === 'macos') {
-  const ask = action => { window.open(`https://rexdesk.window/${action}`, '_blank'); };
-  const bar = document.createElement('div');
-  bar.className = `win-bar ${shell}`; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Window');
-  // The Rex Desk name sits in the window bar, where a window's title belongs; the list below starts with Rex Agent.
-  const brand = '<span class="win-brand"><img src="/favicon.svg" alt="" width="20" height="20"><b>Rex Desk</b></span>';
   const mac = shell === 'macos', key = mac ? '⌘ K' : 'Ctrl K';
   const middle = `<span class="win-fill"></span><button type="button" class="win-search" data-palette-open title="Search or jump to anything (${key})"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search or jump to a chat, agent or task</span><kbd>${key}</kbd></button><span class="win-fill"></span>
     <button type="button" class="win-update" data-action="update-show" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span>Update</span></button>
     <button type="button" class="win-working" data-open="main" data-id="" hidden title="Agents working right now"><i></i><span></span></button>
     <button type="button" class="win-bell tile" data-action="nt-panel" aria-label="Notifications" title="Notifications"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><b hidden></b></button>`;
-  bar.innerHTML = shell === 'windows' ? `${brand}${middle}
-    <button type="button" class="win-btn" data-win="minimize" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 6.5h8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
-    <button type="button" class="win-btn" data-win="maximize" aria-label="Maximize or restore" title="Maximize"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2.2" y="2.2" width="7.6" height="7.6" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
-    <button type="button" class="win-btn close" data-win="close" aria-label="Close" title="Close (Rex Desk keeps running in the tray)"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>`
-    : `${brand}${middle}`;
-  document.documentElement.classList.add('has-win-bar', `shell-${shell}`);
-  document.body.prepend(bar);
-  bar.addEventListener('click', event => { const button = event.target.closest('[data-win]'); if (button) ask(button.dataset.win); });
-  // Dragging the empty bar moves the window; a double click maximizes or restores it.
-  bar.addEventListener('mousedown', event => { if (event.button === 0 && !event.target.closest('button') && event.detail === 1) ask('drag'); });
-  bar.addEventListener('dblclick', event => { if (!event.target.closest('button')) ask('maximize'); });
+  windowBar(middle);
 }
 
 // Each theme's own layer behind the app: Cyberpunk's grid, Gojo's stars and ring, Crayon's doodles, Sakura's petals.
