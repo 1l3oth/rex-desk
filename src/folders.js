@@ -47,7 +47,7 @@ export function checkTarget(from, to) {
 // Not Node's cpSync: it is native code, and on Windows it ended the whole server while moving a data folder (exit 0xC0000409,
 // no message), which left Rex Desk unable to start. Copying file by file turns any problem into an error that is reported.
 // It reports progress for the waiting page.
-async function copyAll(from, to, skip = () => false, progress = () => {}) {
+export async function copyAll(from, to, skip = () => false, progress = () => {}) {
   const files = [], folders = [];
   const walk = (folder, relative) => {
     for (const entry of readdirSync(folder, { withFileTypes: true })) {

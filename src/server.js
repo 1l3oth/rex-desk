@@ -340,7 +340,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   function busyAgents(store) {
     if (!store) return [];
     // A chat open in the Claude app is a session waiting for the person, not work in progress: it does not hold an update back.
-    const names = store.list('run').filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state) && !run.inApp)
+    // Nor does an agent running from Rex Desk's private copy (host.outside): the update leaves it running and the new server attaches to it.
+    const names = store.list('run').filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state) && !run.inApp && !run.host?.outside)
       .map(run => { const id = run.roomAgent || run.specialistId; return (id && id !== 'main' ? store.get('specialist', id)?.name : '') || (run.main || run.role === 'coordinator' ? 'Rex Agent' : run.title) || 'An agent'; });
     return [...new Set(names)];
   }
@@ -654,6 +655,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         input.provider = aiProvider(input.provider || 'claude');
         const config = store.publicConfig();
         store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [input.provider]: input.profile ?? null } });
+        // Picked by the person: an old "limited" mark does not keep the automatic switch away from it.
+        if (input.profile) desk.agents.clearLimited(input.profile);
         desk.agents.invalidate(input.provider);
         return json(response, 200, await desk.agents.overview());
       }

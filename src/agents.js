@@ -146,9 +146,15 @@ export class AgentProfiles {
     }
     return null;
   }
-  markLimited(profile, hours = 5) {
+  // until: when the account's limit resets (from Claude's own usage report); 5 hours when that is not known.
+  markLimited(profile, until = 0) {
     const record = this.store.get('accounts', 'limited') || { id: 'limited', until: {} };
-    this.store.put('accounts', 'limited', { ...record, until: { ...record.until, [canonical(profile || '')]: Date.now() + hours * 3600000 } });
+    this.store.put('accounts', 'limited', { ...record, until: { ...record.until, [canonical(profile || '')]: until > Date.now() ? until : Date.now() + 5 * 3600000 } });
+  }
+  // The person chose this account: an earlier "limited" mark no longer keeps it out of the automatic switch.
+  clearLimited(profile) {
+    const record = this.store.get('accounts', 'limited'), key = canonical(profile || ''); if (!record?.until?.[key]) return;
+    const { [key]: _gone, ...rest } = record.until; this.store.put('accounts', 'limited', { ...record, until: rest });
   }
   async status(provider, profile = this.selected(provider), { refresh = false } = {}) {
     const key = `${provider}:${profile ? canonical(profile) : ''}`, cached = this.cache.get(key);

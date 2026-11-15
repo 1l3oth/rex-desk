@@ -30,7 +30,7 @@ import { inspectRepository } from './repositories.js';
 import { Worktrees, longPath } from './worktrees.js';
 import { ProjectRules } from './project-rules.js';
 import { lowDiskMessage, friendlyDiskError } from './disk.js';
-import { HostRunner, hostAlive } from './hosts.js';
+import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
 import { Jev } from './jev.js';
@@ -113,6 +113,9 @@ export class Desk {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     this.localAi = new LocalAi(store);
+    // The installed app on Windows copies itself beside the data once per version, in the background; agents started after
+    // that run from the copy, so an update installs while they work (see prepareRuntime). Until it is ready they start as before.
+    if (!runnerFactory && process.env.REX_DESK_VERSION) void prepareRuntime(path.join(store.directory, 'runtime')).then(runtime => { this.runtime = runtime; }, () => {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
     this.localTasks = new LocalTasks(store);
@@ -217,7 +220,10 @@ export class Desk {
       .map(event => String(event.text || event.message || event.result || '')).find(text => LIMIT.test(text));
     if (!hit) return false;
     const pinned = this.accountFor(run), current = pinned || this.agents.selected(provider);
-    this.agents.markLimited(current);
+    // Limited until the reset Claude reported for this account, not a blind 5 hours: an account whose window reset minutes
+    // later was skipped for hours, and Rex Desk said every account was full while one was at 7%.
+    const usage = this.store.get('usage', `${provider}:${current || 'default'}`)?.windows || {};
+    this.agents.markLimited(current, Math.max(0, ...Object.values(usage).filter(window => window?.status === 'rejected' || Number(window?.used) >= 100).map(window => Number(window.resetsAt) || 0)));
     if (this.store.get('accounts', 'auto')?.off) { this.store.event(runId, 'account-limit', { text: `This ${title} account hit its usage limit. Switch accounts at the bottom left, then continue.` }, true); return false; }
     if (run.accountSwitchedAt && Date.now() - Date.parse(run.accountSwitchedAt) < 120000) return false;
     const next = await this.agents.alternative(provider, current);
@@ -235,6 +241,8 @@ export class Desk {
   async say(runId, text, picked = {}, { raw = false } = {}) {
     const run = this.run(runId), line = raw ? String(text || '').trim() : String(text || '').replace(/\s+/g, ' ').trim();
     if (!line) throw new Error('Write a message first.');
+    // The person wrote: the count of fresh sessions that carried on by themselves starts again.
+    if (run.autoContinues) this.patchRun(runId, { autoContinues: 0 });
     if (this.live.has(runId)) {
       this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
       this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
@@ -514,7 +522,7 @@ export class Desk {
       }
       // A headless agent works in a process of its own, so a Rex Desk restart (an update) does not cut it off.
       const hosted = attach || (!this.runnerFactory && this.store.config().agentHost !== false);
-      const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.hostOptions || {}) })
+      const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.runtime ? { runtime: this.runtime } : {}), ...(this.hostOptions || {}) })
         : this.runnerFactory ? this.runnerFactory(options)
         : new (run.provider === 'codex' ? CodexRunner : run.provider === 'gemini' ? AntigravityRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) });
       const entry = this.live.get(runId);
@@ -814,6 +822,15 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       await this.freshStart(runId, { note, reason: `automatically, because the conversation filled ${Math.round(100 * (run.handoffShare || limit))}% of the context` });
       const waiting = this.store.get('run', runId);
       if (waiting?.queued?.length && !this.closed) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
+      // Nothing waiting: the fresh session carries on by itself from the handoff, so the person does not have to say "continue".
+      // It stops at once when the handoff shows the work is done. Config autoContinue: false waits for the next message instead.
+      // At most three in a row without the person writing, so a session that fills up again at once cannot loop for ever.
+      else if (waiting && !this.closed && this.store.config().autoContinue !== false && (waiting.autoContinues || 0) < 3) {
+        this.patchRun(runId, { autoContinues: (waiting.autoContinues || 0) + 1 });
+        this.store.event(runId, 'phase', { text: 'Fresh session: reading the handoff and carrying on' }, true);
+        void this.resume(runId, { silent: true, prompt: 'Your earlier session filled its context, so this is a fresh session. Carry on with the work from the handoff: do the next step now, without asking the person to say continue. If the handoff shows that everything the person asked for is already done, say so in one line and stop.' })
+          .catch(error => this.store.event(runId, 'error', { message: error.message }, true));
+      }
       return true;
     }
     const share = Number(run.contextUsed || 0) / Number(run.contextWindow || 200000);
