@@ -171,6 +171,15 @@ export class Desk {
     if (at >= 0) { this.store.put('run', runId, { ...run, queued: queued.filter((_, index) => index !== at) }); return { unsent: true, seen: false }; }
     return { unsent: true, seen: this.live.has(runId) || !['queued'].includes(run.state) };
   }
+  // Messages the agent was handed but never read (they came just as its reply ended) go back to the front of its queue.
+  requeue(runId, text) {
+    const run = this.store.get('run', runId); if (!run || !String(text || '').trim()) return;
+    this.store.put('run', runId, { ...run, queued: [String(text), ...(run.queued || [])] });
+    this.store.event(runId, 'inbox-returned', {});
+    // The turn already ended: the message starts the next one now.
+    const waiting = this.store.get('run', runId);
+    if (!this.live.has(runId) && !this.closed && ['needs_evidence', 'finished'].includes(waiting.state)) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
+  }
   takeInbox(runId) {
     const run = this.store.get('run', runId); if (!run?.queued?.length) return '';
     this.store.put('run', runId, { ...run, queued: [] });
@@ -476,7 +485,7 @@ export class Desk {
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
-        ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
+        ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), requeue: text => this.requeue(runId, text), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           // How full the chat's context is, for the ring by the message box. A 1M-context model says so in its name.

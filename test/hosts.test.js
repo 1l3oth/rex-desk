@@ -67,3 +67,17 @@ test('Stop ends an agent that runs in its own process', async () => {
   assert.equal(store.get('run', run.id).state, 'stopped');
   await desk.shutdown(); store.close();
 });
+
+test('a message that arrives as the reply ends is not lost: it starts the next turn', async () => {
+  const directory = path.join(temporary('host-late'), 'data'), release = path.join(path.dirname(directory), 'release');
+  const { store, desk } = open(directory);
+  const run = await desk.startWebTask(`compare prices release=${release}`);
+  await waitFor(() => said(store, run.id).includes('step one'), 'the first step');
+  // The agent takes no more steps that read messages, so this one waits in its process until the reply is over.
+  await desk.say(run.id, 'one more thing');
+  await waitFor(() => store.events(run.id).some(event => event.kind === 'inbox-delivered'), 'the message to reach the agent process');
+  writeFileSync(release, 'go');
+  await waitFor(() => store.events(run.id).some(event => event.kind === 'inbox-returned'), 'the unread message to come back');
+  await waitFor(() => said(store, run.id).filter(text => text === 'step one').length === 2, 'the next turn to start with it');
+  await desk.shutdown(); store.close();
+});

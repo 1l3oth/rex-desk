@@ -62,7 +62,8 @@ export class HostRunner {
         if (this.detached) { clearInterval(this.timer); return; }
         try {
           // New messages for the agent go over as they come, the way an in-process agent picks them up between steps.
-          if (Date.now() - inboxAt > 1000) { inboxAt = Date.now(); const news = this.options.inbox?.(); if (news) void this.post('/inbox', { text: news }).catch(() => {}); }
+          // A message the process refuses (its reply just ended) or cannot take goes back to the run's queue, for the next turn.
+          if (Date.now() - inboxAt > 1000) { inboxAt = Date.now(); const news = this.options.inbox?.(); if (news) void this.post('/inbox', { text: news }).catch(error => { if (!/timeout|aborted/i.test(String(error?.name || '') + error?.message)) this.options.requeue?.(news); }); }
           const size = existsSync(this.state.journal) ? statSync(this.state.journal).size : 0;
           if (size > this.state.offset) {
             const fd = openSync(this.state.journal, 'r'), chunk = Buffer.alloc(size - this.state.offset);
@@ -74,6 +75,7 @@ export class HostRunner {
               if (!line.trim()) continue;
               const entry = JSON.parse(line);
               if (entry.type === 'event') this.options.event(entry.kind, entry.data);
+              else if (entry.type === 'unread') this.options.requeue?.(entry.text);
               else if (entry.type === 'ask' && !(this.state.asks || []).some(item => item.id === entry.id)) { this.save({ asks: [...(this.state.asks || []), { id: entry.id, request: entry.request }] }); this.answer(entry.id, entry.request); }
               else if (entry.type === 'done') { this.save({ offset }); return finish(resolve, { status: 'completed' }); }
               else if (entry.type === 'error') { this.save({ offset }); return finish(reject, new Error(entry.message)); }
