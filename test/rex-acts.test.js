@@ -40,6 +40,9 @@ test('Rex Agent makes a group chat, talks in it and in an agent\'s personal chat
 
     const rooms = await result(client, 'desk_rooms_all', {});
     assert.ok(rooms.some(item => item.name === 'Launch'));
+    // The agents woken in the room and in the personal chat answer in the background: let them finish before closing.
+    await waitFor(() => app.desk.live.size === 0, 'the woken agents to finish');
+    await new Promise(resolve => setTimeout(resolve, 300));
   } finally { await client.close().catch(() => {}); await app.close(); }
 });
 
