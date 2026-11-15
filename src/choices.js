@@ -18,7 +18,9 @@ export const MODES = [
 ];
 
 // The models offered: the list the signed-in Claude Code reported (kept in the store), or the built-in one until it has.
-export const modelList = (store, provider = 'claude') => { const saved = store?.get?.('models', provider === 'claude' ? 'list' : provider)?.items; return Array.isArray(saved) && saved.length ? saved : provider === 'claude' ? MODELS : []; };
+// Claude Code also offers the models on this computer (Local AI: Ollama or another local server), after its own.
+const localModels = store => { const items = store?.get?.('models', 'local')?.items; return Array.isArray(items) ? items : []; };
+export const modelList = (store, provider = 'claude') => { const saved = store?.get?.('models', provider === 'claude' ? 'list' : provider)?.items; const own = Array.isArray(saved) && saved.length ? saved : provider === 'claude' ? MODELS : []; return provider === 'claude' ? [...own, ...localModels(store)] : own; };
 // The pickers also show the models this account refused (a higher plan only), greyed out, so the person sees why one is missing.
 export const pickerModels = (store, provider = 'claude') => { const refused = store?.get?.('models', provider === 'claude' ? 'list' : provider)?.refusedItems || []; return [...modelList(store, provider), ...refused.map(item => ({ ...item, hint: 'Not on your plan: it needs a higher one', disabled: true }))]; };
 // Gemini's own four modes, as agy reports them, plus Dangerous, which Rex Desk adds by starting agy with every tool approved.

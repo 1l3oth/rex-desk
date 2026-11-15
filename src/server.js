@@ -42,6 +42,7 @@ import { followDataMove, followMemoryMove, planDataMove, moveMedia, folderStatus
 import { readdirSync } from 'node:fs';
 import { knowledgeGraph } from './knowledge.js';
 import { accountSignIn, accountDatabase, accountMe, accountReachable } from './rexdesk-account.js';
+import { bridge } from './local-ai.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -58,9 +59,9 @@ async function rawBody(request, limit = 20 * 1024 * 1024) {
   for await (const chunk of request) { size += chunk.length; if (size > limit) throw new Error('Recording is too long.'); chunks.push(chunk); }
   return Buffer.concat(chunks);
 }
-async function body(request) {
+async function body(request, limit = 2 * 1024 * 1024) {
   let input = '';
-  for await (const chunk of request) { input += chunk; if (Buffer.byteLength(input) > 2 * 1024 * 1024) throw new Error('Request exceeds 2 MB.'); }
+  for await (const chunk of request) { input += chunk; if (Buffer.byteLength(input) > limit) throw new Error(`Request exceeds ${Math.round(limit / 1048576)} MB.`); }
   try { return input ? JSON.parse(input) : {}; } catch { throw new Error('Request body must be JSON.'); }
 }
 function serveFile(request, response, file, { sandbox = false, download = false, cache = 'no-store', frame = false, type: forced = '' } = {}) {
@@ -204,6 +205,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (!process.env.NODE_TEST_CONTEXT) void desk.refreshModels().catch(error => store.event('', 'models-error', { message: error.message }));
     // Antigravity's models fill its pickers when it is installed and signed in; otherwise this fails quietly.
     if (!process.env.NODE_TEST_CONTEXT && store.config().provider !== 'gemini') void desk.refreshModels({ provider: 'gemini' }).catch(() => {});
+    // The models on this computer (Local AI), for the Claude Code model pickers.
+    if (!process.env.NODE_TEST_CONTEXT) void desk.localAi.status().catch(() => {});
   }
   async function closeSession({ forget = false } = {}) {
     if (!session) return;
@@ -392,6 +395,15 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           return json(response, 401, { error: 'Sign in with the key from your Rex Desk first.' });
         }
         peerSignedIn = true;
+      }
+      // Local AI's bridge: an agent's Claude Code sends its model requests here, with its own Rex Desk token, and they go on to
+      // the person's local server in the OpenAI format (see local-ai.js).
+      if (url.pathname.startsWith('/local-ai/')) {
+        if (remoteSocket) return json(response, 403, { error: 'Agents connect on this computer only.' });
+        const token = request.headers['x-api-key'] || request.headers.authorization?.replace(/^Bearer /i, '');
+        if (!session?.desk?.scope(token)) return json(response, 401, { type: 'error', error: { type: 'authentication_error', message: 'Supply the Rex Desk run token.' } });
+        const [, , serverId, ...rest] = url.pathname.split('/');
+        await bridge(session.desk.localAi, serverId, `/${rest.join('/')}`, request, response, request.method === 'POST' ? await body(request, 50 * 1024 * 1024) : undefined); return;
       }
       if (url.pathname === '/mcp') {
         const token = request.headers.authorization?.replace(/^Bearer /i, '');
@@ -620,6 +632,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       }
       if (url.pathname === '/api/config' && request.method === 'PUT') { const saved = store.saveConfig(await body(request)); desk.agents.invalidate(); void desk.refreshModels().catch(() => {}); return json(response, 200, saved); }
       // The skills, commands and MCP servers an agent has (or Rex Agent, with agent=main), for the / menu and its profile.
+      // Local AI: the servers on this computer and their models, downloads into Ollama, and Hugging Face search.
+      if (url.pathname === '/api/local-ai' && request.method === 'GET') return json(response, 200, await desk.localAi.status());
+      if (url.pathname === '/api/local-ai/servers' && request.method === 'POST') { const input = await body(request); desk.localAi.addServer(input); return json(response, 200, await desk.localAi.status()); }
+      if (url.pathname === '/api/local-ai/servers' && request.method === 'DELETE') { desk.localAi.removeServer(String(url.searchParams.get('id') || '')); return json(response, 200, await desk.localAi.status()); }
+      if (url.pathname === '/api/local-ai/servers' && request.method === 'PUT') { const input = await body(request); desk.localAi.updateServer(String(input.id || ''), input); return json(response, 200, await desk.localAi.status()); }
+      if (url.pathname === '/api/local-ai/pull' && request.method === 'POST') return json(response, 200, desk.localAi.pull((await body(request)).model));
+      if (url.pathname === '/api/local-ai/models' && request.method === 'DELETE') { const status = await desk.localAi.remove(String(url.searchParams.get('model') || '')); desk.specialists.normalizeModels(); return json(response, 200, status); }
+      if (url.pathname === '/api/local-ai/huggingface' && request.method === 'GET') return json(response, 200, { items: await desk.localAi.searchHuggingFace(url.searchParams.get('q')) });
       if (url.pathname === '/api/agents/tools' && request.method === 'GET') {
         const id = url.searchParams.get('agent') || 'main', agent = id === 'main' ? null : store.get('specialist', id);
         return json(response, 200, agentTools({ profile: agent?.profile || desk.agents.selected('claude') || '', projectPath: agent?.projectPath || '', extra: desk.orbitAccountMcp() }));
@@ -957,7 +977,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/glass.css': 'glass.css', '/rex-core.js': 'rex-core.js', '/chat-palette.js': 'chat-palette.js', '/chat-split.js': 'chat-split.js', '/themes.css': 'themes.css', '/chat-glass.js': 'chat-glass.js', '/win-bar.js': 'win-bar.js', '/chat-graph.js': 'chat-graph.js', '/graph-worker.js': 'graph-worker.js', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/glass.css': 'glass.css', '/rex-core.js': 'rex-core.js', '/chat-palette.js': 'chat-palette.js', '/chat-split.js': 'chat-split.js', '/themes.css': 'themes.css', '/chat-glass.js': 'chat-glass.js', '/chat-local-ai.js': 'chat-local-ai.js', '/win-bar.js': 'win-bar.js', '/chat-graph.js': 'chat-graph.js', '/graph-worker.js': 'graph-worker.js', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
       // three.js ships from the installed package; the page loads no remote scripts.
       const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js', '/vendor/driver/driver.js.mjs': 'driver.js/dist/driver.js.mjs', '/vendor/driver/driver.css': 'driver.js/dist/driver.css' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });

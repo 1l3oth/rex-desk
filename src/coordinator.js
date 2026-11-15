@@ -1,5 +1,6 @@
 import { aiProvider, AI_PROVIDERS, CodexRunner, codexModels, profileKey, providerTitle } from './codex.js';
 import { AntigravityRunner, antigravityModels } from './antigravity.js';
+import { LocalAi, isLocalModel } from './local-ai.js';
 import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
 import { Memory } from './memory.js';
@@ -111,6 +112,7 @@ export class Desk {
   constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
+    this.localAi = new LocalAi(store);
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
     this.localTasks = new LocalTasks(store);
@@ -505,6 +507,11 @@ export class Desk {
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
+      // Local AI: Claude Code keeps its tools but talks to a model on this computer (Ollama, or another local server through Rex Desk's bridge).
+      if ((run.provider || 'claude') === 'claude' && isLocalModel(options.model)) {
+        const local = this.localAi.route(options.model, { base: new URL(this.mcpUrl).origin, token });
+        if (local) { options.model = local.model; options.agentEnv = { ...options.agentEnv, ...local.env }; }
+      }
       // A headless agent works in a process of its own, so a Rex Desk restart (an update) does not cut it off.
       const hosted = attach || (!this.runnerFactory && this.store.config().agentHost !== false);
       const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.hostOptions || {}) })
@@ -546,7 +553,7 @@ ${message}` : message);
     } catch (error) {
       if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) { handedOn = true; return; }
       // The chosen model is not available on this Claude account: the turn runs again once on the account's default model, and the agent stops asking for that model.
-      if (!controller.signal.aborted && MODEL_MISSING.test(error.message) && !run.modelFallback) {
+      if (!controller.signal.aborted && MODEL_MISSING.test(error.message) && !run.modelFallback && !isLocalModel(run.model)) {
         const agentId = run.roomAgent || run.specialistId, agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
         if (agent?.model) this.store.put('specialist', agentId, { ...agent, model: '' });
         // The account's model list can offer a model its plan cannot run (Codex lists them for ChatGPT accounts too): drop it from the pickers.

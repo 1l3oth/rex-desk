@@ -4,6 +4,7 @@ import { voicesFor, chosenVoice } from '/chat-speak.js';
 import { loadFolders, foldersHtml, folderClick, startTour } from '/chat-tour.js';
 import { trackerDraft, readTrackers, trackersHtml, trackerSources, trackerClick, trackerInput } from '/chat-trackers.js';
 import { runSettingsTour } from '/chat-settings-tour.js';
+import { loadLocalAi, localAiHtml, localAiClick } from '/chat-local-ai.js';
 // Settings, as a popup over the chat: the sections on the left, one section's settings on the right. Each section saves on its own,
 // so a change never waits for the rest. It replaces the old "Issues & settings" page.
 const SECTIONS = [
@@ -12,6 +13,7 @@ const SECTIONS = [
   ['notify', 'Notifications', 'Pop-ups, sound, phone, quiet hours'],
   ['agents', 'Agents', 'Workers, model, branches, pull requests'],
   ['accounts', 'Claude accounts', 'Which subscription agents use'],
+  ['localai', 'Local AI', 'Models that run on this computer'],
   ['projects', 'Projects', 'Repositories, branches and commands'],
   ['sources', 'Task sources', 'Rex Desk, Orbit, Flow, Morningmate'],
   ['jev', 'Jev and voice', 'Ranking, computer control, speech'],
@@ -24,7 +26,7 @@ const SECTIONS = [
 // The sections in groups by what they are about, so the list reads in a few chunks instead of thirteen rows.
 const GROUPS = [
   ['You', ['general', 'notify', 'jev']],
-  ['Agents', ['agents', 'accounts', 'schedule', 'signins']],
+  ['Agents', ['agents', 'accounts', 'localai', 'schedule', 'signins']],
   ['Work', ['projects', 'sources', 'connect']],
   ['Data and devices', ['folders', 'backup', 'devices']],
 ];
@@ -35,6 +37,7 @@ const ST_ICON = {
   notify: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
   agents: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 14.5a5 5 0 0 1 5.5 5"/>',
   accounts: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2.2"/><path d="M5.5 16a3.6 3.6 0 0 1 7 0M14 10h4M14 13.5h3"/>',
+  localai: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
   projects: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   sources: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/>',
   jev: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
@@ -149,6 +152,7 @@ export function openSettings(ctx, section = 'general') {
       ${check('autoPrLowRisk', config().autoPrLowRisk, 'Open draft pull requests for small, safe fixes on their own', 'Only style, text, docs or test changes with passing tests. Nothing is ever merged on its own.')}
       ${hasOrbit() ? check('reportToOrbit', config().reportToOrbit, 'Let agents send their final report to Orbit', 'Through your Orbit connection.') : ''}`,
     accounts: () => `<h2>Claude accounts</h2><p class="muted">Agents run on a Claude Code sign-in. You can add more accounts and switch when one runs out.</p>${tip('accounts', 'One account is enough to start. Add a second only if you often hit the usage limit.')}<button type="button" class="btn primary" data-st-open="accounts">Open Claude accounts</button>`,
+    localai: () => `<h2>Local AI</h2>${localAiHtml(ctx, state)}`,
     projects: () => {
       // Each project that has agents: where its agents may work, and whether their chats may go to the cloud.
       const projectRulesHtml = () => {
@@ -251,6 +255,7 @@ ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on 
     if (id === 'general') state.extra.autostart = await api('/autostart').catch(() => null);
     draw();
     if (id === 'folders') { await loadFolders(ctx, state); if (state.section === 'folders') draw(); }
+    if (id === 'localai') { await loadLocalAi(ctx, state); if (state.section === 'localai') draw(); }
     back.querySelector('[data-st-panel]')?.scrollTo({ top: 0 });
   }
   back.addEventListener('click', async event => {
@@ -261,6 +266,7 @@ ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on 
       const section = target.closest('[data-st-section]'); if (section) { await goSection(section.dataset.stSection); return; }
       if (await trackerClick(ctx, state, target, back, draw)) return;
       if (await folderClick(ctx, state, target, draw)) return;
+      if (state.section === 'localai' && await localAiClick(ctx, state, target, draw)) return;
       // A feature tour circles the real controls of a section; "Take the tour" goes through every section.
       const show = target.closest('[data-st-show]'); if (show) { await runSettingsTour(goSection, { section: show.dataset.stShow }); return; }
       if (target.closest('[data-st-show-all]')) { await runSettingsTour(goSection, { all: true }); return; }
@@ -354,6 +360,7 @@ ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on 
   back.addEventListener('change', event => { const lang = event.target.dataset?.stVoice; if (!lang) return; try { if (event.target.value) localStorage.setItem(`rex-desk-voice-${lang}`, event.target.value); else localStorage.removeItem(`rex-desk-voice-${lang}`); } catch { /* private window */ } toast('Reading voice saved.'); });
   if (section === 'projects') void loadGithub();
   if (section === 'folders') void loadFolders(ctx, state).then(() => state.section === 'folders' && draw());
+  if (section === 'localai') void loadLocalAi(ctx, state).then(() => state.section === 'localai' && draw());
   if (section === 'general') void api('/autostart').then(result => { state.extra.autostart = result; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
   // The Notifications tab saves on change; redraw it when its settings come back changed, keeping the scroll.
   let noticeHtml = '';
