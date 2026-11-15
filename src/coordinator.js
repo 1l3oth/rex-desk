@@ -267,10 +267,15 @@ export class Desk {
   helperDone(runId, failure = '') {
     const run = this.store.get('run', runId), parent = run?.parentRunId && this.store.get('run', run.parentRunId); if (!parent) return;
     const said = this.store.events(runId, { visible: true, limit: 60 }).filter(event => event.kind === 'agent-text' && event.text).at(-1)?.text || '';
-    const result = failure ? `That job did not work: ${failure}` : said.trim().slice(0, 1200) || 'That job is done.';
-    // Posted in the agent's chat (in Voice mode it is said out loud), and kept for the agent's next turn.
-    this.message(parent.id, result);
-    this.patchRun(parent.id, { jobResults: [...(parent.jobResults || []), `${run.title.replace(/^Job · /, '')}: ${result}`].slice(-8) });
+    const report = failure ? `That job did not work: ${failure}` : said.trim().slice(0, 8000) || 'That job is done.';
+    const name = run.title.replace(/^Job · /, '');
+    // The full report goes in the chat as text, never read out: it is written for reading (lists, paths), and the person
+    // should only ever hear the agent. The agent itself then tells them the outcome, in a sentence or two of its own.
+    this.store.event(parent.id, 'message', { text: `**Background job: ${name}**\n\n${report}`, job: name }, true);
+    const prompt = `Your background job "${name}" has finished. Its report (the person can read it in the chat):\n${report}\n\nTell the person the outcome now in one or two short spoken sentences, as yourself: no lists, paths, code or markdown, and do not mention the job.`;
+    const current = this.store.get('run', parent.id);
+    if (this.live.has(parent.id) || this.closed) { this.store.put('run', parent.id, { ...current, queued: [...(current.queued || []), prompt] }); return; }
+    void this.resume(parent.id, { prompt, silent: true }).catch(error => this.store.event(parent.id, 'error', { message: error.message }, true));
   }
   // What the agent's jobs found since its last turn, given with the person's next message (once).
   takeJobResults(runId) {

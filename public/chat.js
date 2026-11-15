@@ -16,7 +16,7 @@ import { maybeStartTour } from '/chat-tour.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
-import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive, voiceModeButton, toggleVoiceMode, voiceModeOn, speechIdle, stopLive, outputLevel, welcome } from '/chat-speak.js';
+import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive, voiceModeButton, toggleVoiceMode, voiceModeOn, speechIdle, speechPlaying, stopLive, outputLevel, welcome } from '/chat-speak.js';
 import { mountOrb } from '/voice-orb.js';
 import { welcomeLine, STILL_THERE, GOODBYE } from '/voice-phrases.js';
 import { openAvatarPicker } from '/chat-avatar.js';
@@ -398,7 +398,9 @@ function agentWriting() {
 }
 function voiceNow() {
   const heard = voiceListening();
-  if (!speechIdle()) return { state: 'speaking', level: outputLevel() };
+  // "Speaking" only while sound is coming out; while a sentence's voice is still being made it is "Thinking".
+  if (speechPlaying()) return { state: 'speaking', level: outputLevel() };
+  if (!speechIdle()) return { state: 'thinking', level: 0 };
   if (heard.listening) return { state: 'listening', level: heard.level };
   if (heard.transcribing || agentWriting()) return { state: 'thinking', level: 0 };
   return { state: 'idle', level: 0 };

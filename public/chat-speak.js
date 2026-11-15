@@ -119,7 +119,8 @@ export function toggleReadAloud(key) {
 }
 // After each redraw: finished replies not read yet are read, oldest first. A reply Voice mode already spoke is not read again.
 export function readNewReplies(key) {
-  if (!heard.has(key) || !readAloudOn(key)) { markAll(key); return; }
+  // In Voice mode, Voice mode alone decides what is said (never a written report or code), so read-aloud stays quiet.
+  if (!heard.has(key) || !readAloudOn(key) || voiceModeOn(key)) { markAll(key); return; }
   if (document.querySelector('#feed-inner .bubble.typing')) return;
   const seen = heard.get(key);
   for (const button of replies()) {
@@ -176,7 +177,7 @@ export function outputLevel() {
   return 0;
 }
 const fingerprint = text => String(text).toLowerCase().replace(/[^a-z0-9ក-៿가-힯]+/g, '').slice(0, 60);
-const live = { runId: '', text: '', said: 0, token: 0, queue: Promise.resolve(), spoken: new Set(), spokenAt: 0, pending: 0 };
+const live = { runId: '', text: '', said: 0, token: 0, queue: Promise.resolve(), spoken: new Set(), spokenAt: 0, pending: 0, playing: false };
 const spokenLive = text => { const print = fingerprint(text); return print.length > 8 && live.spoken.has(print); };
 // What is read: code is said as "code", a block still open is not read yet, links and markdown marks are dropped.
 function sayable(raw) {
@@ -206,7 +207,8 @@ function sayPhrase(phrase, token, notBefore = 0) {
     return;
   }
   // The neural voice: each phrase is fetched at once, and played in order as soon as the one before it ends.
-  const sound = fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text, lang, voice: chosen }) })
+  // A voice that has not come back in 15 seconds is given up (the computer's own voice says it), so nothing waits for ever.
+  const sound = fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text, lang, voice: chosen }), signal: AbortSignal.timeout?.(15000) })
     .then(response => (response.ok ? response.blob() : null)).then(blob => (blob ? URL.createObjectURL(blob) : null)).catch(() => null);
   live.pending += 1;
   live.queue = live.queue.then(async () => {
@@ -215,11 +217,17 @@ function sayPhrase(phrase, token, notBefore = 0) {
     // The online voice did not answer (no network, the service down): this computer's own voice says it instead of silence.
     if (!url) { await sayHere(text, lang, token); return; }
     player ||= new Audio(); const audio = player; audio.src = url;
-    const played = await new Promise(resolve => { audio.onended = () => resolve(true); audio.onerror = () => resolve(false); audio.onplaying = () => measure(audio); audio.play().catch(() => resolve(false)); });
+    const played = await new Promise(resolve => {
+      audio.onended = () => { live.playing = false; resolve(true); }; audio.onerror = () => { live.playing = false; resolve(false); };
+      audio.onplaying = () => { live.playing = true; measure(audio); };
+      audio.play().catch(() => { live.playing = false; resolve(false); });
+    });
     URL.revokeObjectURL(url);
     if (!played && token === live.token) await sayHere(text, lang, token);
   }).finally(() => { live.pending = Math.max(0, live.pending - 1); });
 }
+// Sound is coming out right now (not only waiting to be made): what the body's "Speaking" means.
+export const speechPlaying = () => live.playing || (typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking);
 // One phrase in this computer's own voice, resolved when it has been said.
 async function sayHere(text, lang, token) {
   if (typeof speechSynthesis === 'undefined' || token !== live.token) return;
@@ -267,7 +275,7 @@ export function speakLive({ runId, text = '', done = false, tool = '', input = {
 // now, during the opening, and played at `at`. The agent meanwhile reads its report quietly.
 export function welcome(text, at) { sayPhrase(text, live.token, at); }
 // Stops live speech (read-aloud turned off, another chat opened).
-export function stopLive() { live.token += 1; live.queue = Promise.resolve(); live.pending = 0; live.said = 0; live.text = ''; live.runId = ''; try { speechSynthesis.cancel(); } catch { /* no voices */ } if (player) { try { player.pause(); } catch { /* not playing */ } } }
+export function stopLive() { live.token += 1; live.queue = Promise.resolve(); live.pending = 0; live.playing = false; live.said = 0; live.text = ''; live.runId = ''; try { speechSynthesis.cancel(); } catch { /* no voices */ } if (player) { try { player.pause(); } catch { /* not playing */ } } }
 export const readAloudButton = key => { const on = readAloudOn(key); return `<button type="button" class="icon-btn read-aloud${on ? ' on' : ''}" data-action="read-aloud" aria-pressed="${on}" title="${on ? 'Replies are read aloud. Press to stop' : 'Read replies aloud'}" aria-label="Read replies aloud">${SPEAKER}</button>`; };
 let ctxToast = null;
 export function wireSpeak(toast) {
