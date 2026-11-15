@@ -31,6 +31,9 @@
     "resources": [
       "payload/**/*"
     ],
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
