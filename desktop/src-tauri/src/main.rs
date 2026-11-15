@@ -135,6 +135,7 @@ fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::
     let built = WebviewWindowBuilder::new(app, label, WebviewUrl::External("about:blank".parse().unwrap()))
         .window_features(features)
         .title("Rex Desk")
+        .background_color(tauri::window::Color(10, 14, 25, 255))
         .inner_size(1200.0, 820.0)
         .on_document_title_changed(|window, title| { let _ = window.set_title(&title); })
         .build();
