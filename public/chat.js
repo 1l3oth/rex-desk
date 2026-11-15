@@ -16,11 +16,12 @@ import { maybeStartTour } from '/chat-tour.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
-import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive } from '/chat-speak.js';
+import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive, voiceModeButton, toggleVoiceMode, voiceModeOn, speechIdle, stopLive, outputLevel } from '/chat-speak.js';
+import { mountOrb } from '/voice-orb.js';
 import { openAvatarPicker } from '/chat-avatar.js';
 import { watchForStar } from '/chat-star.js';
 import { showUpdateCard, updateLater, updateShow, installUpdate, updateWhenIdle, watchForUpdates, showSyncNote } from '/chat-update.js';
-import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
+import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments, voiceTurn, voiceBusy, cancelVoiceTurn, voiceListening } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
 // Which screen is open lives in the address (#/room/ID) and is also saved, so a refresh or a restart comes back to the same place.
@@ -356,7 +357,7 @@ const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="em
 
 function renderStage(full) {
   const model = stageModel(), stage = document.getElementById('stage');
-  const head = `<div class="stage-head"><button type="button" class="pane-toggle" data-pane="rail" aria-pressed="true" aria-label="Show or hide the list" title="Show or hide the list (Ctrl+B)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="3" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M9.5 4v16"/></svg></button><button class="m-menu" data-action="m-rail" aria-label="Back to the list"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="head-title"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}</div><span class="spacer"></span><div class="head-actions">${model.composer && ['run', 'main', 'room'].includes(ui.view.type) ? readAloudButton(draftKey()) : ''}${model.actions || ''}</div><button type="button" class="pane-toggle" data-pane="side" aria-pressed="true" aria-label="Show or hide the side panel" title="Show or hide the side panel (Ctrl+.)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="14.5" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M14.5 4v16"/></svg></button></div>`;
+  const head = `<div class="stage-head"><button type="button" class="pane-toggle" data-pane="rail" aria-pressed="true" aria-label="Show or hide the list" title="Show or hide the list (Ctrl+B)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="3" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M9.5 4v16"/></svg></button><button class="m-menu" data-action="m-rail" aria-label="Back to the list"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="head-title"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}</div><span class="spacer"></span><div class="head-actions">${model.composer && ['run', 'main', 'room'].includes(ui.view.type) ? readAloudButton(draftKey()) + voiceModeButton(draftKey()) : ''}${model.actions || ''}</div><button type="button" class="pane-toggle" data-pane="side" aria-pressed="true" aria-label="Show or hide the side panel" title="Show or hide the side panel (Ctrl+.)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="14.5" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M14.5 4v16"/></svg></button></div>`;
   // A view that needs the message box always gets it, even when an earlier view had none.
   if (full || !document.getElementById('feed') || Boolean(model.composer) !== Boolean(document.getElementById('composer'))) {
     stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}${model.top ? '' : '<button type="button" class="to-end" id="to-end" hidden aria-label="Go to the newest messages"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span class="to-end-new">New messages</span></button>'}</div><aside class="side" id="side"></aside>`;
@@ -376,7 +377,31 @@ function renderStage(full) {
   if (!editing && !choosing) { const changed = patchFeed(inner, model.feed, full); if (ui.stick && !model.top) followFeed(feed, changed && !full); else if (changed && feed.scrollHeight > ui.feedHeight) ui.freshBelow = true; ui.feedHeight = feed.scrollHeight; }
   syncToEnd();
   ui.mentions = model.composer?.mentions || [];
+  syncVoiceStage();
 }
+// Voice mode's screen: Rex's body over the chat, nothing else but a faint way out (or Esc). It is made once and kept
+// (re-attached after a redraw), so its animation never restarts. What it shows comes from what is happening right now.
+let voiceStage = null, voiceOrb = null;
+function voiceNow() {
+  const heard = voiceListening();
+  if (!speechIdle()) return { state: 'speaking', level: outputLevel() };
+  if (heard.listening) return { state: 'listening', level: heard.level };
+  if (heard.transcribing || document.querySelector('#feed-inner .bubble.typing')) return { state: 'thinking', level: 0 };
+  return { state: 'idle', level: 0 };
+}
+const VOICE_WORDS = { idle: '', listening: 'Listening', thinking: 'Thinking', speaking: '' };
+function syncVoiceStage() {
+  const main = document.querySelector('#stage .stage-main'), on = Boolean(main) && voiceModeOn(draftKey()) && Boolean(ctx.currentRunId());
+  if (!on) { if (voiceStage) { voiceOrb?.destroy(); voiceStage.remove(); voiceStage = voiceOrb = null; } return; }
+  if (!voiceStage) {
+    voiceStage = document.createElement('div'); voiceStage.className = 'voice-stage';
+    voiceStage.innerHTML = '<button type="button" class="voice-exit" data-action="voice-mode" aria-label="End voice mode" title="End voice mode (Esc)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><p class="voice-word" aria-live="polite"></p>';
+    const word = voiceStage.querySelector('.voice-word');
+    voiceOrb = mountOrb(voiceStage, () => { const now = voiceNow(), text = VOICE_WORDS[now.state]; if (word.textContent !== text) word.textContent = text; return now; });
+  }
+  if (voiceStage.parentElement !== main) main.append(voiceStage);
+}
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && voiceStage && voiceModeOn(draftKey())) { toggleVoiceMode(draftKey()); cancelVoiceTurn(); stopLive(); renderAll(); } });
 // The terminal panel keeps its scroll place unless it was at the bottom, where it follows the newest command.
 function drawSide(html, extra = '') {
   const side = document.getElementById('side'); if (!side) return;
@@ -451,6 +476,7 @@ function open(type, id = '') {
   if (location.hash !== hashOf(ui.view)) { ui.fromOpen = true; location.hash = hashOf(ui.view); } document.querySelector('.chat-shell')?.classList.remove('show-rail'); void refresh({ full: true }); }
 
 // ---------- actions ----------
+let voiceRest = 0;
 async function send() {
   const box = document.getElementById('draft'), typed = box?.value.trim(), hasFiles = ui.attachments.some(file => file.path);
   if (!typed && !hasFiles) return;
@@ -524,6 +550,7 @@ document.addEventListener('click', async event => {
     else if (action === 'agent-signin') { try { await api('/agents/login', { method: 'POST', data: { provider: target.dataset.provider || 'claude', profile: '' } }); toast('Sign-in opened. Pick the account that has the plan, finish it, then start a fresh chat.'); } catch (error) { toast(error.message, true); } }
     else if (action === 'update-install') await installUpdate(api);
     else if (action === 'update-later') updateLater();
+    else if (action === 'voice-mode') { const on = toggleVoiceMode(draftKey()); if (!on) { cancelVoiceTurn(); stopLive(); } voiceRest = 0; toast(on ? 'Voice mode is on. Talk when the mic lights up; the reply is spoken as it is written.' : 'Voice mode is off.'); renderAll(); }
     else if (action === 'read-aloud') { const on = toggleReadAloud(draftKey()); toast(on ? 'New replies in this chat are read aloud.' : 'Replies are no longer read aloud.'); renderAll(); }
     else if (action === 'update-show') updateShow(ui.snap.update);
     else if (action === 'avatar-pick') { const agent = (ui.snap.specialists || []).find(item => item.id === target.closest('[data-agent-id]')?.dataset.agentId); if (agent) openAvatarPicker(ctx, agent); }
@@ -657,7 +684,14 @@ try {
   await refresh({ full: true });
   const stream = new EventSource('/api/events'); let timer;
   stream.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(() => void refresh().catch(() => {}), 700); });
-  // An agent's words as they are written: read-aloud speaks them a phrase behind, without waiting for the whole reply.
+  // Voice mode: when nothing is being written or said, listen for the person's next turn; after they spoke, give the
+  // agent a moment to start replying before listening again.
+  setInterval(() => {
+    if (!voiceModeOn(draftKey()) || voiceBusy() || Date.now() < voiceRest || document.hidden) return;
+    if (document.querySelector('#feed-inner .bubble.typing') || !speechIdle()) { voiceRest = Date.now() + 600; return; }
+    void voiceTurn(ctx, { onState: state => { if (state === 'thinking') voiceRest = Date.now() + 4000; } }).then(started => { if (!started) { toggleVoiceMode(draftKey()); renderAll(); } });
+  }, 400);
+  // An agent's words as they are written: Voice mode speaks them a phrase behind, without waiting for the whole reply.
   stream.addEventListener('partial', event => { try { speakLive(JSON.parse(event.data), draftKey(), ctx.currentRunId()); } catch { /* a broken message is skipped */ } });
   setInterval(() => void refresh().catch(() => {}), 15000);
 } catch (error) { app.innerHTML = `<div class="boot boot-failed"><h2>Rex Desk is unavailable</h2><p>${esc(error.message)}</p><p>Opening it again by itself as soon as the server answers.</p></div>`; }

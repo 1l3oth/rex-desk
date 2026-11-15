@@ -113,29 +113,64 @@ const replyId = button => { const message = button.closest('.msg'), text = butto
 const markAll = key => heard.set(key, new Set(replies().map(replyId)));
 export function toggleReadAloud(key) {
   const chats = autoChats(), on = !chats.has(key);
-  if (on) { chats.add(key); unlockSound(); markAll(key); } else { chats.delete(key); stop(); stopLive(); }
+  if (on) { chats.add(key); unlockSound(); markAll(key); } else { chats.delete(key); stop(); }
   try { localStorage.setItem(AUTO, JSON.stringify([...chats])); } catch { /* private window */ }
   return on;
 }
-// After each redraw: finished replies not read yet are read, oldest first. One already spoken live (below) is not read again.
+// After each redraw: finished replies not read yet are read, oldest first. A reply Voice mode already spoke is not read again.
 export function readNewReplies(key) {
   if (!heard.has(key) || !readAloudOn(key)) { markAll(key); return; }
-  // While the agent is still writing, a reply waits (it is read once all of it is there), unless it was already spoken live.
-  const seen = heard.get(key), writing = Boolean(document.querySelector('#feed-inner .bubble.typing'));
+  if (document.querySelector('#feed-inner .bubble.typing')) return;
+  const seen = heard.get(key);
   for (const button of replies()) {
     const id = replyId(button); if (!id || seen.has(id)) continue;
-    if (spokenLive(button.closest('.bubble')?.querySelector('.md')?.textContent || '')) { seen.add(id); continue; }
-    if (writing) continue;
     seen.add(id);
+    if (spokenLive(button.closest('.bubble')?.querySelector('.md')?.textContent || '')) continue;
     reading = reading.then(() => (readAloudOn(key) && document.body.contains(button) ? play(button) : null)).catch(() => {});
   }
 }
 
-// Live read-aloud: while an agent is still writing, each finished phrase (a sentence, or a long clause at a comma) is
-// spoken at once, so the voice follows the words a phrase behind instead of starting after the whole reply. The server
-// sends the text so far of the block being written (event "partial"); "done" carries the finished block.
+// ---------- Voice mode ----------
+// A spoken conversation, separate from read-aloud above: Rex Desk listens, sends what you said when you stop talking, speaks
+// the agent's reply while the agent is still writing it (each finished phrase at once, a phrase behind the words), and
+// listens again once the reply is spoken. The server sends the text so far of the block being written (event "partial");
+// "done" carries the finished block. Switched on per chat with its own button in the chat header.
+const VOICE = 'rex-voice-mode';
+const voiceChats = () => { try { return new Set(JSON.parse(localStorage.getItem(VOICE) || '[]')); } catch { return new Set(); } };
+export const voiceModeOn = key => voiceChats().has(key);
+export function toggleVoiceMode(key) {
+  const chats = voiceChats(), on = !chats.has(key);
+  // Turned on by a click: the player and its level meter start inside that click, so the browser lets them make sound.
+  if (on) { chats.add(key); unlockSound(); measure(player); void meter?.context?.resume?.().catch(() => {}); } else { chats.delete(key); stopLive(); }
+  try { localStorage.setItem(VOICE, JSON.stringify([...chats])); } catch { /* private window */ }
+  return on;
+}
+const WAVE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>';
+export const voiceModeButton = key => { const on = voiceModeOn(key); return `<button type="button" class="icon-btn voice-mode${on ? ' on' : ''}" data-action="voice-mode" aria-pressed="${on}" title="${on ? 'Voice mode is on: talk, and the reply is spoken as it is written. Press to end' : 'Voice mode: talk with this agent'}" aria-label="Voice mode">${WAVE}</button>`; };
+// Nothing is being said or waiting to be said.
+export const speechIdle = () => live.pending === 0 && !(typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking);
+// How loud Rex's own voice is right now (0 to 1), for the body in Voice mode to glow with. The neural voice plays through
+// one player, measured here; the computer's own voices cannot be measured, so they get a gentle made-up rhythm.
+let meter = null;
+function measure(audio) {
+  if (meter || !audio) return;
+  try {
+    const context = new (window.AudioContext || window.webkitAudioContext)(), analyser = context.createAnalyser(); analyser.fftSize = 512;
+    context.createMediaElementSource(audio).connect(analyser); analyser.connect(context.destination);
+    meter = { context, analyser, data: new Float32Array(analyser.fftSize) };
+  } catch { meter = { failed: true }; }
+}
+export function outputLevel() {
+  if (meter?.analyser && live.pending) {
+    if (meter.context.state !== 'running') void meter.context.resume().catch(() => {});
+    meter.analyser.getFloatTimeDomainData(meter.data); let sum = 0; for (const value of meter.data) sum += value * value;
+    return Math.min(1, Math.sqrt(sum / meter.data.length) * 3);
+  }
+  if (typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking) return 0.18 + 0.12 * Math.abs(Math.sin(performance.now() / 160));
+  return 0;
+}
 const fingerprint = text => String(text).toLowerCase().replace(/[^a-z0-9ក-៿가-힯]+/g, '').slice(0, 60);
-const live = { runId: '', text: '', said: 0, token: 0, queue: Promise.resolve(), spoken: new Set(), spokenAt: 0 };
+const live = { runId: '', text: '', said: 0, token: 0, queue: Promise.resolve(), spoken: new Set(), spokenAt: 0, pending: 0 };
 const spokenLive = text => { const print = fingerprint(text); return print.length > 8 && live.spoken.has(print); };
 // What is read: code is said as "code", a block still open is not read yet, links and markdown marks are dropped.
 function sayable(raw) {
@@ -164,16 +199,39 @@ function sayPhrase(phrase, token) {
   // The neural voice: each phrase is fetched at once, and played in order as soon as the one before it ends.
   const sound = fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text, lang, voice: chosen }) })
     .then(response => (response.ok ? response.blob() : null)).then(blob => (blob ? URL.createObjectURL(blob) : null)).catch(() => null);
+  live.pending += 1;
   live.queue = live.queue.then(async () => {
     const url = await sound; if (!url) return;
     if (token !== live.token) { URL.revokeObjectURL(url); return; }
-    const audio = player || new Audio(); audio.src = url;
+    player ||= new Audio(); const audio = player; audio.src = url; measure(audio);
     await new Promise(resolve => { audio.onended = resolve; audio.onerror = resolve; audio.play().catch(resolve); });
     URL.revokeObjectURL(url);
-  });
+  }).finally(() => { live.pending = Math.max(0, live.pending - 1); });
 }
-export function speakLive({ runId, text = '', done = false }, key, openRunId) {
-  if (!runId || runId !== openRunId || !readAloudOn(key)) return;
+// While the agent works instead of talking, Voice mode says so in a few words ("Let me look at the files."), at most one
+// line every few seconds and never the same line twice in a row, so the person is not left in silence.
+function toolWords(tool, input = {}) {
+  if (/^(Read|Glob|Grep|LS|NotebookRead|view_file|read_file|list_dir|grep_search|find_by_name)$/.test(tool)) return 'Let me look at the files.';
+  if (/^(Bash|PowerShell|run_command)$/.test(tool)) return input.description && input.description.length < 70 ? `${input.description.replace(/\.$/, '')}.` : 'Running a command.';
+  if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(tool)) return 'Making the change now.';
+  if (/^(WebSearch|search_web)$/.test(tool)) return 'Searching the web.';
+  if (/^(WebFetch|read_url_content)$/.test(tool)) return 'Reading a web page.';
+  if (/^(Agent|Task)$/.test(tool)) return 'Getting a helper on it.';
+  if (/^desk_(specialists|rooms|room_read|tasks|task|progress)/.test(tool)) return 'Checking on the agents.';
+  if (/^desk_memory/.test(tool)) return 'Checking my notes.';
+  if (/browser|playwright|screenshot/i.test(tool)) return 'Looking at it in the browser.';
+  return 'One moment, I am working on it.';
+}
+const told = { at: 0, last: '' };
+function sayTool(tool, input) {
+  const line = toolWords(tool, input), now = Date.now();
+  if (line === told.last && now - told.at < 30000) return;
+  if (now - told.at < 6000 || live.pending > 1) return;
+  told.at = now; told.last = line; sayPhrase(line, live.token);
+}
+export function speakLive({ runId, text = '', done = false, tool = '', input = {} }, key, openRunId) {
+  if (!runId || runId !== openRunId || !voiceModeOn(key)) return;
+  if (tool) { sayTool(tool, input); return; }
   const said = sayable(text);
   // A new block (the agent wrote, used a tool, and writes again) starts over.
   if (runId !== live.runId || !said.startsWith(live.text.slice(0, live.said))) { live.runId = runId; live.said = 0; }
@@ -183,7 +241,7 @@ export function speakLive({ runId, text = '', done = false }, key, openRunId) {
   if (done) { live.spoken.add(fingerprint(cleanPhrase(text))); if (live.spoken.size > 50) live.spoken.delete(live.spoken.values().next().value); live.said = 0; live.text = ''; }
 }
 // Stops live speech (read-aloud turned off, another chat opened).
-function stopLive() { live.token += 1; live.queue = Promise.resolve(); live.said = 0; live.text = ''; live.runId = ''; try { speechSynthesis.cancel(); } catch { /* no voices */ } if (player) { try { player.pause(); } catch { /* not playing */ } } }
+export function stopLive() { live.token += 1; live.queue = Promise.resolve(); live.pending = 0; live.said = 0; live.text = ''; live.runId = ''; try { speechSynthesis.cancel(); } catch { /* no voices */ } if (player) { try { player.pause(); } catch { /* not playing */ } } }
 export const readAloudButton = key => { const on = readAloudOn(key); return `<button type="button" class="icon-btn read-aloud${on ? ' on' : ''}" data-action="read-aloud" aria-pressed="${on}" title="${on ? 'Replies are read aloud. Press to stop' : 'Read replies aloud'}" aria-label="Read replies aloud">${SPEAKER}</button>`; };
 let ctxToast = null;
 export function wireSpeak(toast) {

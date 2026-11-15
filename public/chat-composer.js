@@ -190,6 +190,80 @@ async function toggleMic(ctx) {
   micButton()?.classList.add('rec');
 }
 
+// Voice mode (chat-speak.js): one spoken turn. It listens until the person stops talking, then sends what they said as a
+// message. Nothing said in 20 seconds ends the turn quietly; Voice mode starts the next one. Returns false when it could
+// not start (already listening, the microphone is blocked).
+export const voiceBusy = () => Boolean(listening || transcribing);
+// What the body in Voice mode shows: listening (with how loud the person is), or turning speech into words.
+let micLevel = 0;
+export const voiceListening = () => ({ listening: Boolean(listening), transcribing, level: micLevel });
+// The words go to the agent as a message, as if typed.
+async function sendSpoken(ctx, text) {
+  const box = document.getElementById('draft'); if (!text || !box) return;
+  box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + text; ctx.ui.drafts.set(ctx.draftKey(), box.value);
+  box.dispatchEvent(new Event('input', { bubbles: true })); await ctx.send();
+}
+// The browser's own speech recognition (Chrome, Edge): free, no key, it hears the words while they are said and knows by
+// itself when the person stopped. The desktop app's window has none that works, and a browser whose service fails (no
+// network, blocked) is not asked again; Rex Desk's own engines (on this computer, Gemini, ElevenLabs) take over.
+const Recognition = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
+let browserSpeech = Recognition && !window.__REX_SHELL ? 'try' : 'no';
+const SPEECH_LANG = { en: 'en-US', km: 'km-KH', ko: 'ko-KR' };
+function listenLevel(stream) {
+  const context = new (window.AudioContext || window.webkitAudioContext)(), analyser = context.createAnalyser(); analyser.fftSize = 1024;
+  context.createMediaStreamSource(stream).connect(analyser);
+  const data = new Float32Array(analyser.fftSize); let timer = 0;
+  const tick = () => { analyser.getFloatTimeDomainData(data); let sum = 0; for (const value of data) sum += value * value; micLevel = Math.min(1, Math.sqrt(sum / data.length) * 6); timer = requestAnimationFrame(tick); };
+  tick();
+  return () => { cancelAnimationFrame(timer); micLevel = 0; stream.getTracks().forEach(track => track.stop()); void context.close(); };
+}
+async function browserTurn(ctx, onState) {
+  let stream; try { stream = await openMicrophone(); } catch { return 'blocked'; }
+  const stopLevel = listenLevel(stream), recognition = new Recognition();
+  recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = false; recognition.maxAlternatives = 1;
+  let said = '', failed = '';
+  recognition.onresult = event => { said = [...event.results].filter(result => result.isFinal).map(result => result[0].transcript).join(' ').trim() || said; if (!said) { const last = event.results[event.results.length - 1]; if (last?.isFinal) said = last[0].transcript.trim(); } };
+  recognition.onerror = event => { failed = event.error || 'error'; if (['network', 'not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(failed)) browserSpeech = 'no'; };
+  const turn = { stop: () => { try { recognition.abort(); } catch { /* already over */ } } };
+  recognition.onend = async () => {
+    stopLevel(); if (listening !== turn) return;
+    listening = null; micButton()?.classList.remove('rec');
+    if (!said) { onState('idle'); return; }
+    transcribing = true; onState('thinking');
+    try { await sendSpoken(ctx, said); } finally { transcribing = false; onState('idle'); }
+  };
+  try { recognition.start(); } catch { stopLevel(); browserSpeech = 'no'; return 'failed'; }
+  listening = turn; micButton()?.classList.add('rec'); onState('listening');
+  if (browserSpeech === 'try') browserSpeech = 'yes';
+  return 'started';
+}
+export async function voiceTurn(ctx, { onState = () => {} } = {}) {
+  if (listening || transcribing) return false;
+  if (browserSpeech !== 'no') {
+    const started = await browserTurn(ctx, onState);
+    if (started === 'started') return true;
+    if (started === 'blocked') { ctx.toast('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.', true); return false; }
+  }
+  void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
+  let stream;
+  try { stream = await openMicrophone(); } catch { ctx.toast('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.', true); return false; }
+  onState('listening');
+  const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => { micLevel = Math.min(1, level * 6); } });
+  listening = recording; micButton()?.classList.add('rec');
+  async function finish() {
+    if (listening !== recording) return;
+    listening = null; micLevel = 0; recording.stop(); micButton()?.classList.remove('rec');
+    if (!recording.heard) { onState('idle'); return; }
+    transcribing = true; onState('thinking');
+    try { const heard = await transcribe(recording.wav(), voiceLanguage(ctx)); await sendSpoken(ctx, String(heard.text || '').trim()); }
+    catch (error) { ctx.toast(/no voice engine|not installed|install/i.test(error.message) ? 'Voice mode needs a way to turn speech into words here: add an OpenRouter key (or install the voice model) in Settings → Jev and voice.' : `Voice mode: ${error.message}`, true); }
+    finally { transcribing = false; onState('idle'); }
+  }
+  return true;
+}
+// Ends a Voice mode turn that is still listening, without sending anything.
+export function cancelVoiceTurn() { const turn = listening; if (!turn) return; listening = null; micLevel = 0; turn.stop(); micButton()?.classList.remove('rec'); }
+
 // Hold Space to talk: past a short hold it listens until Space is let go, then the words land in the message box.
 // A quick tap still types a space. It works in the message box, or anywhere that is not another text field.
 const HOLD_MS = 320;

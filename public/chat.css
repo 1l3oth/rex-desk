@@ -1822,3 +1822,14 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .ab-foot{margin-top:14px}
 @media (prefers-reduced-motion:reduce){.ab-loading .ab-tile b,.ab-loading .ab-tile span{animation:none}}
 .ab-w1{width:2%}.ab-w2{width:4%}.ab-w3{width:6%}.ab-w4{width:8%}.ab-w5{width:10%}.ab-w6{width:12%}.ab-w7{width:14%}.ab-w8{width:16%}.ab-w9{width:18%}.ab-w10{width:20%}.ab-w11{width:22%}.ab-w12{width:24%}.ab-w13{width:26%}.ab-w14{width:28%}.ab-w15{width:30%}.ab-w16{width:32%}.ab-w17{width:34%}.ab-w18{width:36%}.ab-w19{width:38%}.ab-w20{width:40%}.ab-w21{width:42%}.ab-w22{width:44%}.ab-w23{width:46%}.ab-w24{width:48%}.ab-w25{width:50%}.ab-w26{width:52%}.ab-w27{width:54%}.ab-w28{width:56%}.ab-w29{width:58%}.ab-w30{width:60%}.ab-w31{width:62%}.ab-w32{width:64%}.ab-w33{width:66%}.ab-w34{width:68%}.ab-w35{width:70%}.ab-w36{width:72%}.ab-w37{width:74%}.ab-w38{width:76%}.ab-w39{width:78%}.ab-w40{width:80%}.ab-w41{width:82%}.ab-w42{width:84%}.ab-w43{width:86%}.ab-w44{width:88%}.ab-w45{width:90%}.ab-w46{width:92%}.ab-w47{width:94%}.ab-w48{width:96%}.ab-w49{width:98%}.ab-w50{width:100%}
+
+/* Voice mode: Rex's body fills the chat (the sidebars stay). Only a faint way out and a quiet word for what it is doing. */
+.voice-stage{position:absolute;inset:0;z-index:40;background:#05030c;overflow:hidden;animation:vs-in .6s ease-out}
+@keyframes vs-in{from{opacity:0}}
+.orb-canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.voice-exit{position:absolute;top:14px;right:14px;z-index:1;display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:50%;background:transparent;color:rgba(214,200,255,.45);cursor:pointer;transition:color .2s,background .2s}
+.voice-exit:hover,.voice-exit:focus-visible{color:#efe8ff;background:rgba(160,130,255,.14);outline:none}
+.voice-word{position:absolute;left:0;right:0;bottom:7%;margin:0;text-align:center;font:500 14px/1 var(--font,system-ui),sans-serif;letter-spacing:.18em;color:rgba(206,190,255,.5);pointer-events:none;transition:opacity .4s}
+.voice-word:empty{opacity:0}
+.icon-btn.voice-mode.on{color:#b9a2ff;background:color-mix(in srgb,#8b6cff 16%,transparent)}
+@media (prefers-reduced-motion:reduce){.voice-stage{animation:none}}
