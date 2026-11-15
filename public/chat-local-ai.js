@@ -27,18 +27,19 @@ export function localAiHtml({ esc }, state) {
   if (data.error) return `<p class="error-text">${esc(data.error)}</p>`;
   const ollama = data.servers.find(item => item.id === 'ollama'), others = data.servers.filter(item => item.id !== 'ollama');
   const pulls = (data.pulls || []).filter(item => item.state !== 'done');
+  const working = pulls.some(item => item.state === 'downloading');
   const modelRow = (server, model) => `<li class="la-model"><div><b>${esc(model.name)}</b><small>${[model.params, size(model.size)].filter(Boolean).map(esc).join(' · ')}${model.tools ? '' : ' · <span class="error-text">Cannot use tools, so agents cannot work with it</span>'}</small></div>
     ${server.kind === 'ollama' ? `<button type="button" class="btn" data-la-remove="${esc(model.name)}">Remove</button>` : ''}</li>`;
   const pullRow = job => {
     const percent = job.total ? Math.floor((job.completed / job.total) * 100) : 0;
     return `<li class="la-pull"><div><b>${esc(job.model)}</b><small>${job.state === 'failed' ? `<span class="error-text">${esc(job.error)}</span>` : `${esc(job.status)}${job.total ? ` · ${percent}% of ${size(job.total)}` : ''}`}</small></div>
-      ${job.state === 'downloading' ? `<progress max="100" value="${percent}"></progress>` : ''}</li>`;
+      ${job.state === 'downloading' && job.total ? `<progress max="100" value="${percent}"></progress>` : ''}</li>`;
   };
   const hf = state.localHf || {};
   const ollamaCard = `<div class="st-folder la-card">${icon('chip')}<div class="st-folder-text"><b>Ollama</b>
-      <small>${ollama.running ? `Running at <code>${esc(ollama.url)}</code>` : 'Not running. Install it and open it, then press Check again.'}</small>
+      <small>${ollama.running ? `Running at <code>${esc(ollama.url)}</code>` : 'Not on this computer, or not open. Press Set up for me: Rex Desk installs it, starts it and downloads a first model.'}</small>
       ${ollama.running ? (ollama.models.length ? `<ul class="la-models">${ollama.models.map(model => modelRow(ollama, model)).join('')}</ul>` : '<small>No models yet. Download one below.</small>') : ''}
-    </div><div class="la-actions">${ollama.running ? '' : '<a class="btn primary" href="https://ollama.com/download" target="_blank" rel="noopener">Get Ollama</a>'}<button type="button" class="btn" data-la-check>Check again</button></div></div>`;
+    </div><div class="la-actions">${ollama.running ? '' : '<button type="button" class="btn primary" data-la-setup>Set up for me</button>'}<button type="button" class="btn" data-la-check>Check again</button></div></div>`;
   const download = ollama.running ? `<h3>Download a model</h3>
     <p class="muted">Models are big files. Ollama keeps them in its own folder, usually on drive C.</p>
     <div class="la-suggest">${SUGGESTED.map(([id, title, help]) => `<button type="button" class="la-pick" data-la-pull="${esc(id)}"><b>${esc(title)}</b><small>${esc(help)}</small></button>`).join('')}</div>
@@ -61,7 +62,7 @@ export function localAiHtml({ esc }, state) {
     : '<button type="button" class="btn" data-la-add-open>Add a local server</button>';
   return `<p class="muted">Agents can use an AI model that runs on this computer instead of Claude. It is free and private, but on most computers it is much slower and makes more mistakes than Claude. To use one, pick it in an agent's model list, where it shows as "on this computer".</p>
     ${ollamaCard}
-    ${pulls.length ? `<h3>Downloading</h3><ul class="la-models">${pulls.map(pullRow).join('')}</ul>` : ''}
+    ${pulls.length ? `<h3>${working ? 'Working on it' : 'Did not finish'}</h3><ul class="la-models">${pulls.map(pullRow).join('')}</ul>` : ''}
     ${download}
     <h3>Other local servers</h3>
     <p class="muted">LM Studio, llama.cpp, vLLM, Colibri or any app that runs a model and offers an OpenAI-style server.</p>
@@ -73,6 +74,7 @@ export function localAiHtml({ esc }, state) {
 export async function localAiClick(ctx, state, target, draw) {
   const { api, toast } = ctx;
   const reload = async () => { await loadLocalAi(ctx, state); draw(); };
+  if (target.closest('[data-la-setup]')) { try { await api('/local-ai/setup', { method: 'POST', data: {} }); toast('Setting up Local AI. This can take a few minutes.'); } catch (error) { toast(error.message); } await reload(); follow(ctx, state, draw); return true; }
   if (target.closest('[data-la-check]')) { state.localAi = null; draw(); await reload(); return true; }
   const pull = target.closest('[data-la-pull]')?.dataset.laPull || (target.closest('[data-la-pull-name]') ? document.querySelector('[data-la-name]')?.value.trim() : '');
   if (target.closest('[data-la-pull],[data-la-pull-name]')) {

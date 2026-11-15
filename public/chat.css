@@ -1779,8 +1779,8 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .tai-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 14px;align-items:center;padding:13px 16px;border-left:3px solid transparent}
 .tai-row+.tai-row{border-top:1px solid var(--line)}
 .tai-row.on{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
-.tai-mark{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;font-weight:700;font-size:17px;color:#fff}
-.tai-claude{background:#c96442}.tai-codex{background:#0f8f6e}.tai-gemini{background:#3b6fe0}.tai-local{background:color-mix(in srgb,var(--ink) 78%,transparent);color:var(--bg)}
+.tai-mark{display:grid;place-items:center;width:40px;height:40px;border-radius:11px;color:var(--ink);background:color-mix(in srgb,var(--ink) 6%,transparent);border:1px solid var(--line)}
+.tai-text .tai-status.bad{color:var(--bad,#dc2626)}
 .tai-text{display:flex;flex-direction:column;gap:2px;min-width:0}
 .tai-text b{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:15px}
 .tai-text small{color:var(--muted);font-size:13px;line-height:1.4}

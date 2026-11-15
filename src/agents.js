@@ -13,7 +13,7 @@ const statusArgs = { claude: ['auth', 'status', '--json'], codex: ['login', 'sta
 const loginArgs = { claude: ['auth', 'login'], codex: ['login'], gemini: ['acp', '--login'] };
 // What the sign-in window runs first when the CLI is not on this computer yet.
 const installCommands = {
-  win32: { claude: 'irm https://claude.ai/install.ps1 | iex', codex: 'npm install -g @openai/codex', gemini: 'winget install --id Google.AntigravityCLI -e --accept-source-agreements --accept-package-agreements' },
+  win32: { claude: 'irm https://claude.ai/install.ps1 | iex', codex: "if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { Write-Host 'Installing Node.js first...'; winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements; $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User') + ';' + $env:Path }; npm install -g @openai/codex", gemini: 'winget install --id Google.AntigravityCLI -e --accept-source-agreements --accept-package-agreements' },
   other: { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'npm install -g @openai/codex', gemini: '' }
 };
 const bareName = { claude: 'claude', codex: 'codex', gemini: 'agy' };

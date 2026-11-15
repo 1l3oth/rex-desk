@@ -1,11 +1,12 @@
 // The welcome tour's "Choose your AI" step: every AI Rex Desk can run agents on, as one list. Each row says in plain
 // words what it needs, whether it is ready on this computer, and has one button to get it ready. Picking a ready row
 // makes it the AI for new agents. Used only inside the tour (chat-tour.js).
+import { aiLogo } from '/ai-logos.js';
 const AIS = [
-  { id: 'claude', name: 'Claude Code', mark: 'C', needs: 'Needs a Claude plan (Pro or Max).', best: 'Best for most people', service: 'Claude' },
-  { id: 'codex', name: 'Codex', mark: 'O', needs: 'Needs a ChatGPT plan (Plus or Pro).', service: 'ChatGPT' },
-  { id: 'gemini', name: 'Gemini', mark: 'G', needs: 'Needs a Google account.', service: 'Google' },
-  { id: 'local', name: 'Local AI', mark: '', needs: 'Free and private. Runs on this computer, slower than the others.' },
+  { id: 'claude', name: 'Claude Code', needs: 'Needs a Claude plan (Pro or Max).', best: 'Best for most people', service: 'Claude' },
+  { id: 'codex', name: 'Codex', needs: 'Needs a ChatGPT plan (Plus or Pro).', service: 'ChatGPT' },
+  { id: 'gemini', name: 'Gemini', needs: 'Needs a Google account.', service: 'Google' },
+  { id: 'local', name: 'Local AI', needs: 'Free and private. Runs on this computer with Ollama, slower than the others.' },
 ];
 const CHIP = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>';
 const TICK = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3L13 4.5"/></svg>';
@@ -22,10 +23,17 @@ function statusOf(ui, state, ai) {
     const servers = state.ai?.local?.servers || [], ollama = servers.find(item => item.id === 'ollama');
     const models = servers.filter(item => item.running).flatMap(item => item.models || []).filter(model => model.tools).length;
     if (models) return { ready: true, text: `${models} model${models === 1 ? '' : 's'} ready` };
-    return { ready: false, text: ollama?.running ? 'Ollama is running. Download a model to use it.' : 'Not set up yet' };
+    // Set up is working: say which step it is on, and how far a download is.
+    const job = (state.ai?.local?.pulls || []).find(item => item.setup);
+    if (job?.state === 'downloading') return { ready: false, busy: true, text: `${job.status}${job.total ? `: ${Math.floor((job.completed / job.total) * 100)}%` : ''}…` };
+    if (job?.state === 'failed') return { ready: false, failed: true, text: job.error };
+    return { ready: false, text: ollama?.running ? 'Ollama is here, but it has no model yet.' : 'Not on this computer yet. Set up installs it for you.' };
   }
   const list = ui.accounts?.[ai.id], current = list?.profiles?.find(item => item.profile === list.selected && item.loggedIn) || list?.profiles?.find(item => item.loggedIn);
-  return current ? { ready: true, text: `Signed in${current.account ? ` as ${current.account}` : ''}` } : { ready: false, text: 'Not signed in yet' };
+  if (current) return { ready: true, text: `Signed in${current.account ? ` as ${current.account}` : ''}` };
+  // Not on this computer at all: one button installs it and then opens the sign-in.
+  const installed = (list?.profiles || []).some(item => item.installed !== false) && Boolean(list?.profiles?.length);
+  return installed ? { ready: false, text: 'On this computer, not signed in yet' } : { ready: false, missing: true, text: 'Not on this computer yet. Set up installs it, then you sign in.' };
 }
 
 export function tourAiHtml({ ui, esc }, state) {
@@ -34,18 +42,18 @@ export function tourAiHtml({ ui, esc }, state) {
   const row = ai => {
     const status = statusOf(ui, state, ai), picked = ai.id === chosen && status.ready, waiting = state.aiWaiting === ai.id;
     const action = waiting ? '<span class="tai-wait"><span class="dot working"></span>Finish in the window that opened</span>'
-      : ai.id === 'local' ? `<button type="button" class="btn small" data-tai-local>${status.ready ? 'Manage' : 'Set up'}</button>`
+      : ai.id === 'local' ? (status.busy ? '<span class="tai-wait"><span class="dot working"></span>Setting up</span>' : status.ready ? '<button type="button" class="btn small" data-tai-local>Manage</button>' : `<button type="button" class="btn small primary" data-tai-setup>${status.failed ? 'Try again' : 'Set up'}</button>`)
       : status.ready ? (picked ? '' : `<button type="button" class="btn small" data-tai-use="${ai.id}">Use this</button>`)
-      : `<button type="button" class="btn small primary" data-tai-login="${ai.id}">Sign in</button>`;
+      : `<button type="button" class="btn small primary" data-tai-login="${ai.id}">${status.missing ? 'Set up' : 'Sign in'}</button>`;
     return `<li class="tai-row${picked ? ' on' : ''}">
-      <span class="tai-mark tai-${ai.id}" aria-hidden="true">${ai.mark || CHIP}</span>
+      <span class="tai-mark" aria-hidden="true">${aiLogo(ai.id === 'local' ? 'ollama' : ai.id, 24) || CHIP}</span>
       <span class="tai-text"><b>${esc(ai.name)}${ai.best ? `<span class="tai-best">${esc(ai.best)}</span>` : ''}</b><small>${esc(ai.needs)}</small>
-        <small class="tai-status${status.ready ? ' good' : ''}">${status.ready ? TICK : ''}${esc(status.text)}${picked ? '. Your agents use this one.' : ''}</small></span>
+        <small class="tai-status${status.ready ? ' good' : status.failed ? ' bad' : ''}">${status.ready ? TICK : ''}${esc(status.text)}${picked ? '. Your agents use this one.' : ''}</small></span>
       <span class="tai-action">${action}</span></li>`;
   };
   return `<h2>Choose your AI</h2><p>Your agents need an AI to think with. Pick one you already pay for, or the free one. You can add more later in Settings.</p>
     <ul class="tai-list">${AIS.map(row).join('')}</ul>
-    ${anyReady ? '' : '<p class="muted">No AI is ready yet. Press Sign in on one: a window opens, installs what is needed, and opens the sign-in in your browser.</p>'}`;
+    ${anyReady ? '' : '<p class="muted">Nothing to install yourself. Press Set up or Sign in on one: Rex Desk installs what is missing, then opens the sign-in in your browser.</p>'}`;
 }
 
 // Returns true when the click belonged to this step.
@@ -57,6 +65,19 @@ export async function tourAiClick(ctx, state, target, draw) {
     toast(`Your agents will use ${AIS.find(ai => ai.id === use.dataset.taiUse).name}.`); draw(); return true;
   }
   if (target.closest('[data-tai-local]')) { ctx.openSettings?.('localai'); return true; }
+  if (target.closest('[data-tai-setup]')) {
+    await api('/local-ai/setup', { method: 'POST', data: {} });
+    await loadTourAi(ctx, state, false); draw();
+    // Follow the steps (install, start, download) until it is ready or stops with a reason.
+    while (document.querySelector('.tour-back')) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await loadTourAi(ctx, state, false);
+      const job = (state.ai?.local?.pulls || []).find(item => item.setup);
+      draw();
+      if (!job || job.state !== 'downloading') { if (job?.state === 'done') toast('Local AI is ready. Pick its model in the model list of an agent.'); break; }
+    }
+    return true;
+  }
   const login = target.closest('[data-tai-login]');
   if (!login) return false;
   const id = login.dataset.taiLogin, ai = AIS.find(item => item.id === id), ready = () => statusOf(ui, state, ai).ready;
