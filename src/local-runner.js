@@ -103,16 +103,19 @@ export class LocalRunner {
 const safeJson = text => { try { return typeof text === 'string' ? JSON.parse(text || '{}') : text || {}; } catch { return {}; } };
 
 // What a local agent is told: short, so a small model reads it in a moment and keeps it in mind.
-export function lightSystem({ name, about = '', person = '', voice = false }) {
+// report: what Rex Desk holds right now (agents, chats, waiting questions, tasks), made by code for this turn: a small model
+// answers from facts it is given far more reliably than it decides to look them up (it tends to repeat its own last answer).
+export function lightSystem({ name, about = '', person = '', voice = false, report = '' }) {
   return [
     `You are ${name}, an assistant inside Rex Desk, running on a model on the person's own computer.${about ? ` ${about}` : ''}`,
     'Answer the person directly, in short plain sentences.',
-    'You do not know which agents, group chats, tasks or notes exist until you look them up. For any question about them, call the tool first and answer only from what it returns. Never guess or make up names.',
+    report ? 'The report below is what Rex Desk holds right now; it is current. Answer questions about agents, chats, tasks and what is waiting from it. Never guess or make up names: if something is not in it, look it up with a tool.' : 'You do not know which agents, group chats, tasks or notes exist until you look them up. For any question about them, call the tool first and answer only from what it returns. Never guess or make up names.',
     'Agents: desk_specialists. Group chats: desk_rooms_all and desk_room_history. Tasks: desk_tasks. Shared notes: desk_memory.',
     'To act for the person: desk_room_create makes a group chat, desk_room_say posts in one as them, desk_agent_say writes to an agent as them.',
     'For real work on code, files or the web, hand it on with desk_background and say you are on it; do not try it yourself.',
     voice ? 'The person hears you (Voice mode): one to three spoken sentences, no lists or code.' : '',
     person ? `About the person:\n${person}` : '',
     `Today is ${new Date().toDateString()}.`,
+    report ? `\n${report}` : '',
   ].filter(Boolean).join('\n');
 }
