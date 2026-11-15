@@ -1,6 +1,6 @@
 import { aiProvider, AI_PROVIDERS, CodexRunner, codexModels, profileKey, providerTitle } from './codex.js';
 import { AntigravityRunner, antigravityModels } from './antigravity.js';
-import { LocalAi, isLocalModel } from './local-ai.js';
+import { LocalAi, isLocalModel, parseLocalModel } from './local-ai.js';
 import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
 import { Memory } from './memory.js';
@@ -32,6 +32,7 @@ import { ProjectRules } from './project-rules.js';
 import { lowDiskMessage, friendlyDiskError } from './disk.js';
 import { voiceBriefing, VOICE_RULE, VOICE_REMINDER, VOICE_GREETING } from './voice-briefing.js';
 import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
+import { LocalRunner, lightSystem } from './local-runner.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
 import { Jev } from './jev.js';
@@ -212,6 +213,22 @@ export class Desk {
   orbitAccountMcp() { const account = this.orbitAccount(); return account?.token ? { orbit: { type: 'http', url: `${account.base.replace(/\/$/, '')}/mcp`, headers: { Authorization: `Bearer ${account.token}` } } } : {}; }
   // Usage saver (on unless the person turns it off): talking in rooms and away check-ins run on Sonnet, which uses much less of the
   // Claude subscription than the top model; changing code, personal chats and Rex Agent keep the model the person chose.
+  // What a light-mode Local AI turn gets: the model's server, a short instruction (who it is, about the person), the last
+  // few messages of the chat, and the person's newest message.
+  lightTurn(run, localModel) {
+    const server = this.localAi.server(localModel.serverId);
+    if (!server) throw new Error('This agent is set to a local model whose server was removed. Pick another model on its card.');
+    const owner = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
+    const agent = owner && owner !== 'main' ? this.store.get('specialist', owner) : null;
+    const name = agent?.name || (owner === 'main' ? 'Rex Agent' : run.title || 'an agent');
+    const about = agent ? `You look after ${agent.projectSlug || 'a project'}: ${String(agent.purpose || '').slice(0, 300)}` : owner === 'main' ? 'You know every project and agent on this computer, and help the person decide who does what.' : '';
+    const said = this.store.events(run.id, { visible: true, limit: 80 }).filter(event => ['human-message', 'agent-text', 'message'].includes(event.kind) && (event.text || '').trim());
+    const lastPerson = [...said].reverse().find(event => event.kind === 'human-message');
+    const history = said.filter(event => event !== lastPerson).slice(-10)
+      .map(event => ({ role: event.kind === 'human-message' ? 'user' : 'assistant', content: String(event.text).slice(0, 1500) }));
+    return { local: { server, model: localModel.model }, history, lastPersonMessage: lastPerson?.text || '',
+      system: lightSystem({ name, about, person: String(this.memory.person() || '').slice(0, 800), voice: Boolean(run.voice) }) };
+  }
   // A Claude Code turn that runs on a model on this computer (Local AI), by the same choice the turn itself makes.
   usesLocalModel(run) {
     if ((run.provider || 'claude') !== 'claude' || run.modelFallback) return false;
@@ -608,14 +625,20 @@ export class Desk {
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
-      // Local AI: Claude Code keeps its tools but talks to a model on this computer (Ollama, or another local server through Rex Desk's bridge).
-      if ((run.provider || 'claude') === 'claude' && isLocalModel(options.model)) {
+      // Local AI, light mode (the default): the model on this computer is talked to directly, with a short instruction, the
+      // recent chat and the key Rex Desk tools (src/local-runner.js). Config localLight: false runs it through Claude Code
+      // instead, with all of Claude Code's tools, which suits a strong computer.
+      const localModel = (run.provider || 'claude') === 'claude' && isLocalModel(options.model) ? parseLocalModel(options.model) : null;
+      const light = Boolean(localModel) && !attach && !this.runnerFactory && this.store.config().localLight !== false;
+      // Local AI through Claude Code: Claude Code keeps its tools but talks to a model on this computer (Ollama, or another local server through Rex Desk's bridge).
+      if (localModel && !light) {
         const local = this.localAi.route(options.model, { base: new URL(this.mcpUrl).origin, token });
         if (local) { options.model = local.model; options.agentEnv = { ...options.agentEnv, ...local.env }; }
       }
       // A headless agent works in a process of its own, so a Rex Desk restart (an update) does not cut it off.
-      const hosted = attach || (!this.runnerFactory && this.store.config().agentHost !== false);
-      const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.runtime ? { runtime: this.runtime } : {}), ...(this.hostOptions || {}) })
+      const hosted = !light && (attach || (!this.runnerFactory && this.store.config().agentHost !== false));
+      const runner = light ? new LocalRunner({ ...options, ...this.lightTurn(run, localModel) })
+        : hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.runtime ? { runtime: this.runtime } : {}), ...(this.hostOptions || {}) })
         : this.runnerFactory ? this.runnerFactory(options)
         : new (run.provider === 'codex' ? CodexRunner : run.provider === 'gemini' ? AntigravityRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) });
       const entry = this.live.get(runId);
