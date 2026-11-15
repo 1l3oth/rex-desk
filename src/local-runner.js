@@ -105,6 +105,19 @@ export class LocalRunner {
       toolCalls: rawCalls.map(call => ({ id: call.id, name: call.function?.name, args: safeJson(call.function?.arguments) })) };
   }
 }
+// The chat a small model is given, without earlier tries at the question asked now and the replies to them. Asked again,
+// usually because the answer was wrong, a small model with tools repeats its own earlier reply word for word instead of
+// reading the report; without it, it answers from the report.
+export function withoutRepeats(history, question) {
+  const words = text => new Set(String(text).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+  const same = (left, right) => { const [small, large] = [words(left), words(right)].sort((a, b) => a.size - b.size); return small.size > 0 && [...small].filter(word => large.has(word)).length / small.size >= 0.8; };
+  const kept = [];
+  for (let index = 0; index < history.length; index++) {
+    if (history[index].role === 'user' && same(history[index].content, question)) { while (history[index + 1]?.role === 'assistant') index++; continue; }
+    kept.push(history[index]);
+  }
+  return kept;
+}
 const safeJson = text => { try { return typeof text === 'string' ? JSON.parse(text || '{}') : text || {}; } catch { return {}; } };
 
 // What a local agent is told: short, so a small model reads it in a moment and keeps it in mind.

@@ -32,7 +32,7 @@ import { ProjectRules } from './project-rules.js';
 import { lowDiskMessage, friendlyDiskError } from './disk.js';
 import { voiceBriefing, VOICE_RULE, VOICE_REMINDER, VOICE_GREETING } from './voice-briefing.js';
 import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
-import { LocalRunner, lightSystem } from './local-runner.js';
+import { LocalRunner, lightSystem, withoutRepeats } from './local-runner.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
 import { Jev } from './jev.js';
@@ -224,8 +224,8 @@ export class Desk {
     const about = agent ? `You look after ${agent.projectSlug || 'a project'}: ${String(agent.purpose || '').slice(0, 300)}` : owner === 'main' ? 'You know every project and agent on this computer, and help the person decide who does what.' : '';
     const said = this.store.events(run.id, { visible: true, limit: 80 }).filter(event => ['human-message', 'agent-text', 'message'].includes(event.kind) && (event.text || '').trim());
     const lastPerson = [...said].reverse().find(event => event.kind === 'human-message');
-    const history = said.filter(event => event !== lastPerson).slice(-10)
-      .map(event => ({ role: event.kind === 'human-message' ? 'user' : 'assistant', content: String(event.text).slice(0, 1500) }));
+    const history = withoutRepeats(said.filter(event => event !== lastPerson)
+      .map(event => ({ role: event.kind === 'human-message' ? 'user' : 'assistant', content: String(event.text).slice(0, 1500) })), lastPerson?.text || '').slice(-10);
     return { local: { server, model: localModel.model }, history, lastPersonMessage: lastPerson?.text || '',
       system: lightSystem({ name, about, person: String(this.memory.person() || '').slice(0, 800), voice: Boolean(run.voice), report: true }),
       // The same code-made report Voice mode uses (agents, chats, waiting questions, tasks), kept short for a small model.

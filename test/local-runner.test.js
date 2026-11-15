@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/server.js';
 import { now } from '../src/store.js';
-import { LocalRunner, LIGHT_TOOLS } from '../src/local-runner.js';
+import { LocalRunner, LIGHT_TOOLS, withoutRepeats } from '../src/local-runner.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 
@@ -53,4 +53,12 @@ test('Local AI light mode: a short instruction, the key Rex Desk tools, a real t
     const result = events.find(([kind]) => kind === 'agent-result')[1];
     assert.equal(result.result, 'You have one agent, ReelHome.'); assert.equal(result.tokens.input, 2000);
   } finally { await app.close(); ollama.close(); }
+});
+
+test('Local AI light mode: earlier tries at the same question, and the replies to them, are left out of the chat', () => {
+  const history = [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'Hi!' },
+    { role: 'user', content: 'Which agents do I have?' }, { role: 'assistant', content: 'Rex Agent, and maybe others.' },
+    { role: 'user', content: 'Make a group chat with Leo' }, { role: 'assistant', content: 'Done.' },
+    { role: 'user', content: 'which agents do I have, and what is each one doing?' }, { role: 'assistant', content: 'Rex Agent, and maybe others.' }];
+  assert.deepEqual(withoutRepeats(history, 'Which agents do I have, and what is each one doing?').map(message => message.content), ['hi', 'Hi!', 'Make a group chat with Leo', 'Done.']);
 });
