@@ -33,13 +33,13 @@ test('Voice mode speaks each finished phrase while the agent is still writing, i
   say('Hello! I checked');
   assert.deepEqual(fetched, ['Hello!'], 'a finished sentence is spoken at once, before the reply ends');
   say('Hello! I checked the **build**, and every test passes. Here is the code:\n```js\nconst x = 1;');
-  assert.deepEqual(fetched, ['Hello!', 'I checked the build, and every test passes. Here is the code:'], 'what is finished goes in one piece; markdown marks dropped; an open code block not read');
+  assert.deepEqual(fetched, ['Hello!', 'I checked the build, and every test passes.', 'Here is the code:'], 'one sentence at a time (quicker to voice); markdown marks dropped; an open code block not read');
   say('Hello! I checked the **build**, and every test passes. Here is the code:\n```js\nconst x = 1;\n```\nDone', true);
-  assert.deepEqual(fetched.slice(2), ['(code) Done'], 'the rest when it is finished; the code is said as "code"');
+  assert.deepEqual(fetched.slice(3), ['(code)', 'Done'], 'the rest when it is finished; the code is said as "code"');
   speakLive({ runId: 'other', text: 'Not this chat. ', done: true }, 'main:', 'r1');
-  assert.equal(fetched.length, 3, 'only the open chat speaks');
+  assert.equal(fetched.length, 5, 'only the open chat speaks');
   await new Promise(resolve => setTimeout(resolve, 100));
-  assert.equal(played.length, 3, 'every piece plays, one after another');
+  assert.equal(played.length, 5, 'every piece plays, one after another');
 });
 
 test('Voice mode says in a few words what the agent is doing while it works, without filling the silence with chatter', async () => {
