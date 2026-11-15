@@ -121,12 +121,12 @@ export class AntigravityRunner {
     }
   }
   async start(prompt) {
-    if (this.signal?.aborted) throw new Error('Antigravity run interrupted.');
+    if (this.signal?.aborted) throw new Error('Antigravity was stopped.');
     const env = { ...this.agentEnv, REX_DESK_TOKEN: this.token || '', REX_AGENT_TOKEN: this.token || '', REX_DESK_URL: this.mcpUrl || '' };
     let failed; const broken = new Promise((resolve, reject) => { failed = reject; }); broken.catch(() => {});
     this.client = (this.clientFactory || (options => new AcpClient(options)))({ env, cwd: this.cwd, args: dangerous(this.run.permissionMode) ? ['--dangerously-skip-permissions'] : [],
       onNotification: (method, params) => this.notification(method, params), onRequest: (method, params) => this.request(method, params), onError: error => failed(error) });
-    const abort = () => { if (this.sessionId) this.client.notify('session/cancel', { sessionId: this.sessionId }); failed(new Error('Antigravity run interrupted.')); setTimeout(() => this.client.close(), 500); };
+    const abort = () => { if (this.sessionId) this.client.notify('session/cancel', { sessionId: this.sessionId }); failed(new Error('Antigravity was stopped.')); setTimeout(() => this.client.close(), 500); };
     this.signal?.addEventListener('abort', abort, { once: true });
     try {
       await Promise.race([this.client.open(), broken]);
@@ -143,7 +143,7 @@ export class AntigravityRunner {
       this.live = true;
       const result = await Promise.race([this.client.request('session/prompt', { sessionId: this.sessionId, prompt: [{ type: 'text', text: prompt }] }, 0), broken]);
       this.flush();
-      if (result.stopReason === 'cancelled') throw new Error('Antigravity run interrupted.');
+      if (result.stopReason === 'cancelled') throw new Error('Antigravity was stopped.');
       const usage = result.usage || {};
       this.tokens = { input: usage.inputTokens || 0, output: usage.outputTokens || 0, cacheRead: usage.cachedReadTokens || 0, cacheWrite: usage.cachedWriteTokens || 0 };
       this.event('context', { used: (usage.inputTokens || 0) + (usage.cachedReadTokens || 0), window: /claude/i.test(this.model || '') ? 200000 : 1000000 });

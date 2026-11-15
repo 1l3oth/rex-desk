@@ -151,7 +151,7 @@ function roomSideHtml(ctx, room) {
   return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button><button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="side-tab" data-tab="terminal">Terminal</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : tab === 'terminal' ? roomTerminalHtml(ctx, room) : activityHtml(ctx, room)}`;
 }
 // The Agents tab: each member's AI and model, changed right here. Saved at once on the agent itself, so it holds in every chat.
-const AIS = [{ value: 'claude', label: 'Claude Code', hint: 'Claude subscription' }, { value: 'codex', label: 'Codex', hint: 'ChatGPT subscription' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }];
+const AIS = [{ value: 'claude', label: 'Claude Code', hint: 'Your Claude plan' }, { value: 'codex', label: 'Codex', hint: 'Your ChatGPT plan' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }];
 function roomAgentsHtml(ctx, room) {
   const { esc, ui } = ctx, agents = room.members.map(member => member.id === 'main' ? ui.snap.mainAgent : (ui.snap.specialists || []).find(item => item.id === member.id)).filter(Boolean);
   if (!agents.length) return '<p class="muted">No agents in this room yet.</p>';
@@ -162,7 +162,7 @@ function roomAgentsHtml(ctx, room) {
     return `<section class="ag-sec room-agent" data-agent="${esc(agent.id)}"><div class="rperson-main ra-head">${avatarHtml(ctx, { name: agent.name, agent: agent.id === 'main' ? null : agent, size: 'sm' })}<span class="rperson-text"><b>${esc(agent.name)}</b><small>${esc(seat.project || '')}${seat.label ? ` · <span class="st ${esc(seat.state)}">${esc(seat.label)}</span>` : ''}</small></span></div>
       <label class="room-agent-row"><span>AI</span>${pickerHtml(ctx, { id: `ra-provider-${agent.id}`, label: 'AI', value: ai, items: AIS, compact: true })}</label>
       <label class="room-agent-row"><span>Model</span>${pickerHtml(ctx, { id: `ra-model-${agent.id}`, label: 'Model', value: agent.model || '', items: models, compact: true })}</label></section>`;
-  }).join('')}<p class="muted">Changes save at once and hold for this agent everywhere. A new AI starts a fresh session with the chat so far handed over.</p></div>`;
+  }).join('')}<p class="muted">Changes save at once and hold for this agent everywhere. A new AI starts fresh with a summary of the chat so far.</p></div>`;
 }
 function roomSharedHtml(ctx, room) {
   const messages = (ctx.ui.snap.messages || []).filter(message => message.roomId === room.id && message.from.type !== 'system'), runs = new Set(roomRunIds(ctx.ui, room));
@@ -280,7 +280,7 @@ export function tasksStage(ctx) {
   const local = shown.filter(task => task.local), order = (left, right) => PRIORITY.findIndex(([key]) => key === left.priority) - PRIORITY.findIndex(([key]) => key === right.priority);
   const groups = STATUS.map(([status, label]) => group(label, local.filter(task => task.status === status).sort(order))).join('')
     + sources.map(source => group(source.name, shown.filter(task => task.sourceId === source.id))).join('');
-  const empty = pick === 'local' ? '<div class="empty"><h2>No Rex Desk tasks yet</h2><p>Add one above, or ask an agent to make tasks for a project.</p></div>' : filter ? '<div class="empty"><h2>Nothing matches</h2><p>Try other words.</p></div>' : '<div class="empty"><h2>No tasks</h2><p>Add one above, connect a tracker on the left. Each one syncs with the arrows beside its name.</p></div>';
+  const empty = pick === 'local' ? '<div class="empty"><h2>No Rex Desk tasks yet</h2><p>Add one above, or ask an agent to make tasks for a project.</p></div>' : filter ? '<div class="empty"><h2>Nothing matches</h2><p>Try other words.</p></div>' : '<div class="empty"><h2>No tasks</h2><p>Add one above, connect a task app on the left. Each one syncs with the arrows beside its name.</p></div>';
   return { title: 'Tasks', meta: `${everything.length} tasks`, top: true,
     members: `<div class="members tbar"><input id="task-filter" type="search" placeholder="Search tasks, numbers, tags…" value="${esc(ui.taskFilter || '')}" autocomplete="off"></div>`,
     feed: `<div class="page tk">${side}<div class="tk-main">${add}${shown.length ? `<div class="tk-list">${head}${groups}</div>` : empty}</div></div>` };
@@ -325,7 +325,7 @@ export function taskStage(ctx) {
       ${fact('Due', esc(when(task.dueDate)))}
       ${fact('Created', esc(when(task.createdAt)))}
       ${rank >= 0 ? fact('Jev rank', `#${rank + 1} in the queue`) : ''}
-      ${task.url ? `<a class="btn small tp-open" href="${esc(task.url)}" target="_blank" rel="noopener noreferrer">Open in ${esc(source.name || 'the tracker')}</a>` : ''}
+      ${task.url ? `<a class="btn small tp-open" href="${esc(task.url)}" target="_blank" rel="noopener noreferrer">Open in ${esc(source.name || 'the task app')}</a>` : ''}
     </section></aside>`;
   const main = `<div class="tp-main"><div class="tp-head"><span class="tnum">#${esc(taskNumber(task))}</span><h1>${esc(taskName(task))}</h1>${task.titleEn && task.titleEn !== task.title ? `<p class="orig">${esc(task.title)}</p>` : ''}</div>
     ${jev?.summary || jev?.reason ? `<p class="tp-jev">${esc(jev.summary || jev.reason)}</p>` : ''}
@@ -381,7 +381,7 @@ export async function roomAction(ctx, action, target) {
   if (action === 'room-image') { document.getElementById('room-image-input')?.click(); return; }
   if (action === 'room-delete') {
     const room = ui.snap.rooms.find(item => item.id === ui.view.id);
-    if (room && confirm(`Delete the room "${room.name}" and its messages? The agents and their sessions stay.`)) { await api(`/rooms/${room.id}`, { method: 'DELETE' }); ctx.open('main'); }
+    if (room && confirm(`Delete the room "${room.name}" and its messages? The agents and their own chats stay.`)) { await api(`/rooms/${room.id}`, { method: 'DELETE' }); ctx.open('main'); }
     return;
   }
   if (action === 'room-stop') { await api(`/runs/${target.dataset.run}/stop`, { method: 'POST', data: {} }); toast('Stopped.'); await refresh(); return; }
@@ -513,7 +513,7 @@ function connectionsDialog(ctx, startWith = '') {
     const remove = target.closest('[data-src-remove]');
     if (remove) {
       const source = (ui.snap.config?.sources || []).find(item => item.id === remove.dataset.srcRemove);
-      if (!source || !confirm(`Remove ${source.name}? Its tasks leave the list; nothing changes in ${SERVICE[source.type] || 'the tracker'}.`)) return;
+      if (!source || !confirm(`Remove ${source.name}? Its tasks leave the list; nothing changes in ${SERVICE[source.type] || 'the task app'}.`)) return;
       try { await api(`/sources/${encodeURIComponent(source.id)}`, { method: 'DELETE' }); await refresh({ full: true }); draw(); } catch (error) { toast(error.message, true); }
     }
   });

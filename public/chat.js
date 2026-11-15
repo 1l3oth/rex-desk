@@ -74,13 +74,13 @@ function appControl(run, live) {
     if (run.inApp.error) return `<button class="btn small" data-action="app-off" title="${esc(run.inApp.error)}">Could not open in Claude app. Close</button> `;
     const open = run.inApp.url ? `<a class="btn small app-link" href="${esc(run.inApp.url)}" target="_blank" rel="noopener">${APP_ICON}Open in Claude app</a>`
       : `<span class="btn small app-link" aria-busy="true">${APP_ICON}Connecting…</span>`;
-    return `${open} <button class="btn small" data-action="app-off" title="End the Claude app session. The chat carries on here.">Close in app</button> `;
+    return `${open} <button class="btn small" data-action="app-off" title="Close it in the Claude app. The chat carries on here.">Close in app</button> `;
   }
   if ((run.provider || 'claude') !== 'claude' || run.remote || run.cloudCopy || live || run.state === 'waiting') return '';
   return `<button class="btn small app-link" data-action="app-on" title="Keep this chat open so you can chat with it from claude.ai/code or the Claude app on your phone">${APP_ICON}Continue in Claude app</button> `;
 }
 const stateTone = run => ({ working: 'working', review: 'warn' })[stateGroup(run)] || (['failed', 'interrupted'].includes(run.state) ? 'bad' : 'good');
-const stateLabel = run => ({ starting: 'Preparing', queued: 'Queued', running: 'Working', waiting: 'Needs you', verifying: 'Verifying', ready_for_review: 'Ready for review', needs_evidence: 'Needs evidence', published: 'PR created', failed: 'Failed', interrupted: 'Interrupted', stopped: 'Stopped', finished: 'Finished' }[run.state] || String(run.state || '').replaceAll('_', ' '));
+const stateLabel = run => ({ starting: 'Preparing', queued: 'Queued', running: 'Working', waiting: 'Needs you', verifying: 'Checking', ready_for_review: 'Ready for review', needs_evidence: 'Needs proof', published: 'PR created', failed: 'Failed', interrupted: 'Cut off', stopped: 'Stopped', finished: 'Finished' }[run.state] || String(run.state || '').replaceAll('_', ' '));
 const pending = runId => (ui.snap?.interactions || []).filter(item => item.state === 'pending' && (!runId || item.runId === runId));
 const runById = id => ui.snap.runs.find(run => run.id === id);
 // The main agent's personal chat. Its room session (role coordinator, roomAgent main) is a separate conversation and never opens here.
@@ -322,7 +322,7 @@ function stageModel() {
 const brainBanner = () => ui.snap?.memory?.secondBrain === false ? `<div class="card brainbar"><div><b>Your agents don't know your second brain yet.</b><span class="muted small">${ui.snap.memory.brainCandidates?.length ? ` Found ${esc(ui.snap.memory.brainCandidates[0])}.` : ''} Rex Agent can set it up for all of them.</span></div><button class="btn primary small" data-action="brain-setup">Set it up</button></div>` : '';
 const quick = (label, text) => `<button class="chip-btn" data-action="quick" data-text="${esc(text)}">${esc(label)}</button>`;
 const welcomeStage = () => ({ title: 'Rex', meta: 'Rex Agent',
-  feed: `${brainBanner()}<div class="welcome">${rexCore('xl', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length)}<h2>Hi, I am Rex</h2><p>I get to know your projects, set up an agent for each one, and help you work through your issues. Pick a start, or just type.</p><div class="chips">${quick('Meet my projects', 'Meet my projects: go through them one by one, ask me what you are unsure about, and set up an agent for each.')}${quick('Triage my issues', 'Look at my assigned issues and tell me what to do first.')}${quick('What can you do?', 'What can you do for me here?')}</div></div>`,
+  feed: `${brainBanner()}<div class="welcome">${rexCore('xl', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length)}<h2>Hi, I am Rex</h2><p>I get to know your projects, set up an agent for each one, and help you work through your issues. Pick a start, or just type.</p><div class="chips">${quick('Meet my projects', 'Meet my projects: go through them one by one, ask me what you are unsure about, and set up an agent for each.')}${quick('Sort my issues', 'Look at my assigned issues and tell me what to do first.')}${quick('What can you do?', 'What can you do for me here?')}</div></div>`,
   composer: { placeholder: 'Message Rex…', mentions: [] } });
 // The chat is not drawn again from nothing when something changes: only the messages that differ are swapped, and new
 // ones are added at the end. Messages already on screen stay as they are (a playing video, selected text, an open step).
@@ -489,7 +489,7 @@ async function assignFromRoom(roomId, command) {
 }
 async function syncIssues() { toast('Syncing issues…'); await api('/sync', { method: 'POST', data: {} }); toast('Issues synced.'); await refresh(); }
 async function scanProjects() { toast('Scanning this computer for projects…'); const result = await api('/memory/scan', { method: 'POST', data: {} }); toast(`Found ${result.count} projects.`); await refresh(); }
-// /clear: the agent writes nothing itself; Rex Desk saves a handoff of the conversation and the next message starts a fresh session that reads it.
+// /clear: the agent writes nothing itself; Rex Desk saves a summary of the conversation and the next message starts a fresh session that reads it.
 // /loop: the agent looks at its own tasks now, the same as its scheduled check.
 async function loopNow() {
   const run = ui.view.type === 'run' ? runById(ui.view.id) : null, agentId = run?.specialistId;
@@ -499,7 +499,7 @@ async function loopNow() {
 }
 async function clearAgent() {
   const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast('No agent conversation here.', true);
-  if (!confirm('Clear this conversation? The agent starts a fresh session with your next message and reads a handoff of what was said. The messages stay on screen.')) return;
+  if (!confirm('Clear this conversation? The agent starts fresh with your next message and reads a summary of what was said. The messages stay on screen.')) return;
   const box = document.getElementById('draft'); if (box) { box.value = ''; ui.drafts.set(draftKey(), ''); }
   await api(`/runs/${run.id}/fresh`, { method: 'POST', data: {} }); toast('Cleared. Your next message starts a fresh session.'); await refresh();
 }

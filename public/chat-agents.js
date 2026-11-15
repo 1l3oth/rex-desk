@@ -40,7 +40,7 @@ export function agentStage(ctx) {
     <textarea id="sp-rules" rows="${Math.min(16, Math.max(6, Math.ceil(String(agent.rules || '').length / 60) + String(agent.rules || '').split(/\n/).length))}" spellcheck="false" placeholder="How ${esc(agent.name)} should work here. For example: ask before changing the database.">${esc(agent.rules)}</textarea>
     <div class="ag-save"><button class="btn primary" data-action="spec-save" disabled>Save rules</button></div></section>`;
   const lessonList = lessons.length ? `<ul class="ag-lessons">${lessons.map((lesson, index) => `<li><span>${esc(lesson.text)}</span><button type="button" class="ag-x" data-action="spec-forget" data-index="${index}" title="Forget this lesson" aria-label="Forget this lesson"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>` : `<p class="ag-help">None yet. When you correct ${esc(agent.name)}, it keeps the lesson here.</p>`;
-  const chosen = new Set(agent.taskSources || []), options = [['local', 'Rex Desk tasks', 'Kept here, made by you or the agents'], ...(ui.snap.config?.sources || []).map(source => [source.id, source.name, source.type === 'flow' ? 'Flow tracker' : 'Morningmate tracker'])];
+  const chosen = new Set(agent.taskSources || []), options = [['local', 'Rex Desk tasks', 'Kept here, made by you or the agents'], ...(ui.snap.config?.sources || []).map(source => [source.id, source.name, source.type === 'flow' ? 'Flow tasks' : 'Morningmate tasks'])];
   const taskSources = `<div class="ag-sources">${options.map(([id, label, hint]) => `<label><input type="checkbox" data-task-source="${esc(id)}" ${chosen.has(id) ? 'checked' : ''}><span>${esc(label)}<small>${esc(hint)}</small></span></label>`).join('')}</div>${chosen.size ? '' : `<p class="ag-help">Not set. ${esc(agent.name)} asks you before it looks for tasks.</p>`}`;
   // The agent's own loop: how often it looks at its tasks by itself, and what it does on each look.
   const loop = { on: true, every: 60, prompt: '', ...(agent.loop || {}) }, everyLabel = minutes => minutes >= 1440 ? 'Once a day' : minutes >= 60 ? `Every ${minutes / 60} hour${minutes === 60 ? '' : 's'}` : `Every ${minutes} minutes`;
@@ -60,7 +60,7 @@ export function agentStage(ctx) {
     <section class="ag-sec"><h2>Lessons learned</h2>${lessonList}</section>
     <section class="ag-sec"><h2>Tasks come from</h2>${taskSources}</section>
     ${loopBox}
-    <section class="ag-sec"><h2>AI</h2>${pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: [{ value: 'claude', label: 'Claude Code', hint: 'Claude subscription' }, { value: 'codex', label: 'Codex', hint: 'ChatGPT subscription' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }] })}<p class="ag-help">Switching starts a fresh session; the chat so far is handed over.</p></section>
+    <section class="ag-sec"><h2>AI</h2>${pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: [{ value: 'claude', label: 'Claude Code', hint: 'Your Claude plan' }, { value: 'codex', label: 'Codex', hint: 'Your ChatGPT plan' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }] })}<p class="ag-help">Switching starts fresh; the new AI gets a summary of the chat so far.</p></section>
     <section class="ag-sec"><h2>${ai === 'codex' ? 'Codex' : ai === 'gemini' ? 'Google (Antigravity)' : 'Claude'} account</h2>${pickerHtml(ctx, { id: 'sp-profile', label: 'Account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.[ai]?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}</section>
     <section class="ag-sec"><h2>Model</h2>${pickerHtml(ctx, { id: 'sp-model', label: 'Model', value: agent.model || '', items: models })}</section>
     <section class="ag-sec ag-meta"><p>Created by ${esc(agent.createdBy || 'you')}${origin ? `, copied from ${esc(origin.name)}` : ''}.</p><button class="btn small danger" data-action="spec-remove">Remove ${esc(agent.name)}</button></section>
@@ -143,7 +143,7 @@ export async function agentAction(ctx, action, target = null) {
   } else if (action === 'spec-move') {
     if (!confirm(`Move ${agent.name} to this computer?
 
-Its chat comes along and it starts a fresh session from a handoff. Code that was not pushed on ${agent.device || 'the other computer'} stays there, so push it first.`)) return;
+Its chat comes along and it starts fresh from a summary of the chat. Code that was not pushed on ${agent.device || 'the other computer'} stays there, so push it first.`)) return;
     const moved = await api(`/specialists/${agent.id}/move`, { method: 'POST', data: {} }); await refresh({ full: true });
     toast(`${agent.name} now works on this computer, in ${moved.folder}.`);
   } else if (action === 'spec-duplicate') {

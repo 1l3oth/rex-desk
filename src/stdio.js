@@ -19,7 +19,7 @@ function localToken() {
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     const row = db.prepare('SELECT value FROM records WHERE kind=? AND id=?').get('secret', 'mcp-token');
-    if (!row) throw new Error('Rex Desk connection token is missing. Open the dashboard first.');
+    if (!row) throw new Error('The Rex Desk connection key is missing. Open Rex Desk first.');
     const [nonce, tag, encrypted] = JSON.parse(row.value).split('.').map(value => Buffer.from(value, 'base64'));
     const cipher = createDecipheriv('aes-256-gcm', readFileSync(path.join(directory, 'vault.key')), nonce);
     cipher.setAuthTag(tag);

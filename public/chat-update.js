@@ -27,7 +27,7 @@ export function showUpdateCard(update) {
     <p class="uc-error" role="alert" hidden></p>
     <footer class="uc-foot"></footer>`;
   card.querySelector('h2').textContent = update.ready ? `Rex Desk ${version} is ready` : `Downloading Rex Desk ${version}`;
-  card.querySelector('.uc-meta').textContent = update.ready ? (update.current ? `Downloaded and verified · you have ${update.current}` : 'Downloaded and verified') : (update.current ? `In the background · you have ${update.current}` : 'In the background');
+  card.querySelector('.uc-meta').textContent = update.ready ? (update.current ? `Downloaded and checked · you have ${update.current}` : 'Downloaded and checked') : (update.current ? `In the background · you have ${update.current}` : 'In the background');
   const items = noteItems(update.available?.notes);
   const list = card.querySelector('.uc-notes'), more = card.querySelector('.uc-more');
   for (const [index, text] of items.entries()) { const item = document.createElement('li'); item.textContent = text; if (index >= SHOWN) item.hidden = true; list.append(item); }

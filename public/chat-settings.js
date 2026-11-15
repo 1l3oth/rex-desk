@@ -12,7 +12,7 @@ const SECTIONS = [
   ['folders', 'Folders', 'Where data, AI memory and files are kept'],
   ['notify', 'Notifications', 'Pop-ups, sound, phone, quiet hours'],
   ['agents', 'Agents', 'Workers, model, branches, pull requests'],
-  ['accounts', 'Claude accounts', 'Which subscription agents use'],
+  ['accounts', 'Claude accounts', 'Which Claude plan agents use'],
   ['localai', 'Local AI', 'Models that run on this computer'],
   ['projects', 'Projects', 'Repositories, branches and commands'],
   ['sources', 'Task sources', 'Rex Desk, Orbit, Flow, Morningmate'],
@@ -59,7 +59,7 @@ const CLOUD_ART = `<svg class="st-cloud-art" viewBox="0 0 220 96" width="220" he
 </svg>`;
 const CLOUD_WHY = [
   ['<rect x="2.5" y="4" width="13" height="9.5" rx="1.5"/><path d="M6 17h6M9 13.5V17"/><rect x="15.5" y="9" width="6" height="11" rx="1.2"/>', 'Pick up on any computer', 'Sign in at work or at home and the same agents, chats and settings are there.'],
-  ['<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4.5v4h4"/><path d="M12 8v4.5l3 1.8"/>', 'Nothing lost', 'After a reinstall, a broken drive or a new computer, everything comes back with your passphrase.'],
+  ['<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4.5v4h4"/><path d="M12 8v4.5l3 1.8"/>', 'Nothing lost', 'After a reinstall, a broken drive or a new computer, everything comes back with your password.'],
   ['<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/>', 'Private to you', 'A database of your own that only your account can open. Nothing to set up: no address and no key.'],
 ];
 // What goes to the cloud backup, once it is on. Agents, rooms, projects and settings always go: they make the desk follow
@@ -148,7 +148,7 @@ export function openSettings(ctx, section = 'general') {
       ${field('Branch names start with', input('branchPrefix', config().branchPrefix, 'spellcheck="false"'), `New branches look like ${esc(String(config().branchPrefix || 'rex-desk').replace(/\/+$/, ''))}/fix-login-button. Change it only if your team has a rule for branch names.`)}
       ${field('New agents and chats start in', `<select name="defaultMode">${[['bypassPermissions', 'Dangerous: run everything without asking'], ['auto', 'Auto: safe steps run, risky ones ask'], ['acceptEdits', 'Accept edits: edit files freely, ask before commands'], ['manual', 'Ask first: ask before each step'], ['plan', 'Plan: plan only, change nothing']].map(([value, label]) => `<option value="${value}" ${(config().defaultMode || 'bypassPermissions') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`, 'Used when you have not picked a mode for a chat. An AI without that mode asks first instead. You can still change the mode under the message box.')}
       ${check('autonomy', config().autonomy !== false, 'Let agents act on their own', 'They start work and open draft pull requests without asking you each time. Nothing is ever merged. Off: they ask first.')}
-      ${check('saver', config().saver !== false, 'Save my Claude usage', 'Room chat and Away mode check-ins run on Sonnet, which uses much less of your subscription. Code changes, personal chats and Rex Agent keep the model you chose. An agent with its own model always uses it.')}
+      ${check('saver', config().saver !== false, 'Save my Claude usage', 'Room chat and Away mode check-ins run on Sonnet, which uses much less of your Claude plan. Code changes, personal chats and Rex Agent keep the model you chose. An agent with its own model always uses it.')}
       ${check('autoPrLowRisk', config().autoPrLowRisk, 'Open draft pull requests for small, safe fixes on their own', 'Only style, text, docs or test changes with passing tests. Nothing is ever merged on its own.')}
       ${hasOrbit() ? check('reportToOrbit', config().reportToOrbit, 'Let agents send their final report to Orbit', 'Through your Orbit connection.') : ''}`,
     accounts: () => `<h2>Claude accounts</h2><p class="muted">Agents run on a Claude Code sign-in. You can add more accounts and switch when one runs out.</p>${tip('accounts', 'One account is enough to start. Add a second only if you often hit the usage limit.')}<button type="button" class="btn primary" data-st-open="accounts">Open Claude accounts</button>`,
@@ -170,22 +170,22 @@ export function openSettings(ctx, section = 'general') {
         ${field('Test', input(`repo.${index}.testCommand`, repo.testCommand, 'spellcheck="false" placeholder="Found from the project files"'))}
         ${field('How changes go out', `<select name="repo.${index}.push"><option value="pr" ${repo.push !== 'direct' ? 'selected' : ''}>Draft pull request</option><option value="direct" ${repo.push === 'direct' ? 'selected' : ''}>Push straight to the branch</option></select>`, 'Push straight: agents push their commits onto the target branch, with no pull request. Saying "no PR" in a chat does the same for one change.')}
         <button type="button" class="btn small quiet danger" data-st-repo-remove="${index}">Remove this project</button></details>`;
-      return `<h2>Projects</h2><p class="muted">The code your agents work on. Each run gets its own copy, so your own checkout is never touched. Rex Agent can also add a project when you name it in chat.</p>
+      return `<h2>Projects</h2><p class="muted">The code your agents work on. Each run gets its own copy, so your own copy of the project is never touched. Rex Agent can also add a project when you name it in chat.</p>
         ${tip('projects', 'Add each code folder once, set where new work starts and where pull requests go, and let Rex Desk find the set up, run and test commands. Only fill those in when it guesses wrong.')}
         ${repositories.length ? repositories.map(row).join('') : '<p class="muted">No projects yet.</p>'}
         ${projectRulesHtml()}
-        <div class="st-add"><input data-st-repo-path placeholder="A folder, like D:\\dev\\my-app, or owner/name on GitHub to clone" spellcheck="false" aria-label="Folder of a project, or a GitHub repository to clone"><button type="button" class="btn small" data-st-repo-pick>Browse…</button><button type="button" class="btn small primary" data-st-repo-add>Add</button></div>
+        <div class="st-add"><input data-st-repo-path placeholder="A folder, like D:\\dev\\my-app, or owner/name on GitHub to clone" spellcheck="false" aria-label="Folder of a project, or a GitHub project to copy here"><button type="button" class="btn small" data-st-repo-pick>Browse…</button><button type="button" class="btn small primary" data-st-repo-add>Add</button></div>
         ${githubHtml()}`;
     },
     sources: () => `<h2>Task sources</h2><p class="muted">Where tasks come from. Rex Desk tasks are built in, so you need nothing here to start.</p>
-      ${tip('sources', 'Only connect a tracker your team already uses, like Flow, Morningmate or Orbit. Pick just the projects you work on, so agents see your tasks and nothing else.')}
+      ${tip('sources', 'Only connect a task app your team already uses, like Flow, Morningmate or Orbit. Pick just the projects you work on, so agents see your tasks and nothing else.')}
       ${hasTracker() || hasOrbit() ? field('Check for new tasks every', `<span class="st-unit">${input('syncMinutes', config().syncMinutes, 'type="number" min="0" max="1440"')}<em>minutes</em></span>`, '0 checks only when you press Sync.') : ''}
       <ul class="st-list">${(config().sources || []).filter(source => source.type === 'orbit').map(source => `<li><b>${esc(source.name)}</b><span class="muted">${esc(source.type)}${source.hasKey ? '' : ' · no key'}</span></li>`).join('') || '<li class="muted">No Orbit goal connected.</li>'}</ul>
       <div class="st-actions"><button type="button" class="btn" data-st-open="sources">Orbit and Rex Desk tasks</button></div>
       ${trackersHtml(ctx, state)}`,
     jev: () => `<h2>Jev and voice</h2>
       ${tip('jev', 'Talk to Jev to run this computer by voice: open apps, change volume, read the screen. Keep "Ask me before shutting down" on.')}
-      ${field('OpenRouter key', `<input type="password" name="jev.apiKey" autocomplete="off" spellcheck="false" placeholder="${config().jev?.hasKey ? 'Saved. Paste a new key to replace it.' : 'sk-or-…'}">`, 'Optional. For issue ranking and the Gemini voice engine. Kept encrypted on this computer and sent only to OpenRouter.')}
+      ${field('OpenRouter key', `<input type="password" name="jev.apiKey" autocomplete="off" spellcheck="false" placeholder="${config().jev?.hasKey ? 'Saved. Paste a new key to replace it.' : 'sk-or-…'}">`, 'Optional. For issue ranking and the Gemini voice engine. Kept locked on this computer and sent only to OpenRouter.')}
       ${config().jev?.hasKey ? check('jev.clearKey', false, 'Remove the saved key') : ''}
       ${hasTracker() ? `<h3>Ranking your issues</h3>
       <div class="st-row">${field('Jev model', input('jev.model', config().jev?.model, 'placeholder="Newest Jev release" spellcheck="false"'))}${field('Versions you ship now', input('jev.versions', config().jev?.versions, 'placeholder="App 2.0.1, website current release"'))}</div>
@@ -201,7 +201,7 @@ export function openSettings(ctx, section = 'general') {
     schedule: () => { const schedule = config().schedule || {}; const days = schedule.days || [1, 2, 3, 4, 5]; return `<h2>Schedule</h2><p class="muted">At the set time Rex Desk looks for new tasks, Rex Agent sorts them, and agents start work up to your daily limit. Questions wait in Needs you.</p>
       ${tip('schedule', 'Set it for when you start your day, with a small limit like 3 runs. You come back to finished work and a short list of questions.')}
       ${check('schedule.enabled', schedule.enabled, 'Start work on its own on a schedule')}
-      <div class="st-row">${field('Time', input('schedule.time', schedule.time || '09:00', 'type="time"'))}${field('Most runs a day', input('schedule.maxRuns', schedule.maxRuns || 6, 'type="number" min="1" max="20"'), 'Runs use your Claude subscription.')}</div>
+      <div class="st-row">${field('Time', input('schedule.time', schedule.time || '09:00', 'type="time"'))}${field('Most runs a day', input('schedule.maxRuns', schedule.maxRuns || 6, 'type="number" min="1" max="20"'), 'Runs use your Claude plan.')}</div>
       <fieldset class="st-days"><legend>Days</legend>${DAYS.map((day, index) => `<label><input type="checkbox" name="schedule.days" value="${index}" ${days.includes(index) ? 'checked' : ''}><span>${day}</span></label>`).join('')}</fieldset>
       ${hasTracker() ? check('schedule.fix', schedule.fix !== false, 'Start runs for the top-ranked issues', 'Jev ranks the Flow or Morningmate issues; the top ones start first. Needs a project for them.') : ''}
       <div class="st-actions"><button type="button" class="btn small" data-st-schedule-run ${state.extra.scheduling ? 'disabled' : ''}>${state.extra.scheduling ? 'Starting…' : 'Run it now'}</button></div>`; },
@@ -217,7 +217,7 @@ export function openSettings(ctx, section = 'general') {
       ${database.configured ? '' : `<div class="st-cloud">${CLOUD_ART}<div class="st-cloud-head"><b>Back up with your Rex Desk account</b><small>Your whole desk, kept safe in the cloud and ready on every computer you sign in on.</small></div><ul class="st-cloud-why">${CLOUD_WHY.map(([icon, title, text]) => `<li><span class="st-cloud-why-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span><span><b>${title}</b><small>${text}</small></span></li>`).join('')}</ul><button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || 'Sign in with Rex Desk')}</button><p class="st-cloud-fine">No account yet? <a href="https://rexdesk.app/signup" target="_blank" rel="noopener">Create one on rexdesk.app</a></p></div>`}${database.accountNote ? `<p class="error-text" role="alert">${esc(database.accountNote)}</p>` : ''}${database.configured ? `<div class="st-actions"><button type="button" class="btn" data-st-db-sync>Upload now and check</button></div>${backupPartsHtml(database.parts || {})}` : ''}
 ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on this computer: only a Rex Desk account backup keeps them in the cloud.</p>' : ''}${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}
       <h3>App updates</h3><p>${esc(update.supported ? `This is Rex Desk ${[update.current, update.stage].filter(Boolean).join(' ')}. ` : '')}${esc(update.ready ? `Version ${update.available?.version} is downloaded and checked.` : update.available ? `Version ${update.available.version} is available.` : update.supported ? (update.checkedAt ? 'Rex Desk is up to date.' : 'Not checked yet.') : 'This copy runs from source code and updates with Git.')}</p>${update.error ? `<p class="error-text">${esc(update.error)}</p>` : ''}<div class="st-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${state.extra.checking ? 'disabled' : ''}>${state.extra.checking ? 'Checking…' : 'Check now'}</button>` : ''}${update.ready ? '<button type="button" class="btn primary" data-action="update-install">Install and restart</button>' : ''}</div>`; },
-    connect: () => `<h2>Connect another AI</h2><p class="muted">Give this to another Claude Code session (or another assistant) so it can read your tasks and ask you questions through Rex Desk. No key is needed on this computer.</p>
+    connect: () => `<h2>Connect another AI</h2><p class="muted">Give this to another Claude Code window (or another assistant) so it can read your tasks and ask you questions through Rex Desk. No key is needed on this computer.</p>
       ${tip('connect', 'Use this when you already have a Claude Code window open and want it to see your tasks and ask you things here.')}
       <button type="button" class="btn" data-st-prompt>Show the setup text</button>${state.extra.prompt ? `<pre class="st-prompt">${esc(state.extra.prompt)}</pre><button type="button" class="btn small" data-st-copy-prompt>Copy</button>` : ''}`,
   };

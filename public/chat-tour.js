@@ -94,12 +94,12 @@ export function startTour(ctx) {
       <fieldset class="tour-q"><legend>Where did you hear about Rex Desk? Pick any that apply.</legend><div class="tour-chips tour-heard">${HEARD.map(id => `<label class="tour-chip"><input type="checkbox" name="tour-heard" value="${id}" ${state.survey.heard.includes(id) ? 'checked' : ''}>${icon(id)}<span>${esc(SOCIAL[id]?.name || HEARD_NAME[id])}</span></label>`).join('')}</div>
       <input class="tour-other" data-tour-other maxlength="120" placeholder="Where? (optional)" value="${esc(state.survey.other)}" ${state.survey.heard.includes('other') ? '' : 'hidden'} aria-label="Where you heard about Rex Desk"></fieldset>`;
     },
-    ai: () => { const current = account(); return `<h2>Your AI sign-in</h2><p>Agents run on your own Claude subscription, through Claude Code on this computer.</p>
+    ai: () => { const current = account(); return `<h2>Your AI sign-in</h2><p>Agents run on your own Claude plan, through Claude Code on this computer.</p>
       ${current?.loggedIn ? `<p class="tour-ok">Signed in as <b>${esc(current.account || current.label)}</b>. You are set.</p>` : '<p class="tour-warn">No Claude sign-in found yet.</p>'}
       <button type="button" class="btn" data-action="accounts">${current?.loggedIn ? 'Add or switch accounts' : 'Sign in to Claude'}</button>`; },
     folders: () => `<h2>Where things are kept</h2><p>These are good places to start. You can change any of them now, or later in Settings, Folders.</p>${foldersHtml(ctx, state)}`,
     project: () => `<h2>Add your first project</h2><p>Pick the folder of some code you work on, or type owner/name to bring it from GitHub. Rex Desk never changes your own copy: agents work in their own.</p>
-      <div class="st-add"><input data-tour-repo placeholder="A folder, or owner/name on GitHub" spellcheck="false" aria-label="Project folder or GitHub repository"><button type="button" class="btn small" data-tour-browse>Browse…</button><button type="button" class="btn small primary" data-tour-add>Add</button></div>
+      <div class="st-add"><input data-tour-repo placeholder="A folder, or owner/name on GitHub" spellcheck="false" aria-label="Project folder or GitHub project"><button type="button" class="btn small" data-tour-browse>Browse…</button><button type="button" class="btn small primary" data-tour-add>Add</button></div>
       ${(ui.snap.config?.repositories || []).length ? `<p class="tour-ok">Added: ${ui.snap.config.repositories.map(repo => `<b>${esc(repo.name)}</b>`).join(', ')}</p>` : '<p class="muted">You can skip this and ask Rex Agent to add one later.</p>'}`,
     done: () => `<h2>You are ready</h2><p>Talk to <b>Rex Agent</b> first. Tell it what you work on, and it sets up an agent for each project.</p><p class="muted">Phone and other computers: Settings, Devices and phone. This tour is in Settings, General.</p>`,
   };

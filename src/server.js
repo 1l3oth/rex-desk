@@ -186,7 +186,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         else opened.cloud = { pulled: false, reason: 'No cloud backup.' };
         if (session === opened) notify();
       };
-      if (store.fresh) { if (bootStage) bootStage = 'Restoring your workspace from your cloud backup'; await sync(); }
+      if (store.fresh) { if (bootStage) bootStage = 'Bringing your desk back from your cloud backup'; await sync(); }
       else { opened.cloud = { pulled: false, syncing: true }; void sync().catch(error => { opened.cloud = { pulled: false, reason: error.message }; }); }
     } else void store.cloud.open();
     notify(); return session;
@@ -334,7 +334,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   // Requests wait for it, so nobody sees the sign-in page or works on an out-of-date copy meanwhile.
   let opening = Promise.resolve();
   if (!accounts) await openSession(null, null);
-  else { bootStage = 'Unlocking your workspace'; opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; }); }
+  else { bootStage = 'Opening your desk'; opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; }); }
   void opening.finally(() => { bootStage = ''; });
   // Agents working right now, by name: an update restarts Rex Desk and would cut them off.
   function busyAgents(store) {
@@ -750,7 +750,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const branchMatch = url.pathname.match(/^\/api\/repositories\/([^/]+)\/branches$/);
       if (branchMatch) {
         const repository = store.config().repositories.find(item => item.id === decodeURIComponent(branchMatch[1]));
-        if (!repository) return json(response, 404, { error: 'Repository not found.' });
+        if (!repository) return json(response, 404, { error: 'Project not found.' });
         const branches = (await git(repository.path, ['for-each-ref', '--format=%(refname:short)', 'refs/heads', 'refs/remotes/origin'])).split('\n').filter(Boolean);
         return json(response, 200, { branches });
       }

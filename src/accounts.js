@@ -23,11 +23,11 @@ export function openKey({ kdf, sealedKey }, passphrase) {
   const decipher = createDecipheriv('aes-256-gcm', deriveKey(passphrase, kdf), data.subarray(0, 12));
   decipher.setAuthTag(data.subarray(12, 28));
   try { return Buffer.concat([decipher.update(data.subarray(28)), decipher.final()]); }
-  catch { throw new Error('Email or passphrase is incorrect.'); }
+  catch { throw new Error('The email or password is wrong.'); }
 }
 
 export function checkPassphrase(passphrase) {
-  if (String(passphrase || '').length < 8) throw new Error('Use a passphrase of at least 8 characters.');
+  if (String(passphrase || '').length < 8) throw new Error('Use a password with 8 or more letters or numbers.');
 }
 export function cleanEmail(email) {
   const value = String(email || '').trim().toLowerCase();
@@ -95,7 +95,7 @@ export class Accounts {
     if (!legacy) throw new Error('There is no account for that email on this computer yet. If you used Rex Desk before (before a reinstall, or on another computer), open it with Restore from backup.');
     checkPassphrase(passphrase);
     const keyFile = path.join(this.directory(legacy), 'vault.key');
-    if (!existsSync(keyFile)) throw new Error('This workspace has no key file. Restore it from cloud backup instead.');
+    if (!existsSync(keyFile)) throw new Error('This desk has lost its key file. Bring it back from your cloud backup instead.');
     const vaultKey = readFileSync(keyFile);
     Object.assign(legacy, { email: address }, sealKey(vaultKey, passphrase)); this.claimAdmin(address); this.save(); unlinkSync(keyFile);
     return { entry: legacy, vaultKey };

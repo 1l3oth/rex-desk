@@ -254,7 +254,7 @@ export class Desk {
     }
   }
   authorize(scope, runId, { coordinator = false } = {}) {
-    if (!scope) throw new Error('Authentication required.');
+    if (!scope) throw new Error('Sign in first.');
     const scoped = scope.role === 'worker';
     if (coordinator && (scoped || scope.role === 'specialist')) throw new Error('Only the main agent can do this.');
     if (runId && scoped && scope.runId !== runId) throw new Error('Worker token is restricted to its own run.');
@@ -396,7 +396,7 @@ export class Desk {
     const chosen = config.repositories.find(item => item.id === repositoryId);
     const placeable = this.store.list('repository').length > 1 && (!chosen || !baseBranch) && !parentRunId;
     const repository = effectiveRepository(chosen || config.repositories.find(item => item.id === task.repositoryId) || (config.repositories.length === 1 ? config.repositories[0] : null));
-    if (!repository && !placeable) throw new Error('Select a repository for this task.');
+    if (!repository && !placeable) throw new Error('Choose a project for this task.');
     const parent = parentRunId ? this.run(parentRunId) : {};
     const run = { id: id(), role: 'worker', taskId, title: titleEn || task.title, repositoryId: repository?.id || '', ...(specialistId ? { specialistId } : {}), ...(roomId ? { roomId } : {}),
       ...(placeable ? { placement: { state: 'pending', repository: Boolean(chosen), base: Boolean(baseBranch) } } : {}),
@@ -603,7 +603,7 @@ ${message}` : message);
         apiKey: this.jev.apiKey(), model: config.jev?.model || undefined, fetcher: this.jev.fetcher, versions: config.jev?.versions });
     } catch (error) { this.store.event(run.id, 'placement-error', { message: error.message }, true); }
     if (!placed) {
-      if (!run.repositoryId) throw new Error('Rex Desk could not tell which repository this issue belongs to. Choose one and start it again.');
+      if (!run.repositoryId) throw new Error('Rex Desk could not tell which project this issue belongs to. Choose one and start it again.');
       return this.patchRun(run.id, { placement: { ...run.placement, state: 'default' } });
     }
     // A checkout Jev chose that is not in Settings yet is added with what its own files say; commands are detected later.
@@ -1255,7 +1255,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   repositoryFor(run) {
     const repository = this.store.config().repositories.find(item => item.id === run.repositoryId);
-    if (!repository?.path) throw new Error('This run has no source repository, so nothing can be pushed.');
+    if (!repository?.path) throw new Error('This run has no project, so nothing can be pushed.');
     return repository;
   }
   gh(args, options = {}) { return exec('gh', args, { windowsHide: true, timeout: 120000, ...options }); }

@@ -39,7 +39,7 @@ function optionPickers(ctx) {
   const now = currentOptions(ctx), choices = choicesFor(ctx, now.provider);
   const select = (id, label, items, value) => pickerHtml(ctx, { id, label, compact: true, value, items: items.map(item => ({ value: item.id, label: item.label, hint: item.hint, disabled: item.disabled })) });
   const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? 'Dangerous' : item.label, hint: item.hint || MODE_HINT[item.id] }));
-  return `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude subscription' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT subscription' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}`;
+  return `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude plan' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT plan' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}`;
 }
 // The message box is not redrawn while the chat updates (it would lose what is typed), so a new AI redraws only its pickers.
 function redrawOptionPickers(ctx) {
@@ -103,13 +103,13 @@ function contextRing(ctx, working) {
 function commands(ctx) {
   const { ui } = ctx, c = ctx.commands;
   return [
-    { name: 'sync', hint: 'Sync issues from the tracker', run: c.sync },
+    { name: 'sync', hint: 'Get the newest tasks from your task app', run: c.sync },
     { name: 'projects', hint: 'Scan this computer for projects', run: c.projects },
     { name: 'room', hint: 'Start a room for several agents', run: c.room },
     { name: 'agent', hint: 'Create an agent for a project', run: c.agent },
     ...(ui.view.type === 'room' ? [{ name: 'assign', hint: 'Give a task to an agent: /assign @agent #task', run: c.assign }] : []),
     { name: 'main', hint: 'Go to Rex Agent', run: c.main },
-    ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }, { name: 'clear', hint: 'Fresh start: the agent gets a handoff of this chat and a clean session', run: c.clear }, { name: 'loop', hint: 'Check its own tasks now and start on one', run: c.loop }] : []),
+    ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }, { name: 'clear', hint: 'Fresh start: the agent gets a summary of this chat and starts again', run: c.clear }, { name: 'loop', hint: 'Check its own tasks now and start on one', run: c.loop }] : []),
     { name: 'voice', hint: 'Voice engine and language: compare which one understands you', run: () => voiceDialog(ctx) },
     { name: 'settings', hint: 'Open settings', run: c.settings },
     // The agent's own skills and commands, like typing / in Claude Code: choosing one puts it in the box to send to the agent.

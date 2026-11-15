@@ -15,11 +15,11 @@ function safeRemote(value) {
 }
 
 export async function inspectRepository(directory, { execute = run } = {}) {
-  if (!path.isAbsolute(directory || '')) throw new Error('Choose an absolute local repository folder.');
+  if (!path.isAbsolute(directory || '')) throw new Error('Choose the full path of a project folder on this computer.');
   const git = args => execute('git', ['-C', directory, ...args], directory);
   let root;
   try { root = await git(['rev-parse', '--show-toplevel']); }
-  catch { throw new Error('This folder is not an accessible Git repository. Choose its source folder and inspect again.'); }
+  catch { throw new Error('This folder is not a Git project Rex Desk can open. Choose the project folder and check again.'); }
   const optional = async args => { try { return await git(args); } catch { return ''; } };
   const [currentBranch, names, refs, authorName, authorEmail] = await Promise.all([
     optional(['branch', '--show-current']), optional(['remote']),
@@ -75,7 +75,7 @@ export async function inspectRepository(directory, { execute = run } = {}) {
 // one in front, instead of refusing because a picker is already open.
 let pending = null;
 export async function pickRepositoryFolder() {
-  if (process.platform !== 'win32') throw new Error('Paste the absolute repository path on this platform.');
+  if (process.platform !== 'win32') throw new Error('Paste the full path of the project folder on this computer.');
   if (pending) { pending.cancelled = true; try { pending.child.kill(); } catch {} pending = null; }
   const script = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 Add-Type -AssemblyName System.Windows.Forms
@@ -111,7 +111,7 @@ finally { $picker.Dispose(); $owner.Dispose() }`;
 // Clone owner/name with the signed-in GitHub CLI next to the Rex Desk folder. An existing folder is reused, never overwritten.
 export async function cloneRepository(spec, parent) {
   const name = String(spec || '').trim().replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/$/, '');
-  if (!/^[\w.-]+\/[\w.-]+$/.test(name)) throw new Error('Enter a GitHub repository as owner/name, or a local folder path.');
+  if (!/^[\w.-]+\/[\w.-]+$/.test(name)) throw new Error('Enter a GitHub project as owner/name, or the full path of a folder on this computer.');
   const target = path.join(parent, name.split('/')[1]);
   if (existsSync(target)) {
     if (!existsSync(path.join(target, '.git'))) throw new Error(`${target} already exists and is not a Git checkout.`);
