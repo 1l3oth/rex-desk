@@ -3,6 +3,7 @@ import { splitStage } from '/chat-split.js';
 import { rexCore } from '/rex-core.js';
 import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter } from '/chat-sidebar.js';
 import { agentStage, agentAction, agentGroups, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
+import { subagentHtml as subagentCard, subagentsFromEvents, subagentsPanel } from '/chat-subagents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
 import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.js';
@@ -189,15 +190,14 @@ function renderItems(items, run, live) {
   flush(true);
   return out.join('');
 }
-// A sub-agent the agent started: who it is, what it was asked, how far it got. Open it to see each step and its report.
-function subagentHtml(item, live) {
-  const input = item.input, state = item.done ? (item.failed ? 'failed' : 'done') : live ? 'working' : 'stopped';
-  const label = { working: t('Working…'), done: t('Done'), failed: t('Failed'), stopped: t('Stopped') }[state];
-  const took = item.endedAt ? Math.max(1, Math.round((Date.parse(item.endedAt) - Date.parse(item.at)) / 1000)) : 0;
-  const step = event => `<li><b>${esc(event.tool)}</b> ${esc(Object.values(event.input || {}).filter(value => typeof value === 'string').join(' · ').slice(0, 140))}</li>`;
-  return `<details class="subagent ${state}"${ui.openSubs?.has(item.id) ? ' open' : ''} data-sub="${esc(item.id)}"><summary><span class="sa-dot ${state}"></span><span class="sa-main"><b>${t('Sub-agent')}${input.description ? `: ${esc(input.description)}` : ''}</b><small>${esc([input.type, input.model, (item.steps.length === 1 ? t`${item.steps.length} step` : t`${item.steps.length} steps`), took ? `${took < 60 ? `${took}s` : t`${Math.round(took / 60)} min`}` : ''].filter(Boolean).join(' · '))}</small></span><span class="sa-state">${label}</span></summary>
-    <div class="sa-body">${input.prompt ? `<p class="sa-h">${t`Asked`}</p><div class="md sa-text">${markdown(input.prompt)}</div>` : ''}${item.steps.length ? `<p class="sa-h">${t`Steps`}</p><ol class="sa-steps">${item.steps.slice(-40).map(step).join('')}</ol>` : ''}${item.result || item.text ? `<p class="sa-h">${t`Reported back`}</p><div class="md sa-text">${markdown(item.result || item.text)}</div>` : ''}</div></details>`;
-}
+const subagentHtml = (item, live) => subagentCard(item, live, { esc, markdown, openSubs: ui.openSubs });
+// "Show in chat" on a row of the Sub-agents tab: open that card in the chat and scroll to it.
+document.addEventListener('click', event => {
+  const button = event.target.closest?.('[data-action="sub-jump"]'); if (!button) return; event.preventDefault();
+  const card = [...document.querySelectorAll('details.subagent')].find(box => box.dataset.sub === button.dataset.sub && !box.closest('.side-body'));
+  if (!card) { toast(t('That card is not in the chat on screen. Use Show earlier messages.')); return; }
+  card.open = true; card.scrollIntoView({ block: 'center', behavior: 'smooth' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1600);
+});
 document.addEventListener('toggle', event => { const box = event.target; if (!box.matches?.('details.subagent')) return; ui.openSubs ||= new Set(); if (box.open) ui.openSubs.add(box.dataset.sub); else ui.openSubs.delete(box.dataset.sub); }, true);
 // A question that was answered stays in the chat as two messages: the agent asking, and the person answering.
 function answeredItem(item) {
@@ -497,7 +497,7 @@ async function loadView(early = null) {
       const events = await (early && type === 'run' ? early : api(`/runs/${run.id}/messages`)); ui.events.set(run.id, events);
     } else if (type === 'room') {
       const room = ui.snap.rooms.find(item => item.id === id);
-      if (room && ui.infoOpen !== false && ['activity', 'terminal'].includes(ui.sideTab)) await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
+      if (room && ui.infoOpen !== false && ['activity', 'subagents', 'terminal'].includes(ui.sideTab)) await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
     } else if (type === 'worktrees') { await api('/worktrees');
     } else if (type === 'monitor') { ui.monitor = await api('/monitor'); 
     } else if (type === 'person') { ui.page = (await api('/memory/page?name=user')).text; }
@@ -995,12 +995,14 @@ function personalAgent(run) {
 function personalSide(run, agent, items, shells) {
   // Tabs, like a messenger's chat info: Profile (with what was shared in the chat), the worktrees of this chat, and the agent's Terminal.
   const trees = chatWorktrees(ui, { runId: run.id, agentId: agent.id });
-  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'worktrees' ? 'worktrees' : 'profile', part = ['media', 'files', 'links'].includes(ui.chatShared) ? ui.chatShared : 'media';
+  const subs = items.filter(item => item.role === 'subagent');
+  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'worktrees' ? 'worktrees' : ui.chatTab === 'subagents' ? 'subagents' : 'profile', part = ['media', 'files', 'links'].includes(ui.chatShared) ? ui.chatShared : 'media';
   const entries = items.filter(item => item.role === 'human' || item.role === 'agent').map(item => ({ from: item.role === 'human' ? t('You') : agent.name, at: item.at, text: item.text }));
   const shared = collectShared(entries, (ui.snap.artifacts || []).filter(item => item.runId === run.id).map(item => ({ ...item, from: agent.name })));
   const close = `<button type="button" class="side-x" data-action="chat-info-close" aria-label="${t`Close the side panel`}" title="${t`Close`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
-  const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">${t`Profile`}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="chat-tab" data-tab="worktrees">${t`Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}`}</button>${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">${t`Terminal`}<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span>${close}</div>`;
+  const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">${t`Profile`}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="chat-tab" data-tab="worktrees">${t`Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}`}</button><button type="button" class="tab ${tab === 'subagents' ? 'on' : ''}" data-action="chat-tab" data-tab="subagents">${t`Sub-agents${subs.length ? `<span class="tcount quiet">${subs.length}</span>` : ''}`}</button>${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">${t`Terminal`}<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span>${close}</div>`;
   if (tab === 'worktrees') return tabs + worktreeSideHtml(ctx, trees);
+  if (tab === 'subagents') return tabs + subagentsPanel(subs.map(item => ({ ...item, runId: run.id })), ctx, { live: () => stateTone(run) === 'working', jump: true });
   if (tab === 'terminal') return tabs + terminalHtml(shells, { esc, hhmm }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="tl-bar)/, '');
   const sharedBox = `<h3>${t`Media, files and links`}</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
   const sources = (agent.taskSources || []).map(id => id === 'local' ? t('Rex Desk tasks') : (ui.snap.config?.sources || []).find(source => source.id === id)?.name).filter(Boolean);

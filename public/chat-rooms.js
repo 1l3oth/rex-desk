@@ -1,6 +1,7 @@
 import { t, locale } from './i18n.js';
 import { rexCore } from '/rex-core.js';
 import { chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
+import { subagentsFromEvents, subagentsPanel } from '/chat-subagents.js';
 import { speakButton } from '/chat-speak.js';
 import { pickerHtml } from '/chat-pick.js';
 import { collectShared, sharedTabsHtml, sharedCount } from '/chat-media.js';
@@ -113,6 +114,12 @@ function roomTerminalHtml(ctx, room) {
   entries.sort((left, right) => String(left.at).localeCompare(String(right.at)));
   return terminalHtml(entries, { esc, hhmm, who: item => `<span title="${esc(item.who)}">${avatarHtml(ctx, { name: item.who, size: 'xs' })}</span>` }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="tl-bar)/, '');
 }
+// Every sub-agent the members of this room started, from the events of their runs.
+function roomSubagents(ctx, room) {
+  const subs = [];
+  for (const member of room.members) for (const runId of roomRunIds(ctx.ui, { id: room.id, members: [member] })) subs.push(...subagentsFromEvents(ctx.ui.events.get(runId) || [], { who: member.name, runId }));
+  return subs;
+}
 const HIDDEN_STEPS = ['desk_ask', 'desk_message', 'desk_elicit', 'desk_room_post'];
 // What everyone in the room is doing, newest at the bottom: their steps, the commands they ran (with output), and when they replied.
 function activityHtml(ctx, room) {
@@ -146,10 +153,10 @@ function activityHtml(ctx, room) {
 // The right side of a room: Activity and Chat info, as tabs.
 // Two tabs, like a messenger's chat info: Chat info (members, and the media, files and links shared here) and Activity (what the agents are doing).
 function roomSideHtml(ctx, room) {
-  const trees = chatWorktrees(ctx.ui, { roomId: room.id });
-  const tab = ['activity', 'worktrees', 'terminal'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
+  const trees = chatWorktrees(ctx.ui, { roomId: room.id }), subs = roomSubagents(ctx, room);
+  const tab = ['activity', 'worktrees', 'subagents', 'terminal'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
   const close = `<button type="button" class="side-x" data-action="info-toggle" aria-label="${t`Close the side panel`}" title="${t`Close`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
-  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">${t`Chat info`}</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">${t`Activity${busy ? `<span class="tcount">${busy}</span>` : ''}`}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">${t`Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}`}</button><button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="side-tab" data-tab="terminal">${t`Terminal`}</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : tab === 'terminal' ? roomTerminalHtml(ctx, room) : activityHtml(ctx, room)}`;
+  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">${t`Chat info`}</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">${t`Activity${busy ? `<span class="tcount">${busy}</span>` : ''}`}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">${t`Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}`}</button><button type="button" class="tab ${tab === 'subagents' ? 'on' : ''}" data-action="side-tab" data-tab="subagents">${t`Sub-agents${subs.length ? `<span class="tcount quiet">${subs.length}</span>` : ''}`}</button><button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="side-tab" data-tab="terminal">${t`Terminal`}</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : tab === 'subagents' ? subagentsPanel(subs, ctx, { live: item => room.members.some(member => member.name === item.who && ['busy', 'replying', 'waiting'].includes(member.state)) }) : tab === 'terminal' ? roomTerminalHtml(ctx, room) : activityHtml(ctx, room)}`;
 }
 // The Agents tab: each member's AI and model, changed right here. Saved at once on the agent itself, so it holds in every chat.
 const AIS = [{ value: 'claude', label: t('Claude Code'), hint: t('Your Claude plan') }, { value: 'codex', label: t('Codex'), hint: t('Your ChatGPT plan') }, { value: 'gemini', label: t('Gemini'), hint: t('Google account, through Antigravity') }];

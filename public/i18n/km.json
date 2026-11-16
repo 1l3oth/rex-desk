@@ -1338,7 +1338,6 @@
  "Rex Desk is up to date.": "Rex Desk ទាន់សម័យ។",
  "Rex Desk itself uses {0} · checked {1}": "Rex Desk ផ្ទាល់ប្រើ {0} · បានពិនិត្យ {1}",
  "Rex Desk on this computer is locked. Sign in on it first.": "Rex Desk លើកុំព្យូទ័រនេះត្រូវបានចាក់សោ។ ចូលលើវាជាមុនសិន។",
- "Rex Desk opens files in your home folder, your projects, the agents' worktrees and your notes vault. That file is outside them.": "Rex Desk បើកឯកសារក្នុងថតផ្ទះរបស់អ្នក គម្រោងរបស់អ្នក worktrees របស់ភ្នាក់ងារ និងឃ្លាំងកំណត់ចំណាំរបស់អ្នក។ ឯកសារនោះនៅក្រៅទាំងនេះ។",
  "Rex Desk restarts and opens again in about a minute.": "Rex Desk នឹងចាប់ផ្ដើមឡើងវិញ ហើយបើកម្ដងទៀតក្នុងរយៈពេលប្រហែលមួយនាទី។",
  "Rex Desk shows in the language you pick.": "Rex Desk បង្ហាញជាភាសាដែលអ្នកជ្រើសរើស។",
  "Rex Desk stopped while moving the data, so it stays in the old folder. Empty the new folder and try again.": "Rex Desk បានឈប់ពេលកំពុងផ្លាស់ទីទិន្នន័យ ដូច្នេះវានៅក្នុងថតចាស់។ សម្អាតថតថ្មី ហើយព្យាយាមម្ដងទៀត។",
@@ -1953,5 +1952,9 @@
  "Your other computers, your phone": "កុំព្យូទ័រផ្សេងទៀតរបស់អ្នក ទូរសព្ទរបស់អ្នក",
  "Your profile, from what the agents learned": "ប្រវត្តិរូបរបស់អ្នក ពីអ្វីដែលភ្នាក់ងារបានរៀន",
  "Your whole desk, kept safe in the cloud and ready on every computer you sign in on.": "Desk ទាំងមូលរបស់អ្នក រក្សាទុកដោយសុវត្ថិភាពលើពពក ហើយរួចរាល់លើគ្រប់កុំព្យូទ័រដែលអ្នកចូល។",
- "Zoom in": "ពង្រីក"
+ "Zoom in": "ពង្រីក",
+ "Sub-agents{0}": "ភ្នាក់ងាររង{0}",
+ "Show in chat": "បង្ហាញក្នុងការជជែក",
+ "No sub-agents yet. When an agent starts one, it is listed here.": "មិនទាន់មានភ្នាក់ងាររងទេ។ នៅពេលភ្នាក់ងារចាប់ផ្តើមមួយ វានឹងបង្ហាញនៅទីនេះ។",
+ "That card is not in the chat on screen. Use Show earlier messages.": "កាតនោះមិននៅក្នុងការជជែកលើអេក្រង់ទេ។ ប្រើ «បង្ហាញសារមុនៗ»។"
 }

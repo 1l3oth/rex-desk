@@ -1,4 +1,5 @@
 import { t, locale } from './i18n.js';
+import { avatarHtml } from './chat-rooms.js';
 // Notifications: everything agents said or asked while you were elsewhere, newest first, with unread counts on each chat.
 // A new one pops up at the bottom right with a sound (both can be turned off), and you can open it or answer it from there.
 // The settings decide what counts, how it reaches you, and when Rex Desk stays quiet.
@@ -162,10 +163,10 @@ function popUp(ctx, item, more) {
   const chat = item.target.type === 'room' ? (ctx.ui.snap.rooms || []).find(room => room.id === item.target.id)?.name : '';
   const canReply = ['room', 'run', 'main'].includes(item.target.type);
   const card = document.createElement('div'); card.className = `nt-pop ${tone}`; card.setAttribute('role', 'status');
-  card.innerHTML = `<div class="nt-pop-head"><span class="nt-av h${hue(name)}">${esc(initials(name))}</span><span class="nt-pop-who"><b>${esc(name)}</b><small>${t`${esc([chat, label].filter(Boolean).join(' · '))} · now`}</small></span><button type="button" class="nt-pop-x" aria-label="${t`Dismiss`}" title="${t`Dismiss`}">×</button></div>
-    <button type="button" class="nt-pop-body" data-action="nt-open" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}">${prefs.preview === false ? `<em>${t`New message`}</em>` : esc(item.body)}${more ? `<span class="nt-more">${t`+${more} more`}</span>` : ''}</button>
-    ${canReply ? `<form class="nt-reply" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}"><input type="text" placeholder="${t`Reply…`}" aria-label="${t`Reply`}" maxlength="4000"><button type="submit" class="btn small primary">${t`Send`}</button></form>` : ''}
-    <div class="nt-pop-acts"><button type="button" class="btn small quiet" data-action="nt-read" data-key="${esc(item.key)}">${t`Mark read`}</button><button type="button" class="btn small" data-action="nt-open" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}">${t`Open`}</button></div>
+  const open = `data-action="nt-open" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}"`;
+  card.innerHTML = `<div class="nt-pop-head">${avatarHtml(ctx, { name, size: 'sm' })}<span class="nt-pop-who"><b>${esc(name)}</b><small>${t`${esc([chat, label].filter(Boolean).join(' · '))} · now`}</small></span><button type="button" class="nt-pop-link" data-action="nt-read" data-key="${esc(item.key)}">${t`Mark read`}</button><button type="button" class="nt-pop-x" aria-label="${t`Dismiss`}" title="${t`Dismiss`}">×</button></div>
+    <button type="button" class="nt-pop-body" ${open}>${prefs.preview === false ? `<em>${t`New message`}</em>` : esc(String(item.body).replace(/\*\*/g, '').replace(/\s+/g, ' '))}${more ? `<span class="nt-more">${t`+${more} more`}</span>` : ''}</button>
+    <div class="nt-pop-row">${canReply ? `<form class="nt-reply" data-key="${esc(item.key)}" data-type="${esc(item.target.type)}" data-id="${esc(item.target.id || '')}"><input type="text" placeholder="${t`Reply…`}" aria-label="${t`Reply`}" maxlength="4000"><button type="submit" class="btn small primary">${t`Send`}</button></form>` : ''}<button type="button" class="btn small" ${open}>${t`Open`}</button></div>
     <i class="nt-life" aria-hidden="true"></i>`;
   const box = stack(); box.prepend(card); while (box.children.length > 3) box.lastElementChild.remove();
   let timer = 0; const arm = () => { clearTimeout(timer); timer = setTimeout(() => card.remove(), 8000); };
