@@ -323,6 +323,32 @@ test('work done in a group chat publishes: its worktree becomes a run, and the p
   store.close();
 });
 
+test('work in a worktree of a project Rex Desk was never told about, and with no task, still publishes: the project is added and a task is made', async () => {
+  const directory = temporary('room-new'), origin = path.join(directory, 'origin.git'), repository = path.join(directory, 'flow-library'), tree = path.join(directory, 'flow-library-wt', 'group-count-negative');
+  mkdirSync(repository); mkdirSync(origin);
+  await git(repository, ['init', '-b', 'develop']);
+  await git(repository, ['config', 'user.name', 'Test']); await git(repository, ['config', 'user.email', 'test@example.invalid']);
+  writeFileSync(path.join(repository, 'grid.txt'), 'first\n'); await git(repository, ['add', '.']); await git(repository, ['commit', '-m', 'First']);
+  await git(origin, ['init', '--bare', '-b', 'develop']);
+  await git(repository, ['remote', 'add', 'origin', origin]); await git(repository, ['push', '-q', 'origin', 'develop']);
+  await git(repository, ['worktree', 'add', '-q', '-b', 'fix/grid-group-count-negative', tree, 'HEAD']);
+  writeFileSync(path.join(tree, 'fix.txt'), 'the fix\n'); await git(tree, ['add', '.']); await git(tree, ['commit', '-m', 'fix: the grid group count is never negative']);
+  const store = new Store(temporary('room-new-store'));
+  store.saveConfig({ ...defaults, repositories: [] });
+  const desk = new Desk(store, { root: temporary('room-new-root') }), created = [];
+  desk.gh = async args => { created.push(args); return { stdout: 'https://github.com/x/y/pull/8\n' }; };
+  store.put('run', 'room-session', { id: 'room-session', role: 'specialist', specialistId: 'bot', roomAgent: 'bot', roomOf: 'room-1', state: 'running', createdAt: now() });
+  desk.personAskedToPublish = () => true;
+  const result = await desk.requestPublish('room-session', { worktree: tree });
+  assert.equal(result.url, 'https://github.com/x/y/pull/8');
+  assert.deepEqual(store.config().repositories.map(item => path.resolve(item.path)), [path.resolve(repository)], 'the project was added, not refused');
+  const adopted = store.list('run').find(item => item.adoptedFrom === path.resolve(tree)), task = store.get('task', adopted.taskId);
+  assert.equal(task.title, 'fix: the grid group count is never negative', 'the task is named after the last commit');
+  assert.equal(task.local, true); assert.equal(task.roomWork.agentId, 'bot');
+  await assert.rejects(desk.adoptRoomWork('room-session', { worktree: tree, taskId: 'nope' }), /No task "nope"/, 'a task id that does not exist is still refused');
+  store.close();
+});
+
 test('a connection syncs the issues of every account it watches, not only the first', async () => {
   const store = new Store(temporary('accounts')), filters = [];
   store.saveConfig({ ...defaults, repositories: [], sources: [{ ...source, apiKey: 'fixture-key', userId: ' 1l3oth@flow.team , globalDev@flow.team ,1l3oth@flow.team ' }] });

@@ -1580,11 +1580,30 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const branch = (await git(folder, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
     if (!branch || branch === 'HEAD') throw new Error(`${folder} is not on a branch. Check out the work branch first.`);
     const common = longPath(path.resolve(folder, (await git(folder, ['rev-parse', '--git-common-dir'])).trim())).toLowerCase();
-    const repository = this.store.config().repositories.find(item => [path.join(longPath(item.path), '.git').toLowerCase(), longPath(item.path).toLowerCase()].includes(common));
-    if (!repository) throw new Error(`${folder} is not a worktree of a project Rex Desk knows. Add the project in Settings first.`);
+    const known = () => this.store.config().repositories.find(item => [path.join(longPath(item.path), '.git').toLowerCase(), longPath(item.path).toLowerCase()].includes(common));
+    let repository = known();
+    if (!repository) {
+      // A worktree of a project nobody added yet (the person told the agent to work there): the project is added now, so the work can go out.
+      // Nobody is sent to Settings for it.
+      const gitFolder = path.resolve(folder, (await git(folder, ['rev-parse', '--git-common-dir'])).trim());
+      const checkout = path.basename(gitFolder).toLowerCase() === '.git' ? path.dirname(gitFolder) : '';
+      if (!checkout) throw new Error(`${folder} belongs to a bare git folder (${gitFolder}), so Rex Desk cannot tell which project it is. Tell the person.`);
+      await this.addProject(checkout);
+      repository = known();
+      if (!repository) throw new Error(`${folder} is a worktree of ${checkout}, which Rex Desk could not add as a project.`);
+    }
     const roomId = session.roomTurn?.roomId || session.roomOf || '';
-    const task = taskId ? this.store.get('task', taskId) : this.store.list('task').filter(item => item.roomWork?.agentId === agentId && (!roomId || item.roomWork.roomId === roomId)).sort((left, right) => String(right.roomWork.at).localeCompare(String(left.roomWork.at)))[0];
-    if (!task) throw new Error('Pass taskId: which task this work is for (see desk_tasks).');
+    let task = taskId ? this.store.get('task', taskId) : this.store.list('task').filter(item => item.roomWork?.agentId === agentId && (!roomId || item.roomWork.roomId === roomId)).sort((left, right) => String(right.roomWork.at).localeCompare(String(left.roomWork.at)))[0];
+    if (!task && taskId) throw new Error(`No task "${taskId}" (see desk_tasks).`);
+    if (!task) {
+      // Work started on the person's word has no task yet: a Rex Desk task is made for it, named after the last commit, so it has a
+      // name in the lists and the pull request has a place to point at. Nobody is asked "which task".
+      const subject = (await git(folder, ['log', '-1', '--format=%s']).catch(() => '')).trim();
+      const title = (subject || branch.split('/').pop().replace(/[-_]+/g, ' ')).slice(0, 200);
+      const project = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === path.resolve(repository.path).toLowerCase()), owner = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
+      const made = this.localTasks.create({ title, status: 'in_progress', description: `Work on branch ${branch}, made while publishing it.`, project: project?.slug || '', assignee: owner ? owner.id : '' }, { by: owner?.name || 'Rex Agent' });
+      task = { ...made, roomWork: { agentId, roomId, at: now() } }; this.store.put('task', task.id, task);
+    }
     const existing = this.store.list('run').find(item => item.adoptedFrom === folder && item.branch === branch);
     const target = targetBranch || existing?.targetBranch || repository.targetBranch || repository.baseBranch;
     const baseCommit = (await git(folder, ['merge-base', 'HEAD', `origin/${repository.baseBranch || target}`]).catch(() => git(folder, ['merge-base', 'HEAD', `origin/${target}`]))).trim();
