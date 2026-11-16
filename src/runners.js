@@ -83,6 +83,8 @@ export class ClaudeRunner {
   async start(prompt) {
     const { query } = this.sdk || await import('@anthropic-ai/claude-agent-sdk');
     const env = { ...subscriptionEnv(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
+    // Tools of the person's own MCP servers are listed by name and loaded only when needed, not all at the start of every chat.
+    if (!env.ENABLE_TOOL_SEARCH) env.ENABLE_TOOL_SEARCH = 'true';
     delete env.CLAUDECODE;
     const executable = resolveCommand('claude');
     const connections = existingMcpConnections(this.sourcePath, env.CLAUDE_CONFIG_DIR), allowedTools = new Set();

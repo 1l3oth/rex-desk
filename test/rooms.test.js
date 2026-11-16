@@ -542,3 +542,18 @@ test('a Codex model the plan cannot run is greyed out, the turn retries on a usa
   await waitFor(() => seen.length === 3);
   assert.equal(seen[2], 'gpt-terra', 'a model picked after the fallback is used');
 });
+
+test('a follow-up message does not repeat what the session already holds: lessons come once and again only when they change', async () => {
+  const { store, desk, turns, dara } = setup({ replies: ['One.', 'Two.', 'Three.', 'Four.'] });
+  const runIdOf = () => store.get('specialist', dara.id).runId, done = count => waitFor(() => turns.length === count && store.get('run', runIdOf())?.state === 'finished');
+  await desk.specialistTurn(dara.id, { prompt: 'First question.' }); await done(1);
+  desk.specialists.learn(dara.id, 'Always check totals.js before anything else.');
+  await desk.specialistTurn(dara.id, { prompt: 'Second question.' }); await done(2);
+  assert.match(turns[1].prompt, /Always check totals\.js/, 'a new lesson reaches the open session');
+  await desk.specialistTurn(dara.id, { prompt: 'Third question.' }); await done(3);
+  assert.doesNotMatch(turns[2].prompt, /Always check totals\.js|STOP what you are doing/, 'nothing the session already holds is pasted again');
+  assert.match(turns[2].prompt, /Third question\./);
+  desk.specialists.learn(dara.id, 'Never push without a yes.');
+  await desk.specialistTurn(dara.id, { prompt: 'Fourth question.' }); await done(4);
+  assert.match(turns[3].prompt, /Never push without a yes/, 'a changed lesson list is sent again');
+});

@@ -104,3 +104,13 @@ test('a background job does the task on its own (Haiku), so the agent answers at
     assert.ok(!heard.some(text => /render\.mjs|\*\*|Report:/.test(text)), 'the report itself is never read out');
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('a background job runs on Sonnet when the agent asks for it, and on Haiku by default', async () => {
+  const store = new Store(temporary('jobs-model')), desk = new Desk(store, { root: temporary('jobs-model-root'), runnerFactory: options => ({ async start() { options.event('agent-text', { text: 'ok' }); }, async interrupt() {} }) });
+  try {
+    const rex = await desk.startWebTask('hello');
+    await waitFor(() => store.get('run', rex.id).state === 'finished', 'the first turn');
+    assert.equal(store.get('run', desk.startHelper(rex.id, { task: 'Read the cart code and say what it does' }).jobId).model, 'haiku');
+    assert.equal(store.get('run', desk.startHelper(rex.id, { task: 'Read the cart code and say what it does', model: 'sonnet' }).jobId).model, 'sonnet');
+  } finally { await desk.close?.(); }
+});

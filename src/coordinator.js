@@ -292,13 +292,13 @@ export class Desk {
   // A background job for an agent (desk_background): a quick helper on Claude Haiku does one task in a run of its own, so the
   // agent answers the person at once and stays free to talk; they never wait for its steps. When it ends, its short result
   // is posted in the agent's chat (said out loud in Voice mode) and given to the agent with the person's next message.
-  startHelper(parentRunId, { task, title = '' }) {
+  startHelper(parentRunId, { task, title = '', model = 'haiku' }) {
     const parent = this.run(parentRunId), text = String(task || '').trim().slice(0, 6000);
     if (!text) throw new Error('Say what the job is.');
     const name = String(title || text).replace(/\s+/g, ' ').trim();
     const who = parent.roomAgent || parent.specialistId || (parent.main ? 'main' : '');
     const helperFor = who === 'main' || !who ? 'Rex Agent' : this.specialists.get(who)?.name || 'an agent';
-    const run = { id: id(), role: 'helper', parentRunId, helperFor, title: `Job · ${name.length > 60 ? `${name.slice(0, 60)}…` : name}`, provider: 'claude', model: 'haiku', effort: 'low',
+    const run = { id: id(), role: 'helper', parentRunId, helperFor, title: `Job · ${name.length > 60 ? `${name.slice(0, 60)}…` : name}`, provider: 'claude', model: model === 'sonnet' ? 'sonnet' : 'haiku', effort: model === 'sonnet' ? 'medium' : 'low',
       permissionMode: 'bypassPermissions', state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless',
       cwd: parent.worktree || parent.projectPath || parent.cwd || path.join(this.store.directory, 'coordinator'), projectPath: parent.projectPath || '', instructions: text };
     this.store.put('run', run.id, run);
@@ -677,7 +677,12 @@ export class Desk {
       const project = reopened ? this.projectOf(run) : '', workflow = project ? this.memory.workflowText(project) : '', workflowKey = workflow ? createHash('sha256').update(workflow).digest('hex').slice(0, 16) : '';
       const workflowUpdate = workflow && run.workflowSeen !== workflowKey ? `${workflow.replace(':\n', ' (updated):\n')}` : '';
       if (workflowKey && run.workflowSeen !== workflowKey) this.patchRun(runId, { workflowSeen: workflowKey });
-      const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, reopened && owner ? this.specialists.lessonsText(owner) : '', reopened && chat ? '(Reply like a teammate in a chat: short, plain, answer first; no code or long lists unless asked. When corrected, save the lesson with desk_learn.)' : '', reopened ? `(${FALSE_STOP_RULE})` : ''].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : [this.prompt(run), run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
+      const lessons = reopened && owner ? this.specialists.lessonsText(owner) : '', lessonsKey = lessons ? createHash('sha256').update(lessons).digest('hex').slice(0, 16) : '';
+      // The lessons and the stop note are already in the session's first prompt: a follow-up carries them only when they changed.
+      const lessonsUpdate = lessons && run.lessonsSeen !== lessonsKey ? lessons : '';
+      if (lessonsKey && run.lessonsSeen !== lessonsKey) this.patchRun(runId, { lessonsSeen: lessonsKey });
+      const styleReminder = reopened && chat ? '(Reply like a teammate in a chat: short, plain, answer first; no code or long lists unless asked. When corrected, save the lesson with desk_learn.)' : '';
+      const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, lessonsUpdate, styleReminder].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : [this.prompt(run), run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
       // The handoff is used up only by a turn that really ran: a turn that fails to start reads it next time.
       // An open Claude-app session starts with no message: it waits for the person to write, there or here.
       await runner.start(remoteOn ? '' : digest ? `${digest}
@@ -1000,15 +1005,14 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const agentId = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
     const name = agentId === 'main' ? 'Rex Agent' : agentId ? this.specialists.get(agentId)?.name || 'the agent' : run.title || 'the agent';
     const lines = this.store.events(runId, { visible: true, limit: 600 }).filter(event => ['human-message', 'message', 'agent-text'].includes(event.kind) && (event.text || event.message))
-      .map(event => `**${event.kind === 'human-message' ? 'The person' : name}** (${String(event.createdAt || '').slice(0, 16).replace('T', ' ')}): ${String(event.text || event.message).trim().slice(0, 3000)}`);
+      .map(event => `**${event.kind === 'human-message' ? 'The person' : name}** (${String(event.createdAt || '').slice(0, 16).replace('T', ' ')}): ${String(event.text || event.message).trim().slice(0, event.kind === 'human-message' ? 1500 : 700)}`);
     let recent = '';
-    for (const line of lines.reverse()) { if (recent.length + line.length > 24000) break; recent = `${line}\n\n${recent}`; }
+    for (const line of lines.reverse()) { if (recent.length + line.length > 9000) break; recent = `${line}\n\n${recent}`; }
     const task = run.taskId ? this.store.get('task', run.taskId) : null;
     const handoff = [`# Handoff for ${name}`, `Written ${now()} ${reason || 'when the person cleared the conversation (/clear)'}. Read it, then continue from here.`,
       note ? `## Your own handoff, written just before the fresh start\n${String(note).trim().slice(0, 12000)}` : '',
       task ? `## Task\n#${task.taskNumber || task.externalId} ${task.titleEn || task.title}${task.url ? `\n${task.url}` : ''}` : '',
       run.worktree ? `## Where the work is\nWorktree: ${run.worktree}${run.branch ? `\nBranch: ${run.branch}` : ''}` : '',
-      agentId && agentId !== 'main' ? `## What you learned\n${this.specialists.lessonsText(agentId) || 'Nothing saved yet.'}` : '',
       `## The conversation so far (oldest first, recent part)\n${recent || 'Nothing was said yet.'}`].filter(Boolean).join('\n\n');
     const directory = path.join(this.store.directory, 'handoffs'); mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `${runId}-${Date.now()}.md`); writeFileSync(file, handoff);
