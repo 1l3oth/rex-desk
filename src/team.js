@@ -27,7 +27,7 @@ export class Team {
   tasks(filter = () => true) { return this.store.list('team-task').filter(filter).sort((a, b) => a.createdAt.localeCompare(b.createdAt)); }
   get(managerId, taskId) {
     const key = String(taskId || '').toLowerCase();
-    const task = this.tasks(item => item.managerId === managerId).find(item => item.id === key || short(item.id) === key);
+    const task = this.tasks(item => item.managerId === managerId && !item.foreign).find(item => item.id === key || short(item.id) === key);
     if (!task) throw new Error('No such task of yours. See them with desk_team.');
     return task;
   }
@@ -36,7 +36,7 @@ export class Team {
   // Who the manager can give work to, and what each is doing for it.
   overview(runId) {
     const managerId = this.agentOf(runId); if (!managerId) throw new Error('Only an agent in a chat has a team.');
-    const mine = this.tasks(item => item.managerId === managerId);
+    const mine = this.tasks(item => item.managerId === managerId && !item.foreign);
     return {
       agents: this.store.list('specialist').filter(agent => agent.id !== 'main' && agent.kind !== 'main' && agent.id !== managerId).map(agent => {
         const run = agent.runId ? this.store.get('run', agent.runId) : null;
@@ -53,13 +53,39 @@ export class Team {
     if (worker.id === managerId) throw new Error('That is you. Do it yourself, or give it to another agent.');
     // A worker in the middle of a task from this agent does not hand work back up: that is how two agents end up waiting on each other.
     if (this.tasks(item => item.workerId === managerId && item.managerId === worker.id && open.has(item.state)).length) throw new Error(`${worker.name} gave you a task that is still open. Finish it, or ask with a line starting "NEED:".`);
-    if (this.tasks(item => item.managerId === managerId && open.has(item.state)).length >= MAX_OPEN_TASKS) throw new Error(`You already have ${MAX_OPEN_TASKS} tasks open. Wait for results, or cancel one.`);
+    if (this.tasks(item => item.managerId === managerId && !item.foreign && open.has(item.state)).length >= MAX_OPEN_TASKS) throw new Error(`You already have ${MAX_OPEN_TASKS} tasks open. Wait for results, or cancel one.`);
     const record = { id: crypto.randomUUID(), managerId, managerRunId: runId, workerId: worker.id, workerName: worker.name, title: clip(String(title || text).replace(/\s+/g, ' '), 80), text, state: 'queued', createdAt: now() };
+    // An agent that lives on the person's other computer: the task travels there, waits if that computer is off, and the result travels back.
+    if (this.desk.peers.isRemote(worker)) {
+      const device = this.desk.peers.deviceName(worker.node), on = this.desk.peers.online(worker.node);
+      this.store.put('team-task', record.id, { ...record, state: 'working', remote: worker.node, startedAt: now() });
+      this.send(worker.node, 'team-start', worker.id, { id: record.id, managerId, managerName: this.nameOf(managerId), managerNode: this.desk.peers.self.id, workerId: worker.id, workerName: worker.name, title: record.title, text, createdAt: record.createdAt });
+      return { id: short(record.id), agent: worker.name, state: 'working', note: on ? `${worker.name} works on ${device}; the task was sent there. End your reply; the result reaches you when it is done.` : `${worker.name} works on ${device}, which is off right now. The task waits and starts when that computer is back. Tell the person so, and end your reply.` };
+    }
     this.store.put('team-task', record.id, record);
     await this.startNext(worker.id);
     const state = this.store.get('team-task', record.id).state;
     return { id: short(record.id), agent: worker.name, state, note: state === 'working' ? `${worker.name} is on it. End your reply; the result reaches you when it is done.` : `${worker.name} is busy; this starts when it is free. End your reply; the result reaches you when it is done.` };
   }
+
+  // ---------- between the person's computers ----------
+  // A command for the other computer. It syncs with the shared data, so it arrives even when that computer was off.
+  send(node, action, agentId, input) { const id = crypto.randomUUID(); this.store.put('peercmd', id, { id, target: node, action, agentId, input, at: now(), done: false }); }
+  // What arrives here from the other computer (called by peers.runCommand).
+  async remote(action, input = {}) {
+    const task = this.store.get('team-task', String(input.id || ''));
+    if (action === 'team-start') {
+      if (task) return { id: task.id };
+      this.store.put('team-task', input.id, { id: input.id, managerId: input.managerId, managerName: input.managerName, managerNode: input.managerNode, workerId: input.workerId, workerName: input.workerName, title: clip(input.title, 80), text: String(input.text || '').slice(0, 8000), state: 'queued', foreign: true, createdAt: input.createdAt || now() });
+      await this.startNext(input.workerId); return { id: input.id };
+    }
+    if (!task) throw new Error('That task is not on this computer.');
+    if (action === 'team-result') { if (!open.has(task.state)) return {}; const next = { ...task, state: input.state, answer: clip(input.answer, 12000), question: clip(input.question, 2000), endedAt: now() }; this.store.put('team-task', task.id, next); this.tell(next); return {}; }
+    if (action === 'team-answer') { await this.carryOn(task, input.text); return {}; }
+    if (action === 'team-cancel') { await this.stopLocal(task); return {}; }
+    throw new Error(`Unknown team command ${action}.`);
+  }
+  managerName(task) { return task.managerName || this.nameOf(task.managerId); }
 
   // One task at a time for each worker: the oldest waiting one starts when the worker is free.
   async startNext(workerId) {
@@ -67,7 +93,7 @@ export class Team {
     const worker = this.store.get('specialist', workerId), run = worker?.runId ? this.store.get('run', worker.runId) : null;
     if (run && this.desk.live.has(run.id)) return;
     const next = this.tasks(item => item.workerId === workerId && item.state === 'queued')[0]; if (!next) return;
-    const manager = this.nameOf(next.managerId);
+    const manager = this.managerName(next);
     const prompt = `Task ${short(next.id)} from ${manager}, who is managing this work for the person: ${next.title}\n\n${next.text}\n\nDo it now. Your last reply of this turn goes back to ${manager} as the result, so end with what you did and what you found. If you cannot go on without an answer, end your reply with a line that starts with "NEED:" and your question; ${manager} answers it.`;
     this.store.put('team-task', next.id, { ...next, state: 'working', startedAt: now() });
     try {
@@ -95,7 +121,8 @@ export class Team {
     const task = this.store.get('team-task', taskId); if (!task) return;
     const next = { ...task, state, answer: clip(answer, 12000), question, endedAt: now() };
     this.store.put('team-task', taskId, next);
-    this.tell(next);
+    if (task.foreign) this.send(task.managerNode, 'team-result', task.workerId, { id: task.id, state, answer: next.answer, question });
+    else this.tell(next);
     if (state !== 'needs-manager') void this.startNext(task.workerId).catch(() => {});
   }
 
@@ -116,19 +143,30 @@ export class Team {
     const task = this.get(this.agentOf(runId), id), reply = String(text || '').trim().slice(0, 6000);
     if (task.state !== 'needs-manager') throw new Error(`That task is ${task.state}; it is not waiting for an answer.`);
     if (!reply) throw new Error('Say the answer.');
-    this.store.put('team-task', task.id, { ...task, state: 'working', question: '', startedAt: now() });
-    const prompt = `${this.nameOf(task.managerId)} answers your question on task ${short(task.id)} (${task.title}):\n${reply}\n\nCarry on with the task. Your last reply of this turn goes back as the result.`;
-    try { await this.desk.specialistTurn(task.workerId, { prompt, quiet: true }); } catch (error) { this.finish(task.id, 'failed', `It could not carry on: ${error.message}`); throw error; }
+    if (task.remote) { this.store.put('team-task', task.id, { ...task, state: 'working', question: '' }); this.send(task.remote, 'team-answer', task.workerId, { id: task.id, text: reply }); }
+    else await this.carryOn(task, reply);
     return { id: short(task.id), state: 'working' };
+  }
+  // The worker's side of an answer: it carries on with the task.
+  async carryOn(task, reply) {
+    this.store.put('team-task', task.id, { ...task, state: 'working', question: '', startedAt: now() });
+    const prompt = `${this.managerName(task)} answers your question on task ${short(task.id)} (${task.title}):\n${String(reply || '').slice(0, 6000)}\n\nCarry on with the task. Your last reply of this turn goes back as the result.`;
+    try { await this.desk.specialistTurn(task.workerId, { prompt, quiet: true }); } catch (error) { this.finish(task.id, 'failed', `It could not carry on: ${error.message}`); throw error; }
   }
 
   async cancel(runId, { id }) {
     const task = this.get(this.agentOf(runId), id);
     if (!open.has(task.state)) throw new Error(`That task already ended (${task.state}).`);
+    if (task.remote) { this.store.put('team-task', task.id, { ...task, state: 'canceled', endedAt: now() }); this.send(task.remote, 'team-cancel', task.workerId, { id: task.id }); }
+    else await this.stopLocal(task);
+    return { id: short(task.id), state: 'canceled' };
+  }
+  // The worker's side of a cancel: the task stops and the next waiting one starts.
+  async stopLocal(task) {
+    if (!open.has(task.state)) return;
     const wasWorking = task.state === 'working';
     this.store.put('team-task', task.id, { ...task, state: 'canceled', endedAt: now() });
     if (wasWorking && task.runId && this.desk.live.has(task.runId)) await this.desk.stop(task.runId).catch(() => {});
     void this.startNext(task.workerId).catch(() => {});
-    return { id: short(task.id), state: 'canceled' };
   }
 }

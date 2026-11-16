@@ -68,3 +68,31 @@ test('a worker that needs an answer asks its manager, carries on when answered, 
     await waitFor(() => idle(store, desk), 'everything to settle');
   } finally { await desk.shutdown?.(); store.close(); }
 });
+
+test('a task for an agent on the other computer travels there, runs, and its result comes back to the manager', async () => {
+  const home = setup(prompt => /ended: done/.test(prompt) ? 'QA is finished.' : 'Hello.');
+  const work = setup(prompt => /Task \w+ from Rex Agent/.test(prompt) ? 'Checked the login page on the work laptop: 3 tests pass.' : 'Hello.');
+  // What the shared data does between the two computers: a command made on one arrives on the other and runs there.
+  const carry = async (from, to) => { for (const command of from.store.list('peercmd')) if (command.target === to.store.nodeId && !to.store.get('peercmd', command.id)) { to.store.put('peercmd', command.id, command); await to.desk.peers.runCommand(to.store.get('peercmd', command.id)); } };
+  try {
+    assert.notEqual(home.store.nodeId, work.store.nodeId);
+    const qa = work.desk.specialists.create({ name: 'QA', purpose: 'Tests features' });
+    work.store.put('specialist', qa.id, { ...work.store.get('specialist', qa.id), node: work.store.nodeId });
+    home.store.put('specialist', qa.id, { ...work.store.get('specialist', qa.id) });
+    assert.ok(home.desk.peers.isRemote(home.store.get('specialist', qa.id)), 'on the home computer QA lives elsewhere');
+    const rex = await home.desk.startMain({ prompt: 'hi' });
+    await waitFor(() => home.store.get('run', rex.id).state === 'finished', 'the first turn');
+    const given = await home.desk.team.delegate(rex.id, { agent: 'QA', task: 'Check the login page.', title: 'Check login' });
+    assert.equal(given.state, 'working'); assert.match(given.note, /works on/);
+    assert.equal(home.turns.filter(turn => turn.run.specialistId === qa.id).length, 0, 'it does not run on the manager computer');
+    await carry(home, work);
+    await waitFor(() => work.desk.team.tasks()[0]?.state === 'done', 'the task on the work computer');
+    assert.match(work.turns.find(turn => turn.run.specialistId === qa.id).prompt, /Task \w+ from Rex Agent[\s\S]*Check the login page/);
+    assert.equal(work.desk.team.overview(work.store.get('specialist', qa.id).runId).tasks.length, 0, 'a task from the other computer is not shown as a task of an agent here');
+    await carry(work, home);
+    await waitFor(() => home.desk.team.tasks()[0].state === 'done', 'the result back home');
+    assert.match(home.desk.team.tasks()[0].answer, /3 tests pass/);
+    await waitFor(() => home.turns.some(turn => turn.run.id === rex.id && /that you gave QA \(Check login\) ended: done[\s\S]*3 tests pass/.test(turn.prompt)), 'the result handed to the manager');
+    await waitFor(() => idle(home.store, home.desk) && idle(work.store, work.desk), 'everything to settle');
+  } finally { await home.desk.shutdown?.(); home.store.close(); await work.desk.shutdown?.(); work.store.close(); }
+});

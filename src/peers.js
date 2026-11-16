@@ -224,6 +224,8 @@ export class Peers {
       if (command.action === 'say') result = await this.desk.specialistTurn(command.agentId, { prompt: (await this.unpackFiles(command.input)).slice(0, 8000) });
       else if (command.action === 'assign') result = await this.desk.assignTask({ specialistId: command.agentId, ...this.localTask(command.input) });
       else if (command.action === 'chat-stop') result = await this.desk.stop(command.runId);
+      // A team task, its result, an answer or a cancel, from an agent that manages work on the other computer.
+      else if (String(command.action).startsWith('team-')) result = await this.desk.team.remote(command.action, command.input);
       else if (command.action === 'answer') result = this.desk.answer(command.input?.interactionId, command.input?.answer || {});
       else if (command.action === 'chat-say') {
         // Written on another computer in this agent's personal chat: said to the agent while it works, or it picks the chat up again.
