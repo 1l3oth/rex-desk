@@ -182,10 +182,10 @@ function renderItems(items, run, live) {
     out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
       : item.role === 'human' ? bubble({ mine: true, name: t('You'), time: hhmm(item.at), voice: item.voice, html: markdown(item.text), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="${t`Tokens this reply used`}">${esc(tokenText(item.tokens))}</div>` : '') })
-      : item.role === 'cleared' ? `<div class="cleared"><span>${t`Chat cleared · ${esc(item.text)}`}</span>${item.earlier ? `<button type="button" class="btn small quiet" data-action="show-earlier">${t`Show earlier messages`}</button>` : ''}</div>`
+      : item.role === 'cleared' ? `<div class="cleared"><span>${t`Chat cleared · ${esc(item.text)}`}${item.tokens ? ` · <span class="tok">${esc(typeof item.tokens === 'object' ? tokenText(item.tokens) : typeof item.tokens === 'number' ? `${kilo(item.tokens)} ${t('tokens')}` : String(item.tokens))}</span>` : ''}</span>${item.earlier ? `<button type="button" class="btn small quiet" data-action="show-earlier">${t`Show earlier messages`}</button>` : ''}</div>`
       : item.role === 'subagent' ? subagentHtml(item, live)
       : item.role === 'error' ? `<div class="card bad"><h4>${t`Needs attention`}</h4><div class="md">${markdown(item.text)}</div>${/usage limit|limit reached|not signed in|not logged in|log ?in again|sign ?in again|unauthorized|401/i.test(item.text) ? `<button type="button" class="btn small primary" data-action="agent-signin" data-provider="${esc(run.provider || 'claude')}">${t`Sign in again`}</button>` : ''}</div>`
-      : note(`${esc(item.text)} · ${hhmm(item.at)}`));
+      : note(`${esc(item.text)}${item.tokens ? ` · <span class="tok">${esc(typeof item.tokens === 'object' ? tokenText(item.tokens) : typeof item.tokens === 'number' ? `${kilo(item.tokens)} ${t('tokens')}` : String(item.tokens))}</span>` : ''} · ${hhmm(item.at)}`));
   }
   flush(true);
   return out.join('');
@@ -220,8 +220,9 @@ function transcript(all, runId = '') {
   const cut = all.map(event => event.kind).lastIndexOf('chat-cleared');
   const events = cut >= 0 && !ui.showEarlier?.[runId] ? all.slice(cut) : all;
   const items = [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event])), subs = new Map();
+  let lastSwitch = null;
   for (const event of events) {
-    if (event.kind === 'chat-cleared') { items.push({ role: 'cleared', text: event.text, at: event.createdAt, earlier: cut > 0 && !ui.showEarlier?.[runId] }); continue; }
+    if (event.kind === 'chat-cleared') { const item = { role: 'cleared', text: event.text, at: event.createdAt, earlier: cut > 0 && !ui.showEarlier?.[runId], tokens: event.usage || event.tokens || null }; items.push(item); lastSwitch = item; continue; }
     // A sub-agent shows as one card: what it was asked, its steps, and what it reported back.
     if (event.kind === 'agent-tool' && event.tool === 'Agent') { const sub = { role: 'subagent', id: event.id, input: event.input || {}, steps: [], text: '', done: false, failed: false, at: event.createdAt }; subs.set(event.id, sub); if (!subs.has(event.parent)) items.push(sub); else subs.get(event.parent).steps.push({ tool: t('Agent'), input: { description: sub.input.description } }); continue; }
     if (event.parent && subs.has(event.parent)) { const sub = subs.get(event.parent); if (event.kind === 'agent-tool') sub.steps.push(event); else if (event.kind === 'subagent-text') sub.text = event.text; continue; }
@@ -234,13 +235,20 @@ function transcript(all, runId = '') {
     else if (event.kind === 'turn-start') items.push({ role: 'status', text: t`${event.resumed ? t('Resumed') : t('Started')} with ${provider(event.provider)}`, at: event.createdAt });
     else if (event.kind === 'loop-check') items.push({ role: 'status', text: event.text || t('Loop check'), at: event.createdAt });
     // The tokens of a reply show under the reply itself, like in a group chat.
-    else if (event.kind === 'agent-result' && typeof event.usage === 'object' && tokenText(event.usage) && lastReply(items)) lastReply(items).tokens = event.usage;
-    else if (event.kind === 'agent-result') items.push({ role: 'status', text: t`Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${typeof event.usage === 'object' && tokenText(event.usage) ? ` · ${tokenText(event.usage)}` : ''}${event.cost && event.paidByApi === true ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
+    else if (event.kind === 'agent-result' && typeof event.usage === 'object' && tokenText(event.usage) && lastReply(items)) {
+      lastReply(items).tokens = event.usage;
+      if (lastSwitch && !lastSwitch.tokens && event.usage.input) { lastSwitch.tokens = event.usage; lastSwitch = null; }
+    }
+    else if (event.kind === 'agent-result') {
+      items.push({ role: 'status', text: t`Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${typeof event.usage === 'object' && tokenText(event.usage) ? ` · ${tokenText(event.usage)}` : ''}${event.cost && event.paidByApi === true ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
+      if (lastSwitch && !lastSwitch.tokens && typeof event.usage === 'object' && event.usage.input) { lastSwitch.tokens = event.usage; lastSwitch = null; }
+    }
     else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
     else if (event.kind === 'agent-tool' && ['desk_ask', 'desk_message', 'desk_elicit'].includes(event.tool)) continue; // shown as chat messages already
     else if (event.kind === 'agent-tool-result') continue;
     else if (event.kind === 'agent-tool') items.push({ role: 'tool', id: event.id, output: results.get(event.id), tool: event.tool, input: event.input, change: event.change, failed: event.failed, text: event.text, at: event.createdAt });
     else if (event.kind === 'error') items.push({ role: 'error', text: event.text || event.message || t('The run needs attention.'), at: event.createdAt });
+    else if (['provider-switch', 'account-switched'].includes(event.kind)) { const item = { role: 'status', text: event.text || event.message || event.kind.replaceAll('-', ' '), at: event.createdAt, tokens: event.usage || event.tokens || null }; items.push(item); lastSwitch = item; }
     else if (event.visible) items.push({ role: 'status', text: event.text || event.message || event.kind.replaceAll('-', ' '), at: event.createdAt });
   }
   return items;
@@ -1209,6 +1217,11 @@ function toolsHtml(id) {
 // ---------- a sign-in an agent needs: open a terminal running the command, sign in, say done ----------
 function signInCard(item) {
   const run = runById(item.runId), opened = ui.signInOpened?.has(item.id);
+  if (item.request?.purpose === 'run') return `<div class="card ask scard" data-signin="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>${t`Your agent needs you to run this · ${esc(runTitle(run))}`}</div>
+    <div class="qtext md">${markdown(String(item.title || ''))}</div>
+    <div class="scmd"><code>${esc(item.request?.command || '')}</code></div>
+    <p class="fnote">${t`No terminal needed: Run opens a window on this computer with this command running. Do what it asks, then press Done.`}</p>
+    <div class="row"><button type="button" class="send-btn wide" data-signin-open data-run>${opened ? t('Run again') : t('Run')}</button><button type="button" class="btn small ${opened ? 'primary' : ''}" data-signin-done>${t`Done`}</button><button type="button" class="btn small" data-signin-skip>${t`Not now`}</button></div></div>`;
   return `<div class="card ask scard" data-signin="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>${t`Sign-in needed · ${esc(runTitle(run))}`}</div>
     <div class="qtext md">${markdown(String(item.title || ''))}</div>
     <div class="scmd"><code>${esc(item.request?.command || '')}</code></div>
@@ -1219,8 +1232,8 @@ document.addEventListener('click', async event => {
   const card = event.target.closest?.('[data-signin]'); if (!card) return;
   const id = card.dataset.signin;
   try {
-    if (event.target.closest('[data-signin-open]')) { await api(`/interactions/${id}/terminal`, { method: 'POST', data: {} }); (ui.signInOpened ||= new Set()).add(id); toast(t('Terminal opened. Sign in there, then press "I\'m signed in".')); renderAll(); }
-    else if (event.target.closest('[data-signin-done]')) { await api(`/interactions/${id}/answer`, { method: 'POST', data: { action: 'accept', content: {} } }); toast(t('Thanks. The agent checks the sign-in and goes on.')); await refresh(); }
+    if (event.target.closest('[data-signin-open]')) { await api(`/interactions/${id}/terminal`, { method: 'POST', data: {} }); (ui.signInOpened ||= new Set()).add(id); toast(card.querySelector('[data-signin-open]').hasAttribute('data-run') ? t('Running. When it is finished, press Done.') : t('Terminal opened. Sign in there, then press "I\'m signed in".')); renderAll(); }
+    else if (event.target.closest('[data-signin-done]')) { await api(`/interactions/${id}/answer`, { method: 'POST', data: { action: 'accept', content: {} } }); toast(t('Thanks. The agent checks it and goes on.')); await refresh(); }
     else if (event.target.closest('[data-signin-skip]')) { await api(`/interactions/${id}/answer`, { method: 'POST', data: { action: 'decline' } }); await refresh(); }
   } catch (error) { toast(error.message, true); }
 });
