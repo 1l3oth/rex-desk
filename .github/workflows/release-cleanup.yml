@@ -1,0 +1,39 @@
+# Deletes old installers from the downloads bucket, keeping the newest versions (and any version a channel still points to).
+# Run it by hand from the Actions tab. "Desktop installers" also does this after every release.
+name: Release cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "How many of the newest versions to keep"
+        type: string
+        default: "3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-publish-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Delete old releases from the bucket
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_S3_SECRET_ACCESS_KEY }}
+          RELEASE_S3_BUCKET: ${{ vars.RELEASE_S3_BUCKET }}
+          RELEASE_S3_ENDPOINT: ${{ vars.RELEASE_S3_ENDPOINT }}
+          RELEASE_S3_REGION: ${{ vars.RELEASE_S3_REGION }}
+          RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
+          KEEP: ${{ inputs.keep }}
+        run: node scripts/release-desktop.mjs --prune-only --keep "$KEEP"

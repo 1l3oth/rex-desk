@@ -51,3 +51,11 @@ test('a release is refused without exactly one Windows installer, with an unknow
   assert.throws(() => stage({ channel: 'nightly' }), /Channel must be one of/);
   assert.throws(() => stage({ privateKey: generateKeyPairSync('ed25519').privateKey }), /not signed by the Rex Desk release key/);
 });
+
+test('old versions are deleted from the bucket, keeping the newest three and any version a channel names', async () => {
+  const { versionsToDelete } = await import('../scripts/release-desktop.mjs');
+  assert.deepEqual(versionsToDelete(['0.0.9', '0.0.10', '0.0.44', '0.0.45', '0.0.2', '0.0.45'], 3), ['0.0.9', '0.0.2']);
+  assert.deepEqual(versionsToDelete(['0.0.40', '0.0.41', '0.0.42', '0.0.43', '0.0.44'], 3, ['0.0.40']), ['0.0.41']);
+  assert.deepEqual(versionsToDelete(['0.0.1', 'notes', 'beta'], 3), []);
+  assert.deepEqual(versionsToDelete(['0.0.1', '0.0.2'], 0), ['0.0.1'], 'never empties the bucket');
+});

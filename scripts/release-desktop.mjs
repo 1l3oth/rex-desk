@@ -3,7 +3,9 @@
 //   releases/<version>/<file>   every installer of one version, written once and never changed
 //   <channel>/latest.json       the small pointer installed apps read; replacing it is what ships an update
 //
-// Usage: node scripts/release-desktop.mjs --files <folder> [--channel stable|beta] [--notes "What changed"] [--out <folder>] [--upload] [--force]
+// Usage: node scripts/release-desktop.mjs --files <folder> [--channel stable|beta] [--notes "What changed"] [--out <folder>] [--upload] [--force] [--keep <n>]
+// After an upload only the newest <n> versions stay in the bucket (3 unless --keep says otherwise); older installers are deleted. A version a channel pointer names is never deleted.
+// Alone, `node scripts/release-desktop.mjs --prune-only [--keep <n>]` does just the cleanup.
 // Without --upload it only stages and signs, so the result can be inspected. The GitHub workflow "Desktop installers" runs it with --upload.
 import path from 'node:path';
 import os from 'node:os';
@@ -48,12 +50,19 @@ export function stageRelease({ files, out, channel = 'stable', notes = '', baseU
   return manifest;
 }
 
+// Which version folders to delete: everything but the newest `keep`, and never one a channel pointer still names.
+export function versionsToDelete(listed, keep = 3, pinned = []) {
+  const versions = [...new Set(listed)].filter(version => /^\d+\.\d+\.\d+$/.test(version)).sort((a, b) => newer(a, b) ? -1 : newer(b, a) ? 1 : 0);
+  const kept = new Set([...versions.slice(0, Math.max(1, keep)), ...pinned]);
+  return versions.filter(version => !kept.has(version));
+}
+
 const published = async (baseUrl, channel) => {
   const response = await fetch(`${baseUrl}/${channel}/latest.json?t=${Date.now()}`, { signal: AbortSignal.timeout(20000) }).catch(() => null);
   return response?.ok ? response.json() : null;
 };
 
-function upload(out, manifest) {
+function awsFor() {
   const bucket = process.env.RELEASE_S3_BUCKET;
   if (!bucket) throw new Error('Set RELEASE_S3_BUCKET (and AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY; RELEASE_S3_ENDPOINT for R2) to upload.');
   const endpoint = process.env.RELEASE_S3_ENDPOINT ? ['--endpoint-url', process.env.RELEASE_S3_ENDPOINT] : [];
@@ -63,10 +72,25 @@ function upload(out, manifest) {
   writeFileSync(settings, ['[default]', 's3 =', '  multipart_threshold = 4GB', ''].join('\n'));
   const env = { ...process.env, AWS_CONFIG_FILE: settings, AWS_DEFAULT_REGION: process.env.RELEASE_S3_REGION || process.env.AWS_DEFAULT_REGION || 'auto',
     AWS_REQUEST_CHECKSUM_CALCULATION: 'when_required', AWS_RESPONSE_CHECKSUM_VALIDATION: 'when_required' };
-  const aws = args => execFileSync('aws', ['s3', ...args, ...endpoint], { stdio: 'inherit', env });
+  const aws = (args, capture = false) => execFileSync('aws', ['s3', ...args, ...endpoint], { stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit', env, encoding: 'utf8' });
+  return { aws, bucket };
+}
+
+function upload(out, manifest) {
+  const { aws, bucket } = awsFor();
   // Installers first, pointer last: an app that reads the pointer always finds the file it names.
   aws(['cp', path.join(out, 'releases', manifest.version), `s3://${bucket}/releases/${manifest.version}`, '--recursive', '--cache-control', 'public, max-age=31536000, immutable']);
   aws(['cp', path.join(out, manifest.channel, 'latest.json'), `s3://${bucket}/${manifest.channel}/latest.json`, '--content-type', 'application/json', '--cache-control', 'no-cache']);
+}
+
+// Deletes the installers of old versions from the bucket, keeping the newest `keep`.
+async function prune(baseUrl, keep) {
+  const { aws, bucket } = awsFor();
+  const listed = aws(['ls', `s3://${bucket}/releases/`], true).split(/\r?\n/).map(line => line.match(/PRE\s+(\S+?)\/?\s*$/)?.[1]).filter(Boolean);
+  const pinned = (await Promise.all(channels.map(channel => published(baseUrl, channel)))).map(item => item?.version).filter(Boolean);
+  const gone = versionsToDelete(listed, keep, pinned);
+  for (const version of gone) { console.log(`Deleting old release ${version}`); aws(['rm', `s3://${bucket}/releases/${version}/`, '--recursive']); }
+  console.log(gone.length ? `Kept the newest ${keep}; deleted ${gone.length} older version(s).` : `Nothing to delete: ${new Set(listed).size} version(s) in the bucket.`);
 }
 
 // Downloads the release back the way an installed app does and checks it, so a wrong bucket, domain or key fails here and not on someone's computer.
@@ -81,9 +105,10 @@ async function confirm(baseUrl, manifest) {
 
 async function main() {
   const args = process.argv.slice(2), value = name => args.includes(name) ? args[args.indexOf(name) + 1] || '' : '';
+  const keep = Number(value('--keep')) || 3, baseUrl = (process.env.RELEASE_BASE_URL || downloadsUrl).replace(/\/+$/, '');
+  if (args.includes('--prune-only')) return prune(baseUrl, keep);
   const files = value('--files'), channel = value('--channel') || 'stable';
   if (!files || !statSync(files).isDirectory()) throw new Error('Pass --files <folder holding the built installers>.');
-  const baseUrl = (process.env.RELEASE_BASE_URL || downloadsUrl).replace(/\/+$/, '');
   const pem = process.env.REX_RELEASE_KEY_PEM || readFileSync(process.env.REX_RELEASE_KEY || path.join(os.homedir(), '.rex-desk', 'release-signing-key.pem'), 'utf8');
   const out = value('--out') || mkdtempSync(path.join(os.tmpdir(), 'rex-desk-release-'));
   const manifest = stageRelease({ files, out, channel, notes: value('--notes'), baseUrl, privateKey: createPrivateKey(pem) });
@@ -93,6 +118,7 @@ async function main() {
   if (current && !newer(manifest.version, current.version) && !args.includes('--force')) throw new Error(`${channel} already has ${current.version}; ${manifest.version} is not newer, so no installed app would take it. Raise the version.`);
   upload(out, manifest);
   await confirm(baseUrl, manifest);
+  await prune(baseUrl, keep).catch(error => console.log(`Cleanup skipped (the release itself is published): ${error.message}`));
   console.log(`Published Rex Desk ${manifest.version} to ${baseUrl}/${channel}/latest.json. Installed apps on ${channel} update within six hours, or at Settings → Updates → Check now.`);
 }
 
