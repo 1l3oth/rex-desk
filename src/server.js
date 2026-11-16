@@ -54,7 +54,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const startedCode = process.env.REX_DESK_VERSION ? '' : readCode();
 function readCode() { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } }
 function codeVersion() { return startedCode; }
-const mime = { '.webmanifest': 'application/manifest+json', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.json': 'application/json; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+const mime = { '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.json': 'application/json; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 const json = (response, code, data) => { response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(data)); };
 // Recorded speech for transcription arrives as raw WAV bytes, not JSON.
 async function rawBody(request, limit = 20 * 1024 * 1024) {
@@ -1009,6 +1009,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });
       const editorFile = url.pathname.match(/^\/vendor\/codemirror\/((?:lib|mode\/[a-z0-9-]+|addon\/[a-z]+)\/[a-z0-9-]+\.(?:js|css))$/);
       if (editorFile) return serveFile(request, response, path.join(root, 'node_modules', 'codemirror', ...editorFile[1].split('/')), { cache: 'public, max-age=604800' });
+      // The Khmer themes' fonts (Kantumruy Pro and Moul, SIL Open Font License) ship in public/fonts.
+      if (/^\/fonts\/[a-z0-9-]+\.woff2$/.test(url.pathname) && existsSync(path.join(root, 'public', url.pathname.slice(1)))) return serveFile(request, response, path.join(root, 'public', url.pathname.slice(1)), { cache: 'public, max-age=604800' });
       // A page script or style added after this server started is served by its name too, so a server still waiting for
       // agents to finish before it restarts does not leave the page stuck on a missing file.
       // The Settings tours: their steps in public/guides, and the voice of each step in public/guides/voice.
