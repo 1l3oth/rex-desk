@@ -44,7 +44,7 @@ import { tursoSignIn, provisionDatabase } from './turso-setup.js';
 import { followDataMove, followMemoryMove, planDataMove, moveMedia, folderStatus, memoryFolder } from './folders.js';
 import { readdirSync } from 'node:fs';
 import { knowledgeGraph } from './knowledge.js';
-import { accountSignIn, accountDatabase, accountMe, accountReachable } from './rexdesk-account.js';
+import { accountSignIn, accountPasswordSignIn, accountDatabase, accountMe, accountReachable } from './rexdesk-account.js';
 import { bridge } from './local-ai.js';
 
 const exec = promisify(execFile);
@@ -297,20 +297,26 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       try { tursoFound = await provisionDatabase(await pending.token, { create: false }); return json(response, 200, { found: true }); }
       finally { if (tursoPending === pending) tursoPending = null; }
     }
+    // After the Rex Desk account signed in (browser or password): find its backup and which workspace it opens.
+    const accountSigned = async signedIn => {
+      // Ask for the database only when the account already has one: signing in must not make a cloud database by itself.
+      const me = requireAccount ? await accountMe(signedIn.token, accountOptions).catch(() => null) : null;
+      const database = !requireAccount || me?.sync?.on ? await accountDatabase(signedIn.token, accountOptions) : null;
+      accountFound = { session: signedIn, database, workspace: await workspaceFor(signedIn.user?.email || '', database) };
+      return json(response, 200, requireAccount ? { found: Boolean(database), ...accountView() } : { found: true, email: signedIn.user?.email || '' });
+    };
     // The same, with a Rex Desk account: the account service knows which database is this person's and hands over a key.
-    if (url.pathname === '/api/auth/account-start') { accountPending?.cancel(); accountFound = null; accountPending = await accountSignIn(accountOptions); return json(response, 200, { url: accountPending.url }); }
+    if (url.pathname === '/api/auth/account-start') { accountPending?.cancel(); accountFound = null; accountPending = await accountSignIn({ ...accountOptions, provider: input.provider }); return json(response, 200, { url: accountPending.url }); }
     if (url.pathname === '/api/auth/account-finish') {
       if (!accountPending) throw new Error('Start the Rex Desk sign-in first.');
       const pending = accountPending;
-      try {
-        const signedIn = await pending.session;
-        // Ask for the database only when the account already has one: signing in must not make a cloud database by itself.
-        const me = requireAccount ? await accountMe(signedIn.token, accountOptions).catch(() => null) : null;
-        const database = !requireAccount || me?.sync?.on ? await accountDatabase(signedIn.token, accountOptions) : null;
-        accountFound = { session: signedIn, database, workspace: await workspaceFor(signedIn.user?.email || '', database) };
-        return json(response, 200, requireAccount ? { found: Boolean(database), ...accountView() } : { found: true, email: signedIn.user?.email || '' });
-      }
+      try { return await accountSigned(await pending.session); }
       finally { if (accountPending === pending) accountPending = null; }
+    }
+    // The same, with the email and password typed on the sign-in screen: no browser.
+    if (url.pathname === '/api/auth/account-password') {
+      accountPending?.cancel(); accountPending = null; accountFound = null;
+      return accountSigned(await accountPasswordSignIn(input.email, input.password, accountOptions).catch(slow));
     }
     if (url.pathname === '/api/auth/account-forget') { accountPending?.cancel(); accountPending = null; accountFound = null; return json(response, 200, { ok: true }); }
     if (url.pathname === '/api/auth/cloud' && input.account) { if (!accountFound?.database) throw new Error('Sign in with Rex Desk first.'); input.url = accountFound.database.url; input.authToken = accountFound.database.authToken; }
@@ -1003,7 +1009,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/glass.css': 'glass.css', '/rex-core.js': 'rex-core.js', '/chat-palette.js': 'chat-palette.js', '/chat-split.js': 'chat-split.js', '/themes.css': 'themes.css', '/chat-glass.js': 'chat-glass.js', '/ai-logos.js': 'ai-logos.js', '/chat-tour-ai.js': 'chat-tour-ai.js', '/chat-local-ai.js': 'chat-local-ai.js', '/win-bar.js': 'win-bar.js', '/chat-graph.js': 'chat-graph.js', '/graph-worker.js': 'graph-worker.js', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/toast.js': 'toast.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/glass.css': 'glass.css', '/rex-core.js': 'rex-core.js', '/chat-palette.js': 'chat-palette.js', '/chat-split.js': 'chat-split.js', '/themes.css': 'themes.css', '/chat-glass.js': 'chat-glass.js', '/ai-logos.js': 'ai-logos.js', '/chat-tour-ai.js': 'chat-tour-ai.js', '/chat-local-ai.js': 'chat-local-ai.js', '/win-bar.js': 'win-bar.js', '/chat-graph.js': 'chat-graph.js', '/graph-worker.js': 'graph-worker.js', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
       // three.js ships from the installed package; the page loads no remote scripts.
       const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js', '/vendor/driver/driver.js.mjs': 'driver.js/dist/driver.js.mjs', '/vendor/driver/driver.css': 'driver.js/dist/driver.css' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });

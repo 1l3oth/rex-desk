@@ -29,6 +29,15 @@ function fakeAccounts() {
       const made = `session-${service.sessions.size + 1}`; service.sessions.add(made);
       return reply(200, { token: made, expiresAt: new Date(Date.now() + 60 * 86400000).toISOString(), user: { id: 'u1', email: 'person@example.com', name: 'Test Person', image: null } });
     }
+    // Email and password typed in the app: Better Auth's own sign-in, which wants to know where the call comes from.
+    if (route === 'POST /api/auth/sign-in/email') {
+      if (options.headers?.origin !== API) return reply(403, { message: 'Missing or null Origin', code: 'MISSING_OR_NULL_ORIGIN' });
+      const { email, password } = JSON.parse(options.body);
+      if (email === 'new@example.com') return reply(403, { message: 'Email not verified', code: 'EMAIL_NOT_VERIFIED' });
+      if (email !== 'person@example.com' || password !== 'right password 1') return reply(401, { message: 'Invalid email or password', code: 'INVALID_EMAIL_OR_PASSWORD' });
+      const made = `session-${service.sessions.size + 1}`; service.sessions.add(made);
+      return reply(200, { redirect: false, token: made, user: { id: 'u1', email: 'person@example.com', name: 'Test Person', image: null } });
+    }
     if (route === 'GET /health') { if (service.down) throw new TypeError('fetch failed'); return reply(200, { ok: true }); }
     if (!service.sessions.has(token)) return reply(401, { error: { code: 'signed_out', message: 'Your sign-in ended. Sign in to Rex Desk again.' } });
     if (route === 'GET /v1/me') return reply(200, { user: { id: 'u1', email: 'person@example.com' }, plan: 'free', sync: { on: service.keys > 0 } });
@@ -268,4 +277,30 @@ test('on a new computer the Rex Desk sign-in finds the backup, and its passphras
     assert.equal(opened.status, 200); assert.equal(opened.body.current.email, 'person@example.com');
     assert.equal((await visitor('/api/state')).body.database.account.email, 'person@example.com');
   } finally { await second.close(); }
+});
+
+test('the email and password sign in on the sign-in screen itself, with no browser, and a wrong one says so plainly', async () => {
+  const service = fakeAccounts(), turso = fakeTurso();
+  const app = await accountApp(temporary('door-password'), { cloudClientFactory: turso.clientFactory, accountFetcher: service.fetcher, accountApi: API, requireAccount: true });
+  const person = browser(app);
+  try {
+    const wrong = await person('/api/auth/account-password', { method: 'POST', data: { email: 'person@example.com', password: 'not it' } });
+    assert.equal(wrong.status, 400); assert.match(wrong.body.error, /do not match a Rex Desk account/);
+    const unconfirmed = await person('/api/auth/account-password', { method: 'POST', data: { email: 'new@example.com', password: 'right password 1' } });
+    assert.match(unconfirmed.body.error, /Confirm your email first/);
+    assert.equal((await person('/api/auth')).body.account, null, 'a failed try signs nobody in');
+    const found = await person('/api/auth/account-password', { method: 'POST', data: { email: ' person@example.com ', password: 'right password 1' } });
+    assert.equal(found.status, 200); assert.equal(found.body.email, 'person@example.com'); assert.equal(found.body.workspace, 'new');
+    assert.equal(service.keys, 0, 'signing in did not make a cloud database');
+    const opened = await person('/api/auth/create', { method: 'POST', data: { passphrase } });
+    assert.equal(opened.status, 200); assert.equal(opened.body.current.email, 'person@example.com');
+  } finally { await app.close(); }
+});
+
+test('the Google and GitHub buttons each name their own sign-in, and nothing else is passed on', async () => {
+  for (const [provider, expected] of [['google', 'google'], ['github', 'github'], ['', null], ['evil', null]]) {
+    const started = await accountSignIn({ base: API, provider, timeoutMs: 1000 });
+    assert.equal(new URL(started.url).searchParams.get('provider'), expected);
+    started.cancel(); await started.session.catch(() => {});
+  }
 });

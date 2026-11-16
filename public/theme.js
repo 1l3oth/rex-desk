@@ -2,9 +2,14 @@
   const system = matchMedia('(prefers-color-scheme: dark)');
   let preference = 'system';
   try { preference = localStorage.getItem('rex-desk-theme') || 'system'; } catch {}
-  if (!['light', 'dark', 'system'].includes(preference)) preference = 'system';
+  // The Khmer themes (khmer.css) sit on a light or dark base, so everything made for light or dark still fits them.
+  const khmer = { angkor: 'light', lacquer: 'dark', tonle: 'dark' };
+  const known = ['light', 'dark', 'system', ...Object.keys(khmer)];
+  if (!known.includes(preference)) preference = 'system';
   const apply = () => {
-    document.documentElement.dataset.theme = preference === 'system' ? system.matches ? 'dark' : 'light' : preference;
+    const root = document.documentElement;
+    root.dataset.theme = khmer[preference] || (preference === 'system' ? system.matches ? 'dark' : 'light' : preference);
+    if (khmer[preference]) root.dataset.palette = preference; else delete root.dataset.palette;
     window.dispatchEvent(new Event('rex-theme'));
   };
   // The colour theme (Midnight, Cyberpunk, Gojo, Crayon, Forest, Sunset), on top of light or dark.
@@ -17,7 +22,7 @@
   document.documentElement.dataset.size = size;
   window.rexSize = { get value() { return document.documentElement.dataset.size; }, set(value) { document.documentElement.dataset.size = value; try { localStorage.setItem('rex-desk-size', value); } catch {} } };
   window.rexTheme = { get preference() { return preference; }, set(value) {
-    if (!['light', 'dark', 'system'].includes(value)) return;
+    if (!known.includes(value)) return;
     preference = value;
     try { localStorage.setItem('rex-desk-theme', value); } catch {}
     apply();

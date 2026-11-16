@@ -121,8 +121,10 @@ code,pre{font-family:var(--mono);font-size:12px}
 .dialog h2{margin:0;font-size:16px}.dialog label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
 .dialog input[type=text]{padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
 .dialog .pick{display:flex;gap:8px;align-items:center;color:var(--ink);flex-direction:row;font-size:13px}
-#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:10px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:30}
-#toast.on{opacity:1}#toast.bad{background:var(--bad);color:#fff}
+/* The notice sits in the top layer (see toast.js) and also on the highest layer, so nothing covers or dims it. */
+#toast{position:fixed;inset:auto auto 24px 50%;margin:0;transform:translateX(-50%);max-width:min(560px,calc(100vw - 32px));overflow:visible;background:var(--ink);color:var(--bg);border:1px solid color-mix(in srgb,var(--ink) 70%,var(--bg));padding:9px 16px;border-radius:10px;font-size:13px;font-weight:500;line-height:1.4;box-shadow:0 10px 30px rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .2s;z-index:2147483000}
+#toast.on{opacity:1}#toast.bad{background:var(--bad);color:#fff;border-color:var(--bad)}
+#toast[popover]:not(:popover-open){display:none}#toast::backdrop{display:none}
 
 @media (max-width:760px){.chat-shell{grid-template-columns:1fr}.rail{display:none}.chat-shell.show-rail .rail{display:flex}.chat-shell.show-rail .stage{display:none}}
 
@@ -1614,6 +1616,12 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .si-ways{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
 .si-ways span{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;background:var(--bg);color:var(--muted);font-size:12.5px}
 .si-big{min-height:44px;font-size:15px;font-weight:600}
+.si-account-form{margin-bottom:2px}
+.si-label-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;width:100%}
+.si-forgot{color:var(--accent);font-size:12.5px;font-weight:500;text-decoration:none}.si-forgot:hover,.si-forgot:focus-visible{text-decoration:underline}
+.si-or{display:flex;align-items:center;gap:10px;margin:14px 0;color:var(--muted);font-size:12px}.si-or::before,.si-or::after{content:"";flex:1;height:1px;background:var(--line)}
+.si-socials{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.si-social{display:flex;align-items:center;justify-content:center;gap:8px;min-height:42px;font-weight:600}.si-social svg{flex:none}
 .si-center{display:block;margin:10px auto 0;font-size:13px}
 .si-foot{margin:14px 0 0;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;text-align:center}
 .si-foot a{color:var(--accent);font-weight:600}.si-foot a:hover,.si-foot a:focus-visible{text-decoration:underline}
@@ -1721,6 +1729,10 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .st-tip svg{flex:none;margin-top:2px;color:var(--accent)}.st-tip span{flex:1}.st-tip b{font-weight:600;margin-right:4px}.st-tip .btn{flex:none;white-space:nowrap}
 .st-guide-btn{display:flex;align-items:center;gap:7px;margin:0 0 12px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer;width:100%}
 .st-guide-btn:hover{border-color:var(--accent)}.st-guide-btn svg{color:var(--accent)}
+.st-guide{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;background:rgba(0,0,0,.6);padding:20px}
+.st-guide-card{width:min(1100px,100%);background:var(--panel,#16181d);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.45)}
+.st-guide-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px}.st-guide-head .st-x{position:static}
+.st-guide video{display:block;width:100%;max-height:78vh;background:#000}
 /* Settings feature tours (Driver.js): the card that explains the circled control, in Khmer with English under it. */
 .driver-active .driver-active-element{outline:3px solid #f5b83d;outline-offset:4px;border-radius:12px;animation:rt-ring 1.6s ease-in-out infinite}
 @keyframes rt-ring{0%,100%{box-shadow:0 0 0 0 rgba(245,184,61,.45)}50%{box-shadow:0 0 0 10px rgba(245,184,61,0)}}

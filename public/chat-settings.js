@@ -424,3 +424,4 @@ ${database.configured && !hosted ? '<p class="muted">Pictures and files stay on 
   };
   draw(); back.querySelector('.st-nav button.on')?.focus();
 }
+

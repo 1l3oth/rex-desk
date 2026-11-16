@@ -23,7 +23,8 @@ async function call(fetcher, base, method, pathname, { token, body } = {}) {
 
 // Opens a one-time address on this computer for the browser to come back to. The code it brings is worth nothing without
 // the secret made here (the verifier), which never leaves this computer except to trade the code for the sign-in.
-export function accountSignIn({ timeoutMs = 270000, base = ACCOUNT_API, fetcher = fetch } = {}) {
+// provider: 'google' or 'github' goes straight to that sign-in; without it the service's page offers every way.
+export function accountSignIn({ timeoutMs = 270000, base = ACCOUNT_API, fetcher = fetch, provider = '' } = {}) {
   const state = randomBytes(16).toString('hex'), verifier = randomBytes(32).toString('base64url');
   const challenge = createHash('sha256').update(verifier).digest('base64url');
   let finish, fail; const result = new Promise((resolve, reject) => { finish = resolve; fail = reject; }); result.catch(() => {});
@@ -39,11 +40,37 @@ export function accountSignIn({ timeoutMs = 270000, base = ACCOUNT_API, fetcher 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => {
-      const url = `${base}/desktop/start?${new URLSearchParams({ port: String(server.address().port), state, challenge })}`;
+      const url = `${base}/desktop/start?${new URLSearchParams({ port: String(server.address().port), state, challenge, ...(['google', 'github'].includes(provider) ? { provider } : {}) })}`;
       // session: { token, expiresAt, user: { id, email, name, image } }
       resolve({ url, session: result, cancel: () => { fail(new Error('The Rex Desk sign-in was cancelled.')); } });
     });
   });
+}
+
+// Email and password typed in the app itself, so the browser is only needed for Google or GitHub. The account service
+// is the same one the browser uses (Better Auth); it asks every caller where it comes from, so this names the service's
+// own address. The password goes straight to the service over HTTPS and is never kept on this computer.
+const SESSION_DAYS = 60;
+export async function accountPasswordSignIn(email, password, { base = ACCOUNT_API, fetcher = fetch, now = Date.now() } = {}) {
+  email = String(email || '').trim(); password = String(password || '');
+  if (!email || !password) throw new Error('Enter your email and password.');
+  let response;
+  try {
+    response = await fetcher(`${base}/api/auth/sign-in/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: new URL(base).origin },
+      body: JSON.stringify({ email, password, rememberMe: true }), signal: AbortSignal.timeout(20000) });
+  } catch { throw new Error('Rex Desk could not reach its account service. Check the internet connection and try again.'); }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const code = String(data.code || data.error?.code || '');
+    const message = code === 'INVALID_EMAIL_OR_PASSWORD' || response.status === 401 ? 'That email and password do not match a Rex Desk account.'
+      : code === 'EMAIL_NOT_VERIFIED' ? 'Confirm your email first. We sent a new link to your inbox; open it, then sign in here again.'
+      : response.status === 429 ? 'Too many tries. Wait a minute, then try again.'
+      : data.message || data.error?.message || `The Rex Desk account service answered ${response.status}.`;
+    throw Object.assign(new Error(message), { status: response.status, code });
+  }
+  if (!data.token || !data.user) throw new Error('The Rex Desk account service did not finish the sign-in. Try again.');
+  const user = data.user;
+  return { token: data.token, expiresAt: new Date(now + SESSION_DAYS * 86400000).toISOString(), user: { id: user.id, email: user.email, name: user.name || '', image: user.image ?? null } };
 }
 
 // The person's own cloud database: made the first time, and a fresh key every time. { url, authToken, expiresAt, database, created }
