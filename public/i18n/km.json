@@ -1961,5 +1961,11 @@
  "Run again": "ដំណើរការម្តងទៀត",
  "Running. When it is finished, press Done.": "កំពុងដំណើរការ។ ពេលវាចប់ សូមចុច «រួចរាល់»។",
  "Thanks. The agent checks it and goes on.": "អរគុណ។ ភ្នាក់ងារពិនិត្យវា ហើយបន្តទៅមុខ។",
- "Your agent needs you to run this · {0}": "ភ្នាក់ងាររបស់អ្នកត្រូវការឱ្យអ្នកដំណើរការនេះ · {0}"
+ "Your agent needs you to run this · {0}": "ភ្នាក់ងាររបស់អ្នកត្រូវការឱ្យអ្នកដំណើរការនេះ · {0}",
+ "Let other agents reach yours (A2A)": "ឱ្យភ្នាក់ងារផ្សេងទៀតទាក់ទងភ្នាក់ងាររបស់អ្នក (A2A)",
+ "Agents from other apps and other computers can send a task to one of your agents with this address and key. Every message shows in that agent's chat.": "ភ្នាក់ងារពីកម្មវិធី និងកុំព្យូទ័រផ្សេងទៀត អាចផ្ញើការងារទៅភ្នាក់ងារមួយរបស់អ្នក ដោយប្រើអាសយដ្ឋាន និងសោនេះ។ សារនីមួយៗបង្ហាញក្នុងការជជែករបស់ភ្នាក់ងារនោះ។",
+ "Copy key": "ចម្លងសោ",
+ "Make a new key": "បង្កើតសោថ្មី",
+ "Off. No other agent can reach yours this way.": "បិទ។ គ្មានភ្នាក់ងារផ្សេងអាចទាក់ទងភ្នាក់ងាររបស់អ្នកតាមវិធីនេះទេ។",
+ "Turn on": "បើក"
 }

@@ -29,6 +29,7 @@ import { kindOf, mimeOf } from './files.js';
 import { speak, NEURAL_VOICES } from './voice-out.js';
 import { readyLines } from '../public/voice-phrases.js';
 import { setupPrompt } from './setup-prompt.js';
+import { handleA2aHttp, a2aSettings, setA2a } from './a2a.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
 import { weeklyReport } from './report.js';
@@ -384,6 +385,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const remoteSocket = !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress) || (/\.ts\.net$/i.test(hostname) && !publicMcp);
       if (!localHost && !publicMcp && !remoteSocket) return json(response, 403, { error: 'Use the local dashboard address.' });
       const url = new URL(request.url, `http://${host}`);
+      // A2A: other agents reach this desk with the A2A key alone (it is off until the person turns it on), here or over Tailscale.
+      if (session?.desk && await handleA2aHttp(session.desk, request, response, url, request => body(request, 1024 * 1024))) return;
       let peerSignedIn = false;
       if (remoteSocket) {
         const desk = session?.desk;
@@ -705,6 +708,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const repository = store.config().repositories.find(item => item.id === run?.repositoryId);
         const messages = run ? store.events(run.id, { visible: true }).filter(event => event.kind === 'message') : [];
         return json(response, 200, { prompt: handoffPrompt({ task, run, repository, messages }) });
+      }
+      // Settings, Connect another AI: turn A2A on or off, or make a new key. The addresses are this computer's and its Tailscale ones.
+      if (url.pathname === '/api/a2a') {
+        const input = request.method === 'POST' ? await body(request) : null;
+        const settings = input ? setA2a(store, { enabled: input.enabled, newKey: Boolean(input.newKey) }) : a2aSettings(store);
+        const addresses = [`http://127.0.0.1:${desk.port}`, ...desk.peers.addresses(desk.port)].map(base => `${base}/.well-known/agent-card.json`);
+        return json(response, 200, { enabled: settings.enabled, token: settings.enabled ? settings.token : '', addresses });
       }
       if (url.pathname === '/api/setup-prompt' && request.method === 'POST') {
         const input = await body(request);

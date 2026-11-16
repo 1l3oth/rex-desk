@@ -260,10 +260,17 @@ ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay
       <h3>${t`App updates`}</h3><p>${esc(update.supported ? t`This is Rex Desk ${[update.current, update.stage].filter(Boolean).join(' ')}. ` : '')}${esc(update.ready ? t`Version ${update.available?.version} is downloaded and checked.` : update.available ? t`Version ${update.available.version} is available.` : update.supported ? (update.checkedAt ? t('Rex Desk is up to date.') : t('Not checked yet.')) : t('This copy runs from source code and updates with Git.'))}</p>${update.error ? `<p class="error-text">${esc(update.error)}</p>` : ''}<div class="st-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${state.extra.checking ? 'disabled' : ''}>${state.extra.checking ? t('Checking…') : t('Check now')}</button>` : ''}${update.ready ? `<button type="button" class="btn primary" data-action="update-install">${t`Install and restart`}</button>` : ''}</div>`; },
     connect: () => `<h2>${t`Connect another AI`}</h2><p class="muted">${t`Give this to another Claude Code window (or another assistant) so it can read your tasks and ask you questions through Rex Desk. No key is needed on this computer.`}</p>
       ${tip('connect', t('Use this when you already have a Claude Code window open and want it to see your tasks and ask you things here.'))}
-      <button type="button" class="btn" data-st-prompt>${t`Show the setup text`}</button>${state.extra.prompt ? `<pre class="st-prompt">${esc(state.extra.prompt)}</pre><button type="button" class="btn small" data-st-copy-prompt>${t`Copy`}</button>` : ''}`,
+      <button type="button" class="btn" data-st-prompt>${t`Show the setup text`}</button>${state.extra.prompt ? `<pre class="st-prompt">${esc(state.extra.prompt)}</pre><button type="button" class="btn small" data-st-copy-prompt>${t`Copy`}</button>` : ''}
+      <h3 class="st-sub">${t`Let other agents reach yours (A2A)`}</h3><p class="muted">${t`Agents from other apps and other computers can send a task to one of your agents with this address and key. Every message shows in that agent's chat.`}</p>
+      ${!state.extra.a2a ? `<p class="muted small">${t`Loading…`}</p>` : state.extra.a2a.enabled ? `<div class="prow"><b>${t`On`}</b><button type="button" class="btn small" data-st-a2a="off">${t`Turn off`}</button></div>
+        <label class="small muted">${t`Address`}</label><pre class="st-prompt">${esc(state.extra.a2a.addresses.join('\n'))}</pre>
+        <div class="prow"><button type="button" class="btn small" data-st-a2a="copy">${t`Copy key`}</button><button type="button" class="btn small" data-st-a2a="newkey">${t`Make a new key`}</button></div>`
+      : `<div class="prow"><span class="muted">${t`Off. No other agent can reach yours this way.`}</span><button type="button" class="btn small" data-st-a2a="on">${t`Turn on`}</button></div>`}`,
   };
   const saves = new Set(['general', 'agents', 'projects', 'sources', 'jev', 'schedule', 'signins']);
   const draw = () => {
+    // Connect another AI shows whether A2A is on: read once when the section opens.
+    if (state.section === 'connect' && !state.extra.a2a && !state.extra.a2aLoading) { state.extra.a2aLoading = true; void api('/a2a').then(data => { state.extra.a2a = data; draw(); }).catch(() => { state.extra.a2a = { enabled: false, addresses: [] }; draw(); }); }
     // A redraw of the same section keeps the place the person scrolled to (ticking a box used to jump back to the top).
     const keep = back.dataset.section === state.section ? back.querySelector('.st-panel')?.scrollTop || 0 : 0;
     queueMicrotask(() => { back.dataset.section = state.section; const panel = back.querySelector('.st-panel'); if (panel && keep) panel.scrollTop = keep; });
@@ -367,6 +374,9 @@ ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay
         finally { await refresh(); draw(); }
         return;
       }
+      const a2aAct = target.closest('[data-st-a2a]')?.dataset.stA2a;
+      if (a2aAct === 'copy') { await navigator.clipboard.writeText(state.extra.a2a?.token || ''); toast(t('Copied.')); return; }
+      if (a2aAct) { state.extra.a2a = await api('/a2a', { method: 'POST', data: a2aAct === 'newkey' ? { enabled: true, newKey: true } : { enabled: a2aAct === 'on' } }); draw(); return; }
       if (target.closest('[data-st-prompt]')) { state.extra.prompt = (await api('/setup-prompt', { method: 'POST', data: { target: 'claude' } })).prompt; draw(); return; }
       if (target.closest('[data-st-copy-prompt]')) { await navigator.clipboard.writeText(state.extra.prompt); toast(t('Copied.')); return; }
       if (target.closest('[data-st-signin-add]')) { readSignins(); state.signins.push({ id: crypto.randomUUID(), site: '', username: '', password: '' }); draw(); back.querySelector(`[name="ta.${state.signins.length - 1}.site"]`)?.focus(); return; }
