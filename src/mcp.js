@@ -32,8 +32,15 @@ export function createMcp(desk, scope) {
   const tool = (name, description, schema, handler, readOnly = false) => server.registerTool(name,
     { description, inputSchema: schema, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, openWorldHint: false } },
     async (input, extra) => {
+      // Every tool that waits for the person (a question, a file to fill in, a sign-in, an approval) keeps the call alive: a
+      // client that sent a progress token hears from it every 25 seconds. Claude Code ends a tool call that is silent for
+      // 5 minutes, which closed the file and sign-in cards while the person was still typing in them.
+      const token = extra?._meta?.progressToken;
+      let ticks = 0;
+      const alive = token === undefined ? null : setInterval(() => void extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: ++ticks, message: 'Waiting for the human in Rex Desk' } }).catch(() => {}), desk.keepAliveMs || 25000);
       try { return reply(await handler(input, extra)); }
       catch (error) { return { ...reply({ error: error.message }), isError: true }; }
+      finally { clearInterval(alive); }
     });
   tool('desk_connect', 'Register an existing local or cloud AI conversation so it can send dashboard messages and ask questions. This does not start another agent.',
     { name: z.string().min(1).max(100), provider: z.enum(['claude', 'external']).default('external') }, input => {
@@ -100,16 +107,12 @@ export function createMcp(desk, scope) {
     { runId, message: z.string().min(1), kind: z.enum(['question', 'approval']).default('question'),
       fields: z.record(z.string(), z.object({ type: z.enum(['string', 'boolean', 'number', 'integer']), title: z.string().optional(), enum: z.array(z.string()).optional(),
         options: z.array(z.object({ label: z.string().min(1).max(120), description: z.string().max(200).optional() })).max(6).optional().describe('Suggested answers shown as buttons. Give 2 to 4 whenever you can guess likely ones; the person can pick one or type their own.'), multiSelect: z.boolean().optional() })).optional(),
-      required: z.array(z.string()).optional(), wait: z.boolean().default(true) }, async (input, extra) => {
+      required: z.array(z.string()).optional(), wait: z.boolean().default(true) }, async input => {
       requireEnglish(input.message, 'this question');
       const request = { requestedSchema: askSchema(input) };
       const interaction = desk.beginAsk(resolveRun(input.runId), { kind: input.kind, title: input.message, request, method: 'desk' });
       if (!input.wait) return { questionId: interaction.id, state: 'pending' };
-      // Clients that sent a progress token get a keep-alive every 25 seconds, so a question can wait for the human as long as it takes.
-      const token = extra?._meta?.progressToken;
-      let ticks = 0;
-      const alive = token === undefined ? null : setInterval(() => void extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: ++ticks, message: 'Waiting for the human in Rex Desk' } }).catch(() => {}), 25000);
-      try { return await interaction.promise; } finally { clearInterval(alive); }
+      return interaction.promise;
     });
   tool('desk_attachment', 'Save an image or video attached to your issue (a screenshot, comment image, or attachment URL from desk_task) into this run’s folder, and return the local path to read it from.',
     { runId, url: z.string().min(8) }, async input => {
