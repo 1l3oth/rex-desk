@@ -27,7 +27,7 @@ test('a Codex run switched to Claude Code is handed the recorded chat', async ()
   assert.match(run.instructions, /Go on\./);
   const events = store.events('run-1', { visible: true });
   assert.ok(events.some(item => item.kind === 'message' && /PostHeader/.test(item.text)) && events.some(item => item.kind === 'human-message' && /keep tests green/.test(item.text)), 'the history is still on the run');
-  assert.ok(events.some(item => item.kind === 'provider-switch' && item.to === 'claude'));
+  assert.ok(events.some(item => item.kind === 'provider-switch' && item.to === 'claude' && item.usage?.input > 0));
 });
 
 test('resuming a Claude Code run keeps the session and adds no handover', async () => {
