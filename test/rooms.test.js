@@ -518,6 +518,7 @@ test('Rex Agent in a group chat gets its own instructions, not the old issue dis
   assert.match(text, /You are the main agent of Rex Desk/);
   assert.ok(!/selected IDs/.test(text));
   assert.match(text, /look anywhere on this computer/, 'Rex Agent is told it may read outside its own folder');
+  assert.match(text, /the person did not stop you/, 'a step Claude Code cancelled by itself is not taken for the person pressing Stop');
   assert.match(desk.prompt({ id: 'main-chat', main: true, prompt: 'hi' }), /look anywhere on this computer/);
   assert.equal(mainLooks({ main: true }, 'Read'), true); assert.equal(mainLooks({ roomAgent: 'main' }, 'Grep'), true);
   assert.equal(mainLooks({ main: true }, 'Bash'), false, 'commands still ask in the modes that ask');
