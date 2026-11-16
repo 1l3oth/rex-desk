@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store, defaults, now } from '../src/store.js';
@@ -341,7 +341,8 @@ test('work in a worktree of a project Rex Desk was never told about, and with no
   desk.personAskedToPublish = () => true;
   const result = await desk.requestPublish('room-session', { worktree: tree });
   assert.equal(result.url, 'https://github.com/x/y/pull/8');
-  assert.deepEqual(store.config().repositories.map(item => path.resolve(item.path)), [path.resolve(repository)], 'the project was added, not refused');
+  const same = folder => realpathSync.native(path.resolve(folder));
+  assert.deepEqual(store.config().repositories.map(item => same(item.path)), [same(repository)], 'the project was added, not refused');
   const adopted = store.list('run').find(item => item.adoptedFrom === path.resolve(tree)), task = store.get('task', adopted.taskId);
   assert.equal(task.title, 'fix: the grid group count is never negative', 'the task is named after the last commit');
   assert.equal(task.local, true); assert.equal(task.roomWork.agentId, 'bot');
