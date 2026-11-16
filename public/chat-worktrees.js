@@ -138,6 +138,6 @@ function scmBlock(ctx, item) {
 }
 export function worktreeSideHtml(ctx, list) {
   const body = list.length ? list.map(item => scmBlock(ctx, item)).join('')
-    : `<p class="muted small wt-side-empty">${t`No worktree in this chat yet. When an agent makes one or shows one here, it is listed in this tab with its tasks and changes.`}</p>`;
+    : `<div class="side-empty">${WORKTREE_ICON}<p>${t`No worktree in this chat yet. When an agent makes one or shows one here, it is listed in this tab with its tasks and changes.`}</p></div>`;
   return `<div class="side-body wt-side" id="side-body">${body}<div class="prow"><button class="btn small" data-open="worktrees" data-id="">${t`All worktrees`}</button></div></div>`;
 }

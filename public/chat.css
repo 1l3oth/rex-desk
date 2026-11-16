@@ -1861,3 +1861,13 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 
 .subagent.flash{outline:2px solid var(--accent);outline-offset:2px}
 .sa-list .subagent{margin:6px 0}
+
+/* Side panel tabs: one line each, the row scrolls sideways instead of wrapping, the close button stays put. */
+.side-head.tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;gap:2px;padding:8px 10px;align-items:center}
+.side-head.tabs::-webkit-scrollbar{display:none}
+.side-head.tabs .tab{flex:none;white-space:nowrap;padding:6px 9px;line-height:1.3}
+.side-head.tabs .side-x{position:sticky;right:0;margin-left:auto;background:var(--panel)}
+/* Empty side tabs: a quiet centred note with a picture, not a loose paragraph. */
+.side-empty{font-family:var(--sans);display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;margin:28px 18px;padding:22px 16px;border:1px dashed var(--line);border-radius:14px;color:var(--muted)}
+.side-empty svg{width:34px;height:34px;color:var(--faint,var(--muted));opacity:.8}
+.side-empty p{margin:0;font-size:13px;line-height:1.55;max-width:30ch}

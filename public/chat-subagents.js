@@ -22,7 +22,7 @@ export function subagentsFromEvents(events, extra = {}) {
 // The body of the Sub-agents tab: newest first, kept as long as the chat's history is.
 export function subagentsPanel(subs, ctx, { live = () => false, jump = false } = {}) {
   const { esc, markdown, ui } = ctx;
-  if (!subs.length) return `<div class="side-body"><p class="muted">${t`No sub-agents yet. When an agent starts one, it is listed here.`}</p></div>`;
+  if (!subs.length) return `<div class="side-body"><div class="side-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="3"/><circle cx="5.5" cy="17" r="2.5"/><circle cx="18.5" cy="17" r="2.5"/><path d="M10.5 9.6 7 14.6M13.5 9.6 17 14.6"/></svg><p>${t`No sub-agents yet. When an agent starts one, it is listed here.`}</p></div></div>`;
   const sorted = [...subs].sort((left, right) => String(right.at).localeCompare(String(left.at)));
   return `<div class="side-body sa-list">${sorted.map(item => subagentHtml(item, live(item), { esc, markdown, openSubs: ui.openSubs, jump })).join('')}</div>`;
 }
