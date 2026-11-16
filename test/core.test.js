@@ -346,6 +346,23 @@ test('work in a worktree of a project Rex Desk was never told about, and with no
   assert.equal(task.title, 'fix: the grid group count is never negative', 'the task is named after the last commit');
   assert.equal(task.local, true); assert.equal(task.roomWork.agentId, 'bot');
   await assert.rejects(desk.adoptRoomWork('room-session', { worktree: tree, taskId: 'nope' }), /No task "nope"/, 'a task id that does not exist is still refused');
+  // A second worktree of the same project (same agent, same room) gets its own task, not the first worktree's.
+  const tree2 = path.join(directory, 'flow-library-wt', 'second-thing');
+  await git(repository, ['worktree', 'add', '-q', '-b', 'fix/second-thing', tree2, 'HEAD']);
+  writeFileSync(path.join(tree2, 'second.txt'), 'two\n'); await git(tree2, ['add', '.']); await git(tree2, ['commit', '-m', 'fix: the second thing']);
+  const second = store.get('run', await desk.adoptRoomWork('room-session', { worktree: tree2 }));
+  assert.notEqual(second.taskId, adopted.taskId, 'the second worktree is not tied to the first one\'s task');
+  assert.equal(store.get('task', second.taskId).title, 'fix: the second thing');
+  // The same worktree again finds its own task and makes no new one.
+  const again = store.get('run', await desk.adoptRoomWork('room-session', { worktree: tree2 }));
+  assert.equal(again.taskId, second.taskId);
+  // A refused call changes nothing: a bad task id on a project that is not added yet does not add it.
+  const bare = new Store(temporary('room-new-bare')); bare.saveConfig({ ...defaults, repositories: [] });
+  const other = new Desk(bare, { root: temporary('room-new-bare-root') });
+  bare.put('run', 'room-session', { id: 'room-session', role: 'specialist', specialistId: 'bot', roomAgent: 'bot', roomOf: 'room-1', state: 'running', createdAt: now() });
+  await assert.rejects(other.adoptRoomWork('room-session', { worktree: tree, taskId: 'nope' }), /No task "nope"/);
+  assert.equal(bare.config().repositories.length, 0, 'the project was not added by a refused call');
+  bare.close();
   store.close();
 });
 

@@ -7,7 +7,7 @@ import { Desk } from '../src/coordinator.js';
 
 test('any agent can add a project folder, so a project agent never has to send the person to Settings', async () => {
   const added = [];
-  const desk = { authorize: (...args) => Desk.prototype.authorize.apply({}, args), addProject: async folder => { added.push(folder); return { added: true }; } };
+  const desk = { authorize: (...args) => Desk.prototype.authorize.apply({}, args), store: { get: () => null }, addProject: async (folder, options) => { added.push(options); return { added: true }; } };
   for (const role of ['specialist', 'coordinator', 'worker']) {
     const server = createMcp(desk, { role, runId: 'run-1' }), client = new Client({ name: 'test', version: '1' });
     const [here, there] = InMemoryTransport.createLinkedPair();
@@ -17,4 +17,6 @@ test('any agent can add a project folder, so a project agent never has to send t
     await client.close();
   }
   assert.equal(added.length, 3);
+  assert.deepEqual(added.map(item => item.change), [false, true, false], 'only the main agent may change the branches of a project that is already there');
+  assert.deepEqual(added.map(item => item.by), ['an agent', 'main agent', 'an agent'], 'the log names who added it');
 });

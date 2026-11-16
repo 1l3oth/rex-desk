@@ -464,19 +464,20 @@ export class Desk {
     void this.drain(); return this.run(run.id);
   }
   // The main agent adds a project folder the person named: it becomes a source repository in Settings and a project in memory, so it can get its own agent.
-  async addProject(folder, { baseBranch = '', targetBranch = '' } = {}) {
+  // by: who asked (the event log names them); change: false adds a new project only and never changes the branches of one that is already there.
+  async addProject(folder, { baseBranch = '', targetBranch = '', by = 'main agent', change = true } = {}) {
     const found = await inspectRepository(path.resolve(String(folder || '')));
     const config = this.store.config(), same = item => path.resolve(item.path).toLowerCase() === found.path.toLowerCase();
     let repository = config.repositories.find(same), added = false;
     if (!repository) {
       const base = baseBranch || found.preferredBranch || 'develop';
       repository = this.store.saveConfig({ ...this.store.publicConfig(), repositories: [...config.repositories, { name: found.name, path: found.path, baseBranch: base, targetBranch: targetBranch || base }] }).repositories.find(same);
-      this.store.event('', 'repository-added', { name: repository.name, path: repository.path, by: 'main agent' }, true); added = true;
-    } else if ((baseBranch && baseBranch !== repository.baseBranch) || (targetBranch && targetBranch !== repository.targetBranch)) {
+      this.store.event('', 'repository-added', { name: repository.name, path: repository.path, by }, true); added = true;
+    } else if (change && ((baseBranch && baseBranch !== repository.baseBranch) || (targetBranch && targetBranch !== repository.targetBranch))) {
       // Calling it again with branches the person chose updates the repository that is already there.
       const next = { ...repository, baseBranch: baseBranch || repository.baseBranch, targetBranch: targetBranch || baseBranch || repository.targetBranch };
       repository = this.store.saveConfig({ ...this.store.publicConfig(), repositories: config.repositories.map(item => same(item) ? next : item) }).repositories.find(same);
-      this.store.event('', 'repository-branches-changed', { name: repository.name, baseBranch: repository.baseBranch, targetBranch: repository.targetBranch, by: 'main agent' }, true);
+      this.store.event('', 'repository-branches-changed', { name: repository.name, baseBranch: repository.baseBranch, targetBranch: repository.targetBranch, by }, true);
     }
     const known = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === found.path.toLowerCase());
     if (!known) { const previous = this.memory.state(); this.memory.scan({ roots: [...new Set([...(previous.roots || []), found.path])] }); }
@@ -1576,6 +1577,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   async adoptRoomWork(runId, { worktree, taskId = '', targetBranch = '' } = {}) {
     const session = this.run(runId), agentId = session.roomAgent || session.specialistId || '';
     if (!worktree) throw new Error('This chat has no Rex Desk run. Pass worktree: the folder of the git worktree you worked in.');
+    // A task id that does not exist is refused before anything else is done (adding the project below would be a side effect of a refused call).
+    if (taskId && !this.store.get('task', taskId)) throw new Error(`No task "${taskId}" (see desk_tasks).`);
     const folder = path.resolve(worktree); if (!existsSync(folder)) throw new Error(`${folder} does not exist.`);
     const branch = (await git(folder, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
     if (!branch || branch === 'HEAD') throw new Error(`${folder} is not on a branch. Check out the work branch first.`);
@@ -1588,12 +1591,12 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       const gitFolder = path.resolve(folder, (await git(folder, ['rev-parse', '--git-common-dir'])).trim());
       const checkout = path.basename(gitFolder).toLowerCase() === '.git' ? path.dirname(gitFolder) : '';
       if (!checkout) throw new Error(`${folder} belongs to a bare git folder (${gitFolder}), so Rex Desk cannot tell which project it is. Tell the person.`);
-      await this.addProject(checkout);
+      await this.addProject(checkout, { by: (agentId && agentId !== 'main' ? this.store.get('specialist', agentId)?.name : '') || 'Rex Agent', change: false });
       repository = known();
       if (!repository) throw new Error(`${folder} is a worktree of ${checkout}, which Rex Desk could not add as a project.`);
     }
     const roomId = session.roomTurn?.roomId || session.roomOf || '';
-    let task = taskId ? this.store.get('task', taskId) : this.store.list('task').filter(item => item.roomWork?.agentId === agentId && (!roomId || item.roomWork.roomId === roomId)).sort((left, right) => String(right.roomWork.at).localeCompare(String(left.roomWork.at)))[0];
+    let task = taskId ? this.store.get('task', taskId) : this.store.list('task').filter(item => item.roomWork?.agentId === agentId && (!roomId || item.roomWork.roomId === roomId) && (!item.roomWork.branch || item.roomWork.branch === branch)).sort((left, right) => String(right.roomWork.at).localeCompare(String(left.roomWork.at)))[0];
     if (!task && taskId) throw new Error(`No task "${taskId}" (see desk_tasks).`);
     if (!task) {
       // Work started on the person's word has no task yet: a Rex Desk task is made for it, named after the last commit, so it has a
@@ -1602,7 +1605,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       const title = (subject || branch.split('/').pop().replace(/[-_]+/g, ' ')).slice(0, 200);
       const project = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === path.resolve(repository.path).toLowerCase()), owner = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
       const made = this.localTasks.create({ title, status: 'in_progress', description: `Work on branch ${branch}, made while publishing it.`, project: project?.slug || '', assignee: owner ? owner.id : '' }, { by: owner?.name || 'Rex Agent' });
-      task = { ...made, roomWork: { agentId, roomId, at: now() } }; this.store.put('task', task.id, task);
+      task = { ...made, roomWork: { agentId, roomId, at: now(), branch } }; this.store.put('task', task.id, task);
     }
     const existing = this.store.list('run').find(item => item.adoptedFrom === folder && item.branch === branch);
     const target = targetBranch || existing?.targetBranch || repository.targetBranch || repository.baseBranch;
