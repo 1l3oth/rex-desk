@@ -41,6 +41,7 @@ import { TrackerQuery } from './query.js';
 import { branchName, branchNameFromCli, isMostlyEnglish, sentenceCase } from './naming.js';
 import { seedFlowWorktree, runtimeProfile } from './flow-runtime.js';
 import { assessRisk, automaticPrAllowed } from './risk.js';
+import { pullLiveCheckout } from './live-checkout.js';
 import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from './processes.js';
 
 const exec = promisify(execFile);
@@ -1540,7 +1541,9 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       const pushed = { url: '', target: plan.target, head: plan.target, direct: true, commits: plan.commits.length, fingerprint: plan.fingerprint, createdAt: now() };
       this.patchRun(runId, { state: 'published', targetBranch: plan.target, pullRequests: [...this.pullRequests(run), pushed] });
       this.message(runId, `Pushed ${plan.commits.length} commit${plan.commits.length === 1 ? '' : 's'} straight to ${plan.target}, without a pull request.`);
-      return { pushed: true, target: plan.target, commits: plan.commits.length };
+      const live = await pullLiveCheckout({ root: this.root, repositoryPath: this.repositoryFor(run)?.path, target: plan.target });
+      if (live) this.message(runId, live);
+      return { pushed: true, target: plan.target, commits: plan.commits.length, ...(live ? { liveCheckout: live } : {}) };
     }
     const head = plan.rebuild ? await this.rebuildForTarget(run, plan) : { branch: run.branch, worktree: run.worktree };
     try {
