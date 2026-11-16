@@ -1,3 +1,4 @@
+import { doing } from './stall-watch.js';
 import { createClient } from '@libsql/client/web';
 import { backup } from 'node:sqlite';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -113,6 +114,7 @@ export class TursoSync {
     if (part === 'files') this.files.forget(['data/']);
   }
   sendPart(part) {
+    doing(`cloud sync: uploading ${part}`);
     this.store.transaction(() => {
       if (part === 'chats') for (const row of this.store.db.prepare('SELECT * FROM events ORDER BY sequence').all()) this.event(row);
       for (const kind of TursoSync.PART_KINDS[part]) for (const item of this.store.list(kind)) this.record(kind, item.id, item);
@@ -198,6 +200,7 @@ export class TursoSync {
     return this.status();
   }
   seed() {
+    doing('cloud sync: uploading everything');
     this.store.transaction(() => {
       for (const row of this.store.db.prepare('SELECT * FROM records').all()) this.record(row.kind, row.id, JSON.parse(row.value));
       for (const row of this.store.db.prepare('SELECT * FROM events ORDER BY sequence').all()) this.event(row);
@@ -227,6 +230,7 @@ export class TursoSync {
   // does not fetch the whole history every time. What is kept out of the cloud (Store.isPrivate) is never deleted here,
   // because the cloud never had it. This computer's own name, links and read positions (peers/main) stay as they are.
   async pullLatest({ live = new Set() } = {}) {
+    doing('cloud sync: catching up at start');
     await this.flush();
     if (this.state !== 'connected' || this.status().pending) return { pulled: false, reason: this.error || 'Local changes are still uploading.' };
     const remote = await this.cloudRecords();
@@ -347,6 +351,7 @@ export class TursoSync {
     return this.flushing;
   }
   async verify({ repaired = false } = {}) {
+    doing('cloud sync: checking the cloud copy');
     await this.flush();
     if (this.state !== 'connected') throw new Error('Turso is offline. Pending writes are safe in the local outbox.');
     // The question is whether everything on this computer is in the cloud. The same account on another computer adds its own

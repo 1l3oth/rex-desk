@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { doing } from './stall-watch.js';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -15,6 +16,7 @@ const HOST_SCRIPT = fileURLToPath(new URL('./agent-host.js', import.meta.url));
 // One copy per version; older ones are removed once no agent uses them. Returns { node, script, cwd } once the copy is ready.
 export async function prepareRuntime(directory, { version = process.env.REX_DESK_VERSION, execPath = process.execPath, appRoot = path.resolve(path.dirname(HOST_SCRIPT), '..'), platform = process.platform } = {}) {
   if (!version || platform !== 'win32' || !/^[\w.-]+$/.test(version)) return null;
+  doing('agents: preparing their copy of Rex Desk');
   const { copyAll } = await import('./folders.js');
   const target = path.join(directory, version), ready = path.join(target, 'ready');
   const paths = { node: path.join(target, 'node', path.basename(execPath)), script: path.join(target, 'app', 'src', 'agent-host.js'), cwd: path.join(target, 'app') };

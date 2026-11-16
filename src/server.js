@@ -1,3 +1,4 @@
+import { watchStalls, doing } from './stall-watch.js';
 import { aiProvider } from './codex.js';
 import { agyCommand } from './antigravity.js';
 import http from 'node:http';
@@ -37,7 +38,7 @@ import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
 import { orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
-import { Awake } from './awake.js';
+import { Awake, keepInMemory } from './awake.js';
 import { scanRoots } from './placement.js';
 import { tursoSignIn, provisionDatabase } from './turso-setup.js';
 import { followDataMove, followMemoryMove, planDataMove, moveMedia, folderStatus, memoryFolder } from './folders.js';
@@ -168,6 +169,10 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       env: () => desk.agents.environment(store.config().provider), cwd: path.join(store.directory, 'coordinator'), webTask: text => desk.startWebTask(text) });
     // The real app (not tests) scans this computer's checkouts for Jev and catches up with tracker moves made while it was off.
     if (catchUp) {
+      // The freeze log: when the server is stuck, server-error.log says for how long and what it was doing.
+      watchStalls({ logFile: path.join(dataRoot, 'server-error.log') });
+      // Windows must not move the server's memory to the page file (a black window for minutes on a hard drive).
+      keepInMemory();
       // Files from agents (screenshots, recordings, attachments) stay in the data folder unless the person moves them: they are
       // important, and Downloads is a folder people clear out.
       void desk.scanRepositories().catch(error => store.event('', 'repository-scan-error', { message: error.message }));
@@ -359,6 +364,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     setTimeout(() => void handle.close().finally(() => process.exit(0)), 300);
   }
   const handler = async (request, response) => {
+    doing(`${request.method} ${String(request.url || '').split('?')[0].slice(0, 120)}`);
     // While Rex Desk opens, this computer's window gets its page and files at once, and the page asks /api/boot what is
     // happening and shows it. Everything else (data, agents, other devices) waits until the workspace is open.
     const early = (() => { try { const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress), page = new URL(request.url, 'http://local').pathname; return local && request.method === 'GET' && (page === '/api/boot' || (!page.startsWith('/api/') && page !== '/mcp' && !page.startsWith('/artifacts/'))); } catch { return false; } })();
