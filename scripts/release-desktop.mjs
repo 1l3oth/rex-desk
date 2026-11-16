@@ -95,7 +95,13 @@ async function prune(baseUrl, keep) {
 
 // Downloads the release back the way an installed app does and checks it, so a wrong bucket, domain or key fails here and not on someone's computer.
 async function confirm(baseUrl, manifest) {
-  const live = await published(baseUrl, manifest.channel);
+  // The public address can serve the old pointer for a few seconds after the upload: look again for up to two minutes.
+  let live = null;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    live = await published(baseUrl, manifest.channel);
+    if (live?.version === manifest.version) break;
+    await new Promise(resolve => setTimeout(resolve, 10000));
+  }
   if (live?.version !== manifest.version) throw new Error(`${baseUrl}/${manifest.channel}/latest.json does not show ${manifest.version} after the upload. Check the bucket's public address.`);
   const response = await fetch(live.url, { signal: AbortSignal.timeout(15 * 60000) });
   if (!response.ok) throw new Error(`The published installer did not download (${response.status}): ${live.url}`);
