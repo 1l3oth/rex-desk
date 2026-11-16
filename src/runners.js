@@ -30,6 +30,9 @@ export function existingMcpConnections(sourcePath, configDirectory = process.env
 // Rex Desk's own tools read tasks, label them, message the dashboard, or act inside the run's worktree. desk_status,
 // desk_publish, and desk_dispatch carry their own dashboard approval, so none needs the agent's permission prompt too.
 const quietRexTool = name => name.startsWith('mcp__rex_desk__desk_');
+// The main agent reads anywhere on the computer without an approval card: looking is never the risky part.
+const LOOK_TOOLS = new Set(['Read', 'Glob', 'Grep']);
+export const mainLooks = (run, name) => Boolean(run?.main || run?.roomAgent === 'main') && LOOK_TOOLS.has(name);
 // Agents run on the Claude Code profile's claude.ai sign-in, so they use the person's Claude subscription. An API key
 // left in the environment would quietly switch every run to pay-per-token billing, so it is removed unless asked for.
 export const apiKeyVariables = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
@@ -120,7 +123,7 @@ ${news}` } } : {};
       },
       // Only reached in modes that ask: each request becomes an approval card in the chat.
       canUseTool: async (name, input, context) => {
-        if (quietRexTool(name) || allowedTools.has(name)) return { behavior: 'allow', updatedInput: input };
+        if (quietRexTool(name) || allowedTools.has(name) || mainLooks(this.run, name)) return { behavior: 'allow', updatedInput: input };
         const answer = await this.ask({ kind: 'approval', title: `Approve ${name}`, request: { tool: name, input, suggestions: context.suggestions, allowAlways: true }, method: 'claude-permission' });
         if (answer.action === 'accept' && answer.content?.always) allowedTools.add(name);
         return answer.action === 'accept' ? { behavior: 'allow', updatedInput: input }
@@ -137,6 +140,7 @@ ${news}` } } : {};
       void connect.then(answer => this.event('remote-control', { url: answer?.session_url || '', connectUrl: answer?.connect_url || '' }),
         error => this.event('remote-control', { error: String(error?.message || error) }));
     }
+    let answered = false, skipped = null;
     for await (const message of this.query) {
       // The agent's own words as they are written (not a sub-agent's): the text so far of the current block, a few times a
       // second. Shown and spoken live; the finished block still arrives as agent-text below and is what is saved.
@@ -185,7 +189,14 @@ ${news}` } } : {};
         }
         this.event('agent-operation', { type: 'tool-result', content: message.message?.content });
       }
+      if (message.type === 'assistant' && !message.parent_tool_use_id) answered = true;
+      // A background task the last turn left running is reported first when the conversation reopens ("it stopped"), as a turn
+      // of its own with no step and no words, and the person's message waits behind it. That is not the reply: taking it for
+      // the end of the turn closed Claude Code with the message still unread. Keep reading; the real reply follows. It is
+      // shown only when nothing follows (a hook refused the message), so the chat never says "Turn ended" for a note.
+      if (message.type === 'result' && !remote && !answered && !message.is_error && !message.num_turns && !String(message.result || '').trim()) { skipped = message; continue; }
       if (message.type === 'result') {
+        skipped = null;
         // The real context window of the model, as Claude Code reports it, so the circle and auto handoff do not guess 200k.
         const windows = Object.values(message.modelUsage || {}).map(usage => Number(usage?.contextWindow) || 0).filter(Boolean);
         if (windows.length) { this.contextWindow = Math.max(...windows); if (this.contextUsed) this.event('context', { used: this.contextUsed, window: this.contextWindow }); }
@@ -201,6 +212,7 @@ ${news}` } } : {};
         if (!remote) break;
       }
     }
+    if (skipped) this.event('agent-result', { result: '', subtype: skipped.subtype, cost: skipped.total_cost_usd, tokens: tokensOf(skipped.usage), steps: 0, durationMs: skipped.duration_ms || 0, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });
     return { status: 'completed' };
   }
   // The messages of an open Claude-app session: the first one (if any), then whatever arrives in Rex Desk, until Stop.
