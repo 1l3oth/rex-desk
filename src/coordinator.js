@@ -3,6 +3,7 @@ import { AntigravityRunner, antigravityModels } from './antigravity.js';
 import { LocalAi, isLocalModel, parseLocalModel } from './local-ai.js';
 import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
+import { Team } from './team.js';
 import { Memory } from './memory.js';
 import { Specialists, EVIDENCE_RULE, ELI5_RULE } from './specialists.js';
 import { PROTECT_RULE, APP_GUIDE } from './app-guard.js';
@@ -151,6 +152,7 @@ export class Desk {
       store.event(runId, kind, data);
     }, () => this.mcpUrl);
     this.peers = new Peers(this, { transport: peerTransport });
+    this.team = new Team(this);
     this.projectRules = new ProjectRules(this);
     // A phone push opens Rex Desk on the phone when it can reach this computer (Tailscale and remote access on).
     this.notifier.pushClick = () => this.peers.settings().remote && this.port ? this.peers.addresses(this.port)[0] || '' : '';
@@ -733,6 +735,8 @@ ${message}` : message);
       if (this.live.get(runId)?.controller === controller) this.live.delete(runId);
       void this.drain();
       void this.rooms.turnFinished(runId).catch(error => this.store.event(runId, 'error', { message: error.message }));
+      // A worker's turn ended: its manager gets the result, and the worker's next waiting task starts.
+      { const ended = this.store.get('run', runId); if (!this.closed && ended && !ended.roomAgent && ['specialist', 'coordinator'].includes(ended.role)) this.team.turnEnded(runId, ended.state === 'failed' ? ended.error || 'it failed' : ended.state === 'stopped' ? 'it was stopped' : ''); }
       // A chat whose context is nearly full hands over to a fresh session by itself (and waits with queued messages until then).
       if (!this.closed && await this.autoHandoff(runId).catch(error => { this.store.event(runId, 'error', { message: `Automatic handoff failed: ${error.message}` }, true); return false; })) return;
       // Messages that came in while the agent was busy go in now, as the next turn.
