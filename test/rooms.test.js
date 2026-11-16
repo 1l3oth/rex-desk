@@ -6,6 +6,7 @@ import path from 'node:path';
 import { Store, now } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
 import { MAX_HOPS } from '../src/rooms.js';
+import { mainLooks } from '../src/runners.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const SESSION = '7c3a8d71-d78d-409a-9a84-91fb162c1be3';
@@ -516,6 +517,11 @@ test('Rex Agent in a group chat gets its own instructions, not the old issue dis
   const text = desk.prompt({ id: 'main-room', role: 'coordinator', roomAgent: 'main', roomOf: room.id, taskIds: [] });
   assert.match(text, /You are the main agent of Rex Desk/);
   assert.ok(!/selected IDs/.test(text));
+  assert.match(text, /look anywhere on this computer/, 'Rex Agent is told it may read outside its own folder');
+  assert.match(desk.prompt({ id: 'main-chat', main: true, prompt: 'hi' }), /look anywhere on this computer/);
+  assert.equal(mainLooks({ main: true }, 'Read'), true); assert.equal(mainLooks({ roomAgent: 'main' }, 'Grep'), true);
+  assert.equal(mainLooks({ main: true }, 'Bash'), false, 'commands still ask in the modes that ask');
+  assert.equal(mainLooks({ role: 'specialist' }, 'Read'), false);
 });
 
 test('a Codex model the plan cannot run is greyed out, the turn retries on a usable model, and a newly picked model is used again', async () => {
