@@ -1,3 +1,4 @@
+import { watchStalls, doing } from './stall-watch.js';
 import { aiProvider } from './codex.js';
 import { agyCommand } from './antigravity.js';
 import http from 'node:http';
@@ -12,8 +13,9 @@ import { Store } from './store.js';
 import { Accounts, cleanEmail } from './accounts.js';
 import { findCloudWorkspace } from './turso.js';
 import { Updates } from './updates.js';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { Desk } from './coordinator.js';
+import { aboutRexDesk } from './about.js';
 import { handleMcp } from './mcp.js';
 import { git, resolveCommand } from './processes.js';
 import { execFile, execFileSync, spawn } from 'node:child_process';
@@ -25,6 +27,7 @@ import { issueBranch } from './branches.js';
 import { profileEnvironment, discoverProfiles } from './agents.js';
 import { kindOf, mimeOf } from './files.js';
 import { speak, NEURAL_VOICES } from './voice-out.js';
+import { readyLines } from '../public/voice-phrases.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
@@ -35,12 +38,14 @@ import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
 import { orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
-import { Awake } from './awake.js';
+import { Awake, keepInMemory } from './awake.js';
 import { scanRoots } from './placement.js';
 import { tursoSignIn, provisionDatabase } from './turso-setup.js';
 import { followDataMove, followMemoryMove, planDataMove, moveMedia, folderStatus, memoryFolder } from './folders.js';
 import { readdirSync } from 'node:fs';
+import { knowledgeGraph } from './knowledge.js';
 import { accountSignIn, accountPasswordSignIn, accountDatabase, accountMe, accountReachable } from './rexdesk-account.js';
+import { bridge } from './local-ai.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,7 +54,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const startedCode = process.env.REX_DESK_VERSION ? '' : readCode();
 function readCode() { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } }
 function codeVersion() { return startedCode; }
-const mime = { '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.json': 'application/json; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+const mime = { '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.json': 'application/json; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 const json = (response, code, data) => { response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(data)); };
 // Recorded speech for transcription arrives as raw WAV bytes, not JSON.
 async function rawBody(request, limit = 20 * 1024 * 1024) {
@@ -57,9 +62,9 @@ async function rawBody(request, limit = 20 * 1024 * 1024) {
   for await (const chunk of request) { size += chunk.length; if (size > limit) throw new Error('Recording is too long.'); chunks.push(chunk); }
   return Buffer.concat(chunks);
 }
-async function body(request) {
+async function body(request, limit = 2 * 1024 * 1024) {
   let input = '';
-  for await (const chunk of request) { input += chunk; if (Buffer.byteLength(input) > 2 * 1024 * 1024) throw new Error('Request exceeds 2 MB.'); }
+  for await (const chunk of request) { input += chunk; if (Buffer.byteLength(input) > limit) throw new Error(`Request exceeds ${Math.round(limit / 1048576)} MB.`); }
   try { return input ? JSON.parse(input) : {}; } catch { throw new Error('Request body must be JSON.'); }
 }
 function serveFile(request, response, file, { sandbox = false, download = false, cache = 'no-store', frame = false, type: forced = '' } = {}) {
@@ -87,16 +92,34 @@ function serveFile(request, response, file, { sandbox = false, download = false,
 // that did not pass its port on: it was on 4317 and stays there, so a computer using a checkout as its real app keeps its address.
 export const defaultPort = () => Number(process.env.PORT || (process.env.REX_DESK_VERSION || process.env.REX_RESTART_AFTER ? 4317 : 4318));
 
-export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
+export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, ownDatabase = process.env.REX_DESK_OWN_DATABASE === '1', updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
+  // Cloud backup comes with a Rex Desk account (a paid plan later): a database address and key typed by hand, or a Turso
+  // account of the person's own, are turned off unless this copy is started with REX_DESK_OWN_DATABASE=1.
+  const ACCOUNT_ONLY = 'Cloud backup comes with your Rex Desk account. Turn it on in Settings, Backup and updates.';
+  const ownDatabaseOnly = () => { if (!ownDatabase) throw Object.assign(new Error(ACCOUNT_ONLY), { status: 403 }); };
   let dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
   // The real app follows a data folder the person moved, or finishes a move they asked for, before anything opens it.
   // The AI memory moves the same way. Tests pass their own folder and never move anything.
   if (!dataDirectory && existsSync(dataRoot)) {
     const lock = path.join(dataRoot, 'runtime.lock');
     const waitForOld = async () => { const owner = Number(existsSync(lock) ? readFileSync(lock, 'utf8') : 0); const alive = () => { try { process.kill(owner, 0); return true; } catch { return false; } }; for (let i = 0; owner > 0 && owner !== process.pid && i < 240 && alive(); i++) await new Promise(resolve => setTimeout(resolve, 250)); };
-    dataRoot = await followDataMove(dataRoot, { waitForOld, log: message => console.log(message) });
+    // A move copies the whole folder, which can take a minute. Meanwhile a small stand-in answers on the port with how far the
+    // copy is, so the window shows progress instead of a black screen, and the desktop app does not take the busy server for
+    // a stopped one and start a second server over it. It opens once the old server has let go of the port.
+    let moveStage = 'Moving your Rex Desk data to its new folder', standIn = null;
+    const holdPort = () => new Promise(resolve => {
+      const item = http.createServer((request, response) => {
+        if (new URL(request.url, 'http://local').pathname === '/api/boot') return json(response, 200, { stage: moveStage, ready: false });
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(`<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="2"><title>Rex Desk</title><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0a0e19;color:#cbd5e1;font:16px/1.5 system-ui,sans-serif"><p>${moveStage.replace(/[<>&]/g, '')}…<br><small style="color:#64748b">Rex Desk opens by itself when the move is done. Keep this window open.</small></p></body>`);
+      });
+      item.once('error', () => resolve(null)); item.listen(port, '127.0.0.1', () => resolve(item));
+    });
+    dataRoot = await followDataMove(dataRoot, { waitForOld: async () => { await waitForOld(); standIn = await holdPort(); }, log: message => console.log(message),
+      progress: (done, total) => { moveStage = `Moving your Rex Desk data to its new folder: ${done} of ${total} files`; } });
+    if (standIn) { standIn.closeAllConnections(); await new Promise(resolve => standIn.close(resolve)); }
   }
-  if (!dataDirectory) followMemoryMove({ log: message => console.log(message) });
+  if (!dataDirectory) await followMemoryMove({ log: message => console.log(message) });
   // A folder that exists already (even a drive root such as F:\, where mkdir fails with EPERM) is used as it is.
   if (!existsSync(dataRoot)) mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const lockPath = path.join(dataRoot, 'runtime.lock');
@@ -113,7 +136,10 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   writeFileSync(lockPath, String(process.pid), { flag: 'wx', mode: 0o600 });
   // One workspace is open at a time. A plain data folder (tests, scripts) opens immediately; account mode waits for sign-in.
   const accounts = dataDirectory ? null : new Accounts(dataRoot);
-  const updates = new Updates(dataRoot, updateOptions);
+  // A copy started with its own data folder (a test, a screenshot script) never updates itself. Agents run inside the
+  // installed app and their shells carry its version and path, so every such copy took itself for the app and downloaded
+  // the 31 MB installer into its temporary folder: hundreds of them filled drive C:.
+  const updates = new Updates(dataRoot, updateOptions || (dataDirectory ? { version: '' } : undefined));
   // One computer and one voice engine for every account on it: the models are large, so they live beside the accounts.
   const computer = computerFactory ? computerFactory() : new Computer({ directory: path.join(dataRoot, 'screens') });
   // A plain data folder (tests, scripts) never holds the computer awake.
@@ -143,12 +169,18 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       env: () => desk.agents.environment(store.config().provider), cwd: path.join(store.directory, 'coordinator'), webTask: text => desk.startWebTask(text) });
     // The real app (not tests) scans this computer's checkouts for Jev and catches up with tracker moves made while it was off.
     if (catchUp) {
+      // The freeze log: when the server is stuck, server-error.log says for how long and what it was doing.
+      watchStalls({ logFile: path.join(dataRoot, 'server-error.log') });
+      // Windows must not move the server's memory to the page file (a black window for minutes on a hard drive).
+      keepInMemory();
       // Files from agents (screenshots, recordings, attachments) stay in the data folder unless the person moves them: they are
       // important, and Downloads is a folder people clear out.
       void desk.scanRepositories().catch(error => store.event('', 'repository-scan-error', { message: error.message }));
       if (store.config().sources.length) void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));
     }
     store.on('change', notify);
+    // An agent's words as they are written, for read-aloud to speak live (see chat-speak.js speakLive).
+    store.on('partial', data => { const line = `event: partial\ndata: ${JSON.stringify(data)}\n\n`; for (const client of clients) client.write(line); });
     session = { id: entry?.id, email: entry?.email || '', store, desk, cookie: randomBytes(32).toString('base64url'), staySignedIn, cloud: null };
     if (accounts) {
       accounts.touch(entry.id);
@@ -166,7 +198,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         else opened.cloud = { pulled: false, reason: 'No cloud backup.' };
         if (session === opened) notify();
       };
-      if (store.fresh) { if (bootStage) bootStage = 'Restoring your workspace from your cloud backup'; await sync(); }
+      if (store.fresh) { if (bootStage) bootStage = 'Bringing your desk back from your cloud backup'; await sync(); }
       else { opened.cloud = { pulled: false, syncing: true }; void sync().catch(error => { opened.cloud = { pulled: false, reason: error.message }; }); }
     } else void store.cloud.open();
     notify(); return session;
@@ -185,6 +217,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (!process.env.NODE_TEST_CONTEXT) void desk.refreshModels().catch(error => store.event('', 'models-error', { message: error.message }));
     // Antigravity's models fill its pickers when it is installed and signed in; otherwise this fails quietly.
     if (!process.env.NODE_TEST_CONTEXT && store.config().provider !== 'gemini') void desk.refreshModels({ provider: 'gemini' }).catch(() => {});
+    // The models on this computer (Local AI), for the Claude Code model pickers.
+    if (!process.env.NODE_TEST_CONTEXT) void desk.localAi.status().catch(() => {});
   }
   async function closeSession({ forget = false } = {}) {
     if (!session) return;
@@ -196,6 +230,21 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   const cookieOf = request => /(?:^|;\s*)rex_session=([^;]+)/.exec(request.headers.cookie || '')?.[1];
   const sessionCookie = value => `rex_session=${value}; HttpOnly; SameSite=Strict; Path=/`;
   const signedIn = request => Boolean(session) && (!accounts || cookieOf(request) === session.cookie);
+  // "Stay signed in" opens Rex Desk without the passphrase only in a window that proves it is this person's: it holds the
+  // window key, a random value kept in a file in their own data folder (other Windows users cannot read it). The desktop app
+  // and the start script read the file and open /?window=<key>; a browser that signed in with the passphrase gets the key as a
+  // cookie too. Any other program or user on this computer asking /api/auth gets the sign-in screen, not the session.
+  let windowKeyValue = '';
+  const windowKey = () => {
+    if (windowKeyValue) return windowKeyValue;
+    const file = path.join(dataRoot, 'window.key');
+    try { windowKeyValue = readFileSync(file, 'utf8').trim(); } catch {}
+    if (windowKeyValue.length < 32) { windowKeyValue = randomBytes(32).toString('base64url'); try { mkdirSync(dataRoot, { recursive: true }); writeFileSync(file, windowKeyValue, { mode: 0o600 }); } catch (error) { console.error(`Could not write the window key: ${error.message}`); } }
+    return windowKeyValue;
+  };
+  const windowCookie = () => `rex_window=${windowKey()}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`;
+  const sameSecret = (left, right) => { const a = Buffer.from(String(left || '')), b = Buffer.from(String(right || '')); return a.length === b.length && a.length > 0 && timingSafeEqual(a, b); };
+  const holdsWindowKey = request => sameSecret(/(?:^|;\s*)rex_window=([^;]+)/.exec(request.headers.cookie || '')?.[1], windowKey());
   // What this computer holds for the signed-in Rex Desk account: its workspace (here), one from before accounts to claim,
   // a backup in the account's cloud database, or nothing yet (new).
   async function workspaceFor(email, database) {
@@ -205,10 +254,11 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     return accounts.workspaces.some(item => !item.email) ? 'claim' : 'new';
   }
   const accountView = () => ({ email: accountFound.session.user?.email || '', name: accountFound.session.user?.name || '', image: accountFound.session.user?.image || '', workspace: accountFound.workspace });
-  async function handleAuth(request, response, url) {
+  async function handleAuth(request, response, url, peerSignedIn = false) {
     if (url.pathname === '/api/auth' && request.method === 'GET') {
-      // A session that chose to stay signed in on this computer hands its cookie to the local app window.
-      if (session && accounts && session.staySignedIn && !signedIn(request)) {
+      // A session that chose to stay signed in on this computer hands its cookie to the person's own window (it holds the window
+      // key) or to their phone or other computer signed in with the device key.
+      if (session && accounts && session.staySignedIn && !signedIn(request) && (holdsWindowKey(request) || peerSignedIn)) {
         response.setHeader('Set-Cookie', sessionCookie(session.cookie));
         return json(response, 200, { mode: 'accounts', workspaces: accounts.summary(), current: { id: session.id, email: session.email, role: role(), staySignedIn: true, cloud: session.cloud } });
       }
@@ -226,7 +276,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (input.staySignedIn && !session.staySignedIn) { await accounts.remember(entry.id, vaultKey).catch(() => {}); session.staySignedIn = true; }
       } else { await closeSession(); await openSession(entry, vaultKey, { staySignedIn: Boolean(input.staySignedIn) }); }
     };
-    const respond = () => { response.setHeader('Set-Cookie', sessionCookie(session.cookie)); return json(response, 200, { current: describe() }); };
+    // Signing in with the passphrase also gives this browser the window key, so "stay signed in" works in it from then on.
+    const respond = () => { response.setHeader('Set-Cookie', [sessionCookie(session.cookie), windowCookie()]); return json(response, 200, { current: describe() }); };
     const slow = async error => { await new Promise(resolve => setTimeout(resolve, 700)); throw error; };
     // The front door: the Rex Desk account signs in first, and its email names the workspace the passphrase opens.
     // Only when the account service cannot be reached does a workspace already on this computer open with its passphrase alone.
@@ -238,6 +289,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); linked(); return respond(); }
     if (url.pathname === '/api/auth/login') { await activate(await accounts.signIn(input.email, input.passphrase, { claimId: input.claimId }).catch(slow)); linked(); return respond(); }
     // A new computer, from the sign-in screen: Turso's browser sign-in finds the person's existing Rex Desk backup, so they never type its address or key.
+    if (url.pathname === '/api/auth/turso-start' || url.pathname === '/api/auth/turso-finish') ownDatabaseOnly();
     if (url.pathname === '/api/auth/turso-start') { tursoPending?.cancel(); tursoFound = null; tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
     if (url.pathname === '/api/auth/turso-finish') {
       if (!tursoPending) throw new Error('Start the Turso sign-in first.');
@@ -268,6 +320,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     }
     if (url.pathname === '/api/auth/account-forget') { accountPending?.cancel(); accountPending = null; accountFound = null; return json(response, 200, { ok: true }); }
     if (url.pathname === '/api/auth/cloud' && input.account) { if (!accountFound?.database) throw new Error('Sign in with Rex Desk first.'); input.url = accountFound.database.url; input.authToken = accountFound.database.authToken; }
+    if (url.pathname === '/api/auth/cloud' && !input.account) ownDatabaseOnly();
     if (url.pathname === '/api/auth/cloud' && input.turso) { if (!tursoFound) throw new Error('Sign in with Turso first.'); input.url = tursoFound.url; input.authToken = tursoFound.authToken; }
     if (url.pathname === '/api/auth/cloud') {
       // A new computer: find the account in the person's own Turso database, unseal its key, then restore everything before answering.
@@ -276,6 +329,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       try { opened = accounts.workspaces.some(item => item.id === found.id) ? await accounts.signIn(found.name, input.passphrase) : accounts.create(found.name, input.passphrase, { id: found.id, sealed: found.sealed }); }
       catch (error) { return slow(error); }
       await activate(opened);
+      // The account sign-in is kept before connecting, so the restore knows the files are in the account's private folder.
+      if (input.account && !session.store.cloud.enabled) session.store.cloud.account.save(accountFound.session, accountFound.database);
       if (!session.store.cloud.enabled) { await session.store.cloud.connect({ url: input.url, authToken: input.authToken }); session.cloud = { pulled: !session.store.fresh, restored: true }; }
       if (input.turso) tursoFound = null;
       // Keep the account sign-in in the restored workspace, so this computer can renew the database key by itself.
@@ -297,13 +352,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   // Requests wait for it, so nobody sees the sign-in page or works on an out-of-date copy meanwhile.
   let opening = Promise.resolve();
   if (!accounts) await openSession(null, null);
-  else { bootStage = 'Unlocking your workspace'; opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; }); }
+  else { bootStage = 'Opening your desk'; opening = accounts.rememberedSession().then(remembered => remembered && openSession(remembered.entry, remembered.vaultKey, { staySignedIn: true, remembered: true })).catch(() => { session = null; }); }
   void opening.finally(() => { bootStage = ''; });
   // Agents working right now, by name: an update restarts Rex Desk and would cut them off.
   function busyAgents(store) {
     if (!store) return [];
     // A chat open in the Claude app is a session waiting for the person, not work in progress: it does not hold an update back.
-    const names = store.list('run').filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state) && !run.inApp)
+    // Nor does an agent running from Rex Desk's private copy (host.outside): the update leaves it running and the new server attaches to it.
+    const names = store.list('run').filter(run => ['running', 'waiting', 'starting', 'queued'].includes(run.state) && !run.inApp && !run.host?.outside)
       .map(run => { const id = run.roomAgent || run.specialistId; return (id && id !== 'main' ? store.get('specialist', id)?.name : '') || (run.main || run.role === 'coordinator' ? 'Rex Agent' : run.title) || 'An agent'; });
     return [...new Set(names)];
   }
@@ -314,6 +370,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     setTimeout(() => void handle.close().finally(() => process.exit(0)), 300);
   }
   const handler = async (request, response) => {
+    doing(`${request.method} ${String(request.url || '').split('?')[0].slice(0, 120)}`);
     // While Rex Desk opens, this computer's window gets its page and files at once, and the page asks /api/boot what is
     // happening and shows it. Everything else (data, agents, other devices) waits until the workspace is open.
     const early = (() => { try { const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress), page = new URL(request.url, 'http://local').pathname; return local && request.method === 'GET' && (page === '/api/boot' || (!page.startsWith('/api/') && page !== '/mcp' && !page.startsWith('/artifacts/'))); } catch { return false; } })();
@@ -321,7 +378,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (!early) await opening;
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
-    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'");
     try {
       const host = request.headers.host;
       const hostname = host ? new URL(`http://${host}`).hostname : '';
@@ -359,6 +416,15 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         }
         peerSignedIn = true;
       }
+      // Local AI's bridge: an agent's Claude Code sends its model requests here, with its own Rex Desk token, and they go on to
+      // the person's local server in the OpenAI format (see local-ai.js).
+      if (url.pathname.startsWith('/local-ai/')) {
+        if (remoteSocket) return json(response, 403, { error: 'Agents connect on this computer only.' });
+        const token = request.headers['x-api-key'] || request.headers.authorization?.replace(/^Bearer /i, '');
+        if (!session?.desk?.scope(token)) return json(response, 401, { type: 'error', error: { type: 'authentication_error', message: 'Supply the Rex Desk run token.' } });
+        const [, , serverId, ...rest] = url.pathname.split('/');
+        await bridge(session.desk.localAi, serverId, `/${rest.join('/')}`, request, response, request.method === 'POST' ? await body(request, 50 * 1024 * 1024) : undefined); return;
+      }
       if (url.pathname === '/mcp') {
         const token = request.headers.authorization?.replace(/^Bearer /i, '');
         if (!session) return json(response, 401, { error: 'Rex Desk is locked. Sign in to the dashboard first.' });
@@ -370,7 +436,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const origin = request.headers.origin;
       if (origin && origin !== `http://${host}` && origin !== `https://${host}`) return json(response, 403, { error: 'Cross-origin dashboard requests are blocked.' });
       if (request.method !== 'GET' && request.headers['x-rex-desk'] !== '1') return json(response, 403, { error: 'Missing dashboard request header.' });
-      if (url.pathname === '/api/auth' || url.pathname.startsWith('/api/auth/')) return await handleAuth(request, response, url);
+      // The desktop app and the start script open /?window=<key>: the key becomes this window's cookie and leaves the address.
+      if (request.method === 'GET' && url.searchParams.has('window') && !url.pathname.startsWith('/api/')) {
+        const given = url.searchParams.get('window'); url.searchParams.delete('window');
+        response.writeHead(303, { Location: url.pathname + url.search, 'Cache-Control': 'no-store', ...(sameSecret(given, windowKey()) ? { 'Set-Cookie': windowCookie() } : {}) });
+        return response.end();
+      }
+      if (url.pathname === '/api/auth' || url.pathname.startsWith('/api/auth/')) return await handleAuth(request, response, url, peerSignedIn);
       // Everything else that touches a workspace needs this window's sign-in.
       if ((url.pathname.startsWith('/api/') || url.pathname.startsWith('/artifacts/')) && !signedIn(request) && !peerSignedIn) return json(response, 401, { error: 'Sign in to Rex Desk.', signIn: true });
       const store = session?.store, desk = session?.desk;
@@ -405,8 +477,11 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (input.action === 'remove') return json(response, 200, desk.peers.remove(input.id));
         throw new Error('Unknown action.');
       }
+      // Settings › About: version, counts and storage.
+      if (url.pathname === '/api/about' && request.method === 'GET') return json(response, 200, await aboutRexDesk({ store, rooms: desk.rooms.list(), update: updates.status(), install: process.env.REX_DESK_EXE ? path.dirname(process.env.REX_DESK_EXE) : root, fresh: url.searchParams.has('fresh') }));
       if (url.pathname === '/api/state') { const snapshot = desk.snapshot(); return json(response, 200, { ...snapshot, update: { ...updates.status(), whenIdle: updateWhenIdle, busy: busyAgents(store) }, cloudSync: session.cloud || null, account: { email: session.email, role: role() }, code: codeVersion() }); }
       // One-click cloud backup: start opens Turso's sign-in page in the browser; finish waits for it, makes the database and connects it.
+      if (['/api/database/turso-start', '/api/database/turso-finish', '/api/database/connect'].includes(url.pathname)) ownDatabaseOnly();
       if (url.pathname === '/api/database/turso-start' && request.method === 'POST') { tursoPending?.cancel(); tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
       if (url.pathname === '/api/database/turso-finish' && request.method === 'POST') {
         if (!tursoPending) throw new Error('Start the Turso sign-in first.');
@@ -435,6 +510,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       // Signing the account out stops key renewal. The backup keeps working until its current key runs out (about a month).
       if (url.pathname === '/api/database/account-signout' && request.method === 'POST') { await store.cloud.account.signOut(); notify(); return json(response, 200, store.cloud.status()); }
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
+      // What goes to the cloud backup; each switch saves at once.
+      if (url.pathname === '/api/database/parts' && request.method === 'PUT') { const parts = store.cloud.setParts(await body(request)); notify(); return json(response, 200, { parts, status: store.cloud.status() }); }
       if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
       if (url.pathname === '/api/repositories/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());
@@ -468,7 +545,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (url.pathname === '/api/voice/install' && request.method === 'POST') { void voice.install().then(notify, notify); return json(response, 202, voice.status()); }
         if (url.pathname === '/api/voice/prepare' && request.method === 'POST') return json(response, 200, { ready: chosen() === 'local' ? await voice.prepare(language) : true });
         if (url.pathname === '/api/voice/transcribe' && request.method === 'POST') {
-          const audio = await rawBody(request), engine = url.searchParams.get('engine') || chosen();
+          const audio = await rawBody(request), wanted = url.searchParams.get('engine') || chosen(), ready = engines();
+          // The chosen engine is not ready (like "On this computer" before its model is installed): use one that is, and say so.
+          const engine = ready[wanted] ? wanted : ['gemini', 'elevenlabs', 'local'].find(name => ready[name]) || wanted;
+          const switched = engine !== wanted ? `${wanted === 'local' ? 'The on-computer voice model is not installed' : 'The chosen voice engine is not set up'}, so ${engine === 'gemini' ? 'Gemini' : engine === 'elevenlabs' ? 'ElevenLabs' : 'the on-computer model'} was used.` : '';
+          if (!ready[engine]) return json(response, 400, { error: 'No voice engine is ready. Install the on-computer model, or add an OpenRouter key, in Settings → Jev and voice.' });
+          if (switched && engine !== 'local') { const started = Date.now(); return json(response, 200, { ...await run(engine, audio), ms: Date.now() - started, fallback: switched }); }
           // An online engine that fails falls back to the on-computer model, and the answer says so.
           if (engine !== 'local') try { const started = Date.now(); return json(response, 200, { ...await run(engine, audio), ms: Date.now() - started }); } catch (error) { if (!engines().local) throw error; return json(response, 200, { ...await voice.transcribe(audio, language), fallback: `${error.message} Used the voice model on this computer instead.` }); }
           return json(response, 200, await voice.transcribe(audio, language));
@@ -516,7 +598,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         store.put('sidebar', 'main', next); notify(); return json(response, 200, next);
       }
       if (url.pathname === '/api/folders' && request.method === 'GET') return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() }));
-      if (url.pathname === '/api/folders/files' && request.method === 'POST') { moveMedia(store, (await body(request)).to); return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() })); }
+      if (url.pathname === '/api/folders/files' && request.method === 'POST') { await moveMedia(store, (await body(request)).to); return json(response, 200, folderStatus({ dataRoot, store, memory: memoryFolder() })); }
       if (url.pathname === '/api/folders/move' && request.method === 'POST') {
         const input = await body(request);
         if (dataDirectory) throw new Error('This copy of Rex Desk runs with a fixed data folder, so it cannot move it.');
@@ -539,6 +621,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/update/check' && request.method === 'POST') { const status = await updates.check(); notify(); return json(response, 200, status); }
       if (url.pathname === '/api/update/install' && request.method === 'POST') {
         const input = await body(request), busy = busyAgents(store);
+        // The update window takes the colours of the theme the person sees (sent by the page).
+        if (input.theme) updates.theme = input.theme;
         if (input.cancel) { updateWhenIdle = false; notify(); return json(response, 200, { whenIdle: false }); }
         if (busy.length) {
           // Installing restarts Rex Desk and would cut the working agents off: it can wait for them instead.
@@ -558,8 +642,27 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const input = await body(request);
         return json(response, 200, { branch: issueBranch(input.pattern, { prefix: input.prefix || 'temp/rex' }) });
       }
+      // The welcome questions (age range, where the person heard about Rex Desk): kept here, and sent to the Rex Desk account
+      // service when this person is signed in to it, so the owner sees them. Only the listed answers are kept.
+      if (url.pathname === '/api/survey' && request.method === 'POST') {
+        const input = await body(request), clean = value => String(value || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 120);
+        const answer = { age: clean(input.age).slice(0, 40), heard: (Array.isArray(input.heard) ? input.heard : []).map(item => clean(item).slice(0, 30)).filter(Boolean).slice(0, 20), other: clean(input.other), at: new Date().toISOString() };
+        store.put('survey', 'main', answer);
+        const token = session.account?.token || store.cloud.account?.saved?.token;
+        if (token) void (accountOptions.fetcher || fetch)(`${accountOptions.base || ACCOUNT_API}/v1/survey`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(answer), signal: AbortSignal.timeout(15000) }).catch(() => {});
+        return json(response, 200, { saved: true });
+      }
       if (url.pathname === '/api/config' && request.method === 'PUT') { const saved = store.saveConfig(await body(request)); desk.agents.invalidate(); void desk.refreshModels().catch(() => {}); return json(response, 200, saved); }
       // The skills, commands and MCP servers an agent has (or Rex Agent, with agent=main), for the / menu and its profile.
+      // Local AI: the servers on this computer and their models, downloads into Ollama, and Hugging Face search.
+      if (url.pathname === '/api/local-ai' && request.method === 'GET') return json(response, 200, await desk.localAi.status());
+      if (url.pathname === '/api/local-ai/servers' && request.method === 'POST') { const input = await body(request); desk.localAi.addServer(input); return json(response, 200, await desk.localAi.status()); }
+      if (url.pathname === '/api/local-ai/servers' && request.method === 'DELETE') { desk.localAi.removeServer(String(url.searchParams.get('id') || '')); return json(response, 200, await desk.localAi.status()); }
+      if (url.pathname === '/api/local-ai/servers' && request.method === 'PUT') { const input = await body(request); desk.localAi.updateServer(String(input.id || ''), input); return json(response, 200, await desk.localAi.status()); }
+      if (url.pathname === '/api/local-ai/setup' && request.method === 'POST') return json(response, 200, desk.localAi.setup());
+      if (url.pathname === '/api/local-ai/pull' && request.method === 'POST') return json(response, 200, desk.localAi.pull((await body(request)).model));
+      if (url.pathname === '/api/local-ai/models' && request.method === 'DELETE') { const status = await desk.localAi.remove(String(url.searchParams.get('model') || '')); desk.specialists.normalizeModels(); return json(response, 200, status); }
+      if (url.pathname === '/api/local-ai/huggingface' && request.method === 'GET') return json(response, 200, { items: await desk.localAi.searchHuggingFace(url.searchParams.get('q')) });
       if (url.pathname === '/api/agents/tools' && request.method === 'GET') {
         const id = url.searchParams.get('agent') || 'main', agent = id === 'main' ? null : store.get('specialist', id);
         return json(response, 200, agentTools({ profile: agent?.profile || desk.agents.selected('claude') || '', projectPath: agent?.projectPath || '', extra: desk.orbitAccountMcp() }));
@@ -574,6 +677,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         input.provider = aiProvider(input.provider || 'claude');
         const config = store.publicConfig();
         store.saveConfig({ ...config, agentProfiles: { ...config.agentProfiles, [input.provider]: input.profile ?? null } });
+        // Picked by the person: an old "limited" mark does not keep the automatic switch away from it.
+        if (input.profile) desk.agents.clearLimited(input.profile);
         desk.agents.invalidate(input.provider);
         return json(response, 200, await desk.agents.overview());
       }
@@ -651,7 +756,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const input = await body(request), source = store.saveConnection(input.source);
         return json(response, 200, { source, run: await desk.startConnectionAgent({ sourceId: source.id, provider: input.provider }) });
       }
-      if (url.pathname === '/api/sync' && request.method === 'POST') return json(response, 200, await desk.sources.sync());
+      if (url.pathname === '/api/sync' && request.method === 'POST') { const input = await body(request).catch(() => ({})); return json(response, 200, await desk.sources.sync({ only: String(input.sourceId || '') })); }
       if (url.pathname === '/api/jev/prioritize' && request.method === 'POST') return json(response, 200, await (async () => { const input = await body(request); return desk.jev.prioritize({ force: Boolean(input.force), taskId: String(input.taskId || '') }); })());
       if (url.pathname === '/api/runs' && request.method === 'POST') return json(response, 200, await desk.startTask(await body(request)));
       if (url.pathname === '/api/demo' && request.method === 'POST') return json(response, 200, desk.demo());
@@ -670,7 +775,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const branchMatch = url.pathname.match(/^\/api\/repositories\/([^/]+)\/branches$/);
       if (branchMatch) {
         const repository = store.config().repositories.find(item => item.id === decodeURIComponent(branchMatch[1]));
-        if (!repository) return json(response, 404, { error: 'Repository not found.' });
+        if (!repository) return json(response, 404, { error: 'Project not found.' });
         const branches = (await git(repository.path, ['for-each-ref', '--format=%(refname:short)', 'refs/heads', 'refs/remotes/origin'])).split('\n').filter(Boolean);
         return json(response, 200, { branches });
       }
@@ -700,7 +805,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (interactionMatch && request.method === 'POST') { const owner = !store.get('interaction', interactionMatch[1]) && desk.peers.interactionOwner(interactionMatch[1]); return json(response, 200, owner ? await desk.peers.forward(owner, 'POST', url.pathname, await body(request)) : desk.answer(interactionMatch[1], await body(request))); }
       const unsendMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/messages\/(\d+)$/);
       if (unsendMatch && request.method === 'DELETE') return json(response, 200, desk.unsend(unsendMatch[1], unsendMatch[2]));
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|say|fresh))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|say|fresh|app|voice))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
         const runOwner = !store.get('run', runId) && desk.peers.runOwner(runId);
@@ -726,6 +831,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
           // Continue in Claude app (on), or bring the chat back to Rex Desk only (on: false).
           if (action === 'app') return json(response, 200, await desk.continueInApp(runId, input.on !== false));
+          // Voice mode on (the briefing is made now) or off.
+          if (action === 'voice') {
+            // The sentences Voice mode says often are made now, while the body opens, so they play at once: the welcome
+            // first, then the rest, a few at a time.
+            if (input.on !== false) { const lines = readyLines(); let next = 0; const work = async () => { while (next < lines.length) { const line = lines[next++]; await speak(line, { lang: 'en' }).catch(() => {}); } }; void work(); void work(); void work(); }
+            return json(response, 200, desk.voiceMode(runId, input.on !== false));
+          }
           if (action === 'fresh') return json(response, 200, await desk.freshStart(runId));
           if (action === 'say') return json(response, 200, await desk.say(runId, input.text, input));
           if (action === 'resume') return json(response, 200, await desk.resume(runId, input));
@@ -838,6 +950,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/memory/page' && request.method === 'GET') return json(response, 200, { page: url.searchParams.get('name') || 'index', text: desk.memory.readDoc(url.searchParams.get('name') || 'index') });
       if (url.pathname === '/api/memory/scan' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.memory.scan({ roots: Array.isArray(input.roots) && input.roots.length ? input.roots : scanRoots(store, root) })); }
       if (url.pathname === '/api/profile' && request.method === 'GET') return json(response, 200, { ...desk.memory.profile(), name: store.config().name || '', email: session?.email || '', agents: desk.specialists.list().filter(agent => agent.kind !== 'main').map(agent => ({ id: agent.id, name: agent.name, project: agent.projectSlug })) });
+      // The knowledge space as a graph: the person, what the agents learned, the agents and their projects, and the second brain's notes.
+      if (url.pathname === '/api/knowledge' && request.method === 'GET') {
+        const brainPath = /Where:\s*`([^`]+)`/.exec(desk.memory.secondBrain())?.[1] || '';
+        const agents = desk.specialists.list().map(agent => ({ id: agent.id, name: agent.name, purpose: agent.purpose || '', project: agent.kind === 'main' ? '' : agent.projectSlug, lessons: (agent.lessons || []).map(lesson => lesson.text) }));
+        return json(response, 200, await knowledgeGraph({ profile: desk.memory.profile(), name: store.config().name || '', agents, brainPath }));
+      }
       if (url.pathname === '/api/profile/notes' && request.method === 'POST') { const input = await body(request); const result = desk.memory.personNote(String(input.kind || ''), input.text, { lasting: true, replaces: input.replaces || '' }); notify(); return json(response, 200, result); }
       if (url.pathname === '/api/profile/notes' && request.method === 'DELETE') { const input = await body(request); const result = desk.memory.forgetPersonNote(String(input.kind || ''), input.text); notify(); return json(response, 200, result); }
       if (url.pathname === '/api/profile/photo' && request.method === 'GET') { const photo = desk.memory.photo(); if (!photo) return json(response, 404, { error: 'No profile photo yet.' }); return serveFile(request, response, photo.file); }
@@ -891,9 +1009,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
-      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/toast.js': 'toast.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
+      const publicFiles = { '/': 'chat.html', '/chat.js': 'chat.js', '/chat-agents.js': 'chat-agents.js', '/chat-composer.js': 'chat-composer.js', '/chat-update.js': 'chat-update.js', '/toast.js': 'toast.js', '/chat-activity.js': 'chat-activity.js', '/chat-markdown.js': 'chat-markdown.js', '/chat-rooms.js': 'chat-rooms.js', '/chat-pick.js': 'chat-pick.js', '/chat-settings.js': 'chat-settings.js', '/chat-devices.js': 'chat-devices.js', '/chat-monitor.js': 'chat-monitor.js', '/chat-worktrees.js': 'chat-worktrees.js', '/chat-viewer.js': 'chat-viewer.js', '/chat-notices.js': 'chat-notices.js', '/chat-files.js': 'chat-files.js', '/chat-card.js': 'chat-card.js', '/chat-speak.js': 'chat-speak.js', '/files': 'files.html', '/files-window.js': 'files-window.js', '/chat-media.js': 'chat-media.js', '/presence.js': 'presence.js', '/chat.css': 'chat.css', '/glass.css': 'glass.css', '/rex-core.js': 'rex-core.js', '/chat-palette.js': 'chat-palette.js', '/chat-split.js': 'chat-split.js', '/themes.css': 'themes.css', '/chat-glass.js': 'chat-glass.js', '/ai-logos.js': 'ai-logos.js', '/chat-tour-ai.js': 'chat-tour-ai.js', '/chat-local-ai.js': 'chat-local-ai.js', '/win-bar.js': 'win-bar.js', '/chat-graph.js': 'chat-graph.js', '/graph-worker.js': 'graph-worker.js', '/signin': 'signin.html', '/chat-signin.js': 'chat-signin.js', '/theme.js': 'theme.js', '/style.css': 'style.css', '/login-scene.js': 'login-scene.js', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/jev': 'jev.html', '/jev.js': 'jev.js', '/jev.css': 'jev.css', '/recorder.js': 'recorder.js', '/pwa.js': 'pwa.js', '/sw.js': 'sw.js', '/offline.html': 'offline.html', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-180.png': 'icon-180.png', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png' };
       // three.js ships from the installed package; the page loads no remote scripts.
-      const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js' };
+      const vendorFiles = { '/vendor/three/three.module.js': 'three/build/three.module.js', '/vendor/three/three.core.js': 'three/build/three.core.js', '/vendor/driver/driver.js.mjs': 'driver.js/dist/driver.js.mjs', '/vendor/driver/driver.css': 'driver.js/dist/driver.css' };
       if (vendorFiles[url.pathname]) return serveFile(request, response, path.join(root, 'node_modules', vendorFiles[url.pathname]), { cache: 'public, max-age=604800' });
       const editorFile = url.pathname.match(/^\/vendor\/codemirror\/((?:lib|mode\/[a-z0-9-]+|addon\/[a-z]+)\/[a-z0-9-]+\.(?:js|css))$/);
       if (editorFile) return serveFile(request, response, path.join(root, 'node_modules', 'codemirror', ...editorFile[1].split('/')), { cache: 'public, max-age=604800' });
@@ -901,12 +1019,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (/^\/fonts\/[a-z0-9-]+\.woff2$/.test(url.pathname) && existsSync(path.join(root, 'public', url.pathname.slice(1)))) return serveFile(request, response, path.join(root, 'public', url.pathname.slice(1)), { cache: 'public, max-age=604800' });
       // A page script or style added after this server started is served by its name too, so a server still waiting for
       // agents to finish before it restarts does not leave the page stuck on a missing file.
-      // The video guides and their chapter lists ship in public/guides.
-      const file = publicFiles[url.pathname] || (/^\/(?:guides\/)?[a-z0-9-]+\.(?:js|css)$/.test(url.pathname) || /^\/guides\/[a-z0-9-]+\.webm$/.test(url.pathname) ? url.pathname.slice(1) : '');
+      // The Settings tours: their steps in public/guides, and the voice of each step in public/guides/voice.
+      const file = publicFiles[url.pathname] || (/^\/(?:guides\/)?[a-z0-9-]+\.(?:js|css)$/.test(url.pathname) || /^\/guides\/voice\/[a-z0-9-]+\.m4a$/.test(url.pathname) ? url.pathname.slice(1) : '');
       if (!file || !existsSync(path.join(root, 'public', file))) return json(response, 404, { error: 'Page not found.' });
       return serveFile(request, response, path.join(root, 'public', file));
     } catch (error) { if (!response.headersSent) json(response, 400, { error: error.message }); else response.end(); }
   };
+  // The window key file exists before the server answers, so the desktop app can read it as soon as it sees the server up.
+  windowKey();
   const server = http.createServer(handler);
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); }); }
   catch (error) { await closeSession(); unlinkSync(lockPath); throw error; }
@@ -966,10 +1086,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
 // in its job, and a plain detached child would die with it.
 // The replacement keeps this server's port, so a checkout used as the real app (started on 4317) stays on 4317 after it updates.
 async function startReplacement(port) {
-  const log = path.join(root, '.local', 'server-restart.log');
+  // The log goes in the data folder. The installed app has no .local folder, and cmd.exe does not start a command whose
+  // log folder is missing: the replacement never started, and Rex Desk stayed down after "Move" until the window restarted it.
+  const log = path.join(process.env.REX_DATA_DIR || path.join(root, '.local'), 'server-restart.log');
+  try { mkdirSync(path.dirname(log), { recursive: true }); } catch {}
   if (process.platform === 'win32') {
-    // WMI starts it with the user's plain environment, so the folders this server was given are passed on.
-    const carry = ['REX_DATA_DIR', 'REX_DESK_MEMORY'].filter(name => process.env[name]).map(name => `set "${name}=${process.env[name]}"&& `).join('');
+    // WMI starts it with the user's plain environment, so the folders and the installed app's details this server was given are passed on.
+    const carry = ['REX_DATA_DIR', 'REX_DESK_MEMORY', 'REX_DESK_VERSION', 'REX_DESK_EXE', 'REX_CLONE_DIR', 'REX_NO_AUTO_PULL', 'TEMP', 'TMP'].filter(name => process.env[name]).map(name => `set "${name}=${process.env[name]}"&& `).join('');
     const command = `cmd.exe /c "${carry}set REX_RESTART_AFTER=${process.pid}&& set PORT=${port}&& "${process.execPath}" src/server.js >> "${log}" 2>&1"`;
     const script = `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${command.replaceAll("'", "''")}'; CurrentDirectory = '${root.replaceAll("'", "''")}' }; exit $r.ReturnValue`;
     await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 30000 });

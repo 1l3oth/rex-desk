@@ -81,7 +81,7 @@ test('a fresh workspace restores records, events, and its access token from Turs
   await second.cloud.close(); second.close();
 });
 
-test('a reinstall gets back the files too: chat pictures, room pictures, evidence and the memory folder', async () => {
+test('a backup to your own Turso database keeps no files in it, and a reinstall still gets back files an older version put there', async () => {
   const original = temporary('files-a'), restored = temporary('files-b'), memory = temporary('files-memory'), turso = fakeTurso();
   turso.network.online = true;
   const { mkdirSync, writeFileSync, readFileSync, rmSync } = await import('node:fs');
@@ -96,8 +96,13 @@ test('a reinstall gets back the files too: chat pictures, room pictures, evidenc
   first.event('run-1', 'human-message', { text: 'Keep me' }, true); first.event('run-1', 'human-message', { text: 'Unsend me' }, true);
   first.unsendEvent('run-1', first.events('run-1').at(-1).sequence);
   await first.cloud.flush(); await first.cloud.files.run();
-  assert.equal(turso.remote.prepare('SELECT COUNT(*) AS n FROM rex_files').get().n, 4, 'node_modules and copies of source code in evidence are skipped');
-  assert.doesNotMatch(String(turso.remote.prepare("SELECT data FROM rex_files WHERE path='memory/user.md'").get().data), /short answers/, 'files are sealed with the vault key');
+  assert.equal(turso.remote.prepare('SELECT COUNT(*) AS n FROM rex_files').get().n, 0, 'files never go into the database');
+  // Versions before this one did keep files in the database (sealed with the vault key): those still come back on a reinstall.
+  const { readFileSync: read } = await import('node:fs');
+  const older = [['data/uploads/u1/shot.png', path.join(original, 'uploads', 'u1', 'shot.png')], ['data/room-images/room-1.png', path.join(original, 'room-images', 'room-1.png')],
+    ['data/artifacts/run-1/screen.png', path.join(original, 'artifacts', 'run-1', 'screen.png')], ['memory/user.md', path.join(memory, 'user.md')]];
+  const workspace = first.cloud.workspace;
+  for (const [key, file] of older) { const data = read(file); turso.remote.prepare('INSERT INTO rex_files(workspace,path,size,data,updated_at) VALUES(?,?,?,?,?)').run(workspace, key, data.length, first.encryptBytes(data), new Date().toISOString()); }
   await first.cloud.close(); first.close();
   // Uninstall: the data folder and the memory folder are gone. Only the workspace identity and key come back (from the passphrase).
   rmSync(memory, { recursive: true, force: true });
@@ -254,5 +259,38 @@ test('shared agents and computers belong to one account: another account (or a d
   turso.remote.prepare('INSERT INTO rex_presence(node,name,at,agents,host,workspace) VALUES(?,?,?,?,?,?)').run('other-laptop', 'Laptop', Date.now(), '{}', 'Y', workspace);
   assert.deepEqual((await store.cloud.pullShared('0')).map(row => row.id), ['mine']);
   assert.deepEqual((await store.cloud.presence('Here', {})).map(row => row.name), ['Laptop']);
+  await store.cloud.close(); store.close();
+});
+
+test('a part left out of the backup is deleted from the cloud, skipped from then on, and sent back when turned on again', async () => {
+  const directory = temporary('parts'), turso = fakeTurso(); turso.network.online = true;
+  const store = new Store(directory);
+  store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 40 });
+  await store.cloud.connect({ url: 'libsql://rex-parts.example.invalid', authToken: 'parts-token' });
+  store.put('task', 'task-1', { id: 'task-1', title: 'A task' });
+  store.put('specialist', 'agent-1', { id: 'agent-1', name: 'Agent' });
+  store.event('run-1', 'message', { text: 'Hello' }, true);
+  await store.cloud.flush();
+  const count = (sql, ...args) => turso.remote.prepare(sql).get(...args).n;
+  assert.equal(count("SELECT COUNT(*) n FROM rex_records WHERE kind='task'"), 1);
+  assert.equal(count('SELECT COUNT(*) n FROM rex_events'), 1);
+  assert.deepEqual(store.cloud.status().parts, { chats: true, rooms: true, tasks: true, files: true });
+
+  // Off: the cloud copy goes, new ones are not sent, and the cloud check still passes.
+  store.cloud.setParts({ tasks: false, chats: false }); await store.cloud.flush();
+  assert.equal(count("SELECT COUNT(*) n FROM rex_records WHERE kind='task'"), 0);
+  assert.equal(count('SELECT COUNT(*) n FROM rex_events'), 0);
+  store.put('task', 'task-2', { id: 'task-2', title: 'Stays here' }); store.event('run-1', 'message', { text: 'Not sent' }, true);
+  await store.cloud.flush();
+  assert.equal(count("SELECT COUNT(*) n FROM rex_records WHERE kind='task'"), 0);
+  assert.equal(count('SELECT COUNT(*) n FROM rex_events'), 0);
+  assert.equal(count("SELECT COUNT(*) n FROM rex_records WHERE kind='specialist'"), 1, 'agents always go up');
+  assert.equal((await store.cloud.verify()).matched, true);
+  assert.equal(store.list('task').length, 2, 'nothing is deleted on this computer');
+
+  // On again: this computer's copy goes back up.
+  store.cloud.setParts({ tasks: true, chats: true }); await store.cloud.flush();
+  assert.equal(count("SELECT COUNT(*) n FROM rex_records WHERE kind='task'"), 2);
+  assert.equal(count('SELECT COUNT(*) n FROM rex_events'), 2);
   await store.cloud.close(); store.close();
 });

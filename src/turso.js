@@ -1,10 +1,11 @@
+import { doing } from './stall-watch.js';
 import { createClient } from '@libsql/client/web';
 import { backup } from 'node:sqlite';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
-import { SHARED } from './store.js';
+import { SHARED, BACKUP_PARTS } from './store.js';
 import { FileBackup } from './file-backup.js';
 import { AccountLink } from './rexdesk-account.js';
 import { development } from './folders.js';
@@ -38,7 +39,7 @@ export class TursoSync {
     return { configured: this.enabled, url: this.connection?.url || '', state: this.state, error: this.error,
       pending: this.enabled ? Number(this.store.db.prepare('SELECT COUNT(*) AS total FROM cloud_outbox WHERE destination=?').get(this.connection.url).total) : 0,
       account: this.account.summary(), accountNote: this.account.ended || '',
-      lastSyncedAt: this.lastSyncedAt || '', workspace: this.workspace, files: { error: this.files.error || '', restored: this.files.lastRestored || 0 } };
+      lastSyncedAt: this.lastSyncedAt || '', workspace: this.workspace, parts: this.parts(), files: { error: this.files.error || '', restored: this.files.lastRestored || 0 } };
   }
   enqueue(sql, args) {
     if (!this.enabled) return;
@@ -70,7 +71,7 @@ export class TursoSync {
   record(kind, id, value) { if (this.store.isPrivate(kind, value)) return; this.shared(kind, id, value); this.enqueue('INSERT INTO rex_records(workspace,kind,id,value) VALUES(?,?,?,?) ON CONFLICT(workspace,kind,id) DO UPDATE SET value=excluded.value', [this.workspace, kind, id, JSON.stringify(value)]); }
   remove(kind, id) { this.shared(kind, id, null, true); this.enqueue('DELETE FROM rex_records WHERE workspace=? AND kind=? AND id=?', [this.workspace, kind, id]); }
   removeEvent(sequence) { this.enqueue('DELETE FROM rex_events WHERE workspace=? AND sequence=?', [this.workspace, Number(sequence)]); }
-  event(row) { if (this.store.privateRun(row.run_id)) return; this.enqueue('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,sequence) DO UPDATE SET run_id=excluded.run_id,kind=excluded.kind,visible=excluded.visible,value=excluded.value,created_at=excluded.created_at', [this.workspace, Number(row.sequence), row.run_id, row.kind, row.visible, row.value, row.created_at]); }
+  event(row) { if (this.store.privateRun(row.run_id) || this.store.backupOff('chats')) return; this.enqueue('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,sequence) DO UPDATE SET run_id=excluded.run_id,kind=excluded.kind,visible=excluded.visible,value=excluded.value,created_at=excluded.created_at', [this.workspace, Number(row.sequence), row.run_id, row.kind, row.visible, row.value, row.created_at]); }
   // A project was set to stay out of the cloud: what the cloud holds of one of its agents is deleted there. The copies in the
   // shared table are removed outright (not marked deleted), so the other computers keep their own copy of the chat.
   forget(agentId) {
@@ -89,6 +90,36 @@ export class TursoSync {
     });
     this.files.forget([...[...runIds].map(id => `data/artifacts/${id}/`), `memory/agents/home/${agentId}/`]);
     this.schedule(); return { removed };
+  }
+  // What goes to the cloud: chat history, group chat messages, tasks, pictures and files. Turning a part off deletes its
+  // cloud copy (from this account's backup, for every computer); turning it on sends this computer's copy back up.
+  parts() { return { ...BACKUP_PARTS, ...(this.store.get('backup', 'parts') || {}) }; }
+  setParts(next = {}) {
+    const before = this.parts(), after = { ...before };
+    for (const part of Object.keys(BACKUP_PARTS)) if (typeof next[part] === 'boolean') after[part] = next[part];
+    this.store.put('backup', 'parts', after);
+    if (this.enabled) for (const part of Object.keys(BACKUP_PARTS)) if (before[part] !== after[part]) (after[part] ? this.sendPart(part) : this.dropPart(part));
+    this.schedule(); return after;
+  }
+  static PART_KINDS = { rooms: ['roommsg'], tasks: ['task', 'priority'], files: ['chatfile', 'artifact'], chats: [] };
+  dropPart(part) {
+    this.store.transaction(() => {
+      if (part === 'chats') this.enqueue('DELETE FROM rex_events WHERE workspace=?', [this.workspace]);
+      for (const kind of TursoSync.PART_KINDS[part]) {
+        this.enqueue('DELETE FROM rex_records WHERE workspace=? AND kind=?', [this.workspace, kind]);
+        if (SHARED.has(kind)) this.enqueue('DELETE FROM rex_shared WHERE (workspace=? OR workspace IS NULL) AND kind=?', [this.workspace, kind]);
+      }
+      if (part === 'files') this.enqueue("DELETE FROM rex_files WHERE workspace=? AND path LIKE 'data/%'", [this.workspace]);
+    });
+    if (part === 'files') this.files.forget(['data/']);
+  }
+  sendPart(part) {
+    doing(`cloud sync: uploading ${part}`);
+    this.store.transaction(() => {
+      if (part === 'chats') for (const row of this.store.db.prepare('SELECT * FROM events ORDER BY sequence').all()) this.event(row);
+      for (const kind of TursoSync.PART_KINDS[part]) for (const item of this.store.list(kind)) this.record(kind, item.id, item);
+    });
+    if (part === 'files') void this.files.run?.();
   }
   // The project may use the cloud again: everything of the agent that is here goes back up.
   restoreAgent(agentId) {
@@ -169,6 +200,7 @@ export class TursoSync {
     return this.status();
   }
   seed() {
+    doing('cloud sync: uploading everything');
     this.store.transaction(() => {
       for (const row of this.store.db.prepare('SELECT * FROM records').all()) this.record(row.kind, row.id, JSON.parse(row.value));
       for (const row of this.store.db.prepare('SELECT * FROM events ORDER BY sequence').all()) this.event(row);
@@ -198,6 +230,7 @@ export class TursoSync {
   // does not fetch the whole history every time. What is kept out of the cloud (Store.isPrivate) is never deleted here,
   // because the cloud never had it. This computer's own name, links and read positions (peers/main) stay as they are.
   async pullLatest({ live = new Set() } = {}) {
+    doing('cloud sync: catching up at start');
     await this.flush();
     if (this.state !== 'connected' || this.status().pending) return { pulled: false, reason: this.error || 'Local changes are still uploading.' };
     const remote = await this.cloudRecords();
@@ -286,7 +319,7 @@ export class TursoSync {
     const parsed = new URL(url);
     if (!['libsql:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('Use a libsql:// or HTTPS Turso database URL without credentials in the URL.');
     const token = String(authToken || (this.connection?.url === url ? this.connection.authToken : '') || '').trim();
-    if (!token) throw new Error('Enter the Turso database token.');
+    if (!token) throw new Error('Enter the Turso database key.');
     const backups = path.join(this.store.directory, 'backups'); mkdirSync(backups, { recursive: true, mode: 0o700 });
     await backup(this.store.db, path.join(backups, `before-turso-${Date.now()}.sqlite`));
     this.connection = { url, authToken: token }; this.ready = false;
@@ -318,13 +351,14 @@ export class TursoSync {
     return this.flushing;
   }
   async verify({ repaired = false } = {}) {
+    doing('cloud sync: checking the cloud copy');
     await this.flush();
     if (this.state !== 'connected') throw new Error('Turso is offline. Pending writes are safe in the local outbox.');
     // The question is whether everything on this computer is in the cloud. The same account on another computer adds its own
     // chats and records there too, so the cloud copy may hold more than this computer, and that is fine.
     const local = this.store.db.prepare('SELECT kind,id,value FROM records ORDER BY kind,id').all().filter(row => !this.store.isPrivate(row.kind, JSON.parse(row.value)));
     const privateRuns = new Set(this.store.list('run').filter(run => this.store.isPrivate('run', run)).map(run => run.id));
-    const localEvents = this.store.db.prepare('SELECT sequence,run_id FROM events').all().filter(row => !privateRuns.has(row.run_id));
+    const localEvents = this.store.backupOff('chats') ? [] : this.store.db.prepare('SELECT sequence,run_id FROM events').all().filter(row => !privateRuns.has(row.run_id));
     const remoteKeys = new Set(); let kind = '', id = '';
     for (;;) {
       const page = await this.client.execute({ sql: 'SELECT kind,id FROM rex_records WHERE workspace=? AND (kind>? OR (kind=? AND id>?)) ORDER BY kind,id LIMIT 5000', args: [this.workspace, kind, kind, id] });
@@ -366,7 +400,7 @@ export async function findCloudWorkspace({ url, authToken, name }, clientFactory
     const result = await client.execute({ sql: 'SELECT workspace,name,kdf,sealed_key FROM rex_workspaces WHERE lower(name)=lower(?)', args: [String(name || '').trim()] })
       .catch(error => { if (/no such table/i.test(error.message)) return { rows: [] }; throw new Error(hide(error.message)); });
     const row = result.rows[0];
-    if (!row) throw new Error('No workspace with that name is published in this database. On the first computer, sign in with a passphrase and connect Cloud backup.');
+    if (!row) throw new Error('No desk with that name is in this backup. On your first computer, sign in and turn on Cloud backup.');
     return { id: row.workspace, name: row.name, sealed: { kdf: JSON.parse(row.kdf), sealedKey: row.sealed_key } };
   } finally { client.close(); }
 }

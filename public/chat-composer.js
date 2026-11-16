@@ -18,11 +18,27 @@ function remember(patch) { try { localStorage.setItem(KEY, JSON.stringify({ ...s
 
 // What the pickers show: the run's own choice when it has one, else what the person last picked, else the defaults.
 // The AI a chat runs on: the one picked for it here, else the run's own, else the default in Settings.
-function providerOf(ctx, run) { const picked = ctx.ui.providerPick?.[ctx.draftKey()]; return picked || run?.provider || ctx.ui.snap?.config?.provider || 'claude'; }
-function choicesFor(ctx, provider) { const all = ctx.ui.snap?.choices || { models: [], efforts: [], modes: [] }; return all.providers?.[provider] || all; }
+// Local AI is offered as an AI of its own (the models on this computer), though it runs through Claude Code: a chat on
+// a local model shows "Local AI", Claude Code's list shows only Claude's models, and the message goes out as Claude Code.
+const LOCAL = 'local';
+const isLocalId = id => String(id || '').startsWith('local:');
+function providerOf(ctx, run) {
+  const picked = ctx.ui.providerPick?.[ctx.draftKey()]; if (picked) return picked;
+  const own = run?.provider || ctx.ui.snap?.config?.provider || 'claude';
+  return own === 'claude' && isLocalId(run ? run.model : ctx.ui.snap?.config?.models?.claude) ? LOCAL : own;
+}
+function choicesFor(ctx, provider) {
+  const all = ctx.ui.snap?.choices || { models: [], efforts: [], modes: [] };
+  if (provider !== LOCAL && provider !== 'claude') return all.providers?.[provider] || all;
+  const claude = all.providers?.claude || all, local = provider === LOCAL;
+  const models = claude.models.filter(item => isLocalId(item.id) === local);
+  // No model on this computer yet: say where to get one instead of an empty list.
+  return { ...claude, models: models.length || !local ? models : [{ id: '', label: 'No models yet', hint: 'Open Settings, Local AI, and press Set up: it installs Ollama and a starter model.', disabled: true }] };
+}
+const sentProvider = provider => (provider === LOCAL ? 'claude' : provider);
 export function currentOptions(ctx) {
   const { ui } = ctx, run = ui.view.type === 'main' ? ctx.mainRun() : ui.view.type === 'run' ? ctx.runById(ui.view.id) : null, last = saved(), provider = providerOf(ctx, run), choices = choicesFor(ctx, provider);
-  const configured = ui.snap?.config?.models?.[provider];
+  const configured = ui.snap?.config?.models?.[sentProvider(provider)];
   // Only a model that is on the current list is shown and sent; anything else falls back to the first one (the recommended default).
   const ids = choices.models.filter(item => !item.disabled).map(item => item.id), model = [run?.model, last.model, configured].find(value => value && ids.includes(value)) || ids[0] || '';
   const modeIds = choices.modes.map(item => item.id), wanted = ui.snap?.config?.defaultMode || DEFAULT_MODE, mode = [run?.permissionMode, last.permissionMode, wanted].find(value => value && modeIds.includes(value)) || (modeIds.includes('manual') ? 'manual' : modeIds[0]);
@@ -31,7 +47,7 @@ export function currentOptions(ctx) {
 }
 export function pickedOptions(ctx) {
   const read = id => document.getElementById(id)?.value || '';
-  return { provider: read('opt-provider') || undefined, model: read('opt-model') || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
+  return { provider: sentProvider(read('opt-provider')) || undefined, model: read('opt-model') || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
 }
 
 // The AI, model, effort and mode pickers under the message box, for the AI picked now.
@@ -39,7 +55,7 @@ function optionPickers(ctx) {
   const now = currentOptions(ctx), choices = choicesFor(ctx, now.provider);
   const select = (id, label, items, value) => pickerHtml(ctx, { id, label, compact: true, value, items: items.map(item => ({ value: item.id, label: item.label, hint: item.hint, disabled: item.disabled })) });
   const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? 'Dangerous' : item.label, hint: item.hint || MODE_HINT[item.id] }));
-  return `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude subscription' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT subscription' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}`;
+  return `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude plan' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT plan' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }, { id: LOCAL, label: 'Local AI', hint: 'A model on this computer: free and private, no account needed' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}`;
 }
 // The message box is not redrawn while the chat updates (it would lose what is typed), so a new AI redraws only its pickers.
 function redrawOptionPickers(ctx) {
@@ -103,13 +119,13 @@ function contextRing(ctx, working) {
 function commands(ctx) {
   const { ui } = ctx, c = ctx.commands;
   return [
-    { name: 'sync', hint: 'Sync issues from the tracker', run: c.sync },
+    { name: 'sync', hint: 'Get the newest tasks from your task app', run: c.sync },
     { name: 'projects', hint: 'Scan this computer for projects', run: c.projects },
     { name: 'room', hint: 'Start a room for several agents', run: c.room },
     { name: 'agent', hint: 'Create an agent for a project', run: c.agent },
     ...(ui.view.type === 'room' ? [{ name: 'assign', hint: 'Give a task to an agent: /assign @agent #task', run: c.assign }] : []),
     { name: 'main', hint: 'Go to Rex Agent', run: c.main },
-    ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }, { name: 'clear', hint: 'Fresh start: the agent gets a handoff of this chat and a clean session', run: c.clear }, { name: 'loop', hint: 'Check its own tasks now and start on one', run: c.loop }] : []),
+    ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }, { name: 'clear', hint: 'Fresh start: the agent gets a summary of this chat and starts again', run: c.clear }, { name: 'loop', hint: 'Check its own tasks now and start on one', run: c.loop }] : []),
     { name: 'voice', hint: 'Voice engine and language: compare which one understands you', run: () => voiceDialog(ctx) },
     { name: 'settings', hint: 'Open settings', run: c.settings },
     // The agent's own skills and commands, like typing / in Claude Code: choosing one puts it in the box to send to the agent.
@@ -167,8 +183,49 @@ function menuItems(ctx, box) {
 let listening = null, transcribing = false;
 const micButton = () => document.querySelector('[data-action="mic"]');
 const voiceLanguage = ctx => { try { return localStorage.getItem('jev-language') || ctx.ui.snap?.config?.control?.language || 'en'; } catch { return ctx.ui.snap?.config?.control?.language || 'en'; } };
+// Dictation with the browser's own speech recognition (Chrome, Edge; see Voice mode below): it works the words out while
+// they are said, so they are in the box the moment the person stops, instead of being worked out from a recording after.
+// Where it cannot be used (the desktop app's window, no network), Rex Desk's own engine records as before.
+function putInBox(ctx, text) {
+  const box = document.getElementById('draft'); if (!box || !text) return;
+  ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(ctx.draftKey());
+  box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + text; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); box.dispatchEvent(new Event('input', { bubbles: true }));
+}
+// The browser's recognition listens to the browser's own microphone choice, which can be a muted virtual one (iVCam): it
+// is handed the microphone Rex Desk found working instead, where the browser allows that (Chrome does).
+function startOn(recognition, stream) {
+  const track = stream?.getAudioTracks?.()[0];
+  if (track) { try { recognition.start(track); return; } catch { /* an older browser: its own microphone */ } }
+  recognition.start();
+}
+async function browserDictate(ctx, { untilRelease = false } = {}) {
+  if (browserSpeech === 'no') return false;
+  let recognition; try { recognition = new Recognition(); } catch { browserSpeech = 'no'; return false; }
+  let stream = null; try { stream = await openMicrophone(); } catch { /* the browser asks for the microphone itself */ }
+  const release = () => stream?.getTracks().forEach(track => track.stop());
+  // Always continuous (on its own it stops at the first breath). Held Space ends when it is let go; the mic button ends after
+  // a pause of two seconds with no new words, or when it is pressed again.
+  recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = true;
+  let said = '', lastWords = 0;
+  const watch = untilRelease ? 0 : setInterval(() => { if (said && performance.now() - lastWords > 2000) turn.stop(); }, 200);
+  const turn = { browser: true, stop: () => { clearInterval(watch); try { recognition.stop(); } catch { /* already over */ } } };
+  recognition.onresult = event => { said = [...event.results].map(result => result[0].transcript).join(' ').replace(/\s+/g, ' ').trim(); lastWords = performance.now(); };
+  recognition.onerror = event => { turn.failed = event.error; if (['network', 'not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(event.error)) browserSpeech = 'no'; };
+  recognition.onend = () => {
+    clearInterval(watch); release(); if (listening === turn) listening = null;
+    micButton()?.classList.remove('rec'); document.body.classList.remove('ptt');
+    if (said) { putInBox(ctx, said); return; }
+    ctx.toast(turn.failed && browserSpeech === 'no' ? 'The browser could not turn speech into words here. Press the mic again to use Rex Desk\'s own voice engine.' : 'Nothing was heard. Hold Space (or press the mic) and speak.', true);
+  };
+  try { startOn(recognition, stream); } catch { release(); browserSpeech = 'no'; return false; }
+  if (browserSpeech === 'try') browserSpeech = 'yes';
+  listening = turn; micButton()?.classList.add('rec');
+  return true;
+}
 async function finishMic(ctx) {
   const recording = listening; if (!recording) return;
+  // The browser's recognition puts the words in the box itself when it ends.
+  if (recording.browser) { recording.stop(); return; }
   listening = null; recording.stop(); micButton()?.classList.remove('rec');
   if (!recording.heard) { ctx.toast('Nothing was heard. Hold Space (or press the mic) and speak.', true); return; }
   transcribing = true; micButton()?.classList.add('busy');
@@ -183,12 +240,99 @@ async function finishMic(ctx) {
 async function toggleMic(ctx) {
   if (transcribing) return;
   if (listening) return finishMic(ctx);
+  if (await browserDictate(ctx)) return;
   void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
   let stream;
   try { stream = await openMicrophone(); } catch { ctx.toast('Rex Desk could not use the microphone. Allow it, then press the mic again.', true); return; }
   listening = startRecorder(stream, { onQuiet: () => void finishMic(ctx) });
   micButton()?.classList.add('rec');
 }
+
+// Voice mode (chat-speak.js): one spoken turn. It listens until the person stops talking, then sends what they said as a
+// message. Nothing said in 20 seconds ends the turn quietly; Voice mode starts the next one. Returns false when it could
+// not start (already listening, the microphone is blocked).
+export const voiceBusy = () => Boolean(listening || transcribing);
+// What the body in Voice mode shows: listening (with how loud the person is), or turning speech into words.
+// heardAt: the last moment the person's voice was loud enough to be talking, so Voice mode never takes them for silent
+// (and never interrupts them with "are you still there?") while they talk.
+let micLevel = 0, heardAt = 0;
+const hearLevel = level => { micLevel = level; if (level > 0.12) heardAt = Date.now(); };
+export const voiceListening = () => ({ listening: Boolean(listening), transcribing, level: micLevel, heardAt });
+// The words go to the agent as a message, as if typed.
+async function sendSpoken(ctx, text) {
+  const box = document.getElementById('draft'); if (!text || !box) return;
+  box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + text; ctx.ui.drafts.set(ctx.draftKey(), box.value);
+  box.dispatchEvent(new Event('input', { bubbles: true })); ctx.ui.voiceNext = true; await ctx.send();
+}
+// The browser's own speech recognition (Chrome, Edge): free, no key, it hears the words while they are said and knows by
+// itself when the person stopped. The desktop app's window has none that works, and a browser whose service fails (no
+// network, blocked) is not asked again; Rex Desk's own engines (on this computer, Gemini, ElevenLabs) take over.
+const Recognition = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
+let browserSpeech = Recognition && !window.__REX_SHELL ? 'try' : 'no';
+const SPEECH_LANG = { en: 'en-US', km: 'km-KH', ko: 'ko-KR' };
+function listenLevel(stream) {
+  const context = new (window.AudioContext || window.webkitAudioContext)(), analyser = context.createAnalyser(); analyser.fftSize = 1024;
+  context.createMediaStreamSource(stream).connect(analyser);
+  const data = new Float32Array(analyser.fftSize); let timer = 0;
+  const tick = () => { analyser.getFloatTimeDomainData(data); let sum = 0; for (const value of data) sum += value * value; hearLevel(Math.min(1, Math.sqrt(sum / data.length) * 6)); timer = requestAnimationFrame(tick); };
+  tick();
+  return () => { cancelAnimationFrame(timer); micLevel = 0; stream.getTracks().forEach(track => track.stop()); void context.close(); };
+}
+async function browserTurn(ctx, onState) {
+  let stream; try { stream = await openMicrophone(); } catch { return 'blocked'; }
+  const stopLevel = listenLevel(stream), recognition = new Recognition();
+  // Continuous: on its own the recognition ends a turn at the first breath, cutting the person off mid-sentence. Rex Desk
+  // decides the end itself: once something was said, a pause of PAUSE_MS with no new words and a quiet microphone.
+  recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = true; recognition.maxAlternatives = 1;
+  let said = '', failed = '', lastWords = 0, ended = false;
+  const PAUSE_MS = 1800, LONGEST_MS = 90000, started = performance.now();
+  recognition.onresult = event => { said = [...event.results].map(result => result[0].transcript).join(' ').replace(/\s+/g, ' ').trim(); lastWords = performance.now(); };
+  recognition.onerror = event => { failed = event.error || 'error'; if (['network', 'not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(failed)) browserSpeech = 'no'; };
+  const finish = () => { if (ended) return; ended = true; clearInterval(watch); try { recognition.stop(); } catch { /* already over */ } };
+  const watch = setInterval(() => {
+    const now = performance.now();
+    if (said && now - lastWords > PAUSE_MS && micLevel < 0.08) finish();
+    else if (now - started > LONGEST_MS) finish();
+  }, 150);
+  const turn = { stop: () => { ended = true; clearInterval(watch); try { recognition.abort(); } catch { /* already over */ } } };
+  recognition.onend = async () => {
+    clearInterval(watch); stopLevel(); if (listening !== turn) return;
+    listening = null; micButton()?.classList.remove('rec');
+    if (!said) { onState('idle'); return; }
+    transcribing = true; onState('thinking');
+    try { await sendSpoken(ctx, said); } finally { transcribing = false; onState('idle'); }
+  };
+  try { startOn(recognition, stream); } catch { stopLevel(); browserSpeech = 'no'; return 'failed'; }
+  listening = turn; micButton()?.classList.add('rec'); onState('listening');
+  if (browserSpeech === 'try') browserSpeech = 'yes';
+  return 'started';
+}
+export async function voiceTurn(ctx, { onState = () => {} } = {}) {
+  if (listening || transcribing) return false;
+  if (browserSpeech !== 'no') {
+    const started = await browserTurn(ctx, onState);
+    if (started === 'started') return true;
+    if (started === 'blocked') { ctx.toast('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.', true); return false; }
+  }
+  void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
+  let stream;
+  try { stream = await openMicrophone(); } catch { ctx.toast('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.', true); return false; }
+  onState('listening');
+  const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => hearLevel(Math.min(1, level * 6)), longest: 90000, pause: 1800 });
+  listening = recording; micButton()?.classList.add('rec');
+  async function finish() {
+    if (listening !== recording) return;
+    listening = null; micLevel = 0; recording.stop(); micButton()?.classList.remove('rec');
+    if (!recording.heard) { onState('idle'); return; }
+    transcribing = true; onState('thinking');
+    try { const heard = await transcribe(recording.wav(), voiceLanguage(ctx)); await sendSpoken(ctx, String(heard.text || '').trim()); }
+    catch (error) { ctx.toast(/no voice engine|not installed|install/i.test(error.message) ? 'Voice mode needs a way to turn speech into words here: add an OpenRouter key (or install the voice model) in Settings → Jev and voice.' : `Voice mode: ${error.message}`, true); }
+    finally { transcribing = false; onState('idle'); }
+  }
+  return true;
+}
+// Ends a Voice mode turn that is still listening, without sending anything.
+export function cancelVoiceTurn() { const turn = listening; if (!turn) return; listening = null; micLevel = 0; turn.stop(); micButton()?.classList.remove('rec'); }
 
 // Hold Space to talk: past a short hold it listens until Space is let go, then the words land in the message box.
 // A quick tap still types a space. It works in the message box, or anywhere that is not another text field.
@@ -198,13 +342,23 @@ const holdable = target => target?.id === 'draft' || !(target?.closest?.('input,
 async function startHold(ctx) {
   if (listening || transcribing) return;
   hold.active = true; hold.pending = true;
+  // The browser's own recognition, until Space is let go: the words are ready the moment it is.
+  if (await browserDictate(ctx, { untilRelease: true })) {
+    hold.pending = false;
+    const box = document.getElementById('composer')?.getBoundingClientRect(); if (box) document.body.style.setProperty('--ptt-bottom', `${Math.max(16, Math.round(innerHeight - box.top + 12))}px`);
+    document.body.classList.add('ptt');
+    if (hold.releasedEarly) { hold.releasedEarly = false; hold.active = false; document.body.classList.remove('ptt'); void finishMic(ctx); }
+    return;
+  }
   void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
   let stream;
   try { stream = await openMicrophone(); } catch { hold.active = hold.pending = false; ctx.toast('Rex Desk could not use the microphone. Allow it, then try again.', true); return; }
   // While Space is held, quiet does not end the recording; only letting go does (or a minute at most).
   const recording = startRecorder(stream, { onQuiet: () => { if (performance.now() - recording.started > 60000) void finishMic(ctx); } });
   listening = recording; hold.pending = false;
-  micButton()?.classList.add('rec'); document.body.classList.add('ptt');
+  micButton()?.classList.add('rec');
+  const box = document.getElementById('composer')?.getBoundingClientRect(); if (box) document.body.style.setProperty('--ptt-bottom', `${Math.max(16, Math.round(innerHeight - box.top + 12))}px`);
+  document.body.classList.add('ptt');
   if (hold.releasedEarly) { hold.releasedEarly = false; hold.active = false; document.body.classList.remove('ptt'); void finishMic(ctx); }
 }
 function initPushToTalk(ctx) {
@@ -262,7 +416,7 @@ export function initComposer(ctx) {
   document.addEventListener('change', event => {
     if (event.target.id === 'file-input') { for (const file of event.target.files) void upload(ctx, file); event.target.value = ''; return; }
     // Switching the AI shows that AI's models and modes; the next message goes to it, with the chat so far handed over.
-    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : 'Claude Code'}.`); return; }
+    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : event.target.value === LOCAL ? 'Local AI, on this computer' : 'Claude Code'}.`); return; }
     if (event.target.id === 'opt-model') remember({ model: event.target.value });
     if (event.target.id === 'opt-effort') remember({ effort: event.target.value });
     if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast('Dangerous: the agent runs tools without asking.'); }

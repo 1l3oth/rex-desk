@@ -3,7 +3,9 @@
 // - memory: the AI memory every agent reads (what it knows about the person and the projects). Also moved on the next start.
 // - files: screenshots, recordings and attachments. Moved at once, since nothing holds them open.
 // A move copies first and switches only after the copy is complete; the old folder stays as a backup the person can delete.
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { constants, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -41,12 +43,38 @@ export function checkTarget(from, to) {
   return target;
 }
 
-// Copies everything, then checks the copy has every file before the caller switches over.
-function copyAll(from, to, skip = () => false) {
+// Copies everything file by file, then checks the copy has every file with the same size before the caller switches over.
+// Not Node's cpSync: it is native code, and on Windows it ended the whole server while moving a data folder (exit 0xC0000409,
+// no message), which left Rex Desk unable to start. Copying file by file turns any problem into an error that is reported.
+// It reports progress for the waiting page.
+export async function copyAll(from, to, skip = () => false, progress = () => {}) {
+  const files = [], folders = [];
+  const walk = (folder, relative) => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const source = path.join(folder, entry.name), name = path.join(relative, entry.name);
+      if (skip(source)) continue;
+      if (entry.isDirectory()) { folders.push(name); walk(source, name); } else if (entry.isFile()) files.push(name);
+    }
+  };
+  walk(from, '');
   mkdirSync(to, { recursive: true });
-  cpSync(from, to, { recursive: true, force: false, errorOnExist: false, filter: source => !skip(source) });
-  const count = folder => readdirSync(folder, { recursive: true }).length;
-  if (count(to) < count(from) - readdirSync(from, { recursive: true }).filter(name => skip(path.join(from, String(name)))).length) throw new Error('The copy is missing files, so nothing was moved.');
+  for (const folder of folders) mkdirSync(path.join(to, folder), { recursive: true });
+  for (let index = 0; index < files.length; index++) {
+    // Copied in the background (not copyFileSync), so the server still answers while a large database file copies.
+    await copyFile(path.join(from, files[index]), path.join(to, files[index]), constants.COPYFILE_EXCL);
+    if (index % 20 === 0) progress(index, files.length);
+  }
+  const missing = files.filter(name => { try { return statSync(path.join(to, name)).size !== statSync(path.join(from, name)).size; } catch { return true; } });
+  if (missing.length) throw new Error(`The copy is missing ${missing.length} files (for example ${missing[0]}), so nothing was moved.`);
+  progress(files.length, files.length);
+}
+
+// Files copied into a folder Windows compresses (a whole drive can be set to save space) are compressed too, and a compressed
+// database on a hard disk is read so slowly that Rex Desk stopped answering for minutes. The moved data is kept uncompressed.
+// Best effort: elsewhere, or when it fails, the move still counts.
+export async function uncompress(folder, platform = process.platform) {
+  if (platform !== 'win32') return;
+  await new Promise(resolve => execFile('compact.exe', ['/u', '/s', '/i', '/q'], { cwd: folder, windowsHide: true, timeout: 600000 }, () => resolve()));
 }
 
 // People pick the folder they think of (Documents, a drive), not an empty one: a picked folder that already holds things
@@ -62,16 +90,21 @@ export function planDataMove(dataRoot, to) {
 
 // Called on every start, before the database opens. Follows a finished move, or does a planned one once the previous
 // server has let go of the folder. Any failure keeps the old folder, so Rex Desk always opens.
-export async function followDataMove(dataRoot, { home = os.homedir(), waitForOld = async () => {}, log = () => {} } = {}) {
+export async function followDataMove(dataRoot, { home = os.homedir(), waitForOld = async () => {}, log = () => {}, progress = () => {} } = {}) {
   const moved = readLine(path.join(dataRoot, MOVED));
   if (moved && holdsWorkspace(moved)) return moved;
   const pendingFile = path.join(dataRoot, PENDING);
   if (!existsSync(pendingFile)) return dataRoot;
   let plan; try { plan = JSON.parse(readFileSync(pendingFile, 'utf8')); } catch { rmSync(pendingFile, { force: true }); return dataRoot; }
   try {
+    // A move that stopped the server partway (twice) is given up, so Rex Desk opens from the old folder instead of never opening.
+    const tries = Number(plan.tries) || 0;
+    if (tries >= 2) throw new Error('Rex Desk stopped while moving the data, so it stays in the old folder. Empty the new folder and try again.');
+    writeFileSync(pendingFile, JSON.stringify({ ...plan, tries: tries + 1 }));
     await waitForOld();
     const target = checkTarget(dataRoot, plan.to);
-    copyAll(dataRoot, target, source => [PENDING, 'runtime.lock'].includes(path.basename(source)) && path.dirname(source) === dataRoot);
+    await copyAll(dataRoot, target, source => [PENDING, 'runtime.lock'].includes(path.basename(source)) && path.dirname(source) === dataRoot, progress);
+    await uncompress(target);
     writeFileSync(path.join(dataRoot, MOVED), target);
     // The desktop app reads this pointer to find the workspace on its next launch.
     mkdirSync(pointerHome(home), { recursive: true }); writeFileSync(path.join(pointerHome(home), 'data-folder.txt'), target);
@@ -96,14 +129,14 @@ export function planMemoryMove(to, { env = process.env, home = os.homedir() } = 
 }
 
 // Called on every start, before the memory opens.
-export function followMemoryMove({ env = process.env, home = os.homedir(), log = () => {} } = {}) {
+export async function followMemoryMove({ env = process.env, home = os.homedir(), log = () => {} } = {}) {
   const file = path.join(pointerHome(home, env), 'memory-move.json');
   if (env.REX_DESK_MEMORY || !existsSync(file)) return memoryFolder(env, home);
   try {
     const plan = JSON.parse(readFileSync(file, 'utf8')), target = checkTarget(plan.from, plan.to);
     // Moving out of ~/.rexdesk leaves the small pointer files behind; they are not memory.
     const pointers = new Set(['memory-move.json', 'memory-folder.txt', 'data-folder.txt']);
-    copyAll(plan.from, target, source => pointers.has(path.basename(source)) && path.dirname(source) === plan.from);
+    await copyAll(plan.from, target, source => pointers.has(path.basename(source)) && path.dirname(source) === plan.from);
     writeFileSync(path.join(pointerHome(home, env), 'memory-folder.txt'), target);
     log(`Moved the AI memory from ${plan.from} to ${target}. The old folder is kept as a backup.`);
   } catch (error) { log(`Could not move the AI memory: ${error.message}`); }
@@ -112,7 +145,7 @@ export function followMemoryMove({ env = process.env, home = os.homedir(), log =
 }
 
 // The files folder moves at once: copy each part, switch the setting, then remove the old copies.
-export function moveMedia(store, to) {
+export async function moveMedia(store, to) {
   to = settle(to, 'Rex Desk');
   const from = store.config().mediaDirectory || store.directory, target = path.resolve(String(to || ''));
   if (!to || !path.isAbsolute(String(to))) throw new Error('Pick a full folder path.');
@@ -120,7 +153,7 @@ export function moveMedia(store, to) {
   if (inside(target, store.directory) && target.toLowerCase() !== store.directory.toLowerCase()) throw new Error('Pick a folder outside Rex Desk\'s data folder.');
   for (const folder of MEDIA_FOLDERS) if (existsSync(path.join(target, folder)) && readdirSync(path.join(target, folder)).length) throw new Error(`That folder already has a ${folder} folder with files in it. Pick another one.`);
   mkdirSync(target, { recursive: true });
-  for (const folder of MEDIA_FOLDERS) if (existsSync(path.join(from, folder))) copyAll(path.join(from, folder), path.join(target, folder));
+  for (const folder of MEDIA_FOLDERS) if (existsSync(path.join(from, folder))) await copyAll(path.join(from, folder), path.join(target, folder));
   store.saveConfig({ ...store.publicConfig(), mediaDirectory: target === store.directory ? '' : target });
   for (const folder of MEDIA_FOLDERS) {
     const old = path.join(from, folder);

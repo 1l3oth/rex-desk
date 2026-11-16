@@ -21,6 +21,28 @@ code,pre{font-family:var(--mono);font-size:12px}
 /* Loading screen: the mark breathes over a thin running bar. If the page cannot start, the same spot becomes a card that says why and retries. */
 .boot{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;background:var(--bg);color:var(--muted);font-size:13px;text-align:center}
 .boot-mark{width:44px;height:44px;border-radius:11px;animation:boot-breathe 1.8s ease-in-out infinite}
+.boot .rex-anim.boot-mark{--s:72px;width:var(--s);height:var(--s);border-radius:0;animation:none;margin-bottom:4px}
+/* The animated Rex Desk mark: four robot agents look around, then become the four white tiles of the logo (the last one 
+   faint: an agent waiting), a light sweeps across, and they turn back into agents. Pure CSS, loops every 4.2 s. */ 
+.rex-anim{--s:96px;position:relative;display:block;width:var(--s);height:var(--s);flex:none} 
+.rex-anim i{position:absolute;display:block} 
+.ra-base{inset:3.1%;border-radius:23.3%;background:linear-gradient(150deg,#78a8ff 0%,#4c8dff 42%,#3170e6 100%);box-shadow:inset 0 calc(var(--s)*.008) 0 rgba(255,255,255,.45),0 calc(var(--s)*.06) calc(var(--s)*.16) rgba(40,90,220,.4);overflow:hidden} 
+.ra-sheen{top:-30%;bottom:-30%;left:-60%;width:36%;transform:skewX(-18deg);background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);animation:ra-sheen 4.2s infinite} 
+.ra-t{width:21.9%;height:21.9%;border-radius:50%;overflow:hidden;box-shadow:0 calc(var(--s)*.012) calc(var(--s)*.03) rgba(10,30,90,.28);animation:ra-move 4.2s cubic-bezier(.65,0,.35,1) infinite both,ra-shape 4.2s cubic-bezier(.65,0,.35,1) infinite both} 
+.ra-t b{position:absolute;inset:0;background:#fff} 
+.ra-t svg{position:absolute;inset:0;width:100%;height:100%;display:block;animation:ra-face 4.2s cubic-bezier(.65,0,.35,1) infinite both} 
+.ra-1{left:25%;top:25%;--dx:calc(var(--s)*-.02);--dy:calc(var(--s)*-.02);--r:8deg} 
+.ra-2{left:53.1%;top:25%;--dx:calc(var(--s)*.02);--dy:calc(var(--s)*-.02);--r:-7deg;animation-delay:.07s} 
+.ra-3{left:25%;top:53.1%;--dx:calc(var(--s)*-.02);--dy:calc(var(--s)*.02);--r:-9deg;animation-delay:.14s} 
+.ra-4{left:53.1%;top:53.1%;--dx:calc(var(--s)*.02);--dy:calc(var(--s)*.02);--r:7deg;animation-delay:.21s} 
+.ra-2 svg,.ra-2 b{animation-delay:.07s}.ra-3 svg,.ra-3 b{animation-delay:.14s}.ra-4 svg{animation-delay:.21s} 
+.ra-4 b{animation:ra-wait 4.2s infinite both} 
+@keyframes ra-move{0%,6%{transform:translate(var(--dx),var(--dy)) scale(1.22) rotate(0)}14%{transform:translate(var(--dx),calc(var(--dy) - var(--s)*.03)) scale(1.24) rotate(var(--r))}23%{transform:translate(var(--dx),var(--dy)) scale(1.22) rotate(calc(var(--r)*-1))}31%,37%{transform:translate(var(--dx),var(--dy)) scale(1.22) rotate(0)}49%{transform:translate(0,0) scale(.94)}53%,86%{transform:translate(0,0) scale(1)}100%{transform:translate(var(--dx),var(--dy)) scale(1.22) rotate(0)}} 
+@keyframes ra-shape{0%,37%{border-radius:50%}50%,86%{border-radius:21.4%}100%{border-radius:50%}} 
+@keyframes ra-face{0%,37%{opacity:1}50%,86%{opacity:0}100%{opacity:1}} 
+@keyframes ra-wait{0%,52%{opacity:1}60%,84%{opacity:.47}94%,100%{opacity:1}} 
+@keyframes ra-sheen{0%,58%{left:-60%}74%,100%{left:140%}} 
+@media (prefers-reduced-motion:reduce){.rex-anim *{animation:none!important}.ra-t{border-radius:21.4%}.ra-t svg{opacity:0}.ra-4 b{opacity:.47}}
 .boot-bar{position:relative;display:block;width:120px;height:2px;border-radius:2px;background:var(--line);overflow:hidden}
 .boot-bar::after{content:"";position:absolute;inset:0 auto 0 0;width:40%;border-radius:2px;background:var(--accent);animation:boot-run 1.2s ease-in-out infinite}
 @keyframes boot-breathe{50%{transform:scale(.94);opacity:.75}}
@@ -328,8 +350,8 @@ code,pre{font-family:var(--mono);font-size:12px}
 .feed.room .msg:not(.mine) .rwho{display:flex}.feed.room .rwho strong{font-weight:700}
 .nc0{color:#7aa2ff}.nc1{color:#ff8f7a}.nc2{color:#4fd1a5}.nc3{color:#f08bd0}.nc4{color:#f6c453}.nc5{color:#5cc8f0}.nc6{color:#8fd47a}.nc7{color:#b79cff}
 html[data-theme=light] .nc0{color:#3559c7}html[data-theme=light] .nc1{color:#c2410c}html[data-theme=light] .nc2{color:#047857}html[data-theme=light] .nc3{color:#be185d}html[data-theme=light] .nc4{color:#a16207}html[data-theme=light] .nc5{color:#0369a1}html[data-theme=light] .nc6{color:#3f7d1f}html[data-theme=light] .nc7{color:#6d28d9}
-/* ---- the sender of a long message stays in view while you scroll through it ---- */
-.feed.room .rmsg .rwho{position:sticky;top:0;z-index:2;background:var(--bg);padding:6px 0 4px;margin-top:-6px;box-shadow:0 6px 8px -8px rgba(0,0,0,.6)}
+/* The name row of a group chat message sits plainly on the chat, like a personal chat reply: no band behind it. */
+.feed.room .rmsg .rwho{padding:6px 0 4px;margin-top:-6px}
 .feed.room .rmsg .ravcol .av{position:sticky;top:6px;z-index:2}
 /* sticky headers stick flush to the top: the scrolling box has no padding of its own */
 .feed{padding:0}.feed-inner{padding-top:20px;padding-bottom:20px}
@@ -547,7 +569,8 @@ p.pf-stats{display:block;margin:2px 0 0;font-size:13px;color:var(--muted)}
 .src-dialog details{font-size:13px;color:var(--muted)}.src-dialog details label{margin-top:6px}
 /* holding Space to talk: the mic pulses and a small label says what to do */
 body.ptt .icon-btn[data-action="mic"]{animation:ptt-pulse 1s ease-in-out infinite}
-body.ptt::after{content:"Listening… let go of Space to stop";position:fixed;left:50%;bottom:96px;transform:translateX(-50%);padding:6px 14px;border-radius:999px;background:var(--bad);color:#fff;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.35);z-index:30}
+/* Sits just above the message box (its height is measured when listening starts) and above the glass panels, so it is never covered or blurred. */
+body.ptt::after{content:"Listening… let go of Space to stop";position:fixed;left:50%;bottom:var(--ptt-bottom,96px);transform:translateX(-50%);padding:7px 16px;border-radius:999px;background:var(--bad);color:#fff;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.35);z-index:1000;pointer-events:none}
 @keyframes ptt-pulse{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--bad) 30%,transparent)}}
 @media (prefers-reduced-motion:reduce){body.ptt .icon-btn[data-action="mic"]{animation:none}}
 
@@ -978,9 +1001,19 @@ button.cn-main{cursor:pointer}
 .si-submit{width:100%;padding:9px}
 .si-error{margin:0;color:var(--bad);font-size:13px;min-height:1em}
 .st-account{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
-.st-cloud{display:flex;flex-direction:column;align-items:flex-start;gap:12px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--raised)}
-.st-cloud-head{display:flex;gap:12px;align-items:flex-start}.st-cloud-head>div{display:flex;flex-direction:column;gap:3px}.st-cloud-head b{font-size:14.5px}.st-cloud-head small{color:var(--muted);font-size:13px;line-height:1.5}
+.st-cloud{display:flex;flex-direction:column;align-items:flex-start;gap:14px;padding:18px 20px;border:1px solid var(--line);border-radius:12px;background:var(--raised)}
+.st-cloud-head{display:flex;flex-direction:column;gap:3px;align-self:stretch;text-align:center}.st-cloud-head>div{display:flex;flex-direction:column;gap:3px}.st-cloud-head b{font-size:14.5px}.st-cloud-head small{color:var(--muted);font-size:13px;line-height:1.5}
 .st-cloud-head .st-ic{flex:none;display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+.st-cloud-art{align-self:center;max-width:100%;height:auto;margin:2px 0 -2px}
+.st-cloud-art .sca-cloud{fill:color-mix(in srgb,var(--accent) 16%,transparent);stroke:var(--accent);stroke-width:2.2}
+.st-cloud-art .sca-mark{stroke:var(--accent);stroke-width:2.4}
+.st-cloud-art .sca-dev{stroke:var(--ink);stroke-width:2;opacity:.75}
+.st-cloud-art .sca-dot{stroke:var(--muted);stroke-width:2}
+.st-cloud-art .sca-line{stroke:var(--accent);stroke-width:2;opacity:.7}
+.st-cloud-why{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;width:100%}
+.st-cloud-why li{display:flex;gap:12px;align-items:flex-start}.st-cloud-why li>span:last-child{display:flex;flex-direction:column;gap:2px}
+.st-cloud-why b{font-size:13.5px;font-weight:600}.st-cloud-why small{color:var(--muted);font-size:12.5px;line-height:1.5}
+.st-cloud-why-ic{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent)}
 .st-cloud-fine{margin:0;color:var(--muted);font-size:12.5px}.st-cloud-fine a{color:var(--accent);font-weight:600}.st-cloud-fine a:hover{text-decoration:underline}.st-cloud-account{margin-bottom:10px}.st-cloud-account small{overflow-wrap:anywhere}
 .st-db-manual>.btn{margin:4px 0 10px}.st-account>span:nth-child(2){flex:1;display:flex;flex-direction:column}.st-account small{color:var(--muted);font-size:12px}
 .md-page{display:inline-flex;align-items:center;gap:8px;margin:6px 0;padding:8px 14px;border:1px solid var(--accent);border-radius:10px;background:color-mix(in srgb,var(--accent) 10%,var(--panel));color:var(--ink);font-weight:600}
@@ -1245,7 +1278,8 @@ code.md-file{cursor:pointer;text-decoration:underline dotted;text-underline-offs
 
 /* The file window in a window of its own */
 body.fw-alone{margin:0;background:var(--panel);overflow:hidden}
-body.fw-alone .fw{inset:0;width:auto;height:auto;border:0;border-radius:0;box-shadow:none}
+/* A window of its own always fills it: a place an agent asks for, or a size saved in the chat, never shrinks it. */
+body.fw-alone .fw{inset:0!important;width:auto!important;height:auto!important;border:0;border-radius:0;box-shadow:none}
 body.fw-alone .fw-rs,body.fw-alone [data-fw="hide"],body.fw-alone [data-fw="big"],body.fw-alone [data-fw="popout"]{display:none}
 body.fw-alone .fw-head{cursor:default}
 
@@ -1338,7 +1372,7 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 
 /* Picture viewer: a picture in a chat opens full screen inside Rex Desk. */
 .md-media-link img.md-media{cursor:zoom-in}
-.iv{width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;padding:0;border:0;background:rgba(8,10,13,.97);backdrop-filter:blur(6px);color:#e6e8eb;display:none}
+.iv{inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;padding:0;border:0;background:rgba(8,10,13,.97);backdrop-filter:blur(6px);color:#e6e8eb;display:none}
 .iv[open]{display:grid;grid-template-rows:auto minmax(0,1fr)}
 .iv::backdrop{background:transparent}
 .iv-head{display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(0,0,0,.35)}
@@ -1348,7 +1382,9 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 .iv-btn:hover{background:rgba(255,255,255,.12);text-decoration:none}
 .iv-stage{display:grid;place-items:center;min-height:0;overflow:hidden;padding:16px 64px 24px}
 .iv-stage img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;cursor:zoom-in;box-shadow:0 8px 40px rgba(0,0,0,.5)}
-.iv-stage.actual{overflow:auto;place-items:start center}.iv-stage.actual img{max-width:none;max-height:none;cursor:zoom-out}
+.iv-stage{touch-action:none;-webkit-user-select:none;user-select:none}
+.iv-stage img{transform-origin:center center;transition:transform .12s ease-out;will-change:transform}.iv-stage img.zoomed{cursor:grab;box-shadow:none;border-radius:0}
+@media (max-width:700px){.iv-stage{padding:8px}.iv-head{padding:8px 10px;gap:4px}.iv-head strong{font-size:14px}.iv-nav{width:38px;height:38px;background:rgba(0,0,0,.45)}.iv-nav.prev{left:6px}.iv-nav.next{right:6px}}
 .iv-nav{position:fixed;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:44px;height:44px;border:0;border-radius:50%;background:rgba(255,255,255,.1);color:#fff}
 .iv-nav:hover{background:rgba(255,255,255,.22)}.iv-nav.prev{left:12px}.iv-nav.next{right:12px}
 .fw-ic.fw-away{display:inline-grid;place-items:center}.fw-ic.fw-away.on{color:var(--accent)}
@@ -1697,3 +1733,125 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .st-guide-card{width:min(1100px,100%);background:var(--panel,#16181d);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.45)}
 .st-guide-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px}.st-guide-head .st-x{position:static}
 .st-guide video{display:block;width:100%;max-height:78vh;background:#000}
+/* Settings feature tours (Driver.js): the card that explains the circled control, in Khmer with English under it. */
+.driver-active .driver-active-element{outline:3px solid #f5b83d;outline-offset:4px;border-radius:12px;animation:rt-ring 1.6s ease-in-out infinite}
+@keyframes rt-ring{0%,100%{box-shadow:0 0 0 0 rgba(245,184,61,.45)}50%{box-shadow:0 0 0 10px rgba(245,184,61,0)}}
+@media (prefers-reduced-motion:reduce){.driver-active .driver-active-element{animation:none}}
+.driver-popover.rex-tour{background:var(--solid,var(--panel,#16181d));color:var(--ink,#e8eaf0);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.45);max-width:360px;padding:16px 18px}
+.driver-popover.rex-tour .driver-popover-description{margin:0}
+.rex-tour .rt-km{margin:0 0 6px;font:500 17px/1.75 'Noto Sans Khmer','Khmer UI',var(--font,system-ui),sans-serif}
+.rex-tour .rt-en{margin:0;font-size:13px;line-height:1.45;color:var(--muted)}
+.driver-popover.rex-tour .driver-popover-progress-text{color:var(--muted);font-size:12px}
+.driver-popover.rex-tour .driver-popover-footer{gap:6px;margin-top:14px;flex-wrap:wrap}
+.driver-popover.rex-tour .driver-popover-footer button,.rex-tour .rt-sound{font:inherit;font-size:13px;text-shadow:none;border-radius:9px;padding:6px 12px;border:1px solid var(--line);background:transparent;color:inherit;cursor:pointer}
+.driver-popover.rex-tour .driver-popover-next-btn{background:var(--accent);border-color:var(--accent);color:#fff}
+.rex-tour .rt-sound{margin-right:auto;color:var(--muted)}
+.driver-popover.rex-tour .driver-popover-close-btn{color:var(--muted)}
+.driver-popover.rex-tour .driver-popover-arrow-side-left{border-left-color:var(--solid,var(--panel,#16181d))}.driver-popover.rex-tour .driver-popover-arrow-side-right{border-right-color:var(--solid,var(--panel,#16181d))}
+.driver-popover.rex-tour .driver-popover-arrow-side-top{border-top-color:var(--solid,var(--panel,#16181d))}.driver-popover.rex-tour .driver-popover-arrow-side-bottom{border-bottom-color:var(--solid,var(--panel,#16181d))}
+
+/* Read replies aloud: the speaker in the chat header, lit while it is on. */
+.read-aloud.on{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
+/* Setup tour, "A little about you": answers as chips; the brand icons keep their colours. */
+.tour-q{border:0;margin:12px 0 0;padding:0}.tour-q legend{font-size:13px;font-weight:600;margin-bottom:8px;padding:0}
+.tour-chips{display:flex;flex-wrap:wrap;gap:6px}
+.tour-chip{display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border:1px solid var(--line);border-radius:999px;font-size:13px;cursor:pointer;background:var(--bg)}
+.tour-chip input{position:absolute;opacity:0;pointer-events:none}.tour-chip svg{flex:none}
+.tour-chip:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.tour-chip:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+.tour-other{margin-top:8px;width:100%;height:36px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+/* "Like Rex Desk?" star card: small, bottom left, out of the way of the update card and the message box. */
+#star-card{position:fixed;left:20px;bottom:20px;z-index:28;width:min(320px,calc(100vw - 32px));padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:var(--solid,var(--panel));color:var(--ink);box-shadow:0 18px 50px rgba(0,0,0,.35);animation:sc-in .3s ease-out}
+@keyframes sc-in{from{opacity:0;transform:translateY(10px)}}@media (prefers-reduced-motion:reduce){#star-card{animation:none}}
+#star-card .sc-head{display:flex;align-items:center;gap:10px}#star-card .sc-head b{font-size:15px}
+#star-card .sc-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:color-mix(in srgb,var(--ink) 8%,transparent)}
+#star-card p{margin:8px 0 12px;font-size:13px;line-height:1.5;color:var(--muted)}
+#star-card .sc-acts{display:flex;justify-content:flex-end;gap:8px}#star-card .sc-acts .btn{display:inline-flex;align-items:center;gap:6px}
+#star-card .sc-acts .btn.primary svg{color:#f6c453}
+#star-card .sc-x{position:absolute;top:8px;right:10px;border:0;background:none;color:var(--muted);font-size:18px;cursor:pointer}
+@media (max-width:760px){#star-card{left:12px;right:12px;width:auto;bottom:calc(84px + env(safe-area-inset-bottom))}}
+/* Settings, Local AI: the local servers, their models, downloads and Hugging Face search. */
+.la-card{margin:10px 0}
+.la-actions{display:flex;flex-direction:column;gap:6px;align-items:stretch}
+.la-models{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.la-model,.la-pull{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.la-model>div,.la-pull>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.la-model b,.la-pull b{overflow-wrap:anywhere;font-weight:600}
+.la-model small,.la-pull small{color:var(--muted)}
+.la-pull progress{width:140px;flex:none;accent-color:var(--accent)}
+.la-suggest{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin:8px 0}
+.la-pick{display:flex;flex-direction:column;gap:3px;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);cursor:pointer;font:inherit}
+.la-pick:hover{border-color:var(--accent)}
+.la-pick small{color:var(--muted)}
+.la-row{display:flex;gap:8px;align-items:center;margin:8px 0}
+.la-row input{flex:1;min-width:0}
+.la-add{display:flex;flex-direction:column;gap:6px;margin-top:8px;padding:12px 14px;border:1px solid var(--line);border-radius:12px}
+/* Welcome tour, Choose your AI: one row per AI, with what it needs, whether it is ready, and one button. */
+.tai-list{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column;flex:none;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tai-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 14px;align-items:center;padding:13px 16px;border-left:3px solid transparent}
+.tai-row+.tai-row{border-top:1px solid var(--line)}
+.tai-row.on{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.tai-mark{display:grid;place-items:center;width:40px;height:40px;border-radius:11px;color:var(--ink);background:color-mix(in srgb,var(--ink) 6%,transparent);border:1px solid var(--line)}
+.tai-text .tai-status.bad{color:var(--bad,#dc2626)}
+.tai-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.tai-text b{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:15px}
+.tai-text small{color:var(--muted);font-size:13px;line-height:1.4}
+.tai-best{font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;color:var(--accent);background:color-mix(in srgb,var(--accent) 13%,transparent)}
+.tai-status{display:flex;align-items:center;gap:5px}
+.tai-text .tai-status.good{color:var(--good,#16a34a)}
+.tai-action{display:flex;justify-content:flex-end;min-width:76px}
+.tai-wait{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);max-width:150px;line-height:1.3}
+@media (max-width:560px){.tai-row{grid-template-columns:auto minmax(0,1fr)}.tai-action{grid-column:2;justify-content:flex-start}}
+
+
+/* The version, small, at the end of the list's bottom row: a click opens Settings > About. A dot when an update is ready. */
+.rail-ver{margin-left:auto;align-self:center;border:0;background:transparent;color:var(--muted);font:600 11px/1 ui-monospace,SFMono-Regular,Consolas,monospace;padding:4px 6px;border-radius:6px;cursor:pointer;font-variant-numeric:tabular-nums;position:relative}
+.rail-ver:hover{color:var(--ink);background:var(--raised)}
+.rail-ver.new::after{content:"";position:absolute;top:1px;right:0;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+/* Settings > About */
+.ab-hero{display:flex;align-items:center;gap:20px;padding:6px 0 18px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.ab-hero svg{flex:none;filter:drop-shadow(0 10px 24px rgba(40,90,220,.35))}
+.ab-hero h2{margin:0;font-size:24px;letter-spacing:-.01em}
+.ab-ver{margin:2px 0 0;color:var(--ink);font-variant-numeric:tabular-nums}
+.ab-status{margin:2px 0 0;color:var(--muted);font-size:13px}.ab-status.new{color:var(--accent)}
+.ab-actions{display:flex;gap:8px;margin-top:10px}
+.ab-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:8px 0 6px}
+.ab-tile{display:grid;gap:2px;padding:14px 14px 12px;border:1px solid var(--line);border-radius:14px;background:var(--raised)}
+.ab-tile b{font-size:26px;line-height:1.1;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--ink)}
+.ab-tile span{font-size:12px;color:var(--muted)}
+.ab-loading .ab-tile b,.ab-loading .ab-tile span{background:linear-gradient(90deg,var(--line),transparent,var(--line));background-size:200% 100%;border-radius:6px;animation:ab-shimmer 1.4s linear infinite;color:transparent}
+@keyframes ab-shimmer{to{background-position:-200% 0}}
+.ab-big{margin:6px 0 10px;color:var(--muted)}.ab-big b{color:var(--ink);font-size:18px}
+.ab-bar{display:flex;height:12px;border-radius:999px;overflow:hidden;background:color-mix(in srgb,var(--accent) 10%,var(--raised));border:1px solid var(--line)}
+.ab-bar i{display:block;height:100%}
+.ab-desk{background:var(--accent)}.ab-other{background:color-mix(in srgb,var(--muted) 45%,transparent)}.ab-free{background:color-mix(in srgb,var(--accent) 10%,var(--raised));border:1px solid var(--line)}
+.ab-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin:8px 0 4px;font-size:12px;color:var(--muted)}
+.ab-legend span{display:inline-flex;align-items:center;gap:6px}.ab-legend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+.ab-places{display:grid;gap:8px;margin-top:6px}
+.ab-place{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
+.ab-place>span{display:grid;gap:2px;min-width:0;flex:1}.ab-place small{color:var(--muted);font-size:11px}
+.ab-place code{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+.ab-foot{margin-top:14px}
+@media (prefers-reduced-motion:reduce){.ab-loading .ab-tile b,.ab-loading .ab-tile span{animation:none}}
+.ab-w1{width:2%}.ab-w2{width:4%}.ab-w3{width:6%}.ab-w4{width:8%}.ab-w5{width:10%}.ab-w6{width:12%}.ab-w7{width:14%}.ab-w8{width:16%}.ab-w9{width:18%}.ab-w10{width:20%}.ab-w11{width:22%}.ab-w12{width:24%}.ab-w13{width:26%}.ab-w14{width:28%}.ab-w15{width:30%}.ab-w16{width:32%}.ab-w17{width:34%}.ab-w18{width:36%}.ab-w19{width:38%}.ab-w20{width:40%}.ab-w21{width:42%}.ab-w22{width:44%}.ab-w23{width:46%}.ab-w24{width:48%}.ab-w25{width:50%}.ab-w26{width:52%}.ab-w27{width:54%}.ab-w28{width:56%}.ab-w29{width:58%}.ab-w30{width:60%}.ab-w31{width:62%}.ab-w32{width:64%}.ab-w33{width:66%}.ab-w34{width:68%}.ab-w35{width:70%}.ab-w36{width:72%}.ab-w37{width:74%}.ab-w38{width:76%}.ab-w39{width:78%}.ab-w40{width:80%}.ab-w41{width:82%}.ab-w42{width:84%}.ab-w43{width:86%}.ab-w44{width:88%}.ab-w45{width:90%}.ab-w46{width:92%}.ab-w47{width:94%}.ab-w48{width:96%}.ab-w49{width:98%}.ab-w50{width:100%}
+
+/* Voice mode: Rex's body fills the chat (the sidebars stay). Only a faint way out and a quiet word for what it is doing. */
+.voice-stage{position:absolute;inset:0;z-index:40;background:#05030c;overflow:hidden;animation:vs-in .6s ease-out}
+@keyframes vs-in{from{opacity:0}}
+.orb-canvas{position:absolute;z-index:0;inset:0;width:100%;height:100%;display:block}
+.voice-exit{position:absolute;top:14px;right:14px;z-index:2;display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:50%;background:transparent;color:rgba(214,200,255,.45);cursor:pointer;transition:color .2s,background .2s}
+.voice-exit:hover,.voice-exit:focus-visible{color:#efe8ff;background:rgba(160,130,255,.14);outline:none}
+.voice-word{position:absolute;left:0;right:0;bottom:7%;margin:0;text-align:center;font:500 14px/1 var(--font,system-ui),sans-serif;letter-spacing:.18em;color:rgba(206,190,255,.5);pointer-events:none;transition:opacity .4s}
+.voice-word:empty{opacity:0}
+.icon-btn.voice-mode.on{color:#b9a2ff;background:color-mix(in srgb,#8b6cff 16%,transparent)}
+@media (prefers-reduced-motion:reduce){.voice-stage{animation:none}}
+/* Voice mode's badge: whether to talk now. Green and alive only while the mic is open; quiet otherwise. */
+.voice-cue{position:absolute;z-index:2;left:50%;bottom:6%;transform:translateX(-50%);display:flex;align-items:center;gap:9px;padding:9px 16px 9px 13px;border-radius:999px;border:1px solid rgba(190,170,255,.18);background:rgba(16,10,34,.62);backdrop-filter:blur(8px);color:rgba(214,202,255,.62);font:500 14px/1 var(--font,system-ui),sans-serif;letter-spacing:.01em;pointer-events:none;transition:color .25s,border-color .25s,background .25s,box-shadow .25s}
+.voice-cue .vc-dot{width:9px;height:9px;border-radius:50%;background:rgba(206,190,255,.4);transition:background .25s,transform .08s linear}
+.voice-cue[data-state="listening"]{color:#d9ffe8;border-color:rgba(74,222,128,.55);background:rgba(6,40,24,.66);box-shadow:0 0 0 1px rgba(74,222,128,.12),0 0 28px rgba(74,222,128,.22)}
+.voice-cue[data-state="listening"] .vc-dot{background:#4ade80;transform:scale(calc(1 + var(--level,0) * 1.4));box-shadow:0 0 12px #4ade80;animation:vc-pulse 1.4s ease-in-out infinite}
+@keyframes vc-pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.voice-cue[data-state="speaking"]{color:#efe8ff;border-color:rgba(190,160,255,.45)}
+.voice-cue[data-state="speaking"] .vc-dot{background:#b9a2ff}
+.voice-cue[data-state="thinking"] .vc-dot{background:#f5c46b;animation:vc-pulse .9s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.voice-cue .vc-dot{animation:none!important}}

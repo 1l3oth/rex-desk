@@ -1,21 +1,43 @@
 import path from 'node:path';
+import { doing } from './stall-watch.js';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 // Rex Desk's side of an agent that runs in its own process (src/agent-host.js). It has the same face as an in-process
 // runner (start, interrupt), so the coordinator treats both alike. It reads the agent's journal from where it left off,
 // so after a restart it can attach to an agent that kept working, and nothing the agent did in between is lost.
 const HOST_SCRIPT = fileURLToPath(new URL('./agent-host.js', import.meta.url));
+
+// Agents keep working through an update. On Windows the installer closes everything that runs from the install folder (it
+// cannot replace a running program), so agents run from a private copy of this version (its Node.js and Rex Desk's code)
+// kept beside the data. The update leaves them running, and the new server attaches to them as after any restart.
+// One copy per version; older ones are removed once no agent uses them. Returns { node, script, cwd } once the copy is ready.
+export async function prepareRuntime(directory, { version = process.env.REX_DESK_VERSION, execPath = process.execPath, appRoot = path.resolve(path.dirname(HOST_SCRIPT), '..'), platform = process.platform } = {}) {
+  if (!version || platform !== 'win32' || !/^[\w.-]+$/.test(version)) return null;
+  doing('agents: preparing their copy of Rex Desk');
+  const { copyAll } = await import('./folders.js');
+  const target = path.join(directory, version), ready = path.join(target, 'ready');
+  const paths = { node: path.join(target, 'node', path.basename(execPath)), script: path.join(target, 'app', 'src', 'agent-host.js'), cwd: path.join(target, 'app') };
+  if (!existsSync(ready)) {
+    rmSync(target, { recursive: true, force: true });
+    await copyAll(path.dirname(execPath), path.join(target, 'node'));
+    await copyAll(appRoot, path.join(target, 'app'), source => path.basename(source) === '.local');
+    writeFileSync(ready, new Date().toISOString());
+  }
+  for (const name of existsSync(directory) ? readdirSync(directory) : []) if (name !== version) { try { rmSync(path.join(directory, name), { recursive: true }); } catch { /* an agent still runs from it */ } }
+  return paths;
+}
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
 // What crosses into the host process: plain data only. Callbacks stay here and travel as journal entries and HTTP calls.
 const PLAIN = ['run', 'cwd', 'projectDirectory', 'token', 'sourcePath', 'mcpUrl', 'model', 'agentEnv', 'javaEnv', 'artifactDirectory', 'uploadsDirectory', 'extraMcp', 'remote', 'guard'];
 
 export class HostRunner {
   // options: the coordinator's runner options (event, ask, inbox, run…). onState: saves { pid, port, key, journal, offset, asks } on the run.
-  constructor(options, { directory, onState, spawner = spawn, node = process.execPath, pollMs = 250, sdkModule = '' }) {
-    Object.assign(this, { options, directory, onState, spawner, node, pollMs, sdkModule, state: null, stopped: false, detached: false });
+  // runtime: { node, script, cwd } of the private copy (prepareRuntime), so an update does not stop the agent.
+  constructor(options, { directory, onState, spawner = spawn, node = process.execPath, pollMs = 250, sdkModule = '', runtime = null }) {
+    Object.assign(this, { options, directory, onState, spawner, node: runtime?.node || node, script: runtime?.script || HOST_SCRIPT, cwd: runtime?.cwd || path.dirname(HOST_SCRIPT), outside: Boolean(runtime), pollMs, sdkModule, state: null, stopped: false, detached: false });
   }
   save(patch) { this.state = { ...this.state, ...patch }; this.onState?.(this.state); }
   async start(prompt) {
@@ -25,9 +47,10 @@ export class HostRunner {
     writeFileSync(journal, '', { mode: 0o600 });
     const options = Object.fromEntries(PLAIN.filter(name => this.options[name] !== undefined).map(name => [name, this.options[name]]));
     writeFileSync(specFile, JSON.stringify({ key, journal, stateFile, prompt, options, ...(this.sdkModule ? { sdkModule: this.sdkModule } : {}) }), { mode: 0o600 });
-    const child = this.spawner(this.node, [HOST_SCRIPT, specFile], { detached: true, stdio: 'ignore', windowsHide: true, cwd: path.dirname(HOST_SCRIPT) });
+    const child = this.spawner(this.node, [this.script, specFile], { detached: true, stdio: 'ignore', windowsHide: true, cwd: this.cwd });
     child.unref?.();
-    this.save({ pid: child.pid, port: 0, key, journal, stateFile, offset: 0, asks: [] });
+    // outside: the agent runs from the private copy, so an update can install while it works.
+    this.save({ pid: child.pid, port: 0, key, journal, stateFile, offset: 0, asks: [], ...(this.outside ? { outside: true } : {}) });
     return this.follow();
   }
   // A Rex Desk that restarted picks up an agent that kept working. Questions it was waiting on are asked again.
@@ -62,7 +85,8 @@ export class HostRunner {
         if (this.detached) { clearInterval(this.timer); return; }
         try {
           // New messages for the agent go over as they come, the way an in-process agent picks them up between steps.
-          if (Date.now() - inboxAt > 1000) { inboxAt = Date.now(); const news = this.options.inbox?.(); if (news) void this.post('/inbox', { text: news }).catch(() => {}); }
+          // A message the process refuses (its reply just ended) or cannot take goes back to the run's queue, for the next turn.
+          if (Date.now() - inboxAt > 1000) { inboxAt = Date.now(); const news = this.options.inbox?.(); if (news) void this.post('/inbox', { text: news }).catch(error => { if (!/timeout|aborted/i.test(String(error?.name || '') + error?.message)) this.options.requeue?.(news); }); }
           const size = existsSync(this.state.journal) ? statSync(this.state.journal).size : 0;
           if (size > this.state.offset) {
             const fd = openSync(this.state.journal, 'r'), chunk = Buffer.alloc(size - this.state.offset);
@@ -74,6 +98,7 @@ export class HostRunner {
               if (!line.trim()) continue;
               const entry = JSON.parse(line);
               if (entry.type === 'event') this.options.event(entry.kind, entry.data);
+              else if (entry.type === 'unread') this.options.requeue?.(entry.text);
               else if (entry.type === 'ask' && !(this.state.asks || []).some(item => item.id === entry.id)) { this.save({ asks: [...(this.state.asks || []), { id: entry.id, request: entry.request }] }); this.answer(entry.id, entry.request); }
               else if (entry.type === 'done') { this.save({ offset }); return finish(resolve, { status: 'completed' }); }
               else if (entry.type === 'error') { this.save({ offset }); return finish(reject, new Error(entry.message)); }

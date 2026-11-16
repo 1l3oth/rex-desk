@@ -11,6 +11,21 @@ import { agyCommand, antigravityMcpInstalled, parseAgyModels } from './antigravi
 const cli = provider => provider === 'gemini' ? { command: agyCommand(), args: [] } : resolveCommand(provider);
 const statusArgs = { claude: ['auth', 'status', '--json'], codex: ['login', 'status'], gemini: ['models'] };
 const loginArgs = { claude: ['auth', 'login'], codex: ['login'], gemini: ['acp', '--login'] };
+// What the sign-in window runs first when the CLI is not on this computer yet.
+const installCommands = {
+  // Each tool's own installer, using only what Windows (PowerShell) and macOS (curl, bash) already have: no Node, npm, winget
+  // or Homebrew, so a computer never set up for coding can install them too. On a Mac all three go to ~/.local/bin.
+  win32: { claude: 'irm https://claude.ai/install.ps1 | iex', codex: 'irm https://chatgpt.com/codex/install.ps1 | iex', gemini: 'irm https://antigravity.google/cli/install.ps1 | iex' },
+  other: { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh', gemini: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' }
+};
+const bareName = { claude: 'claude', codex: 'codex', gemini: 'agy' };
+const cliFound = ({ command }) => {
+  if (path.isAbsolute(command)) return existsSync(command);
+  try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { windowsHide: true, stdio: 'ignore', timeout: 10000 }); return true; } catch { return false; }
+};
+// The person's own terminal for a sign-in: without the markers of an AI agent, which make CLIs refuse to ask questions.
+const terminalEnvironment = (env, keep) => Object.fromEntries(Object.entries(env).filter(([key]) => key === keep || !/^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_AGENT.*|ANTHROPIC_.*|REX_.*|AI_AGENT|AGENT|CI|NODE_TEST_CONTEXT)$/i.test(key)));
+const psQuote = value => `'${String(value).replace(/'/g, "''")}'`;
 
 // Agent sign-in lives in each CLI profile. Rex Desk only reads status; it never reads or copies credentials.
 const home = os.homedir();
@@ -50,7 +65,7 @@ export function discoverProfiles(provider, { configured = '', env = process.env,
   } catch {}
   try {
     const config = path.join(roots.home, '.config');
-    for (const entry of readdirSync(config, { withFileTypes: true })) if (entry.isDirectory() && entry.name.startsWith(provider) && !/shared-history|\s$/i.test(entry.name)) add(path.join(config, entry.name), 'config');
+    for (const entry of readdirSync(config, { withFileTypes: true })) if (entry.isDirectory() && entry.name.startsWith(provider) && !/shared-history|\.lock$|\s$/i.test(entry.name)) add(path.join(config, entry.name), 'config');
   } catch {}
   const orca = path.join(roots.appData, 'orca', `${provider}-profiles`);
   try { for (const entry of readdirSync(orca, { withFileTypes: true })) if (entry.isDirectory()) add(path.join(orca, entry.name, 'home'), 'orca'); } catch {}
@@ -131,9 +146,15 @@ export class AgentProfiles {
     }
     return null;
   }
-  markLimited(profile, hours = 5) {
+  // until: when the account's limit resets (from Claude's own usage report); 5 hours when that is not known.
+  markLimited(profile, until = 0) {
     const record = this.store.get('accounts', 'limited') || { id: 'limited', until: {} };
-    this.store.put('accounts', 'limited', { ...record, until: { ...record.until, [canonical(profile || '')]: Date.now() + hours * 3600000 } });
+    this.store.put('accounts', 'limited', { ...record, until: { ...record.until, [canonical(profile || '')]: until > Date.now() ? until : Date.now() + 5 * 3600000 } });
+  }
+  // The person chose this account: an earlier "limited" mark no longer keeps it out of the automatic switch.
+  clearLimited(profile) {
+    const record = this.store.get('accounts', 'limited'), key = canonical(profile || ''); if (!record?.until?.[key]) return;
+    const { [key]: _gone, ...rest } = record.until; this.store.put('accounts', 'limited', { ...record, until: rest });
   }
   async status(provider, profile = this.selected(provider), { refresh = false } = {}) {
     const key = `${provider}:${profile ? canonical(profile) : ''}`, cached = this.cache.get(key);
@@ -183,15 +204,41 @@ export class AgentProfiles {
   }
   // Signs a profile in to a Claude account: Claude Code opens the browser, the person signs in, and the profile is ready.
   login(provider, profile) {
-    const executable = cli(provider), env = profileEnvironment(provider, profile);
-    if (provider === 'gemini' && executable.command === 'agy' && process.platform === 'win32') throw new Error('The Antigravity CLI (agy) is not installed on this computer. Install it with: winget install Google.AntigravityCLI');
+    const executable = cli(provider), env = profileEnvironment(provider, profile), found = cliFound(executable), name = providerTitle(provider);
+    const install = (installCommands[process.platform === 'win32' ? 'win32' : 'other'] || {})[provider] || '';
+    if (!found && !install) throw new Error(`${name} is not installed on this computer, and Rex Desk cannot install it here. Install it, then press Sign in again.`);
     // Codex keeps the saved account when it is asked to log in again, so a person who changed plan or account must be signed out first.
-    if (provider === 'codex') { try { execFileSync(executable.command, [...executable.args, 'logout'], { env, windowsHide: true, timeout: 15000, stdio: 'ignore' }); } catch {} }
-    const child = spawn(executable.command, [...executable.args, ...loginArgs[provider]], { env, windowsHide: false, detached: true, stdio: 'ignore' });
-    // A sign-in program that is not installed must never stop Rex Desk: the failure is only remembered for the status.
-    child.on('error', error => { this.loginError = { provider, message: error.code === 'ENOENT' ? `${executable.command} is not installed on this computer.` : error.message, at: Date.now() }; this.invalidate(provider); });
+    if (provider === 'codex' && found) { try { execFileSync(executable.command, [...executable.args, 'logout'], { env, windowsHide: true, timeout: 15000, stdio: 'ignore' }); } catch {} }
+    // The sign-in runs in a window the person can see: the CLI opens the browser, and anything it asks or any error shows there.
+    // A missing CLI is installed first in the same window.
+    const terminalEnv = terminalEnvironment(env, profileKey(aiProvider(provider))), args = loginArgs[provider];
+    let child;
+    if (process.platform === 'win32') {
+      const run = found ? `& ${[executable.command, ...executable.args, ...args].map(psQuote).join(' ')}` : `& ${psQuote(bareName[provider])} ${args.map(psQuote).join(' ')}`;
+      const script = [
+        "$Host.UI.RawUI.WindowTitle = 'Rex Desk sign-in'",
+        `Write-Host 'Rex Desk: signing in to ${name}. Your browser opens next.'`, "Write-Host ''",
+        ...(found ? [] : [`Write-Host '${name} is not on this computer yet. Installing it first...'`, install,
+          "$env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + $env:Path",
+          "$env:Path = (Join-Path $HOME '.local\\bin') + ';' + (Join-Path $env:LOCALAPPDATA 'Programs\\OpenAI\\Codex\\bin') + ';' + (Join-Path $env:LOCALAPPDATA 'agy\\bin') + ';' + (Join-Path $env:APPDATA 'npm') + ';' + $env:Path"]),
+        run, "Write-Host ''", "Write-Host 'When the browser says you are signed in, close this window and go back to Rex Desk.'"
+      ].join('\n');
+      // `start` gives it a window of its own (a console started straight from Rex Desk closes at once), and the encoded script
+      // passes through cmd untouched, so `|`, `&` and quotes in it are not read by cmd.
+      child = spawn('cmd.exe', ['/c', 'start', 'Rex Desk sign-in', 'powershell.exe', '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: terminalEnv, windowsHide: false, detached: true, stdio: 'ignore' });
+    } else {
+      const quote = value => `'${String(value).replace(/'/g, `'\\''`)}'`;
+      const run = found ? [executable.command, ...executable.args, ...args].map(quote).join(' ') : [bareName[provider], ...args].map(quote).join(' ');
+      const key = profileKey(aiProvider(provider)), profileSet = env[key] ? `export ${key}=${quote(env[key])}; ` : '';
+      const line = `${profileSet}echo 'Rex Desk: signing in to ${name}.'; ${found ? '' : `${install}; export PATH="$HOME/.local/bin:$PATH"; `}${run}; echo; echo 'When the browser says you are signed in, close this window and go back to Rex Desk.'`;
+      child = process.platform === 'darwin'
+        ? spawn('osascript', ['-e', `tell application "Terminal" to do script ${JSON.stringify(line)}`, '-e', 'tell application "Terminal" to activate'], { env: terminalEnv, detached: true, stdio: 'ignore' })
+        : spawn('x-terminal-emulator', ['-e', 'bash', '-lc', `${line}; exec bash`], { env: terminalEnv, detached: true, stdio: 'ignore' });
+    }
+    // A sign-in window that cannot open must never stop Rex Desk: the failure is only remembered for the status.
+    child.on('error', error => { this.loginError = { provider, message: `Rex Desk could not open the sign-in window: ${error.message}`, at: Date.now() }; this.invalidate(provider); });
     child.unref(); this.invalidate(provider);
-    return { started: true, profile, label: profileLabel(provider, profile) };
+    return { started: true, installing: !found, profile, label: profileLabel(provider, profile) };
   }
   // A new profile folder for another Claude account. It shares the conversation history folder with the others when there is
   // one, so an agent keeps its conversation when it moves between accounts.

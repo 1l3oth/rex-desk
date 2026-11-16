@@ -16,6 +16,23 @@ const turn = [{ type: 'system', subtype: 'init', session_id: SESSION },
 const runnerFor = (run, seen, events = []) => new ClaudeRunner({ sdk: fakeSdk(turn, seen), run: { id: 'r', role: 'worker', ...run }, cwd: 'x', token: 't', mcpUrl: 'http://127.0.0.1:1/mcp',
   event: (kind, data) => events.push([kind, data]), ask: async () => ({ action: 'accept' }), controller: new AbortController(), uploadsDirectory: 'UP' });
 
+test("the turn ends at Claude's reply, even when a background task the agent started never finishes", async () => {
+  let closed = false;
+  const sdk = { query: () => (async function* () {
+    try {
+      for (const message of turn) yield message;
+      await new Promise(() => {}); // Claude Code waiting on a background task that never ends
+    } finally { closed = true; }
+  })() };
+  const events = [];
+  const runner = new ClaudeRunner({ sdk, run: { id: 'r', role: 'worker' }, cwd: 'x', token: 't', mcpUrl: 'http://127.0.0.1:1/mcp',
+    event: (kind, data) => events.push([kind, data]), ask: async () => ({ action: 'accept' }), controller: new AbortController() });
+  const outcome = await Promise.race([runner.start('Go'), new Promise(resolve => setTimeout(() => resolve('still waiting'), 2000))]);
+  assert.deepEqual(outcome, { status: 'completed' });
+  assert.ok(closed, 'Claude Code (and its background tasks) is closed');
+  assert.ok(events.some(([kind]) => kind === 'agent-result'));
+});
+
 test('headless Claude Code starts dangerous, speaks in the chat, and Rex Desk refuses only what would take Rex Desk itself down', async () => {
   const seen = [], events = [];
   await runnerFor({ effort: 'high' }, seen, events).start('Go');

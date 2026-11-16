@@ -27,7 +27,7 @@ export function showUpdateCard(update) {
     <p class="uc-error" role="alert" hidden></p>
     <footer class="uc-foot"></footer>`;
   card.querySelector('h2').textContent = update.ready ? `Rex Desk ${version} is ready` : `Downloading Rex Desk ${version}`;
-  card.querySelector('.uc-meta').textContent = update.ready ? (update.current ? `Downloaded and verified · you have ${update.current}` : 'Downloaded and verified') : (update.current ? `In the background · you have ${update.current}` : 'In the background');
+  card.querySelector('.uc-meta').textContent = update.ready ? (update.current ? `Downloaded and checked · you have ${update.current}` : 'Downloaded and checked') : (update.current ? `In the background · you have ${update.current}` : 'In the background');
   const items = noteItems(update.available?.notes);
   const list = card.querySelector('.uc-notes'), more = card.querySelector('.uc-more');
   for (const [index, text] of items.entries()) { const item = document.createElement('li'); item.textContent = text; if (index >= SHOWN) item.hidden = true; list.append(item); }
@@ -63,13 +63,21 @@ function renderFoot(card, update) {
       : ['Rex Desk restarts and opens again in about a minute.', '<button type="button" class="btn quiet" data-action="update-later">Later</button><button type="button" class="btn primary" data-action="update-install">Update now</button>'];
   foot.innerHTML = `<p class="uc-hint">${hint}</p><div class="uc-actions">${actions}</div>`;
 }
+// The colours of the theme on screen, as #rrggbb, so the update window that runs while Rex Desk restarts looks like it.
+function themeColours() {
+  const probe = document.createElement('i'); probe.style.display = 'none'; document.body.append(probe);
+  const hex = (value, fallback) => { probe.style.color = ''; probe.style.color = value; const resolved = getComputedStyle(probe).color, unit = resolved.startsWith('color(') ? 255 : 1, match = resolved.replace(/^color\(\s*srgb/, '').match(/\d*\.?\d+/g); return match && match.length >= 3 ? `#${match.slice(0, 3).map(part => Math.min(255, Math.round(Number(part) * unit)).toString(16).padStart(2, '0')).join('')}` : fallback; };
+  const style = getComputedStyle(document.documentElement), read = (name, fallback) => hex(style.getPropertyValue(name).trim() || fallback, fallback);
+  const colours = { panel: read('--solid', read('--panel', '#16181d')), ink: read('--ink', '#e6e8eb'), muted: read('--muted', '#9aa3b1'), accent: read('--accent', '#5a97ff'), line: read('--line', '#2a2f37') };
+  probe.remove(); return colours;
+}
 const esc = text => String(text).replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
 
 // "Update when it finishes" (or cancel it): the server installs by itself once no agent is working.
 export async function updateWhenIdle(api, wait = true) {
   const card = document.getElementById('update-card'), error = card?.querySelector('.uc-error');
   if (error) error.hidden = true;
-  try { await api('/update/install', { method: 'POST', data: wait ? { whenIdle: true } : { cancel: true } }); }
+  try { await api('/update/install', { method: 'POST', data: wait ? { whenIdle: true, theme: themeColours() } : { cancel: true } }); }
   catch (failure) { if (error) { error.textContent = failure.message; error.hidden = false; } }
 }
 
@@ -82,6 +90,17 @@ export function watchForUpdates(api) {
   document.addEventListener('visibilitychange', ask); addEventListener('focus', ask);
 }
 
+// The version whose card the person put off with Later, while it is still waiting: the window bar shows an Update button for it.
+export function updateDeferred(update) {
+  const version = update?.ready ? update.available?.version : update?.downloading?.version || '', later = laterChoice();
+  return version && later.version === version && later.until > Date.now() ? version : '';
+}
+// The Update button in the window bar brings the card back.
+export function updateShow(update) {
+  try { localStorage.removeItem(LATER); } catch { /* private window */ }
+  showUpdateCard(update);
+}
+
 export function updateLater() {
   const card = document.getElementById('update-card'); if (!card) return;
   try { localStorage.setItem(LATER, JSON.stringify({ version: card.dataset.version, until: Date.now() + 24 * 3600000 })); } catch { /* private window */ }
@@ -92,7 +111,7 @@ export async function installUpdate(api) {
   const card = document.getElementById('update-card'), button = card?.querySelector('[data-action="update-install"]'), error = card?.querySelector('.uc-error');
   if (button) { button.disabled = true; button.textContent = 'Updating…'; }
   if (error) error.hidden = true;
-  try { await api('/update/install', { method: 'POST' }); }
+  try { await api('/update/install', { method: 'POST', data: { theme: themeColours() } }); }
   catch (failure) {
     // Agents still working, or the download went away: say why here and let the person try again.
     if (button) { button.disabled = false; button.textContent = 'Update now'; }

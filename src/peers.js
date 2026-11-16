@@ -2,6 +2,7 @@
 // worktrees and sessions stay there. Rooms, messages, agent cards, what the agents learned, and commands for an agent on
 // another computer are copied between the person's computers over their private network (Tailscale), so every computer
 // and the phone shows the same chats. A computer that is off only takes its own agents offline; messages for them wait.
+import { doing } from './stall-watch.js';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -132,6 +133,7 @@ export class Peers {
 
   // ---------- the copy that comes in ----------
   async pullFrom(peer) {
+    doing('sync: reading another computer');
     if (!peer) return;
     const settings = this.settings(); let cursor = settings.cursors?.[peer.id] || 0, filesCursor = settings.files?.[peer.id] || 0, page;
     try {
@@ -244,6 +246,7 @@ export class Peers {
 
   // With the same Turso database on every computer, the chats also arrive from there, even while the other computer is off.
   async pullTurso() {
+    doing('sync: reading other computers');
     if (!this.store.cloud?.ready) return;
     // Under another computer id (a restore that got its own), what was skipped as "this computer's own" is read again from the start.
     const settings = this.settings(), again = settings.tursoNode !== this.self.id, at = again ? 0 : settings.tursoAt || 0;
@@ -280,7 +283,8 @@ export class Peers {
     const agent = this.store.get('specialist', run.specialistId);
     return Boolean(agent) && agent.kind !== 'main' && !this.isRemote(agent);
   }
-  copyChat(runId) {
+  // `artifacts`: the chat's artifact records when the caller already has them (the start-up pass reads them all once).
+  copyChat(runId, artifacts = null) {
     const run = this.store.get('run', runId); if (!this.copies(run)) return;
     const trim = (value, max) => typeof value === 'string' && value.length > max ? `${value.slice(0, max)}…` : value;
     // The same message said again right after itself is shown once; tool output is shortened. The newest messages are kept.
@@ -297,7 +301,7 @@ export class Peers {
     const asks = this.store.list('interaction').filter(item => item.runId === runId && item.state === 'pending')
       .map(item => Object.fromEntries(Object.entries(item).filter(([, value]) => JSON.stringify(value ?? '').length < 20000)));
     this.store.put('chatcopy', runId, { id: runId, agentId: run.specialistId, run: slim, events, asks, at: now() });
-    this.sharePictures(events, run.specialistId); this.shareEvidence(runId, run.specialistId);
+    this.sharePictures(events, run.specialistId); this.shareEvidence(runId, run.specialistId, artifacts);
   }
   // Pictures the person attached in a shared chat travel with it (up to 2 MB each), so they show on the other computers too.
   sharePictures(events, agentId = '') {
@@ -343,8 +347,8 @@ export class Peers {
     return text;
   }
   // Screenshots an agent saved as evidence in the chat travel with it too (up to 2 MB each).
-  shareEvidence(runId, agentId = '') {
-    for (const artifact of this.store.list('artifact').filter(item => item.runId === runId && (PICTURE.test(item.file) || (isPageArtifact(item))))) {
+  shareEvidence(runId, agentId = '', artifacts = null) {
+    for (const artifact of (artifacts || this.store.list('artifact').filter(item => item.runId === runId)).filter(item => PICTURE.test(item.file) || isPageArtifact(item))) {
       const file = path.join(this.store.media('artifacts'), runId, path.basename(artifact.file));
       if (!existsSync(file)) continue;
       const id = evidenceId(runId, artifact.file), size = statSync(file).size;
@@ -378,8 +382,21 @@ export class Peers {
     });
     // The chats that were there before this computer started sharing them.
     // Every personal chat of the last 30 days, not only the one each agent is in now, so older conversations show too.
+    // It runs in the background, one chat at a time with a pause between them, and reads the artifact list once: done in
+    // one go (and reading every artifact again for each chat) it held the server for minutes on a large workspace on a hard
+    // disk, so nothing answered and the window stayed black.
     const since = Date.now() - 30 * 86400000;
-    for (const run of this.store.list('run')) if (this.copies(run) && Date.parse(run.updatedAt || run.createdAt || 0) > since) { try { this.copyChat(run.id); } catch { /* not a personal chat */ } }
+    const runs = this.store.list('run').filter(run => this.copies(run) && Date.parse(run.updatedAt || run.createdAt || 0) > since).map(run => run.id);
+    if (!runs.length) return;
+    const byRun = new Map();
+    for (const artifact of this.store.list('artifact')) { if (!byRun.has(artifact.runId)) byRun.set(artifact.runId, []); byRun.get(artifact.runId).push(artifact); }
+    this.sharing = (async () => {
+      for (const runId of runs) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        if (this.stopped) return;
+        try { this.copyChat(runId, byRun.get(runId) || []); } catch { /* not a personal chat */ }
+      }
+    })();
   }
   // Another computer's chat, read from its copy: only when it is not here and not reached directly.
   chatCopy(runId) {
@@ -438,7 +455,7 @@ export class Peers {
     this.loop = setInterval(() => { if (!this.ticking) { this.ticking = true; void tick().finally(() => { this.ticking = false; }); } }, 1000);
     this.loop.unref?.();
   }
-  stop() { clearInterval(this.loop); }
+  stop() { clearInterval(this.loop); this.stopped = true; }
   selfUrl() { return this.port ? this.addresses(this.port).find(address => address.startsWith('http://')) || '' : ''; }
   async http(peer, method, route, data) {
     const response = await fetch(`${peer.url}${route}`, { method, signal: AbortSignal.timeout(6000),

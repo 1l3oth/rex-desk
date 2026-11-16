@@ -28,7 +28,7 @@ export class Evidence {
     const run = this.getRun(runId);
     if (!run.worktree) throw new Error('This run has no worktree.');
     const repository = effectiveRepository(this.store.config().repositories.find(item => item.id === run.repositoryId));
-    if (!repository?.devCommand && !repository?.flowRuntime && !repository?.electronRuntime) throw new Error('Set this repository’s dev command, Flow Tomcat preset, or Electron preset in Settings.');
+    if (!repository?.devCommand && !repository?.flowRuntime && !repository?.electronRuntime) throw new Error('Set how this project runs in Settings, Projects: its run command, Flow Tomcat preset, or Electron preset.');
     const directory = this.directory(runId);
     if (repository.electronRuntime) return this.startElectron(runId, run, repository, directory);
     const kept = this.previews.get(runId), resume = this.resumes.get(runId);

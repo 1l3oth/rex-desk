@@ -39,3 +39,18 @@ test('a message to a chat with an agent that lives on another computer goes ther
     assert.equal(sent.length, 1);
   } finally { await app.close(); }
 });
+
+test('"Continue in Claude app" reaches the server: the chat opens in the Claude app and closes there again', async () => {
+  const { createApp } = await import('../src/server.js');
+  const app = await createApp({ dataDirectory: temporary('app-route'), port: 0 });
+  try {
+    const { store, desk } = app, runId = randomUUID(), calls = [];
+    store.put('run', runId, { id: runId, state: 'finished', provider: 'claude', createdAt: new Date().toISOString() });
+    desk.continueInApp = async (id, on) => { calls.push([id, on]); return { ok: true }; };
+    const post = on => fetch(`${app.address}/api/runs/${runId}/app`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ on }) });
+    const opened = await post(true);
+    assert.equal(opened.status, 200, 'the button used to get "API route not found"');
+    await post(false);
+    assert.deepEqual(calls, [[runId, true], [runId, false]]);
+  } finally { await app.close(); }
+});

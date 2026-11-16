@@ -60,7 +60,66 @@ fn startup_error() -> String {
 
 // A link Rex Desk opens in a new window: its own pages open in a child window of the app (same sign-in);
 // anything else opens in the person's browser.
+// A red dot for the taskbar icon while something waits for the person. Drawn at 32 by 32 with smooth edges (each pixel
+// is sampled 16 times), so Windows scales it down cleanly at any display scale instead of showing jagged steps.
+#[cfg(target_os = "windows")]
+const DOT_SIZE: u32 = 32;
+#[cfg(target_os = "windows")]
+fn badge_dot() -> &'static [u8] {
+    use std::sync::OnceLock;
+    static DOT: OnceLock<Vec<u8>> = OnceLock::new();
+    DOT.get_or_init(|| {
+        let size = DOT_SIZE as usize;
+        let centre = size as f32 / 2.0;
+        // A thin white ring keeps the dot readable on any icon; the red fills the rest.
+        let (outer, inner) = (centre - 1.0, centre - 3.2);
+        let mut pixels = vec![0u8; size * size * 4];
+        for y in 0..size {
+            for x in 0..size {
+                let (mut red, mut ring) = (0.0f32, 0.0f32);
+                for sy in 0..4 {
+                    for sx in 0..4 {
+                        let (px, py) = (x as f32 + (sx as f32 + 0.5) / 4.0, y as f32 + (sy as f32 + 0.5) / 4.0);
+                        let distance = ((px - centre).powi(2) + (py - centre).powi(2)).sqrt();
+                        if distance <= inner { red += 1.0 } else if distance <= outer { ring += 1.0 }
+                    }
+                }
+                let (red, ring) = (red / 16.0, ring / 16.0);
+                let alpha = red + ring;
+                if alpha <= 0.0 { continue; }
+                // Straight (not premultiplied) colour: the mix of red and white, at the coverage of both.
+                let mix = |r: f32, w: f32| ((r * red + w * ring) / alpha).round() as u8;
+                let at = (y * size + x) * 4;
+                pixels[at..at + 4].copy_from_slice(&[mix(229.0, 255.0), mix(57.0, 255.0), mix(70.0, 255.0), (alpha * 255.0).round() as u8]);
+            }
+        }
+        pixels
+    })
+}
+
 fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::NewWindowFeatures) -> tauri::webview::NewWindowResponse<tauri::Wry> {
+    // Rex Desk draws its own window buttons: a button opens https://rexdesk.window/<action>, which never becomes a
+    // window; the action is done to the main window instead.
+    if url.host_str() == Some("rexdesk.window") {
+        if let Some(window) = app.get_webview_window("main") {
+            match url.path() {
+                "/minimize" => { let _ = window.minimize(); }
+                "/maximize" => { if window.is_maximized().unwrap_or(false) { let _ = window.unmaximize(); } else { let _ = window.maximize(); } }
+                "/close" => { let _ = window.hide(); }
+                "/drag" => { let _ = window.start_dragging(); }
+                "/badge" => {
+                    // How many things wait for the person: a dot on the taskbar icon (Windows), the number on the Dock (Mac).
+                    let count = url.query_pairs().find(|(key, _)| key == "n").and_then(|(_, value)| value.parse::<i64>().ok()).unwrap_or(0);
+                    #[cfg(target_os = "windows")]
+                    { let _ = window.set_overlay_icon(if count > 0 { Some(tauri::image::Image::new(badge_dot(), DOT_SIZE, DOT_SIZE)) } else { None }); }
+                    #[cfg(not(target_os = "windows"))]
+                    { let _ = window.set_badge_count(if count > 0 { Some(count) } else { None }); }
+                }
+                _ => {}
+            }
+        }
+        return tauri::webview::NewWindowResponse::Deny;
+    }
     let own = url.host_str() == Some("127.0.0.1") && url.port() == Some(4317);
     if !own {
         if matches!(url.scheme(), "http" | "https" | "mailto") {
@@ -78,6 +137,7 @@ fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::
     let built = WebviewWindowBuilder::new(app, label, WebviewUrl::External("about:blank".parse().unwrap()))
         .window_features(features)
         .title("Rex Desk")
+        .background_color(tauri::window::Color(10, 14, 25, 255))
         .inner_size(1200.0, 820.0)
         .on_document_title_changed(|window, title| { let _ = window.set_title(&title); })
         .build();
@@ -133,6 +193,19 @@ fn data_home(fallback: &PathBuf) -> PathBuf {
     #[cfg(not(windows))]
     let base = std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library").join("Application Support"));
     base.unwrap_or_else(|| fallback.clone()).join("Rex Desk")
+}
+
+// Rex Desk's address with the window key from the data folder, so "stay signed in" opens this window without the
+// passphrase. Other programs and Windows users cannot read the key, so they get the sign-in screen.
+fn server_url(runtime: &Runtime) -> tauri::Url {
+    let key = fs::read_to_string(runtime.data.join("window.key")).unwrap_or_default();
+    let key = key.trim();
+    let address = if !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        format!("http://{ADDRESS}/?window={key}")
+    } else {
+        format!("http://{ADDRESS}")
+    };
+    address.parse().expect("valid URL")
 }
 
 struct Runtime {
@@ -198,28 +271,8 @@ fn workspace_in(picked: &PathBuf) -> PathBuf {
     if picked.parent().is_none() || !empty { picked.join("Rex Desk") } else { picked.clone() }
 }
 
-// A folder picker, shown once before anything opens. None when the person cancels.
-fn pick_folder(message: &str) -> Option<PathBuf> {
-    #[cfg(windows)]
-    let mut command = {
-        let script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = $env:REX_PICK; $d.ShowNewFolderButton = $true; $f = New-Object System.Windows.Forms.Form; $f.TopMost = $true; if ($d.ShowDialog($f) -eq 'OK') { [Console]::Out.Write($d.SelectedPath) }";
-        let mut command = Command::new("powershell.exe");
-        command.args(["-NoProfile", "-STA", "-Command", script]);
-        command
-    };
-    #[cfg(not(windows))]
-    let mut command = {
-        let mut command = Command::new("osascript");
-        command.args(["-e", "POSIX path of (choose folder with prompt (system attribute \"REX_PICK\"))"]);
-        command
-    };
-    let output = hidden(command.env("REX_PICK", message)).output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if text.is_empty() { None } else { Some(PathBuf::from(text)) }
-}
-
 // Which folder holds the data: the remembered one; else the app's default folder when it already holds a workspace
-// (an upgrade); else, when `ask` is set, the person picks one (cancel keeps the default and starts a new workspace).
+// (an upgrade); else the default folder, remembered for next time.
 fn choose_data(default: PathBuf, ask: bool) -> PathBuf {
     let saved = saved_folder();
     if let Some(saved) = &saved {
@@ -234,10 +287,10 @@ fn choose_data(default: PathBuf, ask: bool) -> PathBuf {
         remember_folder(&default);
         return default;
     }
-    if !ask { return default; }
-    let chosen = pick_folder("Where is your Rex Desk workspace? Pick the folder that holds it (or the folder above it), or any folder to start fresh. Cancel uses the default folder.").map(|picked| workspace_in(&picked)).unwrap_or(default);
-    remember_folder(&chosen);
-    chosen
+    // A first install never asks where to keep things: a folder question before anything opens looked suspicious. The data
+    // goes to the default folder, and the person can move it later in Settings, Folders.
+    if ask { remember_folder(&default); }
+    default
 }
 
 // The installed app carries its own Node and server next to the executable and keeps data in %APPDATA%\Rex Desk
@@ -444,13 +497,21 @@ fn main() {
         .invoke_handler(tauri::generate_handler![restart_server, startup_error])
         .setup(|app| {
             let handle = app.handle().clone();
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .on_new_window(move |url, features| open_link(&handle, url, features))
+                .initialization_script(if cfg!(target_os = "macos") { "window.__REX_SHELL = 'macos';" } else { "window.__REX_SHELL = 'windows';" })
+                // Dark before the first page paints, so the window never flashes white while Rex Desk starts.
+                .background_color(tauri::window::Color(10, 14, 25, 255))
                 .title("Rex Desk Beta")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(900.0, 600.0)
-                .maximized(true)
-                .build()?;
+                .maximized(true);
+            // Windows: no system title bar, our own buttons instead. Mac: the three dots stay, floating over our bar.
+            #[cfg(target_os = "windows")]
+            let builder = builder.decorations(false).shadow(true);
+            #[cfg(target_os = "macos")]
+            let builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+            let window = builder.build()?;
             // Rex Desk lives in the system tray: closing the window hides it while the server keeps running agents.
             let open = MenuItem::with_id(app, "open", "Open Rex Desk", true, None::<&str>)?;
             let again = MenuItem::with_id(app, "restart", "Restart Rex Desk server", true, None::<&str>)?;
@@ -511,8 +572,7 @@ fn main() {
                         return fail(error);
                     }
                 }
-                let server: tauri::Url = format!("http://{ADDRESS}").parse().expect("valid URL");
-                let _ = window.navigate(server.clone());
+                let _ = window.navigate(server_url(&runtime));
                 // Watchdog: when the server stops answering for about 8 seconds (longer than a self-update handover), the window
                 // shows the app's own page with a Restart button and the app starts the server again by itself. When the server
                 // answers again, the window goes back to Rex Desk.
@@ -524,7 +584,7 @@ fn main() {
                         down = 0;
                         if away {
                             away = false;
-                            let _ = window.navigate(server.clone());
+                            let _ = window.navigate(server_url(&runtime));
                         }
                         continue;
                     }

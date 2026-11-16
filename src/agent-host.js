@@ -15,6 +15,8 @@ try { unlinkSync(specPath); } catch { /* already gone */ }
 let seq = 0;
 const write = entry => appendFileSync(spec.journal, `${JSON.stringify({ seq: ++seq, at: Date.now(), ...entry })}\n`);
 const asks = new Map(), inbox = [], controller = new AbortController();
+// Once the reply is over, new messages are refused: Rex Desk keeps them for the next turn instead of losing them here.
+let finished = false;
 const keyOk = value => { const a = Buffer.from(String(value || '')), b = Buffer.from(spec.key); return a.length === b.length && timingSafeEqual(a, b); };
 const body = request => new Promise(resolve => { let text = ''; request.on('data', chunk => { text += chunk; }); request.on('end', () => { try { resolve(JSON.parse(text || '{}')); } catch { resolve({}); } }); });
 let runner = null;
@@ -27,7 +29,7 @@ const server = http.createServer(async (request, response) => {
   if (request.method !== 'POST') return send(404, { error: 'Not found.' });
   const input = await body(request);
   if (url.pathname === '/answer') { const waiter = asks.get(input.id); if (!waiter) return send(404, { error: 'No such question.' }); asks.delete(input.id); waiter(input.answer || { action: 'cancel' }); return send(200, { ok: true }); }
-  if (url.pathname === '/inbox') { if (input.text) inbox.push(String(input.text)); return send(200, { ok: true }); }
+  if (url.pathname === '/inbox') { if (finished) return send(409, { error: 'The reply is over.' }); if (input.text) inbox.push(String(input.text)); return send(200, { ok: true }); }
   if (url.pathname === '/stop') { controller.abort(); void runner?.interrupt?.().catch(() => {}); return send(200, { ok: true }); }
   return send(404, { error: 'Not found.' });
 });
@@ -45,8 +47,10 @@ async function main() {
     event: (kind, data) => write({ type: 'event', kind, data }),
     ask: request => new Promise(resolve => { const id = randomUUID(); asks.set(id, resolve); write({ type: 'ask', id, request }); }),
     inbox: () => inbox.splice(0).join('\n\n') });
-  try { await runner.start(spec.prompt); write({ type: 'done' }); }
-  catch (error) { write({ type: 'error', message: String(error?.message || error), aborted: controller.signal.aborted }); }
+  // Messages that came after the agent's last step were never read: they go back to Rex Desk, which starts the next turn with them.
+  const handBack = () => { finished = true; if (inbox.length) write({ type: 'unread', text: inbox.splice(0).join('\n\n') }); };
+  try { await runner.start(spec.prompt); handBack(); write({ type: 'done' }); }
+  catch (error) { handBack(); write({ type: 'error', message: String(error?.message || error), aborted: controller.signal.aborted }); }
 }
 main().catch(error => { try { write({ type: 'error', message: String(error?.message || error) }); } catch { /* journal folder gone */ } })
   .finally(() => { server.close(); setTimeout(() => process.exit(0), 200).unref(); });

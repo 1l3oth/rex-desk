@@ -1,3 +1,5 @@
+import { splitStage } from '/chat-split.js';
+import { rexCore } from '/rex-core.js';
 import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter } from '/chat-sidebar.js';
 import { agentStage, agentAction, agentGroups, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
@@ -15,14 +17,17 @@ import { maybeStartTour } from '/chat-tour.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
 import { wireImageViewer } from '/chat-viewer.js';
-import { wireSpeak, speakButton } from '/chat-speak.js';
+import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive, voiceModeButton, toggleVoiceMode, voiceModeOn, speechIdle, speechPlaying, stopLive, outputLevel, welcome } from '/chat-speak.js';
+import { mountOrb } from '/voice-orb.js';
+import { welcomeLine, STILL_THERE, GOODBYE } from '/voice-phrases.js';
 import { openAvatarPicker } from '/chat-avatar.js';
-import { showUpdateCard, updateLater, installUpdate, updateWhenIdle, watchForUpdates, showSyncNote } from '/chat-update.js';
-import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments } from '/chat-composer.js';
+import { watchForStar } from '/chat-star.js';
+import { showUpdateCard, updateLater, updateShow, installUpdate, updateWhenIdle, watchForUpdates, showSyncNote } from '/chat-update.js';
+import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments, voiceTurn, voiceBusy, cancelVoiceTurn, voiceListening } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
 // Which screen is open lives in the address (#/room/ID) and is also saved, so a refresh or a restart comes back to the same place.
-const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'jev', 'monitor', 'worktrees'];
+const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'jev', 'monitor', 'worktrees', 'split'];
 const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
 function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash); return match && SCREENS.includes(match[1]) ? { type: match[1], id: match[2] ? decodeURIComponent(match[2]) : '' } : null; }
 function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
@@ -68,13 +73,13 @@ function appControl(run, live) {
     if (run.inApp.error) return `<button class="btn small" data-action="app-off" title="${esc(run.inApp.error)}">Could not open in Claude app. Close</button> `;
     const open = run.inApp.url ? `<a class="btn small app-link" href="${esc(run.inApp.url)}" target="_blank" rel="noopener">${APP_ICON}Open in Claude app</a>`
       : `<span class="btn small app-link" aria-busy="true">${APP_ICON}Connecting…</span>`;
-    return `${open} <button class="btn small" data-action="app-off" title="End the Claude app session. The chat carries on here.">Close in app</button> `;
+    return `${open} <button class="btn small" data-action="app-off" title="Close it in the Claude app. The chat carries on here.">Close in app</button> `;
   }
   if ((run.provider || 'claude') !== 'claude' || run.remote || run.cloudCopy || live || run.state === 'waiting') return '';
   return `<button class="btn small app-link" data-action="app-on" title="Keep this chat open so you can chat with it from claude.ai/code or the Claude app on your phone">${APP_ICON}Continue in Claude app</button> `;
 }
 const stateTone = run => ({ working: 'working', review: 'warn' })[stateGroup(run)] || (['failed', 'interrupted'].includes(run.state) ? 'bad' : 'good');
-const stateLabel = run => ({ starting: 'Preparing', queued: 'Queued', running: 'Working', waiting: 'Needs you', verifying: 'Verifying', ready_for_review: 'Ready for review', needs_evidence: 'Needs evidence', published: 'PR created', failed: 'Failed', interrupted: 'Interrupted', stopped: 'Stopped', finished: 'Finished' }[run.state] || String(run.state || '').replaceAll('_', ' '));
+const stateLabel = run => ({ starting: 'Preparing', queued: 'Queued', running: 'Working', waiting: 'Needs you', verifying: 'Checking', ready_for_review: 'Ready for review', needs_evidence: 'Needs proof', published: 'PR created', failed: 'Failed', interrupted: 'Cut off', stopped: 'Stopped', finished: 'Finished' }[run.state] || String(run.state || '').replaceAll('_', ' '));
 const pending = runId => (ui.snap?.interactions || []).filter(item => item.state === 'pending' && (!runId || item.runId === runId));
 const runById = id => ui.snap.runs.find(run => run.id === id);
 // The main agent's personal chat. Its room session (role coordinator, roomAgent main) is a separate conversation and never opens here.
@@ -87,6 +92,12 @@ const roomById = id => ui.snap.rooms.find(room => room.id === id);
 // ---------- rail ----------
 const TILE_NAMES = { notices: 'Alerts', inbox: 'Needs', tasks: 'Tasks', jev: 'Jev', person: 'You', monitor: 'RAM', devices: 'PCs', worktrees: 'Trees' };
 // A small square button for a place (Notifications, Tasks, Monitor…), with its name and state in the tooltip and a badge when something waits.
+// A place in the rail: an icon, a name, and a count on the right (amber when it needs you).
+function place(type, icon, name, count = 0, warn = false, hint = '') {
+  // The bell opens a dropdown instead of a screen; it keeps the "tile" class the dropdown places itself by.
+  const bell = type === 'notices', active = bell ? Boolean(document.querySelector('.nt-pane')) : ui.view.type === type;
+  return `<button type="button" class="place${bell ? ' tile' : ''}${active ? ' active' : ''}" ${bell ? 'data-action="nt-panel"' : `data-open="${type}" data-id=""`} ${active ? 'aria-current="page"' : ''} title="${esc(hint || name)}">${iconAv(icon, warn && count ? 'warn' : '')}<span>${esc(name)}</span>${count ? `<b class="${warn ? 'warn' : ''}">${count > 99 ? '99+' : count}</b>` : ''}</button>`;
+}
 function tile(type, avatar, name, sub, badge = 0, warn = false) {
   // The bell opens a dropdown list instead of a screen.
   const active = type === 'notices' ? Boolean(document.querySelector('.nt-pane')) : ui.view.type === type, how = type === 'notices' ? 'data-action="nt-panel"' : `data-open="${type}" data-id=""`;
@@ -94,14 +105,26 @@ function tile(type, avatar, name, sub, badge = 0, warn = false) {
 }
 // The computer an agent works on, after its state, unless the state already names it ("Offline · Work is off").
 const withDevice = (text, device) => !device || String(text).includes(device) ? text : `${text} · ${device}`;
-function railItem(type, id, { dot = '', avatar = '', name, sub = '', badge = 0, warn = false, title = '' }) {
+// Rex Agent's own state, the same shape as an agent's.
+const mainLive = () => {
+  const listed = (ui.snap?.specialists || []).find(agent => agent.kind === 'main')?.status; if (listed) return listed;
+  const run = mainRun(); if (run && ['starting', 'running', 'queued', 'verifying'].includes(run.state)) return { state: 'replying' };
+  if (run?.state === 'waiting') return { state: 'waiting' };
+  const last = run?.lastTokens, span = last?.cacheTtl >= 3600 ? last.cacheTtl - 600 : Math.max(0, (last?.cacheTtl || 0) - 60), until = last?.at && span ? new Date(last.at).getTime() + span * 1000 : 0;
+  return { state: 'idle', warmUntil: until > Date.now() ? new Date(until).toISOString() : '', warmTtl: span };
+};
+function railItem(type, id, { dot = '', avatar = '', name, sub = '', badge = 0, warn = false, title = '', live = '' }) {
   const active = (ui.view.type === type && (ui.view.id || '') === (id || '')) || (type === 'specialist' && ui.view.type === 'run' && (ui.snap?.specialists || []).some(agent => agent.id === id && agent.runId === ui.view.id));
-  return `<button class="item ${active ? 'active' : ''}" data-open="${type}" data-id="${esc(id || '')}"${title ? ` title="${esc(title)}"` : ''}>${avatar || (dot ? `<span class="dot ${dot}"></span>` : '')}<span class="name">${esc(name)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span>${badge ? `<span class="badge ${warn ? 'warn' : ''}">${badge}</span>` : ''}</button>`;
+  // live: { state, warmUntil } of an agent: working shows a turning halo, asleep a dimmed face, warm a countdown.
+  const mood = live ? (['busy', 'replying'].includes(live.state) ? 'is-working' : live.state === 'waiting' ? 'is-waiting' : live.state === 'idle' || !live.state ? 'is-asleep' : '') : '';
+  const warm = mood === 'is-asleep' && live.warmUntil ? ` data-warm="${esc(live.warmUntil)}" data-ttl="${Number(live.warmTtl) || 300}"` : '';
+  return `<button class="item ${active ? 'active' : ''} ${mood}" data-open="${type}" data-id="${esc(id || '')}"${warm}${title ? ` title="${esc(title)}"` : ''}>${avatar || (dot ? `<span class="dot ${dot}"></span>` : '')}<span class="name">${esc(name)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span>${badge ? `<span class="badge ${warn ? 'warn' : ''}">${badge}</span>` : ''}</button>`;
 }
 // Sidebar pieces: an icon or a picture for every row, a status dot on agents, and sections that fold and remember it.
 const SVG = {
   main: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.4 5 5.6.8-4 3.9.9 5.5L12 15.6 7.1 18.2 8 12.7 4 8.8l5.6-.8z"/></svg>',
-  inbox: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',
+  split: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M12 4v16M3 12h9"/></svg>',
+  inbox: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/></svg>',
   person: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
   mic: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   tasks: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>',
@@ -126,22 +149,20 @@ function renderRail() {
   const snap = ui.snap, asks = pending().length;
   const main = mainRun(), agents = snap.specialists || [], tasks = (snap.tasks || []).filter(task => task.active && !task.demo), busy = agents.filter(agent => agent.status?.state === 'busy').length;
   const plus = (action, label) => `<button class="sec-add" data-action="${action}" title="${label}" aria-label="${label}">+</button>`;
-  return `<div class="rail-head"><span class="brand">${iconAv('main', 'brandmark')}<strong>Rex Desk</strong></span><span class="spacer"></span><button class="btn small" data-action="sync" title="Sync issues from the tracker">Sync</button></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
+  return `<div class="rail-head"><span class="brand"><img class="brand-logo" src="/favicon.svg" alt="" width="26" height="26"><strong>Rex Desk</strong></span><span class="spacer"></span></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
     <div class="sec-body top">
-      ${railItem('main', '', { avatar: withDot(iconAv('main', 'accent'), main ? stateTone(main) : ''), name: 'Rex Agent', sub: main ? stateLabel(main) : 'Not started', badge: unreadFor(ui, 'main:') })}
-      <div class="tiles" role="toolbar" aria-label="Places">${[
-        tile('notices', iconAv('bell', snap.notices?.unread ? 'warn' : ''), 'Notifications', snap.notices?.unread ? `${snap.notices.unread} unread` : 'All caught up', snap.notices?.unread || 0, true),
-        tile('inbox', iconAv('inbox', asks ? 'warn' : ''), 'Needs you', asks ? `${asks} waiting` : 'Nothing waiting', asks, true),
-        tile('tasks', iconAv('tasks'), 'Tasks', busy ? `${busy} being worked on` : `${tasks.length} tasks`, 0),
-        tile('jev', iconAv('mic', 'accent'), 'Jev', 'Control this computer and websites', 0),
-        tile('person', ui.profile?.photo ? `<img class="av sm photo" src="${photoUrl()}" alt="">` : iconAv('person'), 'About you', ui.profile?.name || 'What the agents learned', 0),
-        tile('monitor', iconAv('monitor'), 'Monitor', ui.monitor ? `${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : 'Memory and what uses it', 0),
-        tile('devices', iconAv('devices'), 'Devices', (snap.devices?.peers || []).length ? `${(snap.devices.peers.filter(peer => peer.online).length + 1)} of ${snap.devices.peers.length + 1} on` : 'Only this computer', 0),
-      ].join('')}</div>
+      ${railItem('main', '', { avatar: withDot(rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : ''), name: 'Rex Agent', sub: mainLive().state === 'idle' ? 'Asleep' : main ? stateLabel(main) : 'Not started', badge: unreadFor(ui, 'main:'), live: mainLive() })}
+      <nav class="places" aria-label="Places">${[
+        place('notices', 'bell', 'Notifications', snap.notices?.unread || 0, true),
+        place('inbox', 'inbox', 'Needs you', asks, true),
+        place('tasks', 'tasks', 'Tasks', busy || tasks.length, false, busy ? `${busy} being worked on` : ''),
+        place('person', 'person', 'Knowledge', 0),
+        place('split', 'split', 'Split view', 0),
+      ].join('')}</nav>
     </div>
     ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} ${room.members.length === 1 ? 'agent' : 'agents'}`, badge: unreadFor(ui, `room:${room.id}`) })) : '<p class="rail-empty">No rooms yet.</p>')}
-    ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: ['busy', 'replying', 'waiting'].includes(agent.status?.state) ? agent.status.label : agent.projectSlug || '', title: [agent.device && `Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
-  </div>${phoneTabs(asks)}<div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button><button class="btn small" data-action="theme">Theme</button></div>`;
+    ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: ['busy', 'replying', 'waiting'].includes(agent.status?.state) ? agent.status.label : agent.status?.state === 'idle' ? ['Asleep', agent.projectSlug].filter(Boolean).join(' · ') : agent.projectSlug || '', live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && `Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
+  </div>${phoneTabs(asks)}<div class="rail-tools" role="toolbar" aria-label="Tools"><button type="button" class="tool" data-open="jev" title="Jev: control this computer and websites" aria-label="Jev">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? `Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : 'Memory and what uses it')}" aria-label="Memory">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="Devices: your other computers and phone" aria-label="Devices">${iconAv('devices')}</button></div><div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button><button class="btn small" data-action="theme">Theme</button><button class="btn small" type="button" data-glass-open title="How see-through Rex Desk is">Glass</button><button type="button" class="rail-ver${ui.snap.update?.ready || ui.snap.update?.available ? ' new' : ''}" data-action="about-open" title="About Rex Desk: version, storage and what it holds">${esc(ui.snap.update?.current ? `v${ui.snap.update.current}` : 'dev')}</button></div>`;
 }
 
 // ---------- run conversation ----------
@@ -269,7 +290,10 @@ function stageModel() {
   if (type === 'monitor') return monitorStage(ctx);
   if (type === 'worktrees') return worktreesStage(ctx);
   if (type === 'jev') return jevStage();
-  if (type === 'person') return { title: 'About you', meta: 'Your profile, from what the agents learned', feed: personPage(), top: true };
+  if (type === 'split') return splitStage();
+  if (type === 'person') { const graph = knowledgeView() === 'graph'; return { title: 'Knowledge', meta: graph ? 'You, your agents and your second brain' : 'Your profile, from what the agents learned', top: true,
+    actions: `<div class="kg-switch" role="tablist" aria-label="How to look at your knowledge"><button type="button" role="tab" aria-selected="${graph}" class="${graph ? 'on' : ''}" data-action="kg-view" data-view="graph">Graph</button><button type="button" role="tab" aria-selected="${!graph}" class="${graph ? '' : 'on'}" data-action="kg-view" data-view="list">List</button></div>`,
+    feed: graph ? '<div class="kg" id="kg" data-keep="kg"></div>' : personPage() }; }
   if (type === 'project') {
     return { title: id, meta: 'Project memory', feed: `<div class="page"><div class="row"><button class="btn primary small" data-action="spec-new">Create agent for this project</button></div><div class="card"><div class="md">${markdown(ui.page || 'Loading…')}</div></div></div>` };
   }
@@ -289,26 +313,56 @@ function stageModel() {
   // A personal chat with an agent shows its profile and what was shared on the right; the terminal is one of those tabs.
   const personal = personalAgent(run);
   const side = personal ? (ui.chatInfo === false ? '' : personalSide(run, personal, items, shells)) : shells.length && ui.termOpen ? terminalHtml(shells, { esc, hhmm }) : '';
-  const actions = appControl(run, live) + (personal ? `<button class="btn small" data-action="chat-to-room" title="Make a group chat from this chat: add agents and carry on with the same topic">+ Group chat</button> ${ui.chatInfo === false ? '<button class="btn small" data-action="chat-info">Info</button> ' : ''}${live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : ''}` : run.inApp ? '' : stop);
-  return { title: personal ? personal.name : runTitle(run), meta: personal ? `${provider(run.provider)} · ${personal.projectSlug}` : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: run.inApp ? '<span class="chip working">In Claude app</span>' : `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
-    working: workingStates.includes(run.state), composer: { placeholder: workingStates.includes(run.state) ? `Message ${provider(run.provider)}…` : (run.provider === 'codex' ? 'Message Claude Code. It takes over from Codex with the chat so far…' : `Message ${provider(run.provider)}. It picks up where it left off…`), mentions: [] } };
+  const actions = appControl(run, live) + (personal ? `<button class="icon-btn head-add" data-action="chat-to-room" title="Add agents: start a group chat with this agent and others" aria-label="Add agents"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></button> ${ui.chatInfo === false ? '<button class="btn small" data-action="chat-info">Info</button> ' : ''}${live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : ''}` : run.inApp ? '' : stop);
+  return { title: personal ? personal.name : runTitle(run), meta: personal ? '' : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: run.inApp ? '<span class="chip working">In Claude app</span>' : personal ? '' : `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
+    working: workingStates.includes(run.state), composer: { placeholder: composerHint(run, workingStates.includes(run.state)), mentions: [] } };
 }
 // Until the second brain is set up, the main agent's screen and About you offer to do it.
 const brainBanner = () => ui.snap?.memory?.secondBrain === false ? `<div class="card brainbar"><div><b>Your agents don't know your second brain yet.</b><span class="muted small">${ui.snap.memory.brainCandidates?.length ? ` Found ${esc(ui.snap.memory.brainCandidates[0])}.` : ''} Rex Agent can set it up for all of them.</span></div><button class="btn primary small" data-action="brain-setup">Set it up</button></div>` : '';
 const quick = (label, text) => `<button class="chip-btn" data-action="quick" data-text="${esc(text)}">${esc(label)}</button>`;
 const welcomeStage = () => ({ title: 'Rex', meta: 'Rex Agent',
-  feed: `${brainBanner()}<div class="welcome"><div class="avatar big">RX</div><h2>Hi, I am Rex</h2><p>I get to know your projects, set up an agent for each one, and help you work through your issues. Pick a start, or just type.</p><div class="chips">${quick('Meet my projects', 'Meet my projects: go through them one by one, ask me what you are unsure about, and set up an agent for each.')}${quick('Triage my issues', 'Look at my assigned issues and tell me what to do first.')}${quick('What can you do?', 'What can you do for me here?')}</div></div>`,
+  feed: `${brainBanner()}<div class="welcome">${rexCore('xl', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length)}<h2>Hi, I am Rex</h2><p>I get to know your projects, set up an agent for each one, and help you work through your issues. Pick a start, or just type.</p><div class="chips">${quick('Meet my projects', 'Meet my projects: go through them one by one, ask me what you are unsure about, and set up an agent for each.')}${quick('Sort my issues', 'Look at my assigned issues and tell me what to do first.')}${quick('What can you do?', 'What can you do for me here?')}</div></div>`,
   composer: { placeholder: 'Message Rex…', mentions: [] } });
+// The chat is not drawn again from nothing when something changes: only the messages that differ are swapped, and new
+// ones are added at the end. Messages already on screen stay as they are (a playing video, selected text, an open step).
+let feedHtml = '';
+// Graph or list on the Knowledge screen; remembered on this computer.
+const knowledgeView = () => { try { return localStorage.getItem('rex-knowledge-view') === 'list' ? 'list' : 'graph'; } catch { return 'graph'; } };
+function patchFeed(inner, html, full) {
+  if (!full && html === feedHtml && inner.childElementCount) return false;
+  feedHtml = html;
+  const next = document.createElement('template'); next.innerHTML = html;
+  const want = [...next.content.childNodes], have = [...inner.childNodes];
+  if (full || !have.length) { inner.replaceChildren(...want); return true; }
+  // An element marked data-keep (the graph's canvas lives in one) is kept as it is while its mark stays the same.
+  const same = (a, b) => a.nodeType === b.nodeType && (a.nodeType === 1 ? (a.dataset.keep && a.dataset.keep === b.dataset.keep) || a.outerHTML === b.outerHTML : a.nodeValue === b.nodeValue);
+  let changed = false;
+  for (let index = 0; index < want.length; index++) {
+    const old = have[index];
+    if (!old) { inner.append(want[index]); changed = true; }
+    else if (!same(old, want[index])) { old.replaceWith(want[index]); changed = true; }
+  }
+  for (let index = want.length; index < have.length; index++) { have[index].remove(); changed = true; }
+  return changed;
+}
+// Staying at the newest message: a new reply glides into view; a first draw or a switch of chat jumps there at once.
+function followFeed(feed, glide) {
+  const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches, gap = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
+  if (glide && !calm && gap > 4 && gap < feed.clientHeight * 1.5) { ui.gliding = true; clearTimeout(ui.glideTimer); ui.glideTimer = setTimeout(() => { ui.gliding = false; }, 700); feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); }
+  else feed.scrollTop = feed.scrollHeight;
+}
 const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="empty"><h2>Nothing here</h2><p>${text}</p></div>` });
 
 function renderStage(full) {
   const model = stageModel(), stage = document.getElementById('stage');
-  const head = `<div class="stage-head"><button class="m-menu" data-action="m-rail" aria-label="Back to the list"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="head-title"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}</div><span class="spacer"></span><div class="head-actions">${model.actions || ''}</div></div>`;
+  const head = `<div class="stage-head"><button type="button" class="pane-toggle" data-pane="rail" aria-pressed="true" aria-label="Show or hide the list" title="Show or hide the list (Ctrl+B)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="3" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M9.5 4v16"/></svg></button><button class="m-menu" data-action="m-rail" aria-label="Back to the list"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="head-title"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}</div><span class="spacer"></span><div class="head-actions">${model.composer && ['run', 'main', 'room'].includes(ui.view.type) ? readAloudButton(draftKey()) + voiceModeButton(draftKey()) : ''}${model.actions || ''}</div><button type="button" class="pane-toggle" data-pane="side" aria-pressed="true" aria-label="Show or hide the side panel" title="Show or hide the side panel (Ctrl+.)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="14.5" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M14.5 4v16"/></svg></button></div>`;
   // A view that needs the message box always gets it, even when an earlier view had none.
   if (full || !document.getElementById('feed') || Boolean(model.composer) !== Boolean(document.getElementById('composer'))) {
     stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}${model.top ? '' : '<button type="button" class="to-end" id="to-end" hidden aria-label="Go to the newest messages"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span class="to-end-new">New messages</span></button>'}</div><aside class="side" id="side"></aside>`;
     ui.stick = !model.top; redrawAttachments(ctx); if (model.top) document.getElementById('feed').scrollTop = 0;
   } else { document.getElementById('head').innerHTML = head; const slot = document.getElementById('members'); if (!slot.contains(document.activeElement) && !pickerOpen()) slot.innerHTML = model.members || ''; }
+  // The hint in the message box follows the AI picked under it without redrawing what is typed.
+  const draftBox = document.getElementById('draft'); if (draftBox && model.composer?.placeholder && draftBox.placeholder !== model.composer.placeholder) draftBox.placeholder = model.composer.placeholder;
   document.getElementById('feed').className = `feed ${model.feedClass || ''}`;
   const banner = document.getElementById('banner'); if (banner && banner.innerHTML !== (model.banner || '')) banner.innerHTML = model.banner || '';
   drawSide(model.side || '', model.sideClass || '');
@@ -318,10 +372,79 @@ function renderStage(full) {
   const active = document.activeElement, form = active?.closest?.('[data-interaction]');
   const editing = !full && feed.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName) && (!form || model.feed.includes(`data-interaction="${form.dataset.interaction}"`));
   const choosing = pickerOpen();
-  if (!editing && !choosing) { const before = inner.innerHTML; inner.innerHTML = model.feed; if (ui.stick && !model.top) feed.scrollTop = feed.scrollHeight; else if (before && before !== inner.innerHTML && feed.scrollHeight > ui.feedHeight) ui.freshBelow = true; ui.feedHeight = feed.scrollHeight; }
+  if (!editing && !choosing) { const changed = patchFeed(inner, model.feed, full); if (ui.stick && !model.top) followFeed(feed, changed && !full); else if (changed && feed.scrollHeight > ui.feedHeight) ui.freshBelow = true; ui.feedHeight = feed.scrollHeight; }
   syncToEnd();
   ui.mentions = model.composer?.mentions || [];
+  syncVoiceStage();
 }
+// Voice mode's screen: Rex's body over the chat, nothing else but a faint way out (or Esc). It is made once and kept
+// (re-attached after a redraw), so its animation never restarts. What it shows comes from what is happening right now.
+let voiceStage = null, voiceOrb = null, voiceBeat = 0;
+// While the body is on screen it says so every two seconds (this window and the split view's panes read it): no
+// notification pop-ups or sounds talk over the voice.
+const voiceLive = () => { try { localStorage.setItem('rex-voice-live', String(Date.now())); } catch { /* private window */ } };
+function closeVoiceStage() {
+  clearInterval(voiceBeat); voiceBeat = 0; try { localStorage.removeItem('rex-voice-live'); } catch { /* private window */ }
+  voiceOrb?.destroy(); voiceStage?.remove(); voiceStage = voiceOrb = null;
+}
+// The agent is writing a reply the person waits for. Its quiet turn reading Voice mode's report does not count: the mic
+// opens right after the welcome, and what the person says reaches the agent as soon as it has read.
+function agentWriting() {
+  if (!document.querySelector('#feed-inner .bubble.typing')) return false;
+  return !runById(ctx.currentRunId())?.voice?.reading;
+}
+function voiceNow() {
+  const heard = voiceListening();
+  // "Speaking" only while sound is coming out; while a sentence's voice is still being made it is "Thinking".
+  if (speechPlaying()) return { state: 'speaking', level: outputLevel() };
+  if (!speechIdle()) return { state: 'thinking', level: 0 };
+  if (heard.listening) return { state: 'listening', level: heard.level };
+  if (heard.transcribing || agentWriting()) return { state: 'thinking', level: 0 };
+  return { state: 'idle', level: 0 };
+}
+// The badge under the body says plainly whether to talk: green "Listening, go ahead" only while the mic is open.
+const VOICE_WORDS = { idle: 'One moment', listening: 'Listening, go ahead', thinking: 'Thinking', speaking: 'Speaking' };
+const MIC_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+// A soft short tone each time the mic opens, so the person knows when to talk without looking.
+let voiceTone = null;
+function micOpenTone() {
+  try {
+    voiceTone ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (voiceTone.state !== 'running') void voiceTone.resume();
+    const at = voiceTone.currentTime, tone = voiceTone.createOscillator(), gain = voiceTone.createGain();
+    tone.type = 'sine'; tone.frequency.setValueAtTime(880, at); tone.frequency.exponentialRampToValueAtTime(1320, at + 0.09);
+    gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.12, at + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.22);
+    tone.connect(gain).connect(voiceTone.destination); tone.start(at); tone.stop(at + 0.25);
+  } catch { /* no sound: the badge still shows it */ }
+}
+function syncVoiceStage() {
+  const main = document.querySelector('#stage .stage-main'), on = Boolean(main) && voiceModeOn(draftKey()) && Boolean(ctx.currentRunId());
+  if (!on) {
+    if (voiceStage) { void api(`/runs/${voiceStage.dataset.run}/voice`, { method: 'POST', data: { on: false } }).catch(() => {}); closeVoiceStage(); }
+    return;
+  }
+  if (voiceStage && voiceStage.dataset.run !== ctx.currentRunId()) { closeVoiceStage(); }
+  if (!voiceStage) {
+    voiceStage = document.createElement('div'); voiceStage.className = 'voice-stage'; voiceStage.dataset.run = ctx.currentRunId();
+    // The briefing is made now, while the body opens (code, not AI): the first question is answered from it at once.
+    void api(`/runs/${voiceStage.dataset.run}/voice`, { method: 'POST', data: { on: true } }).catch(() => {});
+    voiceStage.innerHTML = `<button type="button" class="voice-exit" data-action="voice-mode" aria-label="End voice mode" title="End voice mode (Esc)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><div class="voice-cue" data-state="idle" role="status" aria-live="polite"><span class="vc-dot" aria-hidden="true"></span>${MIC_ICON}<span class="vc-text">One moment</span></div>`;
+    const cue = voiceStage.querySelector('.voice-cue'), word = cue.querySelector('.vc-text');
+    voiceLive(); voiceBeat = setInterval(voiceLive, 2000);
+    // The welcome is said by Rex Desk itself the moment the body has formed (about 2.3 s), not written by the AI, which
+    // takes a few seconds more; the mic opens after it.
+    welcome(welcomeLine(), performance.now() + 2300); voiceRest = Date.now() + 3200;
+    voiceOrb = mountOrb(voiceStage, () => {
+      const now = voiceNow(), text = VOICE_WORDS[now.state];
+      if (cue.dataset.state !== now.state) { if (now.state === 'listening') micOpenTone(); cue.dataset.state = now.state; word.textContent = text; }
+      // The dot grows with the person's voice while it listens, so they can see it hears them.
+      cue.style.setProperty('--level', now.state === 'listening' ? Math.min(1, now.level).toFixed(2) : '0');
+      return now;
+    });
+  }
+  if (voiceStage.parentElement !== main) main.append(voiceStage);
+}
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && voiceStage && voiceModeOn(draftKey())) { toggleVoiceMode(draftKey()); cancelVoiceTurn(); stopLive(); renderAll(); } });
 // The terminal panel keeps its scroll place unless it was at the bottom, where it follows the newest command.
 function drawSide(html, extra = '') {
   const side = document.getElementById('side'); if (!side) return;
@@ -331,9 +454,18 @@ function drawSide(html, extra = '') {
   const fresh = document.getElementById('side-body'); if (fresh) fresh.scrollTop = keep.bottom ? fresh.scrollHeight : keep.top;
 }
 const draftKey = () => `${ui.view.type}:${ui.view.id || ''}`;
+// The message box names the AI the next message goes to: the one picked under the box, else the chat's own.
+function composerHint(run, working) {
+  // Local AI runs through Claude Code: switching between them keeps the same conversation.
+  const picked = ui.providerPick?.[draftKey()], next = picked === 'local' ? 'claude' : picked || (run.provider === 'codex' ? 'claude' : run.provider);
+  const name = id => (id === 'claude' && (picked === 'local' || (!picked && String(run.model || '').startsWith('local:'))) ? 'Local AI' : provider(id));
+  if (working) return `Message ${name(run.provider)}…`;
+  return next !== run.provider ? `Message ${name(next)}. It takes over from ${provider(run.provider)} with the chat so far…` : `Message ${name(next)}. It picks up where it left off…`;
+}
 
 function renderAll(full = false) {
   queueMicrotask(drawReplyBar);
+  queueMicrotask(() => readNewReplies(draftKey()));
   if (!ui.snap) return;
   // On a phone Rex Desk opens on the list, like a messaging app; a chat slides in over it and the back arrow returns.
   if (!document.getElementById('rail')) ui.railHtml = '', app.innerHTML = `<div class="chat-shell${phone() && !location.hash ? ' show-rail' : ''}"><aside class="rail" id="rail"></aside><main class="stage" id="stage"></main></div>`;
@@ -353,42 +485,57 @@ function renderAll(full = false) {
 }
 
 // ---------- data ----------
-async function loadView() {
+async function loadView(early = null) {
   const { type, id } = ui.view;
   try {
     if (type === 'main' || type === 'run') {
       const run = type === 'main' ? mainRun() : runById(id); if (!run) return;
-      const events = await api(`/runs/${run.id}/messages`); ui.events.set(run.id, events);
+      const events = await (early && type === 'run' ? early : api(`/runs/${run.id}/messages`)); ui.events.set(run.id, events);
     } else if (type === 'room') {
       const room = ui.snap.rooms.find(item => item.id === id);
-      if (room && ui.infoOpen !== false && ui.sideTab === 'activity') await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
+      if (room && ui.infoOpen !== false && ['activity', 'terminal'].includes(ui.sideTab)) await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
     } else if (type === 'worktrees') { await api('/worktrees');
     } else if (type === 'monitor') { ui.monitor = await api('/monitor'); 
     } else if (type === 'person') { ui.page = (await api('/memory/page?name=user')).text; }
     else if (type === 'project') ui.page = (await api(`/memory/page?name=${encodeURIComponent(id)}`)).text;
   } catch (error) { if (type === 'project') ui.page = error.message; }
 }
-let busy = false, again = false, lastTyped = 0, typingHold = 0;
+let busy = false, again = false, againFull = false, lastTyped = 0, typingHold = 0;
 // While the person types, the page is not redrawn: a redraw of a long chat takes the main thread and the letters lag.
 // Updates wait until they pause for a moment, then everything catches up at once.
 document.addEventListener('input', event => { if (event.target.id === 'draft' || event.target.closest?.('#composer')) lastTyped = performance.now(); }, true);
 async function refresh({ full = false } = {}) {
   const sinceTyping = performance.now() - lastTyped;
   if (!full && sinceTyping < 1200) { clearTimeout(typingHold); typingHold = setTimeout(() => void refresh().catch(() => {}), 1250 - sinceTyping); return; }
-  if (busy) { again = true; return; } busy = true;
+  // A refresh asked for while one is running comes after it, and a full one (another chat was opened) stays full.
+  if (busy) { again = true; againFull ||= full; return; } busy = true;
   try {
-    ui.snap = await api('/state');
+    // Everything the page needs is asked for at once, not one after another: opening a chat waited for four answers in a row.
+    const view = ui.view, early = view.type === 'run' ? api(`/runs/${view.id}/messages`).catch(() => null) : null;
+    const [snap, memory, profile] = await Promise.all([api('/state'), api('/memory').catch(() => ui.memory), api('/profile').catch(() => ui.profile)]);
+    ui.snap = snap;
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
-    if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = await api('/memory').catch(() => ui.memory); ui.profile = await api('/profile').catch(() => ui.profile);
-    await loadView(); renderAll(full); maybeStartTour(ctx); showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
-  } finally { busy = false; if (again) { again = false; void refresh(); } }
+    if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = memory; ui.profile = profile;
+    await loadView(view === ui.view && early ? early.then(events => events || api(`/runs/${view.id}/messages`)) : null); renderAll(full); maybeStartTour(ctx); if (!window.__starWatch && !document.documentElement.classList.contains('embed')) { window.__starWatch = true; watchForStar(); } showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
+  } finally { busy = false; if (again) { const wasFull = againFull; again = false; againFull = false; void refresh({ full: wasFull }); } }
+}
+// A chat opened is drawn at once from what the page already holds (its messages from the last visit), and brought up to
+// date a moment later; before, the screen stayed on the old chat until the server had answered everything.
+function showNow() {
+  const { type, id } = ui.view; if (!ui.snap) return;
+  const run = type === 'main' ? mainRun() : type === 'run' ? runById(id) : null;
+  if (['main', 'run'].includes(type) && !(run && ui.events.has(run.id))) return;
+  if (!['main', 'run', 'room'].includes(type)) return;
+  try { renderAll(true); } catch { /* the refresh below draws it */ }
 }
 function open(type, id = '') {
   ui.view = { type, id }; ui.page = ''; window.rexView = noticeKey(ui.view); window.rexPresence?.();
-  try { localStorage.setItem('rex-desk-view', JSON.stringify(ui.view)); } catch { /* private window */ }
-  if (location.hash !== hashOf(ui.view)) { ui.fromOpen = true; location.hash = hashOf(ui.view); } document.querySelector('.chat-shell')?.classList.remove('show-rail'); void refresh({ full: true }); }
+  if (!document.documentElement.classList.contains('embed')) try { localStorage.setItem('rex-desk-view', JSON.stringify(ui.view)); } catch { /* private window */ }
+  if (location.hash !== hashOf(ui.view)) { ui.fromOpen = true; location.hash = hashOf(ui.view); } document.querySelector('.chat-shell')?.classList.remove('show-rail'); showNow(); void refresh({ full: true }); }
 
 // ---------- actions ----------
+let voiceRest = 0;
+const voiceQuiet = { since: 0, asked: false };
 async function send() {
   const box = document.getElementById('draft'), typed = box?.value.trim(), hasFiles = ui.attachments.some(file => file.path);
   if (!typed && !hasFiles) return;
@@ -407,7 +554,10 @@ async function send() {
       const away = run.remote ? { text, at: new Date().toISOString() } : null;
       if (away) { (ui.outbox ||= new Map()).set(run.id, [...(ui.outbox.get(run.id) || []), away]); box.value = ''; renderAll(); }
       try {
-        if (workingStates.includes(run.state)) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text, ...picked } });
+        // Spoken in Voice mode: always through "say", which gives the agent its briefing and how to talk.
+        const spoken = ui.voiceNext; ui.voiceNext = false;
+        if (spoken) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text, ...picked, voice: true } });
+        else if (workingStates.includes(run.state)) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text, ...picked } });
         else await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text, ...picked } });
       } catch (error) { if (away) { ui.outbox.set(run.id, ui.outbox.get(run.id).filter(item => item !== away)); box.value = typed; } throw error; }
       if (away) away.sent = true;
@@ -427,7 +577,7 @@ async function assignFromRoom(roomId, command) {
 }
 async function syncIssues() { toast('Syncing issues…'); await api('/sync', { method: 'POST', data: {} }); toast('Issues synced.'); await refresh(); }
 async function scanProjects() { toast('Scanning this computer for projects…'); const result = await api('/memory/scan', { method: 'POST', data: {} }); toast(`Found ${result.count} projects.`); await refresh(); }
-// /clear: the agent writes nothing itself; Rex Desk saves a handoff of the conversation and the next message starts a fresh session that reads it.
+// /clear: the agent writes nothing itself; Rex Desk saves a summary of the conversation and the next message starts a fresh session that reads it.
 // /loop: the agent looks at its own tasks now, the same as its scheduled check.
 async function loopNow() {
   const run = ui.view.type === 'run' ? runById(ui.view.id) : null, agentId = run?.specialistId;
@@ -437,7 +587,7 @@ async function loopNow() {
 }
 async function clearAgent() {
   const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast('No agent conversation here.', true);
-  if (!confirm('Clear this conversation? The agent starts a fresh session with your next message and reads a handoff of what was said. The messages stay on screen.')) return;
+  if (!confirm('Clear this conversation? The agent starts fresh with your next message and reads a summary of what was said. The messages stay on screen.')) return;
   const box = document.getElementById('draft'); if (box) { box.value = ''; ui.drafts.set(draftKey(), ''); }
   await api(`/runs/${run.id}/fresh`, { method: 'POST', data: {} }); toast('Cleared. Your next message starts a fresh session.'); await refresh();
 }
@@ -462,6 +612,9 @@ document.addEventListener('click', async event => {
     else if (action === 'agent-signin') { try { await api('/agents/login', { method: 'POST', data: { provider: target.dataset.provider || 'claude', profile: '' } }); toast('Sign-in opened. Pick the account that has the plan, finish it, then start a fresh chat.'); } catch (error) { toast(error.message, true); } }
     else if (action === 'update-install') await installUpdate(api);
     else if (action === 'update-later') updateLater();
+    else if (action === 'voice-mode') { const on = toggleVoiceMode(draftKey()); if (!on) { cancelVoiceTurn(); stopLive(); } voiceRest = 0; toast(on ? 'Voice mode is on. Talk when the mic lights up; the reply is spoken as it is written.' : 'Voice mode is off.'); renderAll(); }
+    else if (action === 'read-aloud') { const on = toggleReadAloud(draftKey()); toast(on ? 'New replies in this chat are read aloud.' : 'Replies are no longer read aloud.'); renderAll(); }
+    else if (action === 'update-show') updateShow(ui.snap.update);
     else if (action === 'avatar-pick') { const agent = (ui.snap.specialists || []).find(item => item.id === target.closest('[data-agent-id]')?.dataset.agentId); if (agent) openAvatarPicker(ctx, agent); }
     else if (action === 'pin-toggle') togglePin(ctx, target.dataset.kind, target.dataset.id);
     else if (action === 'app-on' || action === 'app-off') {
@@ -486,9 +639,12 @@ document.addEventListener('click', async event => {
     else if (action === 'sync') await syncIssues();
     else if (action === 'sec-toggle') toggleSection(target.dataset.sec);
     else if (action === 'settings-open') openSettings(ctx);
+    else if (action === 'about-open') openSettings(ctx, 'about');
     else if (action === 'settings-sources') { document.querySelector('.dialog-back:not(.settings)')?.remove(); openSettings(ctx, 'sources'); }
-    // The Theme button walks through every theme, the Khmer ones included.
-    else if (action === 'theme') { const order = ['light', 'dark', 'angkor', 'lacquer', 'tonle'], now = document.documentElement.dataset.palette || document.documentElement.dataset.theme; window.rexTheme?.set(order[(order.indexOf(now) + 1) % order.length]); }
+    else if (action === 'sync-source') { ui.syncing = target.dataset.source; renderAll(); try { const [result] = await api('/sync', { method: 'POST', data: { sourceId: target.dataset.source } }); toast(result?.error ? `Sync failed: ${result.error}` : `${result?.name || 'Tracker'} synced.`, Boolean(result?.error)); } finally { ui.syncing = ''; await refresh(); } }
+    else if (action === 'know-tab') { ui.knowTab = target.dataset.tab; renderAll(true); }
+    else if (action === 'kg-view') { try { localStorage.setItem('rex-knowledge-view', target.dataset.view); } catch {} renderAll(true); }
+    else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
     else if (action === 'stop') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
     else if (action === 'scan') await scanProjects();
     else if (action === 'wake-approve') { await api(`/rooms/x/wakes/${target.dataset.id}`, { method: 'POST', data: {} }); toast('Agent resumed.'); await refresh(); }
@@ -517,7 +673,7 @@ document.addEventListener('submit', async event => {
   try { await api(`/interactions/${form.dataset.interaction}/answer`, { method: 'POST', data: { action: always ? 'accept' : decision, content: always ? { ...content, always: true } : content } }); toast(decision === 'accept' || always ? 'Sent to the agent.' : 'Declined.'); await refresh(); }
   catch (error) { toast(error.message, true); }
 });
-document.addEventListener('scroll', event => { if (event.target.id === 'feed') { ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; if (ui.stick) ui.freshBelow = false; syncToEnd(); } }, true);
+document.addEventListener('scroll', event => { if (event.target.id === 'feed') { if (ui.gliding) return; ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; if (ui.stick) ui.freshBelow = false; syncToEnd(); } }, true);
 
 initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx); wireAgentCards(ctx); wireSpeak(toast); wireWorktrees(ctx); wireChatSwitch(); wireImageViewer();
 // On a phone the side panels start closed, and the menu button opens the list of chats.
@@ -539,7 +695,7 @@ document.addEventListener('click', event => { const head = event.target.closest?
 window.addEventListener('hashchange', () => {
   if (ui.fromOpen) { ui.fromOpen = false; return; }
   const view = viewFromHash(); if (!view) return;
-  ui.view = view; ui.page = ''; void refresh({ full: true });
+  ui.view = view; ui.page = ''; showNow(); void refresh({ full: true });
 });
 setPickActions({ 'room-add': async agentId => { try { await api(`/rooms/${ui.view.id}/members`, { method: 'POST', data: { agentId } }); await refresh(); } catch (error) { toast(error.message, true); } } });
 // Yes and No answers.
@@ -554,6 +710,7 @@ document.addEventListener('click', event => {
   const link = event.target.closest?.('[data-term-focus]'); if (!link) return;
   ui.termOpen = true; renderAll();
   const entry = document.getElementById(`term-${link.dataset.termFocus}`); if (!entry) return;
+  if (entry.tagName === 'DETAILS') entry.open = true;
   entry.scrollIntoView({ block: 'center' }); entry.classList.add('flash'); setTimeout(() => entry.classList.remove('flash'), 1200);
 });
 // In a question card, the keys 1 to 9 pick that option (when not typing).
@@ -589,6 +746,29 @@ try {
   await refresh({ full: true });
   const stream = new EventSource('/api/events'); let timer;
   stream.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(() => void refresh().catch(() => {}), 700); });
+  // Voice mode: when nothing is being written or said, listen for the person's next turn; after they spoke, give the
+  // agent a moment to start replying before listening again.
+  // When the person says nothing for a while (only listening, no agent at work), Rex asks once whether they are still
+  // there; after two minutes it says it will be there when needed and ends Voice mode, so the mic is not left open.
+  setInterval(() => {
+    if (!voiceModeOn(draftKey())) { voiceQuiet.since = 0; return; }
+    const agentBusy = agentWriting() || !speechIdle() || voiceListening().transcribing;
+    if (agentBusy) voiceQuiet.since = 0; else if (!voiceQuiet.since) { voiceQuiet.since = Date.now(); voiceQuiet.asked = false; }
+    // Quiet counts from the last moment the person's voice was heard, not from when the mic opened: someone who talks for a
+    // long time is never taken for silent, and never cut off.
+    const lastVoice = voiceListening().heardAt;
+    if (voiceQuiet.since && lastVoice > voiceQuiet.since) { voiceQuiet.since = lastVoice; voiceQuiet.asked = false; }
+    if (voiceQuiet.since && !agentBusy) {
+      const quiet = Date.now() - voiceQuiet.since;
+      if (quiet > 120000) { voiceQuiet.since = 0; cancelVoiceTurn(); welcome(GOODBYE, 0); setTimeout(() => { if (voiceModeOn(draftKey())) { toggleVoiceMode(draftKey()); renderAll(); } }, 3500); return; }
+      if (quiet > 25000 && !voiceQuiet.asked) { voiceQuiet.asked = true; cancelVoiceTurn(); welcome(STILL_THERE, 0); voiceRest = Date.now() + 1500; return; }
+    }
+    if (voiceBusy() || Date.now() < voiceRest || document.hidden) return;
+    if (agentBusy) { voiceRest = Date.now() + 600; return; }
+    void voiceTurn(ctx, { onState: state => { if (state === 'thinking') { voiceRest = Date.now() + 4000; voiceQuiet.since = 0; } } }).then(started => { if (!started) { toggleVoiceMode(draftKey()); renderAll(); } });
+  }, 400);
+  // An agent's words as they are written: Voice mode speaks them a phrase behind, without waiting for the whole reply.
+  stream.addEventListener('partial', event => { try { speakLive(JSON.parse(event.data), draftKey(), ctx.currentRunId()); } catch { /* a broken message is skipped */ } });
   setInterval(() => void refresh().catch(() => {}), 15000);
 } catch (error) { app.innerHTML = `<div class="boot boot-failed"><h2>Rex Desk is unavailable</h2><p>${esc(error.message)}</p><p>Opening it again by itself as soon as the server answers.</p></div>`; }
 
@@ -627,32 +807,32 @@ function photoUrl() { return `/api/profile/photo?v=${encodeURIComponent(ui.profi
 function noteText(item) { const match = /^(.*?)\s+\((\d{4}-\d{2}-\d{2})(, may change)?\)$/.exec(item); return match ? { text: match[1], when: match[2], soft: Boolean(match[3]) } : { text: item, when: '', soft: false }; }
 function personPage() {
   const profile = ui.profile || { sections: [], projects: [], agents: [] }, name = profile.name || 'You';
-  const about = profile.sections.find(section => section.title === 'About them')?.items.map(noteText) || [];
-  const others = profile.sections.filter(section => section.title !== 'About them');
-  const photo = profile.photo ? `<img class="pf-photo" src="${photoUrl()}" alt="${esc(name)}">` : `<div class="pf-photo pf-initials" aria-hidden="true">${esc(initials(name))}</div>`;
-  const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
-  const stats = `Works on ${plural(profile.projects.length, 'project')} with ${plural(profile.agents.length, 'agent')}.`;
+  const photo = profile.photo ? `<img class="kl-photo" src="${photoUrl()}" alt="${esc(name)}">` : `<div class="kl-photo kl-initials" aria-hidden="true">${esc(initials(name))}</div>`;
   const plain = text => String(text || '').replace(/\*\*|__|`/g, '');
-  const hero = `<section class="pf-hero">${photo}<div class="pf-who"><h2>${esc(name)}</h2>${profile.email ? `<p class="muted">${esc(profile.email)}</p>` : ''}
-    <p class="pf-intro">${about.length ? about.map(item => esc(item.text)).join(' · ') : 'Your agents add what they learn about you here as you work with them.'}</p>
-    <p class="pf-stats">${stats}</p>
-    <div class="pf-actions"><label class="btn small pf-upload">${profile.photo ? 'Change photo' : 'Add a photo'}<input type="file" accept="image/png,image/jpeg,image/webp" data-photo-upload hidden></label>${profile.photo ? '<button class="btn small" data-action="photo-remove">Remove photo</button>' : ''}</div>
-    ${profile.photo ? '' : '<p class="muted small">Or let Rex Agent find a picture of you in your projects: it asks before using one.</p>'}</div></section>`;
-  // How agents should talk to you: every section is shown, so you can fill it in yourself; agents add to it as they learn.
-  const SECTIONS = [['explain', 'How to explain things to me', 'Format, length, level of detail, examples, what to always explain, what to skip.', 'Short answer first, then the steps as a numbered list'],
-    ['personality', 'Personality', 'How you think and work, so agents meet you where you are.', 'I learn by doing; show me, then explain'],
-    ['likes', 'Likes', 'What works well for you.', 'Plain words, no jargon'], ['dislikes', 'Dislikes', 'What agents should stop doing.', 'Long walls of text'],
-    ['works', 'How they work', 'Your habits and tools.', 'I work in Orca and test on my phone'], ['about', 'About them', 'Facts about you.', 'I speak Khmer, English and Korean']];
-  const card = ([kind, title, hint, example]) => {
-    const items = (profile.sections.find(section => section.title === title)?.items || []).map(noteText);
-    return `<div class="pf-card pf-notes${kind === 'explain' ? ' wide' : ''}"><h3>${esc(title)}</h3><p class="pf-hint">${esc(hint)}</p>
-      ${items.length ? `<ul>${items.map(item => `<li><span>${esc(item.text)}${item.when ? ` <small class="muted">${item.when}${item.soft ? ' · may change' : ''}</small>` : ''}</span><button type="button" class="ag-x" data-note-forget="${esc(kind)}" data-note-text="${esc(item.text)}" title="Remove this" aria-label="Remove this"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>` : ''}
-      <form class="pf-add" data-note-add="${esc(kind)}"><input name="text" type="text" maxlength="240" placeholder="For example: ${esc(example)}" aria-label="Add to ${esc(title)}" autocomplete="off"><button class="btn small">Add</button></form></div>`;
-  };
-  const notes = `<section><h3 class="pf-title">How your agents should talk to you</h3><p class="pf-hint">Every agent reads this before it answers you, including new ones. Agents add to it when they notice what works; you can add or remove anything.</p><div class="pf-grid pf-notes-grid">${SECTIONS.map(card).join('')}</div></section>`;
-  const projects = profile.projects.length ? `<section><h3 class="pf-title">Projects</h3><div class="pf-grid">${profile.projects.map(project => `<button class="pf-card pf-project" data-open="project" data-id="${esc(project.slug)}"><h3>${esc(project.slug)}</h3><p>${esc(plain(project.purpose) || 'No description yet.')}</p>${project.stack.filter(item => !/\.(json|toml|lock|txt)$/i.test(item)).length ? `<div class="pf-tags">${project.stack.filter(item => !/\.(json|toml|lock|txt)$/i.test(item)).slice(0, 5).map(item => `<span>${esc(item)}</span>`).join('')}</div>` : ''}</button>`).join('')}</div></section>` : '';
-  const agents = profile.agents.length ? `<section><h3 class="pf-title">Your agents</h3><div class="pf-agents">${profile.agents.map(agent => `<button class="pf-agent" data-open="specialist" data-id="${esc(agent.id)}">${avatarHtml(ctx, { name: agent.name, agent, size: 'sm' })}<span>${esc(agent.name)}<small>${esc(agent.project)}</small></span></button>`).join('')}</div></section>` : '';
-  return `<div class="page pf">${brainBanner()}${hero}${notes}${projects}${agents}<p class="muted small">Notes are kept in .rexdesk/user.md. Change or delete any line there and every agent follows it.</p></div>`;
+  // What the agents know, one tab for each kind. The title is the heading in .rexdesk/user.md.
+  const KINDS = [['explain', 'How to explain things to me', 'Explain', 'Format, length, detail, examples: how every agent answers you.', 'Short answer first, then the steps as a numbered list'],
+    ['likes', 'Likes', 'Likes', 'What works well for you.', 'Plain words, no jargon'],
+    ['dislikes', 'Dislikes', 'Dislikes', 'What agents should stop doing.', 'Long walls of text'],
+    ['works', 'How they work', 'How you work', 'Your habits, tools and rules.', 'I test on my phone before I merge'],
+    ['personality', 'Personality', 'Personality', 'How you think, so agents meet you where you are.', 'I learn by doing; show me, then explain'],
+    ['about', 'About them', 'About you', 'Facts about you.', 'I speak Khmer, English and Korean']];
+  const itemsOf = title => (profile.sections.find(section => section.title === title)?.items || []).map(noteText);
+  const tab = KINDS.some(kind => kind[0] === ui.knowTab) ? ui.knowTab : (KINDS.find(item => itemsOf(item[1]).length) || KINDS[0])[0];
+  const [kind, title, label, hint, example] = KINDS.find(item => item[0] === tab);
+  const total = KINDS.reduce((sum, item) => sum + itemsOf(item[1]).length, 0);
+  const items = itemsOf(title);
+  const tabs = `<div class="kl-tabs" role="tablist" aria-label="What the agents know">${KINDS.map(([key, heading, short]) => { const count = itemsOf(heading).length; return `<button type="button" role="tab" aria-selected="${key === tab}" class="${key === tab ? 'on' : ''}" data-action="know-tab" data-tab="${key}">${esc(short)}<span>${count}</span></button>`; }).join('')}</div>`;
+  const rows = items.length ? `<ul class="kl-list">${items.map(item => `<li><span class="kl-text">${esc(item.text)}</span><span class="kl-meta">${item.when ? esc(item.when) : ''}${item.soft ? '<em>may change</em>' : ''}</span><button type="button" class="kl-x" data-note-forget="${esc(kind)}" data-note-text="${esc(item.text)}" title="Remove" aria-label="Remove this"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>`
+    : `<p class="kl-empty">Nothing here yet. Agents add to it when they notice what works, or add your own above.</p>`;
+  const panel = `<section class="kl-panel" role="tabpanel"><header><h2>${esc(label)}</h2><p>${esc(hint)}</p></header>
+    <form class="kl-add" data-note-add="${esc(kind)}"><input name="text" type="text" maxlength="240" placeholder="Add one, for example: ${esc(example)}" aria-label="Add to ${esc(label)}" autocomplete="off"><button class="btn primary small">Add</button></form>${rows}</section>`;
+  const side = `<aside class="kl-side"><div class="kl-me">${photo}<div><h2>${esc(name)}</h2>${profile.email ? `<p>${esc(profile.email)}</p>` : ''}</div></div>
+    <div class="kl-stats"><div><b>${total}</b><span>things known</span></div><div><b>${profile.projects.length}</b><span>projects</span></div><div><b>${profile.agents.length}</b><span>agents</span></div></div>
+    <div class="kl-actions"><label class="btn small pf-upload">${profile.photo ? 'Change photo' : 'Add a photo'}<input type="file" accept="image/png,image/jpeg,image/webp" data-photo-upload hidden></label>${profile.photo ? '<button class="btn small" data-action="photo-remove">Remove</button>' : ''}</div>
+    ${profile.projects.length ? `<h3>Projects</h3><div class="kl-chips">${profile.projects.map(project => `<button type="button" data-open="project" data-id="${esc(project.slug)}" title="${esc(plain(project.purpose))}">${esc(project.slug)}</button>`).join('')}</div>` : ''}
+    ${profile.agents.length ? `<h3>Agents</h3><div class="kl-chips">${profile.agents.map(agent => `<button type="button" data-open="specialist" data-id="${esc(agent.id)}">${esc(agent.name)}</button>`).join('')}</div>` : ''}
+    <p class="kl-file">Kept in .rexdesk/user.md. Every agent reads it before it answers you.</p></aside>`;
+  return `<div class="page kl">${brainBanner()}<div class="kl-body">${side}<div class="kl-main">${tabs}${panel}</div></div></div>`;
 }
 // A chosen picture is made small (512 px) in the page before it is saved.
 document.addEventListener('change', async event => {
@@ -817,7 +997,7 @@ function personalSide(run, agent, items, shells) {
   const close = '<button type="button" class="side-x" data-action="chat-info-close" aria-label="Close the side panel" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
   const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">Profile</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="chat-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button>${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">Terminal<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span>${close}</div>`;
   if (tab === 'worktrees') return tabs + worktreeSideHtml(ctx, trees);
-  if (tab === 'terminal') return tabs + terminalHtml(shells, { esc, hhmm }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="side-body)/, '');
+  if (tab === 'terminal') return tabs + terminalHtml(shells, { esc, hhmm }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="tl-bar)/, '');
   const sharedBox = `<h3>Media, files and links</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
   const sources = (agent.taskSources || []).map(id => id === 'local' ? 'Rex Desk tasks' : (ui.snap.config?.sources || []).find(source => source.id === id)?.name).filter(Boolean);
   const rooms = (ui.snap.rooms || []).filter(room => room.members.some(member => member.id === agent.id));
@@ -898,7 +1078,7 @@ async function accountsDialog() {
     back.innerHTML = `<form class="dialog acct-dialog"><div class="acct-head"><h2>AI accounts</h2><button type="button" class="side-x" data-close aria-label="Close" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>
       <div class="acct-tabs" role="tablist">${Object.entries(NAMES).map(([key, [, title]]) => `<button type="button" role="tab" aria-selected="${name === key}" class="acct-tab${name === key ? ' on' : ''}" data-acct-tab="${key}"><b>${title}</b>${defaultAi === key ? '<span class="acct-default-badge">Default</span>' : ''}</button>`).join('')}</div>
       <div class="acct-intro"><p>Agents on ${product} run on the account marked <b>In use</b>. Click another account to switch.</p>${defaultAi === name ? `<span class="acct-note">New agents and chats use ${product}</span>` : `<button type="button" class="btn small" data-acct-default="${name}">Use ${product} for new agents</button>`}</div>
-      ${signedIn.length ? `<div class="acct-list">${signedIn.map(row).join('')}</div>` : `<p class="acct-empty">No ${service} account is signed in yet${name === 'codex' ? '. Install the Codex CLI (npm install -g @openai/codex) if it is missing, then add an account below.' : name === 'gemini' ? '. Install the Antigravity CLI (winget install Google.AntigravityCLI) if it is missing, then press Sign in.' : '.'}</p>`}
+      ${signedIn.length ? `<div class="acct-list">${signedIn.map(row).join('')}</div>` : `<p class="acct-empty">No ${service} account is signed in yet. Press Sign in: a window opens, installs ${name === 'codex' ? 'the Codex CLI' : name === 'gemini' ? 'the Antigravity CLI' : 'Claude Code'} if this computer does not have it yet, and opens the sign-in in your browser.</p>`}
       ${signedOut.length ? `<details class="acct-out"${signedIn.length ? '' : ' open'}><summary>Not signed in <span>${signedOut.length}</span></summary><ul>${signedOut.map(out).join('')}</ul></details>` : ''}
       ${name === 'gemini' ? '' : `<div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="Name for the new account, like work or personal" aria-label="Name for the new account"><button type="button" class="btn small primary" data-acct-create>Create and sign in</button><button type="button" class="btn small" data-acct-cancel>Cancel</button>` : `<button type="button" class="btn small" data-acct-new>+ Add a ${short} account</button>`}</div>`}
       ${ui.acctWaiting ? `<p class="acct-wait"><span class="dot working"></span> Finish signing in to ${service} in the window that opened. This list updates by itself.</p>` : ''}
@@ -919,11 +1099,13 @@ async function accountsDialog() {
     if (login || create) {
       event.preventDefault(); const name = tab(), signedIn = () => (ui.accounts?.[name]?.profiles || []).filter(item => item.loggedIn).length;
       try {
-        if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast('Give the account a name first.', true); await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; }
-        else await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin, provider: name } });
+        let started;
+        if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast('Give the account a name first.', true); started = await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; }
+        else started = await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin, provider: name } });
+        if (started?.installing) toast('A sign-in window opened. It installs the tool first, then opens the browser.');
         ui.acctWaiting = true; await loadAccounts(true); draw();
-        // Sign-in happens in the browser; look again every few seconds for up to three minutes.
-        for (let tries = 0; tries < 60 && ui.acctWaiting && document.body.contains(back); tries++) {
+        // Sign-in happens in the browser; look again every few seconds for up to three minutes, or ten while the tool installs.
+        for (let tries = 0; tries < (started?.installing ? 200 : 60) && ui.acctWaiting && document.body.contains(back); tries++) {
           await new Promise(resolve => setTimeout(resolve, 3000));
           const before = signedIn(); await loadAccounts(true);
           if (signedIn() > before) { ui.acctWaiting = false; toast('Signed in. You can pick this account now.'); }
@@ -1124,11 +1306,11 @@ function phoneChats() {
   for (const agent of snap.specialists || []) {
     const run = runById(agent.runId), state = agent.status?.state;
     rows.push({ at: run?.updatedAt || agent.updatedAt || agent.createdAt || '', html: phoneRow('specialist', agent.id, avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(state), agent.name,
-      `${agent.status?.label || 'Idle'} · ${agent.projectSlug || ''}`, run?.updatedAt || '', agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0) });
+      [agent.status?.label || 'Idle', agent.projectSlug].filter(Boolean).join(' · '), run?.updatedAt || '', agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0) });
   }
   rows.sort((left, right) => String(right.at).localeCompare(String(left.at)));
   const main = mainRun();
-  const pinned = phoneRow('main', '', iconAv('main', 'accent'), main ? stateTone(main) : '', 'Rex Agent', main ? stateLabel(main) : 'Your helper for everything', main?.updatedAt || '', unreadFor(ui, 'main:'));
+  const pinned = phoneRow('main', '', rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : '', 'Rex Agent', main ? stateLabel(main) : 'Your helper for everything', main?.updatedAt || '', unreadFor(ui, 'main:'));
   return `<div class="m-chats">${pinned}${rows.map(row => row.html).join('')}<p class="m-none" hidden>No chat matches.</p></div>`;
 }
 function phoneRow(type, id, avatar, dot, name, sub, at, badge) {

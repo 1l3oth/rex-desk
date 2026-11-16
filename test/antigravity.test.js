@@ -7,6 +7,19 @@ import { fileURLToPath } from 'node:url';
 import { AcpClient, AntigravityRunner, antigravityModels, antigravityMode, parseAgyModels } from '../src/antigravity.js';
 import { aiProvider, providerTitle } from '../src/codex.js';
 import { modesFor, effortsFor, runOptions, defaultModeFor } from '../src/choices.js';
+import { antigravityTool } from '../src/antigravity.js';
+
+test("Gemini's commands and file reads show what they did, and commands reach the terminal panel", () => {
+  // Real tool calls from a Gemini (Antigravity) chat.
+  const command = antigravityTool('run_command', { CommandLine: 'cd "D:\\dev\\x"; node render.mjs stills 1', WaitMsBeforeAsync: 10000, toolSummary: 'Test render.mjs stills 1' }, 'win32');
+  assert.equal(command.tool, 'PowerShell', 'a shell command, so its output shows in the terminal');
+  assert.equal(command.input.command, 'cd "D:\\dev\\x"; node render.mjs stills 1');
+  assert.equal(command.input.description, 'Test render.mjs stills 1', 'the step line says what the command is for');
+  assert.equal(antigravityTool('run_command', { CommandLine: 'ls' }, 'darwin').tool, 'Bash');
+  assert.deepEqual(antigravityTool('read_file', { Path: 'D:\\dev\\x\\package.json', StartLine: 1 }), { tool: 'Read', input: { Path: 'D:\\dev\\x\\package.json', StartLine: 1, file_path: 'D:\\dev\\x\\package.json' } });
+  assert.equal(antigravityTool('write_to_file', { TargetFile: 'D:\\dev\\x\\a.ts' }).input.file_path, 'D:\\dev\\x\\a.ts');
+  assert.deepEqual(antigravityTool('manage_task', { Action: 'status' }), { tool: 'manage_task', input: { Action: 'status' } }, 'other tools stay as they are');
+});
 
 const fake = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-agy.mjs');
 const factory = options => new AcpClient({ ...options, spawnProcess: (command, args, spawnOptions) => spawn(process.execPath, [fake, ...args], spawnOptions) });
@@ -29,11 +42,11 @@ test('a Gemini turn streams text, tools and the result, and asks before a tool i
   const { item, events, asks } = runner({ permissionMode: 'manual', effort: 'max' });
   await item.start('hello');
   const kinds = events.map(event => event.kind);
-  assert.deepEqual(kinds.filter(kind => kind !== 'context'), ['session', 'agent-text', 'agent-tool', 'agent-tool-result', 'agent-text', 'agent-result']);
+  assert.deepEqual(kinds.filter(kind => kind !== 'context' && kind !== 'agent-text-partial'), ['session', 'agent-text', 'agent-tool', 'agent-tool-result', 'agent-text', 'agent-result']);
   assert.equal(events[0].data.sessionId, '11111111-2222-3333-4444-555555555555');
   assert.equal(asks.length, 1);
   assert.match(asks[0].title, /git --version/);
-  assert.equal(events.find(event => event.kind === 'agent-tool').data.tool, 'run_command');
+  assert.equal(events.find(event => event.kind === 'agent-tool').data.tool, process.platform === 'win32' ? 'PowerShell' : 'Bash', 'run_command shows as a terminal command');
   assert.equal(events.find(event => event.kind === 'agent-tool-result').data.failed, false);
   const result = events.find(event => event.kind === 'agent-result').data;
   assert.equal(result.result, 'Checking done: hello [initialize,session/new,session/set_config_option,session/set_config_option,session/set_config_option,session/prompt]');

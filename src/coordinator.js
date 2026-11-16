@@ -1,5 +1,6 @@
 import { aiProvider, AI_PROVIDERS, CodexRunner, codexModels, profileKey, providerTitle } from './codex.js';
 import { AntigravityRunner, antigravityModels } from './antigravity.js';
+import { LocalAi, isLocalModel, parseLocalModel } from './local-ai.js';
 import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
 import { Memory } from './memory.js';
@@ -28,7 +29,10 @@ import { effectiveRepository } from './project-detect.js';
 import { inspectRepository } from './repositories.js';
 import { Worktrees, longPath } from './worktrees.js';
 import { ProjectRules } from './project-rules.js';
-import { HostRunner, hostAlive } from './hosts.js';
+import { lowDiskMessage, friendlyDiskError } from './disk.js';
+import { voiceBriefing, VOICE_RULE, VOICE_REMINDER, VOICE_GREETING } from './voice-briefing.js';
+import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
+import { LocalRunner, lightSystem, withoutRepeats } from './local-runner.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
 import { Jev } from './jev.js';
@@ -42,6 +46,15 @@ import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from '
 const exec = promisify(execFile);
 const EVIDENCE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.pdf': 'application/pdf', '.txt': 'text/plain', '.log': 'text/plain', '.json': 'application/json', '.html': 'text/html', '.zip': 'application/zip' };
 // qa_* belong to QA checks, which Rex Desk no longer runs; they stay listed so older runs still count as finished.
+// What a background job is told (desk_background): do the one task, quickly, without asking anyone, and end with a short
+// result that is read out loud to the person.
+const helperPrompt = (task, helperFor) => [
+  `You are a quick background job for ${helperFor}, who is talking with the person and handed you this task so they do not have to wait.`,
+  `The task: ${task}`,
+  'Do only this, with as few steps as you can. Do not ask the person anything and do not use desk_ask or desk_message: nobody is watching this job.',
+  'If something is missing or fails, stop and say so in your last reply instead of trying for long.',
+  'End with your result as plain spoken words, one to three short sentences, no lists, code, paths or links: it is read out loud to the person as it is.',
+].join('\n');
 // What a browser agent is told: use a real browser, keep the person informed, and stop before anything that costs money or cannot be undone.
 const webAgentPrompt = task => [
   `You are Rex Desk's web agent. Do this for the person on the web: ${task}`,
@@ -110,6 +123,16 @@ export class Desk {
   constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
+    this.localAi = new LocalAi(store);
+    // The models on this computer (Ollama, LM Studio, Colibri…) are looked up a moment after start and every two minutes,
+    // so a model the person adds shows in the AI picker by itself, without opening Settings.
+    if (!runnerFactory) {
+      const look = () => { if (!this.closed) void this.localAi.status().catch(() => {}); };
+      this.localTimers = [setTimeout(look, 5000), setInterval(look, 120000)]; for (const timer of this.localTimers) timer.unref?.();
+    }
+    // The installed app on Windows copies itself beside the data once per version, in the background; agents started after
+    // that run from the copy, so an update installs while they work (see prepareRuntime). Until it is ready they start as before.
+    if (!runnerFactory && process.env.REX_DESK_VERSION) void prepareRuntime(path.join(store.directory, 'runtime')).then(runtime => { this.runtime = runtime; }, () => {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
     this.localTasks = new LocalTasks(store);
@@ -170,6 +193,15 @@ export class Desk {
     if (at >= 0) { this.store.put('run', runId, { ...run, queued: queued.filter((_, index) => index !== at) }); return { unsent: true, seen: false }; }
     return { unsent: true, seen: this.live.has(runId) || !['queued'].includes(run.state) };
   }
+  // Messages the agent was handed but never read (they came just as its reply ended) go back to the front of its queue.
+  requeue(runId, text) {
+    const run = this.store.get('run', runId); if (!run || !String(text || '').trim()) return;
+    this.store.put('run', runId, { ...run, queued: [String(text), ...(run.queued || [])] });
+    this.store.event(runId, 'inbox-returned', {});
+    // The turn already ended: the message starts the next one now.
+    const waiting = this.store.get('run', runId);
+    if (!this.live.has(runId) && !this.closed && ['needs_evidence', 'finished'].includes(waiting.state)) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
+  }
   takeInbox(runId) {
     const run = this.store.get('run', runId); if (!run?.queued?.length) return '';
     this.store.put('run', runId, { ...run, queued: [] });
@@ -181,6 +213,31 @@ export class Desk {
   orbitAccountMcp() { const account = this.orbitAccount(); return account?.token ? { orbit: { type: 'http', url: `${account.base.replace(/\/$/, '')}/mcp`, headers: { Authorization: `Bearer ${account.token}` } } } : {}; }
   // Usage saver (on unless the person turns it off): talking in rooms and away check-ins run on Sonnet, which uses much less of the
   // Claude subscription than the top model; changing code, personal chats and Rex Agent keep the model the person chose.
+  // What a light-mode Local AI turn gets: the model's server, a short instruction (who it is, about the person), the last
+  // few messages of the chat, and the person's newest message.
+  lightTurn(run, localModel) {
+    const server = this.localAi.server(localModel.serverId);
+    if (!server) throw new Error('This agent is set to a local model whose server was removed. Pick another model on its card.');
+    const owner = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
+    const agent = owner && owner !== 'main' ? this.store.get('specialist', owner) : null;
+    const name = agent?.name || (owner === 'main' ? 'Rex Agent' : run.title || 'an agent');
+    const about = agent ? `You look after ${agent.projectSlug || 'a project'}: ${String(agent.purpose || '').slice(0, 300)}` : owner === 'main' ? 'You know every project and agent on this computer, and help the person decide who does what.' : '';
+    const said = this.store.events(run.id, { visible: true, limit: 80 }).filter(event => ['human-message', 'agent-text', 'message'].includes(event.kind) && (event.text || '').trim());
+    const lastPerson = [...said].reverse().find(event => event.kind === 'human-message');
+    const history = withoutRepeats(said.filter(event => event !== lastPerson)
+      .map(event => ({ role: event.kind === 'human-message' ? 'user' : 'assistant', content: String(event.text).slice(0, 1500) })), lastPerson?.text || '').slice(-10);
+    return { local: { server, model: localModel.model }, history, lastPersonMessage: lastPerson?.text || '',
+      system: lightSystem({ name, about, person: String(this.memory.person() || '').slice(0, 800), voice: Boolean(run.voice), report: true }),
+      // The same code-made report Voice mode uses (agents, chats, waiting questions, tasks), kept short for a small model.
+      // It goes next to the newest message, not in the instruction at the top: a small model reads what is nearest the
+      // question and otherwise repeats its own earlier reply from the chat.
+      report: voiceBriefing({ store: this.store, skip: run.id }).replace(/^# Briefing for Voice mode.*$/m, '').trim().slice(0, 3000) };
+  }
+  // A Claude Code turn that runs on a model on this computer (Local AI), by the same choice the turn itself makes.
+  usesLocalModel(run) {
+    if ((run.provider || 'claude') !== 'claude' || run.modelFallback) return false;
+    return isLocalModel(run.model || this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider]));
+  }
   saverModel(run) {
     if (run.provider !== 'claude' || this.store.config().saver === false || !run.roomAgent) return '';
     const agent = this.store.get('specialist', run.roomAgent);
@@ -205,7 +262,10 @@ export class Desk {
       .map(event => String(event.text || event.message || event.result || '')).find(text => LIMIT.test(text));
     if (!hit) return false;
     const pinned = this.accountFor(run), current = pinned || this.agents.selected(provider);
-    this.agents.markLimited(current);
+    // Limited until the reset Claude reported for this account, not a blind 5 hours: an account whose window reset minutes
+    // later was skipped for hours, and Rex Desk said every account was full while one was at 7%.
+    const usage = this.store.get('usage', `${provider}:${current || 'default'}`)?.windows || {};
+    this.agents.markLimited(current, Math.max(0, ...Object.values(usage).filter(window => window?.status === 'rejected' || Number(window?.used) >= 100).map(window => Number(window.resetsAt) || 0)));
     if (this.store.get('accounts', 'auto')?.off) { this.store.event(runId, 'account-limit', { text: `This ${title} account hit its usage limit. Switch accounts at the bottom left, then continue.` }, true); return false; }
     if (run.accountSwitchedAt && Date.now() - Date.parse(run.accountSwitchedAt) < 120000) return false;
     const next = await this.agents.alternative(provider, current);
@@ -220,9 +280,73 @@ export class Desk {
     this.patchRun(runId, { accountSwitchedAt: now(), state: 'queued', queued: [], followUp: 'You were cut off by a usage limit. Continue exactly where you left off.' });
     this.live.delete(runId); void this.drain(); return true;
   }
+  // A background job for an agent (desk_background): a quick helper on Claude Haiku does one task in a run of its own, so the
+  // agent answers the person at once and stays free to talk; they never wait for its steps. When it ends, its short result
+  // is posted in the agent's chat (said out loud in Voice mode) and given to the agent with the person's next message.
+  startHelper(parentRunId, { task, title = '' }) {
+    const parent = this.run(parentRunId), text = String(task || '').trim().slice(0, 6000);
+    if (!text) throw new Error('Say what the job is.');
+    const name = String(title || text).replace(/\s+/g, ' ').trim();
+    const who = parent.roomAgent || parent.specialistId || (parent.main ? 'main' : '');
+    const helperFor = who === 'main' || !who ? 'Rex Agent' : this.specialists.get(who)?.name || 'an agent';
+    const run = { id: id(), role: 'helper', parentRunId, helperFor, title: `Job · ${name.length > 60 ? `${name.slice(0, 60)}…` : name}`, provider: 'claude', model: 'haiku', effort: 'low',
+      permissionMode: 'bypassPermissions', state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless',
+      cwd: parent.worktree || parent.projectPath || parent.cwd || path.join(this.store.directory, 'coordinator'), projectPath: parent.projectPath || '', instructions: text };
+    this.store.put('run', run.id, run);
+    void this.drain();
+    return { started: true, jobId: run.id, note: 'It runs on its own. Tell the person you are on it and end your reply; its result reaches them, and you, when it is done.' };
+  }
+  helperDone(runId, failure = '') {
+    const run = this.store.get('run', runId), parent = run?.parentRunId && this.store.get('run', run.parentRunId); if (!parent) return;
+    const said = this.store.events(runId, { visible: true, limit: 60 }).filter(event => event.kind === 'agent-text' && event.text).at(-1)?.text || '';
+    const report = failure ? `That job did not work: ${failure}` : said.trim().slice(0, 8000) || 'That job is done.';
+    const name = run.title.replace(/^Job · /, '');
+    // The full report goes in the chat as text, never read out: it is written for reading (lists, paths), and the person
+    // should only ever hear the agent. The agent itself then tells them the outcome, in a sentence or two of its own.
+    this.store.event(parent.id, 'message', { text: `**Background job: ${name}**\n\n${report}`, job: name }, true);
+    const prompt = `Your background job "${name}" has finished. Its report (the person can read it in the chat):\n${report}\n\nTell the person the outcome now in one or two short spoken sentences, as yourself: no lists, paths, code or markdown, and do not mention the job.`;
+    const current = this.store.get('run', parent.id);
+    if (this.live.has(parent.id) || this.closed) { this.store.put('run', parent.id, { ...current, queued: [...(current.queued || []), prompt] }); return; }
+    void this.resume(parent.id, { prompt, silent: true }).catch(error => this.store.event(parent.id, 'error', { message: error.message }, true));
+  }
+  // What the agent's jobs found since its last turn, given with the person's next message (once).
+  takeJobResults(runId) {
+    const results = this.store.get('run', runId)?.jobResults || []; if (!results.length) return '';
+    this.patchRun(runId, { jobResults: [] });
+    return `Results of the jobs you started (the person has heard them already):\n${results.map(line => `- ${line}`).join('\n')}`;
+  }
+  // Voice mode on or off for a chat. On: the report is made now (code, milliseconds) and given to the agent at once, while
+  // the body's opening animation plays: it reads it and only greets the person, like picking up a call. Its answers later
+  // come from it. An agent still busy with a turn gets it with the first spoken message instead. Off: messages are ordinary again.
+  voiceMode(runId, on = true) {
+    const run = this.run(runId);
+    if (!on) { this.patchRun(runId, { voice: undefined }); return { on: false }; }
+    const briefing = voiceBriefing({ store: this.store, memoryDirectory: this.memory?.directory || '' });
+    const now_ = now(), busy = this.live.has(runId) || run.external;
+    this.patchRun(runId, { voice: { at: now_, briefing, sent: !busy, reading: !busy } });
+    if (!busy) void this.resume(runId, { silent: true, prompt: `${VOICE_RULE}\n\n${briefing}\n\n${VOICE_GREETING}` }).catch(error => this.store.event(runId, 'error', { message: error.message }, true));
+    return { on: true, briefing: briefing.length, greeting: !busy };
+  }
+  // A spoken message as the agent gets it: with the briefing the first time, then with a short reminder to talk, not write.
+  spoken(runId, line) {
+    const voice = this.store.get('run', runId)?.voice; if (!voice) return '';
+    const jobs = this.takeJobResults(runId), said = jobs ? `${jobs}\n\nThe person said: ${line}` : line;
+    if (!voice.sent) { this.patchRun(runId, { voice: { ...voice, sent: true } }); return `${VOICE_RULE}\n\n${voice.briefing}\n\nThe person said: ${said}`; }
+    return `${VOICE_REMINDER}\n\n${said}`;
+  }
   async say(runId, text, picked = {}, { raw = false } = {}) {
     const run = this.run(runId), line = raw ? String(text || '').trim() : String(text || '').replace(/\s+/g, ' ').trim();
     if (!line) throw new Error('Write a message first.');
+    // The person wrote: the count of fresh sessions that carried on by themselves starts again.
+    if (run.autoContinues) this.patchRun(runId, { autoContinues: 0 });
+    // In Voice mode the agent gets the briefing and how to talk; the chat shows only what the person said.
+    const spoken = picked.voice ? this.spoken(runId, line) : '';
+    if (spoken) {
+      if (this.live.has(runId)) { const current = this.store.get('run', runId); this.store.put('run', runId, { ...current, queued: [...(current.queued || []), spoken], updatedAt: now() }); this.store.event(runId, 'human-message', { text: line, via: 'voice', queued: true }, true); return { queued: true }; }
+      this.store.event(runId, 'human-message', { text: line, via: 'voice' }, true);
+      await this.resume(runId, { provider: picked.provider || run.provider, prompt: spoken, silent: true, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });
+      return { sent: true };
+    }
     if (this.live.has(runId)) {
       this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
       this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
@@ -242,7 +366,7 @@ export class Desk {
     }
   }
   authorize(scope, runId, { coordinator = false } = {}) {
-    if (!scope) throw new Error('Authentication required.');
+    if (!scope) throw new Error('Sign in first.');
     const scoped = scope.role === 'worker';
     if (coordinator && (scoped || scope.role === 'specialist')) throw new Error('Only the main agent can do this.');
     if (runId && scoped && scope.runId !== runId) throw new Error('Worker token is restricted to its own run.');
@@ -384,7 +508,7 @@ export class Desk {
     const chosen = config.repositories.find(item => item.id === repositoryId);
     const placeable = this.store.list('repository').length > 1 && (!chosen || !baseBranch) && !parentRunId;
     const repository = effectiveRepository(chosen || config.repositories.find(item => item.id === task.repositoryId) || (config.repositories.length === 1 ? config.repositories[0] : null));
-    if (!repository && !placeable) throw new Error('Select a repository for this task.');
+    if (!repository && !placeable) throw new Error('Choose a project for this task.');
     const parent = parentRunId ? this.run(parentRunId) : {};
     const run = { id: id(), role: 'worker', taskId, title: titleEn || task.title, repositoryId: repository?.id || '', ...(specialistId ? { specialistId } : {}), ...(roomId ? { roomId } : {}),
       ...(placeable ? { placement: { state: 'pending', repository: Boolean(chosen), base: Boolean(baseBranch) } } : {}),
@@ -417,8 +541,12 @@ export class Desk {
     // browser, tools, questions and room reply now, so this one's clean-up leaves them alone.
     let run = this.run(runId), token, handedOn = false;
     try {
-      // Check the selected CLI profile before creating worktrees or spending an agent turn.
-      if (!this.runnerFactory && !attach) await this.agents.ensureSignedIn(run.provider, this.accountFor(run) || this.agents.selected(run.provider));
+      // A nearly full drive makes the agent fail half way with "ENOSPC"; say so before it starts instead.
+      const noRoom = lowDiskMessage([this.store.directory, os.tmpdir()], { min: this.minFreeBytes }); if (noRoom) throw new Error(noRoom);
+      // Check the selected CLI profile before creating worktrees or spending an agent turn. A Claude Code agent on a local
+      // model needs no Claude account (Rex Desk gives it the local server's address and key), so it is not asked for one:
+      // on a computer where nobody signed in to Claude, every turn stopped at "profile is not signed in".
+      if (!this.runnerFactory && !attach && !this.usesLocalModel(run)) await this.agents.ensureSignedIn(run.provider, this.accountFor(run) || this.agents.selected(run.provider));
       if (run.role === 'worker' && !run.worktree && run.placement?.state === 'pending') run = await this.place(run);
       if (run.role === 'worker' && !run.worktree) {
         const config = this.store.config();
@@ -473,7 +601,15 @@ export class Desk {
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
-        ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
+        ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), requeue: text => this.requeue(runId, text), extraMcp: this.orbitAccountMcp(), event: (kind, data) => {
+          // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
+          // The quiet turn that reads Voice mode's report is not said: Rex Desk has welcomed the person already.
+          const reading = this.store.get('run', runId)?.voice?.reading;
+          if (kind === 'agent-text-partial') { if (!reading) this.store.emit('partial', { runId, text: String(data.text || '') }); return; }
+          if (kind === 'agent-text' && !reading) this.store.emit('partial', { runId, text: String(data.text || ''), done: true });
+          if (kind === 'agent-result' && reading) { const voice = this.store.get('run', runId)?.voice; if (voice) this.patchRun(runId, { voice: { ...voice, reading: false } }); }
+          // A step the agent takes (reading files, running a command, searching), so Voice mode can say what it is doing.
+          if (kind === 'agent-tool' && !data.parent) this.store.emit('partial', { runId, tool: String(data.tool || ''), input: { description: String(data.input?.description || '').slice(0, 120) } });
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           // How full the chat's context is, for the ring by the message box. A 1M-context model says so in its name.
@@ -493,9 +629,20 @@ export class Desk {
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
+      // Local AI, light mode (the default): the model on this computer is talked to directly, with a short instruction, the
+      // recent chat and the key Rex Desk tools (src/local-runner.js). Config localLight: false runs it through Claude Code
+      // instead, with all of Claude Code's tools, which suits a strong computer.
+      const localModel = (run.provider || 'claude') === 'claude' && isLocalModel(options.model) ? parseLocalModel(options.model) : null;
+      const light = Boolean(localModel) && !attach && !this.runnerFactory && this.store.config().localLight !== false;
+      // Local AI through Claude Code: Claude Code keeps its tools but talks to a model on this computer (Ollama, or another local server through Rex Desk's bridge).
+      if (localModel && !light) {
+        const local = this.localAi.route(options.model, { base: new URL(this.mcpUrl).origin, token });
+        if (local) { options.model = local.model; options.agentEnv = { ...options.agentEnv, ...local.env }; }
+      }
       // A headless agent works in a process of its own, so a Rex Desk restart (an update) does not cut it off.
-      const hosted = attach || (!this.runnerFactory && this.store.config().agentHost !== false);
-      const runner = hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.hostOptions || {}) })
+      const hosted = !light && (attach || (!this.runnerFactory && this.store.config().agentHost !== false));
+      const runner = light ? new LocalRunner({ ...options, ...this.lightTurn(run, localModel) })
+        : hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.runtime ? { runtime: this.runtime } : {}), ...(this.hostOptions || {}) })
         : this.runnerFactory ? this.runnerFactory(options)
         : new (run.provider === 'codex' ? CodexRunner : run.provider === 'gemini' ? AntigravityRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) });
       const entry = this.live.get(runId);
@@ -530,11 +677,14 @@ ${message}` : message);
       }
       if (await this.switchIfLimited(runId)) { handedOn = true; return; }
       const current = this.run(runId);
-      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' ? 'finished' : 'needs_evidence', endedAt: now() });
+      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' || run.role === 'helper' ? 'finished' : 'needs_evidence', endedAt: now() });
+      if (run.role === 'helper') this.helperDone(runId);
+      // The quiet turn that read Voice mode's report is over: what the agent says next is said out loud.
+      const voiceAfter = this.store.get('run', runId)?.voice; if (voiceAfter?.reading) this.patchRun(runId, { voice: { ...voiceAfter, reading: false } });
     } catch (error) {
       if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) { handedOn = true; return; }
       // The chosen model is not available on this Claude account: the turn runs again once on the account's default model, and the agent stops asking for that model.
-      if (!controller.signal.aborted && MODEL_MISSING.test(error.message) && !run.modelFallback) {
+      if (!controller.signal.aborted && MODEL_MISSING.test(error.message) && !run.modelFallback && !isLocalModel(run.model)) {
         const agentId = run.roomAgent || run.specialistId, agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
         if (agent?.model) this.store.put('specialist', agentId, { ...agent, model: '' });
         // The account's model list can offer a model its plan cannot run (Codex lists them for ChatGPT accounts too): drop it from the pickers.
@@ -545,8 +695,9 @@ ${message}` : message);
         this.store.event(runId, 'message', { text: `The model this agent was set to is not available on this ${run.provider === 'codex' ? 'Codex (ChatGPT)' : run.provider === 'gemini' ? 'Antigravity (Google)' : 'Claude'} account, so it now uses the account's default model. Pick another one on the agent's card if you want.` }, true);
         return;
       }
-      this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: error.message, endedAt: now() });
-      this.store.event(runId, 'error', { message: error.message }, true);
+      this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: friendlyDiskError(error.message), endedAt: now() });
+      this.store.event(runId, 'error', { message: friendlyDiskError(error.message) }, true);
+      if (run.role === 'helper') this.helperDone(runId, friendlyDiskError(error.message));
     } finally {
       if (handedOn) {
         if (token) this.forgetToken(token);
@@ -584,7 +735,7 @@ ${message}` : message);
         apiKey: this.jev.apiKey(), model: config.jev?.model || undefined, fetcher: this.jev.fetcher, versions: config.jev?.versions });
     } catch (error) { this.store.event(run.id, 'placement-error', { message: error.message }, true); }
     if (!placed) {
-      if (!run.repositoryId) throw new Error('Rex Desk could not tell which repository this issue belongs to. Choose one and start it again.');
+      if (!run.repositoryId) throw new Error('Rex Desk could not tell which project this issue belongs to. Choose one and start it again.');
       return this.patchRun(run.id, { placement: { ...run.placement, state: 'default' } });
     }
     // A checkout Jev chose that is not in Settings yet is added with what its own files say; commands are detected later.
@@ -616,6 +767,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       'You are the main agent of Rex Desk, the first agent the person talks to. Keep every message short and plain. Work in small steps.', "When the person asks about memory, a slow computer, or what is running, read desk_monitor; free unused memory with desk_free_memory, and end one process with desk_end_process (anything opened outside Rex Desk only with their OK). A task on a project that has its own agent always goes to that agent with desk_assign_task (in a room, pass roomId so they do it in the room); do not do it yourself or start a new run for it, unless the person asks you to. You run the desk for the person: with desk_runs, desk_stop_run, desk_assign_task and desk_tell_run you can stop or close any run, give a task to an agent, and tell any run what to do. Do it when the person asks; when you do it on your own judgment, say what you did in one line.",
       this.memory.chatStyle(), this.memory.person() ? `What you know about the person (all agents share this). Follow "How to explain things to me" in every answer:\n${this.memory.person()}` : '', this.specialists.lessonsText('main'), "Notice what the person likes and dislikes from how they react to you: corrections, praise, frustration, things they ask for again. Save what you notice with desk_learn_person; lessons about your own work go to desk_learn. Preferences can change with time and events: treat the notes about the person as hints, prefer the newest, and when what the person says now differs, follow what they say now and update the note with replaces.", this.memory.secondBrain(), "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
       'While you read projects and the second brain, notice pictures that may be the person (a portfolio, about page, avatar or profile folder). If the About you page has no photo yet, ask the person with desk_ask whether that file is them, and only if they say yes, set it with desk_set_profile_photo.',
+      'The person can ask you for any kind of agent, not only one for code: a writer, a researcher, a study partner, a planner, a helper for their shop, anything. Make it with desk_create_specialist and leave project out: give it a short human name, say in purpose exactly what it is for, and put what the person told you in rules. Ask at most 2 short questions first, only if you cannot tell what they want. Never say you can only make coding agents.',
       'When the person names a project that is not in the index or not in desk_repositories, find its folder on this computer (ask if there are several) and add it yourself with desk_add_project. Never ask the person to add a repository in Settings.',
       'Where tasks come from: the person may work on company projects (tasks in Flow or Morningmate), personal projects, or anything else. For each project, ask the person with desk_ask where its tasks live, with options for each connected tracker, "Rex Desk tasks (kept here)", and "Somewhere else". Save the answer with desk_set_task_sources. Never assume a project uses Flow or Morningmate. A project whose tasks live elsewhere can still use Rex Desk tasks: create them with desk_create_task when the person describes the work.',
       '1. Read desk_memory with page "index", and desk_specialists. Greet the person in one or two lines: how many projects you found, and how many already have a specialist agent.',
@@ -626,6 +778,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       '5. When every project has an agent, offer to look at the assigned issues with desk_tasks and desk_repositories. Never start a run except through desk_dispatch, which the person approves.',
       `The person's first message: ${run.prompt || '(none: start with step 1)'}`].join('\n');
     if (run.role === 'web') return [common, webAgentPrompt(run.instructions)].join('\n\n');
+    if (run.role === 'helper') return [common, helperPrompt(run.instructions, run.helperFor)].join('\n\n');
     if (run.role === 'coordinator' && !run.roomAgent) return `${common}\nYou are the main coordinator. Read desk_tasks and desk_task for the selected IDs ${JSON.stringify(run.taskIds)}. Classify issues by affected module, severity, likely dependency, and reproduction path. Do not guess fixes. Use desk_categorize to label tasks and desk_dispatch to start a run for an issue${repositories ? '' : ' (unavailable: no source repository is configured, so say which issues are waiting for one)'}. Respect dependencies: serialize related changes and parallelize independent tasks. Do not modify source code yourself. Each dispatched run gets its own branch, worktree, and port, and investigates one issue. Choose the repository for every issue yourself and pass it as repositoryId: read desk_repositories, and match the issue to the project whose code holds the reported behaviour, by its product, module, screen, platform and the file or class names in its description and comments. Do not fall back to the connection default because it is there, and never send an issue to a repository that cannot contain the cause. If more than one could fit, or the right one is not listed, ask the human once with desk_ask, naming the candidates you found and saying the repository may need adding in Settings. Use desk_runs to track runs; report what you dispatched through desk_message.${run.maxDispatch ? ` This is a scheduled run: start at most ${run.maxDispatch} runs, prioritize by severity, and end with one desk_message summary for the human: what started, what was skipped and why.` : ''} Never mark a source task complete without verified evidence. Base override: ${run.baseBranch || 'repository setting'}. PR target override: ${run.targetBranch || 'repository setting'}. User instruction: ${run.prompt || 'Analyze and dispatch these assigned issues.'}`;
     const roomNote = 'This is your group-chat session: you use it for every room you are in. Your personal chat with the person is a separate conversation; read it with desk_my_chat when you need it.';
     const personalNote = 'This is your personal chat with the person. Group chats are a separate conversation of yours; read them with desk_rooms and desk_room_history when you need them.';
@@ -697,6 +850,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     return { id: interaction.id, promise };
   }
   ask(runId, request) {
+    // In Voice mode a question card is also said out loud, so the person hears it.
+    if (this.store.get('run', runId)?.voice && request?.title) this.store.emit('partial', { runId, text: String(request.title).slice(0, 600), done: true });
     return this.beginAsk(runId, request).promise;
   }
   // An agent asks the person to fill in a file (an API key in .env, a value only they know). The person edits it in Rex Desk;
@@ -777,6 +932,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   message(runId, text) {
     const run = this.run(runId); this.store.event(runId, 'message', { text: String(text).slice(0, 50000) }, true);
+    // In Voice mode what the agent sends with desk_message is said out loud too.
+    if (run.voice) this.store.emit('partial', { runId, text: String(text).slice(0, 4000), done: true });
     // What an agent reports on a task it was given in a room is also said in that room.
     if (run.role === 'worker' && run.roomId && run.specialistId) void this.rooms.post(run.roomId, { fromAgentId: run.specialistId, text: String(text).slice(0, 8000) }).catch(() => {});
     return { delivered: true };
@@ -795,6 +952,15 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       await this.freshStart(runId, { note, reason: `automatically, because the conversation filled ${Math.round(100 * (run.handoffShare || limit))}% of the context` });
       const waiting = this.store.get('run', runId);
       if (waiting?.queued?.length && !this.closed) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
+      // Nothing waiting: the fresh session carries on by itself from the handoff, so the person does not have to say "continue".
+      // It stops at once when the handoff shows the work is done. Config autoContinue: false waits for the next message instead.
+      // At most three in a row without the person writing, so a session that fills up again at once cannot loop for ever.
+      else if (waiting && !this.closed && this.store.config().autoContinue !== false && (waiting.autoContinues || 0) < 3) {
+        this.patchRun(runId, { autoContinues: (waiting.autoContinues || 0) + 1 });
+        this.store.event(runId, 'phase', { text: 'Fresh session: reading the handoff and carrying on' }, true);
+        void this.resume(runId, { silent: true, prompt: 'Your earlier session filled its context, so this is a fresh session. Carry on with the work from the handoff: do the next step now, without asking the person to say continue. If the handoff shows that everything the person asked for is already done, say so in one line and stop.' })
+          .catch(error => this.store.event(runId, 'error', { message: error.message }, true));
+      }
       return true;
     }
     const share = Number(run.contextUsed || 0) / Number(run.contextWindow || 200000);
@@ -1236,7 +1402,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   repositoryFor(run) {
     const repository = this.store.config().repositories.find(item => item.id === run.repositoryId);
-    if (!repository?.path) throw new Error('This run has no source repository, so nothing can be pushed.');
+    if (!repository?.path) throw new Error('This run has no project, so nothing can be pushed.');
     return repository;
   }
   gh(args, options = {}) { return exec('gh', args, { windowsHide: true, timeout: 120000, ...options }); }
@@ -1254,6 +1420,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // A project agent works in its own project like a person on that team: it reads, changes, runs, commits and pushes there when asked.
   ownProjectRule(agent) {
     const folder = agent?.projectPath || '';
+    // An agent with no code project: no git rules, only where it keeps its files.
+    if (agent?.general) return `You have no code project. Keep the files you make in ${folder || 'your own folder (your working folder)'}, and show them to the person with desk_show_file. Answer from this chat and from what the person gives you. When the person asks you to look at or change a project or folder, do it.`;
     return [`Your project${folder ? ` is at ${folder}` : ''}. You work in it directly: read it, change the code, run it, test it, commit, and push or open a pull request when the person asks (desk_publish with worktree set to the folder you worked in, or git yourself). Work the way the person says (straight in the folder, on a branch, or in a worktree); when they say nothing, use a branch in the project folder and leave others' uncommitted changes alone.`, WORKTREE_RULE, 'When you point the person at code, write it as `path:start-end` in backticks (like `src/server.js:42-58`): a click opens the file with those lines highlighted.',
       'Answer from your project and from this chat. Do not bring other projects or other chats into your answers on your own. When the person asks you to look at or change another project or folder, do it.'].join(' ');
   }
@@ -1489,5 +1657,5 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     }
   }
   // Closing Rex Desk (a restart or an update) leaves agents in their own process working; the next start follows them again.
-  async shutdown() { this.closed = true; this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
+  async shutdown() { this.closed = true; for (const timer of this.localTimers || []) { clearTimeout(timer); clearInterval(timer); } this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
 }

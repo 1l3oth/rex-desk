@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
@@ -144,7 +144,14 @@ try {
   await page.screenshot({ path: path.join(screenshots, 'tour-welcome.png') });
   await tour.locator('[data-tour-name]').fill('Synthetic Tester');
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
-  await tour.getByRole('heading', { name: 'Your AI sign-in' }).waitFor();
+  // Two welcome questions, answered here: an age range and where the person heard about Rex Desk.
+  await tour.getByRole('heading', { name: 'A little about you' }).waitFor();
+  await tour.locator('.tour-chip', { hasText: '25 to 34' }).click();
+  await tour.locator('.tour-chip', { hasText: 'YouTube' }).click(); await tour.locator('.tour-chip', { hasText: 'Somewhere else' }).click();
+  await tour.locator('[data-tour-other]').fill('A meetup');
+  await page.screenshot({ path: path.join(screenshots, 'tour-about.png') });
+  await tour.getByRole('button', { name: 'Next', exact: true }).click();
+  await tour.getByRole('heading', { name: 'Choose your AI' }).waitFor();
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
   await tour.getByRole('heading', { name: 'Where things are kept' }).waitFor();
   await tour.locator('.st-folder', { hasText: 'Files from agents' }).locator('code').first().waitFor();
@@ -161,6 +168,7 @@ try {
   await tour.waitFor({ state: 'detached' });
   assert.equal(app.store.config().name, 'Synthetic Tester');
   assert.equal(app.store.config().tourDismissed, true, 'The tour does not come back once finished');
+  assert.deepEqual(((({ age, heard, other }) => ({ age, heard, other }))(app.store.get('survey', 'main') || {})), { age: '25 to 34', heard: ['youtube', 'other'], other: 'A meetup' }, 'the welcome answers are kept');
   assert.equal(app.store.config().repositories.length, 1);
 
   // Settings, Projects lists it, with GitHub accounts below.
@@ -264,4 +272,8 @@ try {
     screenshots, fixtureWorkspace: workspace, workerId: worker.id, artifacts: artifacts.map(item => ({ type: item.type, title: item.title, path: path.join(app.store.directory, 'artifacts', worker.id, item.file) })) };
   writeFileSync(path.join(qa, 'acceptance.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result, null, 2));
-} finally { await context?.close(); await browser?.close(); await app?.close(); }
+} finally {
+  await context?.close(); await browser?.close(); await app?.close();
+  // The fixture holds a git repository, whose files are read-only on Windows: clear that, then remove the folder, so a run leaves nothing behind.
+  try { const { execFileSync } = await import('node:child_process'); if (process.platform === 'win32') execFileSync('cmd', ['/c', 'rmdir', '/s', '/q', workspace], { stdio: 'ignore' }); else rmSync(workspace, { recursive: true, force: true }); } catch { /* left for the next cleanup */ }
+}

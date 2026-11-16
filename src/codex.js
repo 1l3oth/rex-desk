@@ -142,7 +142,7 @@ export class CodexRunner {
     if (method === 'error' && !params.willRetry) this.rejectTurn?.(new Error(params.error?.message || 'Codex failed.'));
   }
   async start(prompt) {
-    if (this.signal?.aborted) throw new Error('Codex run interrupted.');
+    if (this.signal?.aborted) throw new Error('Codex was stopped.');
     const env = { ...codexEnvironment(this.agentEnv), REX_DESK_TOKEN: this.token || '', REX_AGENT_TOKEN: this.token || '', REX_DESK_URL: this.mcpUrl || '' };
     const servers = {};
     if (this.mcpUrl) servers.rex_desk = { url: this.mcpUrl, bearer_token_env_var: 'REX_DESK_TOKEN', required: true };
@@ -157,12 +157,12 @@ export class CodexRunner {
     const completed = new Promise((resolve, reject) => { this.resolveTurn = resolve; this.rejectTurn = reject; });
     completed.catch(() => {});
     this.client = (this.clientFactory || (options => new CodexClient(options)))({ env, cwd: this.cwd, onNotification: (method, params) => this.notification(method, params), onRequest: (method, params) => this.approve(method, params), onError: error => this.rejectTurn(error) });
-    const abort = () => { this.rejectTurn(new Error('Codex run interrupted.')); this.client.close(); };
+    const abort = () => { this.rejectTurn(new Error('Codex was stopped.')); this.client.close(); };
     this.signal?.addEventListener('abort', abort, { once: true });
     try {
       await this.client.open();
       const auth = await this.client.request('account/read', { refreshToken: false });
-      if (auth.account?.type !== 'chatgpt') throw new Error('Codex needs a ChatGPT subscription sign-in. Connect Codex in Settings.');
+      if (auth.account?.type !== 'chatgpt') throw new Error('Codex needs you to sign in with your ChatGPT plan. Connect Codex in Settings.');
       const config = { model_provider: 'openai', forced_login_method: 'chatgpt', mcp_servers: servers };
       const common = { cwd: this.cwd, approvalPolicy: permissions.approvalPolicy, approvalsReviewer: 'user', sandbox: permissions.sandbox, config, ...(this.model ? { model: this.model } : {}) };
       const session = this.run.sessionId;
@@ -174,7 +174,7 @@ export class CodexRunner {
       return await completed;
     } finally { this.signal?.removeEventListener('abort', abort); this.client.close(); }
   }
-  async interrupt() { this.rejectTurn?.(new Error('Codex run interrupted.')); this.client?.close(); }
+  async interrupt() { this.rejectTurn?.(new Error('Codex was stopped.')); this.client?.close(); }
   close() { this.client?.close(); }
 }
 

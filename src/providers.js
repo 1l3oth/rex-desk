@@ -180,13 +180,13 @@ export class Sources {
     if (!key) throw new Error(`Add an API key for ${source.name} in Settings.`);
     return apiRequest(source, key, endpoint, { ...options, fetcher: this.fetcher });
   }
-  async sync() {
+  async sync({ only = '' } = {}) {
     // Sync reads only the projects and assignee explicitly selected in Settings.
     if (this.syncing) throw new Error('A sync is already running.');
     this.syncing = true;
     const results = [];
     try {
-      for (const source of this.store.config().sources) {
+      for (const source of this.store.config().sources.filter(item => !only || item.id === only)) {
         try { results.push(await this.syncSource(source)); }
         catch (error) {
           const result = { sourceId: source.id, name: source.name, error: error.message, at: now() };

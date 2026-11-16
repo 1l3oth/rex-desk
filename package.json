@@ -2,6 +2,8 @@
   "name": "rex-desk",
   "version": "0.1.0",
   "private": true,
+  "author": "Vong Pichdaraboth",
+  "license": "MIT",
   "type": "module",
   "description": "A local, chat-first desk where AI agents work on your projects with you: personal chats, group rooms and tasks",
   "engines": {
@@ -10,7 +12,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node --import ./test/setup-tmp.js --test \"test/*.test.js\"",
     "mcp": "node src/stdio.js",
     "verify": "node scripts/verify.js",
     "test:browser": "node scripts/browser-test.js",
@@ -22,13 +24,14 @@
     "@libsql/client": "^0.18.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "codemirror": "^5.65.18",
+    "driver.js": "^1.14.0",
     "mammoth": "^1.8.0",
     "msedge-tts": "^2.1.1",
     "playwright": "^1.0.0",
     "prettier": "^3.3.3",
     "qrcode": "^1.5.4",
     "three": "0.186.1",
-    "xlsx": "^0.18.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.0.0"
   },
   "bin": {

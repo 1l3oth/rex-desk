@@ -52,3 +52,10 @@ test('a run on a Rex Desk task moves the task along without asking', async () =>
   assert.deepEqual(await desk.status('r1', 'working'), { status: 'in_progress' });
   assert.equal(desk.localTasks.get(task.id).status, 'in_progress');
 });
+
+test('updating a task without a project keeps its project', () => {
+  const { desk } = setup();
+  desk.localTasks.create({ title: 'Fix the cart', project: 'shop' });
+  assert.equal(desk.localTasks.update('L1', { comment: 'on it' }).projectSlug, 'shop');
+  assert.equal(desk.localTasks.update('L1', { project: '' }).projectSlug, '');
+});

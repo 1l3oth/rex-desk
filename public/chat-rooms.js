@@ -1,8 +1,9 @@
+import { rexCore } from '/rex-core.js';
 import { chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { speakButton } from '/chat-speak.js';
 import { pickerHtml } from '/chat-pick.js';
 import { collectShared, sharedTabsHtml, sharedCount } from '/chat-media.js';
-import { toolLine, changeHtml } from '/chat-activity.js';
+import { toolLine, changeHtml, terminalHtml } from '/chat-activity.js';
 import { AVATARS } from '/avatars.js';
 // Rooms (group chats with agents) and Tasks. Both are their own screens, apart from the main agent.
 const WORKING = ['starting', 'running', 'queued', 'verifying'];
@@ -26,7 +27,7 @@ export function avatarHtml(ctx, { name, image = '', id = '', at = '', size = '',
   // Whoever this is gets their own picture wherever it shows (group chat messages, cards, lists): an agent its avatar,
   // the person their profile photo, Rex Agent the Rex Desk mark. Letters only for someone with no picture at all.
   if (!agent && !image && !members) {
-    if (name === 'Rex Agent') return `<span class="av av-agent ${size}"><img src="${REX_MARK}" alt=""></span>`;
+    if (name === 'Rex Agent') return rexCore(size, (ui?.snap?.specialists || []).filter(item => item.kind !== 'main').length);
     if ((name === 'You' || (ui?.profile?.name && name === ui.profile.name)) && ui?.profile?.photo) return `<span class="av ${size}"><img src="/api/profile/photo?v=${encodeURIComponent(ui.profile.photo.updatedAt || '')}" alt=""></span>`;
     agent = (ui?.snap?.specialists || []).find(item => item.name === name) || null;
   }
@@ -101,6 +102,16 @@ export function roomRunIds(ui, room) {
   }
   return [...new Set(ids)];
 }
+// The terminal of a group chat: every command any member ran, one line each, starting with the face of who ran it.
+function roomTerminalHtml(ctx, room) {
+  const { ui, esc, hhmm } = ctx, entries = [];
+  for (const member of room.members) for (const runId of roomRunIds(ui, { id: room.id, members: [member] })) {
+    const events = ui.events.get(runId) || [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event]));
+    for (const event of events) if (event.kind === 'agent-tool' && (event.tool === 'Bash' || event.tool === 'PowerShell') && event.id) entries.push({ id: event.id, tool: event.tool, input: event.input, output: results.get(event.id), at: event.createdAt, who: member.name });
+  }
+  entries.sort((left, right) => String(left.at).localeCompare(String(right.at)));
+  return terminalHtml(entries, { esc, hhmm, who: item => `<span title="${esc(item.who)}">${avatarHtml(ctx, { name: item.who, size: 'xs' })}</span>` }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="tl-bar)/, '');
+}
 const HIDDEN_STEPS = ['desk_ask', 'desk_message', 'desk_elicit', 'desk_room_post'];
 // What everyone in the room is doing, newest at the bottom: their steps, the commands they ran (with output), and when they replied.
 function activityHtml(ctx, room) {
@@ -135,12 +146,12 @@ function activityHtml(ctx, room) {
 // Two tabs, like a messenger's chat info: Chat info (members, and the media, files and links shared here) and Activity (what the agents are doing).
 function roomSideHtml(ctx, room) {
   const trees = chatWorktrees(ctx.ui, { roomId: room.id });
-  const tab = ['activity', 'worktrees'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
+  const tab = ['activity', 'worktrees', 'terminal'].includes(ctx.ui.sideTab) ? ctx.ui.sideTab : 'info', busy = room.members.filter(member => member.state === 'busy' || member.state === 'replying').length;
   const close = '<button type="button" class="side-x" data-action="info-toggle" aria-label="Close the side panel" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
-  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : activityHtml(ctx, room)}`;
+  return `<div class="side-head tabs"><button type="button" class="tab ${tab === 'info' ? 'on' : ''}" data-action="side-tab" data-tab="info">Chat info</button><button type="button" class="tab ${tab === 'activity' ? 'on' : ''}" data-action="side-tab" data-tab="activity">Activity${busy ? `<span class="tcount">${busy}</span>` : ''}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="side-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button><button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="side-tab" data-tab="terminal">Terminal</button><span class="spacer"></span>${close}</div>${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : tab === 'terminal' ? roomTerminalHtml(ctx, room) : activityHtml(ctx, room)}`;
 }
 // The Agents tab: each member's AI and model, changed right here. Saved at once on the agent itself, so it holds in every chat.
-const AIS = [{ value: 'claude', label: 'Claude Code', hint: 'Claude subscription' }, { value: 'codex', label: 'Codex', hint: 'ChatGPT subscription' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }];
+const AIS = [{ value: 'claude', label: 'Claude Code', hint: 'Your Claude plan' }, { value: 'codex', label: 'Codex', hint: 'Your ChatGPT plan' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }];
 function roomAgentsHtml(ctx, room) {
   const { esc, ui } = ctx, agents = room.members.map(member => member.id === 'main' ? ui.snap.mainAgent : (ui.snap.specialists || []).find(item => item.id === member.id)).filter(Boolean);
   if (!agents.length) return '<p class="muted">No agents in this room yet.</p>';
@@ -151,7 +162,7 @@ function roomAgentsHtml(ctx, room) {
     return `<section class="ag-sec room-agent" data-agent="${esc(agent.id)}"><div class="rperson-main ra-head">${avatarHtml(ctx, { name: agent.name, agent: agent.id === 'main' ? null : agent, size: 'sm' })}<span class="rperson-text"><b>${esc(agent.name)}</b><small>${esc(seat.project || '')}${seat.label ? ` · <span class="st ${esc(seat.state)}">${esc(seat.label)}</span>` : ''}</small></span></div>
       <label class="room-agent-row"><span>AI</span>${pickerHtml(ctx, { id: `ra-provider-${agent.id}`, label: 'AI', value: ai, items: AIS, compact: true })}</label>
       <label class="room-agent-row"><span>Model</span>${pickerHtml(ctx, { id: `ra-model-${agent.id}`, label: 'Model', value: agent.model || '', items: models, compact: true })}</label></section>`;
-  }).join('')}<p class="muted">Changes save at once and hold for this agent everywhere. A new AI starts a fresh session with the chat so far handed over.</p></div>`;
+  }).join('')}<p class="muted">Changes save at once and hold for this agent everywhere. A new AI starts fresh with a summary of the chat so far.</p></div>`;
 }
 function roomSharedHtml(ctx, room) {
   const messages = (ctx.ui.snap.messages || []).filter(message => message.roomId === room.id && message.from.type !== 'system'), runs = new Set(roomRunIds(ctx.ui, room));
@@ -179,16 +190,43 @@ function roomInfoHtml(ctx, room) {
 }
 
 export function newRoomDialog(ctx, from = null) {
-  const { ui, esc, toast, api, refresh, open } = ctx, agents = (ui.snap.specialists || []).filter(agent => agent.id !== from?.id);
+  const { ui, esc, toast, api, refresh, open } = ctx;
+  // Everyone who can join: Rex Agent first, then the agents, the one this chat is with left out (it comes along).
+  const people = [...(from?.id === 'main' ? [] : [{ id: 'main', name: 'Rex Agent', projectSlug: 'every project', main: true }]), ...(ui.snap.specialists || []).filter(agent => agent.kind !== 'main' && agent.id !== from?.id)];
+  const picked = new Set();
   const back = document.createElement('div'); back.className = 'dialog-back';
-  back.innerHTML = `<form class="dialog"><h2>${from ? `Group chat from your chat with ${esc(from.name)}` : 'New room'}</h2>${from ? `<p class="muted small">${esc(from.name)} comes along, and the last 20 messages are copied in, so everyone carries on with the same topic.</p>` : ''}<label>Name<input type="text" name="name" placeholder="Checkout bug" required maxlength="80" value="${from ? esc(`${from.name} and team`) : ''}"></label><label>Agents in the room</label>${from?.id === 'main' ? '' : '<label class="pick"><input type="checkbox" name="member" value="main"> Rex Agent <span class="muted">· knows every project</span></label>'}${agents.length ? agents.map(agent => `<label class="pick"><input type="checkbox" name="member" value="${esc(agent.id)}"> ${esc(agent.name)} <span class="muted">· ${esc(agent.projectSlug)}</span></label>`).join('') : '<p class="muted">No agents yet. Create one with the + next to Agents, then add it to a room.</p>'}<div class="row"><button class="btn primary">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`;
-  document.body.append(back); back.querySelector('input').focus();
-  back.addEventListener('click', event => { if (event.target === back || event.target.dataset.close !== undefined) back.remove(); });
-  back.querySelector('form').addEventListener('submit', async event => {
-    event.preventDefault(); const form = new FormData(event.target);
-    try { const room = from ? await api('/rooms/from-chat', { method: 'POST', data: { agentId: from.id, name: form.get('name'), members: form.getAll('member') } }) : await api('/rooms', { method: 'POST', data: { name: form.get('name'), members: form.getAll('member') } }); back.remove(); await refresh(); open('room', room.id); }
+  const card = person => `<button type="button" class="ra-card" data-pick="${esc(person.id)}" aria-pressed="false" data-find="${esc(`${person.name} ${person.projectSlug || ''}`.toLowerCase())}">
+    ${avatarHtml(ctx, { name: person.name, agent: person.main ? null : person, size: 'sm' })}<span class="ra-text"><b>${esc(person.name)}</b><small>${esc(person.projectSlug || '')}</small></span>
+    <span class="ra-tick" aria-hidden="true"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>`;
+  back.innerHTML = `<form class="dialog ra-dialog" aria-labelledby="ra-title">
+    <header class="ra-head"><div><h2 id="ra-title">${from ? 'Add agents' : 'New group chat'}</h2><p>${from ? `${esc(from.name)} comes along with the last 20 messages, so everyone carries on with the same topic.` : 'Pick who joins. You can add more later.'}</p></div><button type="button" class="ra-x" data-close aria-label="Close">×</button></header>
+    <label class="ra-field"><span>Name</span><input type="text" name="name" placeholder="Checkout bug" required maxlength="80" value="${from ? esc(`${from.name} and team`) : ''}"></label>
+    <div class="ra-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="search" placeholder="Find an agent or a project" aria-label="Find an agent or a project" data-ra-find></div>
+    <div class="ra-chosen" data-ra-chosen>${from ? `<span class="ra-chip fixed">${esc(from.name)}</span>` : ''}<span class="ra-none">Nobody picked yet</span></div>
+    <div class="ra-grid" role="group" aria-label="Agents">${people.length ? people.map(card).join('') : '<p class="muted">No agents yet. Create one with the + next to Agents.</p>'}</div>
+    <footer class="ra-foot"><span class="ra-count" data-ra-count>0 picked</span><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" data-ra-go disabled>${from ? 'Start group chat' : 'Create'}</button></footer></form>`;
+  document.body.append(back);
+  const form = back.querySelector('form'), chosen = back.querySelector('[data-ra-chosen]'), count = back.querySelector('[data-ra-count]'), go = back.querySelector('[data-ra-go]');
+  const draw = () => {
+    const names = people.filter(person => picked.has(person.id));
+    chosen.innerHTML = `${from ? `<span class="ra-chip fixed">${esc(from.name)}</span>` : ''}${names.map(person => `<button type="button" class="ra-chip" data-pick="${esc(person.id)}" title="Remove">${esc(person.name)} <span aria-hidden="true">×</span></button>`).join('') || '<span class="ra-none">Nobody picked yet</span>'}`;
+    count.textContent = `${picked.size} picked`; go.disabled = !picked.size && !from;
+    for (const button of back.querySelectorAll('.ra-card')) { const on = picked.has(button.dataset.pick); button.classList.toggle('on', on); button.setAttribute('aria-pressed', String(on)); }
+  };
+  back.querySelector('[data-ra-find]').addEventListener('input', event => { const words = event.target.value.trim().toLowerCase(); for (const button of back.querySelectorAll('.ra-card')) button.hidden = Boolean(words) && !button.dataset.find.includes(words); });
+  back.addEventListener('click', event => {
+    if (event.target === back || event.target.closest('[data-close]')) { back.remove(); return; }
+    const pick = event.target.closest('[data-pick]'); if (!pick) return;
+    if (picked.has(pick.dataset.pick)) picked.delete(pick.dataset.pick); else picked.add(pick.dataset.pick);
+    draw();
+  });
+  back.addEventListener('keydown', event => { if (event.key === 'Escape') back.remove(); });
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); const name = new FormData(form).get('name'), members = [...picked];
+    try { const room = from ? await api('/rooms/from-chat', { method: 'POST', data: { agentId: from.id, name, members } }) : await api('/rooms', { method: 'POST', data: { name, members } }); back.remove(); await refresh(); open('room', room.id); }
     catch (error) { toast(error.message, true); }
   });
+  back.querySelector('[data-ra-find]').focus();
 }
 
 // ---------- tasks ----------
@@ -226,7 +264,9 @@ export function tasksStage(ctx) {
   const count = test => everything.filter(test).filter(task => showDone || task.status !== 'done').length;
   // Left: where tasks come from.
   const item = (id, mark, name, number, extra = '') => `<button class="tk-source${pick === id ? ' on' : ''}" data-action="task-source" data-source="${esc(id)}" aria-pressed="${pick === id}"><span class="src-mark mini ${esc(mark)}" aria-hidden="true">${esc(name[0])}</span><span class="tk-sname">${esc(name)}</span>${extra}<span class="tk-count">${number}</span></button>`;
-  const connected = sources.map(source => { const sync = syncs.get(source.id); return item(source.id, source.type, source.name, count(task => task.sourceId === source.id), sync?.error ? `<span class="dot bad" title="${esc(sync.error)}"></span>` : ''); }).join('');
+  // Each tracker syncs on its own: the arrows beside it, with when it last synced.
+  const ago = at => { const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60000); return !at ? 'never synced' : minutes < 1 ? 'synced just now' : minutes < 60 ? `synced ${minutes} min ago` : minutes < 1440 ? `synced ${Math.round(minutes / 60)} h ago` : `synced ${Math.round(minutes / 1440)} d ago`; };
+  const connected = sources.map(source => { const sync = syncs.get(source.id), busy = ui.syncing === source.id; return `<div class="tk-srow">${item(source.id, source.type, source.name, count(task => task.sourceId === source.id), sync?.error ? `<span class="dot bad" title="${esc(sync.error)}"></span>` : '')}<button type="button" class="tk-sync${busy ? ' busy' : ''}" data-action="sync-source" data-source="${esc(source.id)}" title="Sync ${esc(source.name)} now · ${esc(sync?.error ? `last sync failed: ${sync.error}` : ago(sync?.at))}" aria-label="Sync ${esc(source.name)}" ${busy ? 'disabled' : ''}><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/></svg></button></div>`; }).join('');
   const missing = [['flow', 'Flow'], ['morningmate', 'Morningmate'], ['orbit', 'Orbit']].filter(([type]) => !sources.some(source => source.type === type))
     .map(([type, name]) => type === 'orbit' ? `<button class="tk-connect" data-action="task-connect" data-service="orbit"><span class="src-mark mini orbit" aria-hidden="true">O</span>Connect ${name}</button>` : `<button type="button" class="tk-connect" data-action="settings-sources"><span class="src-mark mini ${type}" aria-hidden="true">${name[0]}</span>Connect ${name}</button>`).join('');
   const side = `<aside class="tk-side"><h3>Sources</h3>${item('all', 'all', 'All tasks', count(() => true))}${item('local', 'local', 'Rex Desk tasks', count(task => task.local))}${connected}
@@ -240,7 +280,7 @@ export function tasksStage(ctx) {
   const local = shown.filter(task => task.local), order = (left, right) => PRIORITY.findIndex(([key]) => key === left.priority) - PRIORITY.findIndex(([key]) => key === right.priority);
   const groups = STATUS.map(([status, label]) => group(label, local.filter(task => task.status === status).sort(order))).join('')
     + sources.map(source => group(source.name, shown.filter(task => task.sourceId === source.id))).join('');
-  const empty = pick === 'local' ? '<div class="empty"><h2>No Rex Desk tasks yet</h2><p>Add one above, or ask an agent to make tasks for a project.</p></div>' : filter ? '<div class="empty"><h2>Nothing matches</h2><p>Try other words.</p></div>' : '<div class="empty"><h2>No tasks</h2><p>Add one above, connect a source on the left, or press Sync.</p></div>';
+  const empty = pick === 'local' ? '<div class="empty"><h2>No Rex Desk tasks yet</h2><p>Add one above, or ask an agent to make tasks for a project.</p></div>' : filter ? '<div class="empty"><h2>Nothing matches</h2><p>Try other words.</p></div>' : '<div class="empty"><h2>No tasks</h2><p>Add one above, connect a task app on the left. Each one syncs with the arrows beside its name.</p></div>';
   return { title: 'Tasks', meta: `${everything.length} tasks`, top: true,
     members: `<div class="members tbar"><input id="task-filter" type="search" placeholder="Search tasks, numbers, tags…" value="${esc(ui.taskFilter || '')}" autocomplete="off"></div>`,
     feed: `<div class="page tk">${side}<div class="tk-main">${add}${shown.length ? `<div class="tk-list">${head}${groups}</div>` : empty}</div></div>` };
@@ -285,7 +325,7 @@ export function taskStage(ctx) {
       ${fact('Due', esc(when(task.dueDate)))}
       ${fact('Created', esc(when(task.createdAt)))}
       ${rank >= 0 ? fact('Jev rank', `#${rank + 1} in the queue`) : ''}
-      ${task.url ? `<a class="btn small tp-open" href="${esc(task.url)}" target="_blank" rel="noopener noreferrer">Open in ${esc(source.name || 'the tracker')}</a>` : ''}
+      ${task.url ? `<a class="btn small tp-open" href="${esc(task.url)}" target="_blank" rel="noopener noreferrer">Open in ${esc(source.name || 'the task app')}</a>` : ''}
     </section></aside>`;
   const main = `<div class="tp-main"><div class="tp-head"><span class="tnum">#${esc(taskNumber(task))}</span><h1>${esc(taskName(task))}</h1>${task.titleEn && task.titleEn !== task.title ? `<p class="orig">${esc(task.title)}</p>` : ''}</div>
     ${jev?.summary || jev?.reason ? `<p class="tp-jev">${esc(jev.summary || jev.reason)}</p>` : ''}
@@ -341,7 +381,7 @@ export async function roomAction(ctx, action, target) {
   if (action === 'room-image') { document.getElementById('room-image-input')?.click(); return; }
   if (action === 'room-delete') {
     const room = ui.snap.rooms.find(item => item.id === ui.view.id);
-    if (room && confirm(`Delete the room "${room.name}" and its messages? The agents and their sessions stay.`)) { await api(`/rooms/${room.id}`, { method: 'DELETE' }); ctx.open('main'); }
+    if (room && confirm(`Delete the room "${room.name}" and its messages? The agents and their own chats stay.`)) { await api(`/rooms/${room.id}`, { method: 'DELETE' }); ctx.open('main'); }
     return;
   }
   if (action === 'room-stop') { await api(`/runs/${target.dataset.run}/stop`, { method: 'POST', data: {} }); toast('Stopped.'); await refresh(); return; }
@@ -473,7 +513,7 @@ function connectionsDialog(ctx, startWith = '') {
     const remove = target.closest('[data-src-remove]');
     if (remove) {
       const source = (ui.snap.config?.sources || []).find(item => item.id === remove.dataset.srcRemove);
-      if (!source || !confirm(`Remove ${source.name}? Its tasks leave the list; nothing changes in ${SERVICE[source.type] || 'the tracker'}.`)) return;
+      if (!source || !confirm(`Remove ${source.name}? Its tasks leave the list; nothing changes in ${SERVICE[source.type] || 'the task app'}.`)) return;
       try { await api(`/sources/${encodeURIComponent(source.id)}`, { method: 'DELETE' }); await refresh({ full: true }); draw(); } catch (error) { toast(error.message, true); }
     }
   });

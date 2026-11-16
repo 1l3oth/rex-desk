@@ -42,7 +42,7 @@ export class LocalTasks {
     const pick = (key, make) => input[key] !== undefined ? make(input[key]) : previous[key];
     return {
       title: pick('title', value => text(value, 200)), description: pick('description', value => text(value, 20000)), status, statusName: STATUS_NAMES[status], priority,
-      projectSlug: pick('project', value => this.project(value)) ?? '', dueDate: pick('dueDate', day) ?? '', tags: pick('tags', value => list(value)) ?? [],
+      projectSlug: (input.project !== undefined ? this.project(input.project) : previous.projectSlug) ?? '', dueDate: pick('dueDate', day) ?? '', tags: pick('tags', value => list(value)) ?? [],
       checklist: pick('checklist', value => [].concat(value || []).map(item => typeof item === 'string' ? { text: text(item, 300), done: false } : { text: text(item.text, 300), done: Boolean(item.done) }).filter(item => item.text).slice(0, 50)) ?? [],
       parentTaskId: pick('parentTaskId', value => value ? this.get(value).id : '') ?? '', blockedBy: pick('blockedBy', value => [].concat(value || []).filter(Boolean).map(id => this.get(id).id)) ?? [],
       assignee: pick('assignee', value => this.agentId(value)) ?? '',

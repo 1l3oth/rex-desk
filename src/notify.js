@@ -20,13 +20,21 @@ const SCRIPT = [
   '$xml = New-Object Windows.Data.Xml.Dom.XmlDocument',
   '$audio = if ($env:REX_TOAST_SOUND) { "<audio src=\'ms-winsoundevent:Notification." + $env:REX_TOAST_SOUND + "\'/>" } else { "<audio silent=\'true\'/>" }',
   '$xml.LoadXml("<toast><visual><binding template=\'ToastGeneric\'><text>$t</text><text>$b</text></binding></visual>$audio</toast>")',
-  "$id = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'",
+  "$id = if ($env:REX_TOAST_APP) { $env:REX_TOAST_APP } else { '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe' }",
   '[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($xml))',
 ].join('; ');
+// The installed desktop app's id in Windows (its Start menu entry), so a toast shows Rex Desk's name and logo.
+export const TOAST_APP = 'com.rexdesk.desktop';
 export function windowsToast(title, body, { sound = 'Default' } = {}) {
+  if (process.platform === 'darwin') { macNotice(title, body, sound); return; }
   if (process.platform !== 'win32') return;
   execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', SCRIPT],
-    { windowsHide: true, timeout: 15000, env: { ...process.env, REX_TOAST_TITLE: clip(title, 100), REX_TOAST_BODY: clip(body, 220), REX_TOAST_SOUND: /^(Default|IM|Mail|Reminder|SMS)$/.test(sound) ? sound : '' } }, () => {});
+    { windowsHide: true, timeout: 15000, env: { ...process.env, REX_TOAST_TITLE: clip(title, 100), REX_TOAST_BODY: clip(body, 220), REX_TOAST_APP: process.env.REX_DESK_EXE ? TOAST_APP : '', REX_TOAST_SOUND: /^(Default|IM|Mail|Reminder|SMS)$/.test(sound) ? sound : '' } }, () => {});
+}
+
+// A Mac notification. Title and text travel as arguments to a fixed script, so nothing in them runs.
+function macNotice(title, body, sound) {
+  execFile('osascript', ['-e', 'on run argv', '-e', 'if item 3 of argv is "" then', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'else', '-e', 'display notification (item 2 of argv) with title (item 1 of argv) sound name "Glass"', '-e', 'end if', '-e', 'end run', clip(title, 100), clip(body, 220), sound ? 'on' : ''], { timeout: 15000 }, () => {});
 }
 
 // Every notification is kept in a list the person can read in Rex Desk, with unread counts on each chat.

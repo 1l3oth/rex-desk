@@ -17,7 +17,7 @@ export function agyCommand(env = process.env) {
   const folders = String(env.PATH || '').split(path.delimiter).filter(Boolean);
   const packages = path.join(local, 'Microsoft', 'WinGet', 'Packages');
   try { for (const entry of readdirSync(packages)) if (/^Google\.AntigravityCLI/i.test(entry)) folders.push(path.join(packages, entry)); } catch {}
-  folders.push(path.join(local, 'Microsoft', 'WinGet', 'Links'), path.join(local, 'Programs', 'Antigravity', 'bin'), path.join(local, 'agy'), path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.gemini', 'antigravity-cli', 'bin'));
+  folders.push(path.join(local, 'Microsoft', 'WinGet', 'Links'), path.join(local, 'Programs', 'Antigravity', 'bin'), path.join(local, 'agy'), path.join(local, 'agy', 'bin'), path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.gemini', 'antigravity-cli', 'bin'));
   return folders.map(folder => path.join(folder, 'agy.exe')).find(file => existsSync(file)) || 'agy';
 }
 
@@ -40,7 +40,7 @@ export class AcpClient {
   async open() {
     if (this.cwd && !existsSync(this.cwd)) throw new Error(`The agent's folder does not exist: ${this.cwd}`);
     this.child = this.spawnProcess(agyCommand(this.env), ['acp', ...this.args],{ env: this.env, cwd: this.cwd, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
-    this.child.once('error', error => this.fail(error.code === 'ENOENT' ? new Error('The Antigravity CLI (agy) is not installed. Install it with: winget install Google.AntigravityCLI') : error));
+    this.child.once('error', error => this.fail(error.code === 'ENOENT' ? new Error(`The Antigravity CLI (agy) is not installed. Install it with: ${process.platform === 'win32' ? 'irm https://antigravity.google/cli/install.ps1 | iex (in PowerShell)' : 'curl -fsSL https://antigravity.google/cli/install.sh | bash'}`) : error));
     this.child.once('exit', code => { if (!this.closed) this.fail(new Error(`Antigravity CLI exited (${code}).`)); });
     this.child.stdin.on('error', error => { if (!this.closed) this.fail(error); });
     this.child.stderr.resume();
@@ -92,6 +92,24 @@ const resultText = output => typeof output === 'string' ? output : output?.outpu
 // No mode set means Dangerous, the mode Rex Desk agents start with, the same as for Claude.
 const dangerous = mode => !mode || mode === 'bypassPermissions';
 
+// Antigravity's own tools under the names the chat knows, so a command shows what it ran (and its output in the terminal
+// panel) and a file read says which file, instead of a bare "Uses run command". The original input is kept too.
+export function antigravityTool(name, input = {}, platform = process.platform) {
+  const file = input.Path || input.AbsolutePath || input.TargetFile || input.FilePath || input.File || '';
+  const as = (tool, extra) => ({ tool, input: { ...input, ...extra } });
+  switch (name) {
+    case 'run_command': return as(platform === 'win32' ? 'PowerShell' : 'Bash', { command: input.CommandLine || input.Command || '', description: input.toolSummary || '' });
+    case 'read_file': case 'view_file': case 'view_file_outline': return as('Read', { file_path: file });
+    case 'write_to_file': return as('Write', { file_path: file });
+    case 'replace_file_content': case 'multi_replace_file_content': case 'edit_file': return as('Edit', { file_path: file });
+    case 'grep_search': return as('Grep', { pattern: input.Query || input.Pattern || '' });
+    case 'find_by_name': case 'list_dir': return as('Glob', { pattern: input.Pattern || input.DirectoryPath || input.SearchDirectory || '' });
+    case 'search_web': return as('WebSearch', { query: input.query || input.Query || '' });
+    case 'read_url_content': return as('WebFetch', { url: input.Url || input.url || '' });
+    default: return { tool: name, input };
+  }
+}
+
 export class AntigravityRunner {
   constructor(options) { Object.assign(this, options); this.event ||= () => {}; this.text = ''; this.pendingText = ''; }
   flush() { if (!this.pendingText.trim()) { this.pendingText = ''; return; } this.event('agent-text', { text: this.pendingText.trim() }); this.pendingText = ''; }
@@ -111,22 +129,26 @@ export class AntigravityRunner {
   notification(method, params) {
     if (method !== 'session/update' || (this.sessionId && params.sessionId !== this.sessionId) || !this.live) return;
     const update = params.update || {};
-    if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') { this.text += update.content.text; this.pendingText += update.content.text; }
+    if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
+      this.text += update.content.text; this.pendingText += update.content.text;
+      // The words so far, for read-aloud to speak while Gemini is still writing (as Claude's do).
+      if (Date.now() - (this.partialAt || 0) > 120) { this.partialAt = Date.now(); this.event('agent-text-partial', { text: this.pendingText }); }
+    }
     if (update.sessionUpdate === 'tool_call') {
       this.flush();
-      this.event('agent-tool', { id: update.toolCallId, tool: update.name || update.kind || 'tool', input: update.rawInput || update.args || {} });
+      this.event('agent-tool', { id: update.toolCallId, ...antigravityTool(update.name || update.kind || 'tool', update.rawInput || update.args || {}) });
     }
     if (update.sessionUpdate === 'tool_call_update' && ['completed', 'failed'].includes(update.status)) {
       this.event('agent-tool-result', { id: update.toolCallId, text: String(resultText(update.rawOutput)).slice(-6000), failed: update.status === 'failed' || Boolean(update.rawOutput?.exit_code) });
     }
   }
   async start(prompt) {
-    if (this.signal?.aborted) throw new Error('Antigravity run interrupted.');
+    if (this.signal?.aborted) throw new Error('Antigravity was stopped.');
     const env = { ...this.agentEnv, REX_DESK_TOKEN: this.token || '', REX_AGENT_TOKEN: this.token || '', REX_DESK_URL: this.mcpUrl || '' };
     let failed; const broken = new Promise((resolve, reject) => { failed = reject; }); broken.catch(() => {});
     this.client = (this.clientFactory || (options => new AcpClient(options)))({ env, cwd: this.cwd, args: dangerous(this.run.permissionMode) ? ['--dangerously-skip-permissions'] : [],
       onNotification: (method, params) => this.notification(method, params), onRequest: (method, params) => this.request(method, params), onError: error => failed(error) });
-    const abort = () => { if (this.sessionId) this.client.notify('session/cancel', { sessionId: this.sessionId }); failed(new Error('Antigravity run interrupted.')); setTimeout(() => this.client.close(), 500); };
+    const abort = () => { if (this.sessionId) this.client.notify('session/cancel', { sessionId: this.sessionId }); failed(new Error('Antigravity was stopped.')); setTimeout(() => this.client.close(), 500); };
     this.signal?.addEventListener('abort', abort, { once: true });
     try {
       await Promise.race([this.client.open(), broken]);
@@ -143,7 +165,7 @@ export class AntigravityRunner {
       this.live = true;
       const result = await Promise.race([this.client.request('session/prompt', { sessionId: this.sessionId, prompt: [{ type: 'text', text: prompt }] }, 0), broken]);
       this.flush();
-      if (result.stopReason === 'cancelled') throw new Error('Antigravity run interrupted.');
+      if (result.stopReason === 'cancelled') throw new Error('Antigravity was stopped.');
       const usage = result.usage || {};
       this.tokens = { input: usage.inputTokens || 0, output: usage.outputTokens || 0, cacheRead: usage.cachedReadTokens || 0, cacheWrite: usage.cachedWriteTokens || 0 };
       this.event('context', { used: (usage.inputTokens || 0) + (usage.cachedReadTokens || 0), window: /claude/i.test(this.model || '') ? 200000 : 1000000 });

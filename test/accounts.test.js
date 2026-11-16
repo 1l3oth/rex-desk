@@ -60,7 +60,7 @@ test('accounts gate the dashboard, the first account is superadmin, and each acc
     assert.equal(memberState.body.database.state, 'local');
     assert.notEqual((await member('/api/database/sync', { method: 'POST' })).status, 403, 'a member may manage its own backup');
 
-    assert.match((await admin('/api/auth/login', { method: 'POST', data: { email: 'owner@example.com', passphrase: 'wrong passphrase' } })).body.error, /incorrect/);
+    assert.match((await admin('/api/auth/login', { method: 'POST', data: { email: 'owner@example.com', passphrase: 'wrong passphrase' } })).body.error, /password is wrong/);
     assert.equal((await admin('/api/auth/login', { method: 'POST', data: { email: 'owner@example.com', passphrase } })).body.current.role, 'superadmin');
     assert.equal((await admin('/api/auth/logout', { method: 'POST' })).status, 200);
     assert.equal((await admin('/api/state')).status, 401);
@@ -81,18 +81,34 @@ test('an existing single-folder workspace is claimed with an email and keeps its
   } finally { await app.close(); }
 });
 
+test('cloud backup comes only with a Rex Desk account: a typed database address, or an own Turso account, is refused', async () => {
+  const app = await accountApp(temporary('account-only'), { cloudClientFactory: fakeTurso().clientFactory }), client = browser(app);
+  try {
+    await client('/api/auth/create', { method: 'POST', data: { email: 'owner@example.com', passphrase } });
+    for (const route of ['/api/database/connect', '/api/database/turso-start']) {
+      const reply = await client(route, { method: 'POST', data: { url: 'libsql://mine.example.invalid', authToken: 'mine' } });
+      assert.notEqual(reply.status, 200, route); assert.match(reply.body.error, /comes with your Rex Desk account/);
+    }
+    assert.equal(app.store.cloud.enabled, false, 'nothing was connected');
+    await client('/api/auth/logout', { method: 'POST' });
+    const typed = await client('/api/auth/cloud', { method: 'POST', data: { url: 'libsql://mine.example.invalid', authToken: 'mine', email: 'owner@example.com', passphrase } });
+    assert.match(typed.body.error, /comes with your Rex Desk account/);
+  } finally { await app.close(); }
+});
+
+// The sync itself, with a database of the owner's own (only allowed with REX_DESK_OWN_DATABASE=1 now).
 test('the same account opens on another computer from its own Turso database and both computers stay in step', async () => {
   const turso = fakeTurso(), url = 'libsql://owner-db.example.invalid', authToken = 'owner-token';
-  const home = await accountApp(temporary('home'), { cloudClientFactory: turso.clientFactory }), atHome = browser(home);
+  const home = await accountApp(temporary('home'), { cloudClientFactory: turso.clientFactory, ownDatabase: true }), atHome = browser(home);
   await atHome('/api/auth/create', { method: 'POST', data: { email: 'owner@example.com', passphrase } });
   home.store.put('task', 'task-home', { id: 'task-home', title: 'Created at home', active: true });
   assert.equal((await atHome('/api/database/connect', { method: 'POST', data: { url, authToken } })).body.state, 'connected');
   await atHome('/api/auth/logout', { method: 'POST' });
   await home.close();
 
-  const work = await accountApp(temporary('work'), { cloudClientFactory: turso.clientFactory }), atWork = browser(work);
+  const work = await accountApp(temporary('work'), { cloudClientFactory: turso.clientFactory, ownDatabase: true }), atWork = browser(work);
   try {
-    assert.match((await atWork('/api/auth/cloud', { method: 'POST', data: { url, authToken, email: 'owner@example.com', passphrase: 'wrong passphrase' } })).body.error, /incorrect/);
+    assert.match((await atWork('/api/auth/cloud', { method: 'POST', data: { url, authToken, email: 'owner@example.com', passphrase: 'wrong passphrase' } })).body.error, /password is wrong/);
     const opened = await atWork('/api/auth/cloud', { method: 'POST', data: { url, authToken, email: 'owner@example.com', passphrase } });
     assert.equal(opened.body.current.role, 'superadmin');
     assert.ok((await atWork('/api/state')).body.tasks.some(task => task.id === 'task-home'), 'Work restores what was done at home');
@@ -123,5 +139,36 @@ test('the Tailscale https address (tailscale serve) is treated like another devi
     assert.equal((await ask('/manifest.webmanifest')).status, 200, 'what installing needs is open');
     const key = app.desk.peers.key();
     assert.equal((await ask('/api/state', { 'x-rex-peer-key': key })).status, 200, 'with the key it works');
+  } finally { await app.close(); }
+});
+
+test('stay signed in opens only a window holding the window key, never any program that asks', async () => {
+  const root = temporary('window-key');
+  const app = await accountApp(root, { requireAccount: false });
+  const call = (route, { method = 'GET', data, cookie = '' } = {}) => fetch(app.address + route, { method, redirect: 'manual', headers: { 'x-rex-desk': '1', 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, ...(data ? { body: JSON.stringify(data) } : {}) });
+  const cookies = response => (response.headers.getSetCookie?.() || []).map(item => item.split(';')[0]);
+  try {
+    const created = await call('/api/auth/create', { method: 'POST', data: { email: 'owner@example.com', passphrase, staySignedIn: true } });
+    assert.equal(created.status, 200);
+    // Signing in with the passphrase gives this browser the window key as well as the session.
+    const given = cookies(created);
+    assert.ok(given.some(item => item.startsWith('rex_session=')) && given.some(item => item.startsWith('rex_window=')));
+    const key = readFileSync(path.join(root, 'window.key'), 'utf8').trim();
+    assert.ok(key.length >= 32);
+    // Another program (or Windows user) asking without the key gets no session.
+    const stranger = await call('/api/auth');
+    assert.deepEqual(cookies(stranger), []); assert.equal((await stranger.json()).current, null);
+    assert.equal((await call('/api/auth', { cookie: 'rex_window=wrong-key-wrong-key-wrong-key-wrong' })).headers.getSetCookie().length, 0);
+    // The desktop app opens /?window=<key>: the key becomes a cookie and leaves the address.
+    const opened = await call(`/?window=${key}`);
+    assert.equal(opened.status, 303); assert.equal(opened.headers.get('location'), '/');
+    const windowCookie = cookies(opened).find(item => item.startsWith('rex_window='));
+    assert.equal(windowCookie, `rex_window=${key}`);
+    assert.deepEqual(cookies(await call('/?window=guess')), []);
+    // With the key, the window is signed in without the passphrase.
+    const handed = await call('/api/auth', { cookie: windowCookie });
+    const session = cookies(handed).find(item => item.startsWith('rex_session='));
+    assert.ok(session); assert.equal((await handed.json()).current.email, 'owner@example.com');
+    assert.equal((await call('/api/agents', { cookie: session })).status, 200);
   } finally { await app.close(); }
 });

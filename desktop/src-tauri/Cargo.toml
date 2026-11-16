@@ -3,6 +3,8 @@ name = "rex-desk"
 version = "0.0.3"
 description = "Rex Desk desktop window"
 edition = "2021"
+authors = ["Vong Pichdaraboth"]
+license = "MIT"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
