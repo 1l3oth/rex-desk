@@ -22,6 +22,7 @@ New to the project? Start with [docs/ONBOARDING.md](docs/ONBOARDING.md).
 
 - Match the surrounding code: Node 24 ES modules, no build step for `public/`, and the existing naming and comment style.
 - Dashboard text is plain English, written for someone who is not a developer.
+- Dashboard text goes through `t()` and has a Khmer translation in `public/i18n/km.json`; `npm test` fails until it does. See [docs/i18n](docs/i18n/README.md).
 - Keep secrets out of code, tests, logs, and screenshots. Keys belong in Settings, where they are encrypted; agents use test-account placeholders. `.local/` is never committed.
 - Develop with a separate data folder (`REX_DATA_DIR`) and port (`PORT`), so tests and experiments never touch a real workspace.
 

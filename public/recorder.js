@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Voice recording shared by the dashboard and the Jev bar: the microphone at its own rate, turned into 16 kHz mono WAV,
 // which the speech model reads. It stops by itself after a second and a half of quiet once you have spoken, or after 20 seconds.
 // iPhone (every browser there runs on WebKit) starts an audio context paused unless it is made, or resumed, inside the
@@ -75,6 +76,6 @@ export async function transcribe(wav, language) {
   const response = await fetch(`/api/voice/transcribe?language=${encodeURIComponent(language)}`, { method: 'POST', headers: { 'Content-Type': 'audio/wav', 'x-rex-desk': '1' }, body: wav });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-  if (!result.text) throw new Error('No words were recognized. Try again a little closer to the microphone.');
+  if (!result.text) throw new Error(t('No words were recognized. Try again a little closer to the microphone.'));
   return result;
 }

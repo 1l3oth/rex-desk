@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // The chat input: a rounded box with a + menu, slash commands, @ mentions, voice, attachments, and the model, effort and mode pickers underneath.
 const ICON = {
   plus: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -8,9 +9,9 @@ const ICON = {
 import { pickerHtml } from '/chat-pick.js';
 import { openMicrophone, startRecorder, transcribe } from '/recorder.js';
 const KEY = 'rex-desk-input';
-const EFFORT_LABEL = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
-const EFFORT_HINT = { low: 'Fast, light thinking', medium: 'Balanced', high: 'Thinks longer', xhigh: 'Thinks a lot longer', max: 'Longest thinking, slowest' };
-const MODE_HINT = { bypassPermissions: 'Runs tools without asking', manual: 'Asks you for each tool, in the chat', auto: 'A checker decides what is safe', plan: 'Plans only, runs nothing', acceptEdits: 'Edits files freely, asks for the rest' };
+const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
+const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
+const MODE_HINT = { bypassPermissions: t('Runs tools without asking'), manual: t('Asks you for each tool, in the chat'), auto: t('A checker decides what is safe'), plan: t('Plans only, runs nothing'), acceptEdits: t('Edits files freely, asks for the rest') };
 const DEFAULT_MODE = 'bypassPermissions';
 
 function saved() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } }
@@ -33,7 +34,7 @@ function choicesFor(ctx, provider) {
   const claude = all.providers?.claude || all, local = provider === LOCAL;
   const models = claude.models.filter(item => isLocalId(item.id) === local);
   // No model on this computer yet: say where to get one instead of an empty list.
-  return { ...claude, models: models.length || !local ? models : [{ id: '', label: 'No models yet', hint: 'Open Settings, Local AI, and press Set up: it installs Ollama and a starter model.', disabled: true }] };
+  return { ...claude, models: models.length || !local ? models : [{ id: '', label: t('No models yet'), hint: t('Open Settings, Local AI, and press Set up: it installs Ollama and a starter model.'), disabled: true }] };
 }
 const sentProvider = provider => (provider === LOCAL ? 'claude' : provider);
 export function currentOptions(ctx) {
@@ -54,8 +55,8 @@ export function pickedOptions(ctx) {
 function optionPickers(ctx) {
   const now = currentOptions(ctx), choices = choicesFor(ctx, now.provider);
   const select = (id, label, items, value) => pickerHtml(ctx, { id, label, compact: true, value, items: items.map(item => ({ value: item.id, label: item.label, hint: item.hint, disabled: item.disabled })) });
-  const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? 'Dangerous' : item.label, hint: item.hint || MODE_HINT[item.id] }));
-  return `${select('opt-provider', 'AI', [{ id: 'claude', label: 'Claude Code', hint: 'Your Claude plan' }, { id: 'codex', label: 'Codex', hint: 'Your ChatGPT plan' }, { id: 'gemini', label: 'Gemini', hint: 'Your Google account, through Antigravity' }, { id: LOCAL, label: 'Local AI', hint: 'A model on this computer: free and private, no account needed' }], now.provider)}${select('opt-model', 'Model', choices.models, now.model)}${select('opt-effort', 'Effort', choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', 'Mode', modes, now.permissionMode)}`;
+  const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? t('Dangerous') : item.label, hint: item.hint || MODE_HINT[item.id] }));
+  return `${select('opt-provider', 'AI', [{ id: 'claude', label: t('Claude Code'), hint: t('Your Claude plan') }, { id: 'codex', label: t('Codex'), hint: t('Your ChatGPT plan') }, { id: 'gemini', label: t('Gemini'), hint: t('Your Google account, through Antigravity') }, { id: LOCAL, label: t('Local AI'), hint: t('A model on this computer: free and private, no account needed') }], now.provider)}${select('opt-model', t('Model'), choices.models, now.model)}${select('opt-effort', t('Effort'), choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', t('Mode'), modes, now.permissionMode)}`;
 }
 // The message box is not redrawn while the chat updates (it would lose what is typed), so a new AI redraws only its pickers.
 function redrawOptionPickers(ctx) {
@@ -69,13 +70,13 @@ export function composerHtml(ctx, model) {
   return `<div class="composer" id="composer"><div class="composer-inner">
     <div class="attach-chips" id="attach-chips"></div>
     <div class="box2"><div id="menu"></div>
-      <button class="icon-btn" data-action="plus" aria-label="Add" title="Add">${ICON.plus}</button>
+      <button class="icon-btn" data-action="plus" aria-label="${t`Add`}" title="${t`Add`}">${ICON.plus}</button>
       <textarea id="draft" rows="1" placeholder="${esc(model.composer.placeholder)}">${esc(ui.drafts.get(ctx.draftKey()) || '')}</textarea>
-      ${navigator.mediaDevices?.getUserMedia ? `<button class="icon-btn" data-action="mic" aria-label="Dictate" title="Dictate: click, or hold Space (Khmer, English or Korean, on this computer)">${ICON.mic}</button>` : ''}
-      <button class="send-btn" data-action="send" aria-label="Send" title="Send">${ICON.up}</button>
+      ${navigator.mediaDevices?.getUserMedia ? `<button class="icon-btn" data-action="mic" aria-label="${t`Dictate`}" title="${t`Dictate: click, or hold Space (Khmer, English or Korean, on this computer)`}">${ICON.mic}</button>` : ''}
+      <button class="send-btn" data-action="send" aria-label="${t`Send`}" title="${t`Send`}">${ICON.up}</button>
       <input type="file" id="file-input" multiple hidden>
     </div>
-    <div class="foot"><span class="hint">Type / for commands · hold Space to talk${model.composer.mentions?.length ? ' · @ to mention · # for a task' : ''}</span><span class="spacer"></span>${model.composer.foot || ''}
+    <div class="foot"><span class="hint">${t('Type / for commands · hold Space to talk')}${model.composer.mentions?.length ? t(' · @ to mention · # for a task') : ''}</span><span class="spacer"></span>${model.composer.foot || ''}
       ${model.composer.noPickers ? '' : `${optionPickers(ctx)}
       ${contextRing(ctx, working)}`}</div>
   </div></div>`;
@@ -84,19 +85,19 @@ export function composerHtml(ctx, model) {
 // ---------- attachments ----------
 function drawChips(ctx) {
   const host = document.getElementById('attach-chips'); if (!host) return;
-  host.innerHTML = ctx.ui.attachments.map((file, index) => `<span class="attach ${file.error ? 'bad' : ''}">${ICON.file}<span class="nm">${ctx.esc(file.name)}</span>${file.path ? '' : '<span class="sp"></span>'}<button type="button" data-remove-attach="${index}" aria-label="Remove">×</button></span>`).join('');
+  host.innerHTML = ctx.ui.attachments.map((file, index) => `<span class="attach ${file.error ? 'bad' : ''}">${ICON.file}<span class="nm">${ctx.esc(file.name)}</span>${file.path ? '' : '<span class="sp"></span>'}<button type="button" data-remove-attach="${index}" aria-label="${t`Remove`}">×</button></span>`).join('');
 }
 // Saves a dropped or pasted file in Rex Desk and gives back where it is, without attaching it to a message.
 async function store(file) {
   const response = await fetch(`/api/uploads?name=${encodeURIComponent(file.name || 'dropped-file')}`, { method: 'POST', headers: { 'x-rex-desk': '1' }, body: file });
-  const body = await response.json(); if (!response.ok) throw new Error(body.error || 'Upload failed.');
+  const body = await response.json(); if (!response.ok) throw new Error(body.error ? t(body.error) : t('Upload failed.'));
   return body;
 }
 async function upload(ctx, file) {
   const entry = { name: file.name || 'pasted-file', path: '' }; ctx.ui.attachments.push(entry); drawChips(ctx);
   try {
     const response = await fetch(`/api/uploads?name=${encodeURIComponent(entry.name)}`, { method: 'POST', headers: { 'x-rex-desk': '1' }, body: file });
-    const body = await response.json(); if (!response.ok) throw new Error(body.error || 'Upload failed.');
+    const body = await response.json(); if (!response.ok) throw new Error(body.error ? t(body.error) : t('Upload failed.'));
     entry.path = body.path; entry.name = body.name;
   } catch (error) { ctx.ui.attachments.splice(ctx.ui.attachments.indexOf(entry), 1); ctx.toast(error.message, true); }
   drawChips(ctx);
@@ -111,7 +112,7 @@ function contextRing(ctx, working) {
   const { ui } = ctx, view = ui.view, run = view.type === 'main' ? ctx.mainRun() : view.type === 'run' ? ctx.runById(view.id) : null;
   const used = Number(run?.contextUsed || 0), window = Number(run?.contextWindow || 200000), share = Math.min(1, used / window), round = 2 * Math.PI * 7;
   const kilo = value => value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value);
-  const title = run ? (used ? `Context: ${kilo(used)} of ${kilo(window)} (${Math.round(share * 100)}%).${share > 0.7 ? ' Getting full: /clear starts fresh with a summary.' : ''}` : 'Context: empty. It fills as you talk.') : 'Context shows in a chat with one agent.';
+  const title = run ? (used ? t`Context: ${kilo(used)} of ${kilo(window)} (${Math.round(share * 100)}%).${share > 0.7 ? ' Getting full: /clear starts fresh with a summary.' : ''}` : t('Context: empty. It fills as you talk.')) : t('Context shows in a chat with one agent.');
   return `<span class="ring ctx ${share > 0.85 ? 'full' : share > 0.6 ? 'mid' : ''} ${working ? 'busy' : ''}" title="${ctx.esc(title)}" aria-label="${ctx.esc(title)}" role="img"><svg viewBox="0 0 18 18" width="18" height="18"><circle cx="9" cy="9" r="7" class="ring-bg"/><circle cx="9" cy="9" r="7" class="ring-fill" stroke-dasharray="${(share * round).toFixed(2)} ${round.toFixed(2)}" transform="rotate(-90 9 9)"/></svg></span>`;
 }
 
@@ -119,15 +120,15 @@ function contextRing(ctx, working) {
 function commands(ctx) {
   const { ui } = ctx, c = ctx.commands;
   return [
-    { name: 'sync', hint: 'Get the newest tasks from your task app', run: c.sync },
-    { name: 'projects', hint: 'Scan this computer for projects', run: c.projects },
-    { name: 'room', hint: 'Start a room for several agents', run: c.room },
-    { name: 'agent', hint: 'Create an agent for a project', run: c.agent },
-    ...(ui.view.type === 'room' ? [{ name: 'assign', hint: 'Give a task to an agent: /assign @agent #task', run: c.assign }] : []),
-    { name: 'main', hint: 'Go to Rex Agent', run: c.main },
-    ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: 'Stop the agent', run: c.stop }, { name: 'clear', hint: 'Fresh start: the agent gets a summary of this chat and starts again', run: c.clear }, { name: 'loop', hint: 'Check its own tasks now and start on one', run: c.loop }] : []),
-    { name: 'voice', hint: 'Voice engine and language: compare which one understands you', run: () => voiceDialog(ctx) },
-    { name: 'settings', hint: 'Open settings', run: c.settings },
+    { name: 'sync', hint: t('Get the newest tasks from your task app'), run: c.sync },
+    { name: 'projects', hint: t('Scan this computer for projects'), run: c.projects },
+    { name: 'room', hint: t('Start a room for several agents'), run: c.room },
+    { name: 'agent', hint: t('Create an agent for a project'), run: c.agent },
+    ...(ui.view.type === 'room' ? [{ name: 'assign', hint: t('Give a task to an agent: /assign @agent #task'), run: c.assign }] : []),
+    { name: 'main', hint: t('Go to Rex Agent'), run: c.main },
+    ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: t('Stop the agent'), run: c.stop }, { name: 'clear', hint: t('Fresh start: the agent gets a summary of this chat and starts again'), run: c.clear }, { name: 'loop', hint: t('Check its own tasks now and start on one'), run: c.loop }] : []),
+    { name: 'voice', hint: t('Voice engine and language: compare which one understands you'), run: () => voiceDialog(ctx) },
+    { name: 'settings', hint: t('Open settings'), run: c.settings },
     // The agent's own skills and commands, like typing / in Claude Code: choosing one puts it in the box to send to the agent.
     ...agentSlash(ctx),
   ];
@@ -143,8 +144,8 @@ function agentSlash(ctx) {
   const tools = ctx.ui.tools?.[id];
   if (!tools) { ctx.ui.tools = ctx.ui.tools || {}; ctx.ui.tools[id] = { skills: [], commands: [], loading: true }; void ctx.api(`/agents/tools?agent=${encodeURIComponent(id)}`).then(found => { ctx.ui.tools[id] = found; }).catch(() => {}); return []; }
   const put = name => () => { const box = document.getElementById('draft'); if (!box) return; box.value = `/${name} `; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); };
-  return [...(tools.commands || []).map(item => ({ name: item.name, hint: `Command · ${item.description || item.source}`, run: put(item.name) })),
-    ...(tools.skills || []).map(item => ({ name: item.name, hint: `Skill · ${item.description || item.source}`, run: put(item.name) }))];
+  return [...(tools.commands || []).map(item => ({ name: item.name, hint: t`Command · ${item.description || item.source}`, run: put(item.name) })),
+    ...(tools.skills || []).map(item => ({ name: item.name, hint: t`Skill · ${item.description || item.source}`, run: put(item.name) }))];
 }
 function drawMenu(ctx) {
   const host = document.getElementById('menu'); if (!host) return;
@@ -166,7 +167,7 @@ function menuItems(ctx, box) {
   const at = /(^|\s)@([\p{L}\p{N}_.-]*)$/u.exec(before);
   if (at) {
     const agentsHere = room ? room.members.filter(member => member.id !== 'you').length : 0;
-    const items = (room ? [...(agentsHere > 1 ? [{ name: 'all', hint: `Everyone in this room (${agentsHere} agents)` }] : []), ...room.members.map(member => ({ name: member.handle, hint: `${member.name} · ${member.project} · ${member.label}` }))] : (ctx.ui.mentions || []).map(name => ({ name }))).filter(item => item.name && item.name.toLowerCase().startsWith(at[2].toLowerCase()));
+    const items = (room ? [...(agentsHere > 1 ? [{ name: 'all', hint: t`Everyone in this room (${agentsHere} agents)` }] : []), ...room.members.map(member => ({ name: member.handle, hint: `${member.name} · ${member.project} · ${member.label}` }))] : (ctx.ui.mentions || []).map(name => ({ name }))).filter(item => item.name && item.name.toLowerCase().startsWith(at[2].toLowerCase()));
     return items.length ? { kind: 'mention', items, index: 0, from: before.length - at[2].length - 1 } : null;
   }
   const hash = /(^|\s)#(\d*)$/.exec(before);
@@ -215,7 +216,7 @@ async function browserDictate(ctx, { untilRelease = false } = {}) {
     clearInterval(watch); release(); if (listening === turn) listening = null;
     micButton()?.classList.remove('rec'); document.body.classList.remove('ptt');
     if (said) { putInBox(ctx, said); return; }
-    ctx.toast(turn.failed && browserSpeech === 'no' ? 'The browser could not turn speech into words here. Press the mic again to use Rex Desk\'s own voice engine.' : 'Nothing was heard. Hold Space (or press the mic) and speak.', true);
+    ctx.toast(turn.failed && browserSpeech === 'no' ? t('The browser could not turn speech into words here. Press the mic again to use Rex Desk\'s own voice engine.') : t('Nothing was heard. Hold Space (or press the mic) and speak.'), true);
   };
   try { startOn(recognition, stream); } catch { release(); browserSpeech = 'no'; return false; }
   if (browserSpeech === 'try') browserSpeech = 'yes';
@@ -227,14 +228,14 @@ async function finishMic(ctx) {
   // The browser's recognition puts the words in the box itself when it ends.
   if (recording.browser) { recording.stop(); return; }
   listening = null; recording.stop(); micButton()?.classList.remove('rec');
-  if (!recording.heard) { ctx.toast('Nothing was heard. Hold Space (or press the mic) and speak.', true); return; }
+  if (!recording.heard) { ctx.toast(t('Nothing was heard. Hold Space (or press the mic) and speak.'), true); return; }
   transcribing = true; micButton()?.classList.add('busy');
-  const slow = setTimeout(() => ctx.toast('Loading the voice model. The first time after a restart takes a minute or two.'), 4000);
+  const slow = setTimeout(() => ctx.toast(t('Loading the voice model. The first time after a restart takes a minute or two.')), 4000);
   try {
     const heard = await transcribe(recording.wav(), voiceLanguage(ctx)), box = document.getElementById('draft');
     if (box) { ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(ctx.draftKey()); box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + heard.text; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); box.dispatchEvent(new Event('input', { bubbles: true })); }
   } catch (error) {
-    ctx.toast(/not installed|install/i.test(error.message) ? 'Voice is not installed yet. Install it in Settings → Jev and voice.' : `Voice input: ${error.message}`, true);
+    ctx.toast(/not installed|install/i.test(error.message) ? t('Voice is not installed yet. Install it in Settings → Jev and voice.') : t`Voice input: ${error.message}`, true);
   } finally { clearTimeout(slow); transcribing = false; micButton()?.classList.remove('busy'); }
 }
 async function toggleMic(ctx) {
@@ -243,7 +244,7 @@ async function toggleMic(ctx) {
   if (await browserDictate(ctx)) return;
   void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
   let stream;
-  try { stream = await openMicrophone(); } catch { ctx.toast('Rex Desk could not use the microphone. Allow it, then press the mic again.', true); return; }
+  try { stream = await openMicrophone(); } catch { ctx.toast(t('Rex Desk could not use the microphone. Allow it, then press the mic again.'), true); return; }
   listening = startRecorder(stream, { onQuiet: () => void finishMic(ctx) });
   micButton()?.classList.add('rec');
 }
@@ -312,11 +313,11 @@ export async function voiceTurn(ctx, { onState = () => {} } = {}) {
   if (browserSpeech !== 'no') {
     const started = await browserTurn(ctx, onState);
     if (started === 'started') return true;
-    if (started === 'blocked') { ctx.toast('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.', true); return false; }
+    if (started === 'blocked') { ctx.toast(t('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.'), true); return false; }
   }
   void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
   let stream;
-  try { stream = await openMicrophone(); } catch { ctx.toast('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.', true); return false; }
+  try { stream = await openMicrophone(); } catch { ctx.toast(t('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.'), true); return false; }
   onState('listening');
   const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => hearLevel(Math.min(1, level * 6)), longest: 90000, pause: 1800 });
   listening = recording; micButton()?.classList.add('rec');
@@ -326,7 +327,7 @@ export async function voiceTurn(ctx, { onState = () => {} } = {}) {
     if (!recording.heard) { onState('idle'); return; }
     transcribing = true; onState('thinking');
     try { const heard = await transcribe(recording.wav(), voiceLanguage(ctx)); await sendSpoken(ctx, String(heard.text || '').trim()); }
-    catch (error) { ctx.toast(/no voice engine|not installed|install/i.test(error.message) ? 'Voice mode needs a way to turn speech into words here: add an OpenRouter key (or install the voice model) in Settings → Jev and voice.' : `Voice mode: ${error.message}`, true); }
+    catch (error) { ctx.toast(/no voice engine|not installed|install/i.test(error.message) ? t('Voice mode needs a way to turn speech into words here: add an OpenRouter key (or install the voice model) in Settings → Jev and voice.') : t`Voice mode: ${error.message}`, true); }
     finally { transcribing = false; onState('idle'); }
   }
   return true;
@@ -352,7 +353,7 @@ async function startHold(ctx) {
   }
   void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
   let stream;
-  try { stream = await openMicrophone(); } catch { hold.active = hold.pending = false; ctx.toast('Rex Desk could not use the microphone. Allow it, then try again.', true); return; }
+  try { stream = await openMicrophone(); } catch { hold.active = hold.pending = false; ctx.toast(t('Rex Desk could not use the microphone. Allow it, then try again.'), true); return; }
   // While Space is held, quiet does not end the recording; only letting go does (or a minute at most).
   const recording = startRecorder(stream, { onQuiet: () => { if (performance.now() - recording.started > 60000) void finishMic(ctx); } });
   listening = recording; hold.pending = false;
@@ -408,18 +409,18 @@ export function initComposer(ctx) {
     if (!button) { if (ctx.ui.menu && !event.target.closest('.box2')) closeMenu(ctx); return; }
     if (button.dataset.action === 'mic') return toggleMic(ctx);
     const items = [
-      { name: 'Attach a file or image', plain: true, hint: '', run: () => document.getElementById('file-input').click() },
-      { name: 'Start a room', plain: true, run: ctx.commands.room }, { name: 'Create an agent', plain: true, run: ctx.commands.agent }, { name: 'Scan for projects', plain: true, run: ctx.commands.projects }, { name: 'Voice engine and language', plain: true, run: () => voiceDialog(ctx) },
+      { name: t('Attach a file or image'), plain: true, hint: '', run: () => document.getElementById('file-input').click() },
+      { name: t('Start a room'), plain: true, run: ctx.commands.room }, { name: t('Create an agent'), plain: true, run: ctx.commands.agent }, { name: t('Scan for projects'), plain: true, run: ctx.commands.projects }, { name: t('Voice engine and language'), plain: true, run: () => voiceDialog(ctx) },
     ];
     ctx.ui.menu = { kind: 'slash', items, index: 0, from: 0 }; drawMenu(ctx);
   });
   document.addEventListener('change', event => {
     if (event.target.id === 'file-input') { for (const file of event.target.files) void upload(ctx, file); event.target.value = ''; return; }
     // Switching the AI shows that AI's models and modes; the next message goes to it, with the chat so far handed over.
-    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(`Your next message goes to ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : event.target.value === LOCAL ? 'Local AI, on this computer' : 'Claude Code'}.`); return; }
+    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(t`Your next message goes to ${event.target.value === 'codex' ? t('Codex') : event.target.value === 'gemini' ? t('Gemini') : event.target.value === LOCAL ? t('Local AI, on this computer') : t('Claude Code')}.`); return; }
     if (event.target.id === 'opt-model') remember({ model: event.target.value });
     if (event.target.id === 'opt-effort') remember({ effort: event.target.value });
-    if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast('Dangerous: the agent runs tools without asking.'); }
+    if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast(t('Dangerous: the agent runs tools without asking.')); }
   });
   document.addEventListener('keydown', event => {
     if (event.target.id !== 'draft') return;
@@ -450,7 +451,7 @@ export function initComposer(ctx) {
   document.addEventListener('dragover', event => {
     if (!carriesFiles(event)) return;
     event.preventDefault();
-    const where = event.target.closest?.('.fw') ? 'Open in the file window' : field(event.target) && event.target.id !== 'draft' ? 'Put its path here' : document.getElementById('draft') ? 'Attach to your message' : '';
+    const where = event.target.closest?.('.fw') ? t('Open in the file window') : field(event.target) && event.target.id !== 'draft' ? t('Put its path here') : document.getElementById('draft') ? t('Attach to your message') : '';
     document.body.classList.toggle('dropping-files', Boolean(where)); document.body.dataset.dropHint = where;
     clearTimeout(hide); hide = setTimeout(() => document.body.classList.remove('dropping-files'), 300);
   });
@@ -469,7 +470,7 @@ export function initComposer(ctx) {
       } catch (error) { ctx.toast(error.message, true); }
       return;
     }
-    if (!document.getElementById('draft')) { ctx.toast('Open a chat to attach files.', true); return; }
+    if (!document.getElementById('draft')) { ctx.toast(t('Open a chat to attach files.'), true); return; }
     for (const file of files) void upload(ctx, file);
     document.getElementById('draft')?.focus();
   });
@@ -477,8 +478,8 @@ export function initComposer(ctx) {
 export const redrawAttachments = drawChips;
 
 // ---------- voice engine: which speech-to-text understands the person best ----------
-const ENGINE = { local: ['On this computer', 'Private and free. Weak on Khmer.'], gemini: ['Gemini (online)', 'Uses your OpenRouter key. Good with Khmer.'], elevenlabs: ['ElevenLabs Scribe (online)', 'Its own key. Strong across languages.'] };
-const LANG = [['km', 'Khmer'], ['en', 'English'], ['ko', 'Korean']];
+const ENGINE = { local: [t('On this computer'), t('Private and free. Weak on Khmer.')], gemini: [t('Gemini (online)'), t('Uses your OpenRouter key. Good with Khmer.')], elevenlabs: [t('ElevenLabs Scribe (online)'), t('Its own key. Strong across languages.')] };
+const LANG = [['km', t('Khmer')], ['en', t('English')], ['ko', t('Korean')]];
 async function voiceDialog(ctx) {
   const { api, toast, esc } = ctx;
   document.querySelector('.dialog-back.voice')?.remove();
@@ -489,9 +490,9 @@ async function voiceDialog(ctx) {
   // On-computer voice installs right here: one download (about 1.9 GB), with its progress.
   const localHint = () => {
     const local = info.local || {};
-    if (local.supported === false) return 'Not available on this computer.';
-    if (local.installing) { const p = local.progress; return `Downloading${p ? ` ${p.index} of ${p.total}${p.sizeMB ? `: ${Math.round(p.receivedMB)} of ${Math.round(p.sizeMB)} MB` : ''}` : ''}… You can keep working.`; }
-    return `${local.error ? `Install failed: ${esc(local.error)}. ` : 'Not installed yet. '}<button type="button" class="btn small" data-v-install>Install (${local.downloadMB || 1900} MB download)</button>`;
+    if (local.supported === false) return t('Not available on this computer.');
+    if (local.installing) { const p = local.progress; return !p ? t`Downloading… You can keep working.` : p.sizeMB ? t`Downloading ${p.index} of ${p.total}: ${Math.round(p.receivedMB)} of ${Math.round(p.sizeMB)} MB… You can keep working.` : t`Downloading ${p.index} of ${p.total}… You can keep working.`; }
+    return `${local.error ? t`Install failed: ${esc(local.error)}. ` : t('Not installed yet. ')}<button type="button" class="btn small" data-v-install>${t`Install (${local.downloadMB || 1900} MB download)`}</button>`;
   };
   let watching = null;
   const watchInstall = () => {
@@ -499,25 +500,25 @@ async function voiceDialog(ctx) {
     watching = setInterval(async () => {
       if (!back.isConnected) { clearInterval(watching); watching = null; return; }
       try { info = await api('/voice/engines'); } catch { return; }
-      if (!info.local?.installing) { clearInterval(watching); watching = null; if (info.available.local) toast('Voice on this computer is installed.'); }
+      if (!info.local?.installing) { clearInterval(watching); watching = null; if (info.available.local) toast(t('Voice on this computer is installed.')); }
       draw();
     }, 2000);
   };
   if (info.local?.installing) watchInstall();
   const draw = () => {
     const language = voiceLanguage(ctx);
-    back.innerHTML = `<form class="dialog vdialog"><h2>Voice</h2>
-      <label>I speak<select data-v-language>${LANG.map(([value, label]) => `<option value="${value}" ${value === language ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
-      <fieldset class="vengines"><legend>Turn speech into text with</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] ? hint : key === 'local' ? localHint() : key === 'gemini' ? 'Needs your OpenRouter key: Settings → Jev and voice.' : 'Paste a key below to use it.'}</small></span></label>`).join('')}</fieldset>
-      <label>ElevenLabs API key<span class="vkey"><input type="password" data-v-key autocomplete="off" spellcheck="false" placeholder="${info.available.elevenlabs ? 'Saved. Paste a new key to replace it.' : 'From elevenlabs.io → Profile → API keys'}"><button type="button" class="btn small" data-v-savekey>Save key</button>${info.available.elevenlabs ? '<button type="button" class="btn small quiet danger" data-v-dropkey>Remove</button>' : ''}</span></label>
-      <section class="vcompare"><h3>Which one understands you?</h3><p class="muted small">Press Record, say one sentence, then Stop. It goes through every engine that is ready, so you can pick the best. Online engines receive this recording.</p>
-        <button type="button" class="btn ${recording ? 'danger' : 'primary'}" data-v-record ${busy ? 'disabled' : ''}>${recording ? 'Stop' : busy ? 'Comparing…' : 'Record a sentence'}</button>
-        ${results ? `<ol class="vresults">${results.map(item => `<li><div><b>${esc(ENGINE[item.engine]?.[0] || item.engine)}</b><small>${(item.ms / 1000).toFixed(1)} s${item.model ? ` · ${esc(item.model)}` : ''}</small></div><p class="${item.error ? 'bad' : ''}">${esc(item.error || item.text || '(nothing heard)')}</p>${item.error ? '' : `<button type="button" class="btn small" data-v-use="${esc(item.engine)}">Use this one</button>`}</li>`).join('')}</ol>` : ''}
+    back.innerHTML = `<form class="dialog vdialog"><h2>${t`Voice`}</h2>
+      <label>${t`I speak`}<select data-v-language>${LANG.map(([value, label]) => `<option value="${value}" ${value === language ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      <fieldset class="vengines"><legend>${t`Turn speech into text with`}</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] ? hint : key === 'local' ? localHint() : key === 'gemini' ? t('Needs your OpenRouter key: Settings → Jev and voice.') : t('Paste a key below to use it.')}</small></span></label>`).join('')}</fieldset>
+      <label>${t`ElevenLabs API key`}<span class="vkey"><input type="password" data-v-key autocomplete="off" spellcheck="false" placeholder="${info.available.elevenlabs ? t('Saved. Paste a new key to replace it.') : t('From elevenlabs.io → Profile → API keys')}"><button type="button" class="btn small" data-v-savekey>${t`Save key`}</button>${info.available.elevenlabs ? `<button type="button" class="btn small quiet danger" data-v-dropkey>${t`Remove`}</button>` : ''}</span></label>
+      <section class="vcompare"><h3>${t`Which one understands you?`}</h3><p class="muted small">${t`Press Record, say one sentence, then Stop. It goes through every engine that is ready, so you can pick the best. Online engines receive this recording.`}</p>
+        <button type="button" class="btn ${recording ? 'danger' : 'primary'}" data-v-record ${busy ? 'disabled' : ''}>${recording ? t('Stop') : busy ? t('Comparing…') : t('Record a sentence')}</button>
+        ${results ? `<ol class="vresults">${results.map(item => `<li><div><b>${esc(ENGINE[item.engine]?.[0] || item.engine)}</b><small>${(item.ms / 1000).toFixed(1)} s${item.model ? ` · ${esc(item.model)}` : ''}</small></div><p class="${item.error ? 'bad' : ''}">${esc(item.error || item.text || '(nothing heard)')}</p>${item.error ? '' : `<button type="button" class="btn small" data-v-use="${esc(item.engine)}">${t`Use this one`}</button>`}</li>`).join('')}</ol>` : ''}
       </section>
-      <div class="row"><button type="button" class="btn" data-v-close>Done</button></div></form>`;
+      <div class="row"><button type="button" class="btn" data-v-close>${t`Done`}</button></div></form>`;
   };
   draw();
-  const choose = async engine => { try { info = { ...info, engine: (await api('/voice/engine', { method: 'POST', data: { engine } })).engine }; toast(`Voice now uses ${ENGINE[engine][0]}.`); draw(); } catch (error) { toast(error.message, true); draw(); } };
+  const choose = async engine => { try { info = { ...info, engine: (await api('/voice/engine', { method: 'POST', data: { engine } })).engine }; toast(t`Voice now uses ${ENGINE[engine][0]}.`); draw(); } catch (error) { toast(error.message, true); draw(); } };
   back.addEventListener('change', event => {
     if (event.target.matches('[data-v-language]')) { setLanguage(event.target.value); results = null; draw(); }
     if (event.target.name === 'engine') void choose(event.target.value);
@@ -529,14 +530,14 @@ async function voiceDialog(ctx) {
     if (target.closest('[data-v-install]')) { event.preventDefault(); try { info = { ...info, local: await api('/voice/install', { method: 'POST', data: {} }) }; draw(); watchInstall(); } catch (error) { toast(error.message, true); } return; }
     if (target.closest('[data-v-savekey]') || target.closest('[data-v-dropkey]')) {
       const key = target.closest('[data-v-dropkey]') ? '' : back.querySelector('[data-v-key]').value.trim();
-      if (!key && !target.closest('[data-v-dropkey]')) return toast('Paste the key first.', true);
-      try { await api('/voice/key', { method: 'POST', data: { key } }); info = await api('/voice/engines'); toast(key ? 'ElevenLabs key saved.' : 'ElevenLabs key removed.'); draw(); } catch (error) { toast(error.message, true); }
+      if (!key && !target.closest('[data-v-dropkey]')) return toast(t('Paste the key first.'), true);
+      try { await api('/voice/key', { method: 'POST', data: { key } }); info = await api('/voice/engines'); toast(key ? t('ElevenLabs key saved.') : t('ElevenLabs key removed.')); draw(); } catch (error) { toast(error.message, true); }
       return;
     }
     if (!target.closest('[data-v-record]')) return;
     if (recording) {
       const done = recording; recording = null; done.stop(); busy = true; draw();
-      if (!done.heard) { busy = false; toast('Nothing was heard. Try again a little closer to the microphone.', true); draw(); return; }
+      if (!done.heard) { busy = false; toast(t('Nothing was heard. Try again a little closer to the microphone.'), true); draw(); return; }
       try {
         const response = await fetch(`/api/voice/compare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'Content-Type': 'audio/wav', 'x-rex-desk': '1' }, body: done.wav() });
         const body = await response.json(); if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
@@ -545,6 +546,6 @@ async function voiceDialog(ctx) {
       busy = false; draw(); return;
     }
     try { recording = startRecorder(await openMicrophone(), { onQuiet: () => {} }); results = null; draw(); }
-    catch { toast('Rex Desk could not use the microphone.', true); }
+    catch { toast(t('Rex Desk could not use the microphone.'), true); }
   });
 }

@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Feature tours inside Settings, with Driver.js (MIT, served from node_modules): each step dims the page, circles one
 // real control and explains it in a small card, while Rex's own voice reads the Khmer line. "Show me" on a section runs
 // that section's tour; "Take the tour" runs every section in turn.
@@ -35,12 +36,12 @@ export async function runSettingsTour(goSection, { section, all = false } = {}) 
     const tour = driver({
       steps: steps.map((step, number) => ({ element: step.element, popover: { description: `<p class="rt-km" lang="km">${esc(step.km)}</p><p class="rt-en">${esc(step.en)}</p>`, side: step.element === nav ? 'right' : 'bottom', align: step.element === nav ? 'center' : 'start' }, voice: step.id })),
       popoverClass: 'rex-tour', overlayColor: '#05070c', overlayOpacity: 0.6, stagePadding: 6, stageRadius: 12, smoothScroll: true, allowClose: true,
-      showProgress: true, progressText: all ? `Part ${index + 1} of ${sections.length} · {{current}}/{{total}}` : '{{current}} of {{total}}',
-      nextBtnText: 'Next', prevBtnText: 'Back', doneBtnText: all && !last ? 'Next feature' : 'Done',
+      showProgress: true, progressText: all ? t`Part ${index + 1} of ${sections.length} · {{current}}/{{total}}` : '{{current}} of {{total}}',
+      nextBtnText: t('Next'), prevBtnText: t('Back'), doneBtnText: all && !last ? t('Next feature') : t('Done'),
       onHighlighted: (element, step) => play(step.voice),
       onPopoverRender: popover => {
         const sound = document.createElement('button'); sound.type = 'button'; sound.className = 'rt-sound';
-        const label = () => { sound.textContent = muted() ? 'Voice off' : 'Voice on'; sound.setAttribute('aria-pressed', String(!muted())); };
+        const label = () => { sound.textContent = muted() ? t('Voice off') : t('Voice on'); sound.setAttribute('aria-pressed', String(!muted())); };
         label(); sound.addEventListener('click', () => { try { localStorage.setItem(MUTE, muted() ? '0' : '1'); } catch { /* private window */ } label(); if (muted()) stop(); else play(tour.getActiveStep()?.voice); });
         popover.footerButtons.prepend(sound);
       },

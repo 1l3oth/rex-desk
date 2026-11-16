@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // The file window: any file opens here in a tab, from a path in a chat, a file an agent shows, or the Files list.
 // Code and text open in an editor (CodeMirror 5, served from the installed package) with save and Prettier; Markdown, HTML
 // and CSV also have a preview; pictures, videos, sound, PDFs, Excel and Word files have a viewer. The window can shrink to
@@ -30,7 +31,7 @@ function load(src) {
   if (loaded.has(src)) return loaded.get(src);
   const done = new Promise((resolve, reject) => {
     if (src.endsWith('.css')) { const link = Object.assign(document.createElement('link'), { rel: 'stylesheet', href: src }); link.onload = resolve; link.onerror = reject; document.head.append(link); return; }
-    const script = Object.assign(document.createElement('script'), { src, async: false }); script.onload = resolve; script.onerror = () => reject(new Error(`Could not load ${src}`)); document.head.append(script);
+    const script = Object.assign(document.createElement('script'), { src, async: false }); script.onload = resolve; script.onerror = () => reject(new Error(t`Could not load ${src}`)); document.head.append(script);
   });
   loaded.set(src, done); return done;
 }
@@ -68,7 +69,7 @@ function show(index) {
 }
 function closeTab(index) {
   const tab = state.tabs[index]; if (!tab) return;
-  if (dirty(tab) && !confirm(`${tab.name} has changes that are not saved. Close it anyway?`)) return;
+  if (dirty(tab) && !confirm(t`${tab.name} has changes that are not saved. Close it anyway?`)) return;
   editors.get(tab.path)?.wrap.remove(); editors.delete(tab.path);
   state.tabs.splice(index, 1);
   // The two panes keep pointing at the same tabs; closing the tab of one pane closes that pane.
@@ -88,9 +89,9 @@ async function save(tab, force = false) {
   const text = editor.getValue();
   try {
     const result = await api('/files/save', { method: 'POST', data: { path: tab.path, text, mtime: tab.mtime, force } });
-    tab.saved = text; tab.text = text; tab.mtime = result.mtime; toast(`Saved ${tab.name}.`); drawChrome(); if (tab.view === 'preview') drawBody();
+    tab.saved = text; tab.text = text; tab.mtime = result.mtime; toast(t`Saved ${tab.name}.`); drawChrome(); if (tab.view === 'preview') drawBody();
   } catch (error) {
-    if (/changed this file after you opened it/.test(error.message)) { if (confirm(`${tab.name} changed on disk after you opened it. Save your version over it?`)) return save(tab, true); return; }
+    if (/changed this file after you opened it/.test(error.message)) { if (confirm(t`${tab.name} changed on disk after you opened it. Save your version over it?`)) return save(tab, true); return; }
     toast(error.message, true);
   }
 }
@@ -98,14 +99,14 @@ async function format(tab) {
   const { api, toast } = state.ctx, editor = editors.get(tab.path)?.cm; if (!editor) return;
   try {
     const { text } = await api('/files/format', { method: 'POST', data: { path: tab.path, text: editor.getValue() } });
-    if (text === editor.getValue()) return toast('Already formatted.');
+    if (text === editor.getValue()) return toast(t('Already formatted.'));
     const cursor = editor.getCursor(), top = editor.getScrollInfo().top;
     editor.operation(() => { editor.setValue(text); editor.setCursor(cursor); editor.scrollTo(null, top); });
-    toast('Formatted with Prettier. Save to keep it.'); drawChrome();
+    toast(t('Formatted with Prettier. Save to keep it.')); drawChrome();
   } catch (error) { toast(error.message.split('\n')[0], true); }
 }
 async function reload(tab) {
-  if (dirty(tab) && !confirm(`Throw away your changes to ${tab.name} and load it from disk?`)) return;
+  if (dirty(tab) && !confirm(t`Throw away your changes to ${tab.name} and load it from disk?`)) return;
   const info = await state.ctx.api(`/files/open?path=${encodeURIComponent(tab.path)}`);
   Object.assign(tab, info, { saved: info.text }); const editor = editors.get(tab.path)?.cm; if (editor) editor.setValue(info.text ?? '');
   draw();
@@ -117,8 +118,8 @@ const size = bytes => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : 
 const ICON = { image: 'IMG', video: 'VID', audio: 'AUD', pdf: 'PDF', sheet: 'XLS', doc: 'DOC', markdown: 'MD', html: 'HTML', csv: 'CSV', binary: 'BIN' };
 function shell() {
   let box = document.querySelector('.fw'); if (box) return box;
-  box = document.createElement('section'); box.className = 'fw'; box.setAttribute('aria-label', 'Files');
-  box.innerHTML = '<div class="fw-head"><div class="fw-tabs" role="tablist"></div><div class="fw-wins"><button type="button" class="fw-ic fw-away" data-fw="dodge" title="Move out of the way while I type in the chat (on or off)" aria-label="Move out of the way while I type"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2 5h9M8 2l3 3-3 3M14 11H5M8 8l-3 3 3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button type="button" class="fw-ic" data-fw="popout" title="Open in its own window" aria-label="Open in its own window">&#10697;</button><button type="button" class="fw-ic" data-fw="big" title="Bigger or smaller (window)" aria-label="Bigger or smaller"></button><button type="button" class="fw-ic" data-fw="hide" title="Hide (your tabs stay)" aria-label="Hide the file window">&#8211;</button><button type="button" class="fw-ic" data-fw="close-all" title="Close all files" aria-label="Close all files">&#215;</button></div></div><div class="fw-bar"></div><div class="fw-body"></div>';
+  box = document.createElement('section'); box.className = 'fw'; box.setAttribute('aria-label', t('Files'));
+  box.innerHTML = `<div class="fw-head"><div class="fw-tabs" role="tablist"></div><div class="fw-wins"><button type="button" class="fw-ic fw-away" data-fw="dodge" title="${t`Move out of the way while I type in the chat (on or off)`}" aria-label="${t`Move out of the way while I type`}"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2 5h9M8 2l3 3-3 3M14 11H5M8 8l-3 3 3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button type="button" class="fw-ic" data-fw="popout" title="${t`Open in its own window`}" aria-label="${t`Open in its own window`}">&#10697;</button><button type="button" class="fw-ic" data-fw="big" title="${t`Bigger or smaller (window)`}" aria-label="${t`Bigger or smaller`}"></button><button type="button" class="fw-ic" data-fw="hide" title="${t`Hide (your tabs stay)`}" aria-label="${t`Hide the file window`}">&#8211;</button><button type="button" class="fw-ic" data-fw="close-all" title="${t`Close all files`}" aria-label="${t`Close all files`}">&#215;</button></div></div><div class="fw-bar"></div><div class="fw-body"></div>`;
   box.insertAdjacentHTML('beforeend', ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map(edge => `<div class="fw-rs fw-rs-${edge}" data-edge="${edge}" aria-hidden="true"></div>`).join(''));
   document.body.append(box);
   box.addEventListener('click', onClick);
@@ -269,7 +270,7 @@ function pill() {
   if (!state.tabs.length || state.shown) { button?.remove(); return; }
   if (!button) { button = document.createElement('button'); button.type = 'button'; button.className = 'fw-pill'; button.dataset.fw = 'show'; button.addEventListener('click', onClick); document.body.append(button); }
   const unsaved = state.tabs.filter(dirty).length;
-  button.innerHTML = `<span class="fw-pill-ic" aria-hidden="true">&lt;/&gt;</span>Files<span class="fw-pill-n">${state.tabs.length}</span>${unsaved ? `<span class="fw-dot" title="${unsaved} not saved"></span>` : ''}`;
+  button.innerHTML = `<span class="fw-pill-ic" aria-hidden="true">&lt;/&gt;</span>${t`Files`}<span class="fw-pill-n">${state.tabs.length}</span>${unsaved ? `<span class="fw-dot" title="${t`${unsaved} not saved`}"></span>` : ''}`;
   button.title = state.tabs.map(tab => tab.name).join(', ');
 }
 function draw() {
@@ -283,19 +284,19 @@ function drawChrome() {
   box.classList.toggle('big', state.big);
   box.querySelector('[data-fw="big"]').innerHTML = state.big ? '&#10697;' : '&#9634;';
   const away = box.querySelector('[data-fw="dodge"]'); if (away) { away.classList.toggle('on', dodgeOn()); away.setAttribute('aria-pressed', String(dodgeOn())); }
-  box.querySelector('.fw-tabs').innerHTML = state.tabs.map((item, index) => `<div class="fw-tab ${index === state.active ? 'on' : ''} ${index === state.second ? 'twin' : ''}" role="tab" aria-selected="${index === state.active}"><button type="button" class="fw-tab-name" draggable="true" data-fw="tab" data-index="${index}" title="${esc(item.path)}">${ICON[item.kind] ? `<span class="fw-k">${ICON[item.kind]}</span>` : ''}${esc(item.name.replace(/^[0-9]{10,}-/, ""))}${dirty(item) ? '<span class="fw-dot" aria-label="not saved"></span>' : ''}</button><button type="button" class="fw-tab-x" data-fw="tab-close" data-index="${index}" aria-label="Close ${esc(item.name)}">&#215;</button></div>`).join('');
-  const views = PREVIEW.has(tab.kind) && tab.editable ? `<div class="pseg fw-views"><button type="button" class="tab ${tab.view === 'code' ? 'on' : ''}" data-fw="view" data-view="code">Code</button><button type="button" class="tab ${tab.view === 'preview' ? 'on' : ''}" data-fw="view" data-view="preview">Preview</button>${tab.kind !== 'csv' ? `<button type="button" class="tab ${tab.view === 'split' ? 'on' : ''}" data-fw="view" data-view="split">Both</button>` : ''}</div>` : '';
-  box.querySelector('.fw-bar').innerHTML = `<button type="button" class="fw-path" data-fw="copy" title="Copy the path">${esc(tab.path)}</button><span class="muted small">${size(tab.size)}</span><span class="spacer"></span>${views}
-    ${state.tabs.length > 1 ? `<button type="button" class="btn small quiet" data-fw="${state.second >= 0 ? 'unsplit' : 'split'}" title="${state.second >= 0 ? 'Back to one file' : 'Two files side by side (or drag a tab to the right)'}">${state.second >= 0 ? 'One pane' : 'Split'}</button>` : ''}
-    ${tab.editable && tab.formattable ? '<button type="button" class="btn small" data-fw="format" title="Format with Prettier (Shift+Alt+F)">Format</button>' : ''}
-    ${tab.editable ? `<button type="button" class="btn small ${dirty(tab) ? 'primary' : ''}" data-fw="save" title="Save (Ctrl+S)">${dirty(tab) ? 'Save' : 'Saved'}</button>` : ''}
-    <details class="fw-more"><summary class="btn small" aria-label="More">&#8943;</summary><div class="fw-menu"><button type="button" data-fw="reload">Load again from disk</button><button type="button" data-fw="app">Open in its program</button><button type="button" data-fw="folder">Show in folder</button><a href="${raw(tab, '&download=1')}" download>Download</a></div></details>`;
+  box.querySelector('.fw-tabs').innerHTML = state.tabs.map((item, index) => `<div class="fw-tab ${index === state.active ? 'on' : ''} ${index === state.second ? 'twin' : ''}" role="tab" aria-selected="${index === state.active}"><button type="button" class="fw-tab-name" draggable="true" data-fw="tab" data-index="${index}" title="${esc(item.path)}">${ICON[item.kind] ? `<span class="fw-k">${ICON[item.kind]}</span>` : ''}${esc(item.name.replace(/^[0-9]{10,}-/, ""))}${dirty(item) ? `<span class="fw-dot" aria-label="${t`not saved`}"></span>` : ''}</button><button type="button" class="fw-tab-x" data-fw="tab-close" data-index="${index}" aria-label="${t`Close ${esc(item.name)}`}">&#215;</button></div>`).join('');
+  const views = PREVIEW.has(tab.kind) && tab.editable ? `<div class="pseg fw-views"><button type="button" class="tab ${tab.view === 'code' ? 'on' : ''}" data-fw="view" data-view="code">${t`Code`}</button><button type="button" class="tab ${tab.view === 'preview' ? 'on' : ''}" data-fw="view" data-view="preview">${t`Preview`}</button>${tab.kind !== 'csv' ? `<button type="button" class="tab ${tab.view === 'split' ? 'on' : ''}" data-fw="view" data-view="split">${t`Both`}</button>` : ''}</div>` : '';
+  box.querySelector('.fw-bar').innerHTML = `<button type="button" class="fw-path" data-fw="copy" title="${t`Copy the path`}">${esc(tab.path)}</button><span class="muted small">${size(tab.size)}</span><span class="spacer"></span>${views}
+    ${state.tabs.length > 1 ? `<button type="button" class="btn small quiet" data-fw="${state.second >= 0 ? 'unsplit' : 'split'}" title="${state.second >= 0 ? t('Back to one file') : t('Two files side by side (or drag a tab to the right)')}">${state.second >= 0 ? t('One pane') : t('Split')}</button>` : ''}
+    ${tab.editable && tab.formattable ? `<button type="button" class="btn small" data-fw="format" title="${t`Format with Prettier (Shift+Alt+F)`}">${t`Format`}</button>` : ''}
+    ${tab.editable ? `<button type="button" class="btn small ${dirty(tab) ? 'primary' : ''}" data-fw="save" title="${t`Save (Ctrl+S)`}">${dirty(tab) ? t('Save') : t('Saved')}</button>` : ''}
+    <details class="fw-more"><summary class="btn small" aria-label="${t`More`}">&#8943;</summary><div class="fw-menu"><button type="button" data-fw="reload">${t`Load again from disk`}</button><button type="button" data-fw="app">${t`Open in its program`}</button><button type="button" data-fw="folder">${t`Show in folder`}</button><a href="${raw(tab, '&download=1')}" download>${t`Download`}</a></div></details>`;
 }
 // The body has one pane, or two side by side. Each pane shows one tab: its editor, its preview, or its viewer.
 function panesOf(body) {
   let panes = [...body.querySelectorAll(':scope > .fw-pane')];
   if (panes.length < 2) {
-    body.innerHTML = '<div class="fw-pane" data-pane="0"></div><div class="fw-pane" data-pane="1"></div><div class="fw-drop" aria-hidden="true">Drop to open on the right</div>';
+    body.innerHTML = `<div class="fw-pane" data-pane="0"></div><div class="fw-pane" data-pane="1"></div><div class="fw-drop" aria-hidden="true">${t`Drop to open on the right`}</div>`;
     panes = [...body.querySelectorAll(':scope > .fw-pane')];
   }
   return panes;
@@ -336,14 +337,14 @@ function focusPane(event) {
 }
 function split(index) {
   if (index === undefined) index = state.tabs.findIndex((item, at) => at !== state.active);
-  if (index < 0 || index === state.active) { state.ctx.toast('Open another file first, then split.'); return; }
+  if (index < 0 || index === state.active) { state.ctx.toast(t('Open another file first, then split.')); return; }
   if (index === state.second) return;
   state.second = state.active; state.active = index; state.focusRight = true; remember(); draw();
 }
 function preview(tab) {
   const text = editors.get(tab.path)?.cm?.getValue() ?? tab.text ?? '';
   if (tab.kind === 'markdown') return `<div class="fw-md md">${markdown(text)}</div>`;
-  if (tab.kind === 'html') return `<iframe class="fw-frame" src="${tab.page ? `${tab.page}${tab.page.includes('?') ? '&' : '?'}v=${tab.mtime}` : raw(tab, `&v=${tab.mtime}`)}" title="Preview of ${esc(tab.name)}" sandbox="allow-scripts"></iframe>${dirty(tab) ? '<p class="fw-note">The preview shows the saved file. Save to see your changes.</p>' : ''}`;
+  if (tab.kind === 'html') return `<iframe class="fw-frame" src="${tab.page ? `${tab.page}${tab.page.includes('?') ? '&' : '?'}v=${tab.mtime}` : raw(tab, `&v=${tab.mtime}`)}" title="${t`Preview of ${esc(tab.name)}`}" sandbox="allow-scripts"></iframe>${dirty(tab) ? `<p class="fw-note">${t`The preview shows the saved file. Save to see your changes.`}</p>` : ''}`;
   if (tab.kind === 'csv') { const rows = text.split(/\r?\n/).filter(Boolean).slice(0, 1000).map(line => line.split(tab.ext === '.tsv' ? '\t' : /,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(cell => cell.replace(/^"|"$/g, '').replaceAll('""', '"'))); return table(rows); }
   return '';
 }
@@ -355,14 +356,14 @@ function viewer(tab) {
   if (tab.kind === 'audio') return `<div class="fw-media"><audio src="${src}" controls></audio></div>`;
   if (tab.kind === 'pdf') return `<iframe class="fw-frame" src="${src}" title="${esc(tab.name)}"></iframe>`;
   if (tab.kind === 'doc') return `<iframe class="fw-frame" src="/api/files/doc?path=${encodeURIComponent(tab.path)}&v=${tab.mtime}" title="${esc(tab.name)}" sandbox></iframe>`;
-  if (tab.kind === 'sheet') return '<div class="fw-sheet"><p class="muted">Reading the workbook…</p></div>';
-  return `<div class="fw-empty"><b>${esc(tab.name)}</b><p>${tab.kind === 'binary' ? 'This kind of file has no viewer here.' : 'This file is too big to edit here.'} Open it in its program, or download it.</p><div class="row"><button type="button" class="btn primary small" data-fw="app">Open in its program</button><a class="btn small" href="${raw(tab, '&download=1')}" download>Download</a></div></div>`;
+  if (tab.kind === 'sheet') return `<div class="fw-sheet"><p class="muted">${t`Reading the workbook…`}</p></div>`;
+  return `<div class="fw-empty"><b>${esc(tab.name)}</b><p>${t`${tab.kind === 'binary' ? t('This kind of file has no viewer here.') : t('This file is too big to edit here.')} Open it in its program, or download it.`}</p><div class="row"><button type="button" class="btn primary small" data-fw="app">${t`Open in its program`}</button><a class="btn small" href="${raw(tab, '&download=1')}" download>${t`Download`}</a></div></div>`;
 }
 async function drawSheet(tab, view) {
   try {
     tab.book ||= await state.ctx.api(`/files/sheet?path=${encodeURIComponent(tab.path)}`);
     const sheet = tab.book.sheets[tab.sheet || 0]; if (!view.isConnected) return;
-    view.innerHTML = `<div class="fw-sheet">${tab.book.sheets.length > 1 ? `<div class="fw-sheets">${tab.book.sheets.map((item, index) => `<button type="button" class="tab ${index === (tab.sheet || 0) ? 'on' : ''}" data-fw="sheet" data-index="${index}">${esc(item.name)}</button>`).join('')}</div>` : ''}${sheet.rows.length ? table(sheet.rows) : '<p class="muted">This sheet is empty.</p>'}${sheet.more ? '<p class="fw-note">Only the first 1000 rows and 60 columns show here. Open it in Excel for all of it.</p>' : ''}<p class="fw-note">Read only. Open it in its program to change it.</p></div>`;
+    view.innerHTML = `<div class="fw-sheet">${tab.book.sheets.length > 1 ? `<div class="fw-sheets">${tab.book.sheets.map((item, index) => `<button type="button" class="tab ${index === (tab.sheet || 0) ? 'on' : ''}" data-fw="sheet" data-index="${index}">${esc(item.name)}</button>`).join('')}</div>` : ''}${sheet.rows.length ? table(sheet.rows) : `<p class="muted">${t`This sheet is empty.`}</p>`}${sheet.more ? `<p class="fw-note">${t`Only the first 1000 rows and 60 columns show here. Open it in Excel for all of it.`}</p>` : ''}<p class="fw-note">${t`Read only. Open it in its program to change it.`}</p></div>`;
   } catch (error) { view.innerHTML = `<div class="fw-empty"><p>${esc(error.message)}</p></div>`; }
 }
 async function editorFor(tab, pane) {
@@ -371,7 +372,7 @@ async function editorFor(tab, pane) {
     const wrap = document.createElement('div'); wrap.className = 'fw-editor'; pane.prepend(wrap);
     item = { wrap, cm: null }; editors.set(tab.path, item);
     const mode = await codeMirror(extOf(tab.name)).catch(() => null);
-    if (!window.CodeMirror) { wrap.innerHTML = '<p class="fw-note">The editor did not load.</p>'; return; }
+    if (!window.CodeMirror) { wrap.innerHTML = `<p class="fw-note">${t`The editor did not load.`}</p>`; return; }
     item.cm = window.CodeMirror(wrap, { value: tab.text ?? '', mode, lineNumbers: true, matchBrackets: true, autoCloseBrackets: true, styleActiveLine: true, indentUnit: 2, tabSize: 2, lineWrapping: tab.kind === 'markdown',
       extraKeys: { 'Ctrl-S': () => save(tab), 'Cmd-S': () => save(tab), 'Shift-Alt-F': () => format(tab), 'Alt-G': 'jumpToLine' } });
     item.cm.on('change', () => { drawChrome(); pill(); if (tab.view === 'split') { const view = wrap.parentElement?.querySelector(':scope > .fw-view'); if (view && tab.kind === 'markdown') view.innerHTML = preview(tab); } });
@@ -399,12 +400,12 @@ async function onClick(event) {
     if (act === 'tab') { show(Number(target.dataset.index)); remember(); draw(); }
     else if (act === 'popout') {
       // The open files move to a window of their own; unsaved edits stay here until saved.
-      const unsaved = state.tabs.filter(dirty); if (unsaved.length) { toast(`Save ${unsaved.map(item => item.name).join(', ')} first, then open in its own window.`, true); return; }
+      const unsaved = state.tabs.filter(dirty); if (unsaved.length) { toast(t`Save ${unsaved.map(item => item.name).join(', ')} first, then open in its own window.`, true); return; }
       const paths = state.tabs.map(item => item.page || item.path), active = state.tabs[state.active]?.page || state.tabs[state.active]?.path || '';
       const page = `/files#${encodeURIComponent(JSON.stringify({ paths, active }))}`;
       const opened = window.open(page, `rexfiles-${Date.now()}`, 'popup,width=1200,height=820');
       // Where windows are blocked (an older desktop app, a strict browser), the page opens in the normal browser instead.
-      if (!opened) { try { await api('/open-page', { method: 'POST', data: { path: page } }); toast('Opened in your browser.'); } catch (error) { toast(error.message, true); return; } }
+      if (!opened) { try { await api('/open-page', { method: 'POST', data: { path: page } }); toast(t('Opened in your browser.')); } catch (error) { toast(error.message, true); return; } }
       for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.second = -1; state.shown = false; remember(); draw();
     }
     else if (act === 'split') split();
@@ -412,15 +413,15 @@ async function onClick(event) {
     else if (act === 'tab-close') closeTab(Number(target.dataset.index));
     else if (act === 'hide') { state.shown = false; remember(); draw(); }
     else if (act === 'show') { if (state.dodged) undodge(); else { state.shown = true; remember(); draw(); } }
-    else if (act === 'dodge') { try { localStorage.setItem('rex-desk-files-dodge', dodgeOn() ? 'off' : 'on'); } catch { /* private window */ } drawChrome(); state.ctx.toast(dodgeOn() ? 'The window moves out of the way while you type.' : 'The window stays where it is while you type.'); }
+    else if (act === 'dodge') { try { localStorage.setItem('rex-desk-files-dodge', dodgeOn() ? 'off' : 'on'); } catch { /* private window */ } drawChrome(); state.ctx.toast(dodgeOn() ? t('The window moves out of the way while you type.') : t('The window stays where it is while you type.')); }
     else if (act === 'big') { state.dodged = null; state.big = !state.big; place(); drawChrome(); editors.get(tab?.path)?.cm?.refresh(); }
-    else if (act === 'close-all') { const unsaved = state.tabs.filter(dirty); if (unsaved.length && !confirm(`${unsaved.map(item => item.name).join(', ')} not saved. Close all anyway?`)) return; if (state.standalone) { window.close(); return; } for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.shown = false; remember(); draw(); }
+    else if (act === 'close-all') { const unsaved = state.tabs.filter(dirty); if (unsaved.length && !confirm(t`${unsaved.map(item => item.name).join(', ')} not saved. Close all anyway?`)) return; if (state.standalone) { window.close(); return; } for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.shown = false; remember(); draw(); }
     else if (act === 'view') { tab.view = target.dataset.view; drawChrome(); drawBody(); }
     else if (act === 'sheet') { tab.sheet = Number(target.dataset.index); drawBody(); }
     else if (act === 'save') await save(tab);
     else if (act === 'format') await format(tab);
     else if (act === 'reload') { target.closest('details')?.removeAttribute('open'); await reload(tab); }
-    else if (act === 'copy') { await navigator.clipboard.writeText(tab.path); toast('Path copied.'); }
+    else if (act === 'copy') { await navigator.clipboard.writeText(tab.path); toast(t('Path copied.')); }
     else if (act === 'app' || act === 'folder') { target.closest('details')?.removeAttribute('open'); await api('/files/reveal', { method: 'POST', data: { path: tab.path, how: act === 'folder' ? 'folder' : 'app' } }); }
   } catch (error) { toast(error.message, true); }
 }
@@ -434,7 +435,7 @@ export async function standaloneFiles(ctx, { paths = [], active = '' } = {}) {
   window.addEventListener('beforeunload', event => { if (state.tabs.some(dirty)) { event.preventDefault(); event.returnValue = ''; } });
   for (const path of paths) await openFile(ctx, path, /^\/artifacts\//.test(path) ? { view: 'preview' } : {});
   const index = state.tabs.findIndex(tab => (tab.page || tab.path) === active); if (index >= 0) { show(index); draw(); }
-  const update = () => { document.title = state.tabs[state.active] ? `${state.tabs[state.active].name.replace(/^[0-9]{10,}-/, '')} · Rex Desk` : 'Files · Rex Desk'; };
+  const update = () => { document.title = state.tabs[state.active] ? t`${state.tabs[state.active].name.replace(/^[0-9]{10,}-/, '')} · Rex Desk` : t('Files · Rex Desk'); };
   update(); document.addEventListener('click', () => setTimeout(update), true);
 }
 export function wireFiles(ctx) {

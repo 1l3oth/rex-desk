@@ -30,7 +30,7 @@ test('every agent knows how to restart Rex Desk, how updates work, and every sec
   const { APP_GUIDE } = await import('../src/app-guard.js');
   const { readFileSync } = await import('node:fs');
   const settings = readFileSync(new URL('../public/chat-settings.js', import.meta.url), 'utf8');
-  const sections = [...settings.match(/const SECTIONS = \[([\s\S]*?)\];/)[1].matchAll(/\['[a-z]+', '([^']+)'/g)].map(match => match[1]);
+  const sections = [...settings.match(/const SECTIONS = \[([\s\S]*?)\];/)[1].matchAll(/\['[a-z]+', (?:t\()?'([^']+)'/g)].map(match => match[1]);
   assert.ok(sections.length >= 10);
   for (const name of sections) assert.ok(APP_GUIDE.includes(name), `the guide names the "${name}" section`);
   assert.match(APP_GUIDE, /Restart Rex Desk server/); assert.match(APP_GUIDE, /Update when it finishes/); assert.match(APP_GUIDE, /Check now/);

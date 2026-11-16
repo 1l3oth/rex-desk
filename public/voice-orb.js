@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Rex's body in Voice mode: a dark core full of slow stars, wrapped in rings of light that drift and bend around it.
 // It breathes when idle, leans in and follows your voice while listening, swirls while thinking, and flares with its own
 // voice while speaking. Drawn every frame on a canvas with additive light (no CSS filters), so it stays smooth.

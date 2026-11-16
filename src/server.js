@@ -1011,6 +1011,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (editorFile) return serveFile(request, response, path.join(root, 'node_modules', 'codemirror', ...editorFile[1].split('/')), { cache: 'public, max-age=604800' });
       // The Khmer themes' fonts (Kantumruy Pro and Moul, SIL Open Font License) ship in public/fonts.
       if (/^\/fonts\/[a-z0-9-]+\.woff2$/.test(url.pathname) && existsSync(path.join(root, 'public', url.pathname.slice(1)))) return serveFile(request, response, path.join(root, 'public', url.pathname.slice(1)), { cache: 'public, max-age=604800' });
+      // One file per language, { "English text": "Translation" } (see public/i18n.js). Always checked again, so a fix to a word shows at once.
+      if (/^\/i18n\/[a-z]{2,3}\.json$/.test(url.pathname) && existsSync(path.join(root, 'public', url.pathname.slice(1)))) return serveFile(request, response, path.join(root, 'public', url.pathname.slice(1)), { cache: 'no-cache' });
       // A page script or style added after this server started is served by its name too, so a server still waiting for
       // agents to finish before it restarts does not leave the page stuck on a missing file.
       // The Settings tours: their steps in public/guides, and the voice of each step in public/guides/voice.

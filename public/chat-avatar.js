@@ -1,10 +1,11 @@
+import { t } from './i18n.js';
 // Choosing an agent's avatar: one of the 128 pictures, or a picture of the person's own, shrunk to 128 x 128 here in the
 // browser so it stays small (it travels with the agent to the person's other computers).
 import { AVATARS, AVATAR_GROUPS, AVATAR_CREDIT } from '/avatars.js';
 import { agentPicture } from '/chat-rooms.js';
 
 const shrink = file => new Promise((resolve, reject) => {
-  if (!/^image\//.test(file.type)) return reject(new Error('Pick a picture file (PNG, JPEG, WebP or GIF).'));
+  if (!/^image\//.test(file.type)) return reject(new Error(t('Pick a picture file (PNG, JPEG, WebP or GIF).')));
   const image = new Image(), url = URL.createObjectURL(file);
   image.onload = () => {
     const size = 128, canvas = Object.assign(document.createElement('canvas'), { width: size, height: size }), context = canvas.getContext('2d');
@@ -14,7 +15,7 @@ const shrink = file => new Promise((resolve, reject) => {
     const webp = canvas.toDataURL('image/webp', 0.86);
     resolve(webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/png'));
   };
-  image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That picture could not be read.')); };
+  image.onerror = () => { URL.revokeObjectURL(url); reject(new Error(t('That picture could not be read.'))); };
   image.src = url;
 });
 
@@ -24,14 +25,14 @@ export function openAvatarPicker(ctx, agent) {
   const back = document.createElement('div'); back.className = 'dialog-back avatar-pick';
   const current = String(agent.avatar || '');
   back.innerHTML = `<div class="dialog ap-dialog" role="dialog" aria-modal="true" aria-labelledby="ap-title">
-    <div class="ap-head"><img class="ap-now" src="${esc(agentPicture(agent))}" alt=""><div><h2 id="ap-title">${esc(agent.name)}'s avatar</h2><p class="muted">Pick one, or use a picture of your own.</p></div>
-      <button type="button" class="icon-btn ap-close" data-ap-close aria-label="Close"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
-    <div class="ap-groups">${AVATAR_GROUPS.map(group => `<h3 class="ap-group">${esc(group.name)}</h3><div class="ap-grid" role="listbox" aria-label="${esc(group.name)}">${AVATARS.slice(group.from, group.to + 1).map((svg, offset) => [svg, group.from + offset]).map(([svg, index]) => `<button type="button" role="option" class="ap-item${current === `a:${index}` ? ' on' : ''}" aria-selected="${current === `a:${index}`}" data-ap-pick="a:${index}" aria-label="Avatar ${index + 1}"><img src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}" alt="" loading="lazy"></button>`).join('')}</div>`).join('')}</div>
-    <div class="ap-foot"><label class="btn"><input type="file" accept="image/*" data-ap-upload hidden>Upload a picture</label><span class="muted">Shrunk to 128 × 128 pixels.</span><small class="ap-credit">${esc(AVATAR_CREDIT)}</small></div></div>`;
+    <div class="ap-head"><img class="ap-now" src="${esc(agentPicture(agent))}" alt=""><div><h2 id="ap-title">${t`${esc(agent.name)}'s avatar`}</h2><p class="muted">${t`Pick one, or use a picture of your own.`}</p></div>
+      <button type="button" class="icon-btn ap-close" data-ap-close aria-label="${t`Close`}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="ap-groups">${AVATAR_GROUPS.map(group => `<h3 class="ap-group">${esc(group.name)}</h3><div class="ap-grid" role="listbox" aria-label="${esc(group.name)}">${AVATARS.slice(group.from, group.to + 1).map((svg, offset) => [svg, group.from + offset]).map(([svg, index]) => `<button type="button" role="option" class="ap-item${current === `a:${index}` ? ' on' : ''}" aria-selected="${current === `a:${index}`}" data-ap-pick="a:${index}" aria-label="${t`Avatar ${index + 1}`}"><img src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}" alt="" loading="lazy"></button>`).join('')}</div>`).join('')}</div>
+    <div class="ap-foot"><label class="btn"><input type="file" accept="image/*" data-ap-upload hidden>${t`Upload a picture`}</label><span class="muted">${t`Shrunk to 128 × 128 pixels.`}</span><small class="ap-credit">${esc(AVATAR_CREDIT)}</small></div></div>`;
   document.body.append(back);
   const close = () => back.remove();
   const save = async avatar => {
-    try { await api(`/specialists/${encodeURIComponent(agent.id)}`, { method: 'PUT', data: { avatar } }); close(); toast(`${agent.name} has a new avatar.`); await refresh(); }
+    try { await api(`/specialists/${encodeURIComponent(agent.id)}`, { method: 'PUT', data: { avatar } }); close(); toast(t`${agent.name} has a new avatar.`); await refresh(); }
     catch (error) { toast(error.message, true); }
   };
   back.addEventListener('click', event => {

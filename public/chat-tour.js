@@ -1,11 +1,12 @@
+import { t, languagePicker } from './i18n.js';
 import { loadTourAi, tourAiHtml, tourAiClick } from '/chat-tour-ai.js';
 import { SOCIAL } from '/social-icons.js';
 // Where Rex Desk keeps things (shown in Settings, Folders and in the setup tour), and the setup tour a new person gets.
 const ROWS = [
-  ['data', 'Rex Desk data', 'Chats, tasks, settings and saved keys.', 'restart'],
+  ['data', t('Rex Desk data'), t('Chats, tasks, settings and saved keys.'), 'restart'],
   // The AI memory stays in the home folder (~/.rexdesk): every account on this computer and every agent reads the same one.
-  ['memory', 'AI memory', 'What agents know about you and your projects. Every agent and every account on this computer reads it, so it stays in your home folder.', 'fixed'],
-  ['files', 'Files from agents', 'Screenshots, recordings and files you attach.', 'now'],
+  ['memory', t('AI memory'), t('What agents know about you and your projects. Every agent and every account on this computer reads it, so it stays in your home folder.'), 'fixed'],
+  ['files', t('Files from agents'), t('Screenshots, recordings and files you attach.'), 'now'],
 ];
 
 // One line icon per kind of folder (16px, 2px stroke, like the rest of the app).
@@ -23,14 +24,14 @@ export async function loadFolders({ api }, state) { state.folders = await api('/
 
 export function foldersHtml({ esc }, state) {
   const folders = state.folders;
-  if (!folders) return '<p class="muted">Finding your folders…</p>';
+  if (!folders) return `<p class="muted">${t`Finding your folders…`}</p>`;
   if (folders.error) return `<p class="error-text">${esc(folders.error)}</p>`;
   const pending = { data: folders.dataPending, memory: folders.memoryPending };
   return `<div class="st-folders">${ROWS.map(([kind, label, help, when]) => `<div class="st-folder"><span class="st-folder-icon st-folder-${kind}">${ICONS[kind]}</span><div class="st-folder-text"><b>${label}</b><small>${help}</small><span class="st-folder-path" title="${esc(folders[kind])}">${FOLDER}<code>${pathHtml(esc, folders[kind])}</code></span>
-      ${pending[kind] ? `<small class="st-folder-note">Moves to ${esc(pending[kind])} when Rex Desk restarts.</small>` : ''}
-      ${kind === 'data' && folders.dataFailed ? `<small class="error-text">The last move did not happen: ${esc(folders.dataFailed)}</small>` : ''}
-      ${kind === 'files' && folders.filesInData ? `<small class="st-folder-note">Kept with your Rex Desk data, so they are backed up with it.</small>` : ''}</div>
-    <div class="st-folder-actions"><button type="button" class="btn small quiet" data-fd-open="${kind}">Open</button>${when === 'fixed' ? '' : `<button type="button" class="btn small" data-fd-change="${kind}" data-fd-when="${when}" title="Copies everything to a folder you pick, then uses it. The old folder stays as a backup.">Move…</button>`}</div></div>`).join('')}</div>`;
+      ${pending[kind] ? `<small class="st-folder-note">${t`Moves to ${esc(pending[kind])} when Rex Desk restarts.`}</small>` : ''}
+      ${kind === 'data' && folders.dataFailed ? `<small class="error-text">${t`The last move did not happen: ${esc(folders.dataFailed)}`}</small>` : ''}
+      ${kind === 'files' && folders.filesInData ? `<small class="st-folder-note">${t`Kept with your Rex Desk data, so they are backed up with it.`}</small>` : ''}</div>
+    <div class="st-folder-actions"><button type="button" class="btn small quiet" data-fd-open="${kind}">${t`Open`}</button>${when === 'fixed' ? '' : `<button type="button" class="btn small" data-fd-change="${kind}" data-fd-when="${when}" title="${t`Copies everything to a folder you pick, then uses it. The old folder stays as a backup.`}">${t`Move…`}</button>`}</div></div>`).join('')}</div>`;
 }
 
 // Clicks on the folder rows. Returns true when it handled the click.
@@ -43,11 +44,11 @@ export async function folderClick(ctx, state, target, draw) {
   const kind = change.dataset.fdChange, label = ROWS.find(([id]) => id === kind)[1];
   const picked = await api('/folders/pick', { method: 'POST', data: {} }).catch(() => null);
   if (!picked?.path) return true;
-  if (kind === 'files') { state.folders = await api('/folders/files', { method: 'POST', data: { to: picked.path } }); toast(`${label} moved to ${state.folders.files}.`); draw(); return true; }
+  if (kind === 'files') { state.folders = await api('/folders/files', { method: 'POST', data: { to: picked.path } }); toast(t`${label} moved to ${state.folders.files}.`); draw(); return true; }
   const note = kind === 'memory' ? ' Agents start their next chat fresh, with a summary of the old one.' : '';
-  if (!confirm(`Move ${label.toLowerCase()} to ${picked.path}?\n\nRex Desk restarts, copies everything there, and opens again in a few seconds. The old folder stays as a backup you can delete later.${note}`)) return true;
+  if (!confirm(t`Move ${label.toLowerCase()} to ${picked.path}?\n\nRex Desk restarts, copies everything there, and opens again in a few seconds. The old folder stays as a backup you can delete later.${note}`)) return true;
   await api('/folders/move', { method: 'POST', data: { kind, to: picked.path, restart: true } });
-  document.body.insertAdjacentHTML('beforeend', '<div class="dialog-back tour-wait"><div class="tour-card"><h2>Moving your folder</h2><p>Rex Desk is restarting. This page opens again by itself.</p></div></div>');
+  document.body.insertAdjacentHTML('beforeend', `<div class="dialog-back tour-wait"><div class="tour-card"><h2>${t`Moving your folder`}</h2><p>${t`Rex Desk is restarting. This page opens again by itself.`}</p></div></div>`);
   // Wait for the old server to go away, then for the new one to answer.
   await new Promise(resolve => setTimeout(resolve, 3000));
   for (let i = 0; i < 120; i++) { try { if ((await fetch('/api/folders', { cache: 'no-store' })).status < 500) break; } catch { /* still restarting */ } await new Promise(resolve => setTimeout(resolve, 1000)); }
@@ -57,14 +58,14 @@ export async function folderClick(ctx, state, target, draw) {
 // The setup tour. It opens by itself for a new person (no project yet, never finished), and from Settings, General.
 const STEPS = ['welcome', 'about', 'ai', 'folders', 'project', 'done'];
 // The two welcome questions (both can be skipped): an age range, and where the person heard about Rex Desk.
-const AGES = ['Under 18', '18 to 24', '25 to 34', '35 to 44', '45 to 54', '55 or older', 'Prefer not to say'];
+const AGES = [t('Under 18'), '18 to 24', '25 to 34', '35 to 44', '45 to 54', '55 or older', t('Prefer not to say')];
 const HEARD = ['tiktok', 'youtube', 'facebook', 'instagram', 'x', 'linkedin', 'reddit', 'github', 'telegram', 'discord', 'threads', 'friend', 'search', 'other'];
 const OTHER_ICON = {
   friend: '<path d="M8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2 20a6 6 0 0 1 12 0M16.5 11a3 3 0 1 0 0-6M18 20a5 5 0 0 0-3-4.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-4.8-4.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   other: '<circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/>',
 };
-const HEARD_NAME = { friend: 'A friend or colleague', search: 'A search engine', other: 'Somewhere else' };
+const HEARD_NAME = { friend: t('A friend or colleague'), search: t('A search engine'), other: t('Somewhere else') };
 export function maybeStartTour(ctx) {
   const config = ctx.ui.snap?.config;
   if (!config || config.tourDismissed || (config.repositories || []).length || document.querySelector('.tour-back')) return;
@@ -85,27 +86,28 @@ export function startTour(ctx) {
     done: '<circle cx="60" cy="40" r="24" class="tp-fill"/><path d="M48 40l8 8 16-16" class="tp-check"/>',
   }[step]}</svg>`;
   const body = {
-    welcome: () => `<h2>Welcome to Rex Desk</h2><p>AI agents work on your projects here, and you chat with them like teammates. A few short steps get you ready.</p>
-      <label class="st-field"><span>What should agents call you?</span><input data-tour-name value="${esc(ui.snap.config?.name || '')}" maxlength="60"></label>`,
+    welcome: () => `<h2>${t`Welcome to Rex Desk`}</h2><p>${t`AI agents work on your projects here, and you chat with them like teammates. A few short steps get you ready.`}</p>
+      <div class="tour-lang">${languagePicker(t('Language'))}</div>
+      <label class="st-field"><span>${t`What should agents call you?`}</span><input data-tour-name value="${esc(ui.snap.config?.name || '')}" maxlength="60"></label>`,
     about: () => {
       const icon = id => { const brand = SOCIAL[id]; return `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">${brand ? brand.svg || `<path d="${brand.path}" fill="${brand.color}"/>` : OTHER_ICON[id]}</svg>`; };
-      return `<h2>A little about you</h2><p>Two quick questions so we can make Rex Desk better for people like you. Skip them if you like.</p>
-      <fieldset class="tour-q"><legend>Your age</legend><div class="tour-chips">${AGES.map(age => `<label class="tour-chip"><input type="radio" name="tour-age" value="${esc(age)}" ${state.survey.age === age ? 'checked' : ''}><span>${esc(age)}</span></label>`).join('')}</div></fieldset>
-      <fieldset class="tour-q"><legend>Where did you hear about Rex Desk? Pick any that apply.</legend><div class="tour-chips tour-heard">${HEARD.map(id => `<label class="tour-chip"><input type="checkbox" name="tour-heard" value="${id}" ${state.survey.heard.includes(id) ? 'checked' : ''}>${icon(id)}<span>${esc(SOCIAL[id]?.name || HEARD_NAME[id])}</span></label>`).join('')}</div>
-      <input class="tour-other" data-tour-other maxlength="120" placeholder="Where? (optional)" value="${esc(state.survey.other)}" ${state.survey.heard.includes('other') ? '' : 'hidden'} aria-label="Where you heard about Rex Desk"></fieldset>`;
+      return `<h2>${t`A little about you`}</h2><p>${t`Two quick questions so we can make Rex Desk better for people like you. Skip them if you like.`}</p>
+      <fieldset class="tour-q"><legend>${t`Your age`}</legend><div class="tour-chips">${AGES.map(age => `<label class="tour-chip"><input type="radio" name="tour-age" value="${esc(age)}" ${state.survey.age === age ? 'checked' : ''}><span>${esc(age)}</span></label>`).join('')}</div></fieldset>
+      <fieldset class="tour-q"><legend>${t`Where did you hear about Rex Desk? Pick any that apply.`}</legend><div class="tour-chips tour-heard">${HEARD.map(id => `<label class="tour-chip"><input type="checkbox" name="tour-heard" value="${id}" ${state.survey.heard.includes(id) ? 'checked' : ''}>${icon(id)}<span>${esc(SOCIAL[id]?.name || HEARD_NAME[id])}</span></label>`).join('')}</div>
+      <input class="tour-other" data-tour-other maxlength="120" placeholder="${t`Where? (optional)`}" value="${esc(state.survey.other)}" ${state.survey.heard.includes('other') ? '' : 'hidden'} aria-label="${t`Where you heard about Rex Desk`}"></fieldset>`;
     },
     ai: () => tourAiHtml(ctx, state),
-    folders: () => `<h2>Where things are kept</h2><p>These are good places to start. You can change any of them now, or later in Settings, Folders.</p>${foldersHtml(ctx, state)}`,
-    project: () => `<h2>Add your first project</h2><p>Pick the folder of some code you work on, or type owner/name to bring it from GitHub. Rex Desk never changes your own copy: agents work in their own.</p>
-      <div class="st-add"><input data-tour-repo placeholder="A folder, or owner/name on GitHub" spellcheck="false" aria-label="Project folder or GitHub project"><button type="button" class="btn small" data-tour-browse>Browse…</button><button type="button" class="btn small primary" data-tour-add>Add</button></div>
-      ${(ui.snap.config?.repositories || []).length ? `<p class="tour-ok">Added: ${ui.snap.config.repositories.map(repo => `<b>${esc(repo.name)}</b>`).join(', ')}</p>` : '<p class="muted">You can skip this and ask Rex Agent to add one later.</p>'}`,
-    done: () => `<h2>You are ready</h2><p>Talk to <b>Rex Agent</b> first. Tell it what you work on, and it sets up an agent for each project.</p><p class="muted">Phone and other computers: Settings, Devices and phone. This tour is in Settings, General.</p>`,
+    folders: () => `<h2>${t`Where things are kept`}</h2><p>${t`These are good places to start. You can change any of them now, or later in Settings, Folders.`}</p>${foldersHtml(ctx, state)}`,
+    project: () => `<h2>${t`Add your first project`}</h2><p>${t`Pick the folder of some code you work on, or type owner/name to bring it from GitHub. Rex Desk never changes your own copy: agents work in their own.`}</p>
+      <div class="st-add"><input data-tour-repo placeholder="${t`A folder, or owner/name on GitHub`}" spellcheck="false" aria-label="${t`Project folder or GitHub project`}"><button type="button" class="btn small" data-tour-browse>${t`Browse…`}</button><button type="button" class="btn small primary" data-tour-add>${t`Add`}</button></div>
+      ${(ui.snap.config?.repositories || []).length ? `<p class="tour-ok">Added: ${ui.snap.config.repositories.map(repo => `<b>${esc(repo.name)}</b>`).join(', ')}</p>` : `<p class="muted">${t`You can skip this and ask Rex Agent to add one later.`}</p>`}`,
+    done: () => `<h2>${t`You are ready`}</h2><p>${t`Talk to ${`<b>${t`Rex Agent`}</b>`} first. Tell it what you work on, and it sets up an agent for each project.`}</p><p class="muted">${t`Phone and other computers: Settings, Devices and phone. This tour is in Settings, General.`}</p>`,
   };
   const draw = () => {
     const step = STEPS[state.step];
-    back.innerHTML = `<div class="tour-card" role="dialog" aria-modal="true" aria-label="Set up Rex Desk"><div class="tour-dots">${STEPS.map((id, index) => `<span class="${index === state.step ? 'on' : index < state.step ? 'done' : ''}"></span>`).join('')}</div>
+    back.innerHTML = `<div class="tour-card" role="dialog" aria-modal="true" aria-label="${t`Set up Rex Desk`}"><div class="tour-dots">${STEPS.map((id, index) => `<span class="${index === state.step ? 'on' : index < state.step ? 'done' : ''}"></span>`).join('')}</div>
       ${picture(step)}<div class="tour-body">${body[step]()}</div>
-      <div class="tour-foot">${state.step && step !== 'done' ? '<button type="button" class="btn quiet" data-tour-back>Back</button>' : '<button type="button" class="btn quiet" data-tour-skip>Skip the tour</button>'}<span class="spacer"></span><button type="button" class="btn primary" data-tour-next>${step === 'done' ? 'Start' : step === 'project' && !(ui.snap.config?.repositories || []).length ? 'Skip for now' : 'Next'}</button></div></div>`;
+      <div class="tour-foot">${state.step && step !== 'done' ? `<button type="button" class="btn quiet" data-tour-back>${t`Back`}</button>` : `<button type="button" class="btn quiet" data-tour-skip>${t`Skip the tour`}</button>`}<span class="spacer"></span><button type="button" class="btn primary" data-tour-next>${step === 'done' ? t('Start') : step === 'project' && !(ui.snap.config?.repositories || []).length ? t('Skip for now') : t('Next')}</button></div></div>`;
   };
   const finish = async () => { back.remove(); try { ui.snap.config = await api('/config', { method: 'PUT', data: { ...ui.snap.config, tourDismissed: true } }); } catch (error) { toast(error.message, true); } void refresh(); };
   const saveName = async () => {
@@ -137,13 +139,13 @@ export function startTour(ctx) {
       if (target.closest('[data-tour-browse]')) { const picked = await api('/repositories/pick', { method: 'POST', data: {} }).catch(() => null); if (picked?.path) back.querySelector('[data-tour-repo]').value = picked.path; return; }
       if (target.closest('[data-tour-add]')) {
         const button = target.closest('[data-tour-add]'); let folder = back.querySelector('[data-tour-repo]').value.trim();
-        if (!folder) { toast('Type or browse to a project folder first.', true); return; }
-        button.disabled = true; button.textContent = 'Adding…';
+        if (!folder) { toast(t('Type or browse to a project folder first.'), true); return; }
+        button.disabled = true; button.textContent = t('Adding…');
         try {
           if ((!/[\\:]/.test(folder) && /^[\w.-]+\/[\w.-]+$/.test(folder)) || /^https:\/\/github\.com\//.test(folder)) folder = (await api('/repositories/clone', { method: 'POST', data: { repository: folder } })).path;
           const found = await api('/repositories/inspect', { method: 'POST', data: { path: folder } }), config = ui.snap.config;
           if (!config.repositories.some(repo => repo.path.toLowerCase() === found.path.toLowerCase())) ui.snap.config = await api('/config', { method: 'PUT', data: { ...config, repositories: [...config.repositories, { name: found.name, path: found.path, baseBranch: found.preferredBranch || 'develop', targetBranch: found.preferredBranch || 'develop' }] } });
-          toast(`Added ${found.name}.`);
+          toast(t`Added ${found.name}.`);
         } finally { draw(); }
       }
     } catch (error) { toast(error.message, true); }

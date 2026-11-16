@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 import { updateDeferred } from '/chat-update.js';
 import { windowBar, windowShell } from '/win-bar.js';
 // The glass controls: a slider that changes how see-through Rex Desk is while you drag it, and buttons (and Ctrl+B,
@@ -25,11 +26,11 @@ setPane('side', read('rex-side-off', '') === '1', false);
 
 function openSlider(anchor) {
   document.querySelector('.glass-pop')?.remove();
-  const pop = document.createElement('div'); pop.className = 'glass-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Glass');
-  pop.innerHTML = `<h3>Glass <output>${level()}%</output></h3><p>How see-through Rex Desk is.</p>
-    <input type="range" min="0" max="100" step="1" value="${level()}" aria-label="Transparency">
-    <div class="glass-ends"><span>Solid</span><span>Clear</span></div>
-    <div class="glass-row"><button type="button" data-glass="0">Solid</button><button type="button" data-glass="${DEFAULT}">Default</button><button type="button" data-glass="100">Clear</button></div>`;
+  const pop = document.createElement('div'); pop.className = 'glass-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', t('Glass'));
+  pop.innerHTML = `<h3>${t`Glass`} <output>${level()}%</output></h3><p>${t`How see-through Rex Desk is.`}</p>
+    <input type="range" min="0" max="100" step="1" value="${level()}" aria-label="${t`Transparency`}">
+    <div class="glass-ends"><span>${t`Solid`}</span><span>${t`Clear`}</span></div>
+    <div class="glass-row"><button type="button" data-glass="0">${t`Solid`}</button><button type="button" data-glass="${DEFAULT}">${t`Default`}</button><button type="button" data-glass="100">${t`Clear`}</button></div>`;
   document.body.append(pop);
   const box = anchor.getBoundingClientRect(), width = 264;
   pop.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, box.left))}px`;
@@ -69,8 +70,8 @@ function syncBar() {
   const working = (snap.specialists || []).filter(agent => ['busy', 'replying'].includes(agent.status?.state)).length + ((snap.runs || []).some(run => run.role === 'coordinator' && run.main && ['starting', 'running', 'queued', 'verifying'].includes(run.state)) ? 1 : 0);
   // An update put off with Later waits here as a small button; pressing it opens the card again.
   const update = document.querySelector('.win-update'), deferred = updateDeferred(snap.update) && !document.getElementById('update-card') ? updateDeferred(snap.update) : '';
-  if (update) { update.hidden = !deferred; const title = deferred ? `Rex Desk ${deferred} is ${snap.update?.ready ? 'ready to install' : 'downloading'}` : ''; if (update.title !== title) update.title = title; }
-  const pill = document.querySelector('.win-working'); if (pill) { pill.hidden = !working; const text = `${working} working`; if (pill.lastElementChild.textContent !== text) pill.lastElementChild.textContent = text; }
+  if (update) { update.hidden = !deferred; const title = deferred ? t`Rex Desk ${deferred} is ${snap.update?.ready ? 'ready to install' : 'downloading'}` : ''; if (update.title !== title) update.title = title; }
+  const pill = document.querySelector('.win-working'); if (pill) { pill.hidden = !working; const text = t`${working} working`; if (pill.lastElementChild.textContent !== text) pill.lastElementChild.textContent = text; }
   const badge = document.querySelector('.win-bell b'), unread = snap.notices?.unread || 0; if (badge) { badge.hidden = !unread; const text = unread > 99 ? '99+' : String(unread); if (badge.textContent !== text) badge.textContent = text; }
 }
 function syncPanes() {
@@ -83,11 +84,11 @@ function syncPanes() {
 // The desktop app's own window bar (win-bar.js), with search, update, working and notifications in the middle.
 const shell = windowShell();
 if (shell === 'windows' || shell === 'macos') {
-  const mac = shell === 'macos', key = mac ? '⌘ K' : 'Ctrl K';
-  const middle = `<span class="win-fill"></span><button type="button" class="win-search" data-palette-open title="Search or jump to anything (${key})"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search or jump to a chat, agent or task</span><kbd>${key}</kbd></button><span class="win-fill"></span>
-    <button type="button" class="win-update" data-action="update-show" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span>Update</span></button>
-    <button type="button" class="win-working" data-open="main" data-id="" hidden title="Agents working right now"><i></i><span></span></button>
-    <button type="button" class="win-bell tile" data-action="nt-panel" aria-label="Notifications" title="Notifications"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><b hidden></b></button>`;
+  const mac = shell === 'macos', key = mac ? '⌘ K' : t('Ctrl K');
+  const middle = `<span class="win-fill"></span><button type="button" class="win-search" data-palette-open title="${t`Search or jump to anything (${key})`}"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>${t`Search or jump to a chat, agent or task`}</span><kbd>${key}</kbd></button><span class="win-fill"></span>
+    <button type="button" class="win-update" data-action="update-show" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span>${t`Update`}</span></button>
+    <button type="button" class="win-working" data-open="main" data-id="" hidden title="${t`Agents working right now`}"><i></i><span></span></button>
+    <button type="button" class="win-bell tile" data-action="nt-panel" aria-label="${t`Notifications`}" title="${t`Notifications`}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><b hidden></b></button>`;
   windowBar(middle);
 }
 
@@ -134,10 +135,10 @@ const tickWarm = () => {
     const left = Math.round((new Date(item.dataset.warm).getTime() - Date.now()) / 1000), sub = item.querySelector('.sub');
     if (!sub) continue;
     if (!sub.dataset.base) sub.dataset.base = sub.textContent.replace(/^Asleep · ?/, '');
-    if (left <= 0) { item.removeAttribute('data-warm'); sub.textContent = sub.dataset.base ? `Asleep · ${sub.dataset.base}` : 'Asleep'; item.title = 'Asleep: not running and using no memory. Its cache has gone cold, so the next message starts from scratch.'; continue; }
-    const text = `Warm ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    if (left <= 0) { item.removeAttribute('data-warm'); sub.textContent = sub.dataset.base ? t`Asleep · ${sub.dataset.base}` : t('Asleep'); item.title = t('Asleep: not running and using no memory. Its cache has gone cold, so the next message starts from scratch.'); continue; }
+    const text = t`Warm ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
     if (sub.textContent !== text) sub.textContent = text;
-    item.title = `Asleep, cache still warm for ${Math.ceil(left / 60)} min: a message now is quicker and cheaper.`;
+    item.title = t`Asleep, cache still warm for ${Math.ceil(left / 60)} min: a message now is quicker and cheaper.`;
     item.style.setProperty('--warm', String(Math.max(0, Math.min(1, left / Number(item.dataset.ttl || 300)))));
   }
 };

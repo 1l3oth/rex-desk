@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // The sidebar's lists of agents and group chats: the person's own order and pins (dragged, or Alt+Up/Down), saved with their
 // workspace so every computer shows the same. Agents are grouped by where they are: pinned, on this computer, on other
 // computers (dimmed, and the group folds away). A filter box finds an agent by name or project.
@@ -15,7 +16,7 @@ function arrange(items, saved = {}) {
 const rowHtml = (ctx, kind, item, inner, pinned, search = '') => {
   const { esc } = ctx;
   return `<div class="drag-row${pinned ? ' pinned' : ''}" draggable="true" data-drag-kind="${kind}" data-drag-id="${esc(item.id)}" data-search="${esc(search.toLowerCase())}">${inner}`
-    + `<button type="button" class="pin-btn${pinned ? ' on' : ''}" data-action="pin-toggle" data-kind="${kind}" data-id="${esc(item.id)}" title="${pinned ? 'Unpin' : 'Pin to the top'}" aria-label="${pinned ? `Unpin ${esc(item.name)}` : `Pin ${esc(item.name)} to the top`}" aria-pressed="${pinned}">${PIN}</button></div>`;
+    + `<button type="button" class="pin-btn${pinned ? ' on' : ''}" data-action="pin-toggle" data-kind="${kind}" data-id="${esc(item.id)}" title="${pinned ? t('Unpin') : t('Pin to the top')}" aria-label="${pinned ? t`Unpin ${esc(item.name)}` : t`Pin ${esc(item.name)} to the top`}" aria-pressed="${pinned}">${PIN}</button></div>`;
 };
 const subhead = (ctx, key, title, count, foldable) => {
   const shut = foldable && ctx.isCollapsed?.(key);
@@ -27,17 +28,17 @@ export function agentListHtml(ctx, agents, inner) {
   const search = agent => `${agent.name} ${agent.projectSlug || ''}`;
   const rows = (list, isPinned) => list.map(agent => rowHtml(ctx, 'agents', agent, inner(agent), isPinned, search(agent))).join('');
   const local = rest.filter(here), away = rest.filter(agent => !here(agent));
-  const filter = agents.length > 6 ? `<label class="rail-filter"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input type="search" data-rail-filter="agents" value="${esc(ui.agentFilter || '')}" placeholder="Filter agents or projects" aria-label="Filter agents or projects"></label>` : '';
+  const filter = agents.length > 6 ? `<label class="rail-filter"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input type="search" data-rail-filter="agents" value="${esc(ui.agentFilter || '')}" placeholder="${t`Filter agents or projects`}" aria-label="${t`Filter agents or projects`}"></label>` : '';
   return filter
-    + (pinned.length ? `${subhead(ctx, 'pinned-agents', 'Pinned', pinned.length, false)}<div class="drag-list" data-list="agents" data-pins="yes">${rows(pinned, true)}</div>` : '')
-    + (local.length ? `${subhead(ctx, 'agents-here', 'On this computer', local.length, away.length > 0 || pinned.length > 0)}${ctx.isCollapsed?.('agents-here') ? '' : `<div class="drag-list" data-list="agents">${rows(local, false)}</div>`}` : '')
-    + (away.length ? `${subhead(ctx, 'agents-away', 'On other computers', away.length, true)}${ctx.isCollapsed?.('agents-away') ? '' : `<div class="drag-list away" data-list="agents">${rows(away, false)}</div>`}` : '');
+    + (pinned.length ? `${subhead(ctx, 'pinned-agents', t('Pinned'), pinned.length, false)}<div class="drag-list" data-list="agents" data-pins="yes">${rows(pinned, true)}</div>` : '')
+    + (local.length ? `${subhead(ctx, 'agents-here', t('On this computer'), local.length, away.length > 0 || pinned.length > 0)}${ctx.isCollapsed?.('agents-here') ? '' : `<div class="drag-list" data-list="agents">${rows(local, false)}</div>`}` : '')
+    + (away.length ? `${subhead(ctx, 'agents-away', t('On other computers'), away.length, true)}${ctx.isCollapsed?.('agents-away') ? '' : `<div class="drag-list away" data-list="agents">${rows(away, false)}</div>`}` : '');
 }
 
 export function roomListHtml(ctx, rooms, inner) {
   const { ui } = ctx, { pinned, rest } = arrange(rooms, ui.snap.sidebar?.rooms || {});
   const rows = (list, isPinned) => list.map(room => rowHtml(ctx, 'rooms', room, inner(room), isPinned, room.name)).join('');
-  return (pinned.length ? `${subhead(ctx, 'pinned-rooms', 'Pinned', pinned.length, false)}<div class="drag-list" data-list="rooms" data-pins="yes">${rows(pinned, true)}</div>` : '')
+  return (pinned.length ? `${subhead(ctx, 'pinned-rooms', t('Pinned'), pinned.length, false)}<div class="drag-list" data-list="rooms" data-pins="yes">${rows(pinned, true)}</div>` : '')
     + `<div class="drag-list" data-list="rooms">${rows(rest, false)}</div>`;
 }
 

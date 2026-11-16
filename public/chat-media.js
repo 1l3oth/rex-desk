@@ -1,3 +1,4 @@
+import { t, locale } from './i18n.js';
 // What was shared in a chat, like a messenger's chat info: pictures and videos, files, and links, newest first.
 // Built from the messages themselves: files attached through the + button, pictures and links written in messages,
 // file paths an agent mentioned, and the evidence (screenshots, recordings) an agent saved during the run.
@@ -27,7 +28,7 @@ export function collectShared(entries, artifacts = []) {
     for (const match of (attached ? text.slice(0, attached.index) : text).matchAll(WINDOWS_PATH)) { const file = match[1]; add(files, `f:${file}`, { ...meta, name: baseName(file), path: file, url: isUpload(file) ? uploadUrl(file) : '' }); }
   }
   for (const artifact of artifacts) {
-    const url = `/artifacts/${artifact.runId}/${encodeURIComponent(artifact.file)}`, meta = { from: artifact.from || 'Agent', at: artifact.createdAt || '' };
+    const url = `/artifacts/${artifact.runId}/${encodeURIComponent(artifact.file)}`, meta = { from: artifact.from || t('Agent'), at: artifact.createdAt || '' };
     if (/^(image|video)\//.test(artifact.type || '') || IMAGE.test(artifact.file) || VIDEO.test(artifact.file)) add(media, `m:${url}`, { ...meta, name: artifact.file, url, video: /^video\//.test(artifact.type || '') || VIDEO.test(artifact.file) });
     else add(files, `f:${url}`, { ...meta, name: artifact.file, path: '', url });
   }
@@ -36,10 +37,10 @@ export function collectShared(entries, artifacts = []) {
 }
 
 export function sharedTabsHtml(ctx, shared, tab) {
-  const { esc, hhmm } = ctx, when = at => at ? `${new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric' })} ${hhmm(at)}` : '';
-  if (tab === 'media') return shared.media.length ? `<div class="sh-grid">${shared.media.map(item => `<a class="sh-thumb" href="${esc(item.url)}" data-file-open="${esc(item.path || item.url)}" title="${esc(item.name)} · ${esc(item.from)} · ${esc(when(item.at))}">${item.video ? `<span class="sh-video" aria-hidden="true">▶</span><span class="sh-cap">${esc(item.name)}</span>` : `<img src="${esc(item.url)}" alt="${esc(item.name)}" loading="lazy">`}</a>`).join('')}</div>` : '<p class="sh-empty">No pictures or videos yet. Attach one with + in the message box.</p>';
-  if (tab === 'files') return shared.files.length ? `<ul class="sh-list">${shared.files.map(item => `<li><span class="sh-icon" aria-hidden="true">${esc((item.name.split('.').pop() || 'file').slice(0, 4).toUpperCase())}</span><span class="sh-text"><b title="${esc(item.path || item.name)}">${esc(item.name)}</b><small>${esc(item.from)} · ${esc(when(item.at))}</small>${item.url ? '' : `<code title="${esc(item.path)}">${esc(item.path)}</code>`}</span><button type="button" class="btn small" data-file-open="${esc(item.path || item.url)}">Open</button></li>`).join('')}</ul>` : '<p class="sh-empty">No files yet.</p>';
-  return shared.links.length ? `<ul class="sh-list">${shared.links.map(item => `<li><span class="sh-icon link" aria-hidden="true"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M7 9a3 3 0 0 0 4.2 0l2-2a3 3 0 0 0-4.2-4.2l-.8.8M9 7a3 3 0 0 0-4.2 0l-2 2A3 3 0 0 0 7 13.2l.8-.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="sh-text"><a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer"><b>${esc(item.host)}</b></a><small>${esc(item.from)} · ${esc(when(item.at))}</small><code title="${esc(item.url)}">${esc(item.url)}</code></span></li>`).join('')}</ul>` : '<p class="sh-empty">No links yet.</p>';
+  const { esc, hhmm } = ctx, when = at => at ? `${new Date(at).toLocaleDateString(locale(), { month: 'short', day: 'numeric' })} ${hhmm(at)}` : '';
+  if (tab === 'media') return shared.media.length ? `<div class="sh-grid">${shared.media.map(item => `<a class="sh-thumb" href="${esc(item.url)}" data-file-open="${esc(item.path || item.url)}" title="${esc(item.name)} · ${esc(item.from)} · ${esc(when(item.at))}">${item.video ? `<span class="sh-video" aria-hidden="true">▶</span><span class="sh-cap">${esc(item.name)}</span>` : `<img src="${esc(item.url)}" alt="${esc(item.name)}" loading="lazy">`}</a>`).join('')}</div>` : `<p class="sh-empty">${t`No pictures or videos yet. Attach one with + in the message box.`}</p>`;
+  if (tab === 'files') return shared.files.length ? `<ul class="sh-list">${shared.files.map(item => `<li><span class="sh-icon" aria-hidden="true">${esc((item.name.split('.').pop() || 'file').slice(0, 4).toUpperCase())}</span><span class="sh-text"><b title="${esc(item.path || item.name)}">${esc(item.name)}</b><small>${esc(item.from)} · ${esc(when(item.at))}</small>${item.url ? '' : `<code title="${esc(item.path)}">${esc(item.path)}</code>`}</span><button type="button" class="btn small" data-file-open="${esc(item.path || item.url)}">${t`Open`}</button></li>`).join('')}</ul>` : `<p class="sh-empty">${t`No files yet.`}</p>`;
+  return shared.links.length ? `<ul class="sh-list">${shared.links.map(item => `<li><span class="sh-icon link" aria-hidden="true"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M7 9a3 3 0 0 0 4.2 0l2-2a3 3 0 0 0-4.2-4.2l-.8.8M9 7a3 3 0 0 0-4.2 0l-2 2A3 3 0 0 0 7 13.2l.8-.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="sh-text"><a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer"><b>${esc(item.host)}</b></a><small>${esc(item.from)} · ${esc(when(item.at))}</small><code title="${esc(item.url)}">${esc(item.url)}</code></span></li>`).join('')}</ul>` : `<p class="sh-empty">${t`No links yet.`}</p>`;
 }
 
 export const sharedCount = shared => ({ media: shared.media.length, files: shared.files.length, links: shared.links.length });

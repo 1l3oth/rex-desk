@@ -36,5 +36,8 @@
   },
   "bin": {
     "jev": "bin/jev.js"
+  },
+  "devDependencies": {
+    "acorn": "^8.19.0"
   }
 }

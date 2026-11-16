@@ -1,6 +1,7 @@
+import { t, locale } from './i18n.js';
 import { pickerHtml } from '/chat-pick.js';
 // Specialist agents: one identity per project. The card shows who the agent is and what it was told; the person can rename, edit or duplicate it.
-const providerName = name => name === 'codex' ? 'Codex' : name === 'gemini' ? 'Gemini (Antigravity)' : 'Claude Code';
+const providerName = name => name === 'codex' ? t('Codex') : name === 'gemini' ? t('Gemini (Antigravity)') : t('Claude Code');
 
 // Agents are grouped under their project; a project with several agents folds away. Folded groups are remembered on this computer.
 const FOLDED = 'rex-agent-groups-folded';
@@ -9,61 +10,61 @@ export function toggleGroup(project) { const set = folded(); if (set.has(project
 // The sidebar list: one group per project, with that project's agents under it. item(agent, grouped) draws one row.
 export function agentGroups(ctx, agents, item) {
   const { ui, esc } = ctx, groups = new Map();
-  for (const agent of agents) { const key = agent.projectSlug || 'For anything'; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(agent); }
+  for (const agent of agents) { const key = agent.projectSlug || t('For anything'); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(agent); }
   const shut = folded(), active = ui.view.type === 'specialist' ? agents.find(agent => agent.id === ui.view.id)?.projectSlug : '';
   if (groups.size === 1 && agents.length === 1) return item(agents[0], false);
   return [...groups].sort(([left], [right]) => left.localeCompare(right)).map(([project, list]) => {
     const open = !shut.has(project) || project === active, busy = list.filter(agent => ['busy', 'replying'].includes(agent.status?.state)).length, waiting = list.filter(agent => agent.status?.state === 'waiting').length;
-    return `<div class="agroup${open ? ' open' : ''}"><button class="agroup-head" data-action="agent-group" data-project="${esc(project)}" aria-expanded="${open}"><svg class="chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="agroup-name">${esc(project)}</span>${waiting ? `<span class="dot warn" title="${waiting} waiting for you"></span>` : busy ? `<span class="dot working" title="${busy} working"></span>` : ''}<span class="agroup-count">${list.length}</span></button>${open ? `<div class="agroup-list">${list.map(agent => item(agent, true)).join('')}</div>` : ''}</div>`;
+    return `<div class="agroup${open ? ' open' : ''}"><button class="agroup-head" data-action="agent-group" data-project="${esc(project)}" aria-expanded="${open}"><svg class="chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="agroup-name">${esc(project)}</span>${waiting ? `<span class="dot warn" title="${t`${waiting} waiting for you`}"></span>` : busy ? `<span class="dot working" title="${t`${busy} working`}"></span>` : ''}<span class="agroup-count">${list.length}</span></button>${open ? `<div class="agroup-list">${list.map(agent => item(agent, true)).join('')}</div>` : ''}</div>`;
   }).join('');
 }
 
 export function agentStage(ctx) {
   const { ui, esc } = ctx, agent = (ui.snap.specialists || []).find(item => item.id === ui.view.id);
-  if (!agent) return { title: 'Agent', meta: '', feed: '<div class="empty"><h2>That agent is gone.</h2></div>' };
+  if (!agent) return { title: t('Agent'), meta: '', feed: `<div class="empty"><h2>${t`That agent is gone.`}</h2></div>` };
   delete ui.picks['sp-model']; delete ui.picks['sp-provider'];
   const origin = agent.cloneOf ? (ui.snap.specialists || []).find(item => item.id === agent.cloneOf) : null;
   const state = agent.status?.state || 'idle', tone = { busy: 'working', replying: 'working', waiting: 'warn', idle: 'good' }[state] || '';
   const unsure = (agent.unsure || []).filter(Boolean), lessons = agent.lessons || [];
   const ai = ['codex', 'gemini'].includes(agent.provider) ? agent.provider : 'claude', aiChoices = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
-  const models = [{ value: '', label: 'Default', hint: 'The model set in Settings' }, ...(aiChoices.models || []).map(model => ({ value: model.id, label: model.label }))];
+  const models = [{ value: '', label: t('Default'), hint: t('The model set in Settings') }, ...(aiChoices.models || []).map(model => ({ value: model.id, label: model.label }))];
   const head = `<header class="ag-head">${ctx.avatar({ name: agent.name, size: 'xl' })}
     <div class="ag-who">
-      <form class="ag-name" data-agent-rename><input id="sp-name" type="text" maxlength="40" value="${esc(agent.name)}" aria-label="Agent name" spellcheck="false"><button class="btn small" type="submit" hidden>Rename</button></form>
-      <p class="ag-line"><span class="dot ${tone}"></span>${esc(agent.status?.label || 'Idle')}${agent.projectSlug ? ` on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>` : ' · not tied to a project'}${agent.device ? ` · works on <b>${esc(agent.device)}</b>${agent.remote ? '' : ' (this computer)'}` : ''}</p>
-      ${agent.projectPath || agent.projectSlug ? `<p class="ag-path" title="${esc(agent.projectPath)}">Main folder <code>${esc(agent.projectPath || 'not set')}</code></p>` : ''}
+      <form class="ag-name" data-agent-rename><input id="sp-name" type="text" maxlength="40" value="${esc(agent.name)}" aria-label="${t`Agent name`}" spellcheck="false"><button class="btn small" type="submit" hidden>${t`Rename`}</button></form>
+      <p class="ag-line"><span class="dot ${tone}"></span>${esc(agent.status?.label || t('Idle'))}${agent.projectSlug ? ` on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>` : t(' · not tied to a project')}${agent.device ? ` ${agent.remote ? t`· works on ${`<b>${esc(agent.device)}</b>`}` : t`· works on ${`<b>${esc(agent.device)}</b>`} (this computer)`}` : ''}</p>
+      ${agent.projectPath || agent.projectSlug ? `<p class="ag-path" title="${esc(agent.projectPath)}">${t`Main folder`} <code>${esc(agent.projectPath || t('not set'))}</code></p>` : ''}
     </div>
-    <div class="ag-actions"><button class="btn primary" data-action="spec-chat">Chat with ${esc(agent.name)}</button><button class="btn" data-action="spec-duplicate">Duplicate</button>${agent.remote && !agent.pinned ? '<button class="btn" data-action="spec-move" title="Make this agent work on this computer, with the same chat">Move to this computer</button>' : ''}</div>${agent.pinned ? `<p class="ag-help">Runs only on ${esc(agent.device || 'its computer')} (set in Settings, Projects).${agent.noCloud ? ' Kept out of the cloud.' : ''}</p>` : agent.noCloud ? '<p class="ag-help">Kept out of the cloud (set in Settings, Projects).</p>' : ''}
+    <div class="ag-actions"><button class="btn primary" data-action="spec-chat">${t`Chat with ${esc(agent.name)}`}</button><button class="btn" data-action="spec-duplicate">${t`Duplicate`}</button>${agent.remote && !agent.pinned ? `<button class="btn" data-action="spec-move" title="${t`Make this agent work on this computer, with the same chat`}">${t`Move to this computer`}</button>` : ''}</div>${agent.pinned ? `<p class="ag-help">${t`Runs only on ${esc(agent.device || t('its computer'))} (set in Settings, Projects).`}${agent.noCloud ? t` Kept out of the cloud.` : ''}</p>` : agent.noCloud ? `<p class="ag-help">${t`Kept out of the cloud (set in Settings, Projects).`}</p>` : ''}
   </header>`;
-  const questions = unsure.length ? `<section class="ag-ask"><h2>${esc(agent.name)} is not sure about</h2><ul>${unsure.map((text, index) => `<li><span>${esc(text)}</span><span class="ag-ask-do"><button class="btn small" data-action="spec-answer" data-index="${index}">Answer</button><button class="btn small quiet" data-action="spec-settled" data-index="${index}" title="Mark as settled" aria-label="Mark as settled">Settled</button></span></li>`).join('')}</ul></section>` : '';
-  const rules = `<section class="ag-sec"><h2>Rules from you</h2><p class="ag-help">${esc(agent.name)} follows these ${agent.projectSlug ? `on every task in ${esc(agent.projectSlug)}` : 'in everything it does'}.</p>
-    <textarea id="sp-rules" rows="${Math.min(16, Math.max(6, Math.ceil(String(agent.rules || '').length / 60) + String(agent.rules || '').split(/\n/).length))}" spellcheck="false" placeholder="How ${esc(agent.name)} should work here. For example: ask before changing the database.">${esc(agent.rules)}</textarea>
-    <div class="ag-save"><button class="btn primary" data-action="spec-save" disabled>Save rules</button></div></section>`;
-  const lessonList = lessons.length ? `<ul class="ag-lessons">${lessons.map((lesson, index) => `<li><span>${esc(lesson.text)}</span><button type="button" class="ag-x" data-action="spec-forget" data-index="${index}" title="Forget this lesson" aria-label="Forget this lesson"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>` : `<p class="ag-help">None yet. When you correct ${esc(agent.name)}, it keeps the lesson here.</p>`;
-  const chosen = new Set(agent.taskSources || []), options = [['local', 'Rex Desk tasks', 'Kept here, made by you or the agents'], ...(ui.snap.config?.sources || []).map(source => [source.id, source.name, source.type === 'flow' ? 'Flow tasks' : 'Morningmate tasks'])];
-  const taskSources = `<div class="ag-sources">${options.map(([id, label, hint]) => `<label><input type="checkbox" data-task-source="${esc(id)}" ${chosen.has(id) ? 'checked' : ''}><span>${esc(label)}<small>${esc(hint)}</small></span></label>`).join('')}</div>${chosen.size ? '' : `<p class="ag-help">Not set. ${esc(agent.name)} asks you before it looks for tasks.</p>`}`;
+  const questions = unsure.length ? `<section class="ag-ask"><h2>${t`${esc(agent.name)} is not sure about`}</h2><ul>${unsure.map((text, index) => `<li><span>${esc(text)}</span><span class="ag-ask-do"><button class="btn small" data-action="spec-answer" data-index="${index}">${t`Answer`}</button><button class="btn small quiet" data-action="spec-settled" data-index="${index}" title="${t`Mark as settled`}" aria-label="${t`Mark as settled`}">${t`Settled`}</button></span></li>`).join('')}</ul></section>` : '';
+  const rules = `<section class="ag-sec"><h2>${t`Rules from you`}</h2><p class="ag-help">${agent.projectSlug ? t`${esc(agent.name)} follows these on every task in ${esc(agent.projectSlug)}.` : t`${esc(agent.name)} follows these in everything it does.`}</p>
+    <textarea id="sp-rules" rows="${Math.min(16, Math.max(6, Math.ceil(String(agent.rules || '').length / 60) + String(agent.rules || '').split(/\n/).length))}" spellcheck="false" placeholder="${t`How ${esc(agent.name)} should work here. For example: ask before changing the database.`}">${esc(agent.rules)}</textarea>
+    <div class="ag-save"><button class="btn primary" data-action="spec-save" disabled>${t`Save rules`}</button></div></section>`;
+  const lessonList = lessons.length ? `<ul class="ag-lessons">${lessons.map((lesson, index) => `<li><span>${esc(lesson.text)}</span><button type="button" class="ag-x" data-action="spec-forget" data-index="${index}" title="${t`Forget this lesson`}" aria-label="${t`Forget this lesson`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>` : `<p class="ag-help">${t`None yet. When you correct ${esc(agent.name)}, it keeps the lesson here.`}</p>`;
+  const chosen = new Set(agent.taskSources || []), options = [['local', t('Rex Desk tasks'), t('Kept here, made by you or the agents')], ...(ui.snap.config?.sources || []).map(source => [source.id, source.name, source.type === 'flow' ? t('Flow tasks') : t('Morningmate tasks')])];
+  const taskSources = `<div class="ag-sources">${options.map(([id, label, hint]) => `<label><input type="checkbox" data-task-source="${esc(id)}" ${chosen.has(id) ? 'checked' : ''}><span>${esc(label)}<small>${esc(hint)}</small></span></label>`).join('')}</div>${chosen.size ? '' : `<p class="ag-help">${t`Not set. ${esc(agent.name)} asks you before it looks for tasks.`}</p>`}`;
   // The agent's own loop: how often it looks at its tasks by itself, and what it does on each look.
-  const loop = { on: true, every: 60, prompt: '', ...(agent.loop || {}) }, everyLabel = minutes => minutes >= 1440 ? 'Once a day' : minutes >= 60 ? `Every ${minutes / 60} hour${minutes === 60 ? '' : 's'}` : `Every ${minutes} minutes`;
+  const loop = { on: true, every: 60, prompt: '', ...(agent.loop || {}) }, everyLabel = minutes => minutes >= 1440 ? t('Once a day') : minutes >= 60 ? (minutes === 60 ? t`Every ${minutes / 60} hour` : t`Every ${minutes / 60} hours`) : t`Every ${minutes} minutes`;
   const STEP = { 15: '15m', 30: '30m', 60: '1h', 120: '2h', 240: '4h', 1440: '1 day' }, next = loop.on && loop.lastAt ? new Date(new Date(loop.lastAt).getTime() + Number(loop.every) * 60000) : null;
   const nextIn = next ? Math.max(0, Math.round((next.getTime() - Date.now()) / 60000)) : null;
-  const loopBox = `<section class="ag-sec ag-loop${loop.on ? ' on' : ''}"><div class="lp-head"><div><h2>Own loop</h2><p>${esc(agent.name)} checks its own tasks and starts work by itself.</p></div>
-      <label class="switch" title="${loop.on ? 'Turn the loop off' : 'Turn the loop on'}"><input type="checkbox" role="switch" data-loop-on ${loop.on ? 'checked' : ''} aria-label="Own loop"><span></span></label></div>
+  const loopBox = `<section class="ag-sec ag-loop${loop.on ? ' on' : ''}"><div class="lp-head"><div><h2>${t`Own loop`}</h2><p>${t`${esc(agent.name)} checks its own tasks and starts work by itself.`}</p></div>
+      <label class="switch" title="${loop.on ? t('Turn the loop off') : t('Turn the loop on')}"><input type="checkbox" role="switch" data-loop-on ${loop.on ? 'checked' : ''} aria-label="${t`Own loop`}"><span></span></label></div>
     <div class="lp-body">
-      <div class="lp-every" role="radiogroup" aria-label="How often">${[15, 30, 60, 120, 240, 1440].map(minutes => `<label title="${everyLabel(minutes)}"><input type="radio" name="loop-every-${esc(agent.id)}" value="${minutes}" data-loop-every ${Number(loop.every) === minutes ? 'checked' : ''}><span>${STEP[minutes]}</span></label>`).join('')}</div>
-      <textarea data-loop-prompt rows="3" maxlength="2000" placeholder="What to do on each check (optional). For example: pick up QA issues first and test them in the browser.">${esc(loop.prompt || '')}</textarea>
-      <div class="lp-foot"><span class="lp-status">${loop.on ? `<i class="lp-dot"></i>${nextIn === null ? 'First check soon' : nextIn <= 0 ? 'Checking soon' : `Next check in ${nextIn >= 60 ? `${Math.round(nextIn / 60)} h` : `${nextIn} min`}`}` : 'Off'}${loop.lastAt ? `<small>Last ${esc(new Date(loop.lastAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</small>` : ''}</span>
-        <button type="button" class="btn small lp-now" data-action="spec-loop-now"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>Check now</button></div>
-      <p class="ag-help">A check costs nothing when its tasks have not changed. It ${agent.projectSlug ? `follows the ${esc(agent.projectSlug)} workflow and ` : ''}asks you before anything risky.</p>
+      <div class="lp-every" role="radiogroup" aria-label="${t`How often`}">${[15, 30, 60, 120, 240, 1440].map(minutes => `<label title="${everyLabel(minutes)}"><input type="radio" name="loop-every-${esc(agent.id)}" value="${minutes}" data-loop-every ${Number(loop.every) === minutes ? 'checked' : ''}><span>${STEP[minutes]}</span></label>`).join('')}</div>
+      <textarea data-loop-prompt rows="3" maxlength="2000" placeholder="${t`What to do on each check (optional). For example: pick up QA issues first and test them in the browser.`}">${esc(loop.prompt || '')}</textarea>
+      <div class="lp-foot"><span class="lp-status">${loop.on ? `<i class="lp-dot"></i>${nextIn === null ? t('First check soon') : nextIn <= 0 ? t('Checking soon') : t`Next check in ${nextIn >= 60 ? `${Math.round(nextIn / 60)} h` : t`${nextIn} min`}`}` : t('Off')}${loop.lastAt ? `<small>${t`Last ${esc(new Date(loop.lastAt).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}`}</small>` : ''}</span>
+        <button type="button" class="btn small lp-now" data-action="spec-loop-now"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>${t`Check now`}</button></div>
+      <p class="ag-help">${agent.projectSlug ? t`A check costs nothing when its tasks have not changed. It follows the ${esc(agent.projectSlug)} workflow and asks you before anything risky.` : t`A check costs nothing when its tasks have not changed. It asks you before anything risky.`}</p>
     </div></section>`;
   const side = `<aside class="ag-side">
-    <section class="ag-sec"><h2>What ${esc(agent.projectSlug || agent.name)} is for</h2><p>${esc(agent.purpose || 'Not recorded yet.')}</p></section>
-    <section class="ag-sec"><h2>Lessons learned</h2>${lessonList}</section>
-    <section class="ag-sec"><h2>Tasks come from</h2>${taskSources}</section>
+    <section class="ag-sec"><h2>${t`What ${esc(agent.projectSlug || agent.name)} is for`}</h2><p>${esc(agent.purpose || t('Not recorded yet.'))}</p></section>
+    <section class="ag-sec"><h2>${t`Lessons learned`}</h2>${lessonList}</section>
+    <section class="ag-sec"><h2>${t`Tasks come from`}</h2>${taskSources}</section>
     ${loopBox}
-    <section class="ag-sec"><h2>AI</h2>${pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: [{ value: 'claude', label: 'Claude Code', hint: 'Your Claude plan' }, { value: 'codex', label: 'Codex', hint: 'Your ChatGPT plan' }, { value: 'gemini', label: 'Gemini', hint: 'Google account, through Antigravity' }] })}<p class="ag-help">Switching starts fresh; the new AI gets a summary of the chat so far.</p></section>
-    <section class="ag-sec"><h2>${ai === 'codex' ? 'Codex' : ai === 'gemini' ? 'Google (Antigravity)' : 'Claude'} account</h2>${pickerHtml(ctx, { id: 'sp-profile', label: 'Account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.[ai]?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}</section>
-    <section class="ag-sec"><h2>Model</h2>${pickerHtml(ctx, { id: 'sp-model', label: 'Model', value: agent.model || '', items: models })}</section>
-    <section class="ag-sec ag-meta"><p>Created by ${esc(agent.createdBy || 'you')}${origin ? `, copied from ${esc(origin.name)}` : ''}.</p><button class="btn small danger" data-action="spec-remove">Remove ${esc(agent.name)}</button></section>
+    <section class="ag-sec"><h2>AI</h2>${pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: [{ value: 'claude', label: t('Claude Code'), hint: t('Your Claude plan') }, { value: 'codex', label: t('Codex'), hint: t('Your ChatGPT plan') }, { value: 'gemini', label: t('Gemini'), hint: t('Google account, through Antigravity') }] })}<p class="ag-help">${t`Switching starts fresh; the new AI gets a summary of the chat so far.`}</p></section>
+    <section class="ag-sec"><h2>${t`${ai === 'codex' ? t('Codex') : ai === 'gemini' ? t('Google (Antigravity)') : t('Claude')} account`}</h2>${pickerHtml(ctx, { id: 'sp-profile', label: t('Account'), value: agent.profile || '', items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[ai]?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}</section>
+    <section class="ag-sec"><h2>${t`Model`}</h2>${pickerHtml(ctx, { id: 'sp-model', label: t('Model'), value: agent.model || '', items: models })}</section>
+    <section class="ag-sec ag-meta"><p>${t`Created by ${esc(agent.createdBy || t('you'))}${origin ? t`, copied from ${esc(origin.name)}` : ''}.`}</p><button class="btn small danger" data-action="spec-remove">${t`Remove ${esc(agent.name)}`}</button></section>
   </aside>`;
   const feed = `<div class="page ag" data-agent="${esc(agent.id)}">${head}${questions}<div class="ag-body"><div class="ag-main">${rules}</div>${side}</div></div>`;
   return { title: agent.name, meta: [providerName(agent.provider), agent.projectSlug].filter(Boolean).join(' · '), feed, top: true };
@@ -71,7 +72,7 @@ export function agentStage(ctx) {
 
 function dialog(ctx, { title, nameValue = '', projects = null, submit }) {
   const { esc, toast } = ctx, back = document.createElement('div'); back.className = 'dialog-back';
-  back.innerHTML = `<form class="dialog"><h2>${esc(title)}</h2><label>Name<input type="text" name="name" value="${esc(nameValue)}" maxlength="40" required></label>${projects ? `<label>Project${pickerHtml(ctx, { id: 'newagent-project', name: 'project', label: 'Project', searchable: projects.length > 6, value: (projects.find(project => project.selected) || projects[0] || {}).slug || '', items: projects.map(project => ({ value: project.slug, label: project.label || project.slug, ...(project.hint ? { hint: project.hint } : {}) })) })}</label><label>What is it for?<textarea name="purpose" rows="3" maxlength="400" placeholder="Like: helps me write posts for my shop. Needed when there is no project."></textarea></label>` : ''}<div class="row"><button class="btn primary">Create</button><button class="btn" type="button" data-close>Cancel</button></div></form>`;
+  back.innerHTML = `<form class="dialog"><h2>${esc(title)}</h2><label>${t`Name`}<input type="text" name="name" value="${esc(nameValue)}" maxlength="40" required></label>${projects ? `<label>${t('Project')}${pickerHtml(ctx, { id: 'newagent-project', name: 'project', label: t('Project'), searchable: projects.length > 6, value: (projects.find(project => project.selected) || projects[0] || {}).slug || '', items: projects.map(project => ({ value: project.slug, label: project.label || project.slug, ...(project.hint ? { hint: project.hint } : {}) })) })}</label><label>${t`What is it for?`}<textarea name="purpose" rows="3" maxlength="400" placeholder="${t`Like: helps me write posts for my shop. Needed when there is no project.`}"></textarea></label>` : ''}<div class="row"><button class="btn primary">${t`Create`}</button><button class="btn" type="button" data-close>${t`Cancel`}</button></div></form>`;
   document.body.append(back); back.querySelector('input').select();
   back.addEventListener('click', event => { if (event.target === back || event.target.dataset.close !== undefined) back.remove(); });
   back.querySelector('form').addEventListener('submit', async event => {
@@ -97,16 +98,16 @@ export const savedChatGone = (ctx, agent) => Boolean(agent?.runId) && !ctx.runBy
 export async function openAgentChat(ctx, agent) {
   const { ui, api, toast, refresh, open } = ctx;
   // An agent on a computer that is off: its chat lives there, so it opens when that computer is back.
-  if (agent.remote && agent.status?.state === 'offline' && !(agent.runId && ctx.runById(agent.runId))) { toast(`${agent.name} is offline: ${agent.device} is off. Its chat opens when it is back; messages in rooms wait for it.`); return; }
+  if (agent.remote && agent.status?.state === 'offline' && !(agent.runId && ctx.runById(agent.runId))) { toast(t`${agent.name} is offline: ${agent.device} is off. Its chat opens when it is back; messages in rooms wait for it.`); return; }
   let runId = agent.runId && ctx.runById(agent.runId) ? agent.runId : '';
   // An agent on another computer: its chat arrives from there. Starting one from here on every redraw sent it the same
   // greeting dozens of times, so its card opens instead, and what the person writes there starts the chat.
-  if (!runId && agent.remote) { open('specialist', agent.id); if (!introduced.has(agent.id)) { introduced.add(agent.id); toast(`${agent.name}'s chat is on ${agent.device || 'its computer'}. It shows here once that computer shares it; or write to ${agent.name} from its card.`); } return; }
+  if (!runId && agent.remote) { open('specialist', agent.id); if (!introduced.has(agent.id)) { introduced.add(agent.id); toast(t`${agent.name}'s chat is on ${agent.device || t('its computer')}. It shows here once that computer shares it; or write to ${agent.name} from its card.`); } return; }
   if (!runId) {
     if (starting.has(agent.id) || introduced.has(agent.id)) { open('specialist', agent.id); return; } starting.add(agent.id); introduced.add(agent.id);
     // When it cannot start, the card opens, so a screen left on the deleted chat does not try again on every redraw.
     try { await api(`/specialists/${agent.id}/say`, { method: 'POST', data: { text: 'Introduce yourself in one or two lines: who you are and which project you look after.' } }); await refresh(); }
-    catch (error) { toast(`${agent.name} could not start a chat: ${error.message}`, true); open('specialist', agent.id); return; }
+    catch (error) { toast(t`${agent.name} could not start a chat: ${error.message}`, true); open('specialist', agent.id); return; }
     finally { starting.delete(agent.id); }
     runId = (ui.snap.specialists || []).find(item => item.id === agent.id)?.runId;
   }
@@ -117,12 +118,12 @@ export async function agentAction(ctx, action, target = null) {
   const agent = (ui.snap.specialists || []).find(item => item.id === ui.view.id);
   if (action === 'spec-new') {
     let projects = ui.memory?.projects || [];
-    if (!projects.length) { toast('Looking for your projects…'); await api('/memory/scan', { method: 'POST', data: {} }).catch(() => {}); await refresh(); projects = ui.memory?.projects || []; }
+    if (!projects.length) { toast(t('Looking for your projects…')); await api('/memory/scan', { method: 'POST', data: {} }).catch(() => {}); await refresh(); projects = ui.memory?.projects || []; }
     const current = ui.view.type === 'project' ? ui.view.id : '';
     // An agent does not need a code project: the first choice makes one for anything else (writing, research, study, planning).
-    const choices = [{ slug: '', label: 'No project', hint: 'An agent for anything: writing, research, study, planning', selected: !current }, ...projects.map(project => ({ slug: project.slug, selected: project.slug === current }))];
-    return dialog(ctx, { title: 'New agent', projects: choices, submit: async form => {
-      if (!form.project && !String(form.purpose || '').trim()) throw new Error('Say what this agent is for.');
+    const choices = [{ slug: '', label: t('No project'), hint: t('An agent for anything: writing, research, study, planning'), selected: !current }, ...projects.map(project => ({ slug: project.slug, selected: project.slug === current }))];
+    return dialog(ctx, { title: t('New agent'), projects: choices, submit: async form => {
+      if (!form.project && !String(form.purpose || '').trim()) throw new Error(t('Say what this agent is for.'));
       const created = await api('/specialists', { method: 'POST', data: { name: form.name, projectSlug: form.project, purpose: form.purpose } }); await refresh(); open('specialist', created.id); } });
   }
   if (!agent) return;
@@ -130,29 +131,29 @@ export async function agentAction(ctx, action, target = null) {
   if (action === 'spec-answer') {
     const question = (agent.unsure || []).filter(Boolean)[Number(target.dataset.index)] || '';
     const runId = agent.runId && ctx.runById(agent.runId) ? agent.runId : ''; if (!runId) { await agentAction(ctx, 'spec-chat'); return; }
-    ui.drafts.set(`run:${runId}`, `About "${question}": `); open('run', runId); setTimeout(() => { const box = document.getElementById('draft'); if (box) { box.value = `About "${question}": `; box.focus(); } }, 50); return;
+    ui.drafts.set(`run:${runId}`, `About "${question}": `); open('run', runId); setTimeout(() => { const box = document.getElementById('draft'); if (box) { box.value = t`About "${question}": `; box.focus(); } }, 50); return;
   }
-  if (action === 'spec-loop-now') { await api(`/specialists/${agent.id}/loop`, { method: 'POST', data: {} }); toast(`${agent.name} is checking its tasks.`); await refresh(); return; }
+  if (action === 'spec-loop-now') { await api(`/specialists/${agent.id}/loop`, { method: 'POST', data: {} }); toast(t`${agent.name} is checking its tasks.`); await refresh(); return; }
   if (action === 'spec-settled') {
     const unsure = (agent.unsure || []).filter(Boolean).filter((_, index) => index !== Number(target.dataset.index));
     await api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: agent.rules, unsure, model: agent.model || '' } }); await refresh(); return;
   }
   if (action === 'spec-forget') { await api(`/specialists/${agent.id}/lessons/${target.dataset.index}`, { method: 'DELETE' }); await refresh(); return; }
-  if (action === 'spec-rename') { await api(`/specialists/${agent.id}/rename`, { method: 'POST', data: { name: value('sp-name') } }); toast('Renamed.'); await refresh({ full: true }); }
+  if (action === 'spec-rename') { await api(`/specialists/${agent.id}/rename`, { method: 'POST', data: { name: value('sp-name') } }); toast(t('Renamed.')); await refresh({ full: true }); }
   else if (action === 'spec-save') {
     await api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: value('sp-rules'), unsure: agent.unsure || [], model: value('sp-model') } });
-    toast('Rules saved.'); await refresh({ full: true });
+    toast(t('Rules saved.')); await refresh({ full: true });
   } else if (action === 'spec-move') {
-    if (!confirm(`Move ${agent.name} to this computer?
+    if (!confirm(t`Move ${agent.name} to this computer?
 
-Its chat comes along and it starts fresh from a summary of the chat. Code that was not pushed on ${agent.device || 'the other computer'} stays there, so push it first.`)) return;
+Its chat comes along and it starts fresh from a summary of the chat. Code that was not pushed on ${agent.device || t('the other computer')} stays there, so push it first.`)) return;
     const moved = await api(`/specialists/${agent.id}/move`, { method: 'POST', data: {} }); await refresh({ full: true });
-    toast(`${agent.name} now works on this computer, in ${moved.folder}.`);
+    toast(t`${agent.name} now works on this computer, in ${moved.folder}.`);
   } else if (action === 'spec-duplicate') {
-    dialog(ctx, { title: `Duplicate ${agent.name}`, nameValue: `${agent.name} 2`, submit: async form => {
-      const copy = await api(`/specialists/${agent.id}/duplicate`, { method: 'POST', data: { name: form.name } }); await refresh(); open('specialist', copy.id); toast('Duplicated. It has the same project and rules, and its own conversation.'); } });
+    dialog(ctx, { title: t`Duplicate ${agent.name}`, nameValue: `${agent.name} 2`, submit: async form => {
+      const copy = await api(`/specialists/${agent.id}/duplicate`, { method: 'POST', data: { name: form.name } }); await refresh(); open('specialist', copy.id); toast(t('Duplicated. It has the same project and rules, and its own conversation.')); } });
   } else if (action === 'spec-remove') {
-    if (!confirm(`Remove ${agent.name}? Its card is deleted. Past runs stay.`)) return;
+    if (!confirm(t`Remove ${agent.name}? Its card is deleted. Past runs stay.`)) return;
     await api(`/specialists/${agent.id}`, { method: 'DELETE' }); await refresh(); open('main');
   }
 }
@@ -177,19 +178,19 @@ export function initAgentCard(ctx) {
   document.addEventListener('change', async event => {
     if (event.target.id !== 'sp-provider') return;
     const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent || agent.provider === event.target.value) return;
-    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { provider: event.target.value } }); ctx.toast(`${agent.name} now runs on ${event.target.value === 'codex' ? 'Codex' : event.target.value === 'gemini' ? 'Gemini' : 'Claude Code'}.`); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
+    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { provider: event.target.value } }); ctx.toast(t`${agent.name} now runs on ${event.target.value === 'codex' ? t('Codex') : event.target.value === 'gemini' ? t('Gemini') : t('Claude Code')}.`); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   // An account picked for this agent is saved at once.
   document.addEventListener('change', async event => {
     if (event.target.id !== 'sp-profile') return;
     const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
-    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { profile: event.target.value } }); ctx.toast(event.target.value ? 'This agent now uses that Claude account.' : 'This agent uses the same account as everyone.'); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
+    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { profile: event.target.value } }); ctx.toast(event.target.value ? t('This agent now uses that Claude account.') : t('This agent uses the same account as everyone.')); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   // A model picked from the list is saved at once.
   document.addEventListener('change', async event => {
     if (event.target.id !== 'sp-model') return;
     const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
-    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: agent.rules, unsure: agent.unsure || [], model: event.target.value } }); ctx.toast('Model saved.'); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
+    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: agent.rules, unsure: agent.unsure || [], model: event.target.value } }); ctx.toast(t('Model saved.')); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   document.addEventListener('input', event => {
     if (event.target.id !== 'sp-rules') return;

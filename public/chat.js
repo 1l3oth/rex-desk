@@ -1,3 +1,4 @@
+import { t, locale } from './i18n.js';
 import { splitStage } from '/chat-split.js';
 import { rexCore } from '/rex-core.js';
 import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter } from '/chat-sidebar.js';
@@ -35,11 +36,11 @@ const ui = { snap: null, view: viewFromHash() || savedView() || { type: 'main' }
 const kilo = number => number >= 1000000 ? `${(number / 1000000).toFixed(1)}M` : number >= 1000 ? `${(number / 1000).toFixed(number >= 10000 ? 0 : 1)}k` : String(number);
 // The agent's last reply of this turn: the newest agent message since the person last wrote.
 const lastReply = items => { for (let index = items.length - 1; index >= 0; index -= 1) { if (items[index].role === 'human') return null; if (items[index].role === 'agent') return items[index]; } return null; };
-export const tokenText = tokens => tokens ? [`${kilo((tokens.input || 0) + (tokens.cacheWrite || 0))} in`, `${kilo(tokens.output || 0)} out`, tokens.cacheRead ? `${kilo(tokens.cacheRead)} from cache` : ''].filter(Boolean).join(' · ') + ' tokens' : '';
+export const tokenText = tokens => tokens ? [`${kilo((tokens.input || 0) + (tokens.cacheWrite || 0))} in`, t`${kilo(tokens.output || 0)} out`, tokens.cacheRead ? t`${kilo(tokens.cacheRead)} from cache` : ''].filter(Boolean).join(' · ') + ' ' + t('tokens') : '';
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
-const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`; };
-const provider = name => name === 'codex' ? 'Codex' : name === 'gemini' ? 'Gemini' : name === 'claude' ? 'Claude Code' : 'Agent';
+const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }); };
+const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? t('now') : minutes < 60 ? t`${minutes}m` : minutes < 1440 ? t`${Math.round(minutes / 60)}h` : t`${Math.round(minutes / 1440)}d`; };
+const provider = name => name === 'codex' ? t('Codex') : name === 'gemini' ? t('Gemini') : name === 'claude' ? t('Claude Code') : t('Agent');
 const aiKey = value => ['codex', 'gemini'].includes(value) ? value : 'claude';
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value), tokenText,
@@ -54,9 +55,9 @@ async function api(path, { method = 'GET', data, retry = false } = {}) {
   if (response.status === 401 && body.signIn) {
     const auth = retry ? null : await fetch('/api/auth', { headers: { 'x-rex-desk': '1' } }).then(reply => reply.json()).catch(() => null);
     if (auth?.current) return api(path, { method, data, retry: true });
-    location.href = '/signin'; throw new Error('Sign in to Rex Desk.');
+    location.href = '/signin'; throw new Error(t('Sign in to Rex Desk.'));
   }
-  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+  if (!response.ok) throw new Error(body.error ? t(body.error) : t`Request failed (${response.status})`);
   return body;
 }
 let toastTimer;
@@ -73,27 +74,27 @@ const stateGroup = run => workingStates.includes(run.state) ? 'working' : review
 const APP_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/></svg>';
 function appControl(run, live) {
   if (run.inApp) {
-    if (run.inApp.error) return `<button class="btn small" data-action="app-off" title="${esc(run.inApp.error)}">Could not open in Claude app. Close</button> `;
-    const open = run.inApp.url ? `<a class="btn small app-link" href="${esc(run.inApp.url)}" target="_blank" rel="noopener">${APP_ICON}Open in Claude app</a>`
-      : `<span class="btn small app-link" aria-busy="true">${APP_ICON}Connecting…</span>`;
-    return `${open} <button class="btn small" data-action="app-off" title="Close it in the Claude app. The chat carries on here.">Close in app</button> `;
+    if (run.inApp.error) return `<button class="btn small" data-action="app-off" title="${esc(run.inApp.error)}">${t`Could not open in Claude app. Close`}</button> `;
+    const open = run.inApp.url ? `<a class="btn small app-link" href="${esc(run.inApp.url)}" target="_blank" rel="noopener">${APP_ICON}${t('Open in Claude app')}</a>`
+      : `<span class="btn small app-link" aria-busy="true">${APP_ICON}${t('Connecting…')}</span>`;
+    return `${open} <button class="btn small" data-action="app-off" title="${t`Close it in the Claude app. The chat carries on here.`}">${t`Close in app`}</button> `;
   }
   if ((run.provider || 'claude') !== 'claude' || run.remote || run.cloudCopy || live || run.state === 'waiting') return '';
-  return `<button class="btn small app-link" data-action="app-on" title="Keep this chat open so you can chat with it from claude.ai/code or the Claude app on your phone">${APP_ICON}Continue in Claude app</button> `;
+  return `<button class="btn small app-link" data-action="app-on" title="${t`Keep this chat open so you can chat with it from claude.ai/code or the Claude app on your phone`}">${APP_ICON}${t('Continue in Claude app')}</button> `;
 }
 const stateTone = run => ({ working: 'working', review: 'warn' })[stateGroup(run)] || (['failed', 'interrupted'].includes(run.state) ? 'bad' : 'good');
-const stateLabel = run => ({ starting: 'Preparing', queued: 'Queued', running: 'Working', waiting: 'Needs you', verifying: 'Checking', ready_for_review: 'Ready for review', needs_evidence: 'Needs proof', published: 'PR created', failed: 'Failed', interrupted: 'Cut off', stopped: 'Stopped', finished: 'Finished' }[run.state] || String(run.state || '').replaceAll('_', ' '));
+const stateLabel = run => ({ starting: t('Preparing'), queued: t('Queued'), running: t('Working'), waiting: t('Needs you'), verifying: t('Checking'), ready_for_review: t('Ready for review'), needs_evidence: t('Needs proof'), published: t('PR created'), failed: t('Failed'), interrupted: t('Cut off'), stopped: t('Stopped'), finished: t('Finished') }[run.state] || String(run.state || '').replaceAll('_', ' '));
 const pending = runId => (ui.snap?.interactions || []).filter(item => item.state === 'pending' && (!runId || item.runId === runId));
 const runById = id => ui.snap.runs.find(run => run.id === id);
 // The main agent's personal chat. Its room session (role coordinator, roomAgent main) is a separate conversation and never opens here.
 // Only this computer's main agent: the other computers' main agents sync in through Turso but are theirs.
 const mainRun = () => ui.snap.runs.find(run => run.role === 'coordinator' && run.main && !run.roomAgent && run.computer === ui.snap.computer);
 // A run on a task is named by the task's English name, whatever language the tracker used.
-const runTitle = run => { const task = run?.taskId ? ui.snap?.tasks?.find(item => item.id === run.taskId) : null; return task?.titleEn || run?.title || run?.branch || `Run ${String(run?.id || '').slice(0, 8)}`; };
+const runTitle = run => { const task = run?.taskId ? ui.snap?.tasks?.find(item => item.id === run.taskId) : null; return task?.titleEn || run?.title || run?.branch || t`Run ${String(run?.id || '').slice(0, 8)}`; };
 const roomById = id => ui.snap.rooms.find(room => room.id === id);
 
 // ---------- rail ----------
-const TILE_NAMES = { notices: 'Alerts', inbox: 'Needs', tasks: 'Tasks', jev: 'Jev', person: 'You', monitor: 'RAM', devices: 'PCs', worktrees: 'Trees' };
+const TILE_NAMES = { notices: t('Alerts'), inbox: t('Needs'), tasks: t('Tasks'), jev: t('Jev'), person: t('You'), monitor: 'RAM', devices: 'PCs', worktrees: t('Trees') };
 // A small square button for a place (Notifications, Tasks, Monitor…), with its name and state in the tooltip and a badge when something waits.
 // A place in the rail: an icon, a name, and a count on the right (amber when it needs you).
 function place(type, icon, name, count = 0, warn = false, hint = '') {
@@ -152,37 +153,37 @@ function renderRail() {
   const snap = ui.snap, asks = pending().length;
   const main = mainRun(), agents = snap.specialists || [], tasks = (snap.tasks || []).filter(task => task.active && !task.demo), busy = agents.filter(agent => agent.status?.state === 'busy').length;
   const plus = (action, label) => `<button class="sec-add" data-action="${action}" title="${label}" aria-label="${label}">+</button>`;
-  return `<div class="rail-head"><span class="brand"><img class="brand-logo" src="/favicon.svg" alt="" width="26" height="26"><strong>Rex Desk</strong></span><span class="spacer"></span></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
+  return `<div class="rail-head"><span class="brand"><img class="brand-logo" src="/favicon.svg" alt="" width="26" height="26"><strong>${t`Rex Desk`}</strong></span><span class="spacer"></span></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
     <div class="sec-body top">
-      ${railItem('main', '', { avatar: withDot(rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : ''), name: 'Rex Agent', sub: mainLive().state === 'idle' ? 'Asleep' : main ? stateLabel(main) : 'Not started', badge: unreadFor(ui, 'main:'), live: mainLive() })}
-      <nav class="places" aria-label="Places">${[
-        place('notices', 'bell', 'Notifications', snap.notices?.unread || 0, true),
-        place('inbox', 'inbox', 'Needs you', asks, true),
-        place('tasks', 'tasks', 'Tasks', busy || tasks.length, false, busy ? `${busy} being worked on` : ''),
-        place('person', 'person', 'Knowledge', 0),
-        place('split', 'split', 'Split view', 0),
+      ${railItem('main', '', { avatar: withDot(rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : ''), name: t('Rex Agent'), sub: mainLive().state === 'idle' ? t('Asleep') : main ? stateLabel(main) : t('Not started'), badge: unreadFor(ui, 'main:'), live: mainLive() })}
+      <nav class="places" aria-label="${t`Places`}">${[
+        place('notices', 'bell', t('Notifications'), snap.notices?.unread || 0, true),
+        place('inbox', 'inbox', t('Needs you'), asks, true),
+        place('tasks', 'tasks', t('Tasks'), busy || tasks.length, false, busy ? t`${busy} being worked on` : ''),
+        place('person', 'person', t('Knowledge'), 0),
+        place('split', 'split', t('Split view'), 0),
       ].join('')}</nav>
     </div>
-    ${section('rooms', 'Rooms', snap.rooms.length, plus('new-room', 'New room'), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: `${room.members.length} ${room.members.length === 1 ? 'agent' : 'agents'}`, badge: unreadFor(ui, `room:${room.id}`) })) : '<p class="rail-empty">No rooms yet.</p>')}
-    ${section('agents', 'Agents', agents.length, plus('spec-new', 'New agent'), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: ['busy', 'replying', 'waiting'].includes(agent.status?.state) ? agent.status.label : agent.status?.state === 'idle' ? ['Asleep', agent.projectSlug].filter(Boolean).join(' · ') : agent.projectSlug || '', live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && `Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : '<p class="rail-empty">No agents yet. Press + to create one.</p>')}
-  </div>${phoneTabs(asks)}<div class="rail-tools" role="toolbar" aria-label="Tools"><button type="button" class="tool" data-open="jev" title="Jev: control this computer and websites" aria-label="Jev">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? `Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : 'Memory and what uses it')}" aria-label="Memory">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="Devices: your other computers and phone" aria-label="Devices">${iconAv('devices')}</button></div><div class="rail-foot"><button class="acct-btn" data-action="accounts" title="Which Claude account the agents use">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button><button class="btn small" data-action="theme">Theme</button><button class="btn small" type="button" data-glass-open title="How see-through Rex Desk is">Glass</button><button type="button" class="rail-ver${ui.snap.update?.ready || ui.snap.update?.available ? ' new' : ''}" data-action="about-open" title="About Rex Desk: version, storage and what it holds">${esc(ui.snap.update?.current ? `v${ui.snap.update.current}` : 'dev')}</button></div>`;
+    ${section('rooms', t('Rooms'), snap.rooms.length, plus('new-room', t('New room')), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: room.members.length === 1 ? t`${room.members.length} agent` : t`${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })) : `<p class="rail-empty">${t`No rooms yet.`}</p>`)}
+    ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: ['busy', 'replying', 'waiting'].includes(agent.status?.state) ? agent.status.label : agent.status?.state === 'idle' ? ['Asleep', agent.projectSlug].filter(Boolean).join(' · ') : agent.projectSlug || '', live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : `<p class="rail-empty">${t`No agents yet. Press + to create one.`}</p>`)}
+  </div>${phoneTabs(asks)}<div class="rail-tools" role="toolbar" aria-label="${t`Tools`}"><button type="button" class="tool" data-open="jev" title="${t`Jev: control this computer and websites`}" aria-label="${t`Jev`}">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? t`Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : t('Memory and what uses it'))}" aria-label="${t`Memory`}">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="${t`Devices: your other computers and phone`}" aria-label="${t`Devices`}">${iconAv('devices')}</button></div><div class="rail-foot"><button class="acct-btn" data-action="accounts" title="${t`Which Claude account the agents use`}">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="${t`Settings`}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>${t`Settings`}</button><button class="btn small" data-action="theme">${t`Theme`}</button><button class="btn small" type="button" data-glass-open title="${t`How see-through Rex Desk is`}">${t`Glass`}</button><button type="button" class="rail-ver${ui.snap.update?.ready || ui.snap.update?.available ? ' new' : ''}" data-action="about-open" title="${t`About Rex Desk: version, storage and what it holds`}">${esc(ui.snap.update?.current ? `v${ui.snap.update.current}` : 'dev')}</button></div>`;
 }
 
 // ---------- run conversation ----------
 // The conversation, with the agent's steps folded into groups between its messages.
 function renderItems(items, run, live) {
   const out = []; let group = [];
-  const link = agent => `<a href="#" class="steplink" data-open="specialist" data-id="${esc(agent.id)}">Open card</a>`;
+  const link = agent => `<a href="#" class="steplink" data-open="specialist" data-id="${esc(agent.id)}">${t`Open card`}</a>`;
   const flush = last => { if (group.length) out.push(stepsHtml(group, { esc, hhmm, live: live && last, openKeys: ui.openSteps, specialists: ui.snap.specialists || [], link })); group = []; };
   for (const item of items) {
     if (item.role === 'tool') { group.push(item); continue; }
     flush(false);
     out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
-      : item.role === 'human' ? bubble({ mine: true, name: 'You', time: hhmm(item.at), voice: item.voice, html: markdown(item.text), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
-      : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="Tokens this reply used">${esc(tokenText(item.tokens))}</div>` : '') })
-      : item.role === 'cleared' ? `<div class="cleared"><span>Chat cleared · ${esc(item.text)}</span>${item.earlier ? '<button type="button" class="btn small quiet" data-action="show-earlier">Show earlier messages</button>' : ''}</div>`
+      : item.role === 'human' ? bubble({ mine: true, name: t('You'), time: hhmm(item.at), voice: item.voice, html: markdown(item.text), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
+      : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="${t`Tokens this reply used`}">${esc(tokenText(item.tokens))}</div>` : '') })
+      : item.role === 'cleared' ? `<div class="cleared"><span>${t`Chat cleared · ${esc(item.text)}`}</span>${item.earlier ? `<button type="button" class="btn small quiet" data-action="show-earlier">${t`Show earlier messages`}</button>` : ''}</div>`
       : item.role === 'subagent' ? subagentHtml(item, live)
-      : item.role === 'error' ? `<div class="card bad"><h4>Needs attention</h4><div class="md">${markdown(item.text)}</div>${/usage limit|limit reached|not signed in|not logged in|log ?in again|sign ?in again|unauthorized|401/i.test(item.text) ? `<button type="button" class="btn small primary" data-action="agent-signin" data-provider="${esc(run.provider || 'claude')}">Sign in again</button>` : ''}</div>`
+      : item.role === 'error' ? `<div class="card bad"><h4>${t`Needs attention`}</h4><div class="md">${markdown(item.text)}</div>${/usage limit|limit reached|not signed in|not logged in|log ?in again|sign ?in again|unauthorized|401/i.test(item.text) ? `<button type="button" class="btn small primary" data-action="agent-signin" data-provider="${esc(run.provider || 'claude')}">${t`Sign in again`}</button>` : ''}</div>`
       : note(`${esc(item.text)} · ${hhmm(item.at)}`));
   }
   flush(true);
@@ -191,11 +192,11 @@ function renderItems(items, run, live) {
 // A sub-agent the agent started: who it is, what it was asked, how far it got. Open it to see each step and its report.
 function subagentHtml(item, live) {
   const input = item.input, state = item.done ? (item.failed ? 'failed' : 'done') : live ? 'working' : 'stopped';
-  const label = { working: 'Working…', done: 'Done', failed: 'Failed', stopped: 'Stopped' }[state];
+  const label = { working: t('Working…'), done: t('Done'), failed: t('Failed'), stopped: t('Stopped') }[state];
   const took = item.endedAt ? Math.max(1, Math.round((Date.parse(item.endedAt) - Date.parse(item.at)) / 1000)) : 0;
   const step = event => `<li><b>${esc(event.tool)}</b> ${esc(Object.values(event.input || {}).filter(value => typeof value === 'string').join(' · ').slice(0, 140))}</li>`;
-  return `<details class="subagent ${state}"${ui.openSubs?.has(item.id) ? ' open' : ''} data-sub="${esc(item.id)}"><summary><span class="sa-dot ${state}"></span><span class="sa-main"><b>Sub-agent${input.description ? `: ${esc(input.description)}` : ''}</b><small>${esc([input.type, input.model, `${item.steps.length} step${item.steps.length === 1 ? '' : 's'}`, took ? `${took < 60 ? `${took}s` : `${Math.round(took / 60)} min`}` : ''].filter(Boolean).join(' · '))}</small></span><span class="sa-state">${label}</span></summary>
-    <div class="sa-body">${input.prompt ? `<p class="sa-h">Asked</p><div class="md sa-text">${markdown(input.prompt)}</div>` : ''}${item.steps.length ? `<p class="sa-h">Steps</p><ol class="sa-steps">${item.steps.slice(-40).map(step).join('')}</ol>` : ''}${item.result || item.text ? `<p class="sa-h">Reported back</p><div class="md sa-text">${markdown(item.result || item.text)}</div>` : ''}</div></details>`;
+  return `<details class="subagent ${state}"${ui.openSubs?.has(item.id) ? ' open' : ''} data-sub="${esc(item.id)}"><summary><span class="sa-dot ${state}"></span><span class="sa-main"><b>${t('Sub-agent')}${input.description ? `: ${esc(input.description)}` : ''}</b><small>${esc([input.type, input.model, (item.steps.length === 1 ? t`${item.steps.length} step` : t`${item.steps.length} steps`), took ? `${took < 60 ? `${took}s` : t`${Math.round(took / 60)} min`}` : ''].filter(Boolean).join(' · '))}</small></span><span class="sa-state">${label}</span></summary>
+    <div class="sa-body">${input.prompt ? `<p class="sa-h">${t`Asked`}</p><div class="md sa-text">${markdown(input.prompt)}</div>` : ''}${item.steps.length ? `<p class="sa-h">${t`Steps`}</p><ol class="sa-steps">${item.steps.slice(-40).map(step).join('')}</ol>` : ''}${item.result || item.text ? `<p class="sa-h">${t`Reported back`}</p><div class="md sa-text">${markdown(item.result || item.text)}</div>` : ''}</div></details>`;
 }
 document.addEventListener('toggle', event => { const box = event.target; if (!box.matches?.('details.subagent')) return; ui.openSubs ||= new Set(); if (box.open) ui.openSubs.add(box.dataset.sub); else ui.openSubs.delete(box.dataset.sub); }, true);
 // A question that was answered stays in the chat as two messages: the agent asking, and the person answering.
@@ -210,9 +211,9 @@ function askHtml(item, run) {
   return bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, '')) + list });
 }
 function answerHtml(item) {
-  const body = item.action !== 'accept' ? `<em>${item.approval ? 'Declined' : item.action === 'expired' ? '(question dropped)' : 'Skipped'}</em>`
-    : item.approval ? '<em>Approved</em>' : item.rows.length > 1 ? item.rows.map(row => `<div class="qa-ans"><span class="qa-l">${esc(row.label)}</span><br>${esc(String(row.value))}</div>`).join('') : item.rows.length ? esc(String(item.rows[0].value)) : '<em>Sent</em>';
-  return bubble({ mine: true, name: 'You', time: hhmm(item.at), html: body });
+  const body = item.action !== 'accept' ? `<em>${item.approval ? t('Declined') : item.action === 'expired' ? '(question dropped)' : t('Skipped')}</em>`
+    : item.approval ? `<em>${t`Approved`}</em>` : item.rows.length > 1 ? item.rows.map(row => `<div class="qa-ans"><span class="qa-l">${esc(row.label)}</span><br>${esc(String(row.value))}</div>`).join('') : item.rows.length ? esc(String(item.rows[0].value)) : `<em>${t`Sent`}</em>`;
+  return bubble({ mine: true, name: t('You'), time: hhmm(item.at), html: body });
 }
 function transcript(all, runId = '') {
   // After /clear the chat starts empty again; what came before stays one click away.
@@ -222,7 +223,7 @@ function transcript(all, runId = '') {
   for (const event of events) {
     if (event.kind === 'chat-cleared') { items.push({ role: 'cleared', text: event.text, at: event.createdAt, earlier: cut > 0 && !ui.showEarlier?.[runId] }); continue; }
     // A sub-agent shows as one card: what it was asked, its steps, and what it reported back.
-    if (event.kind === 'agent-tool' && event.tool === 'Agent') { const sub = { role: 'subagent', id: event.id, input: event.input || {}, steps: [], text: '', done: false, failed: false, at: event.createdAt }; subs.set(event.id, sub); if (!subs.has(event.parent)) items.push(sub); else subs.get(event.parent).steps.push({ tool: 'Agent', input: { description: sub.input.description } }); continue; }
+    if (event.kind === 'agent-tool' && event.tool === 'Agent') { const sub = { role: 'subagent', id: event.id, input: event.input || {}, steps: [], text: '', done: false, failed: false, at: event.createdAt }; subs.set(event.id, sub); if (!subs.has(event.parent)) items.push(sub); else subs.get(event.parent).steps.push({ tool: t('Agent'), input: { description: sub.input.description } }); continue; }
     if (event.parent && subs.has(event.parent)) { const sub = subs.get(event.parent); if (event.kind === 'agent-tool') sub.steps.push(event); else if (event.kind === 'subagent-text') sub.text = event.text; continue; }
     if (event.kind === 'subagent-text') continue;
     if (event.kind === 'subagent-done') { const sub = subs.get(event.id); if (sub) Object.assign(sub, { done: true, failed: event.failed, result: event.text, endedAt: event.createdAt }); continue; }
@@ -230,23 +231,23 @@ function transcript(all, runId = '') {
     if (event.kind === 'human-message') { const said = spokenText(event.text); items.push({ role: 'human', text: said.text, voice: said.voice, at: event.createdAt, sequence: event.sequence }); }
     // Written in the Claude app while the chat was open there (Continue in Claude app).
     else if (event.kind === 'app-message') items.push({ role: 'human', text: event.text || '', at: event.createdAt, sequence: event.sequence });
-    else if (event.kind === 'turn-start') items.push({ role: 'status', text: `${event.resumed ? 'Resumed' : 'Started'} with ${provider(event.provider)}`, at: event.createdAt });
-    else if (event.kind === 'loop-check') items.push({ role: 'status', text: event.text || 'Loop check', at: event.createdAt });
+    else if (event.kind === 'turn-start') items.push({ role: 'status', text: t`${event.resumed ? t('Resumed') : t('Started')} with ${provider(event.provider)}`, at: event.createdAt });
+    else if (event.kind === 'loop-check') items.push({ role: 'status', text: event.text || t('Loop check'), at: event.createdAt });
     // The tokens of a reply show under the reply itself, like in a group chat.
     else if (event.kind === 'agent-result' && typeof event.usage === 'object' && tokenText(event.usage) && lastReply(items)) lastReply(items).tokens = event.usage;
-    else if (event.kind === 'agent-result') items.push({ role: 'status', text: `Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${typeof event.usage === 'object' && tokenText(event.usage) ? ` · ${tokenText(event.usage)}` : ''}${event.cost && event.paidByApi === true ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
+    else if (event.kind === 'agent-result') items.push({ role: 'status', text: t`Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${typeof event.usage === 'object' && tokenText(event.usage) ? ` · ${tokenText(event.usage)}` : ''}${event.cost && event.paidByApi === true ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
     else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
     else if (event.kind === 'agent-tool' && ['desk_ask', 'desk_message', 'desk_elicit'].includes(event.tool)) continue; // shown as chat messages already
     else if (event.kind === 'agent-tool-result') continue;
     else if (event.kind === 'agent-tool') items.push({ role: 'tool', id: event.id, output: results.get(event.id), tool: event.tool, input: event.input, change: event.change, failed: event.failed, text: event.text, at: event.createdAt });
-    else if (event.kind === 'error') items.push({ role: 'error', text: event.text || event.message || 'The run needs attention.', at: event.createdAt });
+    else if (event.kind === 'error') items.push({ role: 'error', text: event.text || event.message || t('The run needs attention.'), at: event.createdAt });
     else if (event.visible) items.push({ role: 'status', text: event.text || event.message || event.kind.replaceAll('-', ' '), at: event.createdAt });
   }
   return items;
 }
 const UNSEND_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const bubble = ({ mine, name, time, html, voice = false, unsend = '' }) => `<div class="msg ${mine ? 'mine' : ''}">${unsend ? `<button type="button" class="unsend" data-unsend="${unsend}" title="Unsend" aria-label="Unsend this message">${UNSEND_ICON}</button>` : ''}<div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}${voice ? ` ${micIcon()}` : ''}</span></div><div class="md">${html}</div>${mine ? '' : `<div class="msg-acts">${speakButton()}</div>`}</div></div>`;
-const typing = (name, caption = '') => `<div class="msg" aria-live="polite" aria-label="${esc(name)} is typing"><div class="avatar">${esc(initials(name))}</div><div class="bubble typing"><span class="dots"><i></i><i></i><i></i></span>${caption ? `<span class="cap">${esc(caption)}</span>` : ''}</div></div>`;
+const bubble = ({ mine, name, time, html, voice = false, unsend = '' }) => `<div class="msg ${mine ? 'mine' : ''}">${unsend ? `<button type="button" class="unsend" data-unsend="${unsend}" title="${t`Unsend`}" aria-label="${t`Unsend this message`}">${UNSEND_ICON}</button>` : ''}<div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}${voice ? ` ${micIcon()}` : ''}</span></div><div class="md">${html}</div>${mine ? '' : `<div class="msg-acts">${speakButton()}</div>`}</div></div>`;
+const typing = (name, caption = '') => `<div class="msg" aria-live="polite" aria-label="${t`${esc(name)} is typing`}"><div class="avatar">${esc(initials(name))}</div><div class="bubble typing"><span class="dots"><i></i><i></i><i></i></span>${caption ? `<span class="cap">${esc(caption)}</span>` : ''}</div></div>`;
 const note = text => `<div class="note">${text}</div>`;
 // Runs that are over. Any other run that is not working can still be closed, so a stuck run never blocks its task.
 const FINISHED = ['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked'];
@@ -257,10 +258,10 @@ function decisionCard(item) {
   const saved = ui.qanswers.get(item.id) || {};
   const field = (key, property, needed) => {
     const attrs = `name="${esc(key)}" data-type="${esc(property.type || 'string')}" ${needed ? 'required' : ''}`;
-    const control = property.type === 'boolean' ? `<div class="seg"><button type="button" data-seg="true">Yes</button><button type="button" data-seg="false">No</button><input type="hidden" ${attrs.replace('required', '')}></div>`
-      : `<input class="qinput" ${attrs} type="${['number', 'integer'].includes(property.type) ? 'number' : 'text'}" placeholder="Type your answer…" autocomplete="off" value="${esc(saved[key] || '')}">`;
+    const control = property.type === 'boolean' ? `<div class="seg"><button type="button" data-seg="true">${t`Yes`}</button><button type="button" data-seg="false">No</button><input type="hidden" ${attrs.replace('required', '')}></div>`
+      : `<input class="qinput" ${attrs} type="${['number', 'integer'].includes(property.type) ? 'number' : 'text'}" placeholder="${t`Type your answer…`}" autocomplete="off" value="${esc(saved[key] || '')}">`;
     const options = (property.options || (property.enum || []).map(label => ({ label }))).slice(0, 8);
-    const suggestions = options.length ? `<div class="sugg" data-multi="${property.multiSelect ? 1 : 0}">${options.map((option, index) => `<button type="button" class="sugg-chip${String(saved[key] || '').split(', ').includes(option.label) ? ' on' : ''}" data-fill="${esc(option.label)}"><span class="num">${index + 1}</span><span class="txt"><b>${esc(option.label)}</b>${option.description ? `<small>${esc(option.description)}</small>` : ''}</span></button>`).join('')}<div class="sugg-other">Or type your own answer below</div></div>` : '';
+    const suggestions = options.length ? `<div class="sugg" data-multi="${property.multiSelect ? 1 : 0}">${options.map((option, index) => `<button type="button" class="sugg-chip${String(saved[key] || '').split(', ').includes(option.label) ? ' on' : ''}" data-fill="${esc(option.label)}"><span class="num">${index + 1}</span><span class="txt"><b>${esc(option.label)}</b>${option.description ? `<small>${esc(option.description)}</small>` : ''}</span></button>`).join('')}<div class="sugg-other">${t`Or type your own answer below`}</div></div>` : '';
     return `<label class="qfield"><span>${esc(property.title || key)}</span>${suggestions}${control}</label>`;
   };
   const list = [...Object.entries(properties).map(([key, property]) => field(key, property, required.includes(key))),
@@ -269,13 +270,13 @@ function decisionCard(item) {
   // Several questions come one at a time: answering one slides to the next.
   const slides = ask && many > 1, step = slides ? Math.min(ui.qstep.get(item.id) || 0, many - 1) : 0;
   const fields = slides ? `<div class="qslider">${list.map((html, index) => `<div class="qslide${index === step ? ' on' : ''}" data-slide="${index}">${html}</div>`).join('')}</div>` : list.join('');
-  const progress = slides ? `<span class="qcount" data-qcount>Question ${step + 1} of ${many}</span><span class="qdots" aria-hidden="true">${list.map((_, index) => `<i class="${index === step ? 'on' : index < step ? 'done' : ''}"></i>`).join('')}</span>` : '';
-  return `<form class="card ask qcard${slides ? ' sliding' : ''}" data-interaction="${esc(item.id)}" data-count="${many}" data-step="${step}" ${slides ? 'novalidate' : ''}><div class="qhead"><span class="qdot"></span>${ask ? (slides ? progress : 'Question') : 'Needs your OK'} · ${esc(runTitle(run))}</div><div class="qtext md">${markdown(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</div>${detail ? `<pre>${esc(typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2).slice(0, 1500))}</pre>` : ''}${fields}
-    <div class="row">${slides ? `<button type="button" class="btn small qback" data-qmove="-1" ${step ? '' : 'hidden'}>Back</button><button type="button" class="send-btn wide qnext" data-qmove="1" ${step < many - 1 ? '' : 'hidden'}>Next</button>` : ''}<button class="send-btn wide qsend" name="decision" value="accept" ${slides && step < many - 1 ? 'hidden' : ''}>${ask ? (many > 1 ? 'Send answers' : 'Send') : 'Approve once'}</button>${request.allowAlways ? '<button class="btn small" name="decision" value="always" formnovalidate>Always allow for this run</button>' : ''}<button class="btn small" name="decision" value="decline" formnovalidate>${ask ? 'Skip' : 'Decline'}</button>${slides ? '<small class="qhint">Pick an answer or type one · Enter for next</small>' : ''}</div></form>`;
+  const progress = slides ? `<span class="qcount" data-qcount>${t`Question ${step + 1} of ${many}`}</span><span class="qdots" aria-hidden="true">${list.map((_, index) => `<i class="${index === step ? 'on' : index < step ? 'done' : ''}"></i>`).join('')}</span>` : '';
+  return `<form class="card ask qcard${slides ? ' sliding' : ''}" data-interaction="${esc(item.id)}" data-count="${many}" data-step="${step}" ${slides ? 'novalidate' : ''}><div class="qhead"><span class="qdot"></span>${ask ? (slides ? progress : t('Question')) : t('Needs your OK')} · ${esc(runTitle(run))}</div><div class="qtext md">${markdown(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</div>${detail ? `<pre>${esc(typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2).slice(0, 1500))}</pre>` : ''}${fields}
+    <div class="row">${slides ? `<button type="button" class="btn small qback" data-qmove="-1" ${step ? '' : 'hidden'}>${t`Back`}</button><button type="button" class="send-btn wide qnext" data-qmove="1" ${step < many - 1 ? '' : 'hidden'}>${t`Next`}</button>` : ''}<button class="send-btn wide qsend" name="decision" value="accept" ${slides && step < many - 1 ? 'hidden' : ''}>${ask ? (many > 1 ? t('Send answers') : t('Send')) : t('Approve once')}</button>${request.allowAlways ? `<button class="btn small" name="decision" value="always" formnovalidate>${t`Always allow for this run`}</button>` : ''}<button class="btn small" name="decision" value="decline" formnovalidate>${ask ? t('Skip') : t('Decline')}</button>${slides ? `<small class="qhint">${t`Pick an answer or type one · Enter for next`}</small>` : ''}</div></form>`;
 }
 function wakeCard(wake) {
   const run = runById(wake.runId), room = roomById(wake.roomId);
-  return `<div class="card ask"><h4>${esc(wake.from)} mentioned ${esc(runTitle(run))} in ${esc(room?.name || 'a room')}</h4><div class="md">${esc(wake.text)}</div><div class="row"><button class="btn primary small" data-action="wake-approve" data-id="${esc(wake.id)}">Wake it up</button><button class="btn small" data-action="wake-dismiss" data-id="${esc(wake.id)}">Dismiss</button></div></div>`;
+  return `<div class="card ask"><h4>${t`${esc(wake.from)} mentioned ${esc(runTitle(run))} in ${esc(room?.name || 'a room')}`}</h4><div class="md">${esc(wake.text)}</div><div class="row"><button class="btn primary small" data-action="wake-approve" data-id="${esc(wake.id)}">${t`Wake it up`}</button><button class="btn small" data-action="wake-dismiss" data-id="${esc(wake.id)}">${t`Dismiss`}</button></div></div>`;
 }
 
 // ---------- stage ----------
@@ -286,7 +287,7 @@ function stageModel() {
   if (type === 'task') return taskStage(ctx);
   if (type === 'inbox') {
     const asks = pending(), wakes = snap.wakes || [];
-    return { title: 'Needs you', meta: `${asks.length + wakes.length} waiting`, feed: asks.length + wakes.length ? asks.map(decisionCard).join('') + wakes.map(wakeCard).join('') : '<div class="empty"><h2>All clear</h2><p>Questions, approvals and wake-ups from your agents show up here.</p></div>' };
+    return { title: t('Needs you'), meta: t`${asks.length + wakes.length} waiting`, feed: asks.length + wakes.length ? asks.map(decisionCard).join('') + wakes.map(wakeCard).join('') : `<div class="empty"><h2>${t`All clear`}</h2><p>${t`Questions, approvals and wake-ups from your agents show up here.`}</p></div>` };
   }
   if (type === 'specialist') return agentStage(ctx);
   if (type === 'devices') return devicesStage(ctx);
@@ -294,38 +295,38 @@ function stageModel() {
   if (type === 'worktrees') return worktreesStage(ctx);
   if (type === 'jev') return jevStage();
   if (type === 'split') return splitStage();
-  if (type === 'person') { const graph = knowledgeView() === 'graph'; return { title: 'Knowledge', meta: graph ? 'You, your agents and your second brain' : 'Your profile, from what the agents learned', top: true,
-    actions: `<div class="kg-switch" role="tablist" aria-label="How to look at your knowledge"><button type="button" role="tab" aria-selected="${graph}" class="${graph ? 'on' : ''}" data-action="kg-view" data-view="graph">Graph</button><button type="button" role="tab" aria-selected="${!graph}" class="${graph ? '' : 'on'}" data-action="kg-view" data-view="list">List</button></div>`,
+  if (type === 'person') { const graph = knowledgeView() === 'graph'; return { title: t('Knowledge'), meta: graph ? t('You, your agents and your second brain') : t('Your profile, from what the agents learned'), top: true,
+    actions: `<div class="kg-switch" role="tablist" aria-label="${t`How to look at your knowledge`}"><button type="button" role="tab" aria-selected="${graph}" class="${graph ? 'on' : ''}" data-action="kg-view" data-view="graph">${t`Graph`}</button><button type="button" role="tab" aria-selected="${!graph}" class="${graph ? '' : 'on'}" data-action="kg-view" data-view="list">${t`List`}</button></div>`,
     feed: graph ? '<div class="kg" id="kg" data-keep="kg"></div>' : personPage() }; }
   if (type === 'project') {
-    return { title: id, meta: 'Project memory', feed: `<div class="page"><div class="row"><button class="btn primary small" data-action="spec-new">Create agent for this project</button></div><div class="card"><div class="md">${markdown(ui.page || 'Loading…')}</div></div></div>` };
+    return { title: id, meta: t('Project memory'), feed: `<div class="page"><div class="row"><button class="btn primary small" data-action="spec-new">${t`Create agent for this project`}</button></div><div class="card"><div class="md">${markdown(ui.page || t('Loading…'))}</div></div></div>` };
   }
   const run = type === 'main' ? mainRun() : runById(id);
   if (!run && type === 'main') return welcomeStage();
   if (!run) {
     // A view saved on this computer can still point at an agent's deleted chat: start a new one, or show its card when its computer is off.
     const agent = type === 'run' ? (ui.snap.specialists || []).find(item => item.runId === id) : null;
-    if (agent) { setTimeout(() => agent.remote ? open('specialist', agent.id) : void openAgentChat(ctx, agent)); return emptyStage(agent.remote ? `${esc(agent.name)}'s chat is on ${esc(agent.device || 'another computer')}.` : `Starting a new chat with ${esc(agent.name)}…`); }
-    return emptyStage('That run is gone.');
+    if (agent) { setTimeout(() => agent.remote ? open('specialist', agent.id) : void openAgentChat(ctx, agent)); return emptyStage(agent.remote ? t`${esc(agent.name)}'s chat is on ${esc(agent.device || 'another computer')}.` : t`Starting a new chat with ${esc(agent.name)}…`); }
+    return emptyStage(t('That run is gone.'));
   }
   const shown = ui.events.get(run.id) || [], cleared = ui.showEarlier?.[run.id] ? '' : [...shown].reverse().find(event => event.kind === 'chat-cleared')?.createdAt || '';
   const items = [...transcript(shown, run.id), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && (!cleared || String(item.createdAt || item.at || '') >= cleared) && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state) && !run.inApp; // a chat open in the Claude app waits for the person; it is not "typing"
-  const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? 'Nothing recorded yet.' : 'Loading the conversation…'}</p></div>`) + outboxHtml(run, shown)
-    + pending(run.id).map(item => `<div class="msg qfloat"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? 'Preparing…' : '') : '');
-  const shells = terminalItems(items), stop = (shells.length && !ui.termOpen ? `<button class="btn small" data-action="term-open">Terminal (${shells.length})</button> ` : '') + (live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : !FINISHED.includes(run.state) ? '<button class="btn small danger" data-action="stop" title="This run is not working. Close it so the task can get a new run.">Close run</button>' : '');
+  const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? t('Nothing recorded yet.') : t('Loading the conversation…')}</p></div>`) + outboxHtml(run, shown)
+    + pending(run.id).map(item => `<div class="msg qfloat"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? t('Preparing…') : '') : '');
+  const shells = terminalItems(items), stop = (shells.length && !ui.termOpen ? `<button class="btn small" data-action="term-open">${t`Terminal (${shells.length})`}</button> ` : '') + (live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : !FINISHED.includes(run.state) ? `<button class="btn small danger" data-action="stop" title="${t`This run is not working. Close it so the task can get a new run.`}">${t`Close run`}</button>` : '');
   // A personal chat with an agent shows its profile and what was shared on the right; the terminal is one of those tabs.
   const personal = personalAgent(run);
   const side = personal ? (ui.chatInfo === false ? '' : personalSide(run, personal, items, shells)) : shells.length && ui.termOpen ? terminalHtml(shells, { esc, hhmm }) : '';
-  const actions = appControl(run, live) + (personal ? `<button class="icon-btn head-add" data-action="chat-to-room" title="Add agents: start a group chat with this agent and others" aria-label="Add agents"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></button> ${ui.chatInfo === false ? '<button class="btn small" data-action="chat-info">Info</button> ' : ''}${live || run.state === 'waiting' ? '<button class="btn small danger" data-action="stop">Stop</button>' : ''}` : run.inApp ? '' : stop);
-  return { title: personal ? personal.name : runTitle(run), meta: personal ? '' : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: run.inApp ? '<span class="chip working">In Claude app</span>' : personal ? '' : `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
+  const actions = appControl(run, live) + (personal ? `<button class="icon-btn head-add" data-action="chat-to-room" title="${t`Add agents: start a group chat with this agent and others`}" aria-label="${t`Add agents`}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></button> ${ui.chatInfo === false ? `<button class="btn small" data-action="chat-info">${t`Info`}</button> ` : ''}${live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : ''}` : run.inApp ? '' : stop);
+  return { title: personal ? personal.name : runTitle(run), meta: personal ? '' : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: run.inApp ? `<span class="chip working">${t`In Claude app`}</span>` : personal ? '' : `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
     working: workingStates.includes(run.state), composer: { placeholder: composerHint(run, workingStates.includes(run.state)), mentions: [] } };
 }
 // Until the second brain is set up, the main agent's screen and About you offer to do it.
-const brainBanner = () => ui.snap?.memory?.secondBrain === false ? `<div class="card brainbar"><div><b>Your agents don't know your second brain yet.</b><span class="muted small">${ui.snap.memory.brainCandidates?.length ? ` Found ${esc(ui.snap.memory.brainCandidates[0])}.` : ''} Rex Agent can set it up for all of them.</span></div><button class="btn primary small" data-action="brain-setup">Set it up</button></div>` : '';
+const brainBanner = () => ui.snap?.memory?.secondBrain === false ? `<div class="card brainbar"><div><b>${t`Your agents don't know your second brain yet.`}</b><span class="muted small">${t`${ui.snap.memory.brainCandidates?.length ? t` Found ${esc(ui.snap.memory.brainCandidates[0])}.` : ''} Rex Agent can set it up for all of them.`}</span></div><button class="btn primary small" data-action="brain-setup">${t`Set it up`}</button></div>` : '';
 const quick = (label, text) => `<button class="chip-btn" data-action="quick" data-text="${esc(text)}">${esc(label)}</button>`;
-const welcomeStage = () => ({ title: 'Rex', meta: 'Rex Agent',
-  feed: `${brainBanner()}<div class="welcome">${rexCore('xl', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length)}<h2>Hi, I am Rex</h2><p>I get to know your projects, set up an agent for each one, and help you work through your issues. Pick a start, or just type.</p><div class="chips">${quick('Meet my projects', 'Meet my projects: go through them one by one, ask me what you are unsure about, and set up an agent for each.')}${quick('Sort my issues', 'Look at my assigned issues and tell me what to do first.')}${quick('What can you do?', 'What can you do for me here?')}</div></div>`,
-  composer: { placeholder: 'Message Rex…', mentions: [] } });
+const welcomeStage = () => ({ title: t('Rex'), meta: t('Rex Agent'),
+  feed: `${brainBanner()}<div class="welcome">${rexCore('xl', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length)}<h2>${t`Hi, I am Rex`}</h2><p>${t`I get to know your projects, set up an agent for each one, and help you work through your issues. Pick a start, or just type.`}</p><div class="chips">${quick(t('Meet my projects'), t('Meet my projects: go through them one by one, ask me what you are unsure about, and set up an agent for each.'))}${quick(t('Sort my issues'), t('Look at my assigned issues and tell me what to do first.'))}${quick(t('What can you do?'), t('What can you do for me here?'))}</div></div>`,
+  composer: { placeholder: t('Message Rex…'), mentions: [] } });
 // The chat is not drawn again from nothing when something changes: only the messages that differ are swapped, and new
 // ones are added at the end. Messages already on screen stay as they are (a playing video, selected text, an open step).
 let feedHtml = '';
@@ -354,14 +355,14 @@ function followFeed(feed, glide) {
   if (glide && !calm && gap > 4 && gap < feed.clientHeight * 1.5) { ui.gliding = true; clearTimeout(ui.glideTimer); ui.glideTimer = setTimeout(() => { ui.gliding = false; }, 700); feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); }
   else feed.scrollTop = feed.scrollHeight;
 }
-const emptyStage = text => ({ title: 'Rex Desk', meta: '', feed: `<div class="empty"><h2>Nothing here</h2><p>${text}</p></div>` });
+const emptyStage = text => ({ title: t('Rex Desk'), meta: '', feed: `<div class="empty"><h2>${t`Nothing here`}</h2><p>${text}</p></div>` });
 
 function renderStage(full) {
   const model = stageModel(), stage = document.getElementById('stage');
-  const head = `<div class="stage-head"><button type="button" class="pane-toggle" data-pane="rail" aria-pressed="true" aria-label="Show or hide the list" title="Show or hide the list (Ctrl+B)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="3" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M9.5 4v16"/></svg></button><button class="m-menu" data-action="m-rail" aria-label="Back to the list"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="head-title"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}</div><span class="spacer"></span><div class="head-actions">${model.composer && ['run', 'main', 'room'].includes(ui.view.type) ? readAloudButton(draftKey()) + voiceModeButton(draftKey()) : ''}${model.actions || ''}</div><button type="button" class="pane-toggle" data-pane="side" aria-pressed="true" aria-label="Show or hide the side panel" title="Show or hide the side panel (Ctrl+.)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="14.5" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M14.5 4v16"/></svg></button></div>`;
+  const head = `<div class="stage-head"><button type="button" class="pane-toggle" data-pane="rail" aria-pressed="true" aria-label="${t`Show or hide the list`}" title="${t`Show or hide the list (Ctrl+B)`}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="3" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M9.5 4v16"/></svg></button><button class="m-menu" data-action="m-rail" aria-label="${t`Back to the list`}"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="head-title"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}</div><span class="spacer"></span><div class="head-actions">${model.composer && ['run', 'main', 'room'].includes(ui.view.type) ? readAloudButton(draftKey()) + voiceModeButton(draftKey()) : ''}${model.actions || ''}</div><button type="button" class="pane-toggle" data-pane="side" aria-pressed="true" aria-label="${t`Show or hide the side panel`}" title="${t`Show or hide the side panel (Ctrl+.)`}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="14.5" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M14.5 4v16"/></svg></button></div>`;
   // A view that needs the message box always gets it, even when an earlier view had none.
   if (full || !document.getElementById('feed') || Boolean(model.composer) !== Boolean(document.getElementById('composer'))) {
-    stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}${model.top ? '' : '<button type="button" class="to-end" id="to-end" hidden aria-label="Go to the newest messages"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span class="to-end-new">New messages</span></button>'}</div><aside class="side" id="side"></aside>`;
+    stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}${model.top ? '' : `<button type="button" class="to-end" id="to-end" hidden aria-label="${t`Go to the newest messages`}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span class="to-end-new">${t`New messages`}</span></button>`}</div><aside class="side" id="side"></aside>`;
     ui.stick = !model.top; redrawAttachments(ctx); if (model.top) document.getElementById('feed').scrollTop = 0;
   } else { document.getElementById('head').innerHTML = head; const slot = document.getElementById('members'); if (!slot.contains(document.activeElement) && !pickerOpen()) slot.innerHTML = model.members || ''; }
   // The hint in the message box follows the AI picked under it without redrawing what is typed.
@@ -406,7 +407,7 @@ function voiceNow() {
   return { state: 'idle', level: 0 };
 }
 // The badge under the body says plainly whether to talk: green "Listening, go ahead" only while the mic is open.
-const VOICE_WORDS = { idle: 'One moment', listening: 'Listening, go ahead', thinking: 'Thinking', speaking: 'Speaking' };
+const VOICE_WORDS = { idle: t('One moment'), listening: t('Listening, go ahead'), thinking: t('Thinking'), speaking: t('Speaking') };
 const MIC_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
 // A soft short tone each time the mic opens, so the person knows when to talk without looking.
 let voiceTone = null;
@@ -431,7 +432,7 @@ function syncVoiceStage() {
     voiceStage = document.createElement('div'); voiceStage.className = 'voice-stage'; voiceStage.dataset.run = ctx.currentRunId();
     // The briefing is made now, while the body opens (code, not AI): the first question is answered from it at once.
     void api(`/runs/${voiceStage.dataset.run}/voice`, { method: 'POST', data: { on: true } }).catch(() => {});
-    voiceStage.innerHTML = `<button type="button" class="voice-exit" data-action="voice-mode" aria-label="End voice mode" title="End voice mode (Esc)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><div class="voice-cue" data-state="idle" role="status" aria-live="polite"><span class="vc-dot" aria-hidden="true"></span>${MIC_ICON}<span class="vc-text">One moment</span></div>`;
+    voiceStage.innerHTML = `<button type="button" class="voice-exit" data-action="voice-mode" aria-label="${t`End voice mode`}" title="${t`End voice mode (Esc)`}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button><div class="voice-cue" data-state="idle" role="status" aria-live="polite"><span class="vc-dot" aria-hidden="true"></span>${MIC_ICON}<span class="vc-text">${t`One moment`}</span></div>`;
     const cue = voiceStage.querySelector('.voice-cue'), word = cue.querySelector('.vc-text');
     voiceLive(); voiceBeat = setInterval(voiceLive, 2000);
     // The welcome is said by Rex Desk itself the moment the body has formed (about 2.3 s), not written by the AI, which
@@ -461,9 +462,9 @@ const draftKey = () => `${ui.view.type}:${ui.view.id || ''}`;
 function composerHint(run, working) {
   // Local AI runs through Claude Code: switching between them keeps the same conversation.
   const picked = ui.providerPick?.[draftKey()], next = picked === 'local' ? 'claude' : picked || (run.provider === 'codex' ? 'claude' : run.provider);
-  const name = id => (id === 'claude' && (picked === 'local' || (!picked && String(run.model || '').startsWith('local:'))) ? 'Local AI' : provider(id));
-  if (working) return `Message ${name(run.provider)}…`;
-  return next !== run.provider ? `Message ${name(next)}. It takes over from ${provider(run.provider)} with the chat so far…` : `Message ${name(next)}. It picks up where it left off…`;
+  const name = id => (id === 'claude' && (picked === 'local' || (!picked && String(run.model || '').startsWith('local:'))) ? t('Local AI') : provider(id));
+  if (working) return t`Message ${name(run.provider)}…`;
+  return next !== run.provider ? t`Message ${name(next)}. It takes over from ${provider(run.provider)} with the chat so far…` : t`Message ${name(next)}. It picks up where it left off…`;
 }
 
 function renderAll(full = false) {
@@ -542,10 +543,10 @@ const voiceQuiet = { since: 0, asked: false };
 async function send() {
   const box = document.getElementById('draft'), typed = box?.value.trim(), hasFiles = ui.attachments.some(file => file.path);
   if (!typed && !hasFiles) return;
-  if (ui.attachments.some(file => !file.path)) return toast('Wait for the upload to finish.', true);
+  if (ui.attachments.some(file => !file.path)) return toast(t('Wait for the upload to finish.'), true);
   // Dictated words may be misheard: the agent is told, quietly, so it reads them against the conversation.
   const spoken = ui.voiceDrafts?.has(draftKey()) ? VOICE_NOTE : '';
-  const text = `${typed || 'See the attached files.'}${attachmentText(ctx)}${spoken}`, picked = pickedOptions(ctx);
+  const text = `${typed || t('See the attached files.')}${attachmentText(ctx)}${spoken}`, picked = pickedOptions(ctx);
   const { type, id } = ui.view; box.disabled = true; ui.voiceDrafts?.delete(draftKey());
   try {
     if (type === 'jev') { box.value = ''; ui.drafts.set(draftKey(), ''); void jevDo(typed); }
@@ -573,28 +574,28 @@ async function send() {
 async function assignFromRoom(roomId, command) {
   const room = ui.snap.rooms.find(item => item.id === roomId), handle = /@([\p{L}\p{N}_-]+)/u.exec(command)?.[1]?.toLowerCase(), number = /#(\d{2,})/.exec(command)?.[1];
   const member = room?.members.find(item => item.handle.toLowerCase() === handle || item.name.toLowerCase() === handle), task = (ui.snap.tasks || []).find(item => String(item.taskNumber) === number || String(item.externalId) === number);
-  if (!member) throw new Error('Name an agent in this room: /assign @agent #task');
-  if (!task) throw new Error('Name a task by its number: /assign @agent #49760');
+  if (!member) throw new Error(t('Name an agent in this room: /assign @agent #task'));
+  if (!task) throw new Error(t('Name a task by its number: /assign @agent #49760'));
   const given = await api(`/specialists/${member.id}/assign`, { method: 'POST', data: { taskId: task.id, roomId } }); if (given?.queued) toast(given.message);
-  toast(`${member.name} is on it.`);
+  toast(t`${member.name} is on it.`);
 }
-async function syncIssues() { toast('Syncing issues…'); await api('/sync', { method: 'POST', data: {} }); toast('Issues synced.'); await refresh(); }
-async function scanProjects() { toast('Scanning this computer for projects…'); const result = await api('/memory/scan', { method: 'POST', data: {} }); toast(`Found ${result.count} projects.`); await refresh(); }
+async function syncIssues() { toast(t('Syncing issues…')); await api('/sync', { method: 'POST', data: {} }); toast(t('Issues synced.')); await refresh(); }
+async function scanProjects() { toast(t('Scanning this computer for projects…')); const result = await api('/memory/scan', { method: 'POST', data: {} }); toast(t`Found ${result.count} projects.`); await refresh(); }
 // /clear: the agent writes nothing itself; Rex Desk saves a summary of the conversation and the next message starts a fresh session that reads it.
 // /loop: the agent looks at its own tasks now, the same as its scheduled check.
 async function loopNow() {
   const run = ui.view.type === 'run' ? runById(ui.view.id) : null, agentId = run?.specialistId;
-  if (!agentId) return toast('Open an agent\'s chat to run its loop.', true);
+  if (!agentId) return toast(t('Open an agent\'s chat to run its loop.'), true);
   const box = document.getElementById('draft'); if (box) { box.value = ''; ui.drafts.set(draftKey(), ''); }
-  await api(`/specialists/${agentId}/loop`, { method: 'POST', data: {} }); toast('Checking its tasks now.'); await refresh();
+  await api(`/specialists/${agentId}/loop`, { method: 'POST', data: {} }); toast(t('Checking its tasks now.')); await refresh();
 }
 async function clearAgent() {
-  const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast('No agent conversation here.', true);
-  if (!confirm('Clear this conversation? The agent starts fresh with your next message and reads a summary of what was said. The messages stay on screen.')) return;
+  const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast(t('No agent conversation here.'), true);
+  if (!confirm(t('Clear this conversation? The agent starts fresh with your next message and reads a summary of what was said. The messages stay on screen.'))) return;
   const box = document.getElementById('draft'); if (box) { box.value = ''; ui.drafts.set(draftKey(), ''); }
-  await api(`/runs/${run.id}/fresh`, { method: 'POST', data: {} }); toast('Cleared. Your next message starts a fresh session.'); await refresh();
+  await api(`/runs/${run.id}/fresh`, { method: 'POST', data: {} }); toast(t('Cleared. Your next message starts a fresh session.')); await refresh();
 }
-async function stopAgent() { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast('No agent to stop here.', true); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
+async function stopAgent() { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast(t('No agent to stop here.'), true); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
 function newRoomDialog() { openRoomDialog(ctx); }
 document.addEventListener('click', async event => {
   const target = event.target.closest('[data-open],[data-action]'); if (!target) return;
@@ -612,18 +613,18 @@ document.addEventListener('click', async event => {
   try {
     if (action?.startsWith('spec-')) await agentAction(ctx, action, target);
     else if (action === 'send') await send();
-    else if (action === 'agent-signin') { try { await api('/agents/login', { method: 'POST', data: { provider: target.dataset.provider || 'claude', profile: '' } }); toast('Sign-in opened. Pick the account that has the plan, finish it, then start a fresh chat.'); } catch (error) { toast(error.message, true); } }
+    else if (action === 'agent-signin') { try { await api('/agents/login', { method: 'POST', data: { provider: target.dataset.provider || 'claude', profile: '' } }); toast(t('Sign-in opened. Pick the account that has the plan, finish it, then start a fresh chat.')); } catch (error) { toast(error.message, true); } }
     else if (action === 'update-install') await installUpdate(api);
     else if (action === 'update-later') updateLater();
-    else if (action === 'voice-mode') { const on = toggleVoiceMode(draftKey()); if (!on) { cancelVoiceTurn(); stopLive(); } voiceRest = 0; toast(on ? 'Voice mode is on. Talk when the mic lights up; the reply is spoken as it is written.' : 'Voice mode is off.'); renderAll(); }
-    else if (action === 'read-aloud') { const on = toggleReadAloud(draftKey()); toast(on ? 'New replies in this chat are read aloud.' : 'Replies are no longer read aloud.'); renderAll(); }
+    else if (action === 'voice-mode') { const on = toggleVoiceMode(draftKey()); if (!on) { cancelVoiceTurn(); stopLive(); } voiceRest = 0; toast(on ? t('Voice mode is on. Talk when the mic lights up; the reply is spoken as it is written.') : t('Voice mode is off.')); renderAll(); }
+    else if (action === 'read-aloud') { const on = toggleReadAloud(draftKey()); toast(on ? t('New replies in this chat are read aloud.') : t('Replies are no longer read aloud.')); renderAll(); }
     else if (action === 'update-show') updateShow(ui.snap.update);
     else if (action === 'avatar-pick') { const agent = (ui.snap.specialists || []).find(item => item.id === target.closest('[data-agent-id]')?.dataset.agentId); if (agent) openAvatarPicker(ctx, agent); }
     else if (action === 'pin-toggle') togglePin(ctx, target.dataset.kind, target.dataset.id);
     else if (action === 'app-on' || action === 'app-off') {
       const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return;
       await api(`/runs/${run.id}/app`, { method: 'POST', data: { on: action === 'app-on' } });
-      toast(action === 'app-on' ? 'Opening this chat in the Claude app. Its link shows here in a few seconds.' : 'Closed in the Claude app. The chat carries on here.');
+      toast(action === 'app-on' ? t('Opening this chat in the Claude app. Its link shows here in a few seconds.') : t('Closed in the Claude app. The chat carries on here.'));
       await refresh();
     }
     else if (action === 'update-when-idle') await updateWhenIdle(api);
@@ -637,20 +638,20 @@ document.addEventListener('click', async event => {
     else if (action?.startsWith('dev-')) await devicesAction(ctx, action, target);
     else if (action?.startsWith('mo-')) await monitorAction(ctx, action, target);
     else if (action?.startsWith('nt-')) await noticesAction(ctx, action, target);
-    else if (action === 'brain-setup') { const found = ui.snap.memory?.brainCandidates?.[0]; const text = `Help me set up my second brain for all agents.${found ? ` I think it is at ${found}.` : ''} Ask me how I want you to use it.`; if (mainRun()) await api(`/runs/${mainRun().id}/${workingStates.includes(mainRun().state) ? 'say' : 'resume'}`, { method: 'POST', data: workingStates.includes(mainRun().state) ? { text } : { prompt: text } }); else await api('/main', { method: 'POST', data: { prompt: text } }); open('main'); }
+    else if (action === 'brain-setup') { const found = ui.snap.memory?.brainCandidates?.[0]; const text = t`Help me set up my second brain for all agents.${found ? t` I think it is at ${found}.` : ''} Ask me how I want you to use it.`; if (mainRun()) await api(`/runs/${mainRun().id}/${workingStates.includes(mainRun().state) ? 'say' : 'resume'}`, { method: 'POST', data: workingStates.includes(mainRun().state) ? { text } : { prompt: text } }); else await api('/main', { method: 'POST', data: { prompt: text } }); open('main'); }
     else if (action === 'quick') { await api('/main', { method: 'POST', data: { prompt: target.dataset.text } }); await refresh(); }
     else if (action === 'sync') await syncIssues();
     else if (action === 'sec-toggle') toggleSection(target.dataset.sec);
     else if (action === 'settings-open') openSettings(ctx);
     else if (action === 'about-open') openSettings(ctx, 'about');
     else if (action === 'settings-sources') { document.querySelector('.dialog-back:not(.settings)')?.remove(); openSettings(ctx, 'sources'); }
-    else if (action === 'sync-source') { ui.syncing = target.dataset.source; renderAll(); try { const [result] = await api('/sync', { method: 'POST', data: { sourceId: target.dataset.source } }); toast(result?.error ? `Sync failed: ${result.error}` : `${result?.name || 'Tracker'} synced.`, Boolean(result?.error)); } finally { ui.syncing = ''; await refresh(); } }
+    else if (action === 'sync-source') { ui.syncing = target.dataset.source; renderAll(); try { const [result] = await api('/sync', { method: 'POST', data: { sourceId: target.dataset.source } }); toast(result?.error ? t`Sync failed: ${result.error}` : `${result?.name || t('Tracker')} synced.`, Boolean(result?.error)); } finally { ui.syncing = ''; await refresh(); } }
     else if (action === 'know-tab') { ui.knowTab = target.dataset.tab; renderAll(true); }
     else if (action === 'kg-view') { try { localStorage.setItem('rex-knowledge-view', target.dataset.view); } catch {} renderAll(true); }
     else if (action === 'theme') window.rexTheme?.set(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
     else if (action === 'stop') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
     else if (action === 'scan') await scanProjects();
-    else if (action === 'wake-approve') { await api(`/rooms/x/wakes/${target.dataset.id}`, { method: 'POST', data: {} }); toast('Agent resumed.'); await refresh(); }
+    else if (action === 'wake-approve') { await api(`/rooms/x/wakes/${target.dataset.id}`, { method: 'POST', data: {} }); toast(t('Agent resumed.')); await refresh(); }
     else if (action === 'wake-dismiss') { await api(`/rooms/x/wakes/${target.dataset.id}`, { method: 'DELETE' }); await refresh(); }
   } catch (error) { toast(error.message, true); }
 });
@@ -665,7 +666,7 @@ document.addEventListener('submit', async event => {
   const decision = event.submitter?.value || 'accept', content = {};
   if (decision === 'accept' && form.classList.contains('sliding')) {
     const missing = [...form.querySelectorAll('.qslide')].findIndex(slide => !answered(slide));
-    if (missing >= 0) { slideTo(form, missing); toast('Answer this one first, or press Skip.', true); return; }
+    if (missing >= 0) { slideTo(form, missing); toast(t('Answer this one first, or press Skip.'), true); return; }
   }
   for (const field of form.querySelectorAll('[data-type]')) {
     let value = field.value; if (value === '__custom') value = form.elements[`${field.name}__custom`].value; if (value === '') continue;
@@ -673,7 +674,7 @@ document.addEventListener('submit', async event => {
   }
   const always = decision === 'always';
   document.activeElement?.blur?.();
-  try { await api(`/interactions/${form.dataset.interaction}/answer`, { method: 'POST', data: { action: always ? 'accept' : decision, content: always ? { ...content, always: true } : content } }); toast(decision === 'accept' || always ? 'Sent to the agent.' : 'Declined.'); await refresh(); }
+  try { await api(`/interactions/${form.dataset.interaction}/answer`, { method: 'POST', data: { action: always ? 'accept' : decision, content: always ? { ...content, always: true } : content } }); toast(decision === 'accept' || always ? t('Sent to the agent.') : t('Declined.')); await refresh(); }
   catch (error) { toast(error.message, true); }
 });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') { if (ui.gliding) return; ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; if (ui.stick) ui.freshBelow = false; syncToEnd(); } }, true);
@@ -682,16 +683,16 @@ initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLoca
 // On a phone the side panels start closed, and the menu button opens the list of chats.
 if (window.matchMedia('(max-width: 760px)').matches) { ui.infoOpen = false; ui.chatInfo = false; ui.termOpen = false; }
 // A page an agent made (an explanation of its changes) opens full screen over the chat, in a sandbox with no access to Rex Desk.
-function openPage(src, title = 'Explanation') {
+function openPage(src, title = t('Explanation')) {
   document.querySelector('.page-view')?.remove();
   const view = document.createElement('div'); view.className = 'page-view'; view.setAttribute('role', 'dialog'); view.setAttribute('aria-label', title);
-  view.innerHTML = `<div class="pv-bar"><b>${esc(title)}</b><span class="spacer"></span><a class="btn small" href="${esc(src)}" target="_blank" rel="noopener noreferrer">Open in a new window</a><button type="button" class="btn small" data-pv-close>Close</button></div><iframe class="pv-frame" sandbox="allow-scripts" src="${esc(src)}" title="${esc(title)}"></iframe>`;
+  view.innerHTML = `<div class="pv-bar"><b>${esc(title)}</b><span class="spacer"></span><a class="btn small" href="${esc(src)}" target="_blank" rel="noopener noreferrer">${t`Open in a new window`}</a><button type="button" class="btn small" data-pv-close>${t`Close`}</button></div><iframe class="pv-frame" sandbox="allow-scripts" src="${esc(src)}" title="${esc(title)}"></iframe>`;
   document.body.append(view); view.querySelector('[data-pv-close]').focus();
   view.addEventListener('click', event => { if (event.target.closest('[data-pv-close]')) view.remove(); });
   view.addEventListener('keydown', event => { if (event.key === 'Escape') view.remove(); });
 }
 // An explanation page an agent made opens as a tab of the file window, on its preview (Code shows its source).
-document.addEventListener('click', event => { const button = event.target.closest?.('[data-page-open]'); if (!button) return; event.preventDefault(); event.stopPropagation(); if (window.rexOpenFile) void window.rexOpenFile(button.dataset.pageOpen, { view: 'preview' }); else openPage(button.dataset.pageOpen, button.textContent.trim() || 'Explanation'); }, true);
+document.addEventListener('click', event => { const button = event.target.closest?.('[data-page-open]'); if (!button) return; event.preventDefault(); event.stopPropagation(); if (window.rexOpenFile) void window.rexOpenFile(button.dataset.pageOpen, { view: 'preview' }); else openPage(button.dataset.pageOpen, button.textContent.trim() || t('Explanation')); }, true);
 document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="m-rail"]')) return; event.stopPropagation(); document.querySelector('.chat-shell')?.classList.toggle('show-rail'); }, true);
 document.addEventListener('click', event => { const head = event.target.closest?.('[data-action="agent-group"]'); if (!head) return; event.stopPropagation(); toggleGroup(head.dataset.project); renderAll(); }, true);
 // The back and forward buttons, and a pasted address, move between screens.
@@ -773,7 +774,7 @@ try {
   // An agent's words as they are written: Voice mode speaks them a phrase behind, without waiting for the whole reply.
   stream.addEventListener('partial', event => { try { speakLive(JSON.parse(event.data), draftKey(), ctx.currentRunId()); } catch { /* a broken message is skipped */ } });
   setInterval(() => void refresh().catch(() => {}), 15000);
-} catch (error) { app.innerHTML = `<div class="boot boot-failed"><h2>Rex Desk is unavailable</h2><p>${esc(error.message)}</p><p>Opening it again by itself as soon as the server answers.</p></div>`; }
+} catch (error) { app.innerHTML = `<div class="boot boot-failed"><h2>${t`Rex Desk is unavailable`}</h2><p>${esc(error.message)}</p><p>${t`Opening it again by itself as soon as the server answers.`}</p></div>`; }
 
 // A question card with several questions shows one at a time. Back and Next move between them; picking an answer moves on by itself.
 function answered(slide) {
@@ -787,7 +788,7 @@ function slideTo(form, index) {
   form.dataset.step = String(to); ui.qstep.set(form.dataset.interaction, to);
   slides.forEach((slide, position) => { slide.classList.toggle('on', position === to); slide.classList.toggle('back', position === to && to < from); });
   form.querySelectorAll('.qdots i').forEach((dot, position) => { dot.className = position === to ? 'on' : position < to ? 'done' : ''; });
-  const counter = form.querySelector('[data-qcount]'); if (counter) counter.textContent = `Question ${to + 1} of ${count}`;
+  const counter = form.querySelector('[data-qcount]'); if (counter) counter.textContent = t`Question ${to + 1} of ${count}`;
   form.querySelector('.qback').hidden = to === 0; form.querySelector('.qnext').hidden = to === count - 1; form.querySelector('.qsend').hidden = to !== count - 1;
   const box = slides[to].querySelector('.qinput');
   if (to === count - 1 && box?.value) form.querySelector('.qsend').focus(); else box?.focus({ preventScroll: true });
@@ -795,7 +796,7 @@ function slideTo(form, index) {
 document.addEventListener('click', event => {
   const button = event.target.closest?.('[data-qmove]'); if (!button) return;
   const form = button.closest('form'), step = Number(form.dataset.step), move = Number(button.dataset.qmove);
-  if (move > 0 && !answered(form.querySelector('.qslide.on'))) { toast('Pick or type an answer first.', true); return; }
+  if (move > 0 && !answered(form.querySelector('.qslide.on'))) { toast(t('Pick or type an answer first.'), true); return; }
   slideTo(form, step + move);
 });
 // Answers typed or picked so far stay when the chat redraws the card.
@@ -809,32 +810,32 @@ document.addEventListener('input', event => { if (event.target.classList?.contai
 function photoUrl() { return `/api/profile/photo?v=${encodeURIComponent(ui.profile?.photo?.updatedAt || '')}`; }
 function noteText(item) { const match = /^(.*?)\s+\((\d{4}-\d{2}-\d{2})(, may change)?\)$/.exec(item); return match ? { text: match[1], when: match[2], soft: Boolean(match[3]) } : { text: item, when: '', soft: false }; }
 function personPage() {
-  const profile = ui.profile || { sections: [], projects: [], agents: [] }, name = profile.name || 'You';
+  const profile = ui.profile || { sections: [], projects: [], agents: [] }, name = profile.name || t('You');
   const photo = profile.photo ? `<img class="kl-photo" src="${photoUrl()}" alt="${esc(name)}">` : `<div class="kl-photo kl-initials" aria-hidden="true">${esc(initials(name))}</div>`;
   const plain = text => String(text || '').replace(/\*\*|__|`/g, '');
   // What the agents know, one tab for each kind. The title is the heading in .rexdesk/user.md.
-  const KINDS = [['explain', 'How to explain things to me', 'Explain', 'Format, length, detail, examples: how every agent answers you.', 'Short answer first, then the steps as a numbered list'],
-    ['likes', 'Likes', 'Likes', 'What works well for you.', 'Plain words, no jargon'],
-    ['dislikes', 'Dislikes', 'Dislikes', 'What agents should stop doing.', 'Long walls of text'],
-    ['works', 'How they work', 'How you work', 'Your habits, tools and rules.', 'I test on my phone before I merge'],
-    ['personality', 'Personality', 'Personality', 'How you think, so agents meet you where you are.', 'I learn by doing; show me, then explain'],
-    ['about', 'About them', 'About you', 'Facts about you.', 'I speak Khmer, English and Korean']];
+  const KINDS = [['explain', t('How to explain things to me'), t('Explain'), t('Format, length, detail, examples: how every agent answers you.'), t('Short answer first, then the steps as a numbered list')],
+    ['likes', t('Likes'), t('Likes'), t('What works well for you.'), t('Plain words, no jargon')],
+    ['dislikes', t('Dislikes'), t('Dislikes'), t('What agents should stop doing.'), t('Long walls of text')],
+    ['works', t('How they work'), t('How you work'), t('Your habits, tools and rules.'), t('I test on my phone before I merge')],
+    ['personality', t('Personality'), t('Personality'), t('How you think, so agents meet you where you are.'), t('I learn by doing; show me, then explain')],
+    ['about', t('About them'), t('About you'), t('Facts about you.'), t('I speak Khmer, English and Korean')]];
   const itemsOf = title => (profile.sections.find(section => section.title === title)?.items || []).map(noteText);
   const tab = KINDS.some(kind => kind[0] === ui.knowTab) ? ui.knowTab : (KINDS.find(item => itemsOf(item[1]).length) || KINDS[0])[0];
   const [kind, title, label, hint, example] = KINDS.find(item => item[0] === tab);
   const total = KINDS.reduce((sum, item) => sum + itemsOf(item[1]).length, 0);
   const items = itemsOf(title);
-  const tabs = `<div class="kl-tabs" role="tablist" aria-label="What the agents know">${KINDS.map(([key, heading, short]) => { const count = itemsOf(heading).length; return `<button type="button" role="tab" aria-selected="${key === tab}" class="${key === tab ? 'on' : ''}" data-action="know-tab" data-tab="${key}">${esc(short)}<span>${count}</span></button>`; }).join('')}</div>`;
-  const rows = items.length ? `<ul class="kl-list">${items.map(item => `<li><span class="kl-text">${esc(item.text)}</span><span class="kl-meta">${item.when ? esc(item.when) : ''}${item.soft ? '<em>may change</em>' : ''}</span><button type="button" class="kl-x" data-note-forget="${esc(kind)}" data-note-text="${esc(item.text)}" title="Remove" aria-label="Remove this"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>`
-    : `<p class="kl-empty">Nothing here yet. Agents add to it when they notice what works, or add your own above.</p>`;
+  const tabs = `<div class="kl-tabs" role="tablist" aria-label="${t`What the agents know`}">${KINDS.map(([key, heading, short]) => { const count = itemsOf(heading).length; return `<button type="button" role="tab" aria-selected="${key === tab}" class="${key === tab ? 'on' : ''}" data-action="know-tab" data-tab="${key}">${esc(short)}<span>${count}</span></button>`; }).join('')}</div>`;
+  const rows = items.length ? `<ul class="kl-list">${items.map(item => `<li><span class="kl-text">${esc(item.text)}</span><span class="kl-meta">${item.when ? esc(item.when) : ''}${item.soft ? `<em>${t`may change`}</em>` : ''}</span><button type="button" class="kl-x" data-note-forget="${esc(kind)}" data-note-text="${esc(item.text)}" title="${t`Remove`}" aria-label="${t`Remove this`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>`
+    : `<p class="kl-empty">${t`Nothing here yet. Agents add to it when they notice what works, or add your own above.`}</p>`;
   const panel = `<section class="kl-panel" role="tabpanel"><header><h2>${esc(label)}</h2><p>${esc(hint)}</p></header>
-    <form class="kl-add" data-note-add="${esc(kind)}"><input name="text" type="text" maxlength="240" placeholder="Add one, for example: ${esc(example)}" aria-label="Add to ${esc(label)}" autocomplete="off"><button class="btn primary small">Add</button></form>${rows}</section>`;
+    <form class="kl-add" data-note-add="${esc(kind)}"><input name="text" type="text" maxlength="240" placeholder="${t`Add one, for example: ${esc(example)}`}" aria-label="${t`Add to ${esc(label)}`}" autocomplete="off"><button class="btn primary small">${t`Add`}</button></form>${rows}</section>`;
   const side = `<aside class="kl-side"><div class="kl-me">${photo}<div><h2>${esc(name)}</h2>${profile.email ? `<p>${esc(profile.email)}</p>` : ''}</div></div>
-    <div class="kl-stats"><div><b>${total}</b><span>things known</span></div><div><b>${profile.projects.length}</b><span>projects</span></div><div><b>${profile.agents.length}</b><span>agents</span></div></div>
-    <div class="kl-actions"><label class="btn small pf-upload">${profile.photo ? 'Change photo' : 'Add a photo'}<input type="file" accept="image/png,image/jpeg,image/webp" data-photo-upload hidden></label>${profile.photo ? '<button class="btn small" data-action="photo-remove">Remove</button>' : ''}</div>
-    ${profile.projects.length ? `<h3>Projects</h3><div class="kl-chips">${profile.projects.map(project => `<button type="button" data-open="project" data-id="${esc(project.slug)}" title="${esc(plain(project.purpose))}">${esc(project.slug)}</button>`).join('')}</div>` : ''}
-    ${profile.agents.length ? `<h3>Agents</h3><div class="kl-chips">${profile.agents.map(agent => `<button type="button" data-open="specialist" data-id="${esc(agent.id)}">${esc(agent.name)}</button>`).join('')}</div>` : ''}
-    <p class="kl-file">Kept in .rexdesk/user.md. Every agent reads it before it answers you.</p></aside>`;
+    <div class="kl-stats"><div><b>${total}</b><span>${t`things known`}</span></div><div><b>${profile.projects.length}</b><span>${t`projects`}</span></div><div><b>${profile.agents.length}</b><span>${t`agents`}</span></div></div>
+    <div class="kl-actions"><label class="btn small pf-upload">${profile.photo ? t('Change photo') : t('Add a photo')}<input type="file" accept="image/png,image/jpeg,image/webp" data-photo-upload hidden></label>${profile.photo ? `<button class="btn small" data-action="photo-remove">${t`Remove`}</button>` : ''}</div>
+    ${profile.projects.length ? `<h3>${t`Projects`}</h3><div class="kl-chips">${profile.projects.map(project => `<button type="button" data-open="project" data-id="${esc(project.slug)}" title="${esc(plain(project.purpose))}">${esc(project.slug)}</button>`).join('')}</div>` : ''}
+    ${profile.agents.length ? `<h3>${t`Agents`}</h3><div class="kl-chips">${profile.agents.map(agent => `<button type="button" data-open="specialist" data-id="${esc(agent.id)}">${esc(agent.name)}</button>`).join('')}</div>` : ''}
+    <p class="kl-file">${t`Kept in .rexdesk/user.md. Every agent reads it before it answers you.`}</p></aside>`;
   return `<div class="page kl">${brainBanner()}<div class="kl-body">${side}<div class="kl-main">${tabs}${panel}</div></div></div>`;
 }
 // A chosen picture is made small (512 px) in the page before it is saved.
@@ -846,8 +847,8 @@ document.addEventListener('change', async event => {
     const canvas = document.createElement('canvas'); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
     canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     await api('/profile/photo', { method: 'POST', data: { data: canvas.toDataURL('image/jpeg', 0.9).split(',')[1] } });
-    toast('Profile photo saved.'); await refresh({ full: true });
-  } catch (error) { toast(error.message || 'That picture could not be read.', true); }
+    toast(t('Profile photo saved.')); await refresh({ full: true });
+  } catch (error) { toast(error.message || t('That picture could not be read.'), true); }
 });
 document.addEventListener('click', async event => {
   if (!event.target.closest?.('[data-action="photo-remove"]')) return;
@@ -877,22 +878,22 @@ function fileState(item) {
 function fileCard(item) {
   const run = runById(item.runId), state = fileState(item), file = item.request?.path || '';
   let body;
-  if (state.loading) body = '<p class="muted">Opening the file…</p>';
+  if (state.loading) body = `<p class="muted">${t`Opening the file…`}</p>`;
   else if (state.error) body = `<p class="fbad">${esc(state.error)}</p>`;
   else if (state.mode === 'fields') {
     const lines = state.content.split('\n'), rows = lines.map((line, index) => [line, index, envLine(line)]).filter(([, , match]) => match);
     body = rows.length ? `<div class="frows">${rows.map(([, index, match]) => {
       const key = match[2], value = match[4].replace(/^(["'])(.*)\1$/, '$2'), hidden = secretKey(key) && !state.shown.has(index), wanted = state.keys.includes(key);
-      return `<label class="frow${wanted ? ' wanted' : ''}"><span class="fkey">${esc(key)}${wanted ? '<small>asked for</small>' : ''}</span><span class="fval"><input type="${hidden ? 'password' : 'text'}" data-file-line="${index}" value="${esc(value)}" autocomplete="off" spellcheck="false" placeholder="${wanted ? 'Paste the value here' : 'empty'}">${secretKey(key) ? `<button type="button" class="btn small quiet" data-file-show="${index}">${hidden ? 'Show' : 'Hide'}</button>` : ''}</span></label>`;
-    }).join('')}</div>` : '<p class="muted">No KEY=value lines yet. Switch to text to write the file.</p>';
+      return `<label class="frow${wanted ? ' wanted' : ''}"><span class="fkey">${esc(key)}${wanted ? `<small>${t`asked for`}</small>` : ''}</span><span class="fval"><input type="${hidden ? 'password' : 'text'}" data-file-line="${index}" value="${esc(value)}" autocomplete="off" spellcheck="false" placeholder="${wanted ? t('Paste the value here') : 'empty'}">${secretKey(key) ? `<button type="button" class="btn small quiet" data-file-show="${index}">${hidden ? t('Show') : t('Hide')}</button>` : ''}</span></label>`;
+    }).join('')}</div>` : `<p class="muted">${t`No KEY=value lines yet. Switch to text to write the file.`}</p>`;
   } else body = `<textarea class="ftext" data-file-text spellcheck="false">${esc(state.content)}</textarea>`;
-  const toggle = !state.loading && !state.error && isEnv(file) ? `<button type="button" class="btn small quiet" data-file-mode>${state.mode === 'fields' ? 'Edit as text' : 'Edit as fields'}</button>` : '';
-  return `<form class="card ask fcard" data-file="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>File to fill in · ${esc(runTitle(run))}</div>
+  const toggle = !state.loading && !state.error && isEnv(file) ? `<button type="button" class="btn small quiet" data-file-mode>${state.mode === 'fields' ? t('Edit as text') : t('Edit as fields')}</button>` : '';
+  return `<form class="card ask fcard" data-file="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>${t`File to fill in · ${esc(runTitle(run))}`}</div>
     <div class="qtext md">${markdown(String(item.title || ''))}</div>
-    <div class="fpath"><code title="${esc(file)}">${esc(file)}</code>${state.exists === false ? '<span class="chip">new file</span>' : ''}${toggle}</div>
+    <div class="fpath"><code title="${esc(file)}">${esc(file)}</code>${state.exists === false ? `<span class="chip">${t`new file`}</span>` : ''}${toggle}</div>
     ${body}
-    <p class="fnote">Saved straight to this computer. ${esc(runTitle(run))} sees only which keys have a value, never what you type.</p>
-    <div class="row"><button class="send-btn wide" ${state.loading || state.error ? 'disabled' : ''}>Save file</button><button type="button" class="btn small" data-file-close>Close without saving</button></div></form>`;
+    <p class="fnote">${t`Saved straight to this computer. ${esc(runTitle(run))} sees only which keys have a value, never what you type.`}</p>
+    <div class="row"><button class="send-btn wide" ${state.loading || state.error ? 'disabled' : ''}>${t`Save file`}</button><button type="button" class="btn small" data-file-close>${t`Close without saving`}</button></div></form>`;
 }
 function fileLine(state, index, value) {
   const lines = state.content.split('\n'), match = envLine(lines[index]); if (!match) return;
@@ -912,13 +913,13 @@ document.addEventListener('click', async event => {
   if (show) { const index = Number(show.dataset.fileShow); if (state.shown.has(index)) state.shown.delete(index); else state.shown.add(index); renderAll(true); return; }
   if (event.target.closest('[data-file-mode]')) { state.mode = state.mode === 'fields' ? 'text' : 'fields'; renderAll(true); return; }
   if (event.target.closest('[data-file-close]')) {
-    try { await api(`/interactions/${form.dataset.file}/answer`, { method: 'POST', data: { action: 'decline' } }); ui.files.delete(form.dataset.file); toast('Closed without saving.'); await refresh(); } catch (error) { toast(error.message, true); }
+    try { await api(`/interactions/${form.dataset.file}/answer`, { method: 'POST', data: { action: 'decline' } }); ui.files.delete(form.dataset.file); toast(t('Closed without saving.')); await refresh(); } catch (error) { toast(error.message, true); }
   }
 });
 document.addEventListener('submit', async event => {
   const form = event.target.closest?.('[data-file]'); if (!form) return; event.preventDefault(); event.stopPropagation();
   const state = ui.files.get(form.dataset.file); if (!state || state.loading) return;
-  try { await api(`/interactions/${form.dataset.file}/file`, { method: 'POST', data: { content: state.content } }); ui.files.delete(form.dataset.file); document.activeElement?.blur?.(); toast('File saved.'); await refresh({ full: true }); }
+  try { await api(`/interactions/${form.dataset.file}/file`, { method: 'POST', data: { content: state.content } }); ui.files.delete(form.dataset.file); document.activeElement?.blur?.(); toast(t('File saved.')); await refresh({ full: true }); }
   catch (error) { toast(error.message, true); }
 }, true);
 
@@ -927,7 +928,7 @@ function drawReplyBar() {
   const composer = document.querySelector('.composer-inner'); if (!composer) return;
   composer.querySelector('.replybar')?.remove();
   const reply = ui.reply; if (!reply || ui.view.type !== 'room' || reply.roomId !== ui.view.id) return;
-  composer.insertAdjacentHTML('afterbegin', `<div class="replybar"><span>Replying to <b>${esc(reply.name)}</b> <span class="muted">${esc(reply.text)}</span></span><button type="button" class="ag-x" data-reply-cancel aria-label="Cancel the reply" title="Cancel the reply"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>`);
+  composer.insertAdjacentHTML('afterbegin', `<div class="replybar"><span>${t`Replying to`} <b>${esc(reply.name)}</b> <span class="muted">${esc(reply.text)}</span></span><button type="button" class="ag-x" data-reply-cancel aria-label="${t`Cancel the reply`}" title="${t`Cancel the reply`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>`);
 }
 document.addEventListener('click', event => {
   const button = event.target.closest?.('[data-reply]');
@@ -972,22 +973,22 @@ document.addEventListener('click', async event => {
   const button = event.target.closest?.('[data-unsend]'); if (!button) return;
   event.stopPropagation();
   const [runId, sequence] = button.dataset.unsend.split(':');
-  if (!event.shiftKey && !confirm('Unsend this message? (Shift+click unsends without asking.)')) return;
-  try { const result = await api(`/runs/${runId}/messages/${sequence}`, { method: 'DELETE' }); toast(result.seen ? 'Unsent. The agent had already read it.' : 'Unsent before the agent read it.'); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
+  if (!event.shiftKey && !confirm(t('Unsend this message? (Shift+click unsends without asking.)'))) return;
+  try { const result = await api(`/runs/${runId}/messages/${sequence}`, { method: 'DELETE' }); toast(result.seen ? t('Unsent. The agent had already read it.') : t('Unsent before the agent read it.')); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
 });
 // Unsend your own message in a group chat.
 document.addEventListener('click', async event => {
   const button = event.target.closest?.('[data-msg-delete]'); if (!button) return;
   event.stopPropagation();
   const message = (ui.snap.messages || []).find(item => item.id === button.dataset.msgDelete); if (!message) return;
-  if (!event.shiftKey && !confirm('Unsend this message? (Shift+click unsends without asking.)')) return;
+  if (!event.shiftKey && !confirm(t('Unsend this message? (Shift+click unsends without asking.)'))) return;
   try { await api(`/rooms/${message.roomId}/messages/${message.id}`, { method: 'DELETE' }); if (ui.reply?.id === message.id) { ui.reply = null; drawReplyBar(); } await refresh(); } catch (error) { toast(error.message, true); }
 });
 
 // ---------- a personal chat with an agent: its profile and what was shared, on the right ----------
 function personalAgent(run) {
   if (!run || run.roomAgent) return null;
-  if (run.role === 'coordinator' && run.main) return { id: 'main', name: 'Rex Agent', projectSlug: 'all projects', purpose: 'Knows every project and agent, and helps you decide who does what.', main: true, status: { label: stateLabel(run) } };
+  if (run.role === 'coordinator' && run.main) return { id: 'main', name: t('Rex Agent'), projectSlug: 'all projects', purpose: t('Knows every project and agent, and helps you decide who does what.'), main: true, status: { label: stateLabel(run) } };
   if (run.role !== 'specialist' || !run.specialistId) return null;
   return (ui.snap.specialists || []).find(agent => agent.id === run.specialistId && agent.runId === run.id) || null;
 }
@@ -995,32 +996,32 @@ function personalSide(run, agent, items, shells) {
   // Tabs, like a messenger's chat info: Profile (with what was shared in the chat), the worktrees of this chat, and the agent's Terminal.
   const trees = chatWorktrees(ui, { runId: run.id, agentId: agent.id });
   const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'worktrees' ? 'worktrees' : 'profile', part = ['media', 'files', 'links'].includes(ui.chatShared) ? ui.chatShared : 'media';
-  const entries = items.filter(item => item.role === 'human' || item.role === 'agent').map(item => ({ from: item.role === 'human' ? 'You' : agent.name, at: item.at, text: item.text }));
+  const entries = items.filter(item => item.role === 'human' || item.role === 'agent').map(item => ({ from: item.role === 'human' ? t('You') : agent.name, at: item.at, text: item.text }));
   const shared = collectShared(entries, (ui.snap.artifacts || []).filter(item => item.runId === run.id).map(item => ({ ...item, from: agent.name })));
-  const close = '<button type="button" class="side-x" data-action="chat-info-close" aria-label="Close the side panel" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
-  const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">Profile</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="chat-tab" data-tab="worktrees">Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}</button>${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">Terminal<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span>${close}</div>`;
+  const close = `<button type="button" class="side-x" data-action="chat-info-close" aria-label="${t`Close the side panel`}" title="${t`Close`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
+  const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">${t`Profile`}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="chat-tab" data-tab="worktrees">${t`Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}`}</button>${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">${t`Terminal`}<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span>${close}</div>`;
   if (tab === 'worktrees') return tabs + worktreeSideHtml(ctx, trees);
   if (tab === 'terminal') return tabs + terminalHtml(shells, { esc, hhmm }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="tl-bar)/, '');
-  const sharedBox = `<h3>Media, files and links</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
-  const sources = (agent.taskSources || []).map(id => id === 'local' ? 'Rex Desk tasks' : (ui.snap.config?.sources || []).find(source => source.id === id)?.name).filter(Boolean);
+  const sharedBox = `<h3>${t`Media, files and links`}</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
+  const sources = (agent.taskSources || []).map(id => id === 'local' ? t('Rex Desk tasks') : (ui.snap.config?.sources || []).find(source => source.id === id)?.name).filter(Boolean);
   const rooms = (ui.snap.rooms || []).filter(room => room.members.some(member => member.id === agent.id));
   return `${tabs}<div class="side-body rinfo pinfo">
-    <div class="rhero">${agent.remote ? avatarHtml(ctx, { name: agent.name, agent, size: 'xl' }) : `<button type="button" class="av-edit" data-action="avatar-pick" data-agent-id="${esc(agent.id)}" title="Change ${esc(agent.name)}'s avatar" aria-label="Change ${esc(agent.name)}'s avatar">${avatarHtml(ctx, { name: agent.name, agent, size: 'xl' })}<span class="av-edit-badge" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></span></button>`}<h2 class="pname">${esc(agent.name)}</h2><p class="rsub"><span class="dot ${stateTone(run) === 'working' ? 'working' : 'good'}"></span> ${esc(agent.status?.label || stateLabel(run))}${agent.main ? '' : ` on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>`}</p></div>
-    ${agent.purpose ? `<h3>About</h3><p class="pabout">${esc(agent.purpose)}</p>` : ''}
+    <div class="rhero">${agent.remote ? avatarHtml(ctx, { name: agent.name, agent, size: 'xl' }) : `<button type="button" class="av-edit" data-action="avatar-pick" data-agent-id="${esc(agent.id)}" title="${t`Change ${esc(agent.name)}'s avatar`}" aria-label="${t`Change ${esc(agent.name)}'s avatar`}">${avatarHtml(ctx, { name: agent.name, agent, size: 'xl' })}<span class="av-edit-badge" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></span></button>`}<h2 class="pname">${esc(agent.name)}</h2><p class="rsub"><span class="dot ${stateTone(run) === 'working' ? 'working' : 'good'}"></span> ${esc(agent.status?.label || stateLabel(run))}${agent.main ? '' : ` on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>`}</p></div>
+    ${agent.purpose ? `<h3>${t`About`}</h3><p class="pabout">${esc(agent.purpose)}</p>` : ''}
     ${sharedBox}
-    ${agent.main ? '' : `<h3>${agent.provider === 'codex' ? 'Codex' : agent.provider === 'gemini' ? 'Google (Antigravity)' : 'Claude'} account</h3>${pickerHtml(ctx, { id: 'pp-profile', label: 'Account', value: agent.profile || '', items: [{ value: '', label: 'Same as everyone', hint: 'The account chosen at the bottom left' }, ...((ui.accounts?.[agent.provider === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}<button type="button" class="btn small quiet" data-action="accounts">Manage accounts</button>`}
+    ${agent.main ? '' : `<h3>${t`${agent.provider === 'codex' ? t('Codex') : agent.provider === 'gemini' ? t('Google (Antigravity)') : t('Claude')} account`}</h3>${pickerHtml(ctx, { id: 'pp-profile', label: t('Account'), value: agent.profile || '', items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[agent.provider === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}<button type="button" class="btn small quiet" data-action="accounts">${t`Manage accounts`}</button>`}
     ${agent.main ? '' : earlierChats(agent)}
     ${toolsHtml(agent.main ? 'main' : agent.id)}
-    ${agent.main ? '' : `<h3>Tasks come from</h3><p class="pabout">${esc(sources.join(', ') || 'Not set yet')}</p>`}
-    ${(agent.lessons || []).length ? `<h3>Lessons learned <span>${agent.lessons.length}</span></h3><ul class="plessons">${agent.lessons.slice(-4).map(lesson => `<li>${esc(lesson.text)}</li>`).join('')}</ul>` : ''}
-    ${rooms.length ? `<h3>Group chats <span>${rooms.length}</span></h3><ul class="rtasks">${rooms.map(room => `<li><button class="rtask" data-open="room" data-id="${esc(room.id)}">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'xs' })}<span>${esc(room.name)}</span></button></li>`).join('')}</ul>` : ''}
-    ${agent.main ? '' : `<div class="prow"><button class="btn small" data-open="specialist" data-id="${esc(agent.id)}" data-profile="1">Edit profile</button></div>`}
+    ${agent.main ? '' : `<h3>${t`Tasks come from`}</h3><p class="pabout">${esc(sources.join(', ') || t('Not set yet'))}</p>`}
+    ${(agent.lessons || []).length ? `<h3>${t`Lessons learned`} <span>${agent.lessons.length}</span></h3><ul class="plessons">${agent.lessons.slice(-4).map(lesson => `<li>${esc(lesson.text)}</li>`).join('')}</ul>` : ''}
+    ${rooms.length ? `<h3>${t`Group chats`} <span>${rooms.length}</span></h3><ul class="rtasks">${rooms.map(room => `<li><button class="rtask" data-open="room" data-id="${esc(room.id)}">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'xs' })}<span>${esc(room.name)}</span></button></li>`).join('')}</ul>` : ''}
+    ${agent.main ? '' : `<div class="prow"><button class="btn small" data-open="specialist" data-id="${esc(agent.id)}" data-profile="1">${t`Edit profile`}</button></div>`}
   </div>`;
 }
 document.addEventListener('click', event => {
   const target = event.target.closest?.('[data-action="chat-tab"],[data-action="chat-shared"],[data-action="chat-info-close"],[data-action="chat-info"],[data-copy]'); if (!target) return;
   event.stopPropagation();
-  if (target.dataset.copy !== undefined) { void navigator.clipboard?.writeText(target.dataset.copy).then(() => toast('Path copied.'), () => toast('Could not copy.', true)); return; }
+  if (target.dataset.copy !== undefined) { void navigator.clipboard?.writeText(target.dataset.copy).then(() => toast(t('Path copied.')), () => toast(t('Could not copy.'), true)); return; }
   if (target.dataset.action === 'chat-tab') ui.chatTab = target.dataset.tab;
   else if (target.dataset.action === 'chat-shared') ui.chatShared = target.dataset.tab;
   else ui.chatInfo = target.dataset.action === 'chat-info';
@@ -1033,13 +1034,13 @@ const VOICE_NOTE = '\n\n(Sent by voice: speech-to-text may have misheard some wo
 function spokenText(text) { const mark = /\s*\(Sent by voice: [^)]*\)\s*$/; return mark.test(String(text || '')) ? { text: String(text).replace(mark, ''), voice: true } : { text, voice: false }; }
 document.addEventListener('input', event => { if (event.target.id === 'draft' && !event.target.value.trim()) ui.voiceDrafts?.delete(draftKey()); });
 
-function micIcon() { return '<svg class="vmic" viewBox="0 0 16 16" width="12" height="12" aria-label="Sent by voice" role="img"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>'; }
+function micIcon() { return `<svg class="vmic" viewBox="0 0 16 16" width="12" height="12" aria-label="${t`Sent by voice`}" role="img"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`; }
 
 // Adding and removing lines in "How your agents should talk to you".
 document.addEventListener('submit', async event => {
   const form = event.target.closest?.('[data-note-add]'); if (!form) return; event.preventDefault(); event.stopPropagation();
   const text = form.text.value.trim(); if (!text) return;
-  try { await api('/profile/notes', { method: 'POST', data: { kind: form.dataset.noteAdd, text } }); form.text.value = ''; document.activeElement?.blur?.(); toast('Saved. Every agent follows it from now on.'); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
+  try { await api('/profile/notes', { method: 'POST', data: { kind: form.dataset.noteAdd, text } }); form.text.value = ''; document.activeElement?.blur?.(); toast(t('Saved. Every agent follows it from now on.')); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
 }, true);
 document.addEventListener('click', async event => {
   const button = event.target.closest?.('[data-note-forget]'); if (!button) return; event.stopPropagation();
@@ -1049,13 +1050,13 @@ document.addEventListener('click', async event => {
 // ---------- Claude accounts: which subscription the agents run on ----------
 function accountChip() {
   const name = aiKey(ui.snap?.config?.provider), list = ui.accounts?.[name], current = list?.profiles?.find(item => item.profile === list.selected) || list?.profiles?.[0];
-  return `<span class="acct-dot ${current?.loggedIn ? 'good' : 'bad'}"></span><span class="acct-text"><b>${{ codex: 'Codex', gemini: 'Gemini' }[name] || 'Claude'}</b> ${esc(current ? (current.account || current.label) : 'account')}</span>`;
+  return `<span class="acct-dot ${current?.loggedIn ? 'good' : 'bad'}"></span><span class="acct-text"><b>${{ codex: t('Codex'), gemini: t('Gemini') }[name] || t('Claude')}</b> ${esc(current ? (current.account || current.label) : 'account')}</span>`;
 }
 async function loadAccounts(refreshStatus = false) { try { ui.accounts = await api(`/agents${refreshStatus ? '?refresh=1' : ''}`); ui.accountsAuto = (await api('/accounts/auto')).on; } catch {} }
 async function accountsDialog() {
   document.querySelector('.dialog-back.accounts')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back accounts'; document.body.append(back);
-  const NAMES = { claude: ['Claude', 'Claude Code', 'Claude'], codex: ['Codex', 'Codex', 'ChatGPT'], gemini: ['Gemini', 'Gemini', 'Google'] };
+  const NAMES = { claude: [t('Claude'), t('Claude Code'), t('Claude')], codex: [t('Codex'), t('Codex'), 'ChatGPT'], gemini: [t('Gemini'), t('Gemini'), t('Google')] };
   const tab = () => NAMES[ui.acctTab] ? ui.acctTab : aiKey(ui.snap?.config?.provider);
   const draw = () => {
     const name = tab(), [short, product, service] = NAMES[name], list = ui.accounts?.[name] || { profiles: [] }, defaultAi = aiKey(ui.snap?.config?.provider);
@@ -1063,39 +1064,39 @@ async function accountsDialog() {
     // The title is the account; the line under it says where it lives and what plan it is, without repeating the title or saying "none".
     // Each account: a colored letter for the person, the email, its plan as a tag, and the profile folder it lives in, in plain words.
     const hue = text => [...String(text || '?')].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7) % 8;
-    const where = item => { const label = String(item.label || ''), folder = label.match(/\.(?:claude|codex)(?:-([\w-]+?))?(?:-profile)?$/i); return /^Orca profile/i.test(label) ? 'Orca profile' : folder ? (folder[1] ? `${folder[1][0].toUpperCase()}${folder[1].slice(1)} profile` : 'Main profile') : label; };
+    const where = item => { const label = String(item.label || ''), folder = label.match(/\.(?:claude|codex)(?:-([\w-]+?))?(?:-profile)?$/i); return /^Orca profile/i.test(label) ? t('Orca profile') : folder ? (folder[1] ? t`${folder[1][0].toUpperCase() + folder[1].slice(1)} profile` : t('Main profile')) : label; };
     const plan = item => item.plan && item.plan !== 'none' ? `<span class="acct-plan">${esc(`${item.plan[0].toUpperCase()}${item.plan.slice(1)}`)}</span>` : '';
     // How much of each limit the account used, and when it resets: Claude Code and Codex report it while agents work on that account.
-    const resets = at => { if (!at) return ''; const date = new Date(at), today = new Date(); const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); return date.toDateString() === today.toDateString() ? `resets ${time}` : `resets ${date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} ${time}`; };
-    const LIMITS = [['five_hour', '5 hours'], ['seven_day', 'Week'], ['seven_day_opus', 'Week, Opus'], ['seven_day_sonnet', 'Week, Sonnet']];
+    const resets = at => { if (!at) return ''; const date = new Date(at), today = new Date(); const time = date.toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }); return date.toDateString() === today.toDateString() ? t`resets ${time}` : t`resets ${date.toLocaleDateString(locale(), { weekday: 'short', month: 'short', day: 'numeric' })} ${time}`; };
+    const LIMITS = [['five_hour', '5 hours'], ['seven_day', t('Week')], ['seven_day_opus', t('Week, Opus')], ['seven_day_sonnet', t('Week, Sonnet')]];
     const usageHtml = (provider, profile) => {
       const saved = (ui.snap.usage || []).find(entry => entry.provider === provider && (entry.profile || '') === (profile || '')) || (ui.snap.usage || []).find(entry => entry.provider === provider && entry.id === `${provider}:${profile || 'default'}`);
       // The known limits first, then any other one the account reports (a per-model week, like Fable), under its own label.
       const extra = Object.entries(saved?.windows || {}).filter(([key]) => !LIMITS.some(([known]) => known === key)).map(([key, value]) => [key, value.label || key.replace(/^seven_day_/, 'Week, ').replace(/_/g, ' ')]);
       const windows = [...LIMITS, ...extra].filter(([key]) => saved?.windows?.[key] && (saved.windows[key].used !== null || saved.windows[key].resetsAt));
-      if (!windows.length) return '<span class="acct-usage none">Usage shows after an agent works on this account.</span>';
-      return `<span class="acct-usage">${windows.map(([key, label]) => { const limit = saved.windows[key], used = limit.used ?? 0, passed = limit.resetsAt && limit.resetsAt < Date.now(); return `<span class="acct-limit ${used >= 90 && !passed ? 'hot' : ''}"><span class="acct-lname">${label}</span><meter min="0" max="100" low="70" high="90" optimum="0" value="${passed ? 0 : used}"></meter><span class="acct-lval">${passed ? 'reset' : `${used}%`}</span><span class="acct-lreset">${passed ? '' : esc(resets(limit.resetsAt))}</span></span>`; }).join('')}<small class="acct-asof">as of ${esc(new Date(saved.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</small></span>`;
+      if (!windows.length) return `<span class="acct-usage none">${t`Usage shows after an agent works on this account.`}</span>`;
+      return `<span class="acct-usage">${windows.map(([key, label]) => { const limit = saved.windows[key], used = limit.used ?? 0, passed = limit.resetsAt && limit.resetsAt < Date.now(); return `<span class="acct-limit ${used >= 90 && !passed ? 'hot' : ''}"><span class="acct-lname">${label}</span><meter min="0" max="100" low="70" high="90" optimum="0" value="${passed ? 0 : used}"></meter><span class="acct-lval">${passed ? 'reset' : `${used}%`}</span><span class="acct-lreset">${passed ? '' : esc(resets(limit.resetsAt))}</span></span>`; }).join('')}<small class="acct-asof">${t`as of ${esc(new Date(saved.at).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }))}`}</small></span>`;
     };
-    const row = item => { const who = item.account || item.label; return `<label class="acct-row${item.profile === list.selected ? ' on' : ''}" title="${esc(item.label)}"><input type="radio" name="profile" value="${esc(item.profile)}" ${item.profile === list.selected ? 'checked' : ''}><span class="nt-av acct-pic h${hue(who)}">${esc((String(who).match(/[\p{L}\p{N}]/u) || ['?'])[0].toUpperCase())}</span><span class="acct-main"><span class="acct-name"><b>${esc(who)}</b>${plan(item)}</span><small>${esc([item.account ? where(item) : '', item.method].filter(Boolean).join(' · '))}</small>${usageHtml(name, item.profile)}</span>${item.profile === list.selected ? '<span class="acct-badge"><i aria-hidden="true"></i>In use</span>' : '<span class="acct-use">Use</span>'}</label>`; };
-    const out = item => `<li><span class="acct-main"><b>${esc(item.account || item.label)}</b><small>${esc(item.label !== (item.account || item.label) ? item.label : 'Not signed in')}</small></span><button type="button" class="btn small" data-acct-login="${esc(item.profile)}">Sign in</button></li>`;
-    back.innerHTML = `<form class="dialog acct-dialog"><div class="acct-head"><h2>AI accounts</h2><button type="button" class="side-x" data-close aria-label="Close" title="Close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>
-      <div class="acct-tabs" role="tablist">${Object.entries(NAMES).map(([key, [, title]]) => `<button type="button" role="tab" aria-selected="${name === key}" class="acct-tab${name === key ? ' on' : ''}" data-acct-tab="${key}"><b>${title}</b>${defaultAi === key ? '<span class="acct-default-badge">Default</span>' : ''}</button>`).join('')}</div>
-      <div class="acct-intro"><p>Agents on ${product} run on the account marked <b>In use</b>. Click another account to switch.</p>${defaultAi === name ? `<span class="acct-note">New agents and chats use ${product}</span>` : `<button type="button" class="btn small" data-acct-default="${name}">Use ${product} for new agents</button>`}</div>
-      ${signedIn.length ? `<div class="acct-list">${signedIn.map(row).join('')}</div>` : `<p class="acct-empty">No ${service} account is signed in yet. Press Sign in: a window opens, installs ${name === 'codex' ? 'the Codex CLI' : name === 'gemini' ? 'the Antigravity CLI' : 'Claude Code'} if this computer does not have it yet, and opens the sign-in in your browser.</p>`}
-      ${signedOut.length ? `<details class="acct-out"${signedIn.length ? '' : ' open'}><summary>Not signed in <span>${signedOut.length}</span></summary><ul>${signedOut.map(out).join('')}</ul></details>` : ''}
-      ${name === 'gemini' ? '' : `<div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="Name for the new account, like work or personal" aria-label="Name for the new account"><button type="button" class="btn small primary" data-acct-create>Create and sign in</button><button type="button" class="btn small" data-acct-cancel>Cancel</button>` : `<button type="button" class="btn small" data-acct-new>+ Add a ${short} account</button>`}</div>`}
-      ${ui.acctWaiting ? `<p class="acct-wait"><span class="dot working"></span> Finish signing in to ${service} in the window that opened. This list updates by itself.</p>` : ''}
-      <label class="acct-auto"><input type="checkbox" data-acct-auto ${ui.accountsAuto !== false ? 'checked' : ''}><span>When an account hits its usage limit, switch to another signed-in one and continue</span></label>
-      <div class="acct-foot"><button type="button" class="btn quiet" data-acct-refresh>Check again</button><button type="button" class="btn primary" data-close>Done</button></div></form>`;
+    const row = item => { const who = item.account || item.label; return `<label class="acct-row${item.profile === list.selected ? ' on' : ''}" title="${esc(item.label)}"><input type="radio" name="profile" value="${esc(item.profile)}" ${item.profile === list.selected ? 'checked' : ''}><span class="nt-av acct-pic h${hue(who)}">${esc((String(who).match(/[\p{L}\p{N}]/u) || ['?'])[0].toUpperCase())}</span><span class="acct-main"><span class="acct-name"><b>${esc(who)}</b>${plan(item)}</span><small>${esc([item.account ? where(item) : '', item.method].filter(Boolean).join(' · '))}</small>${usageHtml(name, item.profile)}</span>${item.profile === list.selected ? `<span class="acct-badge"><i aria-hidden="true"></i>${t`In use`}</span>` : `<span class="acct-use">${t`Use`}</span>`}</label>`; };
+    const out = item => `<li><span class="acct-main"><b>${esc(item.account || item.label)}</b><small>${esc(item.label !== (item.account || item.label) ? item.label : t('Not signed in'))}</small></span><button type="button" class="btn small" data-acct-login="${esc(item.profile)}">${t`Sign in`}</button></li>`;
+    back.innerHTML = `<form class="dialog acct-dialog"><div class="acct-head"><h2>${t`AI accounts`}</h2><button type="button" class="side-x" data-close aria-label="${t`Close`}" title="${t`Close`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>
+      <div class="acct-tabs" role="tablist">${Object.entries(NAMES).map(([key, [, title]]) => `<button type="button" role="tab" aria-selected="${name === key}" class="acct-tab${name === key ? ' on' : ''}" data-acct-tab="${key}"><b>${title}</b>${defaultAi === key ? `<span class="acct-default-badge">${t`Default`}</span>` : ''}</button>`).join('')}</div>
+      <div class="acct-intro"><p>${t`Agents on ${product} run on the account marked ${`<b>${t`In use`}</b>`}. Click another account to switch.`}</p>${defaultAi === name ? `<span class="acct-note">${t`New agents and chats use ${product}`}</span>` : `<button type="button" class="btn small" data-acct-default="${name}">${t`Use ${product} for new agents`}</button>`}</div>
+      ${signedIn.length ? `<div class="acct-list">${signedIn.map(row).join('')}</div>` : `<p class="acct-empty">${t`No ${service} account is signed in yet. Press Sign in: a window opens, installs ${name === 'codex' ? 'the Codex CLI' : name === 'gemini' ? 'the Antigravity CLI' : t('Claude Code')} if this computer does not have it yet, and opens the sign-in in your browser.`}</p>`}
+      ${signedOut.length ? `<details class="acct-out"${signedIn.length ? '' : ' open'}><summary>${t`Not signed in`} <span>${signedOut.length}</span></summary><ul>${signedOut.map(out).join('')}</ul></details>` : ''}
+      ${name === 'gemini' ? '' : `<div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="${t`Name for the new account, like work or personal`}" aria-label="${t`Name for the new account`}"><button type="button" class="btn small primary" data-acct-create>${t`Create and sign in`}</button><button type="button" class="btn small" data-acct-cancel>${t`Cancel`}</button>` : `<button type="button" class="btn small" data-acct-new>${t`+ Add a ${short} account`}</button>`}</div>`}
+      ${ui.acctWaiting ? `<p class="acct-wait"><span class="dot working"></span> ${t`Finish signing in to ${service} in the window that opened. This list updates by itself.`}</p>` : ''}
+      <label class="acct-auto"><input type="checkbox" data-acct-auto ${ui.accountsAuto !== false ? 'checked' : ''}><span>${t`When an account hits its usage limit, switch to another signed-in one and continue`}</span></label>
+      <div class="acct-foot"><button type="button" class="btn quiet" data-acct-refresh>${t`Check again`}</button><button type="button" class="btn primary" data-close>${t`Done`}</button></div></form>`;
   };
-  if (!ui.accounts) { back.innerHTML = '<div class="dialog"><p class="muted">Checking your AI accounts…</p></div>'; await loadAccounts(true); }
+  if (!ui.accounts) { back.innerHTML = `<div class="dialog"><p class="muted">${t`Checking your AI accounts…`}</p></div>`; await loadAccounts(true); }
   draw();
   back.addEventListener('click', async event => {
     if (event.target === back || event.target.closest('[data-close]')) { back.remove(); renderAll(); return; }
     const switchTab = event.target.closest('[data-acct-tab]'); if (switchTab) { ui.acctTab = switchTab.dataset.acctTab; ui.acctAdding = false; draw(); return; }
     const pickDefault = event.target.closest('[data-acct-default]');
-    if (pickDefault) { try { await api('/config', { method: 'PUT', data: { ...ui.snap.config, provider: pickDefault.dataset.acctDefault } }); await refresh(); ui.acctTab = pickDefault.dataset.acctDefault; toast(`New agents and chats use ${{ codex: 'Codex', gemini: 'Gemini' }[pickDefault.dataset.acctDefault] || 'Claude Code'}.`); draw(); } catch (error) { toast(error.message, true); } return; }
-    if (event.target.closest('[data-acct-refresh]')) { back.querySelector('[data-acct-refresh]').textContent = 'Checking…'; await loadAccounts(true); draw(); }
+    if (pickDefault) { try { await api('/config', { method: 'PUT', data: { ...ui.snap.config, provider: pickDefault.dataset.acctDefault } }); await refresh(); ui.acctTab = pickDefault.dataset.acctDefault; toast(t`New agents and chats use ${{ codex: t('Codex'), gemini: t('Gemini') }[pickDefault.dataset.acctDefault] || t('Claude Code')}.`); draw(); } catch (error) { toast(error.message, true); } return; }
+    if (event.target.closest('[data-acct-refresh]')) { back.querySelector('[data-acct-refresh]').textContent = t('Checking…'); await loadAccounts(true); draw(); }
     if (event.target.closest('[data-acct-new]')) { ui.acctAdding = true; draw(); back.querySelector('[data-acct-name]')?.focus(); }
     if (event.target.closest('[data-acct-cancel]')) { ui.acctAdding = false; draw(); }
     const login = event.target.closest('[data-acct-login]'), create = event.target.closest('[data-acct-create]');
@@ -1103,15 +1104,15 @@ async function accountsDialog() {
       event.preventDefault(); const name = tab(), signedIn = () => (ui.accounts?.[name]?.profiles || []).filter(item => item.loggedIn).length;
       try {
         let started;
-        if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast('Give the account a name first.', true); started = await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; }
+        if (create) { const label = back.querySelector('[data-acct-name]').value.trim(); if (!label) return toast(t('Give the account a name first.'), true); started = await api('/agents/add', { method: 'POST', data: { name: label, provider: name } }); ui.acctAdding = false; }
         else started = await api('/agents/login', { method: 'POST', data: { profile: login.dataset.acctLogin, provider: name } });
-        if (started?.installing) toast('A sign-in window opened. It installs the tool first, then opens the browser.');
+        if (started?.installing) toast(t('A sign-in window opened. It installs the tool first, then opens the browser.'));
         ui.acctWaiting = true; await loadAccounts(true); draw();
         // Sign-in happens in the browser; look again every few seconds for up to three minutes, or ten while the tool installs.
         for (let tries = 0; tries < (started?.installing ? 200 : 60) && ui.acctWaiting && document.body.contains(back); tries++) {
           await new Promise(resolve => setTimeout(resolve, 3000));
           const before = signedIn(); await loadAccounts(true);
-          if (signedIn() > before) { ui.acctWaiting = false; toast('Signed in. You can pick this account now.'); }
+          if (signedIn() > before) { ui.acctWaiting = false; toast(t('Signed in. You can pick this account now.')); }
           if (document.body.contains(back)) draw();
         }
         ui.acctWaiting = false; if (document.body.contains(back)) draw();
@@ -1121,7 +1122,7 @@ async function accountsDialog() {
   back.addEventListener('keydown', event => { if (event.target.matches('[data-acct-name]') && event.key === 'Enter') { event.preventDefault(); back.querySelector('[data-acct-create]')?.click(); } });
   back.addEventListener('change', async event => {
     try {
-      if (event.target.name === 'profile') { const name = tab(); await api('/agents/profile', { method: 'POST', data: { provider: name, profile: event.target.value } }); await loadAccounts(); toast(`Agents on ${NAMES[name][1]} now use this account from their next reply.`); draw(); }
+      if (event.target.name === 'profile') { const name = tab(); await api('/agents/profile', { method: 'POST', data: { provider: name, profile: event.target.value } }); await loadAccounts(); toast(t`Agents on ${NAMES[name][1]} now use this account from their next reply.`); draw(); }
       if (event.target.matches('[data-acct-auto]')) { ui.accountsAuto = (await api('/accounts/auto', { method: 'POST', data: { on: event.target.checked } })).on; }
     } catch (error) { toast(error.message, true); }
   });
@@ -1132,20 +1133,20 @@ void loadAccounts().then(() => { if (ui.snap) renderAll(); });
 // ---------- Jev: say or type what this computer (or a website) should do ----------
 function jevStage() {
   const log = ui.jevLog || [];
-  const examples = ['Turn the volume down to 30', 'Open Bluetooth settings', 'Turn on dark mode', 'Find the cheapest flight from Phnom Penh to Seoul next Friday', 'Take a screenshot', 'What is using my memory?'];
-  const entry = item => `<li class="jv-item"><div class="jv-said"><b>${esc(item.text)}</b><small>${esc(item.at)}</small></div>${item.busy ? '<p class="muted">Working…</p>' : ''}${item.error ? `<p class="bad">${esc(item.error)}</p>` : ''}${item.say ? `<p>${esc(item.say)}</p>` : ''}${(item.results || []).map(step => `<p class="jv-step ${step.ok ? 'ok' : 'bad'}">${step.ok ? '✓' : '✗'} ${esc(step.title)}${step.ok ? (step.result?.url ? ` · <a href="${esc(step.result.url)}">open its chat</a>` : step.result?.text ? ` · ${esc(String(step.result.text).slice(0, 160))}` : '') + jevDetail(step.result) : ` · ${esc(step.error)}`}</p>`).join('')}${item.confirm ? `<div class="jv-confirm"><span>Do this? <b>${esc(item.confirm.join(', '))}</b></span><button class="btn small primary" data-jev-yes="${item.id}">Yes</button><button class="btn small" data-jev-yes="${item.id}" data-always="1" title="Do it now, and never ask again for ${esc(item.confirm.join(', '))}">Yes, always</button><button class="btn small quiet" data-jev-no="${item.id}">Cancel</button></div>` : ''}</li>`;
-  return { title: 'Jev', meta: 'Control this computer and websites', top: true,
-    feed: `<div class="page jv"><section class="jv-hero"><h2>What should Jev do?</h2><p class="muted">On this computer: apps, settings, sound, screen, Wi-Fi and Bluetooth, files, typing and clicking. On the web: search, compare and book with a browser agent that asks before paying. Khmer, English or Korean. Hold Space in the box below to talk. From any app, press <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>J</kbd>.</p>
+  const examples = [t('Turn the volume down to 30'), t('Open Bluetooth settings'), t('Turn on dark mode'), t('Find the cheapest flight from Phnom Penh to Seoul next Friday'), t('Take a screenshot'), t('What is using my memory?')];
+  const entry = item => `<li class="jv-item"><div class="jv-said"><b>${esc(item.text)}</b><small>${esc(item.at)}</small></div>${item.busy ? `<p class="muted">${t`Working…`}</p>` : ''}${item.error ? `<p class="bad">${esc(item.error)}</p>` : ''}${item.say ? `<p>${esc(item.say)}</p>` : ''}${(item.results || []).map(step => `<p class="jv-step ${step.ok ? 'ok' : 'bad'}">${step.ok ? '✓' : '✗'} ${esc(step.title)}${step.ok ? (step.result?.url ? ` · <a href="${esc(step.result.url)}">${t`open its chat`}</a>` : step.result?.text ? ` · ${esc(String(step.result.text).slice(0, 160))}` : '') + jevDetail(step.result) : ` · ${esc(step.error)}`}</p>`).join('')}${item.confirm ? `<div class="jv-confirm"><span>${t`Do this?`} <b>${esc(item.confirm.join(', '))}</b></span><button class="btn small primary" data-jev-yes="${item.id}">${t`Yes`}</button><button class="btn small" data-jev-yes="${item.id}" data-always="1" title="${t`Do it now, and never ask again for ${esc(item.confirm.join(', '))}`}">${t`Yes, always`}</button><button class="btn small quiet" data-jev-no="${item.id}">${t`Cancel`}</button></div>` : ''}</li>`;
+  return { title: t('Jev'), meta: t('Control this computer and websites'), top: true,
+    feed: `<div class="page jv"><section class="jv-hero"><h2>${t`What should Jev do?`}</h2><p class="muted">${t`On this computer: apps, settings, sound, screen, Wi-Fi and Bluetooth, files, typing and clicking. On the web: search, compare and book with a browser agent that asks before paying. Khmer, English or Korean. Hold Space in the box below to talk. From any app, press ${'<kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>J</kbd>'}.`}</p>
       <div class="jv-examples">${examples.map(text => `<button class="chip-btn" data-jev-try="${esc(text)}">${esc(text)}</button>`).join('')}</div></section>
       ${log.length ? `<ol class="jv-log">${log.slice().reverse().map(entry).join('')}</ol>` : ''}</div>`,
-    composer: { placeholder: 'Tell Jev what to do… (hold Space to talk)', mentions: [], noPickers: true } };
+    composer: { placeholder: t('Tell Jev what to do… (hold Space to talk)'), mentions: [], noPickers: true } };
 }
 async function jevDo(text) {
-  const item = { id: String(Date.now()), text, at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), busy: true };
+  const item = { id: String(Date.now()), text, at: new Date().toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }), busy: true };
   ui.jevLog = [...(ui.jevLog || []), item].slice(-30); renderAll();
   try {
     const answer = await api('/computer/do', { method: 'POST', data: { text } });
-    Object.assign(item, { busy: false, say: answer.say, results: answer.results || [], steps: answer.steps, confirm: answer.needsConfirm?.length ? answer.needsConfirm : null, confirmActions: answer.confirmActions || [], error: !answer.steps?.length ? (answer.say || 'Jev did not find something to do for that. Try other words.') : '' });
+    Object.assign(item, { busy: false, say: answer.say, results: answer.results || [], steps: answer.steps, confirm: answer.needsConfirm?.length ? answer.needsConfirm : null, confirmActions: answer.confirmActions || [], error: !answer.steps?.length ? (answer.say || t('Jev did not find something to do for that. Try other words.')) : '' });
     if (item.error === item.say) item.say = '';
   } catch (error) { Object.assign(item, { busy: false, error: error.message }); }
   renderAll();
@@ -1155,9 +1156,9 @@ document.addEventListener('click', async event => {
   const yes = event.target.closest?.('[data-jev-yes]'), no = event.target.closest?.('[data-jev-no]'); if (!yes && !no) return;
   event.stopPropagation(); const item = (ui.jevLog || []).find(entry => entry.id === (yes || no).dataset[yes ? 'jevYes' : 'jevNo']); if (!item) return;
   item.confirm = null;
-  if (no) { item.say = 'Cancelled.'; return renderAll(); }
+  if (no) { item.say = t('Cancelled.'); return renderAll(); }
   // "Yes, always": these actions stop asking from now on (Settings, Jev and voice, lists them).
-  if (yes.dataset.always && item.confirmActions?.length) await api('/computer/allow', { method: 'POST', data: { actions: item.confirmActions } }).then(() => toast('Jev will do that without asking from now on.')).catch(error => toast(error.message, true));
+  if (yes.dataset.always && item.confirmActions?.length) await api('/computer/allow', { method: 'POST', data: { actions: item.confirmActions } }).then(() => toast(t('Jev will do that without asking from now on.'))).catch(error => toast(error.message, true));
   item.busy = true; renderAll();
   try { const answer = await api('/computer/run', { method: 'POST', data: { steps: item.steps } }); Object.assign(item, { busy: false, results: answer.results || [] }); } catch (error) { Object.assign(item, { busy: false, error: error.message }); }
   renderAll();
@@ -1187,7 +1188,7 @@ function jevDetail(result) {
 document.addEventListener('change', async event => {
   if (event.target.id !== 'pp-profile') return;
   const run = runById(ui.view.id), agent = run && personalAgent(run); if (!agent || agent.main) return;
-  try { await api(`/specialists/${agent.id}`, { method: 'PUT', data: { profile: event.target.value } }); toast(event.target.value ? `${agent.name} now uses that Claude account.` : `${agent.name} uses the same account as everyone.`); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
+  try { await api(`/specialists/${agent.id}`, { method: 'PUT', data: { profile: event.target.value } }); toast(event.target.value ? t`${agent.name} now uses that Claude account.` : t`${agent.name} uses the same account as everyone.`); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
 });
 // Forms inside popups are handled by their buttons; pressing Enter never reloads the page.
 document.addEventListener('submit', event => { if (event.target.closest?.('.settings-pop,.acct-dialog,.vdialog,.src-dialog')) event.preventDefault(); });
@@ -1195,29 +1196,29 @@ document.addEventListener('submit', event => { if (event.target.closest?.('.sett
 // The MCP servers and skills an agent has, in its profile panel.
 function toolsHtml(id) {
   const tools = ui.tools?.[id];
-  if (!tools || tools.loading) { ui.tools = ui.tools || {}; if (!tools) { ui.tools[id] = { loading: true, skills: [], commands: [], mcp: [] }; void api(`/agents/tools?agent=${encodeURIComponent(id)}`).then(found => { ui.tools[id] = found; renderAll(); }).catch(() => {}); } return '<h3>Tools</h3><p class="muted small">Checking…</p>'; }
-  const server = item => `<li><span class="tl-type ${esc(item.type)}">${esc(item.type === 'stdio' ? 'local' : item.type)}</span><b>${esc(item.name)}</b><small>${esc(item.where || '')}${item.source ? ` · ${esc(item.source === 'account' ? 'from the Claude account' : item.source === 'project' ? 'from the project' : item.source)}` : ''}</small></li>`;
+  if (!tools || tools.loading) { ui.tools = ui.tools || {}; if (!tools) { ui.tools[id] = { loading: true, skills: [], commands: [], mcp: [] }; void api(`/agents/tools?agent=${encodeURIComponent(id)}`).then(found => { ui.tools[id] = found; renderAll(); }).catch(() => {}); } return `<h3>${t`Tools`}</h3><p class="muted small">${t`Checking…`}</p>`; }
+  const server = item => `<li><span class="tl-type ${esc(item.type)}">${esc(item.type === 'stdio' ? 'local' : item.type)}</span><b>${esc(item.name)}</b><small>${esc(item.where || '')}${item.source ? ` · ${esc(item.source === 'account' ? t('from the Claude account') : item.source === 'project' ? t('from the project') : item.source)}` : ''}</small></li>`;
   const skills = [...(tools.commands || []), ...(tools.skills || [])];
-  return `<h3>Tools (MCP) <span>${tools.mcp.length}</span></h3><ul class="tl-list">${tools.mcp.map(server).join('')}</ul>
-    <details class="tl-skills"><summary><h3>Skills and commands <span>${skills.length}</span></h3></summary><ul class="tl-list">${skills.map(item => `<li><b>/${esc(item.name)}</b><small>${esc(item.description || '')}</small></li>`).join('') || '<li class="muted small">None.</li>'}</ul></details>
-    <p class="muted small">Type / in the message box to use one.</p>`;
+  return `<h3>${t`Tools (MCP)`} <span>${tools.mcp.length}</span></h3><ul class="tl-list">${tools.mcp.map(server).join('')}</ul>
+    <details class="tl-skills"><summary><h3>${t`Skills and commands`} <span>${skills.length}</span></h3></summary><ul class="tl-list">${skills.map(item => `<li><b>/${esc(item.name)}</b><small>${esc(item.description || '')}</small></li>`).join('') || '<li class="muted small">None.</li>'}</ul></details>
+    <p class="muted small">${t`Type / in the message box to use one.`}</p>`;
 }
 
 // ---------- a sign-in an agent needs: open a terminal running the command, sign in, say done ----------
 function signInCard(item) {
   const run = runById(item.runId), opened = ui.signInOpened?.has(item.id);
-  return `<div class="card ask scard" data-signin="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>Sign-in needed · ${esc(runTitle(run))}</div>
+  return `<div class="card ask scard" data-signin="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>${t`Sign-in needed · ${esc(runTitle(run))}`}</div>
     <div class="qtext md">${markdown(String(item.title || ''))}</div>
     <div class="scmd"><code>${esc(item.request?.command || '')}</code></div>
-    <p class="fnote">Opens a terminal on this computer running this command. Sign in there; the tool keeps the sign-in on this computer, so every agent can use it.</p>
-    <div class="row"><button type="button" class="send-btn wide" data-signin-open>${opened ? 'Open the terminal again' : 'Open terminal'}</button><button type="button" class="btn small ${opened ? 'primary' : ''}" data-signin-done>I'm signed in</button><button type="button" class="btn small" data-signin-skip>Not now</button></div></div>`;
+    <p class="fnote">${t`Opens a terminal on this computer running this command. Sign in there; the tool keeps the sign-in on this computer, so every agent can use it.`}</p>
+    <div class="row"><button type="button" class="send-btn wide" data-signin-open>${opened ? t('Open the terminal again') : t('Open terminal')}</button><button type="button" class="btn small ${opened ? 'primary' : ''}" data-signin-done>${t`I'm signed in`}</button><button type="button" class="btn small" data-signin-skip>${t`Not now`}</button></div></div>`;
 }
 document.addEventListener('click', async event => {
   const card = event.target.closest?.('[data-signin]'); if (!card) return;
   const id = card.dataset.signin;
   try {
-    if (event.target.closest('[data-signin-open]')) { await api(`/interactions/${id}/terminal`, { method: 'POST', data: {} }); (ui.signInOpened ||= new Set()).add(id); toast('Terminal opened. Sign in there, then press "I\'m signed in".'); renderAll(); }
-    else if (event.target.closest('[data-signin-done]')) { await api(`/interactions/${id}/answer`, { method: 'POST', data: { action: 'accept', content: {} } }); toast('Thanks. The agent checks the sign-in and goes on.'); await refresh(); }
+    if (event.target.closest('[data-signin-open]')) { await api(`/interactions/${id}/terminal`, { method: 'POST', data: {} }); (ui.signInOpened ||= new Set()).add(id); toast(t('Terminal opened. Sign in there, then press "I\'m signed in".')); renderAll(); }
+    else if (event.target.closest('[data-signin-done]')) { await api(`/interactions/${id}/answer`, { method: 'POST', data: { action: 'accept', content: {} } }); toast(t('Thanks. The agent checks the sign-in and goes on.')); await refresh(); }
     else if (event.target.closest('[data-signin-skip]')) { await api(`/interactions/${id}/answer`, { method: 'POST', data: { action: 'decline' } }); await refresh(); }
   } catch (error) { toast(error.message, true); }
 });
@@ -1227,19 +1228,19 @@ function phone() { return window.matchMedia('(max-width:760px)').matches; }
 function phoneTabs(asks) {
   const ic = d => `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const tab = (attrs, label, icon, on = false, badge = 0) => `<button type="button" ${attrs} class="${on ? 'on' : ''}">${icon}${badge ? `<span class="tb-badge">${badge}</span>` : ''}<span>${label}</span></button>`;
-  return `<nav class="m-tabs" aria-label="Sections">
-    ${tab('data-action="m-top"', 'Chats', ic('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>'), true)}
-    ${tab('data-open="inbox" data-id=""', 'Needs you', ic('<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'), false, asks)}
-    ${tab('data-open="tasks" data-id=""', 'Tasks', ic('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>'))}
-    ${tab('data-open="jev" data-id=""', 'Jev', ic('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>'))}
-    ${tab('data-action="settings-open"', 'Settings', ic('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>'))}
+  return `<nav class="m-tabs" aria-label="${t`Sections`}">
+    ${tab('data-action="m-top"', t('Chats'), ic('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>'), true)}
+    ${tab('data-open="inbox" data-id=""', t('Needs you'), ic('<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'), false, asks)}
+    ${tab('data-open="tasks" data-id=""', t('Tasks'), ic('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>'))}
+    ${tab('data-open="jev" data-id=""', t('Jev'), ic('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>'))}
+    ${tab('data-action="settings-open"', t('Settings'), ic('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>'))}
   </nav>`;
 }
 document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="m-top"]')) return; event.stopPropagation(); document.querySelector('.rail-scroll')?.scrollTo({ top: 0, behavior: 'smooth' }); }, true);
 
 document.addEventListener('change', async event => {
   if (!event.target.matches?.('[data-mo-auto]')) return;
-  try { await api('/config', { method: 'PUT', data: { ...ui.snap.config, autoFree: event.target.checked } }); toast(event.target.checked ? 'Rex Desk frees memory by itself when it runs low.' : 'Automatic freeing is off.'); await refresh(); } catch (error) { toast(error.message, true); }
+  try { await api('/config', { method: 'PUT', data: { ...ui.snap.config, autoFree: event.target.checked } }); toast(event.target.checked ? t('Rex Desk frees memory by itself when it runs low.') : t('Automatic freeing is off.')); await refresh(); } catch (error) { toast(error.message, true); }
 });
 
 // An agent's earlier personal chats (also the ones on another computer), newest first, in its profile.
@@ -1247,7 +1248,7 @@ function earlierChats(agent) {
   const runs = (ui.snap?.runs || []).filter(run => run.specialistId === agent.id && !run.roomAgent && !run.roomId && run.id !== agent.runId)
     .sort((left, right) => String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))).slice(0, 12);
   if (!runs.length) return '';
-  return `<h3>Earlier chats <span>${runs.length}</span></h3><ul class="tl-list">${runs.map(run => `<li><button type="button" class="link-btn" data-open="run" data-id="${esc(run.id)}"><b>${esc(runTitle(run))}</b></button><small>${esc(ago(run.updatedAt || run.createdAt))}</small></li>`).join('')}</ul>`;
+  return `<h3>${t`Earlier chats`} <span>${runs.length}</span></h3><ul class="tl-list">${runs.map(run => `<li><button type="button" class="link-btn" data-open="run" data-id="${esc(run.id)}"><b>${esc(runTitle(run))}</b></button><small>${esc(ago(run.updatedAt || run.createdAt))}</small></li>`).join('')}</ul>`;
 }
 
 // Messages on their way to an agent on another computer. One leaves the list when that computer's copy of the chat has it.
@@ -1259,7 +1260,7 @@ function outboxHtml(run, shown) {
   const left = waiting.filter(item => !arrived(item)); ui.outbox.set(run.id, left);
   const agent = personalAgent(run), where = agent?.device || 'the other computer', off = agent?.status?.state === 'offline';
   return left.map(item => {
-    const state = !item.sent ? 'Sending…' : off ? `Waiting for ${where} to turn on` : Date.now() - Date.parse(item.at) > 45000 ? `Still on its way to ${where}…` : `Sending to ${where}…`;
+    const state = !item.sent ? t('Sending…') : off ? t`Waiting for ${where} to turn on` : Date.now() - Date.parse(item.at) > 45000 ? t`Still on its way to ${where}…` : t`Sending to ${where}…`;
     return `<div class="msg mine sending"><div class="bubble"><div class="md">${markdown(spokenText(item.text).text)}</div><div class="send-state"><span class="spin" aria-hidden="true"></span>${esc(state)}</div></div></div>`;
   }).join('');
 }
@@ -1292,29 +1293,29 @@ function phIcon(name) {
 function phoneHead() {
   const unread = ui.snap?.notices?.unread || 0;
   const me = ui.profile?.photo ? `<img class="av photo" src="${photoUrl()}" alt="">` : `<span class="av icon">${SVG.person}</span>`;
-  return `<div class="m-head"><div class="m-bar"><button type="button" class="m-me" data-open="person" data-id="" aria-label="About you">${me}</button><h2>Chats</h2>
-    <button type="button" class="m-round" data-action="nt-panel" aria-label="Notifications">${phIcon('bell')}${unread ? `<span class="tb-badge">${unread > 99 ? '99+' : unread}</span>` : ''}</button>
-    <button type="button" class="m-round" data-action="m-more" aria-label="More">${phIcon('more')}</button></div>
-    <label class="m-search">${phIcon('search')}<input id="m-search" type="search" placeholder="Search" autocomplete="off" value="${esc(ui.chatFilter || '')}"></label></div>`;
+  return `<div class="m-head"><div class="m-bar"><button type="button" class="m-me" data-open="person" data-id="" aria-label="${t`About you`}">${me}</button><h2>${t`Chats`}</h2>
+    <button type="button" class="m-round" data-action="nt-panel" aria-label="${t`Notifications`}">${phIcon('bell')}${unread ? `<span class="tb-badge">${unread > 99 ? '99+' : unread}</span>` : ''}</button>
+    <button type="button" class="m-round" data-action="m-more" aria-label="${t`More`}">${phIcon('more')}</button></div>
+    <label class="m-search">${phIcon('search')}<input id="m-search" type="search" placeholder="${t`Search`}" autocomplete="off" value="${esc(ui.chatFilter || '')}"></label></div>`;
 }
 function phoneChats() {
   const snap = ui.snap, rows = [], last = new Map();
   for (const message of snap.messages || []) if (message.from?.type !== 'system') last.set(message.roomId, message);
   for (const room of snap.rooms || []) {
-    const said = last.get(room.id), who = said ? (said.from.type === 'human' ? 'You' : said.from.name || (said.from.id === 'main' ? 'Rex Agent' : (snap.specialists || []).find(agent => agent.id === said.from.id)?.name) || 'Agent') : '';
+    const said = last.get(room.id), who = said ? (said.from.type === 'human' ? t('You') : said.from.name || (said.from.id === 'main' ? t('Rex Agent') : (snap.specialists || []).find(agent => agent.id === said.from.id)?.name) || t('Agent')) : '';
     const working = room.members.some(member => member.state === 'replying' || member.state === 'busy');
     rows.push({ at: said?.at || room.createdAt || '', html: phoneRow('room', room.id, avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), working ? 'working' : '', room.name,
-      working ? 'Someone is typing…' : said ? `${who}: ${String(said.text || '').replace(/\s+/g, ' ').slice(0, 90)}` : `${room.members.length} ${room.members.length === 1 ? 'agent' : 'agents'}`, said?.at || '', unreadFor(ui, `room:${room.id}`)) });
+      working ? t('Someone is typing…') : said ? `${who}: ${String(said.text || '').replace(/\s+/g, ' ').slice(0, 90)}` : `${room.members.length} ${room.members.length === 1 ? 'agent' : 'agents'}`, said?.at || '', unreadFor(ui, `room:${room.id}`)) });
   }
   for (const agent of snap.specialists || []) {
     const run = runById(agent.runId), state = agent.status?.state;
     rows.push({ at: run?.updatedAt || agent.updatedAt || agent.createdAt || '', html: phoneRow('specialist', agent.id, avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(state), agent.name,
-      [agent.status?.label || 'Idle', agent.projectSlug].filter(Boolean).join(' · '), run?.updatedAt || '', agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0) });
+      [agent.status?.label || t('Idle'), agent.projectSlug].filter(Boolean).join(' · '), run?.updatedAt || '', agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0) });
   }
   rows.sort((left, right) => String(right.at).localeCompare(String(left.at)));
   const main = mainRun();
-  const pinned = phoneRow('main', '', rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : '', 'Rex Agent', main ? stateLabel(main) : 'Your helper for everything', main?.updatedAt || '', unreadFor(ui, 'main:'));
-  return `<div class="m-chats">${pinned}${rows.map(row => row.html).join('')}<p class="m-none" hidden>No chat matches.</p></div>`;
+  const pinned = phoneRow('main', '', rexCore('sm', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length), main ? stateTone(main) : '', t('Rex Agent'), main ? stateLabel(main) : t('Your helper for everything'), main?.updatedAt || '', unreadFor(ui, 'main:'));
+  return `<div class="m-chats">${pinned}${rows.map(row => row.html).join('')}<p class="m-none" hidden>${t`No chat matches.`}</p></div>`;
 }
 function phoneRow(type, id, avatar, dot, name, sub, at, badge) {
   return `<button type="button" class="m-row${badge ? ' unread' : ''}" data-open="${type}" data-id="${esc(id || '')}" data-name="${esc(String(name).toLowerCase())}">${withDot(avatar, dot)}<span class="m-text"><span class="m-top"><b>${esc(name)}</b>${at ? `<time>${esc(ago(at))}</time>` : ''}</span><span class="m-sub"><span>${esc(sub)}</span>${badge ? `<span class="m-badge">${badge}</span>` : ''}</span></span></button>`;
@@ -1333,13 +1334,13 @@ document.addEventListener('click', event => {
   document.querySelector('.dialog-back.m-more-sheet')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back m-more-sheet';
   const item = (attrs, icon, label) => `<button type="button" class="m-sheet-item" ${attrs}>${icon}<span>${label}</span></button>`;
-  back.innerHTML = `<div class="dialog m-sheet" role="dialog" aria-label="More">
-    ${item('data-action="new-room"', iconAv('main'), 'New room')}
-    ${item('data-action="spec-new"', iconAv('person'), 'New agent')}
-    ${item('data-open="devices" data-id=""', iconAv('devices'), 'Devices')}
-    ${item('data-open="monitor" data-id=""', iconAv('monitor'), 'Memory')}
-    ${item('data-action="sync"', iconAv('tasks'), 'Sync tasks now')}
-    <button type="button" class="btn m-sheet-close">Close</button></div>`;
+  back.innerHTML = `<div class="dialog m-sheet" role="dialog" aria-label="${t`More`}">
+    ${item('data-action="new-room"', iconAv('main'), t('New room'))}
+    ${item('data-action="spec-new"', iconAv('person'), t('New agent'))}
+    ${item('data-open="devices" data-id=""', iconAv('devices'), t('Devices'))}
+    ${item('data-open="monitor" data-id=""', iconAv('monitor'), t('Memory'))}
+    ${item('data-action="sync"', iconAv('tasks'), t('Sync tasks now'))}
+    <button type="button" class="btn m-sheet-close">${t`Close`}</button></div>`;
   document.body.append(back);
   back.addEventListener('click', inner => { if (inner.target === back || inner.target.closest('.m-sheet-close') || inner.target.closest('.m-sheet-item')) setTimeout(() => back.remove()); });
 }, true);

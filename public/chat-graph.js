@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // The Knowledge graph: you, what the agents learned about you, your agents and projects, and your second brain, as one
 // living map. Drawn on a canvas (one picture a frame, not thousands of page elements); the physics runs in graph-worker.js.
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -5,7 +6,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&a
 const KINDS = { you: [212, 24, 7], agent: [268, 15, 3.6], project: [158, 9.5, 2.6], brain: [38, 13, 5], branch: [200, 8.5, 2.2], fact: [200, 4, 1], lesson: [268, 4, 1], note: [226, 2.3, 0.8] };
 const NAMED = new Set(['you', 'agent', 'project', 'brain', 'branch']);
 const BRANCH_HUE = { explain: 190, personality: 320, likes: 150, dislikes: 2, works: 48, about: 222 };
-const LABELS = { you: 'You', agent: 'Agent', project: 'Project', brain: 'Second brain', branch: 'About you', fact: 'What agents know', lesson: 'Lesson', note: 'Note' };
+const LABELS = { you: t('You'), agent: t('Agent'), project: t('Project'), brain: t('Second brain'), branch: t('About you'), fact: t('What agents know'), lesson: t('Lesson'), note: t('Note') };
 let live = null;
 // Three ways to look. Tree: still and calm, it grows out from you branch by branch and then stays where it is.
 // Drift: the same lights floating, pulled by their links. Everything: drifting, with every note of the vault.
@@ -16,9 +17,9 @@ const TREE_NOTES = 200;
 function mount(host) {
   if (live?.host === host) return;
   live?.stop();
-  host.innerHTML = `<canvas class="kg-canvas" aria-label="Knowledge graph"></canvas>
-    <div class="kg-top"><div class="kg-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="search" placeholder="Find in your knowledge" aria-label="Find in your knowledge"></div><div class="kg-style" role="tablist" aria-label="How much to show"><button type="button" role="tab" data-kg-style="tree">Tree</button><button type="button" role="tab" data-kg-style="focus">Drift</button><button type="button" role="tab" data-kg-style="all">Everything</button></div><span class="kg-count" role="status">Reading your knowledge…</span><span class="kg-grow"></span></div>
-    <div class="kg-legend"></div><aside class="kg-card" hidden></aside><div class="kg-hint">Drag the space to move · scroll to zoom · click a light to read it</div>`;
+  host.innerHTML = `<canvas class="kg-canvas" aria-label="${t`Knowledge graph`}"></canvas>
+    <div class="kg-top"><div class="kg-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="search" placeholder="${t`Find in your knowledge`}" aria-label="${t`Find in your knowledge`}"></div><div class="kg-style" role="tablist" aria-label="${t`How much to show`}"><button type="button" role="tab" data-kg-style="tree">${t`Tree`}</button><button type="button" role="tab" data-kg-style="focus">${t`Drift`}</button><button type="button" role="tab" data-kg-style="all">${t`Everything`}</button></div><span class="kg-count" role="status">${t`Reading your knowledge…`}</span><span class="kg-grow"></span></div>
+    <div class="kg-legend"></div><aside class="kg-card" hidden></aside><div class="kg-hint">${t`Drag the space to move · scroll to zoom · click a light to read it`}</div>`;
   const canvas = host.querySelector('canvas'), context = canvas.getContext('2d'), card = host.querySelector('.kg-card'), count = host.querySelector('.kg-count');
   const state = { host, nodes: [], links: [], positions: new Float32Array(0), shown: new Float32Array(0), near: [], view: { x: 0, y: 0, k: 0.9 }, target: { x: 0, y: 0, k: 0.9 }, hover: -1, picked: -1, drag: null, match: null, born: performance.now(), alive: true };
   const mode = style(), tree = mode === 'tree';
@@ -59,8 +60,8 @@ function mount(host) {
     if (tree) plant(); else worker.postMessage({ type: 'start', count: state.nodes.length, links: state.links, mass });
     const kinds = [...new Set(state.nodes.map(node => node.kind))].filter(kind => kind !== 'fact' && kind !== 'lesson');
     host.querySelector('.kg-legend').innerHTML = kinds.map(kind => `<span><i data-h="${KINDS[kind][0]}"></i>${LABELS[kind]}</span>`).join(''); tint(host.querySelector('.kg-legend'));
-    count.textContent = mode !== 'all' ? `${state.nodes.length.toLocaleString()} of ${everything.toLocaleString()} lights` : `${state.nodes.length.toLocaleString()} lights, ${(pairs.length / 2).toLocaleString()} links`;
-  }).catch(error => { count.textContent = `The graph could not load: ${error.message}`; });
+    count.textContent = mode !== 'all' ? t`${state.nodes.length.toLocaleString()} of ${everything.toLocaleString()} lights` : t`${state.nodes.length.toLocaleString()} lights, ${(pairs.length / 2).toLocaleString()} links`;
+  }).catch(error => { count.textContent = t`The graph could not load: ${error.message}`; });
 
   // Sizes follow the box; the canvas is drawn at the screen's real pixel count so it stays sharp.
   let width = 0, height = 0, ratio = 1;
@@ -227,10 +228,10 @@ function mount(host) {
     if (index < 0) { card.hidden = true; return; }
     const node = state.nodes[index], friends = state.near[index].map(other => state.nodes[other]).sort((a, b) => b.size - a.size).slice(0, 8);
     state.touched = true;
-    card.innerHTML = `<button type="button" class="kg-x" aria-label="Close">×</button><span class="kg-kind" data-h="${node.hue}">${esc(LABELS[node.kind] || node.kind)}</span><h3>${esc(node.kind === 'fact' || node.kind === 'lesson' ? node.text : node.label)}</h3>
+    card.innerHTML = `<button type="button" class="kg-x" aria-label="${t`Close`}">×</button><span class="kg-kind" data-h="${node.hue}">${esc(LABELS[node.kind] || node.kind)}</span><h3>${esc(node.kind === 'fact' || node.kind === 'lesson' ? node.text : node.label)}</h3>
       ${node.text && node.kind !== 'fact' && node.kind !== 'lesson' ? `<p>${esc(node.text)}</p>` : ''}
-      ${friends.length ? `<h4>Linked to</h4><div class="kg-links">${friends.map(friend => `<button type="button" data-kg-go="${state.nodes.indexOf(friend)}"><i data-h="${friend.hue}"></i>${esc(friend.label)}</button>`).join('')}</div>` : ''}
-      ${node.file ? `<button type="button" class="btn small" data-file-open="${esc(node.file)}">Open the note</button>` : ''}`;
+      ${friends.length ? `<h4>${t`Linked to`}</h4><div class="kg-links">${friends.map(friend => `<button type="button" data-kg-go="${state.nodes.indexOf(friend)}"><i data-h="${friend.hue}"></i>${esc(friend.label)}</button>`).join('')}</div>` : ''}
+      ${node.file ? `<button type="button" class="btn small" data-file-open="${esc(node.file)}">${t`Open the note`}</button>` : ''}`;
     tint(card); card.hidden = false;
     state.target = { x: -state.shown[index * 2], y: -state.shown[index * 2 + 1], k: Math.max(state.view.k, 2.2) };
   }

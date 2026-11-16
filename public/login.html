@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-km-title="Rex Desk · ចូល">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
@@ -18,11 +18,12 @@
 <main>
   <form method="post" action="/login">
     <h1>Rex Desk</h1>
-    <p>Paste the key from <b>Devices</b> in Rex Desk on your computer.</p>
-    <input type="password" name="key" placeholder="Device key" autocomplete="current-password" required autofocus>
-    <p class="wrong">That key is not right. Copy it again from Devices.</p>
-    <button type="submit">Sign in</button>
+    <p data-km="ដាក់សោពី <b>ឧបករណ៍</b> ក្នុង Rex Desk នៅលើកុំព្យូទ័ររបស់អ្នក។">Paste the key from <b>Devices</b> in Rex Desk on your computer.</p>
+    <input type="password" name="key" placeholder="Device key" data-km-placeholder="សោឧបករណ៍" autocomplete="current-password" required autofocus>
+    <p class="wrong" data-km="សោនេះមិនត្រឹមត្រូវទេ។ ចម្លងវាម្ដងទៀតពីឧបករណ៍។">That key is not right. Copy it again from Devices.</p>
+    <button type="submit" data-km="ចូល">Sign in</button>
   </form>
 </main>
+<script src="/i18n-static.js"></script>
 </body>
 </html>

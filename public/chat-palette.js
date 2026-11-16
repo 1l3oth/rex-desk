@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // Jump to anything: Ctrl+K (⌘K on a Mac), or the search in the window bar, opens one box that finds chats, agents, rooms,
 // tasks, places and settings as you type. Arrow keys move, Enter opens, Escape closes. Works in the app and in a browser.
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -9,18 +10,18 @@ const ICON = {
   place: '<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
   setting: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
 };
-const KIND_LABEL = { chat: 'Chat', agent: 'Agent', room: 'Group chat', task: 'Task', place: 'Place', setting: 'Settings' };
-const PLACES = [['inbox', 'Needs you'], ['tasks', 'Tasks'], ['person', 'Knowledge'], ['jev', 'Jev'], ['monitor', 'Memory'], ['devices', 'Devices'], ['worktrees', 'Worktrees']];
-const SETTINGS = [['general', 'General, look and theme'], ['notify', 'Notifications'], ['agents', 'Agents'], ['accounts', 'AI accounts'], ['localai', 'Local AI'], ['projects', 'Projects'], ['sources', 'Task sources'], ['jev', 'Jev and voice'], ['schedule', 'Schedule'], ['devices', 'Devices and phone'], ['backup', 'Backup and updates'], ['folders', 'Folders'], ['connect', 'Connect another AI']];
+const KIND_LABEL = { chat: t('Chat'), agent: t('Agent'), room: t('Group chat'), task: t('Task'), place: t('Place'), setting: t('Settings') };
+const PLACES = [['inbox', t('Needs you')], ['tasks', t('Tasks')], ['person', t('Knowledge')], ['jev', t('Jev')], ['monitor', t('Memory')], ['devices', t('Devices')], ['worktrees', t('Worktrees')]];
+const SETTINGS = [['general', t('General, look and theme')], ['notify', t('Notifications')], ['agents', t('Agents')], ['accounts', t('AI accounts')], ['localai', t('Local AI')], ['projects', t('Projects')], ['sources', t('Task sources')], ['jev', t('Jev and voice')], ['schedule', t('Schedule')], ['devices', t('Devices and phone')], ['backup', t('Backup and updates')], ['folders', t('Folders')], ['connect', t('Connect another AI')]];
 
 function everything() {
   const ui = window.__rexCtx?.ui, snap = ui?.snap || {};
-  const out = [{ kind: 'chat', label: 'Rex Agent', hint: 'Knows every project', go: ['main', ''] }];
+  const out = [{ kind: 'chat', label: t('Rex Agent'), hint: t('Knows every project'), go: ['main', ''] }];
   for (const agent of snap.specialists || []) if (agent.kind !== 'main') out.push({ kind: 'agent', label: agent.name, hint: [agent.projectSlug, agent.status?.label].filter(Boolean).join(' · '), go: ['specialist', agent.id] });
-  for (const room of snap.rooms || []) out.push({ kind: 'room', label: room.name, hint: `${(room.members || []).length} agents`, go: ['room', room.id] });
+  for (const room of snap.rooms || []) out.push({ kind: 'room', label: room.name, hint: t`${(room.members || []).length} agents`, go: ['room', room.id] });
   for (const [type, label] of PLACES) out.push({ kind: 'place', label, hint: '', go: [type, ''] });
-  for (const task of (snap.tasks || []).filter(item => !item.demo && (item.active || item.local)).slice(0, 400)) out.push({ kind: 'task', label: task.titleEn || task.title || 'Task', hint: `#${task.taskNumber || task.externalId || ''} ${task.statusName || task.status || ''}`.trim(), go: ['task', task.id] });
-  for (const [section, label] of SETTINGS) out.push({ kind: 'setting', label, hint: 'Settings', setting: section });
+  for (const task of (snap.tasks || []).filter(item => !item.demo && (item.active || item.local)).slice(0, 400)) out.push({ kind: 'task', label: task.titleEn || task.title || t('Task'), hint: `#${task.taskNumber || task.externalId || ''} ${task.statusName || task.status || ''}`.trim(), go: ['task', task.id] });
+  for (const [section, label] of SETTINGS) out.push({ kind: 'setting', label, hint: t('Settings'), setting: section });
   return out;
 }
 // Words in any order; the name counts more than the hint, and a match at the start counts most.
@@ -43,7 +44,7 @@ function draw(query) {
   box.querySelector('.cp-list').innerHTML = shown.length ? shown.map((item, index) => `<li role="option" class="${index === picked ? 'on' : ''}" aria-selected="${index === picked}" data-cp="${index}">
     <span class="cp-ic"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[item.kind]}</svg></span>
     <span class="cp-name">${esc(item.label)}${item.hint ? `<small>${esc(item.hint)}</small>` : ''}</span><span class="cp-kind">${KIND_LABEL[item.kind]}</span></li>`).join('')
-    : '<li class="cp-empty">Nothing found</li>';
+    : `<li class="cp-empty">${t`Nothing found`}</li>`;
   box.querySelector('.cp-list li.on')?.scrollIntoView({ block: 'nearest' });
 }
 function go(item) {
@@ -56,9 +57,9 @@ export function openPalette() {
   if (box) { box.querySelector('input').focus(); return; }
   picked = 0;
   box = document.createElement('div'); box.className = 'cp-back';
-  box.innerHTML = `<div class="cp" role="dialog" aria-label="Jump to"><label class="cp-input"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <input type="text" placeholder="Search or jump to a chat, agent, task or setting" aria-label="Search" autocomplete="off" spellcheck="false"><kbd>Esc</kbd></label>
-    <ul class="cp-list" role="listbox"></ul><div class="cp-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span></div></div>`;
+  box.innerHTML = `<div class="cp" role="dialog" aria-label="${t`Jump to`}"><label class="cp-input"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input type="text" placeholder="${t`Search or jump to a chat, agent, task or setting`}" aria-label="${t`Search`}" autocomplete="off" spellcheck="false"><kbd>Esc</kbd></label>
+    <ul class="cp-list" role="listbox"></ul><div class="cp-foot"><span><kbd>↑</kbd><kbd>↓</kbd> ${t`move`}</span><span><kbd>Enter</kbd> ${t`open`}</span></div></div>`;
   document.body.append(box);
   const input = box.querySelector('input');
   input.addEventListener('input', () => { picked = 0; draw(input.value); });

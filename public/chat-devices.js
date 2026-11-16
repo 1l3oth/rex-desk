@@ -1,3 +1,4 @@
+import { t, locale } from './i18n.js';
 // Devices: the person's computers, each the workspace of its own agents, and their phone. They share the chats over Tailscale
 // (and over Turso when every computer uses the same database). A computer that is off only takes its own agents offline.
 const ICON = {
@@ -9,42 +10,42 @@ export function devicesStage(ctx) {
   const { ui, esc } = ctx, devices = ui.snap.devices || { self: {}, peers: [] }, self = devices.self || {};
   const agentsOn = node => (ui.snap.specialists || []).filter(agent => (agent.node || self.id) === node).map(agent => agent.name);
   const mine = agentsOn(self.id), address = self.addresses?.[0] || '', on = devices.peers.filter(peer => peer.online).length + 1;
-  const toggle = `<label class="dv-switch"><input type="checkbox" data-action="dev-remote" ${devices.remote ? 'checked' : ''}><span class="dv-track" aria-hidden="true"></span><span><b>Let my phone and other computers connect</b><small>Only devices on your own Tailscale network can reach it. Nothing is open to the internet.</small></span></label>`;
+  const toggle = `<label class="dv-switch"><input type="checkbox" data-action="dev-remote" ${devices.remote ? 'checked' : ''}><span class="dv-track" aria-hidden="true"></span><span><b>${t`Let my phone and other computers connect`}</b><small>${t`Only devices on your own Tailscale network can reach it. Nothing is open to the internet.`}</small></span></label>`;
   const here = `<section class="dv-card dv-here">
-      <div class="dv-device"><span class="dv-icon">${ICON.laptop}</span><div class="dv-who"><input id="dev-name" class="dv-name" type="text" value="${esc(self.name || '')}" maxlength="40" aria-label="Name of this computer" spellcheck="false"><span class="dv-state"><span class="dot good"></span>This computer · on</span></div></div>
-      <p class="dv-agents">${mine.length ? `<span class="muted">Agents working here</span> ${mine.map(name => `<span class="dv-chip">${esc(name)}</span>`).join('')}` : '<span class="muted">No agents work on this computer yet.</span>'}</p>
+      <div class="dv-device"><span class="dv-icon">${ICON.laptop}</span><div class="dv-who"><input id="dev-name" class="dv-name" type="text" value="${esc(self.name || '')}" maxlength="40" aria-label="${t`Name of this computer`}" spellcheck="false"><span class="dv-state"><span class="dot good"></span>${t`This computer · on`}</span></div></div>
+      <p class="dv-agents">${mine.length ? `<span class="muted">${t`Agents working here`}</span> ${mine.map(name => `<span class="dv-chip">${esc(name)}</span>`).join('')}` : `<span class="muted">${t`No agents work on this computer yet.`}</span>`}</p>
       ${toggle}
-      ${devices.remote && !address ? '<p class="dv-warn">Tailscale is not running on this computer. Open Tailscale and sign in; the address shows up here.</p>' : ''}
+      ${devices.remote && !address ? `<p class="dv-warn">${t`Tailscale is not running on this computer. Open Tailscale and sign in; the address shows up here.`}</p>` : ''}
     </section>`;
   const phone = devices.remote && address ? `<section class="dv-card dv-phone">
-      <div class="dv-phone-text"><h2>Open Rex Desk on your phone</h2>
-        <ol class="dv-steps"><li>Turn on the <b>Tailscale</b> app on your phone, signed in to the same account.</li><li>Scan this code with the phone camera. It opens Rex Desk already signed in.</li><li>Add it to your home screen to open it like an app.</li></ol>
-        <div class="dv-link"><code title="${esc(address)}">${esc(address)}</code><button class="btn small" data-action="dev-copy-link" data-link="${esc(address)}">${ICON.copy} Copy link</button></div>
-        <p class="muted small">Opening the link instead of scanning? Sign in with the key under Advanced.</p></div>
-      <img class="dv-qr" src="/api/devices/qr?v=${encodeURIComponent(address)}" alt="QR code that opens Rex Desk on your phone" width="220" height="220">
-    </section>` : `<section class="dv-card dv-phone off"><span class="dv-icon">${ICON.phone}</span><div><h2>Use Rex Desk on your phone</h2><p class="muted">${devices.remote ? 'Waiting for Tailscale on this computer.' : 'Turn on "Let my phone and other computers connect", then scan the code that appears here.'}</p></div></section>`;
-  const row = peer => `<li class="dv-peer"><span class="dv-icon small">${ICON.laptop}</span><div class="dv-who"><b>${esc(peer.name || 'Computer')}</b><span class="dv-state"><span class="dot ${peer.online ? 'good' : 'off'}"></span>${peer.online ? 'On' : `Off${peer.lastSeen ? ` · seen ${esc(new Date(peer.lastSeen).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}` : ''}`}</span>${agentsOn(peer.id).length ? `<span class="dv-agents small">${agentsOn(peer.id).map(name => `<span class="dv-chip">${esc(name)}</span>`).join('')}</span>` : ''}${peer.error && !peer.online ? `<span class="dv-warn small">${esc(peer.error)}</span>` : ''}</div><button class="ag-x" data-action="dev-remove" data-id="${esc(peer.id)}" title="Forget this computer" aria-label="Forget ${esc(peer.name || 'this computer')}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`;
-  const others = `<section class="dv-card"><h2>My other computers</h2>
-      ${devices.peers.length ? `<ul class="dv-peers">${devices.peers.map(row).join('')}</ul>` : '<p class="muted">None yet. On your other computer, open Rex Desk → Devices, paste this computer\'s key under Advanced and press Join, then add its address here.</p>'}
-      <div class="dv-line"><input id="dev-url" type="text" placeholder="Address of the other computer, like 100.101.102.103" aria-label="Address of another computer"><button class="btn primary small" data-action="dev-add">Add</button></div>
-      <p class="muted small">Same chats everywhere. When a computer is off, its agents show as offline and messages for them wait until it is back.</p></section>`;
-  const advanced = `<details class="dv-card dv-adv"><summary>Advanced: the device key</summary>
-      <p class="muted small">All your computers use the same key, and a phone that opens the link signs in with it. Keep it private.</p>
-      <div class="dv-line"><input id="dev-key" type="password" value="${esc(devices.key || '')}" aria-label="Device key" readonly><button class="btn small" data-action="dev-show">Show</button><button class="btn small" data-action="dev-copy">Copy</button></div>
-      <div class="dv-line"><input id="dev-join" type="text" placeholder="Paste the key from your other computer" aria-label="Key from another computer"><button class="btn small" data-action="dev-join">Join</button></div></details>`;
-  return { title: 'Devices', meta: `${on} of ${devices.peers.length + 1} computer${devices.peers.length ? 's' : ''} on`, top: true,
+      <div class="dv-phone-text"><h2>${t`Open Rex Desk on your phone`}</h2>
+        <ol class="dv-steps"><li>${t`Turn on the ${'<b>Tailscale</b>'} app on your phone, signed in to the same account.`}</li><li>${t`Scan this code with the phone camera. It opens Rex Desk already signed in.`}</li><li>${t`Add it to your home screen to open it like an app.`}</li></ol>
+        <div class="dv-link"><code title="${esc(address)}">${esc(address)}</code><button class="btn small" data-action="dev-copy-link" data-link="${esc(address)}">${t`${ICON.copy} Copy link`}</button></div>
+        <p class="muted small">${t`Opening the link instead of scanning? Sign in with the key under Advanced.`}</p></div>
+      <img class="dv-qr" src="/api/devices/qr?v=${encodeURIComponent(address)}" alt="${t`QR code that opens Rex Desk on your phone`}" width="220" height="220">
+    </section>` : `<section class="dv-card dv-phone off"><span class="dv-icon">${ICON.phone}</span><div><h2>${t`Use Rex Desk on your phone`}</h2><p class="muted">${devices.remote ? t('Waiting for Tailscale on this computer.') : t('Turn on "Let my phone and other computers connect", then scan the code that appears here.')}</p></div></section>`;
+  const row = peer => `<li class="dv-peer"><span class="dv-icon small">${ICON.laptop}</span><div class="dv-who"><b>${esc(peer.name || t('Computer'))}</b><span class="dv-state"><span class="dot ${peer.online ? 'good' : 'off'}"></span>${peer.online ? t('On') : peer.lastSeen ? t`Off · seen ${esc(new Date(peer.lastSeen).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}` : t('Off')}</span>${agentsOn(peer.id).length ? `<span class="dv-agents small">${agentsOn(peer.id).map(name => `<span class="dv-chip">${esc(name)}</span>`).join('')}</span>` : ''}${peer.error && !peer.online ? `<span class="dv-warn small">${esc(peer.error)}</span>` : ''}</div><button class="ag-x" data-action="dev-remove" data-id="${esc(peer.id)}" title="${t`Forget this computer`}" aria-label="${t`Forget ${esc(peer.name || 'this computer')}`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`;
+  const others = `<section class="dv-card"><h2>${t`My other computers`}</h2>
+      ${devices.peers.length ? `<ul class="dv-peers">${devices.peers.map(row).join('')}</ul>` : `<p class="muted">${t`None yet. On your other computer, open Rex Desk → Devices, paste this computer's key under Advanced and press Join, then add its address here.`}</p>`}
+      <div class="dv-line"><input id="dev-url" type="text" placeholder="${t`Address of the other computer, like 100.101.102.103`}" aria-label="${t`Address of another computer`}"><button class="btn primary small" data-action="dev-add">${t`Add`}</button></div>
+      <p class="muted small">${t`Same chats everywhere. When a computer is off, its agents show as offline and messages for them wait until it is back.`}</p></section>`;
+  const advanced = `<details class="dv-card dv-adv"><summary>${t`Advanced: the device key`}</summary>
+      <p class="muted small">${t`All your computers use the same key, and a phone that opens the link signs in with it. Keep it private.`}</p>
+      <div class="dv-line"><input id="dev-key" type="password" value="${esc(devices.key || '')}" aria-label="${t`Device key`}" readonly><button class="btn small" data-action="dev-show">${t`Show`}</button><button class="btn small" data-action="dev-copy">${t`Copy`}</button></div>
+      <div class="dv-line"><input id="dev-join" type="text" placeholder="${t`Paste the key from your other computer`}" aria-label="${t`Key from another computer`}"><button class="btn small" data-action="dev-join">${t`Join`}</button></div></details>`;
+  return { title: t('Devices'), meta: devices.peers.length ? t`${on} of ${devices.peers.length + 1} computers on` : t`${on} of ${devices.peers.length + 1} computer on`, top: true,
     feed: `<div class="page dv"><div class="dv-col">${here}${others}${advanced}</div><div class="dv-col">${phone}</div></div>` };
 }
 export async function devicesAction(ctx, action, target) {
   const { api, toast, refresh } = ctx, value = id => document.getElementById(id)?.value || '';
   const post = data => api('/peers', { method: 'POST', data });
-  if (action === 'dev-rename') { await post({ action: 'rename', name: value('dev-name') }); toast('Renamed.'); }
+  if (action === 'dev-rename') { await post({ action: 'rename', name: value('dev-name') }); toast(t('Renamed.')); }
   else if (action === 'dev-remote') await post({ action: 'remote', on: target.checked });
   else if (action === 'dev-show') { const box = document.getElementById('dev-key'); if (box) box.type = box.type === 'password' ? 'text' : 'password'; return; }
-  else if (action === 'dev-copy') { await navigator.clipboard.writeText(value('dev-key')); toast('Key copied.'); return; }
-  else if (action === 'dev-copy-link') { await navigator.clipboard.writeText(target.dataset.link); toast('Link copied.'); return; }
-  else if (action === 'dev-join') { await post({ action: 'join', key: value('dev-join') }); toast('Joined. This computer now uses that key.'); }
-  else if (action === 'dev-add') { await post({ action: 'add', url: value('dev-url') }); toast('Connected.'); }
+  else if (action === 'dev-copy') { await navigator.clipboard.writeText(value('dev-key')); toast(t('Key copied.')); return; }
+  else if (action === 'dev-copy-link') { await navigator.clipboard.writeText(target.dataset.link); toast(t('Link copied.')); return; }
+  else if (action === 'dev-join') { await post({ action: 'join', key: value('dev-join') }); toast(t('Joined. This computer now uses that key.')); }
+  else if (action === 'dev-add') { await post({ action: 'add', url: value('dev-url') }); toast(t('Connected.')); }
   else if (action === 'dev-remove') await post({ action: 'remove', id: target.dataset.id });
   await refresh();
 }

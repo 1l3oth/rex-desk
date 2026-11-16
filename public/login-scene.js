@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // The sign-in backdrop: you, as a blocky Roblox-style character, at your Rex Desk. The monitors show your issues and an
 // agent's conversation, two small bots (your agents) carry tickets from the inbox tray, and an amber sign pops up when
 // something waits for you. Built only from boxes, so nothing is downloaded.
@@ -24,11 +25,11 @@ function screen(width, height, draw) {
   return { mesh, update: tick => { draw(canvas.getContext('2d'), tick); texture.needsUpdate = true; } };
 }
 const issueRows = ['#38464 Download shows a blank screen', '#48073 Safari menu overlaps title', '#39349 Org chart label (EN)', '#6658 Cahaya → Terang', '#34348 Gmail status button', '#30671 Microsoft sign-in loop', '#32099 Smart search limit', '#26717 Japanese menu text'];
-const transcript = ['Reading issue #6658…', '✓ desk_task', 'Opening the test site', '✓ assertText "Terang"', 'Fix works. Recording saved.', 'Next: #39349', '✓ desk_categorize', 'Waiting for your approval'];
+const transcript = [t('Reading issue #6658…'), '✓ desk_task', t('Opening the test site'), '✓ assertText "Terang"', t('Fix works. Recording saved.'), t('Next: #39349'), '✓ desk_categorize', t('Waiting for your approval')];
 function drawIssues(context, tick) {
   context.fillStyle = '#16181d'; context.fillRect(0, 0, 512, 320);
   context.fillStyle = '#4c8dff'; context.fillRect(0, 0, 512, 36);
-  context.fillStyle = '#ffffff'; context.font = 'bold 20px sans-serif'; context.fillText('Rex Desk · My issues', 16, 25);
+  context.fillStyle = '#ffffff'; context.font = 'bold 20px sans-serif'; context.fillText(t('Rex Desk · My issues'), 16, 25);
   context.font = '17px sans-serif';
   for (let row = 0; row < 7; row++) {
     const text = issueRows[(row + Math.floor(tick / 6)) % issueRows.length], y = 64 + row * 37;
@@ -39,7 +40,7 @@ function drawIssues(context, tick) {
 }
 function drawAgent(context, tick) {
   context.fillStyle = '#1c1f25'; context.fillRect(0, 0, 512, 320);
-  context.fillStyle = '#9aa3b1'; context.font = 'bold 18px sans-serif'; context.fillText('Agent at work', 16, 30);
+  context.fillStyle = '#9aa3b1'; context.font = 'bold 18px sans-serif'; context.fillText(t('Agent at work'), 16, 30);
   context.font = '17px monospace';
   for (let line = 0; line < 7; line++) {
     const text = transcript[(line + Math.floor(tick / 4)) % transcript.length];
@@ -72,7 +73,7 @@ function buildAvatar() {
   for (const side of [-1, 1]) { avatar.add(box(0.75, 0.55, 1.5, PANTS, { x: side * 0.4, y: 1.25, z: 0.5 })); avatar.add(box(0.75, 1.3, 0.55, PANTS, { x: side * 0.4, y: 0.6, z: 1.05 })); }
   const tag = canvasTexture(256, 64, context => {
     context.fillStyle = 'rgba(0,0,0,0.45)'; context.fillRect(64, 8, 128, 48);
-    context.fillStyle = '#ffffff'; context.font = 'bold 32px sans-serif'; context.textAlign = 'center'; context.fillText('You', 128, 43);
+    context.fillStyle = '#ffffff'; context.font = 'bold 32px sans-serif'; context.textAlign = 'center'; context.fillText(t('You'), 128, 43);
   });
   const nameTag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tag, depthTest: false })); nameTag.scale.set(1.6, 0.4, 1); nameTag.position.set(0, 4.85, 0); avatar.add(nameTag);
   return { avatar, head, left, right };

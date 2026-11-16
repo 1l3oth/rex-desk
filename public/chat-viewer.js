@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // A picture in a chat opens here, full screen inside Rex Desk: the desktop app has no browser tab to open it in.
 // Arrows step through the other pictures of the same chat; Esc or a click beside the picture closes it.
 const state = { list: [], index: 0, actual: false, view: { k: 1, x: 0, y: 0 }, pointers: new Map(), moved: false };
@@ -11,19 +12,19 @@ const svg = name => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none"
 
 function box() {
   let dialog = document.getElementById('img-viewer');
-  if (!dialog) { dialog = document.createElement('dialog'); dialog.id = 'img-viewer'; dialog.className = 'iv'; dialog.setAttribute('aria-label', 'Picture'); document.body.append(dialog); }
+  if (!dialog) { dialog = document.createElement('dialog'); dialog.id = 'img-viewer'; dialog.className = 'iv'; dialog.setAttribute('aria-label', t('Picture')); document.body.append(dialog); }
   return dialog;
 }
 function draw() {
   const dialog = box(), item = state.list[state.index], many = state.list.length > 1;
   const name = item.alt || decodeURIComponent(item.src.split('?')[0].split('/').pop()).replace(/^\d{10,}-/, '');
   dialog.innerHTML = `<div class="iv-head"><strong title="${esc(name)}">${esc(name)}</strong>${many ? `<span class="iv-count">${state.index + 1} / ${state.list.length}</span>` : ''}<span class="iv-sp"></span>
-      <button type="button" class="iv-btn" data-iv="zoom" title="${state.actual ? 'Fit to the window' : 'Actual size'}" aria-label="${state.actual ? 'Fit to the window' : 'Actual size'}">${svg(state.actual ? 'fit' : 'zoom')}</button>
-      <button type="button" class="iv-btn" data-iv="file" title="Open in the file window" aria-label="Open in the file window">${svg('file')}</button>
-      <a class="iv-btn" href="${esc(item.src)}" download title="Save" aria-label="Save">${svg('save')}</a>
-      <button type="button" class="iv-btn" data-iv="close" title="Close (Esc)" aria-label="Close">${svg('close')}</button></div>
+      <button type="button" class="iv-btn" data-iv="zoom" title="${state.actual ? t('Fit to the window') : t('Actual size')}" aria-label="${state.actual ? t('Fit to the window') : t('Actual size')}">${svg(state.actual ? 'fit' : 'zoom')}</button>
+      <button type="button" class="iv-btn" data-iv="file" title="${t`Open in the file window`}" aria-label="${t`Open in the file window`}">${svg('file')}</button>
+      <a class="iv-btn" href="${esc(item.src)}" download title="${t`Save`}" aria-label="${t`Save`}">${svg('save')}</a>
+      <button type="button" class="iv-btn" data-iv="close" title="${t`Close (Esc)`}" aria-label="${t`Close`}">${svg('close')}</button></div>
     <div class="iv-stage" data-iv="backdrop"><img src="${esc(item.src)}" alt="${esc(name)}" data-iv="image" draggable="false"></div>
-    ${many ? `<button type="button" class="iv-nav prev" data-iv="prev" aria-label="Previous picture">${svg('prev')}</button><button type="button" class="iv-nav next" data-iv="next" aria-label="Next picture">${svg('next')}</button>` : ''}`;
+    ${many ? `<button type="button" class="iv-nav prev" data-iv="prev" aria-label="${t`Previous picture`}">${svg('prev')}</button><button type="button" class="iv-nav next" data-iv="next" aria-label="${t`Next picture`}">${svg('next')}</button>` : ''}`;
 }
 export function openImage(src, scope = document) {
   const all = [...scope.querySelectorAll('img.md-media')].map(img => ({ src: img.getAttribute('src'), alt: img.getAttribute('alt') || '' }));
@@ -41,7 +42,7 @@ function apply(smooth = true) {
   image.style.transition = smooth ? '' : 'none'; // a finger moves it at once; a tap or the wheel eases
   const { k, x, y } = state.view; state.actual = k > 1.01;
   image.style.transform = `translate(${x}px, ${y}px) scale(${k})`; image.classList.toggle('zoomed', state.actual);
-  const zoom = document.querySelector('#img-viewer [data-iv="zoom"]'); if (zoom) { const label = state.actual ? 'Fit to the window' : 'Zoom in'; zoom.title = label; zoom.setAttribute('aria-label', label); zoom.innerHTML = svg(state.actual ? 'fit' : 'zoom'); }
+  const zoom = document.querySelector('#img-viewer [data-iv="zoom"]'); if (zoom) { const label = state.actual ? t('Fit to the window') : t('Zoom in'); zoom.title = label; zoom.setAttribute('aria-label', label); zoom.innerHTML = svg(state.actual ? 'fit' : 'zoom'); }
 }
 // Zoom to k keeping the point (px, py) of the stage (from its centre) still.
 function zoomAt(k, px = 0, py = 0) {

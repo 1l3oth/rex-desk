@@ -1,10 +1,11 @@
+import { t } from './i18n.js';
 // Listen to a reply: the 🔊 on an agent's message reads it aloud with the voices built into the computer (nothing is sent anywhere).
 // It picks a Korean or Khmer voice when the message is in that language, prefers the natural-sounding voices, and reads in short
 // pieces so long replies are not cut off. Pressing it again, or another message's button, stops it.
 let playing = null;
 const SPEAKER = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 6h2l3-2.5v9L5 10H3z" fill="currentColor"/><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12 3.8a6 6 0 0 1 0 8.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
 const STOP = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>';
-export const speakButton = (extraClass = '') => (true ? `<button type="button" class="speak ${extraClass}" data-speak title="Listen" aria-label="Listen to this message">${SPEAKER}</button>` : '');
+export const speakButton = (extraClass = '') => (true ? `<button type="button" class="speak ${extraClass}" data-speak title="${t`Listen`}" aria-label="${t`Listen to this message`}">${SPEAKER}</button>` : '');
 
 // What a person would hear: the words, without code, link addresses, the token line or the "to …" line.
 function spokenText(message) {
@@ -55,13 +56,13 @@ function unlockSound() {
 function stop() {
   speechSynthesis.cancel?.();
   if (playing?.audio) { playing.audio.pause(); playing.audio.onended = null; playing.audio.onerror = null; URL.revokeObjectURL(playing.audio.src); }
-  if (playing) { playing.button.innerHTML = SPEAKER; playing.button.classList.remove('on', 'loading'); playing.button.title = 'Listen'; }
+  if (playing) { playing.button.innerHTML = SPEAKER; playing.button.classList.remove('on', 'loading'); playing.button.title = t('Listen'); }
   playing = null;
 }
 // The computer's own voices: used when the neural voice cannot be reached, or when the person picked one in Settings.
 async function playLocal(text, lang, mine) {
   const voice = await voiceFor(lang), parts = pieces(text);
-  if (!voice && lang === 'en') ctxToast?.('No English voice is installed on this computer. Add one in Windows Settings, Time & language, Speech.');
+  if (!voice && lang === 'en') ctxToast?.(t('No English voice is installed on this computer. Add one in Windows Settings, Time & language, Speech.'));
   // Resolves when the last piece has been spoken, so replies read one after another do not cut each other off.
   return new Promise(resolve => {
     if (!parts.length) { resolve(); return; }
@@ -80,7 +81,7 @@ async function play(button) {
   const text = spokenText(message); if (!text) return;
   stop(); unlockSound();
   const lang = language(text), chosen = chosenVoice(lang);
-  playing = { button }; button.innerHTML = STOP; button.classList.add('on', 'loading'); button.title = 'Stop';
+  playing = { button }; button.innerHTML = STOP; button.classList.add('on', 'loading'); button.title = t('Stop');
   const mine = playing;
   // A neural voice (Microsoft's Edge voices, the same studybook uses) unless the person chose one of the computer's voices.
   if (!chosen || /Neural$/.test(chosen)) {
@@ -88,18 +89,18 @@ async function play(button) {
     const parts = [];
     for (const piece of pieces(text)) { const last = parts.at(-1); if (last && (last + piece).length < 380) parts[parts.length - 1] = `${last} ${piece}`; else parts.push(piece); }
     const fetchPart = part => fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text: part, lang, voice: chosen }) })
-      .then(async response => { if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'The voice service did not answer.'); return URL.createObjectURL(await response.blob()); });
+      .then(async response => { if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || t('The voice service did not answer.')); return URL.createObjectURL(await response.blob()); });
     try {
       let next = fetchPart(parts[0]);
       for (let index = 0; index < parts.length; index += 1) {
         const url = await next; if (playing !== mine) { URL.revokeObjectURL(url); return; }
         next = index + 1 < parts.length ? fetchPart(parts[index + 1]) : null;
         const audio = player || new Audio(); audio.src = url; mine.audio = audio; button.classList.remove('loading');
-        await new Promise((resolve, reject) => { audio.onended = resolve; audio.onerror = () => reject(new Error('The sound could not play.')); audio.play().catch(reject); });
+        await new Promise((resolve, reject) => { audio.onended = resolve; audio.onerror = () => reject(new Error(t('The sound could not play.'))); audio.play().catch(reject); });
         URL.revokeObjectURL(url); if (playing !== mine) return;
       }
       if (playing === mine) stop(); return;
-    } catch (error) { if (playing !== mine) return; button.classList.remove('loading'); ctxToast?.(`Using this computer's voice: ${error.message}`, true); }
+    } catch (error) { if (playing !== mine) return; button.classList.remove('loading'); ctxToast?.(t`Using this computer's voice: ${error.message}`, true); }
   }
   button.classList.remove('loading');
   if ('speechSynthesis' in window) await playLocal(text, lang, mine); else stop();
@@ -152,7 +153,7 @@ export function toggleVoiceMode(key) {
   return on;
 }
 const WAVE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>';
-export const voiceModeButton = key => { const on = voiceModeOn(key); return `<button type="button" class="icon-btn voice-mode${on ? ' on' : ''}" data-action="voice-mode" aria-pressed="${on}" title="${on ? 'Voice mode is on: talk, and the reply is spoken as it is written. Press to end' : 'Voice mode: talk with this agent'}" aria-label="Voice mode">${WAVE}</button>`; };
+export const voiceModeButton = key => { const on = voiceModeOn(key); return `<button type="button" class="icon-btn voice-mode${on ? ' on' : ''}" data-action="voice-mode" aria-pressed="${on}" title="${on ? t('Voice mode is on: talk, and the reply is spoken as it is written. Press to end') : t('Voice mode: talk with this agent')}" aria-label="${t`Voice mode`}">${WAVE}</button>`; };
 // Nothing is being said or waiting to be said.
 export const speechIdle = () => live.pending === 0 && !(typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking);
 // How loud Rex's own voice is right now (0 to 1), for the body in Voice mode to glow with. It listens to a copy of the
@@ -248,16 +249,16 @@ async function sayHere(text, lang, token) {
 function toolWords(tool, input = {}) {
   // Rex says itself that it is on it; starting a job or acting for the person needs no extra words.
   if (/^desk_(background|agent_say|room_say|room_create|rooms_all|room_manage)$/.test(tool)) return '';
-  if (/^(Read|Glob|Grep|LS|NotebookRead|view_file|read_file|list_dir|grep_search|find_by_name)$/.test(tool)) return 'Let me look at the files.';
-  if (/^(Bash|PowerShell|run_command)$/.test(tool)) return input.description && input.description.length < 70 ? `${input.description.replace(/\.$/, '')}.` : 'Running a command.';
-  if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(tool)) return 'Making the change now.';
-  if (/^(WebSearch|search_web)$/.test(tool)) return 'Searching the web.';
-  if (/^(WebFetch|read_url_content)$/.test(tool)) return 'Reading a web page.';
-  if (/^(Agent|Task)$/.test(tool)) return 'Working on it.';
-  if (/^desk_(specialists|rooms|room_read|tasks|task|progress)/.test(tool)) return 'Checking on the agents.';
-  if (/^desk_memory/.test(tool)) return 'Checking my notes.';
-  if (/browser|playwright|screenshot/i.test(tool)) return 'Looking at it in the browser.';
-  return 'One moment, I am working on it.';
+  if (/^(Read|Glob|Grep|LS|NotebookRead|view_file|read_file|list_dir|grep_search|find_by_name)$/.test(tool)) return t('Let me look at the files.');
+  if (/^(Bash|PowerShell|run_command)$/.test(tool)) return input.description && input.description.length < 70 ? `${input.description.replace(/\.$/, '')}.` : t('Running a command.');
+  if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(tool)) return t('Making the change now.');
+  if (/^(WebSearch|search_web)$/.test(tool)) return t('Searching the web.');
+  if (/^(WebFetch|read_url_content)$/.test(tool)) return t('Reading a web page.');
+  if (/^(Agent|Task)$/.test(tool)) return t('Working on it.');
+  if (/^desk_(specialists|rooms|room_read|tasks|task|progress)/.test(tool)) return t('Checking on the agents.');
+  if (/^desk_memory/.test(tool)) return t('Checking my notes.');
+  if (/browser|playwright|screenshot/i.test(tool)) return t('Looking at it in the browser.');
+  return t('One moment, I am working on it.');
 }
 const told = { at: 0, last: '' };
 function sayTool(tool, input) {
@@ -287,7 +288,7 @@ export function speakLive({ runId, text = '', done = false, tool = '', input = {
 export function welcome(text, at) { sayPhrase(text, live.token, at); }
 // Stops live speech (read-aloud turned off, another chat opened).
 export function stopLive() { live.token += 1; live.queue = Promise.resolve(); live.pending = 0; live.playing = false; live.said = 0; live.text = ''; live.runId = ''; try { speechSynthesis.cancel(); } catch { /* no voices */ } if (player) { try { player.pause(); } catch { /* not playing */ } } }
-export const readAloudButton = key => { const on = readAloudOn(key); return `<button type="button" class="icon-btn read-aloud${on ? ' on' : ''}" data-action="read-aloud" aria-pressed="${on}" title="${on ? 'Replies are read aloud. Press to stop' : 'Read replies aloud'}" aria-label="Read replies aloud">${SPEAKER}</button>`; };
+export const readAloudButton = key => { const on = readAloudOn(key); return `<button type="button" class="icon-btn read-aloud${on ? ' on' : ''}" data-action="read-aloud" aria-pressed="${on}" title="${on ? t('Replies are read aloud. Press to stop') : t('Read replies aloud')}" aria-label="${t`Read replies aloud`}">${SPEAKER}</button>`; };
 let ctxToast = null;
 export function wireSpeak(toast) {
   ctxToast = toast;
