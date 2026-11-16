@@ -1053,8 +1053,7 @@ button.cn-main{cursor:pointer}
 .page.monitor .mo-auto{flex-direction:row;font-size:13px;color:var(--ink)}
 
 /* Sub-agents in the chat */
-.subagent{margin:4px 0 4px 44px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:12px;background:var(--panel)}
-.subagent.failed{border-left-color:var(--bad)}.subagent.done{border-left-color:var(--good)}.subagent.stopped{border-left-color:var(--muted)}
+.subagent{margin:4px 0 4px 44px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 .subagent summary{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;list-style:none}.subagent summary::-webkit-details-marker{display:none}
 .sa-main{flex:1;min-width:0;display:flex;flex-direction:column}.sa-main b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sa-main small{color:var(--muted);font-size:12px}
 .sa-state{font-size:12px;color:var(--muted)}.subagent.working .sa-state{color:var(--accent);font-weight:600}.subagent.failed .sa-state{color:var(--bad)}
@@ -1113,8 +1112,7 @@ button.cn-main{cursor:pointer}
 .nt-mutes .btn.on{color:var(--warn);border-color:var(--warn)}
 /* the pop-ups */
 .nt-stack{position:fixed;right:18px;bottom:18px;z-index:70;display:flex;flex-direction:column;gap:10px;width:min(320px,calc(100vw - 32px))}
-.nt-pop{position:relative;overflow:hidden;display:flex;flex-direction:column;gap:6px;padding:9px 10px 9px 14px;border:1px solid var(--line);border-radius:14px;background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(14px);box-shadow:0 18px 40px rgba(0,0,0,.28),0 2px 6px rgba(0,0,0,.12);animation:nt-in .22s cubic-bezier(.2,.9,.3,1.2)}
-.nt-pop::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent)}.nt-pop.ask::before{background:var(--warn)}.nt-pop.failed::before{background:var(--bad)}
+.nt-pop{position:relative;overflow:hidden;display:flex;flex-direction:column;gap:6px;padding:9px 10px;border:1px solid var(--line);border-radius:14px;background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(14px);box-shadow:0 18px 40px rgba(0,0,0,.28),0 2px 6px rgba(0,0,0,.12);animation:nt-in .22s cubic-bezier(.2,.9,.3,1.2)}
 @keyframes nt-in{from{transform:translateX(24px) scale(.98);opacity:0}}
 .nt-pop-head{display:flex;align-items:center;gap:10px}.nt-pop-who{flex:1;display:flex;flex-direction:column;min-width:0}.nt-pop-who b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nt-pop-who small{color:var(--muted);font-size:12px}
 .nt-pop-x{border:0;background:none;color:var(--muted);font-size:18px;line-height:1;padding:4px 8px;border-radius:8px}.nt-pop-x:hover{background:var(--raised);color:var(--ink)}
