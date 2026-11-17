@@ -309,9 +309,11 @@ export class Peers {
     events.splice(0, Math.max(0, events.length - COPY_KEEP));
     const slim = Object.fromEntries(Object.entries(run).filter(([key, value]) => !['queued', 'mirror', 'prompt'].includes(key) && JSON.stringify(value ?? '').length < 4000));
     // Questions and approvals waiting for the person travel with the chat, so they can be answered from any computer.
-    const asks = this.store.list('interaction').filter(item => item.runId === runId && item.state === 'pending')
+    const asks = this.store.listBy('interaction', 'runId', runId).filter(item => item.state === 'pending')
       .map(item => Object.fromEntries(Object.entries(item).filter(([, value]) => JSON.stringify(value ?? '').length < 20000)));
-    this.store.put('chatcopy', runId, { id: runId, agentId: run.specialistId, run: slim, events, asks, at: now() });
+    // Saved (and sent to the cloud) only when the chat changed: saving the same copy again every few seconds kept the server busy.
+    const body = JSON.stringify({ slim, events, asks });
+    if ((this.copied ||= new Map()).get(runId) !== body) { this.copied.set(runId, body); this.store.put('chatcopy', runId, { id: runId, agentId: run.specialistId, run: slim, events, asks, at: now() }); }
     this.sharePictures(events, run.specialistId); this.shareEvidence(runId, run.specialistId, artifacts);
   }
   // Pictures the person attached in a shared chat travel with it (up to 2 MB each), so they show on the other computers too.
@@ -322,7 +324,7 @@ export class Peers {
         const file = path.resolve(match[1].trim());
         if (!PICTURE.test(file) || !file.toLowerCase().startsWith(uploads + path.sep) || !existsSync(file)) continue;
         const id = chatFileId(file), size = statSync(file).size;
-        if (size > PICTURE_BYTES || this.store.get('chatfile', id)?.size === size) continue;
+        if (size > PICTURE_BYTES || this.store.field('chatfile', id, 'size') === size) continue;
         this.store.put('chatfile', id, { id, path: file, name: path.basename(file), size, data: readFileSync(file).toString('base64'), agentId, at: now() });
       }
     }
@@ -338,7 +340,7 @@ export class Peers {
       const size = statSync(file).size;
       if (size > CARRY_BYTES) { note += `\n(${path.basename(file)} is ${Math.round(size / 1048576)} MB, too big to send to another computer; it stays on ${this.self.name}.)`; continue; }
       const id = chatFileId(file);
-      if (this.store.get('chatfile', id)?.size !== size) this.store.put('chatfile', id, { id, path: file, name: path.basename(file), size, data: readFileSync(file).toString('base64'), for: target, agentId, at: now() });
+      if (this.store.field('chatfile', id, 'size') !== size) this.store.put('chatfile', id, { id, path: file, name: path.basename(file), size, data: readFileSync(file).toString('base64'), for: target, agentId, at: now() });
       files.push({ id, path: match[1].trim(), name: path.basename(file) });
     }
     return { text: text + note, files };
@@ -359,11 +361,11 @@ export class Peers {
   }
   // Screenshots an agent saved as evidence in the chat travel with it too (up to 2 MB each).
   shareEvidence(runId, agentId = '', artifacts = null) {
-    for (const artifact of (artifacts || this.store.list('artifact').filter(item => item.runId === runId)).filter(item => PICTURE.test(item.file) || isPageArtifact(item))) {
+    for (const artifact of (artifacts || this.store.listBy('artifact', 'runId', runId)).filter(item => PICTURE.test(item.file) || isPageArtifact(item))) {
       const file = path.join(this.store.media('artifacts'), runId, path.basename(artifact.file));
       if (!existsSync(file)) continue;
       const id = evidenceId(runId, artifact.file), size = statSync(file).size;
-      if (size > PICTURE_BYTES || this.store.get('chatfile', id)?.size === size) continue;
+      if (size > PICTURE_BYTES || this.store.field('chatfile', id, 'size') === size) continue;
       this.store.put('chatfile', id, { id, path: `evidence:${runId}/${artifact.file}`, name: path.basename(artifact.file), size, data: readFileSync(file).toString('base64'), agentId, at: now() });
     }
   }

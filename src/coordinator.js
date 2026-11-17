@@ -1147,7 +1147,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   async fillEnglishNames(limit = 40) {
     if (!this.jev.apiKey() || this.namingBusy) return; this.namingBusy = true;
-    try { for (const task of this.store.list('task').filter(item => item.active && !item.demo && !item.titleEn).slice(0, limit)) await this.englishName(task.id).catch(() => {}); }
+    try { for (const task of this.store.listBy('task', 'active', 1).filter(item => !item.demo && !item.titleEn).slice(0, limit)) await this.englishName(task.id).catch(() => {}); }
     finally { this.namingBusy = false; }
   }
   // One turn in an agent's own session: a group chat message, or anything else that needs the agent. The session is made the first time and kept after that.

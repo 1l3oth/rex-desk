@@ -140,6 +140,10 @@ export class Store extends EventEmitter {
     return row ? JSON.parse(row.value) : undefined;
   }
   list(kind) { return this.db.prepare('SELECT value FROM records WHERE kind=?').all(kind).map(row => JSON.parse(row.value)); }
+  // Only the records whose field has this value, filtered by the database: no need to read and parse every record of the kind.
+  listBy(kind, field, value) { return this.db.prepare(`SELECT value FROM records WHERE kind=? AND json_extract(value, '$.' || ?)=?`).all(kind, field, value).map(row => JSON.parse(row.value)); }
+  // One field of one record, without reading the rest (a shared file's size, without its data).
+  field(kind, key, field) { return this.db.prepare(`SELECT json_extract(value, '$.' || ?) AS field FROM records WHERE kind=? AND id=?`).get(field, kind, key)?.field; }
   // Nested calls join the open transaction, so many saves can share one write to disk.
   transaction(callback) {
     if (this.inTransaction) return callback();
