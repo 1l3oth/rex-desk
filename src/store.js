@@ -140,10 +140,12 @@ export class Store extends EventEmitter {
     return row ? JSON.parse(row.value) : undefined;
   }
   list(kind) { return this.db.prepare('SELECT value FROM records WHERE kind=?').all(kind).map(row => JSON.parse(row.value)); }
+  // Nested calls join the open transaction, so many saves can share one write to disk.
   transaction(callback) {
-    this.db.exec('BEGIN IMMEDIATE');
-    try { const result = callback(); this.db.exec('COMMIT'); return result; }
-    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    if (this.inTransaction) return callback();
+    this.db.exec('BEGIN IMMEDIATE'); this.inTransaction = true;
+    try { const result = callback(); this.inTransaction = false; this.db.exec('COMMIT'); return result; }
+    catch (error) { this.inTransaction = false; this.db.exec('ROLLBACK'); throw error; }
   }
   // A version that sorts by time, then by computer, so the newest change wins on every computer.
   stamp() { this.clock = (this.clock + 1) % 1679616; return `${Date.now().toString(36).padStart(9, '0')}.${this.clock.toString(36).padStart(4, '0')}.${this.nodeId}`; }

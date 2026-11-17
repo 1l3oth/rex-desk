@@ -173,6 +173,22 @@ export function normalizeTask(source, projectId, post, detail = {}, { names, con
     raw: { post: record, summary: post }, demo: false };
 }
 
+// Saves a fresh tracker list in one write to disk, and only the tasks that changed. Rewriting every task one save at a
+// time held the server for seconds on each sync (every 5 minutes): chats stopped updating, and every task went up to
+// the cloud and down to the other computers again.
+const comparable = ({ _v, node, syncedAt, ...rest } = {}) => JSON.stringify(rest);
+function saveTasks(store, sourceId, fetched, build) {
+  store.transaction(() => {
+    const seen = new Set();
+    for (const task of fetched) {
+      seen.add(task.id);
+      const previous = store.get('task', task.id), next = build(task, previous);
+      if (!previous || comparable(previous) !== comparable(next)) store.put('task', task.id, next);
+    }
+    for (const task of store.list('task')) if (task.sourceId === sourceId && !seen.has(task.id) && task.active !== false) store.put('task', task.id, { ...task, active: false });
+  });
+}
+
 export class Sources {
   constructor(store, { fetcher = fetch, onSynced = () => {} } = {}) { this.store = store; this.fetcher = fetcher; this.onSynced = onSynced; this.syncing = false; }
   async request(source, endpoint, options = {}) {
@@ -241,12 +257,8 @@ export class Sources {
     const key = this.store.credential(source.id);
     if (!key) throw new Error(`Add the Orbit project key for ${source.name}.`);
     const fetched = await orbitTasks(source, key, this.fetcher);
-    for (const task of this.store.list('task').filter(item => item.sourceId === source.id)) this.store.put('task', task.id, { ...task, active: false });
-    for (const task of fetched) {
-      const previous = this.store.get('task', task.id);
-      this.store.put('task', task.id, { ...task, category: previous?.category || '', runId: previous?.runId, deskStatus: previous?.deskStatus || '', deskNote: previous?.deskNote || '',
-        ...(previous?.titleEn && previous.title === task.title ? { titleEn: previous.titleEn } : {}) });
-    }
+    saveTasks(this.store, source.id, fetched, (task, previous) => ({ ...task, category: previous?.category || '', runId: previous?.runId, deskStatus: previous?.deskStatus || '', deskNote: previous?.deskNote || '',
+      ...(previous?.titleEn && previous.title === task.title ? { titleEn: previous.titleEn } : {}) }));
     const result = { sourceId: source.id, name: source.name, count: fetched.length, account: 'Orbit project key', accounts: [], accountSource: 'the Orbit project key', verified: fetched.length, at: now() };
     this.store.put('sync', source.id, result); return result;
   }
@@ -298,16 +310,14 @@ export class Sources {
       }
     }
     // Only retire cached tasks after every configured project completed successfully.
-    for (const task of this.store.list('task').filter(item => item.sourceId === source.id)) this.store.put('task', task.id, { ...task, active: false });
-    for (const task of fetched) {
-      const previous = this.store.get('task', task.id);
+    saveTasks(this.store, source.id, fetched, (task, previous) => {
       const reusable = previous?.detailLoaded && task.detailLoaded === false && previous.postId === task.postId && (!task.updatedAt || previous.updatedAt === task.updatedAt);
       const detail = reusable ? Object.fromEntries(['description', 'contentImages', 'contentFiles', 'images', 'files', 'comments', 'url', 'detailLoadedAt'].map(key => [key, previous[key]])) : {};
-      this.store.put('task', task.id, { ...task, ...detail, ...(reusable ? { detailLoaded: true, raw: { ...task.raw, post: previous.raw?.post } } : {}), category: previous?.category || '', runId: previous?.runId,
+      return { ...task, ...detail, ...(reusable ? { detailLoaded: true, raw: { ...task.raw, post: previous.raw?.post } } : {}), category: previous?.category || '', runId: previous?.runId,
         deskStatus: previous?.deskStatus || '', deskNote: previous?.deskNote || '', deskStatusAt: previous?.deskStatusAt || '', deskStatusBy: previous?.deskStatusBy || '',
         // The English name made for this task is kept until the tracker title itself changes.
-        ...(previous?.titleEn && previous.title === task.title ? { titleEn: previous.titleEn } : {}) });
-    }
+        ...(previous?.titleEn && previous.title === task.title ? { titleEn: previous.titleEn } : {}) };
+    });
     for (const set of statusSets) this.store.put('statuses', `${source.id}:${set.projectId}`, set);
     const people = this.store.get('directory', source.id)?.employees || [];
     const names = keys.map(item => people.find(entry => identity(entry.id) === item || identity(entry.email) === item)?.name).filter(Boolean);
