@@ -735,6 +735,15 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const addresses = [`http://127.0.0.1:${desk.port}`, ...desk.peers.addresses(desk.port)].map(base => `${base}/.well-known/agent-card.json`);
         return json(response, 200, { enabled: settings.enabled, token: settings.enabled ? settings.token : '', addresses });
       }
+      // Settings, Tools and skills: the MCP servers, skills, commands and hooks on this computer.
+      if (url.pathname === '/api/toolbox' && request.method === 'GET') return json(response, 200, await desk.toolbox.overview());
+      if (url.pathname === '/api/toolbox' && request.method === 'POST') {
+        const input = await body(request), what = String(input.what || '');
+        const result = what === 'add-server' ? await desk.toolbox.addServer(input) : what === 'remove-server' ? await desk.toolbox.removeServer(input.name)
+          : what === 'add-skill' ? await desk.toolbox.addSkill(input.source) : what === 'remove-skill' ? desk.toolbox.removeSkill(input.name) : what === 'remove-command' ? desk.toolbox.removeCommand(input.name) : null;
+        if (!result) return json(response, 400, { error: 'Unknown change.' });
+        return json(response, 200, { ...result, ...(await desk.toolbox.overview()) });
+      }
       if (url.pathname === '/api/setup-prompt' && request.method === 'POST') {
         const input = await body(request);
         return json(response, 200, { prompt: setupPrompt({ target: input.target, root, dataDirectory: store.directory, mcpUrl: desk.mcpUrl, profiles: { claude: desk.agents.selected('claude') } }) });

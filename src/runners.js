@@ -120,6 +120,8 @@ export class ClaudeRunner {
       disallowedTools: this.run?.locked ? ['AskUserQuestion', 'Bash', 'PowerShell', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'Skill', 'Workflow'] : ['AskUserQuestion'],
       additionalDirectories: this.run?.locked ? [] : [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
       settingSources: this.run?.locked ? [] : ['user', 'project', 'local'],
+      // Through the toolbox (desk_find, desk_run) the agent reaches every skill on demand, so none is listed up front.
+      ...(this.gateway ? { skills: [] } : {}),
       hooks: {
         // Every command and file edit is checked first: one that would take down Rex Desk itself is refused, with the reason.
         PreToolUse: [{ hooks: [async input => {
@@ -137,7 +139,7 @@ export class ClaudeRunner {
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
       ...(this.model ? { model: this.model } : {}), ...(resume ? { resume } : {}),
       strictMcpConfig: true,
-      mcpServers: this.run?.locked ? {} : { ...connections, ...(this.extraMcp || {}), rex_desk: { type: 'http', url: this.mcpUrl, headers: { Authorization: `Bearer ${this.token}` }, alwaysLoad: true } },
+      mcpServers: this.run?.locked ? {} : { ...(this.gateway ? {} : connections), ...(this.extraMcp || {}), rex_desk: { type: 'http', url: this.mcpUrl, headers: { Authorization: `Bearer ${this.token}` }, alwaysLoad: true } },
       onElicitation: async request => {
         const answer = await this.ask({ kind: 'question', title: request.message, request, method: 'elicitation' });
         return { action: answer.action, ...(answer.action === 'accept' ? { content: answer.content || {} } : {}) };

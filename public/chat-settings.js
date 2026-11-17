@@ -21,6 +21,7 @@ const SECTIONS = [
   ['jev', t('Jev and voice'), t('Ranking, computer control, speech')],
   ['schedule', t('Schedule'), t('Start work on its own')],
   ['signins', t('Test sign-ins'), t('Accounts agents use in previews')],
+  ['tools', t('Tools and skills'), t('MCP servers, skills, commands, hooks')],
   ['devices', t('Devices and phone'), t('Your other computers, your phone')],
   ['backup', t('Backup and updates'), t('Cloud copy, app updates')],
   ['connect', t('Connect another AI'), t('Let another assistant use Rex Desk')],
@@ -29,12 +30,13 @@ const SECTIONS = [
 // The sections in groups by what they are about, so the list reads in a few chunks instead of thirteen rows.
 const GROUPS = [
   [t('You'), ['general', 'notify', 'jev']],
-  [t('Agents'), ['agents', 'accounts', 'localai', 'schedule', 'signins']],
+  [t('Agents'), ['agents', 'accounts', 'localai', 'tools', 'schedule', 'signins']],
   [t('Work'), ['projects', 'sources', 'connect']],
   [t('Data and devices'), ['folders', 'backup', 'devices', 'about']],
 ];
 // An icon for each section, shown in the phone's list of sections.
 const ST_ICON = {
+  tools: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L4 16.8V20h3.2l5.3-5.3a4 4 0 0 0 5.2-5.4l-2.4 2.4-2.6-.6-.6-2.6z"/>',
   about: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   general: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
   folders: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5 12 16l2.5-2.5"/>',
@@ -258,6 +260,24 @@ export function openSettings(ctx, section = 'general') {
       ${database.configured ? '' : `<div class="st-cloud">${CLOUD_ART}<div class="st-cloud-head"><b>${t`Back up with your Rex Desk account`}</b><small>${t`Your whole desk, kept safe in the cloud and ready on every computer you sign in on.`}</small></div><ul class="st-cloud-why">${CLOUD_WHY.map(([icon, title, text]) => `<li><span class="st-cloud-why-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span><span><b>${title}</b><small>${text}</small></span></li>`).join('')}</ul><button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || t('Sign in with Rex Desk'))}</button><p class="st-cloud-fine">${t`No account yet?`} <a href="https://rexdesk.app/signup" target="_blank" rel="noopener">${t`Create one on rexdesk.app`}</a></p></div>`}${database.accountNote ? `<p class="error-text" role="alert">${esc(database.accountNote)}</p>` : ''}${database.configured ? `<div class="st-actions"><button type="button" class="btn" data-st-db-sync>${t`Upload now and check`}</button></div>${backupPartsHtml(database.parts || {})}` : ''}
 ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay on this computer: only a Rex Desk account backup keeps them in the cloud.`}</p>` : ''}${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}
       <h3>${t`App updates`}</h3><p>${esc(update.supported ? t`This is Rex Desk ${[update.current, update.stage].filter(Boolean).join(' ')}. ` : '')}${esc(update.ready ? t`Version ${update.available?.version} is downloaded and checked.` : update.available ? t`Version ${update.available.version} is available.` : update.supported ? (update.checkedAt ? t('Rex Desk is up to date.') : t('Not checked yet.')) : t('This copy runs from source code and updates with Git.'))}</p>${update.error ? `<p class="error-text">${esc(update.error)}</p>` : ''}<div class="st-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${state.extra.checking ? 'disabled' : ''}>${state.extra.checking ? t('Checking…') : t('Check now')}</button>` : ''}${update.ready ? `<button type="button" class="btn primary" data-action="update-install">${t`Install and restart`}</button>` : ''}</div>`; },
+    tools: () => {
+      const box = state.extra.toolbox, busy = state.extra.toolboxBusy;
+      if (!box) return `<h2>${t`Tools and skills`}</h2><p class="muted">${t`Loading…`}</p>`;
+      const row = (title, sub, act, name, extra = '') => `<li class="tb-row"><div class="tb-text"><b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}${extra}</div>${act ? `<button type="button" class="btn small" data-st-tb="${act}" data-name="${esc(name)}"${busy ? ' disabled' : ''}>${t`Remove`}</button>` : ''}</li>`;
+      const list = (items, empty) => items.length ? `<ul class="tb-list">${items.join('')}</ul>` : `<p class="muted small">${empty}</p>`;
+      return `<h2>${t`Tools and skills`}</h2><p class="muted">${t`Everything your agents can use on this computer. They do not carry it all in every chat: they search it when a task needs it, which keeps each chat small.`}</p>
+      <h3 class="st-sub">${t`MCP servers`} <span class="cnt">${box.servers.length}</span></h3>
+      ${list(box.servers.map(item => row(item.name, item.how, item.removable ? 'remove-server' : '', item.name, `<span class="${item.error ? 'tb-bad' : 'tb-ok'}">${item.error ? t`Could not start: ${item.error}` : t`${item.tools} tools`}</span>`)), t`No MCP server yet.`)}
+      <div class="tb-add"><input name="tb-name" placeholder="${t`Name, like slack`}" autocomplete="off" aria-label="${t`Name`}"><input name="tb-how" placeholder="${t`Command (npx -y @scope/server) or https address`}" autocomplete="off" aria-label="${t`Command or address`}"><button type="button" class="btn small primary" data-st-tb="add-server"${busy ? ' disabled' : ''}>${t`Add`}</button></div>
+      <h3 class="st-sub">${t`Skills`} <span class="cnt">${box.skills.length}</span></h3>
+      ${list(box.skills.map(item => row(item.name, item.description, item.removable ? 'remove-skill' : '', item.name)), t`No skill yet.`)}
+      <div class="tb-add"><input name="tb-skill" placeholder="${t`A skill folder, or a git address`}" autocomplete="off" aria-label="${t`Skill folder or git address`}"><button type="button" class="btn small primary" data-st-tb="add-skill"${busy ? ' disabled' : ''}>${t`Add`}</button></div>
+      <h3 class="st-sub">${t`Commands`} <span class="cnt">${box.commands.length}</span></h3>
+      ${list(box.commands.map(item => row(`/${item.name}`, item.description, 'remove-command', item.name)), t`No command yet.`)}
+      <h3 class="st-sub">${t`Hooks`} <span class="cnt">${box.hooks.length}</span></h3>
+      ${list(box.hooks.map(item => row(item.event + (item.matcher ? ` · ${item.matcher}` : ''), item.command, '', '')), t`No hook yet.`)}
+      <p class="muted small">${t`Hooks are changed in Claude Code's own settings file.`}</p>`;
+    },
     connect: () => `<h2>${t`Connect another AI`}</h2><p class="muted">${t`Give this to another Claude Code window (or another assistant) so it can read your tasks and ask you questions through Rex Desk. No key is needed on this computer.`}</p>
       ${tip('connect', t('Use this when you already have a Claude Code window open and want it to see your tasks and ask you things here.'))}
       <button type="button" class="btn" data-st-prompt>${t`Show the setup text`}</button>${state.extra.prompt ? `<pre class="st-prompt">${esc(state.extra.prompt)}</pre><button type="button" class="btn small" data-st-copy-prompt>${t`Copy`}</button>` : ''}
@@ -270,6 +290,7 @@ ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay
   const saves = new Set(['general', 'agents', 'projects', 'sources', 'jev', 'schedule', 'signins']);
   const draw = () => {
     // Connect another AI shows whether A2A is on: read once when the section opens.
+    if (state.section === 'tools' && !state.extra.toolbox && !state.extra.toolboxLoading) { state.extra.toolboxLoading = true; void api('/toolbox').then(data => { state.extra.toolbox = data; draw(); }).catch(error => { state.extra.toolbox = { servers: [], skills: [], commands: [], hooks: [] }; toast(error.message, true); draw(); }); }
     if (state.section === 'connect' && !state.extra.a2a && !state.extra.a2aLoading) { state.extra.a2aLoading = true; void api('/a2a').then(data => { state.extra.a2a = data; draw(); }).catch(() => { state.extra.a2a = { enabled: false, addresses: [] }; draw(); }); }
     // A redraw of the same section keeps the place the person scrolled to (ticking a box used to jump back to the top).
     const keep = back.dataset.section === state.section ? back.querySelector('.st-panel')?.scrollTop || 0 : 0;
@@ -372,6 +393,16 @@ ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay
         const button = target.closest('[data-st-db-sync]'); button.disabled = true; button.textContent = t('Uploading…');
         try { const result = await api('/database/sync', { method: 'POST' }); toast(result.matched ? t`Everything on this computer is in the cloud: ${result.localRecords} records and ${result.localEvents} messages.` : t`${result.missingRecords} records and ${result.missingEvents} messages from this computer did not reach the cloud. Check the connection and try again.`, !result.matched); }
         finally { await refresh(); draw(); }
+        return;
+      }
+      const tbAct = target.closest('[data-st-tb]')?.dataset.stTb;
+      if (tbAct) {
+        const field = name => back.querySelector(`[name="${name}"]`)?.value?.trim() || '', name = target.dataset.name, how = field('tb-how');
+        const data = tbAct === 'add-server' ? { what: tbAct, name: field('tb-name'), ...(/^https?:\/\//.test(how) ? { url: how } : { command: how }) } : tbAct === 'add-skill' ? { what: tbAct, source: field('tb-skill') } : { what: tbAct, name };
+        if (tbAct.startsWith('remove') && !confirm(t`Remove ${name}?`)) return;
+        state.extra.toolboxBusy = true; draw();
+        try { state.extra.toolbox = await api('/toolbox', { method: 'POST', data }); toast(tbAct.startsWith('remove') ? t('Removed.') : t('Added.')); }
+        finally { state.extra.toolboxBusy = false; draw(); }
         return;
       }
       const a2aAct = target.closest('[data-st-a2a]')?.dataset.stA2a;
