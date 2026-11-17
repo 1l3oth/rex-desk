@@ -364,7 +364,8 @@ export class TursoSync {
         while (!this.closed) {
           const pending = this.store.db.prepare('SELECT * FROM cloud_outbox WHERE destination=? ORDER BY sequence LIMIT 50').all(this.connection.url);
           if (!pending.length) break;
-          await this.client.batch(pending.map(row => ({ sql: row.sql, args: JSON.parse(row.args) })), 'write');
+          // A cloud call that never answers would hold every later upload until a restart: it gives up after a minute and is tried again.
+          await Promise.race([this.client.batch(pending.map(row => ({ sql: row.sql, args: JSON.parse(row.args) })), 'write'), new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error('The cloud did not answer in time; the changes are kept and sent again.')), 60000); timer.unref?.(); })]);
           this.store.transaction(() => { const remove = this.store.db.prepare('DELETE FROM cloud_outbox WHERE sequence=?'); for (const row of pending) remove.run(row.sequence); });
         }
         this.state = 'connected'; this.error = ''; this.lastSyncedAt = new Date().toISOString();

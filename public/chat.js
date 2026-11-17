@@ -760,7 +760,9 @@ document.addEventListener('keydown', event => {
 try {
   await refresh({ full: true });
   const stream = new EventSource('/api/events'); let timer;
-  stream.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(() => void refresh().catch(() => {}), 700); });
+  // Changes in quick bursts are drawn once, 0.7 s after the last; when they never stop (another computer syncing), the page still catches up every 2.5 s.
+  let waitingSince = 0;
+  stream.addEventListener('change', () => { clearTimeout(timer); waitingSince ||= Date.now(); timer = setTimeout(() => { waitingSince = 0; void refresh().catch(() => {}); }, Date.now() - waitingSince > 2500 ? 0 : 700); });
   // Voice mode: when nothing is being written or said, listen for the person's next turn; after they spoke, give the
   // agent a moment to start replying before listening again.
   // When the person says nothing for a while (only listening, no agent at work), Rex asks once whether they are still

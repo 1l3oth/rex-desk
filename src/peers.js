@@ -11,7 +11,7 @@ import { HUMAN } from './rooms.js';
 import { execFile } from 'node:child_process';
 
 const now = () => new Date().toISOString();
-const ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000, PICTURE_BYTES = 2 * 1024 * 1024, CARRY_BYTES = 8 * 1024 * 1024;
+const STEP_MS = 30000, ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000, PICTURE_BYTES = 2 * 1024 * 1024, CARRY_BYTES = 8 * 1024 * 1024;
 const isPageArtifact = item => Boolean(item.page) || /\.html?$/i.test(item.file);
 const PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
 // A picture is known by its path on the computer that has it.
@@ -453,14 +453,17 @@ export class Peers {
   // ---------- the loop ----------
   start() {
     this.pendingCommands(); this.watchChats(); this.refreshSecure();
+    // Each step gets at most this long. A cloud call that never answers (a dropped connection, a laptop waking from sleep)
+    // used to hold the loop for good: nothing new arrived from the other computers until Rex Desk was restarted.
+    const bounded = (step, ms = STEP_MS) => Promise.race([Promise.resolve().then(step).catch(() => {}), new Promise(resolve => { const timer = setTimeout(resolve, ms); timer.unref?.(); })]);
     const tick = async () => {
       for (const peer of this.settings().peers) {
         if (this.timers.get(peer.id) > Date.now()) continue;
-        await this.pullFrom(peer);
+        await bounded(() => this.pullFrom(peer));
         this.timers.set(peer.id, Date.now() + (this.direct(peer.id) ? 2500 : 10000));
       }
-      if ((this.timers.get('turso') || 0) <= Date.now()) { await this.pullTurso(); this.timers.set('turso', Date.now() + 5000); }
-      if ((this.timers.get('presence') || 0) <= Date.now()) { this.timers.set('presence', Date.now() + 30000); await this.presence(); }
+      if ((this.timers.get('turso') || 0) <= Date.now()) { this.timers.set('turso', Date.now() + 5000); await bounded(() => this.pullTurso()); this.timers.set('turso', Date.now() + 5000); }
+      if ((this.timers.get('presence') || 0) <= Date.now()) { this.timers.set('presence', Date.now() + 30000); await bounded(() => this.presence()); }
       if ((this.timers.get('secure') || 0) <= Date.now()) { this.timers.set('secure', Date.now() + 300000); this.refreshSecure(); }
     };
     this.loop = setInterval(() => { if (!this.ticking) { this.ticking = true; void tick().finally(() => { this.ticking = false; }); } }, 1000);
