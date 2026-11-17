@@ -403,7 +403,8 @@ ${(() => { const space = database.space, files = space?.files || {}, share = fil
       }
       if (target.closest('[data-st-db-sync]')) {
         const button = target.closest('[data-st-db-sync]'); button.disabled = true; button.textContent = t('Uploading…');
-        try { const result = await api('/database/sync', { method: 'POST' }); toast(result.matched ? t`Everything on this computer is in the cloud: ${result.localRecords} records and ${result.localEvents} messages.` : t`${result.missingRecords} records and ${result.missingEvents} messages from this computer did not reach the cloud. Check the connection and try again.`, !result.matched); }
+        try { const result = await api('/database/sync', { method: 'POST' }); if (result.stillGoing) toast(t('Still uploading. It keeps going by itself; check again later.')); else toast(result.matched ? t`Everything on this computer is in the cloud: ${result.localRecords} records and ${result.localEvents} messages.` : t`${result.missingRecords} records and ${result.missingEvents} messages from this computer did not reach the cloud. Check the connection and try again.`, !result.matched); }
+        catch (error) { toast(error.message, true); }
         finally { await refresh(); draw(); }
         return;
       }

@@ -2126,5 +2126,6 @@
  "Installing…": "កំពុងដំឡើង…",
  "Install": "ដំឡើង",
  "{0}: installed, agents can find it · {1} tools": "{0}: បានដំឡើង ភ្នាក់ងាររកឃើញ · ឧបករណ៍ {1}",
- "{0}: installed, agents can find it": "{0}: បានដំឡើង ភ្នាក់ងាររកឃើញ"
+ "{0}: installed, agents can find it": "{0}: បានដំឡើង ភ្នាក់ងាររកឃើញ",
+ "Still uploading. It keeps going by itself; check again later.": "នៅកំពុងផ្ទុកឡើង។ វាបន្តដោយខ្លួនឯង សូមពិនិត្យម្តងទៀតពេលក្រោយ។"
 }

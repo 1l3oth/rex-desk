@@ -545,7 +545,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
       // What goes to the cloud backup; each switch saves at once.
       if (url.pathname === '/api/database/parts' && request.method === 'PUT') { const parts = store.cloud.setParts(await body(request)); notify(); return json(response, 200, { parts, status: store.cloud.status() }); }
-      if (url.pathname === '/api/database/sync' && request.method === 'POST') { await store.cloud.retry(); return json(response, 200, { ...await store.cloud.verify(), status: store.cloud.status() }); }
+      // A large backup on a busy cloud can take minutes: after a minute the answer is "still going", and the work carries on by itself.
+      if (url.pathname === '/api/database/sync' && request.method === 'POST') { const check = store.cloud.retry().then(() => store.cloud.verify()); check.catch(() => {}); const done = await Promise.race([check, new Promise(resolve => { const timer = setTimeout(() => resolve(null), 60000); timer.unref?.(); })]); return json(response, 200, done ? { ...done, status: store.cloud.status() } : { stillGoing: true, status: store.cloud.status() }); }
       if (url.pathname === '/api/repositories/inspect' && request.method === 'POST') return json(response, 200, await inspectRepository((await body(request)).path));
       if (url.pathname === '/api/repositories/pick' && request.method === 'POST') return json(response, 200, await pickRepositoryFolder());
       // Checkouts beside the ones already configured, and beside Rex Desk itself, so other projects are one click away.
