@@ -577,6 +577,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       }
       // Signing the account out stops key renewal. The backup keeps working until its current key runs out (about a month).
       if (url.pathname === '/api/database/account-signout' && request.method === 'POST') { await store.cloud.account.signOut(); notify(); return json(response, 200, store.cloud.status()); }
+      if (url.pathname === '/api/database/disconnect' && request.method === 'POST') { const status = await store.cloud.disconnect(); notify(); return json(response, 200, status); }
       if (url.pathname === '/api/database/connect' && request.method === 'POST') return json(response, 200, await store.cloud.connect(await body(request)));
       // What goes to the cloud backup; each switch saves at once.
       if (url.pathname === '/api/database/parts' && request.method === 'PUT') { const parts = store.cloud.setParts(await body(request)); notify(); return json(response, 200, { parts, status: store.cloud.status() }); }

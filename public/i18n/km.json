@@ -2185,5 +2185,8 @@
  "A new computer or a reinstall gets everything back when you sign in": "កុំព្យូទ័រថ្មី ឬការដំឡើងឡើងវិញ ទទួលបានអ្វីៗទាំងអស់មកវិញនៅពេលអ្នកចូល",
  "Need more room? Add 5 GB for $1 a month": "ត្រូវការទំហំបន្ថែម? បន្ថែម 5 GB ក្នុងតម្លៃ $1 ក្នុងមួយខែ",
  "Chats and settings": "ការជជែក និងការកំណត់",
- "Database space used": "ទំហំមូលដ្ឋានទិន្នន័យដែលបានប្រើ"
+ "Database space used": "ទំហំមូលដ្ឋានទិន្នន័យដែលបានប្រើ",
+ "Stop using this database": "ឈប់ប្រើមូលដ្ឋានទិន្នន័យនេះ",
+ "Stop copying to this cloud database? Everything stays on this computer and nothing is deleted in the cloud. You can then turn on the Rex Desk account backup.": "ឈប់ចម្លងទៅមូលដ្ឋានទិន្នន័យ cloud នេះ? អ្វីៗទាំងអស់នៅតែលើកុំព្យូទ័រនេះ ហើយគ្មានអ្វីត្រូវបានលុបនៅលើ cloud ទេ។ បន្ទាប់មកអ្នកអាចបើកការបម្រុងទុកគណនី Rex Desk បាន។",
+ "This computer no longer copies to that database.": "កុំព្យូទ័រនេះលែងចម្លងទៅមូលដ្ឋានទិន្នន័យនោះហើយ។"
 }

@@ -1,7 +1,7 @@
 import { doing } from './stall-watch.js';
 import { createClient } from '@libsql/client/web';
 import { backup } from 'node:sqlite';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
@@ -421,6 +421,21 @@ export class TursoSync {
     }
     const missingRecords = lostRecords.length, missingEvents = lostEvents.length;
     return { matched: missingRecords === 0 && missingEvents === 0, missingRecords, missingEvents, localRecords: local.length, remoteRecords: remoteKeys.size, localEvents: localEvents.length, remoteEvents: remoteSequences.size };
+  }
+  // Stops using the cloud database this computer copies to (for example to move to the Rex Desk account backup). Everything
+  // stays on this computer; nothing is deleted in the cloud. The next database it connects to gets a complete copy.
+  async disconnect() {
+    if (this.opening) await this.opening.catch(() => {});
+    clearTimeout(this.timer); clearInterval(this.retryTimer); clearInterval(this.spaceTimer); clearInterval(this.filesTimer); clearTimeout(this.files.soonTimer);
+    this.timer = null; this.retryTimer = null; this.spaceTimer = null; this.filesTimer = null;
+    const old = this.connection?.url || '';
+    try { this.client?.close(); } catch { /* already closed */ }
+    this.client = null; this.connection = null; this.ready = false; this.state = 'local'; this.error = ''; this.space = null;
+    rmSync(this.connectionFile, { force: true }); rmSync(this.marker, { force: true });
+    if (old) this.store.db.prepare('DELETE FROM cloud_outbox WHERE destination=?').run(old);
+    if (this.account.saved?.url) this.account.save({ token: this.account.saved.token, expiresAt: this.account.saved.expiresAt, user: this.account.saved.user }, {});
+    this.notify();
+    return this.status();
   }
   async close() {
     clearTimeout(this.timer); clearInterval(this.retryTimer); clearInterval(this.filesTimer); clearTimeout(this.files.soonTimer);
