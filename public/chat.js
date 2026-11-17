@@ -875,6 +875,14 @@ function secretKey(key) { return /key|secret|token|passw|pwd|auth|credential|pri
 function envLine(line) { return /^(\s*(?:export\s+)?)([A-Za-z_][\w.-]*)(\s*=\s*)(.*)$/.exec(line); }
 function fileState(item) {
   let state = ui.files.get(item.id);
+  if (!state && item.cloudCopy) {
+    // On another of the person's computers: only the keys the agent asked for, empty. What is typed is locked here so only the
+    // agent's computer can read it, and saved there. The rest of the file never leaves that computer.
+    const keys = item.request?.keys || [];
+    state = { loading: false, remote: true, content: keys.map(key => `${key}=`).join('\n'), mode: 'fields', shown: new Set(), keys, exists: item.request?.exists,
+      error: keys.length && item.request?.lockKey ? '' : t`Open this file on the computer the agent works on to fill it in.` };
+    ui.files.set(item.id, state);
+  }
   if (!state) {
     state = { loading: true, content: '', mode: isEnv(item.request?.path) ? 'fields' : 'text', shown: new Set() }; ui.files.set(item.id, state);
     api(`/interactions/${item.id}/file`).then(file => {
@@ -900,12 +908,12 @@ function fileCard(item) {
       return `<label class="frow${wanted ? ' wanted' : ''}"><span class="fkey">${esc(key)}${wanted ? `<small>${t`asked for`}</small>` : ''}</span><span class="fval"><input type="${hidden ? 'password' : 'text'}" data-file-line="${index}" value="${esc(value)}" autocomplete="off" spellcheck="false" placeholder="${wanted ? t('Paste the value here') : 'empty'}">${secretKey(key) ? `<button type="button" class="btn small quiet" data-file-show="${index}">${hidden ? t('Show') : t('Hide')}</button>` : ''}</span></label>`;
     }).join('')}</div>` : `<p class="muted">${t`No KEY=value lines yet. Switch to text to write the file.`}</p>`;
   } else body = `<textarea class="ftext" data-file-text spellcheck="false">${esc(state.content)}</textarea>`;
-  const toggle = !state.loading && !state.error && isEnv(file) ? `<button type="button" class="btn small quiet" data-file-mode>${state.mode === 'fields' ? t('Edit as text') : t('Edit as fields')}</button>` : '';
+  const toggle = !state.loading && !state.error && !state.remote && isEnv(file) ? `<button type="button" class="btn small quiet" data-file-mode>${state.mode === 'fields' ? t('Edit as text') : t('Edit as fields')}</button>` : '';
   return `<form class="card ask fcard" data-file="${esc(item.id)}"><div class="qhead"><span class="qdot"></span>${t`File to fill in · ${esc(runTitle(run))}`}</div>
     <div class="qtext md">${markdown(String(item.title || ''))}</div>
     <div class="fpath"><code title="${esc(file)}">${esc(file)}</code>${state.exists === false ? `<span class="chip">${t`new file`}</span>` : ''}${toggle}</div>
     ${body}
-    <p class="fnote">${t`Saved straight to this computer. ${esc(runTitle(run))} sees only which keys have a value, never what you type.`}</p>
+    <p class="fnote">${state.remote ? t`Locked on this computer so only ${esc((ui.snap.specialists || []).find(agent => agent.id === run?.specialistId)?.device || t('the agent\'s computer'))} can read it, then saved there. ${esc(runTitle(run))} sees only which keys have a value, never what you type.` : t`Saved straight to this computer. ${esc(runTitle(run))} sees only which keys have a value, never what you type.`}</p>
     <div class="row"><button class="send-btn wide" ${state.loading || state.error ? 'disabled' : ''}>${t`Save file`}</button><button type="button" class="btn small" data-file-close>${t`Close without saving`}</button></div></form>`;
 }
 function fileLine(state, index, value) {
@@ -932,6 +940,12 @@ document.addEventListener('click', async event => {
 document.addEventListener('submit', async event => {
   const form = event.target.closest?.('[data-file]'); if (!form) return; event.preventDefault(); event.stopPropagation();
   const state = ui.files.get(form.dataset.file); if (!state || state.loading) return;
+  if (state.remote) {
+    const values = Object.fromEntries(state.content.split('\n').map(envLine).filter(Boolean).map(match => [match[2], match[4].replace(/^(["'])(.*)\1$/, '$2')]).filter(([, value]) => value.trim()));
+    try { await api(`/interactions/${form.dataset.file}/sealed`, { method: 'POST', data: { values } }); ui.files.delete(form.dataset.file); document.activeElement?.blur?.(); toast(t('Sent locked. It is saved on the agent\'s computer.')); await refresh({ full: true }); }
+    catch (error) { toast(error.message, true); }
+    return;
+  }
   try { await api(`/interactions/${form.dataset.file}/file`, { method: 'POST', data: { content: state.content } }); ui.files.delete(form.dataset.file); document.activeElement?.blur?.(); toast(t('File saved.')); await refresh({ full: true }); }
   catch (error) { toast(error.message, true); }
 }, true);

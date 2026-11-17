@@ -38,6 +38,7 @@ import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
 import { LocalRunner, lightSystem, withoutRepeats } from './local-runner.js';
 import { LocalTasks } from './local-tasks.js';
 import { checkEditable, readEditable, writeEditable, filledKeys } from './file-edit.js';
+import { makeLock, unseal, setEnvValues } from './sealed.js';
 import { Jev } from './jev.js';
 import { placeTask, scanRepositories, scanRoots } from './placement.js';
 import { TrackerQuery } from './query.js';
@@ -898,7 +899,11 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // the agent gets back only whether it was saved and which keys have a value.
   async editFile(runId, { path: file, why = '', keys = [] }) {
     const checked = checkEditable(file), wanted = [].concat(keys || []).map(key => String(key).trim()).filter(key => /^[A-Za-z_][\w.-]*$/.test(key)).slice(0, 20);
-    const answer = await this.ask(runId, { kind: 'file', method: 'file', title: String(why || `Fill in ${path.basename(checked.path)}`).slice(0, 300), request: { path: checked.path, exists: checked.exists, keys: wanted } });
+    // A one-time lock, so the keys can also be filled in on the person's other computer: only this computer can open what comes back.
+    const lock = wanted.length ? makeLock() : null;
+    const asked = this.beginAsk(runId, { kind: 'file', method: 'file', title: String(why || `Fill in ${path.basename(checked.path)}`).slice(0, 300), request: { path: checked.path, exists: checked.exists, keys: wanted, ...(lock ? { lockKey: lock.publicKey } : {}) } });
+    if (lock) (this.fileLocks ||= new Map()).set(asked.id, lock.privateKey);
+    const answer = await asked.promise.finally(() => this.fileLocks?.delete(asked.id));
     if (answer.action !== 'accept') return { saved: false, reason: 'The person closed the file without saving.' };
     const result = answer.content || {};
     return { saved: true, path: checked.path, keysWithValues: result.keys || [], missing: wanted.filter(key => !(result.keys || []).includes(key)), note: 'You cannot see what the person typed. Read the file yourself only if the task needs it, and never print secret values.' };
@@ -945,6 +950,18 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const written = writeEditable(item.request.path, content);
     this.answer(interactionId, { action: 'accept', content: { keys: filledKeys(content), bytes: written.bytes } });
     return { saved: true, path: written.path };
+  }
+  // The keys were filled in on another of the person's computers and arrive locked: opened here, written into the file.
+  saveSealedFile(interactionId, sealed) {
+    const item = this.store.get('interaction', interactionId), privateKey = this.fileLocks?.get(interactionId);
+    if (!item || item.kind !== 'file' || item.state !== 'pending') throw new Error('This file is no longer waiting to be filled in.');
+    if (!privateKey) throw new Error('The agent stopped waiting for this file. Ask it to open the file again.');
+    const values = unseal(privateKey, sealed), wanted = new Set(item.request.keys || []);
+    const chosen = Object.fromEntries(Object.entries(values || {}).filter(([key, value]) => wanted.has(key) && typeof value === 'string' && value.length <= 20000));
+    const content = setEnvValues(readEditable(item.request.path).content, chosen);
+    const written = writeEditable(item.request.path, content);
+    this.answer(interactionId, { action: 'accept', content: { keys: filledKeys(content), bytes: written.bytes } });
+    return { saved: true };
   }
   answer(interactionId, answer) {
     const interaction = this.store.get('interaction', interactionId);

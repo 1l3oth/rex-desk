@@ -2,6 +2,7 @@
 // worktrees and sessions stay there. Rooms, messages, agent cards, what the agents learned, and commands for an agent on
 // another computer are copied between the person's computers over their private network (Tailscale), so every computer
 // and the phone shows the same chats. A computer that is off only takes its own agents offline; messages for them wait.
+import { seal } from './sealed.js';
 import { doing } from './stall-watch.js';
 import os from 'node:os';
 import path from 'node:path';
@@ -231,6 +232,7 @@ export class Peers {
       else if (command.action === 'chat-stop') result = await this.desk.stop(command.runId);
       // A team task, its result, an answer or a cancel, from an agent that manages work on the other computer.
       else if (String(command.action).startsWith('team-')) result = await this.desk.team.remote(command.action, command.input);
+      else if (command.action === 'answer' && command.input?.answer?.sealed) result = this.desk.saveSealedFile(command.input.interactionId, command.input.answer.sealed);
       else if (command.action === 'answer') result = this.desk.answer(command.input?.interactionId, command.input?.answer || {});
       else if (command.action === 'chat-say') {
         // Written on another computer in this agent's personal chat: said to the agent while it works, or it picks the chat up again.
@@ -239,7 +241,9 @@ export class Peers {
         result = ['starting', 'running', 'queued', 'waiting', 'verifying'].includes(run.state) ? await this.desk.say(run.id, text, {}) : await this.desk.resume(run.id, { prompt: text });
       }
     } catch (failure) { error = failure.message; }
-    this.store.put('peercmd', command.id, { ...this.store.get('peercmd', command.id), done: true, doneAt: now(), error, runId: result?.id || '' });
+    // A locked file answer is not kept once it is used: only its question id stays.
+    const sealed = command.action === 'answer' && command.input?.answer?.sealed;
+    this.store.put('peercmd', command.id, { ...this.store.get('peercmd', command.id), ...(sealed ? { input: { interactionId: command.input.interactionId } } : {}), done: true, doneAt: now(), error, runId: result?.id || '' });
     this.running.delete(command.id);
   }
   // A task is known by its number on every computer; its id can differ between them.
@@ -433,6 +437,14 @@ export class Peers {
   askCopy(interactionId) {
     if (this.store.get('interaction', interactionId) || this.interactionOwner(interactionId)) return null;
     return this.store.list('chatcopy').find(copy => copy.node && copy.node !== this.self.id && (copy.asks || []).some(item => item.id === interactionId)) || null;
+  }
+  // Keys for a file on the computer the agent works on, typed here: locked with that request's one-time lock before they leave.
+  sealFileAnswer(copy, interactionId, values = {}) {
+    const ask = (copy.asks || []).find(item => item.id === interactionId);
+    if (!ask || ask.kind !== 'file' || !ask.request?.lockKey) throw new Error(`Open this file on ${this.deviceName(copy.node)} to fill it in.`);
+    const wanted = new Set(ask.request.keys || []), chosen = Object.fromEntries(Object.entries(values || {}).filter(([key, value]) => wanted.has(key) && typeof value === 'string' && value.trim()).map(([key, value]) => [key, value.trim()]));
+    if (!Object.keys(chosen).length) throw new Error('Fill in at least one value first.');
+    return this.answerAsk(copy, interactionId, { action: 'accept', sealed: seal(ask.request.lockKey, chosen) });
   }
   answerAsk(copy, interactionId, answer) {
     const id = randomUUID();

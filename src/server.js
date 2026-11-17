@@ -855,6 +855,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const terminalMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/terminal$/);
       if (terminalMatch && request.method === 'POST') return json(response, 200, desk.openSignInTerminal(terminalMatch[1]));
       const fileMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/file$/);
+      const sealedMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/sealed$/);
+      if (sealedMatch && request.method === 'POST') { const copy = desk.peers.askCopy(sealedMatch[1]); if (!copy) return json(response, 404, { error: 'This file is no longer waiting to be filled in.' }); return json(response, 200, desk.peers.sealFileAnswer(copy, sealedMatch[1], (await body(request)).values)); }
       if (fileMatch && request.method === 'GET') return json(response, 200, desk.fileForPerson(fileMatch[1]));
       if (fileMatch && request.method === 'POST') return json(response, 200, desk.saveFileForPerson(fileMatch[1], (await body(request)).content));
       const interactionMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/answer$/);

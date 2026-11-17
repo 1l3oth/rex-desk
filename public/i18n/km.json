@@ -2119,5 +2119,9 @@
  "Cloud space used": "ទំហំលើពពកដែលបានប្រើ",
  "Almost full. Chats and changes keep syncing; new files wait on this computer until there is room.": "ជិតពេញហើយ។ ការជជែក និងការផ្លាស់ប្តូរនៅតែធ្វើសមកាលកម្ម ឯកសារថ្មីរង់ចាំលើកុំព្យូទ័រនេះ រហូតដល់មានកន្លែង។",
  "Add 5 GB": "បន្ថែម 5 GB",
- "Manage plan": "គ្រប់គ្រងគម្រោង"
+ "Manage plan": "គ្រប់គ្រងគម្រោង",
+ "Open this file on the computer the agent works on to fill it in.": "បើកឯកសារនេះលើកុំព្យូទ័រដែលភ្នាក់ងារធ្វើការ ដើម្បីបំពេញវា។",
+ "Locked on this computer so only {0} can read it, then saved there. {1} sees only which keys have a value, never what you type.": "ចាក់សោលើកុំព្យូទ័រនេះ ដើម្បីឱ្យតែ {0} អាចអានបាន រួចរក្សាទុកនៅទីនោះ។ {1} ឃើញតែសោណាមួយដែលមានតម្លៃ មិនដែលឃើញអ្វីដែលអ្នកវាយទេ។",
+ "the agent's computer": "កុំព្យូទ័ររបស់ភ្នាក់ងារ",
+ "Sent locked. It is saved on the agent's computer.": "បានផ្ញើដោយចាក់សោ។ វាត្រូវបានរក្សាទុកលើកុំព្យូទ័ររបស់ភ្នាក់ងារ។"
 }
