@@ -206,7 +206,6 @@
  "Address of another computer": "អាសយដ្ឋានរបស់កុំព្យូទ័រផ្សេង",
  "Address of the other computer, like 100.101.102.103": "អាសយដ្ឋានរបស់កុំព្យូទ័រមួយទៀត ដូចជា 100.101.102.103",
  "Advanced: the device key": "កម្រិតខ្ពស់: សោឧបករណ៍",
- "After a reinstall, a broken drive or a new computer, everything comes back with your password.": "បន្ទាប់ពីដំឡើងឡើងវិញ ថាសខូច ឬកុំព្យូទ័រថ្មី អ្វីៗទាំងអស់ត្រឡប់មកវិញជាមួយពាក្យសម្ងាត់របស់អ្នក។",
  "Agent": "ភ្នាក់ងារ",
  "Agent at work": "ភ្នាក់ងារកំពុងធ្វើការ",
  "Agent disconnected. Resume the run to ask again.": "ភ្នាក់ងារបានផ្ដាច់។ បន្តការងារដើម្បីសួរម្ដងទៀត។",
@@ -2147,9 +2146,6 @@
  "Recommended": "ណែនាំ",
  "a year": "ក្នុងមួយឆ្នាំ",
  "a month": "ក្នុងមួយខែ",
- "Your whole desk kept safe in the cloud": "តុការងារទាំងមូលរបស់អ្នកត្រូវបានរក្សាទុកដោយសុវត្ថិភាពលើ cloud",
- "The same desk on all your computers": "តុការងារដូចគ្នានៅលើកុំព្យូទ័រទាំងអស់របស់អ្នក",
- "1 GB of files, add 5 GB any time": "ឯកសារ 1 GB បន្ថែម 5 GB បានគ្រប់ពេល",
  "Cancel any time, nothing on your computer is lost": "បោះបង់បានគ្រប់ពេល គ្មានអ្វីនៅលើកុំព្យូទ័ររបស់អ្នកបាត់ទេ",
  "Upgrade to Cloud backup": "ដំឡើងទៅការបម្រុងទុកលើ cloud",
  "Payment problem": "បញ្ហាការបង់ប្រាក់",
@@ -2178,5 +2174,14 @@
  "Paid": "បានបង់",
  "Not paid": "មិនទាន់បង់",
  "Receipt": "បង្កាន់ដៃ",
- "No payments yet.": "មិនទាន់មានការបង់ប្រាក់នៅឡើយទេ។"
+ "No payments yet.": "មិនទាន់មានការបង់ប្រាក់នៅឡើយទេ។",
+ "After a reinstall, a broken drive or a new computer, everything comes back when you sign in.": "បន្ទាប់ពីដំឡើងឡើងវិញ ឌ្រាយខូច ឬកុំព្យូទ័រថ្មី អ្វីៗទាំងអស់ត្រឡប់មកវិញនៅពេលអ្នកចូល។",
+ "Turn on cloud backup": "បើកការបម្រុងទុកលើ cloud",
+ "See plans": "មើលគម្រោង",
+ "Cloud backup comes with the Cloud backup plan, from $2.99 a month.": "ការបម្រុងទុកលើ cloud មកជាមួយគម្រោងបម្រុងទុកលើ cloud ចាប់ពី $2.99 ក្នុងមួយខែ។",
+ "Your agents, chats, tasks and settings in a private cloud database only your account can open": "ភ្នាក់ងារ ការជជែក កិច្ចការ និងការកំណត់របស់អ្នក នៅក្នុងមូលដ្ឋានទិន្នន័យ cloud ឯកជន ដែលមានតែគណនីរបស់អ្នកអាចបើកបាន",
+ "1 GB for pictures and files, locked on your computer before they upload": "1 GB សម្រាប់រូបភាព និងឯកសារ ដែលត្រូវបានចាក់សោលើកុំព្យូទ័ររបស់អ្នក មុនពេលផ្ទុកឡើង",
+ "The same desk on every computer you sign in on, kept in step within seconds": "តុការងារដូចគ្នានៅលើកុំព្យូទ័រគ្រប់គ្រឿងដែលអ្នកចូល ធ្វើសមកាលកម្មក្នុងរយៈពេលប៉ុន្មានវិនាទី",
+ "A new computer or a reinstall gets everything back when you sign in": "កុំព្យូទ័រថ្មី ឬការដំឡើងឡើងវិញ ទទួលបានអ្វីៗទាំងអស់មកវិញនៅពេលអ្នកចូល",
+ "Need more room? Add 5 GB for $1 a month": "ត្រូវការទំហំបន្ថែម? បន្ថែម 5 GB ក្នុងតម្លៃ $1 ក្នុងមួយខែ"
 }
