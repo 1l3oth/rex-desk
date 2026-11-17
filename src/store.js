@@ -92,7 +92,10 @@ export class Store extends EventEmitter {
     }
     this.auth = auth;
     this.db = new DatabaseSync(path.join(this.directory, 'desk.sqlite'));
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
+    // On a busy hard disk every save waited for the disk to confirm it (synchronous FULL), and with SQLite's 2 MB cache almost
+    // every read went to the disk too, so the server stopped answering for minutes. In WAL mode NORMAL is still safe from
+    // corruption (a power cut can lose only the last moments); the 64 MB cache keeps the pages in use in memory.
+    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-65536; PRAGMA temp_store=MEMORY;
       CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, value TEXT NOT NULL, PRIMARY KEY(kind,id));
       CREATE TABLE IF NOT EXISTS events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, kind TEXT, visible INTEGER, value TEXT, created_at TEXT);
       CREATE INDEX IF NOT EXISTS event_run ON events(run_id, sequence);`);
