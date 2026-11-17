@@ -2000,7 +2000,16 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .tm-result summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.tm-result p{margin:6px 0 0;font-size:13px;line-height:1.5;white-space:pre-wrap;max-height:220px;overflow:auto}
 .tm-cancel{align-self:flex-start}
 @media (prefers-reduced-motion:no-preference){.tm-dot.live{animation:tm-pulse 1.8s ease-in-out infinite}}@keyframes tm-pulse{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 10%,transparent)}}
-.st-panel :is(.tb-list,.tb-add,.tb-alert,.tb-filter){flex:none}
+.st-panel :is(.tb-list,.tb-add,.tb-alert,.tb-filter,.tb-install){flex:none}
+.tb-install{margin:4px 0 18px;padding:14px 16px 12px;border:1px solid var(--line);border-radius:14px;background:color-mix(in srgb,var(--accent) 4%,var(--panel))}
+.tb-install h3{margin:0 0 2px;font-size:14.5px;font-weight:650}.tb-install>p{margin:0 0 10px}
+.tb-install textarea{display:block;width:100%;box-sizing:border-box;min-height:46px;resize:vertical;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:13px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
+.tb-install textarea:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+.tb-install-foot{display:flex;align-items:center;gap:12px;margin-top:10px}.tb-install-foot .btn{flex:none}
+.tb-kinds{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:4px 6px}.tb-kinds code{font-size:11.5px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.tb-result{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}.tb-result .tb-status{font-size:13px;display:flex;align-items:flex-start;gap:7px;overflow-wrap:anywhere}
+.tb-install .error-text{margin:10px 0 0}
+@media (max-width:640px){.tb-install-foot{flex-direction:column;align-items:stretch}}
 .tb-list .tb-row[hidden]{display:none}
 .st-panel .tb-filter{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:13.5px;margin:0 0 8px}
 .st-panel .tb-filter:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}

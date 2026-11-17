@@ -6,7 +6,7 @@
 //
 // Rex Desk opens the MCP servers itself (the same ones Claude Code would, from ~/.claude.json and the project's .mcp.json),
 // reads their tool lists once, and keeps a connection open only while it is used.
-import { existsSync, readdirSync, readFileSync, statSync, cpSync, rmSync, mkdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, cpSync, rmSync, mkdirSync, renameSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { resolveCommand } from './processes.js';
 import os from 'node:os';
@@ -53,8 +53,8 @@ export function rank(items, query, limit = 8) {
 }
 
 export class Toolbox {
-  constructor({ connect, home = os.homedir(), bundled = '', configDirectory = () => process.env.CLAUDE_CONFIG_DIR, mcpConfig, cli } = {}) {
-    this.cli = cli || runClaude;
+  constructor({ connect, home = os.homedir(), bundled = '', configDirectory = () => process.env.CLAUDE_CONFIG_DIR, mcpConfig, cli, clone } = {}) {
+    this.cli = cli || runClaude; this.clone = clone || gitClone;
     this.mcpConfig = mcpConfig || (project => existingMcpConnections(project, this.configDirectory()));
     this.connectWith = connect; this.home = home; this.bundled = bundled; this.configDirectory = configDirectory;
     this.clients = new Map(); this.lists = new Map(); this.failed = new Map();
@@ -124,21 +124,64 @@ export class Toolbox {
   }
   async removeServer(name) { await this.cli(['mcp', 'remove', '--scope', 'user', String(name)]); this.lists.delete(name); await this.close(name); return { removed: name }; }
   // A skill comes from a folder on this computer or a git address; it is copied into the person's skills folder.
-  async addSkill(source) {
+  // A repository may hold many skills in subfolders (skills/<name>/SKILL.md): each is copied, or only the ones named.
+  async addSkill(source, { only = [], subfolder = '' } = {}) {
     const from = String(source || '').trim(); if (!from) throw new Error('Give a folder or a git address.');
     mkdirSync(this.skillsHome, { recursive: true });
     if (/^(https?:\/\/|git@)/.test(from)) {
-      const name = path.basename(from).replace(/\.git$/, '').replace(/[^A-Za-z0-9_-]/g, '-'), target = path.join(this.skillsHome, name);
-      if (existsSync(target)) throw new Error(`A skill folder named ${name} is already there.`);
-      await new Promise((resolve, reject) => execFile('git', ['clone', '--depth', '1', from, target], { windowsHide: true, timeout: 120000 }, error => error ? reject(new Error(`The skill could not be downloaded: ${error.message.split('\n')[0]}`)) : resolve()));
-      if (!existsSync(path.join(target, 'SKILL.md'))) { rmSync(target, { recursive: true, force: true }); throw new Error('That repository has no SKILL.md at its top.'); }
-      return { added: readSkill(path.join(target, 'SKILL.md')).name };
+      const github = from.match(/^https:\/\/github\.com\/([^/]+)\/([^/#?]+?)(?:\.git)?(?:\/tree\/[^/]+\/(.+?))?\/?$/);
+      const address = github ? `https://github.com/${github[1]}/${github[2]}.git` : from, inside = subfolder || github?.[3] || '';
+      // Downloaded inside the skills folder (same drive), then moved in; the dot keeps it out of the skill list meanwhile.
+      const incoming = path.join(this.skillsHome, `.incoming-${process.pid}-${Date.now()}`);
+      try {
+        await this.clone(address, incoming);
+        const root = path.join(incoming, inside); if (!existsSync(root)) throw new Error(`That repository has no folder ${inside}.`);
+        return this.copySkills(root, only, path.basename(inside || address).replace(/\.git$/, ''));
+      } finally { rmSync(incoming, { recursive: true, force: true }); }
     }
-    if (!existsSync(path.join(from, 'SKILL.md'))) throw new Error('That folder has no SKILL.md.');
-    const target = path.join(this.skillsHome, path.basename(path.resolve(from)));
-    if (existsSync(target)) throw new Error(`A skill folder named ${path.basename(target)} is already there.`);
-    cpSync(from, target, { recursive: true });
-    return { added: readSkill(path.join(target, 'SKILL.md')).name };
+    if (!existsSync(from)) throw new Error('That folder does not exist on this computer.');
+    return this.copySkills(from, only, path.basename(path.resolve(from)), { copy: true });
+  }
+  copySkills(root, only = [], fallbackName = '', { copy = false } = {}) {
+    const found = findSkillFiles(root).map(file => ({ ...readSkill(file), top: path.dirname(file) === root }))
+      .filter(skill => !only.length || only.some(name => name === skill.name || name === path.basename(skill.folder)));
+    if (!found.length) throw new Error(only.length ? `No skill named ${only.join(', ')} there.` : 'No SKILL.md there, so it is not a skill.');
+    const added = [], skipped = [];
+    for (const skill of found) {
+      const folderName = (skill.top ? fallbackName : path.basename(skill.folder)).replace(/[^A-Za-z0-9_.-]/g, '-') || skill.name;
+      const target = path.join(this.skillsHome, folderName);
+      if (existsSync(target)) { skipped.push(skill.name); continue; }
+      let moved = false; if (!copy) try { renameSync(skill.folder, target); moved = true; } catch { /* another drive: copy */ }
+      if (!moved) cpSync(skill.folder, target, { recursive: true, filter: file => path.basename(file) !== '.git' });
+      added.push(readSkill(path.join(target, 'SKILL.md')).name);
+    }
+    if (!added.length) throw new Error(`${skipped.length === 1 ? `A skill folder for ${skipped[0]} is` : `Skill folders for ${skipped.join(', ')} are`} already there.`);
+    return { added: added.join(', '), skills: added, ...(skipped.length ? { skipped } : {}) };
+  }
+  // One box for any install line copied from a README: "claude mcp add ...", "npx skills add owner/repo",
+  // an mcpServers JSON block, "npx -y @scope/some-mcp", an https address, a GitHub link or a folder.
+  // After installing, Rex Desk checks it the way an agent would: the server answers with its tools, and desk_find finds it.
+  async install(text) {
+    const plan = parseInstall(text);
+    if (plan.kind === 'skill') {
+      const result = await this.addSkill(plan.source, { only: plan.only });
+      const check = [];
+      for (const name of result.skills) {
+        const skill = this.skills().find(item => item.name === name);
+        const found = skill?.description ? (await this.find(`${name} ${skill.description}`, { kind: 'skill', limit: 20 })).found.some(item => item.use === `skill:${name}`) : false;
+        check.push({ name, ok: found, ...(found ? {} : { error: 'Installed, but agents cannot find it: its SKILL.md needs a name and a description.' }) });
+      }
+      return { kind: 'skill', ...result, check };
+    }
+    for (const args of plan.calls) await this.cli(args);
+    const servers = this.servers(), check = [];
+    for (const name of plan.names) {
+      this.lists.delete(name); this.failed.delete(name); await this.close(name);
+      if (!servers[name]) { check.push({ name, ok: false, error: 'Claude Code took it, but Rex Desk does not see it yet. Restart Rex Desk and look again.' }); continue; }
+      const tools = await this.toolsOf(name, servers[name]), error = this.failed.get(name)?.error || '';
+      check.push({ name, ok: !error && tools.length > 0, tools: tools.length, ...(error ? { error } : tools.length ? {} : { error: 'It started but offers no tools.' }) });
+    }
+    return { kind: 'server', added: plan.names.join(', '), check };
   }
   removeSkill(name) {
     const skill = this.skills().find(item => item.name === name && item.folder.startsWith(this.skillsHome + path.sep));
@@ -210,6 +253,76 @@ export async function connectServer(name, config) {
   const fallback = new Client({ name: 'rex-desk-toolbox', version: '1.0.0' });
   await fallback.connect(new SSEClientTransport(new URL(config.url), { requestInit: { headers } }));
   return fallback;
+}
+
+// Every SKILL.md under a folder, a few levels down, skipping .git and node_modules.
+export function findSkillFiles(root, depth = 4) {
+  if (existsSync(path.join(root, 'SKILL.md'))) return [path.join(root, 'SKILL.md')];
+  if (depth <= 0) return [];
+  let entries = []; try { entries = readdirSync(root, { withFileTypes: true }); } catch { return []; }
+  return entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules').flatMap(entry => findSkillFiles(path.join(root, entry.name), depth - 1));
+}
+const safeName = text => String(text || '').replace(/^@[^/]+\//, '').replace(/^(mcp-server-|server-|mcp-)/, '').replace(/(-mcp-server|-mcp|-server)$/, '').replace(/[^A-Za-z0-9_-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'server';
+const RUNNERS = new Set(['npx', 'bunx', 'uvx', 'pnpx']);
+const VALUE_FLAGS = new Set(['-s', '--scope', '-t', '--transport', '-e', '--env', '-H', '--header', '--client-id', '--client-secret', '--callback-port']);
+// What an install line asks for: { kind: 'skill', source, only } or { kind: 'server', calls (Claude Code arguments), names }.
+export function parseInstall(text) {
+  const line = String(text || '').trim().replace(/^(\$|>|PS [^>]*>)\s*/, '');
+  if (!line) throw new Error('Paste the install command or address.');
+  if (line.startsWith('{') || line.startsWith('"')) {
+    let data; try { data = JSON.parse(line.startsWith('"') ? `{${line.replace(/,\s*$/, '')}}` : line); } catch { throw new Error('That JSON does not read. Paste the whole block, from { to }.'); }
+    const map = data.mcpServers || data.servers || data.mcp?.servers || (data.command || data.url ? null : data);
+    if (!map || typeof map !== 'object') throw new Error('Paste the block with its name, like {"mcpServers": {"slack": {...}}}.');
+    const entries = Object.entries(map).filter(([name, config]) => config && (config.command || config.url) && /^[A-Za-z0-9_-]{1,40}$/.test(name));
+    if (!entries.length) throw new Error('No server in that JSON has a name and a command or url.');
+    return { kind: 'server', names: entries.map(([name]) => name), calls: entries.map(([name, config]) => ['mcp', 'add-json', '--scope', 'user', name, JSON.stringify(config)]) };
+  }
+  const parts = splitCommand(line);
+  // claude / codex / gemini mcp add ...: run as Claude Code's own command, for the person (user scope).
+  if (['claude', 'codex', 'gemini'].includes(parts[0]) && parts[1] === 'mcp' && ['add', 'add-json'].includes(parts[2])) {
+    let args = parts.slice(1);
+    const cut = args.indexOf('--'), head = cut < 0 ? args : args.slice(0, cut);
+    const scopeAt = head.findIndex(part => part === '-s' || part === '--scope'); if (scopeAt >= 0) args.splice(scopeAt, 2);
+    const end = args.indexOf('--'), rest = (end < 0 ? args : args.slice(0, end)).slice(2);
+    let name = '', at = -1;
+    for (let i = 0; i < rest.length; i += 1) { if (VALUE_FLAGS.has(rest[i])) { i += 1; continue; } if (rest[i].startsWith('-')) continue; name = rest[i]; at = i + 2; break; }
+    if (!name) throw new Error('That command has no server name.');
+    if (parts[0] !== 'claude') {
+      const after = args.slice(at + 1).filter(part => part !== '--');
+      args = /^https?:\/\//.test(after[0] || '') ? ['mcp', 'add', '--transport', 'http', name, after[0]] : ['mcp', 'add', name, '--', ...after];
+    }
+    args.splice(2, 0, '--scope', 'user');
+    return { kind: 'server', names: [name], calls: [args] };
+  }
+  // npx skills add owner/repo [--skill name], npx add-skill owner/repo, or the same without npx.
+  const tail = RUNNERS.has(parts[0]) ? parts.slice(1).filter(part => part !== '-y' && part !== '--yes') : parts;
+  const skillAt = tail[0] === 'skills' && tail[1] === 'add' ? 2 : tail[0] === 'add-skill' ? 1 : -1;
+  if (skillAt > 0) {
+    const rest = tail.slice(skillAt), only = [];
+    let source = '';
+    for (let i = 0; i < rest.length; i += 1) { if (rest[i] === '--skill' || rest[i] === '-s') { only.push(...String(rest[i + 1] || '').split(',').filter(Boolean)); i += 1; } else if (!rest[i].startsWith('-') && !source) source = rest[i]; }
+    if (!source) throw new Error('Say which skills to add, like owner/repo.');
+    const short = !/^(https?:|git@)/.test(source) && !existsSync(source) && source.match(/^([\w.-]+)\/([\w.-]+)(?:\/(.+))?$/);
+    return { kind: 'skill', source: short ? `https://github.com/${short[1]}/${short[2]}${short[3] ? `/tree/HEAD/${short[3]}` : ''}` : source, only };
+  }
+  if (parts.length === 1 && /^https:\/\/(github\.com|gitlab\.com)\//.test(line)) return { kind: 'skill', source: line, only: [] };
+  if (parts.length === 1 && /^git@/.test(line)) return { kind: 'skill', source: line, only: [] };
+  if (parts.length === 1 && /^https?:\/\//.test(line)) {
+    const host = new URL(line).hostname.split('.').filter(part => !['www', 'mcp', 'api'].includes(part));
+    const name = safeName(host.length > 1 ? host[host.length - 2] : host[0]);
+    return { kind: 'server', names: [name], calls: [['mcp', 'add', '--scope', 'user', '--transport', /\/sse\/?$/.test(line) ? 'sse' : 'http', name, line]] };
+  }
+  if (existsSync(line)) return { kind: 'skill', source: line, only: [] };
+  // A command that starts a server: npx -y @scope/some-mcp, uvx mcp-server-time, docker run ..., node server.js.
+  if (RUNNERS.has(parts[0]) || ['docker', 'node', 'python', 'python3', 'deno', 'bun'].includes(parts[0])) {
+    const pkg = tail.find(part => !part.startsWith('-')) || parts[0];
+    const name = safeName(parts[0] === 'docker' ? parts[parts.length - 1].split('/').pop().split(':')[0] : path.basename(pkg).replace(/\.(m?js|py|ts)$/, '').replace(/(.)@[^/]*$/, '$1'));
+    return { kind: 'server', names: [name], calls: [['mcp', 'add', '--scope', 'user', name, '--', ...parts]] };
+  }
+  throw new Error('Rex Desk does not know that install line. Paste a "claude mcp add" or "npx skills add" command, an mcpServers JSON block, an address, or a folder.');
+}
+function gitClone(address, target) {
+  return new Promise((resolve, reject) => execFile('git', ['clone', '--depth', '1', address, target], { windowsHide: true, timeout: 180000 }, error => error ? reject(new Error(`It could not be downloaded: ${String(error.message).split('\n').find(part => /fatal|error:/i.test(part)) || String(error.message).split('\n')[0]}`)) : resolve()));
 }
 
 // "npx -y @scope/server --flag" into its parts, keeping quoted parts together.

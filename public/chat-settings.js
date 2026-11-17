@@ -272,14 +272,18 @@ ${(() => { const space = database.space, files = space?.files || {}, share = fil
       const row = (title, sub, act, name, extra = '') => `<li class="tb-row"><div class="tb-text"><b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}${extra}</div>${act ? `<button type="button" class="btn small" data-st-tb="${act}" data-name="${esc(name)}"${busy ? ' disabled' : ''}>${t`Remove`}</button>` : ''}</li>`;
       const list = (items, empty) => items.length ? `<ul class="tb-list">${items.join('')}</ul>` : `<p class="muted small">${empty}</p>`;
       return `<h2>${t`Tools and skills`}</h2>${box.computer ? `<p class="tb-computer">${t`On ${esc(box.computer)}. Each of your computers has its own list.`}</p>` : ''}<p class="muted">${t`Everything your agents can use on this computer. They do not carry it all in every chat: they search it when a task needs it, which keeps each chat small.`}</p>
+      <section class="tb-install" aria-labelledby="tb-install-h"><h3 id="tb-install-h">${t`Install a tool or skill`}</h3>
+        <p class="muted small">${t`Paste the install line from its page. Rex Desk installs it for every agent on this computer, then checks that agents can find it.`}</p>
+        <textarea name="tb-install" rows="2" spellcheck="false" autocomplete="off" aria-label="${t`Install command`}" placeholder="claude mcp add notion --transport http https://mcp.notion.com/mcp"${busy ? ' disabled' : ''}>${esc(state.extra.toolboxText || '')}</textarea>
+        <div class="tb-install-foot"><span class="tb-kinds">${['claude mcp add …', 'npx skills add owner/repo', '{ "mcpServers": … }', 'npx -y @scope/server', t`a GitHub link or folder`].map(kind => `<code>${esc(kind)}</code>`).join('')}</span><button type="button" class="btn primary" data-st-tb="install"${busy ? ' disabled' : ''}>${busy === 'install' ? t('Installing…') : t('Install')}</button></div>
+        ${state.extra.toolboxResult ? `<ul class="tb-result" role="status">${state.extra.toolboxResult.map(item => `<li>${status(!item.ok, item.ok ? (item.tools ? t`${item.name}: installed, agents can find it · ${item.tools} tools` : t`${item.name}: installed, agents can find it`) : `${item.name}: ${item.error}`)}</li>`).join('')}</ul>` : ''}
+        ${state.extra.toolboxError ? `<p class="error-text" role="alert">${esc(state.extra.toolboxError)}</p>` : ''}</section>
       ${broken ? `<p class="tb-alert" role="status">${t`${broken} need a look. Each one says what is wrong below.`}</p>` : ''}
       <h3 class="st-sub">${t`MCP servers`} <span class="cnt">${box.servers.length}</span></h3>
       ${list([...box.servers].sort((a, b) => Boolean(b.error) - Boolean(a.error)).map(item => row(item.name, item.how, item.removable ? 'remove-server' : '', item.name, `${item.error ? status(true, t`Not working: ${item.error}`) : status(false, t`Working · ${item.tools} tools`)}`)), t`No MCP server yet.`)}
-      <div class="tb-add"><input name="tb-name" placeholder="${t`Name, like slack`}" autocomplete="off" aria-label="${t`Name`}"><input name="tb-how" placeholder="${t`Command (npx -y @scope/server) or https address`}" autocomplete="off" aria-label="${t`Command or address`}"><button type="button" class="btn small primary" data-st-tb="add-server"${busy ? ' disabled' : ''}>${t`Add`}</button></div>
       <h3 class="st-sub">${t`Skills`} <span class="cnt">${box.skills.length}</span></h3>
       ${box.skills.length > 8 ? `<input class="tb-filter" type="search" name="tb-filter" placeholder="${t`Search ${box.skills.length} skills`}" aria-label="${t`Search skills`}" autocomplete="off">` : ''}
       ${list([...box.skills].sort((a, b) => Boolean(b.error) - Boolean(a.error)).map(item => row(item.name, item.description, item.removable ? 'remove-skill' : '', item.name, item.error ? status(true, item.error) : '')), t`No skill yet.`)}
-      <div class="tb-add"><input name="tb-skill" placeholder="${t`A skill folder, or a git address`}" autocomplete="off" aria-label="${t`Skill folder or git address`}"><button type="button" class="btn small primary" data-st-tb="add-skill"${busy ? ' disabled' : ''}>${t`Add`}</button></div>
       <h3 class="st-sub">${t`Commands`} <span class="cnt">${box.commands.length}</span></h3>
       ${list(box.commands.map(item => row(`/${item.name}`, item.description, 'remove-command', item.name)), t`No command yet.`)}
       <h3 class="st-sub">${t`Hooks`} <span class="cnt">${box.hooks.length}</span></h3>
@@ -404,12 +408,20 @@ ${(() => { const space = database.space, files = space?.files || {}, share = fil
         return;
       }
       const tbAct = target.closest('[data-st-tb]')?.dataset.stTb;
+      if (tbAct === 'install') {
+        const text = back.querySelector('[name="tb-install"]')?.value?.trim() || '';
+        if (!text) { back.querySelector('[name="tb-install"]')?.focus(); return; }
+        Object.assign(state.extra, { toolboxText: text, toolboxBusy: 'install', toolboxResult: null, toolboxError: '' }); draw();
+        try { const result = await api('/toolbox', { method: 'POST', data: { what: 'install', text } }); state.extra.toolbox = result; state.extra.toolboxResult = result.check || []; state.extra.toolboxText = ''; }
+        catch (error) { state.extra.toolboxError = error.message; }
+        finally { state.extra.toolboxBusy = false; draw(); }
+        return;
+      }
       if (tbAct) {
-        const field = name => back.querySelector(`[name="${name}"]`)?.value?.trim() || '', name = target.dataset.name, how = field('tb-how');
-        const data = tbAct === 'add-server' ? { what: tbAct, name: field('tb-name'), ...(/^https?:\/\//.test(how) ? { url: how } : { command: how }) } : tbAct === 'add-skill' ? { what: tbAct, source: field('tb-skill') } : { what: tbAct, name };
-        if (tbAct.startsWith('remove') && !confirm(t`Remove ${name}?`)) return;
+        const name = target.dataset.name;
+        if (!confirm(t`Remove ${name}?`)) return;
         state.extra.toolboxBusy = true; draw();
-        try { state.extra.toolbox = await api('/toolbox', { method: 'POST', data }); toast(tbAct.startsWith('remove') ? t('Removed.') : t('Added.')); }
+        try { state.extra.toolbox = await api('/toolbox', { method: 'POST', data: { what: tbAct, name } }); toast(t('Removed.')); }
         finally { state.extra.toolboxBusy = false; draw(); }
         return;
       }

@@ -107,3 +107,30 @@ test('the person adds and removes MCP servers (through Claude Code), skills and 
   const after = await box.overview();
   assert.equal(after.skills.length + after.commands.length, 0);
 });
+
+test('one install box takes the install lines people copy from a README', async () => {
+  const { parseInstall } = await import('../src/toolbox.js');
+  assert.deepEqual(parseInstall('claude mcp add -s project slack -e K=1 -- npx -y @scope/slack').calls, [['mcp', 'add', '--scope', 'user', 'slack', '-e', 'K=1', '--', 'npx', '-y', '@scope/slack']]);
+  assert.deepEqual(parseInstall('codex mcp add ctx -- npx -y @upstash/context7-mcp@latest').calls, [['mcp', 'add', '--scope', 'user', 'ctx', '--', 'npx', '-y', '@upstash/context7-mcp@latest']]);
+  assert.deepEqual(parseInstall('{"mcpServers":{"git":{"command":"uvx","args":["mcp-server-git"]}}}').calls, [['mcp', 'add-json', '--scope', 'user', 'git', '{"command":"uvx","args":["mcp-server-git"]}']]);
+  assert.deepEqual(parseInstall('npx -y @modelcontextprotocol/server-filesystem D:/x').names, ['filesystem']);
+  assert.deepEqual(parseInstall('https://mcp.linear.app/sse').calls, [['mcp', 'add', '--scope', 'user', '--transport', 'sse', 'linear', 'https://mcp.linear.app/sse']]);
+  assert.deepEqual(parseInstall('npx skills add vercel-labs/agent-skills --skill web-design'), { kind: 'skill', source: 'https://github.com/vercel-labs/agent-skills', only: ['web-design'] });
+  assert.throws(() => parseInstall('rm -rf /'), /does not know/);
+
+  // A repository with many skills: the ones asked for are installed, and agents find them with desk_find.
+  const home = temporary('toolbox-install'), calls = [];
+  const box = new Toolbox({ home, mcpConfig: () => ({}), cli: async args => { calls.push(args); return ''; }, clone: async (address, target) => {
+    assert.equal(address, 'https://github.com/vercel-labs/agent-skills.git');
+    for (const [name, about] of [['web-design', 'Review web pages for design quality.'], ['deploy', 'Deploy to Vercel.']]) { mkdirSync(path.join(target, 'skills', name), { recursive: true }); writeFileSync(path.join(target, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: ${about}\n---\nDo it.`); }
+  } });
+  const result = await box.install('npx skills add vercel-labs/agent-skills --skill web-design');
+  assert.deepEqual(result.check, [{ name: 'web-design', ok: true }]);
+  assert.deepEqual(box.skills().map(skill => skill.name), ['web-design']);
+  assert.equal((await box.find('design review web pages')).found[0].use, 'skill:web-design');
+  await assert.rejects(box.install('npx skills add vercel-labs/agent-skills --skill web-design'), /already there/);
+  // A server Claude Code did not take shows why instead of a silent "added".
+  const server = await box.install('claude mcp add docs --transport http https://mcp.example.com/mcp');
+  assert.deepEqual(calls, [['mcp', 'add', '--scope', 'user', 'docs', '--transport', 'http', 'https://mcp.example.com/mcp']]);
+  assert.equal(server.check[0].ok, false);
+});
