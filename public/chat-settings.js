@@ -13,22 +13,38 @@ import { loadTourAi, aiListHtml, tourAiClick } from '/chat-tour-ai.js';
 // browser, already knowing who pays, and the plan shows here by itself once it is paid.
 function planCard(database, state) {
   const billing = state.extra.billing; if (!billing) return '';
-  const busy = state.extra.billingBusy;
-  if (!billing.signedIn) return `<div class="st-space st-plan"><p><b>${t`Your plan`}</b> ${t`Sign in with your Rex Desk account to see your plan, buy cloud backup or add space.`}</p><div class="st-space-actions"><button type="button" class="btn small primary" data-st-plan-signin ${busy ? 'disabled' : ''}>${t`Sign in with Rex Desk`}</button></div></div>`;
+  const busy = state.extra.billingBusy ? 'disabled' : '';
+  const tick = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const list = items => `<ul class="pl-feat">${items.map(item => `<li>${tick}<span>${item}</span></li>`).join('')}</ul>`;
+  if (!billing.signedIn) return `<div class="pl-card"><div class="pl-head"><b>${t`Your plan`}</b></div><p class="pl-sub">${t`Sign in with your Rex Desk account to see your plan, buy cloud backup or add space.`}</p><button type="button" class="btn primary" data-st-plan-signin ${busy}>${t`Sign in with Rex Desk`}</button></div>`;
   const space = billing.space || database.space; if (!space) return '';
+  // Step 1: choose. Free and Cloud backup side by side, with a monthly or yearly switch, as on every big app's plan page.
+  if (!space.paid) {
+    const yearly = state.extra.billingCycle === 'year';
+    const waiting = state.extra.billingWaiting ? `<div class="pl-wait" role="status"><span class="pl-spin" aria-hidden="true"></span><span><b>${t`Waiting for your payment`}</b><small>${t`Finish paying on the Stripe page in your browser. Cloud backup turns on here by itself.`}</small></span><button type="button" class="btn small" data-st-buy="${yearly ? 'year' : 'month'}" ${busy}>${t`Open the payment page again`}</button></div>` : '';
+    return `${waiting}<div class="pl-cycle" role="radiogroup" aria-label="${t`Billing period`}"><button type="button" role="radio" aria-checked="${!yearly}" class="${yearly ? '' : 'on'}" data-st-cycle="month">${t`Monthly`}</button><button type="button" role="radio" aria-checked="${yearly}" class="${yearly ? 'on' : ''}" data-st-cycle="year">${t`Yearly`}<span class="pl-save">${t`Save 33%`}</span></button></div>
+      <div class="pl-grid">
+        <div class="pl-card"><div class="pl-head"><b>${t`Free`}</b><span class="pl-badge">${t`Current plan`}</span></div><p class="pl-price"><b>$0</b></p>${list([t('Every agent, chat and tool on this computer'), t('Works fully offline'), t('No cloud copy')])}</div>
+        <div class="pl-card pl-pick"><div class="pl-head"><b>${t`Cloud backup`}</b><span class="pl-badge pl-badge-accent">${t`Recommended`}</span></div><p class="pl-price"><b>${yearly ? '$24' : '$2.99'}</b><small>${yearly ? t('a year') : t('a month')}</small></p>${list([t('Your whole desk kept safe in the cloud'), t('The same desk on all your computers'), t('1 GB of files, add 5 GB any time'), t('Cancel any time, nothing on your computer is lost')])}<button type="button" class="btn primary pl-cta" data-st-buy="${yearly ? 'year' : 'month'}" ${busy}>${t`Upgrade to Cloud backup`}</button></div>
+      </div>`;
+  }
+  // Step 3: the plan you have. Name, status, next payment, space, and what you can do with it.
   const files = space.files || {}, share = files.limit ? Math.min(1, files.used / files.limit) : 0, gb = bytes => (bytes / 1024 ** 3).toFixed(bytes >= 1024 ** 3 ? 1 : 2);
-  if (!space.paid) return `<div class="st-space st-plan"><p><b>${t`Your plan: Free`}</b> ${t`Keep your whole desk safe in the cloud and the same on all your computers. 1 GB of files, more when you need it.`}</p>
-    ${state.extra.billingWaiting ? `<p class="st-space-note">${t`Finish paying in the browser. Cloud backup turns on here by itself.`}</p>` : ''}
-    <div class="st-space-actions"><button type="button" class="btn primary small" data-st-buy="month" ${busy ? 'disabled' : ''}>${t`$2.99 a month`}</button><button type="button" class="btn small" data-st-buy="year" ${busy ? 'disabled' : ''}>${t`$24 a year`}</button></div></div>`;
-  // What was bought: the plan, how often it is paid and what it costs, when it renews (or ends), and the extra space.
-  const yearly = space.interval === 'year', date = space.renews ? new Date(space.renews).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
-  const price = space.interval ? (yearly ? t`Yearly, $24` : t`Monthly, $2.99`) : t`Given by Rex Desk`;
+  const yearly = space.interval === 'year', date = space.renews ? new Date(space.renews).toLocaleDateString(document.documentElement.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
   const amount = space.interval ? (yearly ? 24 + 10 * (space.packs || 0) : 2.99 + (space.packs || 0)).toFixed(2).replace(/\.00$/, '') : '';
-  const when = date ? (space.endsAtPeriodEnd ? t`Ends ${date}` : amount ? t`Next payment ${`$${amount}`} on ${date}` : t`Renews ${date}`) : '';
-  const packs = space.packs ? t`+${space.packs * 5} GB extra (${space.packs} ${space.packs === 1 ? t('pack') : t('packs')})` : '';
-  return `<div class="st-space st-plan${share >= 0.95 ? ' full' : share >= 0.8 ? ' high' : ''}"><p><b>${t`Your plan: Cloud backup`}</b> ${String([price, when, packs].filter(Boolean).join(' · ')).replace(/[<>&"]/g, '')}</p>
-    <p>${t`${gb(files.used || 0)} of ${gb(files.limit || 0)} GB used`}</p><div class="st-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(share * 100)}" aria-label="${t`Cloud space used`}"><i style="width:${(share * 100).toFixed(1)}%"></i></div>${share >= 0.95 ? `<p class="st-space-note">${t`Almost full. Chats and changes keep syncing; new files wait on this computer until there is room.`}</p>` : ''}
-    <div class="st-space-actions"><button type="button" class="btn small${share >= 0.8 ? ' primary' : ''}" data-st-pack ${busy ? 'disabled' : ''}>${t`Add 5 GB`}</button><button type="button" class="btn small" data-st-manage ${busy ? 'disabled' : ''}>${t`Manage plan`}</button></div></div>`;
+  const status = space.status === 'past_due' ? [t('Payment problem'), 'bad'] : space.endsAtPeriodEnd ? [t('Cancelled'), 'warn'] : [t('Active'), 'good'];
+  const next = space.status === 'past_due' ? t`Your last payment did not go through. Update your card in Manage billing to keep cloud backup.`
+    : space.endsAtPeriodEnd ? (date ? t`Cloud backup ends on ${date}. Everything stays on your computer.` : '')
+    : date && amount ? t`Next payment ${`$${amount}`} on ${date}` : '';
+  const done = state.extra.billingJustPaid ? `<div class="pl-done" role="status">${tick}<span><b>${t`You are on Cloud backup`}</b><small>${t`Thank you. Your desk is backing up to the cloud now.`}</small></span></div>` : '';
+  return `${done}<div class="pl-card pl-current${share >= 0.95 ? ' full' : share >= 0.8 ? ' high' : ''}">
+    <div class="pl-head"><b>${t`Cloud backup`}</b><span class="pl-badge pl-${status[1]}">${status[0]}</span></div>
+    <p class="pl-price"><b>${space.interval ? (yearly ? '$24' : '$2.99') : '$0'}</b><small>${space.interval ? (yearly ? t('a year') : t('a month')) : t('given by Rex Desk')}</small></p>
+    ${next ? `<p class="pl-sub">${next}</p>` : ''}
+    <div class="pl-usage"><div class="pl-usage-row"><span>${t`Cloud space`}</span><span>${t`${gb(files.used || 0)} of ${gb(files.limit || 0)} GB`}</span></div><progress class="pl-meter" max="100" value="${Math.max(1, Math.round(share * 100))}" aria-label="${t`Cloud space used`}"></progress>${space.packs ? `<small class="pl-sub">${t`Includes ${space.packs * 5} GB of extra space`}</small>` : ''}${share >= 0.95 ? `<small class="pl-sub">${t`Almost full. Chats and changes keep syncing; new files wait on this computer until there is room.`}</small>` : ''}</div>
+    <div class="pl-actions"><button type="button" class="btn${share >= 0.8 ? ' primary' : ''}" data-st-pack ${busy}>${t`Add 5 GB`}</button><button type="button" class="btn" data-st-manage ${busy}>${yearly ? t('Switch to monthly') : t('Switch to yearly')}</button><button type="button" class="btn" data-st-manage ${busy}>${t`Manage billing`}</button></div>
+    <p class="pl-fine">${t`Card, receipts and cancelling are on your Stripe page (Manage billing).`}</p>
+  </div>`;
 }
 const SECTIONS = [
   ['general', t('General'), t('Your name, theme, start with Windows')],
@@ -276,7 +292,7 @@ export function openSettings(ctx, section = 'general') {
       ${signins().map((account, index) => `<div class="st-signin"><input name="ta.${index}.site" value="${esc(account.site || '')}" placeholder="${t`Site, like localhost or staging.example.com`}" aria-label="${t`Site`}"><input name="ta.${index}.username" value="${esc(account.username || '')}" placeholder="${t`User name or email`}" aria-label="${t`User name`}"><input type="password" name="ta.${index}.password" value="${esc(account.password || '')}" placeholder="${account.hasPassword ? t('Saved') : t('Password')}" aria-label="${t`Password`}" autocomplete="new-password"><button type="button" class="ag-x" data-st-signin-remove="${index}" aria-label="${t`Remove this sign-in`}">×</button></div>`).join('')}
       <button type="button" class="btn small" data-st-signin-add>${t`+ Add a sign-in`}</button>`,
     devices: () => `<h2>${t`Devices and phone`}</h2><p class="muted">${t`Use Rex Desk on your phone and your other computers over Tailscale. The Devices page has the QR code for your phone.`}</p>${tip('devices', t('Scan the QR code once with your phone, so you can answer agents from anywhere.'))}<button type="button" class="btn primary" data-st-go="devices">${t`Open Devices`}</button>`,
-    plan: () => `<h2>${t`Plan and billing`}</h2>${planCard(ui.snap.database || {}, state) || `<p class="muted">${t`Loading…`}</p>`}<p class="muted">${t`Payments, receipts and your card are handled by Stripe. Manage plan opens your Stripe page, where you can switch between monthly and yearly, change the card, see receipts or cancel.`}</p>`,
+    plan: () => `<h2>${t`Plan and billing`}</h2>${planCard(ui.snap.database || {}, state) || `<p class="muted">${t`Loading…`}</p>`}`,
     backup: () => { const database = ui.snap.database || {}, update = ui.snap.update || {}, account = database.account, hosted = Boolean(account && account.url === database.url); return `<h2>${t`Backup and updates`}</h2>
       ${tip('backup', t('Sign in with your Rex Desk account to back up, and your agents and chats follow you to your other computers.'))}
       <h3>${t`Cloud backup`}</h3>${planCard(database, state)}<p>${esc((hosted ? { connected: t('Backed up with your Rex Desk account.'), syncing: t('Uploading your backup…'), connecting: t('Connecting to your backup…'), offline: t('Your backup is offline; changes wait and upload later.'), error: t('Your backup needs attention.') } : { connected: t('Copied to your Turso database.'), syncing: t('Uploading to Turso…'), connecting: t('Connecting to Turso…'), offline: t('Turso is offline; changes wait and upload later.'), error: t('Turso needs attention.') })[database.state] || t('Kept on this computer only.'))}${database.pending ? t` ${Number(database.pending)} changes waiting.` : ''}</p>
@@ -428,13 +444,15 @@ export function openSettings(ctx, section = 'general') {
         catch (error) { toast(error.message, true); }
         return;
       }
+      const cycle = target.closest('[data-st-cycle]')?.dataset.stCycle;
+      if (cycle) { state.extra.billingCycle = cycle; draw(); return; }
       const buy = target.closest('[data-st-buy]')?.dataset.stBuy;
       if (buy || target.closest('[data-st-manage]')) {
         state.extra.billingBusy = true; draw();
         try {
           const result = await api(buy ? '/billing/checkout' : '/billing/portal', { method: 'POST', data: buy ? { offer: buy } : {} });
           window.open(result.url, '_blank', 'noopener');
-          if (buy && !result.already) { state.extra.billingWaiting = true; const until = Date.now() + 20 * 60000; const look = async () => { const data = await api('/billing').catch(() => null); if (data) state.extra.billing = data; if (data?.space?.paid) { state.extra.billingWaiting = false; toast(t('Cloud backup is on. Thank you.')); draw(); return; } if (Date.now() < until && state.extra.billingWaiting) setTimeout(look, 5000); draw(); }; setTimeout(look, 5000); }
+          if (buy && !result.already) { state.extra.billingWaiting = true; const until = Date.now() + 20 * 60000; const look = async () => { const data = await api('/billing').catch(() => null); if (data) state.extra.billing = data; if (data?.space?.paid) { state.extra.billingWaiting = false; state.extra.billingJustPaid = true; toast(t('Cloud backup is on. Thank you.')); draw(); return; } if (Date.now() < until && state.extra.billingWaiting) setTimeout(look, 5000); draw(); }; setTimeout(look, 5000); }
         } catch (error) { toast(error.message, true); }
         finally { state.extra.billingBusy = false; draw(); }
         return;
