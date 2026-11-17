@@ -298,16 +298,20 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     const joinAccount = () => {
       const opened = session, store = opened?.store, signedIn = opened?.account || store?.cloud?.account?.saved;
       if (!requireAccount || !store || store.cloud.enabled || !signedIn?.token) return;
+      // Written only while the same desk is still open: a sign-out or a closed workspace ends it quietly.
+      const note = value => { try { if (session === opened) store.put('meta', 'account-join', value); } catch { /* the desk closed meanwhile */ } };
       void (async () => {
         try {
           const database = await accountDatabase(signedIn.token, accountOptions);
+          if (session !== opened) return;
           const found = await findCloudWorkspace({ url: database.url, authToken: database.authToken, name: signedIn.user?.email || opened.email || '' }, cloudClientFactory).catch(() => null);
-          if (found && found.id !== store.cloud.workspace) { store.put('meta', 'account-join', { state: 'other-desk', at: new Date().toISOString() }); return; }
+          if (session !== opened) return;
+          if (found && found.id !== store.cloud.workspace) { note({ state: 'other-desk', at: new Date().toISOString() }); return; }
           if (store.cloud.enabled) return;
           store.cloud.account.save({ token: signedIn.token, expiresAt: signedIn.expiresAt, user: signedIn.user }, database);
           await store.cloud.connect({ url: database.url, authToken: database.authToken });
-          store.put('meta', 'account-join', { state: 'joined', at: new Date().toISOString() });
-        } catch (error) { store.put('meta', 'account-join', { state: 'failed', error: String(error.message || error).slice(0, 300), at: new Date().toISOString() }); }
+          note({ state: 'joined', at: new Date().toISOString() });
+        } catch (error) { note({ state: 'failed', error: String(error.message || error).slice(0, 300), at: new Date().toISOString() }); }
       })();
     };
     if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); linked(); joinAccount(); return respond(); }
