@@ -49,6 +49,11 @@ export function accountSignIn({ timeoutMs = 270000, base = ACCOUNT_API, fetcher 
 // The person's own cloud database: made the first time, and a fresh key every time. { url, authToken, expiresAt, database, created }
 export const accountDatabase = (token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'POST', '/v1/sync/database', { token });
 // Who signed in, and whether their cloud database exists yet: { user, plan, sync: { on, since } }. Makes nothing.
+// Buying cloud backup from inside the app, with the account's own sign-in: what comes back is an address to open (Stripe's
+// payment page or its page to change the card or cancel), or, for a pack, the new space right away.
+export const billingCheckout = (token, offer, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'POST', '/v1/billing/checkout', { token, body: { offer } });
+export const billingPortal = (token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'POST', '/v1/billing/portal', { token, body: {} });
+export const billingPack = (token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'POST', '/v1/billing/pack', { token, body: {} });
 export const accountMe = (token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'GET', '/v1/me', { token });
 // False only when the account service cannot be reached at all (no internet, or the service is down).
 export async function accountReachable({ base = ACCOUNT_API, fetcher = fetch } = {}) {

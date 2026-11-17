@@ -2104,9 +2104,6 @@
  "{0} Continue with GitHub": "{0} បន្តជាមួយ GitHub",
  "{0} Continue with email": "{0} បន្តជាមួយអ៊ីមែល",
  "Linking your computers and cloud backup are part of a paid plan. Buy it on rexdesk.app, then sign in again here.": "ការភ្ជាប់កុំព្យូទ័ររបស់អ្នក និងការបម្រុងទុកលើពពក ជាផ្នែកនៃគម្រោងបង់ប្រាក់។ ទិញវានៅ rexdesk.app រួចចូលម្តងទៀតនៅទីនេះ។",
- "Cloud backup is a paid plan": "ការបម្រុងទុកលើពពក ជាគម្រោងបង់ប្រាក់",
- "Your desk works fully on this computer. To keep it safe in the cloud and the same on all your computers, buy cloud backup.": "តុការងាររបស់អ្នកដំណើរការពេញលេញលើកុំព្យូទ័រនេះ។ ដើម្បីរក្សាវាឱ្យមានសុវត្ថិភាពលើពពក និងដូចគ្នាលើគ្រប់កុំព្យូទ័ររបស់អ្នក សូមទិញការបម្រុងទុកលើពពក។",
- "See plans": "មើលគម្រោង",
  "Cloud space": "ទំហំលើពពក",
  "{0} of {1} GB used": "បានប្រើ {0} នៃ {1} GB",
  "{0} extra packs": "កញ្ចប់បន្ថែម {0}",
@@ -2127,5 +2124,12 @@
  "Install": "ដំឡើង",
  "{0}: installed, agents can find it · {1} tools": "{0}: បានដំឡើង ភ្នាក់ងាររកឃើញ · ឧបករណ៍ {1}",
  "{0}: installed, agents can find it": "{0}: បានដំឡើង ភ្នាក់ងាររកឃើញ",
- "Still uploading. It keeps going by itself; check again later.": "នៅកំពុងផ្ទុកឡើង។ វាបន្តដោយខ្លួនឯង សូមពិនិត្យម្តងទៀតពេលក្រោយ។"
+ "Still uploading. It keeps going by itself; check again later.": "នៅកំពុងផ្ទុកឡើង។ វាបន្តដោយខ្លួនឯង សូមពិនិត្យម្តងទៀតពេលក្រោយ។",
+ "Keep your whole desk safe in the cloud and the same on all your computers. 1 GB of files, more when you need it.": "រក្សាតុការងារទាំងមូលរបស់អ្នកឱ្យមានសុវត្ថិភាពនៅលើ cloud និងដូចគ្នានៅលើកុំព្យូទ័រទាំងអស់របស់អ្នក។ ឯកសារ 1 GB និងបន្ថែមទៀតពេលអ្នកត្រូវការ។",
+ "Finish paying in the browser. Cloud backup turns on here by itself.": "បញ្ចប់ការបង់ប្រាក់នៅក្នុងកម្មវិធីរុករក។ ការបម្រុងទុកលើ cloud នឹងបើកនៅទីនេះដោយខ្លួនឯង។",
+ "$2.99 a month": "$2.99 ក្នុងមួយខែ",
+ "$24 a year": "$24 ក្នុងមួយឆ្នាំ",
+ "Cloud backup is on. Thank you.": "ការបម្រុងទុកលើ cloud បានបើកហើយ។ សូមអរគុណ។",
+ "Add 5 GB of cloud space for $1 a month ($10 a year on a yearly plan)? It is charged to the card your plan uses.": "បន្ថែមទំហំ cloud 5 GB ក្នុងតម្លៃ $1 ក្នុងមួយខែ ($10 ក្នុងមួយឆ្នាំ សម្រាប់គម្រោងប្រចាំឆ្នាំ)? វានឹងគិតប្រាក់លើកាតដែលគម្រោងរបស់អ្នកប្រើ។",
+ "5 GB more cloud space added.": "បានបន្ថែមទំហំ cloud 5 GB ទៀត។"
 }

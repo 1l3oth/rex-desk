@@ -9,6 +9,18 @@ import { loadLocalAi, localAiHtml, localAiClick } from '/chat-local-ai.js';
 import { loadTourAi, aiListHtml, tourAiClick } from '/chat-tour-ai.js';
 // Settings, as a popup over the chat: the sections on the left, one section's settings on the right. Each section saves on its own,
 // so a change never waits for the rest. It replaces the old "Issues & settings" page.
+// The plan, bought and managed right here with the account this computer is signed in to: Stripe's payment page opens in the
+// browser, already knowing who pays, and the plan shows here by itself once it is paid.
+function planCard(database, state) {
+  const billing = state.extra.billing, space = billing?.space || database.space;
+  if (!billing?.signedIn || !space) return '';
+  const files = space.files || {}, share = files.limit ? Math.min(1, files.used / files.limit) : 0, gb = bytes => (bytes / 1024 ** 3).toFixed(bytes >= 1024 ** 3 ? 1 : 2), busy = state.extra.billingBusy;
+  if (!space.paid) return `<div class="st-space st-plan"><p><b>${t`Cloud backup`}</b> ${t`Keep your whole desk safe in the cloud and the same on all your computers. 1 GB of files, more when you need it.`}</p>
+    ${state.extra.billingWaiting ? `<p class="st-space-note">${t`Finish paying in the browser. Cloud backup turns on here by itself.`}</p>` : ''}
+    <div class="st-space-actions"><button type="button" class="btn primary small" data-st-buy="month" ${busy ? 'disabled' : ''}>${t`$2.99 a month`}</button><button type="button" class="btn small" data-st-buy="year" ${busy ? 'disabled' : ''}>${t`$24 a year`}</button></div></div>`;
+  return `<div class="st-space${share >= 0.95 ? ' full' : share >= 0.8 ? ' high' : ''}"><p><b>${t`Cloud space`}</b> ${t`${gb(files.used || 0)} of ${gb(files.limit || 0)} GB used`}${space.packs ? ` · ${t`${space.packs} extra packs`}` : ''}${space.endsAtPeriodEnd ? ` · ${t`ends at the end of this period`}` : ''}</p><div class="st-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(share * 100)}" aria-label="${t`Cloud space used`}"><i style="width:${(share * 100).toFixed(1)}%"></i></div>${share >= 0.95 ? `<p class="st-space-note">${t`Almost full. Chats and changes keep syncing; new files wait on this computer until there is room.`}</p>` : ''}
+    <div class="st-space-actions"><button type="button" class="btn small${share >= 0.8 ? ' primary' : ''}" data-st-pack ${busy ? 'disabled' : ''}>${t`Add 5 GB`}</button><button type="button" class="btn small" data-st-manage ${busy ? 'disabled' : ''}>${t`Manage plan`}</button></div></div>`;
+}
 const SECTIONS = [
   ['general', t('General'), t('Your name, theme, start with Windows')],
   ['folders', t('Folders'), t('Where data, AI memory and files are kept')],
@@ -258,10 +270,7 @@ export function openSettings(ctx, section = 'general') {
       <h3>${t`Cloud backup`}</h3><p>${esc((hosted ? { connected: t('Backed up with your Rex Desk account.'), syncing: t('Uploading your backup…'), connecting: t('Connecting to your backup…'), offline: t('Your backup is offline; changes wait and upload later.'), error: t('Your backup needs attention.') } : { connected: t('Copied to your Turso database.'), syncing: t('Uploading to Turso…'), connecting: t('Connecting to Turso…'), offline: t('Turso is offline; changes wait and upload later.'), error: t('Turso needs attention.') })[database.state] || t('Kept on this computer only.'))}${database.pending ? t` ${Number(database.pending)} changes waiting.` : ''}</p>
       ${account ? `<div class="st-account st-cloud-account"><span class="si-avatar">${esc((account.name || account.email || '?')[0].toUpperCase())}</span><span><b>${esc(account.name || account.email)}</b><small>${esc(hosted ? t`Rex Desk account${account.name ? ` · ${account.email}` : ''}. This computer renews its backup key by itself.` : t`Rex Desk account${account.name ? ` · ${account.email}` : ''}. Signed in, but the backup uses another database.`)}</small></span><button type="button" class="btn small" data-st-account-out>${t`Sign out`}</button></div>` : ''}
       ${database.configured ? '' : `<div class="st-cloud">${CLOUD_ART}<div class="st-cloud-head"><b>${t`Back up with your Rex Desk account`}</b><small>${t`Your whole desk, kept safe in the cloud and ready on every computer you sign in on.`}</small></div><ul class="st-cloud-why">${CLOUD_WHY.map(([icon, title, text]) => `<li><span class="st-cloud-why-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span><span><b>${title}</b><small>${text}</small></span></li>`).join('')}</ul><button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || t('Sign in with Rex Desk'))}</button><p class="st-cloud-fine">${t`No account yet?`} <a href="https://rexdesk.app/signup" target="_blank" rel="noopener">${t`Create one on rexdesk.app`}</a></p></div>`}${database.accountNote ? `<p class="error-text" role="alert">${esc(database.accountNote)}</p>` : ''}${database.configured ? `<div class="st-actions"><button type="button" class="btn" data-st-db-sync>${t`Upload now and check`}</button></div>${backupPartsHtml(database.parts || {})}` : ''}
-${(() => { const space = database.space, files = space?.files || {}, share = files.limit ? Math.min(1, files.used / files.limit) : 0, gb = bytes => (bytes / 1024 ** 3).toFixed(bytes >= 1024 ** 3 ? 1 : 2);
-        if (!account) return '';
-        if (!space?.paid) return `<div class="st-space"><p><b>${t`Cloud backup is a paid plan`}</b> ${t`Your desk works fully on this computer. To keep it safe in the cloud and the same on all your computers, buy cloud backup.`}</p><a class="btn primary small" href="https://rexdesk.app/pricing/" target="_blank" rel="noopener">${t`See plans`}</a></div>`;
-        return `<div class="st-space${share >= 0.95 ? ' full' : share >= 0.8 ? ' high' : ''}"><p><b>${t`Cloud space`}</b> ${t`${gb(files.used || 0)} of ${gb(files.limit || 0)} GB used`}${space.packs ? ` · ${t`${space.packs} extra packs`}` : ''}${space.endsAtPeriodEnd ? ` · ${t`ends at the end of this period`}` : ''}</p><div class="st-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(share * 100)}" aria-label="${t`Cloud space used`}"><i style="width:${(share * 100).toFixed(1)}%"></i></div>${share >= 0.95 ? `<p class="st-space-note">${t`Almost full. Chats and changes keep syncing; new files wait on this computer until there is room.`}</p>` : ''}<div class="st-space-actions"><a class="btn small${share >= 0.8 ? ' primary' : ''}" href="https://api.rexdesk.dev/billing/pack" target="_blank" rel="noopener">${t`Add 5 GB`}</a><a class="btn small" href="https://api.rexdesk.dev/billing/manage" target="_blank" rel="noopener">${t`Manage plan`}</a></div></div>`; })()}
+${planCard(database, state)}
       ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay on this computer: only a Rex Desk account backup keeps them in the cloud.`}</p>` : ''}${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}
       <h3>${t`App updates`}</h3><p>${esc(update.supported ? t`This is Rex Desk ${[update.current, update.stage].filter(Boolean).join(' ')}. ` : '')}${esc(update.ready ? t`Version ${update.available?.version} is downloaded and checked.` : update.available ? t`Version ${update.available.version} is available.` : update.supported ? (update.checkedAt ? t('Rex Desk is up to date.') : t('Not checked yet.')) : t('This copy runs from source code and updates with Git.'))}</p>${update.error ? `<p class="error-text">${esc(update.error)}</p>` : ''}<div class="st-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${state.extra.checking ? 'disabled' : ''}>${state.extra.checking ? t('Checking…') : t('Check now')}</button>` : ''}${update.ready ? `<button type="button" class="btn primary" data-action="update-install">${t`Install and restart`}</button>` : ''}</div>`; },
     tools: () => {
@@ -302,6 +311,7 @@ ${(() => { const space = database.space, files = space?.files || {}, share = fil
   const saves = new Set(['general', 'agents', 'projects', 'sources', 'jev', 'schedule', 'signins']);
   const draw = () => {
     // Connect another AI shows whether A2A is on: read once when the section opens.
+    if (state.section === 'backup' && !state.extra.billing && !state.extra.billingLoading) { state.extra.billingLoading = true; void api('/billing').then(data => { state.extra.billing = data; state.extra.billingLoading = false; draw(); }).catch(() => { state.extra.billing = { signedIn: false }; state.extra.billingLoading = false; draw(); }); }
     if (state.section === 'tools' && !state.extra.toolbox && !state.extra.toolboxLoading) { state.extra.toolboxLoading = true; void api('/toolbox').then(data => { state.extra.toolbox = data; draw(); }).catch(error => { state.extra.toolbox = { servers: [], skills: [], commands: [], hooks: [] }; toast(error.message, true); draw(); }); }
     if (state.section === 'connect' && !state.extra.a2a && !state.extra.a2aLoading) { state.extra.a2aLoading = true; void api('/a2a').then(data => { state.extra.a2a = data; draw(); }).catch(() => { state.extra.a2a = { enabled: false, addresses: [] }; draw(); }); }
     // A redraw of the same section keeps the place the person scrolled to (ticking a box used to jump back to the top).
@@ -400,6 +410,25 @@ ${(() => { const space = database.space, files = space?.files || {}, share = fil
       if (target.closest('[data-st-account-out]')) {
         if (!confirm(t('Sign this computer out of your Rex Desk account? The backup keeps working for up to 30 days, then stops until you sign in again.'))) return;
         await api('/database/account-signout', { method: 'POST' }); toast(t('Signed out of your Rex Desk account on this computer.')); await refresh(); draw(); return;
+      }
+      const buy = target.closest('[data-st-buy]')?.dataset.stBuy;
+      if (buy || target.closest('[data-st-manage]')) {
+        state.extra.billingBusy = true; draw();
+        try {
+          const result = await api(buy ? '/billing/checkout' : '/billing/portal', { method: 'POST', data: buy ? { offer: buy } : {} });
+          window.open(result.url, '_blank', 'noopener');
+          if (buy && !result.already) { state.extra.billingWaiting = true; const until = Date.now() + 20 * 60000; const look = async () => { const data = await api('/billing').catch(() => null); if (data) state.extra.billing = data; if (data?.space?.paid) { state.extra.billingWaiting = false; toast(t('Cloud backup is on. Thank you.')); draw(); return; } if (Date.now() < until && state.extra.billingWaiting) setTimeout(look, 5000); draw(); }; setTimeout(look, 5000); }
+        } catch (error) { toast(error.message, true); }
+        finally { state.extra.billingBusy = false; draw(); }
+        return;
+      }
+      if (target.closest('[data-st-pack]')) {
+        if (!confirm(t('Add 5 GB of cloud space for $1 a month ($10 a year on a yearly plan)? It is charged to the card your plan uses.'))) return;
+        state.extra.billingBusy = true; draw();
+        try { await api('/billing/pack', { method: 'POST' }); state.extra.billing = await api('/billing').catch(() => state.extra.billing); toast(t('5 GB more cloud space added.')); }
+        catch (error) { toast(error.message, true); }
+        finally { state.extra.billingBusy = false; draw(); }
+        return;
       }
       if (target.closest('[data-st-db-sync]')) {
         const button = target.closest('[data-st-db-sync]'); button.disabled = true; button.textContent = t('Uploading…');

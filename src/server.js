@@ -45,7 +45,7 @@ import { tursoSignIn, provisionDatabase } from './turso-setup.js';
 import { followDataMove, followMemoryMove, planDataMove, moveMedia, folderStatus, memoryFolder } from './folders.js';
 import { readdirSync } from 'node:fs';
 import { knowledgeGraph } from './knowledge.js';
-import { accountSignIn, accountDatabase, accountMe, accountReachable } from './rexdesk-account.js';
+import { accountSignIn, accountDatabase, accountMe, accountReachable, billingCheckout, billingPortal, billingPack } from './rexdesk-account.js';
 import { bridge } from './local-ai.js';
 
 const exec = promisify(execFile);
@@ -258,6 +258,46 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     return accounts.workspaces.some(item => !item.email) ? 'claim' : 'new';
   }
   const accountView = () => ({ email: accountFound.session.user?.email || '', name: accountFound.session.user?.name || '', image: accountFound.session.user?.image || '', workspace: accountFound.workspace });
+  // One account, many devices: a computer signed in to the account joins the account's shared database by itself, so every
+  // device shows the same agents, chats and tasks, and they reach each other through it. It never mixes two different desks:
+  // when the account's database already holds another desk, this computer keeps its own and says so in Devices.
+  const joinAccount = () => {
+    const opened = session, store = opened?.store, signedIn = opened?.account || store?.cloud?.account?.saved;
+    if (!requireAccount || !store || store.cloud.enabled || !signedIn?.token) return;
+    // Written only while the same desk is still open: a sign-out or a closed workspace ends it quietly.
+    const note = value => { try { if (session === opened) store.put('meta', 'account-join', value); } catch { /* the desk closed meanwhile */ } };
+    void (async () => {
+      try {
+        const database = await accountDatabase(signedIn.token, accountOptions);
+        if (session !== opened) return;
+        const found = await findCloudWorkspace({ url: database.url, authToken: database.authToken, name: signedIn.user?.email || opened.email || '' }, cloudClientFactory).catch(() => null);
+        if (session !== opened) return;
+        if (found && found.id !== store.cloud.workspace) { note({ state: 'other-desk', at: new Date().toISOString() }); return; }
+        if (store.cloud.enabled) return;
+        store.cloud.account.save({ token: signedIn.token, expiresAt: signedIn.expiresAt, user: signedIn.user }, database);
+        await store.cloud.connect({ url: database.url, authToken: database.authToken });
+        note({ state: 'joined', at: new Date().toISOString() });
+      } catch (error) { note(error.code === 'needs_plan' ? { state: 'no-plan', at: new Date().toISOString() } : { state: 'failed', error: String(error.message || error).slice(0, 300), at: new Date().toISOString() }); }
+    })();
+  };
+  // After the payment page opens: look at the plan every 5 seconds for up to 20 minutes. Paid: join the account's cloud space
+  // (or, on a desk with its own database, just show the new plan) and tell the window.
+  let billingWatch = null;
+  const watchPlan = token => {
+    clearInterval(billingWatch); const until = Date.now() + 20 * 60000;
+    billingWatch = setInterval(() => {
+      if (Date.now() > until || !session) { clearInterval(billingWatch); billingWatch = null; return; }
+      void accountMe(token, accountOptions).then(me => {
+        if (!me.space?.paid || !billingWatch) return;
+        clearInterval(billingWatch); billingWatch = null;
+        const store = session?.store; if (!store) return;
+        store.event('', 'billing-paid', { plan: me.plan }); joinAccount();
+        if (store.cloud.checkSpace) { store.cloud.spaceAt = 0; void store.cloud.checkSpace(); }
+        notify();
+      }, () => {});
+    }, 5000);
+    billingWatch.unref?.();
+  };
   async function handleAuth(request, response, url, peerSignedIn = false) {
     if (url.pathname === '/api/auth' && request.method === 'GET') {
       // A session that chose to stay signed in on this computer hands its cookie to the person's own window (it holds the window
@@ -292,28 +332,6 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     // The account sign-in is also kept on disk, locked with the workspace, so a restart (an update) does not lose it: Agents
     // online and the welcome answers use it. A sign-in that already carries a cloud backup database is left as it is.
     const linked = () => { if (requireAccount && accountFound) { session.account = accountFound.session; accountFound = null; const link = session.store?.cloud?.account; if (link && !link.signedIn && session.account?.token) { try { link.save(session.account, {}); } catch (error) { session.store.event('', 'account-save-error', { message: error.message }); } } } };
-    // One account, many devices: a computer signed in to the account joins the account's shared database by itself, so every
-    // device shows the same agents, chats and tasks, and they reach each other through it. It never mixes two different desks:
-    // when the account's database already holds another desk, this computer keeps its own and says so in Devices.
-    const joinAccount = () => {
-      const opened = session, store = opened?.store, signedIn = opened?.account || store?.cloud?.account?.saved;
-      if (!requireAccount || !store || store.cloud.enabled || !signedIn?.token) return;
-      // Written only while the same desk is still open: a sign-out or a closed workspace ends it quietly.
-      const note = value => { try { if (session === opened) store.put('meta', 'account-join', value); } catch { /* the desk closed meanwhile */ } };
-      void (async () => {
-        try {
-          const database = await accountDatabase(signedIn.token, accountOptions);
-          if (session !== opened) return;
-          const found = await findCloudWorkspace({ url: database.url, authToken: database.authToken, name: signedIn.user?.email || opened.email || '' }, cloudClientFactory).catch(() => null);
-          if (session !== opened) return;
-          if (found && found.id !== store.cloud.workspace) { note({ state: 'other-desk', at: new Date().toISOString() }); return; }
-          if (store.cloud.enabled) return;
-          store.cloud.account.save({ token: signedIn.token, expiresAt: signedIn.expiresAt, user: signedIn.user }, database);
-          await store.cloud.connect({ url: database.url, authToken: database.authToken });
-          note({ state: 'joined', at: new Date().toISOString() });
-        } catch (error) { note(error.code === 'needs_plan' ? { state: 'no-plan', at: new Date().toISOString() } : { state: 'failed', error: String(error.message || error).slice(0, 300), at: new Date().toISOString() }); }
-      })();
-    };
     if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); linked(); joinAccount(); return respond(); }
     if (url.pathname === '/api/auth/login') { await activate(await accounts.signIn(input.email, input.passphrase, { claimId: input.claimId }).catch(slow)); linked(); joinAccount(); return respond(); }
     // A new computer, from the sign-in screen: Turso's browser sign-in finds the person's existing Rex Desk backup, so they never type its address or key.
@@ -539,6 +557,22 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         void started.session.then(signedIn => { if (!store.cloud.account.signedIn) store.cloud.account.save(signedIn, {}); else session.account = signedIn; store.event('', 'net-thread', { signedIn: true }); })
           .catch(() => {}).finally(() => { if (accountPending === started) accountPending = null; });
         return json(response, 200, { url: started.url });
+      }
+      // Cloud backup bought from inside the app, with the account this computer is signed in to. After the payment page opens, the
+      // plan is checked every few seconds; once Stripe confirms it, this computer joins the account's cloud space by itself.
+      if (url.pathname.startsWith('/api/billing') && (request.method === 'POST' || request.method === 'GET')) {
+        const token = session.account?.token || store.cloud.account?.saved?.token;
+        const who = session.account?.user || store.cloud.account?.saved?.user || null;
+        if (url.pathname === '/api/billing' && request.method === 'GET') {
+          if (!token) return json(response, 200, { signedIn: false });
+          const me = await accountMe(token, accountOptions).catch(error => ({ error: error.message }));
+          return json(response, 200, { signedIn: true, email: who?.email || me.user?.email || '', plan: me.plan || '', space: me.space || null, error: me.error || '', watching: Boolean(billingWatch) });
+        }
+        if (!token) throw new Error('Sign in with your Rex Desk account first (Settings, Backup and updates).');
+        const input = await body(request);
+        if (url.pathname === '/api/billing/checkout') { const result = await billingCheckout(token, input.offer === 'year' ? 'year' : 'month', accountOptions); watchPlan(token); return json(response, 200, result); }
+        if (url.pathname === '/api/billing/portal') return json(response, 200, await billingPortal(token, accountOptions));
+        if (url.pathname === '/api/billing/pack') { const result = await billingPack(token, accountOptions); if (store.cloud.checkSpace) { store.cloud.spaceAt = 0; void store.cloud.checkSpace(); } return json(response, 200, result); }
       }
       // Signing the account out stops key renewal. The backup keeps working until its current key runs out (about a month).
       if (url.pathname === '/api/database/account-signout' && request.method === 'POST') { await store.cloud.account.signOut(); notify(); return json(response, 200, store.cloud.status()); }
