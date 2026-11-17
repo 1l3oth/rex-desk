@@ -724,6 +724,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         return json(response, 200, { prompt: handoffPrompt({ task, run, repository, messages }) });
       }
       // Settings, Connect another AI: turn A2A on or off, or make a new key. The addresses are this computer's and its Tailscale ones.
+      // The Team tab: the person answers a worker's question or cancels a task, in the manager's place.
+      const teamTask = url.pathname.match(/^\/api\/team\/([^/]+)$/);
+      if (teamTask && request.method === 'POST') {
+        const input = await body(request), task = store.get('team-task', decodeURIComponent(teamTask[1]));
+        if (!task || task.foreign) return json(response, 404, { error: 'That task is not on this computer.' });
+        const managerRun = task.managerRunId;
+        return json(response, 200, input.action === 'cancel' ? await desk.team.cancel(managerRun, { id: task.id }) : await desk.team.answer(managerRun, { id: task.id, text: String(input.text || '') }));
+      }
       // Agents online: the person's agents that other people's agents can reach, who they are linked with, and every conversation.
       if (url.pathname === '/api/net' && request.method === 'GET') return json(response, 200, desk.net.overview());
       if (url.pathname === '/api/net/directory' && request.method === 'GET') return json(response, 200, { agents: await desk.net.directory(url.searchParams.get('q') || '') });

@@ -1983,3 +1983,20 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .tb-add input:first-child:not(:only-of-type){flex:0 0 160px}
 .tb-add input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
 @media (max-width:640px){.tb-add{flex-wrap:wrap}.tb-add input:first-child:not(:only-of-type){flex:1 1 100%}}
+
+/* The Team tab: tasks an agent handed out (or got), live. */
+.side-body.tm{display:flex;flex-direction:column;gap:6px;padding:12px 14px}
+.tm-sec{display:flex;align-items:center;gap:6px;margin:6px 0 2px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.tm-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.tm-task{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.tm-task.owed{border-color:color-mix(in srgb,var(--warn) 55%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--panel))}
+.tm-top{display:flex;align-items:center;gap:8px;min-width:0}.tm-top b{flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tm-when{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tm-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--muted)}.tm-dot.live{background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}.tm-dot.owed{background:var(--warn)}.tm-dot.done{background:var(--good)}.tm-dot.bad{background:var(--bad)}
+.tm-who{margin:0;font-size:12.5px;color:var(--muted)}.tm-task.owed .tm-state{color:var(--warn);font-weight:600}
+.tm-task blockquote{margin:0;padding:8px 10px;border-radius:8px;background:var(--bg);font-size:13px;line-height:1.5}
+.tm-answer{display:flex;gap:6px}.tm-answer input{flex:1;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font-size:13px}
+.tm-answer input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+.tm-result summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.tm-result p{margin:6px 0 0;font-size:13px;line-height:1.5;white-space:pre-wrap;max-height:220px;overflow:auto}
+.tm-cancel{align-self:flex-start}
+@media (prefers-reduced-motion:no-preference){.tm-dot.live{animation:tm-pulse 1.8s ease-in-out infinite}}@keyframes tm-pulse{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 10%,transparent)}}

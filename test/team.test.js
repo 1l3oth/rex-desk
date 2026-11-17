@@ -28,6 +28,7 @@ test('a manager gives a task to another agent, stays free, and is handed the res
     await waitFor(() => store.get('run', rex.id).state === 'finished', 'the first turn');
     const given = await desk.team.delegate(rex.id, { agent: 'Dev', task: 'Build the login page and run the tests.', title: 'Login page' });
     assert.equal(given.state, 'working'); assert.equal(given.agent, 'Dev');
+    assert.deepEqual(desk.snapshot().teamTasks.map(task => [task.title, task.workerName, task.state]), [['Login page', 'Dev', 'working']], 'the Team tab sees it');
     assert.ok(!desk.live.has(rex.id), 'the manager is free at once');
     await waitFor(() => desk.team.tasks()[0].state === 'done', 'the task to finish');
     assert.match(turns.find(turn => turn.run.specialistId === dev.id).prompt, /Task \w+ from Rex Agent[\s\S]*Build the login page/);

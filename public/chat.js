@@ -1003,16 +1003,39 @@ function personalAgent(run) {
   if (run.role !== 'specialist' || !run.specialistId) return null;
   return (ui.snap.specialists || []).find(agent => agent.id === run.specialistId && agent.runId === run.id) || null;
 }
+// The Team tab: the tasks this agent gave to others (and got from a manager), live, with what each one needs.
+const TEAM_OPEN = new Set(['queued', 'working', 'needs-manager']);
+function teamOf(agentId) {
+  const tasks = (ui.snap.teamTasks || []).filter(task => task.managerId === agentId || task.workerId === agentId);
+  return { tasks, open: tasks.filter(task => TEAM_OPEN.has(task.state)).length, owed: tasks.some(task => task.state === 'needs-manager' && task.managerId === agentId) };
+}
+function teamPanel(agent, team) {
+  const label = { queued: t('Waiting its turn'), working: t('Working'), 'needs-manager': t('Has a question'), done: t('Done'), failed: t('Failed'), canceled: t('Canceled') };
+  const tone = { working: 'live', 'needs-manager': 'owed', done: 'done', failed: 'bad', queued: '', canceled: '' };
+  const row = task => {
+    const mine = task.managerId === agent.id, other = mine ? task.workerName : task.managerName || t('its manager'), when = hhmm(task.endedAt || task.createdAt);
+    return `<li class="tm-task ${tone[task.state] || ''}"><div class="tm-top"><span class="tm-dot ${tone[task.state] || ''}" aria-hidden="true"></span><b>${esc(task.title)}</b><span class="tm-when">${esc(when)}</span></div>
+      <p class="tm-who">${mine ? t`To ${esc(other)}` : t`From ${esc(other)}`}${task.remote ? ` · ${t`on your other computer`}` : ''} · <span class="tm-state">${label[task.state] || esc(task.state)}</span></p>
+      ${task.state === 'needs-manager' && task.question ? `<blockquote>${esc(task.question)}</blockquote>${mine ? `<div class="tm-answer"><input name="tm-answer" placeholder="${t`Answer for ${esc(agent.name)}`}" aria-label="${t`Answer`}"><button type="button" class="btn small primary" data-action="team-answer" data-task="${esc(task.id)}">${t`Send`}</button></div>` : ''}` : ''}
+      ${task.answer && ['done', 'failed'].includes(task.state) ? `<details class="tm-result"><summary>${t`Result`}</summary><p>${esc(task.answer)}</p></details>` : ''}
+      ${mine && TEAM_OPEN.has(task.state) ? `<button type="button" class="btn small tm-cancel" data-action="team-cancel" data-task="${esc(task.id)}">${t`Cancel`}</button>` : ''}</li>`;
+  };
+  const open = team.tasks.filter(task => TEAM_OPEN.has(task.state)), past = team.tasks.filter(task => !TEAM_OPEN.has(task.state));
+  if (!team.tasks.length) return `<div class="side-body"><div class="side-empty">${'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.8c1.5.6 2.6 1.9 3 4.2"/></svg>'}<p>${t`No team task yet. Ask ${esc(agent.name)} to hand work to your other agents, like "ask Dev to build it and QA to check it".`}</p></div></div>`;
+  return `<div class="side-body tm">${open.length ? `<h3 class="tm-sec">${t`Now`}<span class="cnt">${open.length}</span></h3><ul class="tm-list">${open.map(row).join('')}</ul>` : ''}${past.length ? `<h3 class="tm-sec">${t`Finished`}<span class="cnt">${past.length}</span></h3><ul class="tm-list">${past.slice(0, 30).map(row).join('')}</ul>` : ''}</div>`;
+}
 function personalSide(run, agent, items, shells) {
   // Tabs, like a messenger's chat info: Profile (with what was shared in the chat), the worktrees of this chat, and the agent's Terminal.
   const trees = chatWorktrees(ui, { runId: run.id, agentId: agent.id });
   const subs = items.filter(item => item.role === 'subagent');
-  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'worktrees' ? 'worktrees' : ui.chatTab === 'subagents' ? 'subagents' : 'profile', part = ['media', 'files', 'links'].includes(ui.chatShared) ? ui.chatShared : 'media';
+  const team = teamOf(agent.id);
+  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'worktrees' ? 'worktrees' : ui.chatTab === 'subagents' ? 'subagents' : ui.chatTab === 'team' ? 'team' : 'profile', part = ['media', 'files', 'links'].includes(ui.chatShared) ? ui.chatShared : 'media';
   const entries = items.filter(item => item.role === 'human' || item.role === 'agent').map(item => ({ from: item.role === 'human' ? t('You') : agent.name, at: item.at, text: item.text }));
   const shared = collectShared(entries, (ui.snap.artifacts || []).filter(item => item.runId === run.id).map(item => ({ ...item, from: agent.name })));
   const close = `<button type="button" class="side-x" data-action="chat-info-close" aria-label="${t`Close the side panel`}" title="${t`Close`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
-  const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">${t`Profile`}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="chat-tab" data-tab="worktrees">${t`Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}`}</button><button type="button" class="tab ${tab === 'subagents' ? 'on' : ''}" data-action="chat-tab" data-tab="subagents">${t`Sub-agents${subs.length ? `<span class="tcount quiet">${subs.length}</span>` : ''}`}</button>${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">${t`Terminal`}<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span>${close}</div>`;
+  const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">${t`Profile`}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="chat-tab" data-tab="team">${t`Team${team.open ? `<span class="tcount${team.owed ? '' : ' quiet'}">${team.open}</span>` : ''}`}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="chat-tab" data-tab="worktrees">${t`Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}`}</button><button type="button" class="tab ${tab === 'subagents' ? 'on' : ''}" data-action="chat-tab" data-tab="subagents">${t`Sub-agents${subs.length ? `<span class="tcount quiet">${subs.length}</span>` : ''}`}</button>${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">${t`Terminal`}<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span>${close}</div>`;
   if (tab === 'worktrees') return tabs + worktreeSideHtml(ctx, trees);
+  if (tab === 'team') return tabs + teamPanel(agent, team);
   if (tab === 'subagents') return tabs + subagentsPanel(subs.map(item => ({ ...item, runId: run.id })), ctx, { live: () => stateTone(run) === 'working', jump: true });
   if (tab === 'terminal') return tabs + terminalHtml(shells, { esc, hhmm }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="tl-bar)/, '');
   const sharedBox = `<h3>${t`Media, files and links`}</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
@@ -1031,6 +1054,15 @@ function personalSide(run, agent, items, shells) {
     ${agent.main ? '' : `<div class="prow"><button class="btn small" data-open="specialist" data-id="${esc(agent.id)}" data-profile="1">${t`Edit profile`}</button></div>`}
   </div>`;
 }
+// The Team tab: the person answers a worker's question or cancels a task, in the manager's place.
+document.addEventListener('click', async event => {
+  const target = event.target.closest?.('[data-action="team-cancel"],[data-action="team-answer"]'); if (!target) return;
+  event.stopPropagation();
+    const text = target.dataset.action === 'team-answer' ? target.closest('.tm-task')?.querySelector('[name="tm-answer"]')?.value.trim() || '' : '';
+    if (target.dataset.action === 'team-answer' && !text) return toast(t('Write the answer first.'), true);
+    try { await api(`/team/${encodeURIComponent(target.dataset.task)}`, { method: 'POST', data: { action: target.dataset.action === 'team-cancel' ? 'cancel' : 'answer', text } }); toast(target.dataset.action === 'team-cancel' ? t('Canceled.') : t('Sent.')); await refresh(); } catch (error) { toast(error.message, true); }
+    return;
+});
 document.addEventListener('click', event => {
   const target = event.target.closest?.('[data-action="chat-tab"],[data-action="chat-shared"],[data-action="chat-info-close"],[data-action="chat-info"],[data-copy]'); if (!target) return;
   event.stopPropagation();

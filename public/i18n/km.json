@@ -2084,5 +2084,18 @@
  "{0} need a look. Each one says what is wrong below.": "{0} ត្រូវការពិនិត្យ។ នីមួយៗប្រាប់ពីបញ្ហាខាងក្រោម។",
  "Agents reach each other through your Rex Desk account. Sign in once on this computer.": "ភ្នាក់ងារទាក់ទងគ្នាតាមរយៈគណនី Rex Desk របស់អ្នក។ ចូលម្តងលើកុំព្យូទ័រនេះ។",
  "Finish signing in in the browser, then come back.": "បញ្ចប់ការចូលក្នុងកម្មវិធីរុករក រួចត្រឡប់មកវិញ។",
- "Signed in.": "បានចូលហើយ។"
+ "Signed in.": "បានចូលហើយ។",
+ "Waiting its turn": "កំពុងរង់ចាំវេន",
+ "Has a question": "មានសំណួរ",
+ "Canceled": "បានបោះបង់",
+ "its manager": "អ្នកគ្រប់គ្រងរបស់វា",
+ "To {0}": "ទៅ {0}",
+ "From {0}": "ពី {0}",
+ "on your other computer": "លើកុំព្យូទ័រផ្សេងរបស់អ្នក",
+ "Answer for {0}": "ឆ្លើយជំនួស {0}",
+ "Result": "លទ្ធផល",
+ "No team task yet. Ask {0} to hand work to your other agents, like \"ask Dev to build it and QA to check it\".": "មិនទាន់មានការងារក្រុមទេ។ សុំឱ្យ {0} ចែកការងារទៅភ្នាក់ងារផ្សេងទៀតរបស់អ្នក ដូចជា \"សុំឱ្យ Dev សាងវា ហើយ QA ពិនិត្យវា\"។",
+ "Team{0}": "ក្រុម{0}",
+ "Write the answer first.": "សរសេរចម្លើយជាមុនសិន។",
+ "Canceled.": "បានបោះបង់។"
 }
