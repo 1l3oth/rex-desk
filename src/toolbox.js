@@ -107,6 +107,7 @@ export class Toolbox {
     const settings = (() => { try { return JSON.parse(readFileSync(path.join(this.home, '.claude', 'settings.json'), 'utf8')); } catch { return {}; } })();
     const hooks = Object.entries(settings.hooks || {}).flatMap(([event, groups]) => (groups || []).flatMap(group => (group.hooks || []).map(hook => ({ event, matcher: group.matcher || '', command: String(hook.command || hook.url || '').slice(0, 200) }))));
     return {
+      computer: this.computer?.() || '',
       servers: lists.map(({ name, config, tools }) => ({ name, how: config.command ? [config.command, ...(config.args || [])].join(' ').slice(0, 200) : config.url, tools: tools.length, error: this.failed.get(name)?.error || '', removable: !user || Boolean(user[name]) })),
       skills: this.skills(project).map(skill => ({ name: skill.name, description: skill.description.slice(0, 240), removable: skill.folder.startsWith(this.skillsHome), ...(skill.error ? { error: skill.error } : {}) })),
       commands, hooks,
@@ -159,9 +160,10 @@ export class Toolbox {
         ? { use: `skill:${item.name}`, kind: 'skill', description: clip(item.description, 400) }
         // The full input shape only for the best few: enough to call them, without filling the context with the rest.
         : { use: `${item.server}/${item.name}`, kind: 'tool', description: clip(item.description, 400), ...(index < 4 ? { input: item.inputSchema } : { input: 'Search again with its name to see its input.' }), ...(item.readOnly ? { readOnly: true } : {}) }),
-      searched: `${tools.length} tools on ${new Set(tools.map(tool => tool.server)).size} servers and ${skills.length} skills`,
+      computer: this.computer?.() || '',
+      searched: `${tools.length} tools on ${new Set(tools.map(tool => tool.server)).size} servers and ${skills.length} skills, on this computer${this.computer?.() ? ` (${this.computer()})` : ''} only`,
       ...(Object.keys(failed).length ? { unavailable: failed } : {}),
-      ...(hits.length ? {} : { note: 'Nothing matched. Try other words, or fewer.' }),
+      ...(hits.length ? {} : { note: 'Nothing matched on this computer. Try other words, or fewer. If it is installed on the person\'s other computer, hand the task to an agent there with desk_team_task.' }),
     };
   }
   // Finds what an id names: "server/tool", or "skill:name".

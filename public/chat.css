@@ -2006,3 +2006,4 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .st-panel .tb-filter:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
 .st-panel .tb-filter+.tb-list{max-height:460px;overflow:auto}
 .tb-text .tb-status{align-items:flex-start;overflow-wrap:anywhere}.tb-status i{margin-top:6px}
+.st-panel .tb-computer{flex:none;margin:-8px 0 0;font-size:13px;font-weight:600;color:var(--accent)}

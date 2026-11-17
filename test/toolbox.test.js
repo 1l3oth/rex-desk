@@ -31,7 +31,7 @@ function setup() {
   mkdirSync(path.join(home, '.claude', 'skills', 'brag'), { recursive: true });
   writeFileSync(path.join(home, '.claude', 'skills', 'brag', 'SKILL.md'), '---\nname: brag\ndescription: Turn a project website into a launch video.\n---\nRecord the site.\n');
   const servers = { bakery: { command: process.execPath, args: [fakeServer(folder)], cwd: folder }, rex_desk: { type: 'http', url: 'http://x' } };
-  return new Toolbox({ home, mcpConfig: () => servers, bundled: '' });
+  const box = new Toolbox({ home, mcpConfig: () => servers, bundled: '' }); box.computer = () => 'Home laptop'; return box;
 }
 
 test('search ranks by the words asked, names first', () => {
@@ -47,7 +47,9 @@ test('an agent finds a tool or skill by plain words and uses it; nothing else is
     const found = await box.find('what bread is there today');
     assert.equal(found.found[0].use, 'bakery/list_bread'); assert.ok(found.found[0].input?.properties?.day, 'the input shape comes with a top match');
     assert.equal(found.found[0].readOnly, true);
-    assert.match(found.searched, /2 tools on 1 servers and 2 skills/);
+    assert.match(found.searched, /2 tools on 1 servers and 2 skills, on this computer \(Home laptop\) only/);
+    assert.equal(found.computer, 'Home laptop');
+    assert.match((await box.find('zzzz qqqq')).note, /other computer[\s\S]*desk_team_task/);
     assert.ok(!JSON.stringify(found).includes('rex_desk'), 'Rex Desk itself is not in the toolbox');
     assert.match((await box.run('bakery/list_bread', { day: 'Monday' })).result, /sourdough 4500, baguette 3000 on Monday/);
     assert.match((await box.run('bakery/order_cake', { name: 'Dara', size: 8 })).result, /8 inch cake for Dara/);

@@ -267,7 +267,7 @@ ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay
       const broken = box.servers.filter(item => item.error).length + box.skills.filter(item => item.error).length;
       const row = (title, sub, act, name, extra = '') => `<li class="tb-row"><div class="tb-text"><b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}${extra}</div>${act ? `<button type="button" class="btn small" data-st-tb="${act}" data-name="${esc(name)}"${busy ? ' disabled' : ''}>${t`Remove`}</button>` : ''}</li>`;
       const list = (items, empty) => items.length ? `<ul class="tb-list">${items.join('')}</ul>` : `<p class="muted small">${empty}</p>`;
-      return `<h2>${t`Tools and skills`}</h2><p class="muted">${t`Everything your agents can use on this computer. They do not carry it all in every chat: they search it when a task needs it, which keeps each chat small.`}</p>
+      return `<h2>${t`Tools and skills`}</h2>${box.computer ? `<p class="tb-computer">${t`On ${esc(box.computer)}. Each of your computers has its own list.`}</p>` : ''}<p class="muted">${t`Everything your agents can use on this computer. They do not carry it all in every chat: they search it when a task needs it, which keeps each chat small.`}</p>
       ${broken ? `<p class="tb-alert" role="status">${t`${broken} need a look. Each one says what is wrong below.`}</p>` : ''}
       <h3 class="st-sub">${t`MCP servers`} <span class="cnt">${box.servers.length}</span></h3>
       ${list([...box.servers].sort((a, b) => Boolean(b.error) - Boolean(a.error)).map(item => row(item.name, item.how, item.removable ? 'remove-server' : '', item.name, `${item.error ? status(true, t`Not working: ${item.error}`) : status(false, t`Working · ${item.tools} tools`)}`)), t`No MCP server yet.`)}

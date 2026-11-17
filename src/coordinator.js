@@ -129,7 +129,7 @@ export const FALSE_STOP_RULE = 'If a command or tool comes back with "The user d
 export const ANYWHERE_RULE = 'You can look anywhere on this computer, not only in your own folder: any drive, folder, project, file or log. When the person asks you to check, find or read something, go and read it yourself, wherever it is; never say it is outside your folder or that you cannot reach it, and never ask the person to open it or paste it for you. Change or delete things outside your own folder only when the person asks.';
 export const WORKTREE_RULE = 'When you make a git worktree, call desk_worktree with action show (pass the folder, and taskId when it is for a task) so it shows in this chat as a card and joins the worktree history. A task that already lives in a worktree is worked on there.';
 
-export const TOOLBOX_RULE = 'Only Rex Desk\'s own tools are loaded. The person\'s other MCP tools and skills (Orbit, Flow, Slack, studybook, design skills and the rest) are reached through two tools: desk_find searches them by plain words, and desk_run uses the one you pick. When a task needs a tool or skill you do not see, search with desk_find before saying you cannot.';
+export const TOOLBOX_RULE = 'Only Rex Desk\'s own tools are loaded. The person\'s other MCP tools and skills (Orbit, Flow, Slack, studybook, design skills and the rest) are reached through two tools: desk_find searches them by plain words, and desk_run uses the one you pick. When a task needs a tool or skill you do not see, search with desk_find before saying you cannot. These are the tools and skills of the computer you run on; each of the person\'s computers has its own. When one is only on their other computer, give the task to an agent there with desk_team_task, and never say a tool is installed here because you saw it there.';
 
 export class Desk {
   constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, netJudge, toolbox } = {}) {
@@ -160,6 +160,8 @@ export class Desk {
     this.net = new Net(this, { fetcher: netFetcher, judge: netJudge });
     // The person's other MCP tools and skills, reached through two tools (desk_find, desk_run) instead of all loaded at once.
     this.toolbox = toolbox || new Toolbox({ bundled: root ? path.join(root, 'skills') : '' });
+    // Tools and skills differ by computer: the toolbox says which one it is, so nobody mixes two computers' lists.
+    this.toolbox.computer = () => this.peers.self.name;
     this.projectRules = new ProjectRules(this);
     // A phone push opens Rex Desk on the phone when it can reach this computer (Tailscale and remote access on).
     this.notifier.pushClick = () => this.peers.settings().remote && this.port ? this.peers.addresses(this.port)[0] || '' : '';
