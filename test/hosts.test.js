@@ -106,3 +106,14 @@ test('a message that arrives as the reply ends is not lost: it starts the next t
   await waitFor(() => said(store, run.id).filter(text => text === 'step one').length === 2, 'the next turn to start with it');
   await desk.shutdown(); store.close();
 });
+
+test('an agent in its own process gets every setting it needs, the toolbox switch among them', async () => {
+  const { HostRunner } = await import('../src/hosts.js');
+  const { readFileSync } = await import('node:fs');
+  let spec = null;
+  const runner = new HostRunner({ run: { id: 'r2' }, gateway: true, guard: { data: 'x' }, extraMcp: {} }, { directory: temporary('hosts-opts'), onState: () => {}, spawner: (node, args) => { spec = JSON.parse(readFileSync(args[1], 'utf8')); return { unref() {}, on() {}, pid: 1 }; } });
+  const started = runner.start('hello').catch(() => {});
+  for (let attempt = 0; attempt < 50 && !spec; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(spec.options.gateway, true, 'without it the agent loaded every MCP tool again');
+  await runner.interrupt?.().catch(() => {}); void started;
+});
