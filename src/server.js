@@ -209,6 +209,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   function startDesk(desk, store) {
     if (desk.started) return; desk.started = true;
     desk.port = listenPort; desk.peers.port = listenPort;
+    // Agents on the internet use the person's Rex Desk account sign-in, and look in their inbox while any of them is reachable.
+    desk.net.token = () => session?.account?.token || store.cloud?.account?.saved?.token || ''; if (accountOptions.base) desk.net.base = accountOptions.base; if (accountOptions.fetcher) desk.net.fetcher = accountOptions.fetcher;
+    desk.net.start();
     // Agents from before avatars each get their own picture (this computer's agents only; the others get theirs at home).
     try { desk.specialists.ensureAvatars(store.nodeId); } catch (error) { store.event('', 'avatar-error', { message: error.message }); }
     desk.peers.onRemoteChange = () => { remoteAt = '-'; remoteOpen(); }; remoteOpen();
@@ -710,6 +713,22 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         return json(response, 200, { prompt: handoffPrompt({ task, run, repository, messages }) });
       }
       // Settings, Connect another AI: turn A2A on or off, or make a new key. The addresses are this computer's and its Tailscale ones.
+      // Agents online: the person's agents that other people's agents can reach, who they are linked with, and every conversation.
+      if (url.pathname === '/api/net' && request.method === 'GET') return json(response, 200, desk.net.overview());
+      if (url.pathname === '/api/net/directory' && request.method === 'GET') return json(response, 200, { agents: await desk.net.directory(url.searchParams.get('q') || '') });
+      const netAgent = url.pathname.match(/^\/api\/net\/agents\/([^/]+)(?:\/(pair-code|pair|request|links))?$/);
+      if (netAgent) {
+        const agentId = decodeURIComponent(netAgent[1]), part = netAgent[2] || '', input = request.method === 'POST' ? await body(request) : {};
+        if (!part && request.method === 'POST') return json(response, 200, input.on === false ? await desk.net.unpublish(agentId) : await desk.net.publish(agentId, input));
+        if (part === 'pair-code' && request.method === 'POST') return json(response, 200, await desk.net.pairCode(agentId));
+        if (part === 'pair' && request.method === 'POST') return json(response, 200, await desk.net.pair(agentId, input.code));
+        if (part === 'request' && request.method === 'POST') return json(response, 200, await desk.net.request(agentId, input.handle));
+        if (part === 'links' && request.method === 'GET') return json(response, 200, { links: await desk.net.links(agentId) });
+        if (part === 'links' && request.method === 'POST') return json(response, 200, await desk.net.linkAction(agentId, String(input.link || ''), String(input.action || '')));
+      }
+      const netThread = url.pathname.match(/^\/api\/net\/threads\/([^/]+)$/);
+      if (netThread && request.method === 'GET') return json(response, 200, desk.net.thread(decodeURIComponent(netThread[1])));
+      if (netThread && request.method === 'POST') { const input = await body(request); return json(response, 200, await desk.net.act(decodeURIComponent(netThread[1]), String(input.action || ''), input.text)); }
       if (url.pathname === '/api/a2a') {
         const input = request.method === 'POST' ? await body(request) : null;
         const settings = input ? setA2a(store, { enabled: input.enabled, newKey: Boolean(input.newKey) }) : a2aSettings(store);

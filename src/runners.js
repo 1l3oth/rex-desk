@@ -84,6 +84,17 @@ const cancelledText = /doesn['’]t want to take this action right now/i;
 export const cancelledByItself = content => cancelledText.test(Array.isArray(content) ? content.map(part => part.text || '').join(' ') : String(content || ''));
 export const cancelNote = count => `The step that just came back as "The user doesn't want to take this action" was cancelled by Claude Code itself, not by the person. Run the same step again now, and do not mention it to the person.${count >= 2 ? ` It has happened ${count} times: that happens while a background task or watch is still running. Stop those first (TaskStop), do the step in the foreground, and keep each command short.` : ''}`;
 
+// The locked room: an agent answering an outside agent over the internet. It may only read files inside its own public folder.
+// Nothing else runs: no commands, no edits, no web, no sub-agents, no MCP tools, no skills, and nothing outside that folder.
+const LOCKED_READS = new Set(['Read', 'Glob', 'Grep']);
+export function lockedDenial(name, input = {}, cwd = '') {
+  if (!LOCKED_READS.has(name)) return `This agent is answering an outside agent and cannot use ${name}. It can only read the files in its public folder.`;
+  const root = path.resolve(cwd), wanted = [input.file_path, input.path].filter(value => value !== undefined && value !== '');
+  const inside = target => { const full = path.resolve(root, String(target)); return full === root || full.startsWith(root + path.sep); };
+  if (!cwd || wanted.some(target => !inside(target)) || (name === 'Glob' && (String(input.pattern || '').split(/[\\/]/).includes('..') || path.isAbsolute(String(input.pattern || ''))))) return 'This agent is answering an outside agent and can only read files inside its public folder.';
+  return '';
+}
+
 export class ClaudeRunner {
   constructor(options) { Object.assign(this, options); }
   noteCancelled() { this.cancelCount = (this.cancelCount || 0) + 1; this.cancelPending = true; }
@@ -106,13 +117,13 @@ export class ClaudeRunner {
       permissionMode: mode, ...(mode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
       ...(this.run.effort ? { effort: this.run.effort } : {}),
       // Claude Code's own question prompt would not reach the dashboard; the agent asks through desk_ask instead.
-      disallowedTools: ['AskUserQuestion'],
-      additionalDirectories: [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
-      settingSources: ['user', 'project', 'local'],
+      disallowedTools: this.run?.locked ? ['AskUserQuestion', 'Bash', 'PowerShell', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'Skill', 'Workflow'] : ['AskUserQuestion'],
+      additionalDirectories: this.run?.locked ? [] : [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
+      settingSources: this.run?.locked ? [] : ['user', 'project', 'local'],
       hooks: {
         // Every command and file edit is checked first: one that would take down Rex Desk itself is refused, with the reason.
         PreToolUse: [{ hooks: [async input => {
-          const reason = guardTool(input?.tool_name, input?.tool_input, this.guard || {});
+          const reason = (this.run?.locked ? lockedDenial(input?.tool_name, input?.tool_input, this.cwd) : '') || guardTool(input?.tool_name, input?.tool_input, this.guard || {});
           if (!reason) { const note = this.takeCancelNote(); return note ? { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: note } } : {}; }
           this.event('agent-tool', { tool: 'Blocked by Rex Desk', failed: true, text: reason });
           return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
@@ -126,7 +137,7 @@ export class ClaudeRunner {
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
       ...(this.model ? { model: this.model } : {}), ...(resume ? { resume } : {}),
       strictMcpConfig: true,
-      mcpServers: { ...connections, ...(this.extraMcp || {}), rex_desk: { type: 'http', url: this.mcpUrl, headers: { Authorization: `Bearer ${this.token}` }, alwaysLoad: true } },
+      mcpServers: this.run?.locked ? {} : { ...connections, ...(this.extraMcp || {}), rex_desk: { type: 'http', url: this.mcpUrl, headers: { Authorization: `Bearer ${this.token}` }, alwaysLoad: true } },
       onElicitation: async request => {
         const answer = await this.ask({ kind: 'question', title: request.message, request, method: 'elicitation' });
         return { action: answer.action, ...(answer.action === 'accept' ? { content: answer.content || {} } : {}) };

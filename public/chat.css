@@ -1871,3 +1871,34 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .side-empty{font-family:var(--sans);display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;margin:28px 18px;padding:22px 16px;border:1px dashed var(--line);border-radius:14px;color:var(--muted)}
 .side-empty svg{width:34px;height:34px;color:var(--faint,var(--muted));opacity:.8}
 .side-empty p{margin:0;font-size:13px;line-height:1.55;max-width:30ch}
+
+/* Agents online: the person's agents on the internet, and their conversations with other people's agents. */
+.net-page{padding-top:16px;padding-bottom:28px}
+.net-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px;align-items:start}
+.net-card{display:flex;flex-direction:column;gap:10px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.net-card header,.net-view header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.net-handle{color:var(--muted);font-size:12.5px}
+.net-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.net-row input{flex:1;min-width:140px}
+.net-field{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}.net-field.narrow{max-width:180px}
+.net-field :is(input,select,textarea),.net-row input{font:inherit;font-size:13.5px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
+.net-field textarea{resize:vertical;line-height:1.45}
+.net-card code{font-size:11.5px;word-break:break-all}
+.net-code{margin:0;padding:10px 12px;border-radius:10px;background:var(--raised);font-size:13px}.net-code b{font-size:17px;letter-spacing:.08em;margin:0 6px}
+.net-links{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}.net-links li{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.chip.good{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}.chip.warn{background:color-mix(in srgb,var(--warn,#c98a1b) 20%,transparent);color:var(--warn,#c98a1b)}
+.btn.danger{color:var(--bad)}
+.net-split{display:grid;grid-template-columns:minmax(240px,340px) minmax(0,1fr);gap:14px;align-items:start;margin-bottom:22px}
+.net-list{display:flex;flex-direction:column;gap:6px}
+.net-thread{display:grid;grid-template-columns:1fr auto;gap:2px 8px;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:inherit}
+.net-thread:hover,.net-thread.on{background:var(--raised)}.net-thread.needs{border-color:var(--warn,#c98a1b)}
+.net-thread .net-last{grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.net-view{display:flex;flex-direction:column;gap:12px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0}
+.net-msgs{display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto;padding-right:4px}
+.net-msg{max-width:82%;padding:8px 11px;border-radius:12px;background:var(--raised);align-self:flex-start}.net-msg p{margin:0;white-space:pre-wrap;word-break:break-word;font-size:13.5px;line-height:1.5}
+.net-msg.us,.net-msg.owner{align-self:flex-end;background:color-mix(in srgb,var(--accent) 16%,var(--panel))}
+.net-msg.owner-note{align-self:flex-end;background:none;border:1px dashed var(--line)}
+.net-msg.system{align-self:center;background:none;color:var(--muted);font-size:12px;padding:2px 8px}
+.net-from{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:2px}
+.net-controls{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:12px}
+.net-why{margin:0 0 4px;padding:9px 12px;border-radius:10px;background:color-mix(in srgb,var(--warn,#c98a1b) 14%,transparent);font-size:13px}
+@media (max-width:820px){.net-split{grid-template-columns:1fr}.net-grid{grid-template-columns:1fr}.net-msg{max-width:94%}}

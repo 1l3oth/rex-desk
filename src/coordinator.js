@@ -4,6 +4,7 @@ import { LocalAi, isLocalModel, parseLocalModel } from './local-ai.js';
 import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
 import { Team } from './team.js';
+import { Net } from './net.js';
 import { Memory } from './memory.js';
 import { Specialists, EVIDENCE_RULE, ELI5_RULE } from './specialists.js';
 import { PROTECT_RULE, APP_GUIDE } from './app-guard.js';
@@ -128,7 +129,7 @@ export const ANYWHERE_RULE = 'You can look anywhere on this computer, not only i
 export const WORKTREE_RULE = 'When you make a git worktree, call desk_worktree with action show (pass the folder, and taskId when it is for a task) so it shows in this chat as a card and joins the worktree history. A task that already lives in a worktree is worked on there.';
 
 export class Desk {
-  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport } = {}) {
+  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     this.localAi = new LocalAi(store);
@@ -153,6 +154,7 @@ export class Desk {
     }, () => this.mcpUrl);
     this.peers = new Peers(this, { transport: peerTransport });
     this.team = new Team(this);
+    this.net = new Net(this, { fetcher: netFetcher });
     this.projectRules = new ProjectRules(this);
     // A phone push opens Rex Desk on the phone when it can reach this computer (Tailscale and remote access on).
     this.notifier.pushClick = () => this.peers.settings().remote && this.port ? this.peers.addresses(this.port)[0] || '' : '';
@@ -694,7 +696,7 @@ ${message}` : message);
       }
       if (await this.switchIfLimited(runId)) { handedOn = true; return; }
       const current = this.run(runId);
-      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' || run.role === 'helper' ? 'finished' : 'needs_evidence', endedAt: now() });
+      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' || run.role === 'helper' || run.role === 'net' ? 'finished' : 'needs_evidence', endedAt: now() });
       if (run.role === 'helper') this.helperDone(runId);
       // The quiet turn that read Voice mode's report is over: what the agent says next is said out loud.
       const voiceAfter = this.store.get('run', runId)?.voice; if (voiceAfter?.reading) this.patchRun(runId, { voice: { ...voiceAfter, reading: false } });
@@ -735,6 +737,8 @@ ${message}` : message);
       if (this.live.get(runId)?.controller === controller) this.live.delete(runId);
       void this.drain();
       void this.rooms.turnFinished(runId).catch(error => this.store.event(runId, 'error', { message: error.message }));
+      // An answer to another person's agent: it is sent, held for the person, or the person is asked.
+      { const ended = this.store.get('run', runId); if (!this.closed && ended?.role === 'net') void this.net.turnEnded(runId, ended.state === 'failed' ? ended.error || 'it failed' : '').catch(error => this.store.event(runId, 'error', { message: error.message })); }
       // A worker's turn ended: its manager gets the result, and the worker's next waiting task starts.
       { const ended = this.store.get('run', runId); if (!this.closed && ended && !ended.roomAgent && ['specialist', 'coordinator'].includes(ended.role)) this.team.turnEnded(runId, ended.state === 'failed' ? ended.error || 'it failed' : ended.state === 'stopped' ? 'it was stopped' : ''); }
       // A chat whose context is nearly full hands over to a fresh session by itself (and waits with queued messages until then).
@@ -772,6 +776,8 @@ ${message}` : message);
       placement: { ...run.placement, state: 'placed', by: placed.by, reason: placed.reason } });
   }
   prompt(run) {
+    // An agent answering another person's agent over the internet gets only what that needs: none of Rex Desk's own tools or notes.
+    if (run.role === 'net') return this.net.prompt(run);
     const orbit = this.store.config().reportToOrbit ? 'After the investigation, send a concise report through the installed Orbit MCP if it is available. Include the source task reference and what you found. Never claim a local file URL is publicly accessible.' : 'Do not send Orbit reports; reporting is disabled in Settings.';
     const lessons = this.lessons(run);
     const common = `${APP_GUIDE}
@@ -1708,5 +1714,5 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     }
   }
   // Closing Rex Desk (a restart or an update) leaves agents in their own process working; the next start follows them again.
-  async shutdown() { this.closed = true; for (const timer of this.localTimers || []) { clearTimeout(timer); clearInterval(timer); } this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
+  async shutdown() { this.closed = true; this.net.stop(); for (const timer of this.localTimers || []) { clearTimeout(timer); clearInterval(timer); } this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
 }

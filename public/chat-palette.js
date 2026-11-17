@@ -11,7 +11,7 @@ const ICON = {
   setting: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
 };
 const KIND_LABEL = { chat: t('Chat'), agent: t('Agent'), room: t('Group chat'), task: t('Task'), place: t('Place'), setting: t('Settings') };
-const PLACES = [['inbox', t('Needs you')], ['tasks', t('Tasks')], ['person', t('Knowledge')], ['jev', t('Jev')], ['monitor', t('Memory')], ['devices', t('Devices')], ['worktrees', t('Worktrees')]];
+const PLACES = [['inbox', t('Needs you')], ['tasks', t('Tasks')], ['person', t('Knowledge')], ['jev', t('Jev')], ['monitor', t('Memory')], ['devices', t('Devices')], ['worktrees', t('Worktrees')], ['net', t('Agents online')]];
 const SETTINGS = [['general', t('General, look and theme')], ['notify', t('Notifications')], ['agents', t('Agents')], ['accounts', t('AI accounts')], ['localai', t('Local AI')], ['projects', t('Projects')], ['sources', t('Task sources')], ['jev', t('Jev and voice')], ['schedule', t('Schedule')], ['devices', t('Devices and phone')], ['backup', t('Backup and updates')], ['folders', t('Folders')], ['connect', t('Connect another AI')]];
 
 function everything() {
