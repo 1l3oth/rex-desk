@@ -66,8 +66,24 @@ export class TursoSync {
   }
   async pullShared(since, limit = 400) {
     if (!this.ready || this.closed) return null;
-    const result = await this.client.execute({ sql: 'SELECT kind,id,value,deleted,v FROM rex_shared WHERE v > ? AND node != ? AND workspace = ? ORDER BY v LIMIT ?', args: [since, this.store.nodeId, this.workspace, limit] });
-    return result.rows.map(row => ({ kind: row.kind, id: row.id, deleted: Boolean(Number(row.deleted)), value: Number(row.deleted) ? null : JSON.parse(row.value), v: row.v }));
+    // Each look re-reads a short overlap (for clocks that differ), so the versions come first and only the records not read
+    // before are downloaded. Downloading every record of the overlap on every look moved tens of GB a month and crowded out
+    // the account service on the same Turso servers.
+    const heads = await this.client.execute({ sql: 'SELECT kind,id,deleted,v FROM rex_shared WHERE v > ? AND node != ? AND workspace = ? ORDER BY v LIMIT ?', args: [since, this.store.nodeId, this.workspace, limit] });
+    const seen = this.pulled ||= new Map(), key = row => `${row.kind}\u001f${row.id}`;
+    if (seen.size > 50000) seen.clear();
+    const wanted = heads.rows.filter(row => !Number(row.deleted) && seen.get(key(row)) !== row.v);
+    const values = new Map();
+    if (wanted.length) {
+      const found = await this.client.execute({ sql: `SELECT kind,id,value,v FROM rex_shared WHERE workspace = ? AND (kind || char(31) || id) IN (${wanted.map(() => '?').join(',')})`, args: [this.workspace, ...wanted.map(key)] });
+      for (const row of found.rows) values.set(key(row), row);
+    }
+    return heads.rows.map(row => {
+      const deleted = Boolean(Number(row.deleted)), full = values.get(key(row));
+      if (full) seen.set(key(row), full.v); else if (deleted) seen.set(key(row), row.v);
+      // A record read before comes back without its value: applying it changes nothing, and it still counts for paging.
+      return { kind: row.kind, id: row.id, deleted, value: deleted || !full ? null : JSON.parse(full.value), v: row.v };
+    });
   }
   // What belongs to a project kept out of the cloud is never written there (see Store.isPrivate): not by a change, not by the
   // first upload of a workspace. Deleting still reaches the cloud, so an older copy there goes away.
