@@ -11,4 +11,11 @@
   nsExec::Exec `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$f = '$INSTDIR\'; for ($$i = 0; $$i -lt 20; $$i++) { $$p = @(Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$f, [StringComparison]::OrdinalIgnoreCase) }); if (-not $$p.Count) { break }; $$p | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 300 }"`
   Pop $0
   RMDir /r "$INSTDIR\payload\app"
+  ; On a drive Windows compresses to save space, the install folder was compressed too, and so was everything written into
+  ; it: node.exe and the server's files. On a busy hard disk Node then needed minutes just to load (0% CPU, before any
+  ; Rex Desk code ran), and the window stayed black. The folder and what is left in it are made uncompressed before the
+  ; new files go in, so they are written uncompressed; a drive that is not compressed makes this a quick no-op.
+  CreateDirectory "$INSTDIR"
+  nsExec::Exec `compact.exe /u /s:"$INSTDIR" /i /q`
+  Pop $0
 !macroend
