@@ -263,14 +263,17 @@ ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay
     tools: () => {
       const box = state.extra.toolbox, busy = state.extra.toolboxBusy;
       if (!box) return `<h2>${t`Tools and skills`}</h2><p class="muted">${t`Loading…`}</p>`;
+      const status = (bad, text) => `<span class="tb-status ${bad ? 'bad' : 'ok'}"><i aria-hidden="true"></i>${esc(text)}</span>`;
+      const broken = box.servers.filter(item => item.error).length + box.skills.filter(item => item.error).length;
       const row = (title, sub, act, name, extra = '') => `<li class="tb-row"><div class="tb-text"><b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}${extra}</div>${act ? `<button type="button" class="btn small" data-st-tb="${act}" data-name="${esc(name)}"${busy ? ' disabled' : ''}>${t`Remove`}</button>` : ''}</li>`;
       const list = (items, empty) => items.length ? `<ul class="tb-list">${items.join('')}</ul>` : `<p class="muted small">${empty}</p>`;
       return `<h2>${t`Tools and skills`}</h2><p class="muted">${t`Everything your agents can use on this computer. They do not carry it all in every chat: they search it when a task needs it, which keeps each chat small.`}</p>
+      ${broken ? `<p class="tb-alert" role="status">${t`${broken} need a look. Each one says what is wrong below.`}</p>` : ''}
       <h3 class="st-sub">${t`MCP servers`} <span class="cnt">${box.servers.length}</span></h3>
-      ${list(box.servers.map(item => row(item.name, item.how, item.removable ? 'remove-server' : '', item.name, `<span class="${item.error ? 'tb-bad' : 'tb-ok'}">${item.error ? t`Could not start: ${item.error}` : t`${item.tools} tools`}</span>`)), t`No MCP server yet.`)}
+      ${list(box.servers.map(item => row(item.name, item.how, item.removable ? 'remove-server' : '', item.name, `${item.error ? status(true, t`Not working: ${item.error}`) : status(false, t`Working · ${item.tools} tools`)}`)), t`No MCP server yet.`)}
       <div class="tb-add"><input name="tb-name" placeholder="${t`Name, like slack`}" autocomplete="off" aria-label="${t`Name`}"><input name="tb-how" placeholder="${t`Command (npx -y @scope/server) or https address`}" autocomplete="off" aria-label="${t`Command or address`}"><button type="button" class="btn small primary" data-st-tb="add-server"${busy ? ' disabled' : ''}>${t`Add`}</button></div>
       <h3 class="st-sub">${t`Skills`} <span class="cnt">${box.skills.length}</span></h3>
-      ${list(box.skills.map(item => row(item.name, item.description, item.removable ? 'remove-skill' : '', item.name)), t`No skill yet.`)}
+      ${list(box.skills.map(item => row(item.name, item.description, item.removable ? 'remove-skill' : '', item.name, item.error ? status(true, item.error) : '')), t`No skill yet.`)}
       <div class="tb-add"><input name="tb-skill" placeholder="${t`A skill folder, or a git address`}" autocomplete="off" aria-label="${t`Skill folder or git address`}"><button type="button" class="btn small primary" data-st-tb="add-skill"${busy ? ' disabled' : ''}>${t`Add`}</button></div>
       <h3 class="st-sub">${t`Commands`} <span class="cnt">${box.commands.length}</span></h3>
       ${list(box.commands.map(item => row(`/${item.name}`, item.description, 'remove-command', item.name)), t`No command yet.`)}

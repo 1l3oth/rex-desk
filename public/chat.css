@@ -1898,7 +1898,7 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .na-mark{display:grid;place-items:center;width:30px;height:30px;flex:none;border-radius:9px;background:var(--raised);color:var(--muted);font-size:13px;font-weight:600}
 .na-mark.live{background:color-mix(in srgb,var(--accent) 16%,var(--panel));color:var(--accent)}.na-mark.owed{background:color-mix(in srgb,var(--warn) 18%,var(--panel));color:var(--warn)}
 .na-quiet{margin:0;padding:6px 8px;font-size:12.5px;color:var(--muted);line-height:1.5}
-.na-owed{margin:0;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--warn) 12%,var(--panel));font-size:12.5px;line-height:1.5}
+.na-owed{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin:0;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--warn) 12%,var(--panel));font-size:12.5px;line-height:1.5}.na-owed p{margin:0}
 
 .na-detail{display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
 .na-head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
@@ -1976,7 +1976,9 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .tb-row{display:flex;align-items:center;gap:12px;padding:10px 14px;border-top:1px solid var(--line)}.tb-row:first-child{border-top:0}
 .tb-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.tb-text b{font-weight:600;font-size:13.5px}
 .tb-text span{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.tb-text .tb-ok{color:var(--good)}.tb-text .tb-bad{color:var(--bad)}
+.tb-text .tb-status{display:inline-flex;align-items:center;gap:6px;margin-top:2px;font-size:12px;-webkit-line-clamp:unset;overflow:visible}.tb-status i{width:7px;height:7px;border-radius:50%;flex:none}
+.tb-status.ok{color:var(--good)}.tb-status.ok i{background:var(--good)}.tb-status.bad{color:var(--bad)}.tb-status.bad i{background:var(--bad)}
+.tb-alert{margin:0 0 12px;padding:9px 12px;border-radius:10px;background:color-mix(in srgb,var(--bad) 10%,var(--panel));font-size:13px}
 .tb-add{display:flex;gap:8px;margin:0 0 18px}.tb-add input{flex:1;min-width:0;padding:7px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:13.5px}
 .tb-add input:first-child:not(:only-of-type){flex:0 0 160px}
 .tb-add input:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}

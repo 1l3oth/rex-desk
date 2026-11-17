@@ -32,7 +32,11 @@ export function listSkills(folders) {
   const found = new Map();
   for (const folder of folders) for (const entry of readdirSync(folder)) {
     const file = path.join(folder, entry, 'SKILL.md');
-    try { if (statSync(path.join(folder, entry)).isDirectory() && existsSync(file)) { const skill = readSkill(file); if (!found.has(skill.name)) found.set(skill.name, skill); } } catch { /* a broken link or unreadable folder is skipped */ }
+    let isFolder = false; try { isFolder = statSync(path.join(folder, entry)).isDirectory(); } catch { /* a broken link */ }
+    if (!isFolder) continue;
+    if (!existsSync(file)) { if (!found.has(entry)) found.set(entry, { name: entry, description: '', file, folder: path.join(folder, entry), error: 'No SKILL.md in this folder.' }); continue; }
+    try { const skill = readSkill(file); if (!skill.description) skill.error = 'Its SKILL.md has no description, so agents cannot find it.'; if (!found.has(skill.name)) found.set(skill.name, skill); }
+    catch (error) { if (!found.has(entry)) found.set(entry, { name: entry, description: '', file, folder: path.join(folder, entry), error: `Its SKILL.md cannot be read: ${error.message}` }); }
   }
   return [...found.values()];
 }
@@ -88,7 +92,7 @@ export class Toolbox {
   async catalog(project = '') {
     const servers = this.servers(project);
     const tools = (await Promise.all(Object.entries(servers).map(([name, config]) => this.toolsOf(name, config)))).flat();
-    const skills = this.skills(project).map(skill => ({ kind: 'skill', name: skill.name, description: skill.description, folder: skill.folder, file: skill.file }));
+    const skills = this.skills(project).filter(skill => !skill.error || skill.description).map(skill => ({ kind: 'skill', name: skill.name, description: skill.description, folder: skill.folder, file: skill.file }));
     return { tools: tools.map(tool => ({ kind: 'tool', ...tool })), skills, servers: Object.keys(servers), failed: Object.fromEntries([...this.failed].filter(([name]) => servers[name]).map(([name, value]) => [name, value.error])) };
   }
 
@@ -103,7 +107,7 @@ export class Toolbox {
     const hooks = Object.entries(settings.hooks || {}).flatMap(([event, groups]) => (groups || []).flatMap(group => (group.hooks || []).map(hook => ({ event, matcher: group.matcher || '', command: String(hook.command || hook.url || '').slice(0, 200) }))));
     return {
       servers: lists.map(({ name, config, tools }) => ({ name, how: config.command ? [config.command, ...(config.args || [])].join(' ').slice(0, 200) : config.url, tools: tools.length, error: this.failed.get(name)?.error || '', removable: !user || Boolean(user[name]) })),
-      skills: this.skills(project).map(skill => ({ name: skill.name, description: skill.description.slice(0, 240), removable: skill.folder.startsWith(this.skillsHome) })),
+      skills: this.skills(project).map(skill => ({ name: skill.name, description: skill.description.slice(0, 240), removable: skill.folder.startsWith(this.skillsHome), ...(skill.error ? { error: skill.error } : {}) })),
       commands, hooks,
     };
   }

@@ -2006,7 +2006,6 @@
  "Take over": "ទទួលយកមកឆ្លើយ",
  "Conversation": "ការសន្ទនា",
  "Nothing said yet.": "មិនទាន់មាននិយាយអ្វីទេ។",
- "Sign in to your Rex Desk account first (Settings, Backup and updates). Agents reach each other through it.": "សូមចូលគណនី Rex Desk របស់អ្នកជាមុនសិន (ការកំណត់ > បម្រុងទុក និងអាប់ដេត)។ ភ្នាក់ងារទាក់ទងគ្នាតាមរយៈគណនីនេះ។",
  "Your agents": "ភ្នាក់ងាររបស់អ្នក",
  "Agents online": "ភ្នាក់ងារលើអ៊ីនធឺណិត",
  "{0} need you": "{0} ត្រូវការអ្នក",
@@ -2065,8 +2064,6 @@
  "MCP servers, skills, commands, hooks": "ម៉ាស៊ីនមេ MCP ជំនាញ ពាក្យបញ្ជា និង hooks",
  "Everything your agents can use on this computer. They do not carry it all in every chat: they search it when a task needs it, which keeps each chat small.": "អ្វីៗទាំងអស់ដែលភ្នាក់ងាររបស់អ្នកអាចប្រើលើកុំព្យូទ័រនេះ។ ពួកវាមិនយកទាំងអស់ចូលគ្រប់ការជជែកទេ៖ ពួកវាស្វែងរកពេលការងារត្រូវការ ដែលធ្វើឱ្យការជជែកនីមួយៗតូច។",
  "MCP servers": "ម៉ាស៊ីនមេ MCP",
- "Could not start: {0}": "មិនអាចចាប់ផ្តើមបាន៖ {0}",
- "{0} tools": "ឧបករណ៍ {0}",
  "No MCP server yet.": "មិនទាន់មានម៉ាស៊ីនមេ MCP ទេ។",
  "Name, like slack": "ឈ្មោះ ដូចជា slack",
  "Command (npx -y @scope/server) or https address": "ពាក្យបញ្ជា (npx -y @scope/server) ឬអាសយដ្ឋាន https",
@@ -2081,5 +2078,11 @@
  "No hook yet.": "មិនទាន់មាន hook ទេ។",
  "Hooks are changed in Claude Code's own settings file.": "Hooks ត្រូវបានកែក្នុងឯកសារការកំណត់ផ្ទាល់របស់ Claude Code។",
  "Remove {0}?": "លុប {0} ចេញ?",
- "Removed.": "បានលុបចេញ។"
+ "Removed.": "បានលុបចេញ។",
+ "Not working: {0}": "មិនដំណើរការ៖ {0}",
+ "Working · {0} tools": "កំពុងដំណើរការ · ឧបករណ៍ {0}",
+ "{0} need a look. Each one says what is wrong below.": "{0} ត្រូវការពិនិត្យ។ នីមួយៗប្រាប់ពីបញ្ហាខាងក្រោម។",
+ "Agents reach each other through your Rex Desk account. Sign in once on this computer.": "ភ្នាក់ងារទាក់ទងគ្នាតាមរយៈគណនី Rex Desk របស់អ្នក។ ចូលម្តងលើកុំព្យូទ័រនេះ។",
+ "Finish signing in in the browser, then come back.": "បញ្ចប់ការចូលក្នុងកម្មវិធីរុករក រួចត្រឡប់មកវិញ។",
+ "Signed in.": "បានចូលហើយ។"
 }

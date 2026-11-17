@@ -34,7 +34,7 @@ export class Net {
 
   // ---------- the account service ----------
   async api(method, pathname, body) {
-    const token = this.token(); if (!token) throw new Error('Sign in to your Rex Desk account first (Settings, Backup and updates).');
+    const token = this.token(); if (!token) throw new Error('Sign in to your Rex Desk account first: press Sign in on Agents online.');
     let response;
     try { response = await this.fetcher(`${this.base}${pathname}`, { method, headers: { authorization: `Bearer ${token}`, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(20000) }); }
     catch { throw new Error('Rex Desk could not reach its account service. Check the internet connection and try again.'); }

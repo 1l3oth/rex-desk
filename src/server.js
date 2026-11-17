@@ -289,7 +289,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (gated && !accountFound) {
       if (!(url.pathname === '/api/auth/login' && input.offline && !await accountReachable(accountOptions))) throw new Error('Sign in with Rex Desk first.');
     } else if (gated) input.email = accountFound.session.user?.email || '';
-    const linked = () => { if (requireAccount && accountFound) { session.account = accountFound.session; accountFound = null; } };
+    // The account sign-in is also kept on disk, locked with the workspace, so a restart (an update) does not lose it: Agents
+    // online and the welcome answers use it. A sign-in that already carries a cloud backup database is left as it is.
+    const linked = () => { if (requireAccount && accountFound) { session.account = accountFound.session; accountFound = null; const link = session.store?.cloud?.account; if (link && !link.signedIn && session.account?.token) { try { link.save(session.account, {}); } catch (error) { session.store.event('', 'account-save-error', { message: error.message }); } } } };
     if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); linked(); return respond(); }
     if (url.pathname === '/api/auth/login') { await activate(await accounts.signIn(input.email, input.passphrase, { claimId: input.claimId }).catch(slow)); linked(); return respond(); }
     // A new computer, from the sign-in screen: Turso's browser sign-in finds the person's existing Rex Desk backup, so they never type its address or key.
@@ -506,6 +508,15 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           return json(response, 200, { ...status, ...store.cloud.status(), created: Boolean(made.created) });
         } catch (error) { if (error.status === 401) session.account = null; throw error; }
         finally { if (started && accountPending === started) accountPending = null; }
+      }
+      // Agents online: sign in to the Rex Desk account for it alone (no cloud backup is made). The browser opens, and the sign-in
+      // is kept locked on this computer.
+      if (url.pathname === '/api/net/sign-in' && request.method === 'POST') {
+        accountPending?.cancel(); accountPending = await accountSignIn(accountOptions);
+        const started = accountPending;
+        void started.session.then(signedIn => { if (!store.cloud.account.signedIn) store.cloud.account.save(signedIn, {}); else session.account = signedIn; store.event('', 'net-thread', { signedIn: true }); })
+          .catch(() => {}).finally(() => { if (accountPending === started) accountPending = null; });
+        return json(response, 200, { url: started.url });
       }
       // Signing the account out stops key renewal. The backup keeps working until its current key runs out (about a month).
       if (url.pathname === '/api/database/account-signout' && request.method === 'POST') { await store.cloud.account.signOut(); notify(); return json(response, 200, store.cloud.status()); }

@@ -39,7 +39,7 @@ function rail(ctx, net, sel) {
   const agent = item => `<button type="button" class="na-row${sel?.kind === 'agent' && sel.id === item.agentId ? ' on' : ''}" data-net-act="pick" data-kind="agent" data-id="${esc(item.agentId)}">
       <span class="na-dot ${item.on ? 'on' : ''}" aria-hidden="true"></span><b>${esc(item.name)}</b>${item.on ? `<span class="na-handle">@${esc(item.handle)}</span>` : `<span class="na-meta">${t`Offline`}</span>`}</button>`;
   return `<aside class="na-rail" aria-label="${t`Agents online`}">
-    ${net.signedIn ? '' : `<p class="na-owed">${t`Sign in to your Rex Desk account first (Settings, Backup and updates). Agents reach each other through it.`}</p>`}
+    ${net.signedIn ? '' : `<div class="na-owed"><p>${t`Agents reach each other through your Rex Desk account. Sign in once on this computer.`}</p><button type="button" class="btn primary small" data-net-act="sign-in">${t`Sign in`}</button></div>`}
     ${group(t('Needs you'), owed, 'owed')}${group(t('Talking'), open)}
     ${net.threads.length ? '' : `<p class="na-quiet">${t`No conversation yet. When another agent writes to yours, it shows here and you decide what happens.`}</p>`}
     <div class="na-group"><h3 class="na-label">${t`Your agents`}${net.requests ? `<span class="na-count owed" title="${t`Agents waiting for your yes`}">${net.requests}</span>` : ''}</h3>${net.agents.map(agent).join('')}</div>
@@ -135,6 +135,7 @@ export function wireNet(ctx) {
     const agentPath = `/net/agents/${encodeURIComponent(agentId)}`;
     try {
       if (act === 'refresh') await reload();
+      else if (act === 'sign-in') { const { url } = await post('/net/sign-in', {}); if (url) window.open(url, '_blank', 'noopener'); toast(t('Finish signing in in the browser, then come back.')); const until = Date.now() + 5 * 60000; const wait = setInterval(async () => { if (Date.now() > until) return clearInterval(wait); const next = await api('/net').catch(() => null); if (next?.signedIn) { clearInterval(wait); ui.net = next; ctx.render(); toast(t('Signed in.')); } }, 2500); }
       else if (act === 'pick') { ui.netSel = { kind: target.dataset.kind, id: target.dataset.id }; ui.netVoice = ''; await reload(); }
       else if (act === 'voice') { ui.netVoice = target.dataset.voice; ctx.render(); root?.querySelector('[name="compose"]')?.focus(); }
       else if (act === 'on') { await post(agentPath, { handle: value('handle') }); ui.netSel = { kind: 'agent', id: agentId || sel.id }; toast(t('It is online. Nobody can reach it until you pair or approve them.')); await reload(); }
