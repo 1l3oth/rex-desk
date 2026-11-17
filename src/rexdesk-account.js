@@ -53,6 +53,7 @@ export const accountDatabase = (token, { base = ACCOUNT_API, fetcher = fetch } =
 // payment page or its page to change the card or cancel), or, for a pack, the new space right away.
 export const billingCheckout = (token, offer, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'POST', '/v1/billing/checkout', { token, body: { offer } });
 export const billingPortal = (token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'POST', '/v1/billing/portal', { token, body: {} });
+export const billingDetails = (token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'GET', '/v1/billing/details', { token });
 export const billingPack = (token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'POST', '/v1/billing/pack', { token, body: {} });
 export const accountMe = (token, { base = ACCOUNT_API, fetcher = fetch } = {}) => call(fetcher, base, 'GET', '/v1/me', { token });
 // False only when the account service cannot be reached at all (no internet, or the service is down).

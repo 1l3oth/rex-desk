@@ -26,6 +26,11 @@ function planCard(database, state) {
       <div class="pl-grid">
         <div class="pl-card"><div class="pl-head"><b>${t`Free`}</b><span class="pl-badge">${t`Current plan`}</span></div><p class="pl-price"><b>$0</b></p>${list([t('Every agent, chat and tool on this computer'), t('Works fully offline'), t('No cloud copy')])}</div>
         <div class="pl-card pl-pick"><div class="pl-head"><b>${t`Cloud backup`}</b><span class="pl-badge pl-badge-accent">${t`Recommended`}</span></div><p class="pl-price"><b>${yearly ? '$24' : '$2.99'}</b><small>${yearly ? t('a year') : t('a month')}</small></p>${list([t('Your whole desk kept safe in the cloud'), t('The same desk on all your computers'), t('1 GB of files, add 5 GB any time'), t('Cancel any time, nothing on your computer is lost')])}<button type="button" class="btn primary pl-cta" data-st-buy="${yearly ? 'year' : 'month'}" ${busy}>${t`Upgrade to Cloud backup`}</button></div>
+      </div>
+      <div class="pl-card pl-faq"><div class="pl-head"><b>${t`Questions`}</b></div>
+        <details><summary>${t`What happens if I cancel?`}</summary><p class="pl-sub">${t`Cloud backup keeps working until the end of the period you paid for. After that nothing new goes up, and everything stays on your computer.`}</p></details>
+        <details><summary>${t`What if my cloud space runs out?`}</summary><p class="pl-sub">${t`Chats and changes keep syncing. New files wait on your computer until there is room. Add 5 GB any time for $1 a month.`}</p></details>
+        <details><summary>${t`Who handles my card?`}</summary><p class="pl-sub">${t`Stripe. Rex Desk never sees or keeps your card number.`}</p></details>
       </div>`;
   }
   // Step 3: the plan you have. Name, status, next payment, space, and what you can do with it.
@@ -43,8 +48,11 @@ function planCard(database, state) {
     ${next ? `<p class="pl-sub">${next}</p>` : ''}
     <div class="pl-usage"><div class="pl-usage-row"><span>${t`Cloud space`}</span><span>${t`${gb(files.used || 0)} of ${gb(files.limit || 0)} GB`}</span></div><progress class="pl-meter" max="100" value="${Math.max(1, Math.round(share * 100))}" aria-label="${t`Cloud space used`}"></progress>${space.packs ? `<small class="pl-sub">${t`Includes ${space.packs * 5} GB of extra space`}</small>` : ''}${share >= 0.95 ? `<small class="pl-sub">${t`Almost full. Chats and changes keep syncing; new files wait on this computer until there is room.`}</small>` : ''}</div>
     <div class="pl-actions"><button type="button" class="btn${share >= 0.8 ? ' primary' : ''}" data-st-pack ${busy}>${t`Add 5 GB`}</button><button type="button" class="btn" data-st-manage ${busy}>${yearly ? t('Switch to monthly') : t('Switch to yearly')}</button><button type="button" class="btn" data-st-manage ${busy}>${t`Manage billing`}</button></div>
-    <p class="pl-fine">${t`Card, receipts and cancelling are on your Stripe page (Manage billing).`}</p>
-  </div>`;
+  </div>
+  <div class="pl-card"><div class="pl-head"><b>${t`Payment method`}</b><button type="button" class="btn small" data-st-manage ${busy}>${t`Change`}</button></div>
+    <p class="pl-sub">${billing.card ? `<b class="pl-cardname">${String(billing.card.brand || '').replace(/^./, ch => ch.toUpperCase()).replace(/[<>&"]/g, '')} •••• ${String(billing.card.last4 || '').replace(/\D/g, '')}</b> · ${t`expires ${String(billing.card.expMonth).padStart(2, '0')}/${billing.card.expYear}`}` : t`Kept by Stripe. Change it in Manage billing.`}</p></div>
+  <div class="pl-card"><div class="pl-head"><b>${t`Billing history`}</b></div>
+    ${(billing.invoices || []).length ? `<ul class="pl-bills">${billing.invoices.map(item => `<li><span>${new Date(item.date).toLocaleDateString(document.documentElement.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' })}</span><span>${'$' + Number(item.amount).toFixed(2)}</span><span class="pl-badge pl-${item.status === 'paid' ? 'good' : item.status === 'open' ? 'warn' : 'bad'}">${item.status === 'paid' ? t('Paid') : item.status === 'open' ? t('Due') : t('Not paid')}</span>${item.url ? `<a href="${item.url.replace(/"/g, '')}" target="_blank" rel="noopener">${t`Receipt`}</a>` : '<span></span>'}</li>`).join('')}</ul>` : `<p class="pl-sub">${t`No payments yet.`}</p>`}</div>`;
 }
 const SECTIONS = [
   ['general', t('General'), t('Your name, theme, start with Windows')],
@@ -67,10 +75,10 @@ const SECTIONS = [
 ];
 // The sections in groups by what they are about, so the list reads in a few chunks instead of thirteen rows.
 const GROUPS = [
-  [t('You'), ['general', 'notify', 'jev']],
+  [t('You'), ['general', 'notify', 'jev', 'plan']],
   [t('Agents'), ['agents', 'accounts', 'localai', 'tools', 'schedule', 'signins']],
   [t('Work'), ['projects', 'sources', 'connect']],
-  [t('Data and devices'), ['plan', 'folders', 'backup', 'devices', 'about']],
+  [t('Data and devices'), ['folders', 'backup', 'devices', 'about']],
 ];
 // An icon for each section, shown in the phone's list of sections.
 const ST_ICON = {

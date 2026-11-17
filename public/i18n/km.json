@@ -2164,5 +2164,19 @@
  "Switch to monthly": "ប្តូរទៅប្រចាំខែ",
  "Switch to yearly": "ប្តូរទៅប្រចាំឆ្នាំ",
  "Manage billing": "គ្រប់គ្រងការបង់ប្រាក់",
- "Card, receipts and cancelling are on your Stripe page (Manage billing).": "កាត បង្កាន់ដៃ និងការបោះបង់ មាននៅលើទំព័រ Stripe របស់អ្នក (គ្រប់គ្រងការបង់ប្រាក់)។"
+ "Questions": "សំណួរ",
+ "What happens if I cancel?": "តើមានអ្វីកើតឡើងប្រសិនបើខ្ញុំបោះបង់?",
+ "Cloud backup keeps working until the end of the period you paid for. After that nothing new goes up, and everything stays on your computer.": "ការបម្រុងទុកលើ cloud បន្តដំណើរការរហូតដល់ចុងរយៈពេលដែលអ្នកបានបង់។ បន្ទាប់ពីនោះ គ្មានអ្វីថ្មីត្រូវបានផ្ទុកឡើងទេ ហើយអ្វីៗទាំងអស់នៅតែលើកុំព្យូទ័ររបស់អ្នក។",
+ "What if my cloud space runs out?": "ចុះបើទំហំ cloud របស់ខ្ញុំអស់?",
+ "Chats and changes keep syncing. New files wait on your computer until there is room. Add 5 GB any time for $1 a month.": "ការជជែក និងការផ្លាស់ប្តូរនៅតែធ្វើសមកាលកម្ម។ ឯកសារថ្មីរង់ចាំលើកុំព្យូទ័ររបស់អ្នករហូតដល់មានទំហំ។ បន្ថែម 5 GB បានគ្រប់ពេលក្នុងតម្លៃ $1 ក្នុងមួយខែ។",
+ "Who handles my card?": "តើនរណាគ្រប់គ្រងកាតរបស់ខ្ញុំ?",
+ "Stripe. Rex Desk never sees or keeps your card number.": "Stripe។ Rex Desk មិនដែលឃើញ ឬរក្សាទុកលេខកាតរបស់អ្នកទេ។",
+ "Payment method": "វិធីបង់ប្រាក់",
+ "expires {0}/{1}": "ផុតកំណត់ {0}/{1}",
+ "Kept by Stripe. Change it in Manage billing.": "រក្សាទុកដោយ Stripe។ ប្តូរវានៅក្នុង គ្រប់គ្រងការបង់ប្រាក់។",
+ "Billing history": "ប្រវត្តិការបង់ប្រាក់",
+ "Paid": "បានបង់",
+ "Not paid": "មិនទាន់បង់",
+ "Receipt": "បង្កាន់ដៃ",
+ "No payments yet.": "មិនទាន់មានការបង់ប្រាក់នៅឡើយទេ។"
 }

@@ -45,7 +45,7 @@ import { tursoSignIn, provisionDatabase } from './turso-setup.js';
 import { followDataMove, followMemoryMove, planDataMove, moveMedia, folderStatus, memoryFolder } from './folders.js';
 import { readdirSync } from 'node:fs';
 import { knowledgeGraph } from './knowledge.js';
-import { accountSignIn, accountDatabase, accountMe, accountReachable, billingCheckout, billingPortal, billingPack } from './rexdesk-account.js';
+import { accountSignIn, accountDatabase, accountMe, accountReachable, billingCheckout, billingPortal, billingPack, billingDetails } from './rexdesk-account.js';
 import { bridge } from './local-ai.js';
 
 const exec = promisify(execFile);
@@ -566,7 +566,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (url.pathname === '/api/billing' && request.method === 'GET') {
           if (!token) return json(response, 200, { signedIn: false });
           const me = await accountMe(token, accountOptions).catch(error => ({ error: error.message }));
-          return json(response, 200, { signedIn: true, email: who?.email || me.user?.email || '', plan: me.plan || '', space: me.space || null, error: me.error || '', watching: Boolean(billingWatch) });
+          const details = me.space?.paid ? await billingDetails(token, accountOptions).catch(() => null) : null;
+          return json(response, 200, { signedIn: true, email: who?.email || me.user?.email || '', plan: me.plan || '', space: me.space || null, card: details?.card || null, invoices: details?.invoices || [], error: me.error || '', watching: Boolean(billingWatch) });
         }
         if (!token) throw new Error('Sign in with your Rex Desk account first (Settings, Backup and updates).');
         const input = await body(request);

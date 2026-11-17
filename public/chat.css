@@ -2056,3 +2056,11 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .pl-meter{appearance:none;-webkit-appearance:none;width:100%;height:8px;border:0;border-radius:999px;background:var(--line);overflow:hidden}
 .pl-meter::-webkit-progress-bar{background:var(--line);border-radius:999px}.pl-meter::-webkit-progress-value{background:var(--accent);border-radius:999px}.pl-meter::-moz-progress-bar{background:var(--accent);border-radius:999px}
 .pl-current.high .pl-meter::-webkit-progress-value{background:var(--warn)}.pl-current.full .pl-meter::-webkit-progress-value{background:var(--bad)}
+
+.pl-card + .pl-card,.pl-grid + .pl-card{margin-top:12px}
+.pl-bills{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.pl-bills li{display:grid;grid-template-columns:1fr auto auto auto;gap:14px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:13px}.pl-bills li:first-child{border-top:0}
+.pl-bills a{color:var(--accent);text-decoration:none}.pl-bills a:hover{text-decoration:underline}
+.pl-cardname{font-weight:600;color:var(--text, inherit)}
+.pl-faq details{border-top:1px solid var(--line);padding:8px 0}.pl-faq details:first-of-type{border-top:0}
+.pl-faq summary{cursor:pointer;font-size:13.5px;font-weight:600}.pl-faq details p{margin-top:6px}
