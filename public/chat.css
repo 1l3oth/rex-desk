@@ -2064,3 +2064,4 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .pl-cardname{font-weight:600;color:var(--text, inherit)}
 .pl-faq details{border-top:1px solid var(--line);padding:8px 0}.pl-faq details:first-of-type{border-top:0}
 .pl-faq summary{cursor:pointer;font-size:13.5px;font-weight:600}.pl-faq details p{margin-top:6px}
+.pl-usage-db{margin-top:6px}.pl-meter-high::-webkit-progress-value{background:var(--warn)}.pl-meter-high::-moz-progress-bar{background:var(--warn)}
