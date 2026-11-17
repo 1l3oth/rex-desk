@@ -269,3 +269,14 @@ test('a computer whose clock runs behind still counts as on: "on" is judged by w
   await b.desk.peers.pullTurso();
   assert.equal(b.desk.peers.online(a.desk.store.nodeId), true, 'something new arrived from it');
 });
+
+test('an agent without a project can move to the computer the person writes from, with nothing to set up', async () => {
+  const { a, b } = computers();
+  const writer = a.desk.specialists.create({ name: 'Writer', purpose: 'Writes posts' });
+  b.desk.store.put('specialist', writer.id, { ...a.desk.store.get('specialist', writer.id), follows: true });
+  assert.ok(b.desk.peers.isRemote(b.desk.store.get('specialist', writer.id)));
+  const moved = await b.desk.projectRules.move(writer.id);
+  assert.equal(moved.moved, true);
+  assert.equal(b.desk.store.get('specialist', writer.id).node, b.desk.store.nodeId, 'it works here now');
+  assert.equal(b.desk.store.get('specialist', writer.id).follows, true, 'and keeps following the person');
+});

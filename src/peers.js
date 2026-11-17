@@ -76,7 +76,9 @@ export class Peers {
     const settings = this.settings();
     return { self: { ...this.self, addresses: port ? this.addresses(port) : [] }, remote: Boolean(settings.remote), key: this.key(), tailscale: tailscaleAddresses().length > 0,
       peers: [...settings.peers.map(peer => ({ id: peer.id, name: peer.name, url: peer.url, online: this.online(peer.id), via: this.direct(peer.id) ? 'tailscale' : this.seen(peer.id) ? 'turso' : '', lastSeen: this.live.get(peer.id)?.at ? new Date(this.live.get(peer.id).at).toISOString() : peer.lastSeen || '', error: peer.error || '' })),
-        ...[...(this.cloudSeen || new Map()).values()].filter(row => !settings.peers.some(peer => peer.id === row.node)).map(row => ({ id: row.node, name: row.name, url: 'through Turso', online: this.seen(row.node), via: 'turso', lastSeen: new Date(row.at).toISOString(), error: '' }))] };
+        ...[...(this.cloudSeen || new Map()).values()].filter(row => !settings.peers.some(peer => peer.id === row.node)).map(row => ({ id: row.node, name: row.name, url: 'through Turso', online: this.seen(row.node), via: 'turso', lastSeen: new Date(this.lastHeard(row.node) || row.at).toISOString(), error: '' }))],
+      // Whether this computer joined the account's shared space when the person signed in, and why not if it did not.
+      join: this.store.get('meta', 'account-join') || null };
   }
 
   // ---------- settings the person changes ----------

@@ -893,7 +893,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           // A chat with an agent that lives on another computer runs there while that computer is on, even when this one holds a copy of the chat.
           const homeAgent = ['say', 'resume', 'stop', 'app'].includes(action) && store.get('run', runId)?.specialistId ? store.get('specialist', store.get('run', runId).specialistId) : null;
           // A project that runs only on its own computer, or is not on this one, never starts here: the message waits for that computer.
-          const elsewhere = homeAgent && desk.peers.isRemote(homeAgent) && (desk.peers.online(homeAgent.node) || homeAgent.pinned || Boolean(homeAgent.projectSlug && !desk.projectRules.folderHere(homeAgent.projectSlug)));
+          const follows = homeAgent && desk.peers.isRemote(homeAgent) && homeAgent.follows && !homeAgent.pinned && action !== 'stop' && !(homeAgent.projectSlug && !desk.projectRules.folderHere(homeAgent.projectSlug)) && !['busy', 'replying', 'waiting'].includes(desk.peers.statusOf(homeAgent).state);
+          if (follows) await desk.projectRules.move(homeAgent.id).catch(() => {});
+          const elsewhere = !follows && homeAgent && desk.peers.isRemote(homeAgent) && (desk.peers.online(homeAgent.node) || homeAgent.pinned || Boolean(homeAgent.projectSlug && !desk.projectRules.folderHere(homeAgent.projectSlug)));
           if (elsewhere) return json(response, 200, await desk.peers.chatAction({ id: runId, node: homeAgent.node, agentId: homeAgent.id }, action, input));
           // Its computer is off and the project is here: the agent moves to this computer and carries on, shown as working here.
           if (homeAgent && desk.peers.isRemote(homeAgent) && action !== 'stop') await desk.projectRules.move(homeAgent.id).catch(() => {});
@@ -956,12 +958,15 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const ruleMatch = url.pathname.match(/^\/api\/project-rules\/([^/]+)$/);
       if (ruleMatch && request.method === 'PUT') return json(response, 200, desk.projectRules.set(decodeURIComponent(ruleMatch[1]), await body(request)));
       if (url.pathname === '/api/project-rules' && request.method === 'GET') return json(response, 200, desk.projectRules.list());
-      const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say|loop|move))?$/);
+      const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say|loop|move|follow))?$/);
       if (specialistMatch) {
         const [, specialistId, part] = specialistMatch;
         let remoteAgent = store.get('specialist', specialistId);
         // A message for an agent whose computer is off, whose project is also here and not kept to its computer: it moves here.
-        if (desk.peers.isRemote(remoteAgent) && request.method === 'POST' && ['say', 'assign'].includes(part) && !desk.peers.online(remoteAgent.node) && !remoteAgent.pinned && desk.projectRules.folderHere(remoteAgent.projectSlug)) {
+        if (request.method === 'POST' && part === 'follow') { const input = await body(request); const agent = store.get('specialist', specialistId); if (!agent || agent.kind === 'main') return json(response, 404, { error: 'No such agent.' }); return json(response, 200, store.put('specialist', specialistId, { ...agent, follows: Boolean(input.on) })); }
+        const followsHere = desk.peers.isRemote(remoteAgent) && remoteAgent.follows && !remoteAgent.pinned && !(remoteAgent.projectSlug && !desk.projectRules.folderHere(remoteAgent.projectSlug)) && !['busy', 'replying', 'waiting'].includes(desk.peers.statusOf(remoteAgent).state);
+        if (request.method === 'POST' && ['say', 'assign'].includes(part) && followsHere) { await desk.projectRules.move(specialistId).catch(() => {}); remoteAgent = store.get('specialist', specialistId); }
+        if (desk.peers.isRemote(remoteAgent) && request.method === 'POST' && ['say', 'assign'].includes(part) && !desk.peers.online(remoteAgent.node) && !remoteAgent.pinned && (!remoteAgent.projectSlug || desk.projectRules.folderHere(remoteAgent.projectSlug))) {
           await desk.projectRules.move(specialistId).catch(() => {}); remoteAgent = store.get('specialist', specialistId);
         }
         if (request.method === 'POST' && part === 'move') return json(response, 200, await desk.projectRules.move(specialistId));

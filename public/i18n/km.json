@@ -998,7 +998,6 @@
  "Nobody picked yet": "មិនទាន់បានជ្រើសរើសអ្នកណាទេ",
  "Nobody yet": "មិនទាន់មាននរណាទេ",
  "None open.": "គ្មានអ្វីបើកទេ។",
- "None yet. On your other computer, open Rex Desk → Devices, paste this computer's key under Advanced and press Join, then add its address here.": "មិនទាន់មានទេ។ នៅលើកុំព្យូទ័រផ្សេងទៀតរបស់អ្នក បើក Rex Desk → ឧបករណ៍ ដាក់សោរបស់កុំព្យូទ័រនេះក្រោមកម្រិតខ្ពស់ ហើយចុចចូលរួម រួចបន្ថែមអាសយដ្ឋានរបស់វានៅទីនេះ។",
  "None yet. Type # in the message box to mention a task.": "មិនទាន់មានទេ។ វាយ # ក្នុងប្រអប់សារដើម្បីលើកឈ្មោះកិច្ចការ។",
  "None yet. When you correct {0}, it keeps the lesson here.": "មិនទាន់មានទេ។ នៅពេលអ្នកកែ {0} វារក្សាទុកមេរៀននៅទីនេះ។",
  "Normal": "ធម្មតា",
@@ -2100,5 +2099,13 @@
  "Canceled.": "បានបោះបង់។",
  "Search {0} skills": "ស្វែងរកក្នុងជំនាញ {0}",
  "Search skills": "ស្វែងរកជំនាញ",
- "On {0}. Each of your computers has its own list.": "នៅលើ {0}។ កុំព្យូទ័រនីមួយៗរបស់អ្នកមានបញ្ជីផ្ទាល់ខ្លួន។"
+ "On {0}. Each of your computers has its own list.": "នៅលើ {0}។ កុំព្យូទ័រនីមួយៗរបស់អ្នកមានបញ្ជីផ្ទាល់ខ្លួន។",
+ "When you write to it from a computer, it moves there and works there": "ពេលអ្នកសរសេរទៅវាពីកុំព្យូទ័រណាមួយ វាផ្លាស់ទៅទីនោះ ហើយធ្វើការនៅទីនោះ",
+ "Works where you are: on": "ធ្វើការនៅកន្លែងអ្នកនៅ៖ បើក",
+ "Works where you are: off": "ធ្វើការនៅកន្លែងអ្នកនៅ៖ បិទ",
+ "It stays on its own computer now.": "ឥឡូវវានៅលើកុំព្យូទ័ររបស់វាផ្ទាល់។",
+ "It now works on whichever computer you write to it from.": "ឥឡូវវាធ្វើការលើកុំព្យូទ័រណាដែលអ្នកសរសេរទៅវា។",
+ "Your account already holds another desk, so this computer kept its own and is not linked to your other computers. To link it, sign in on this computer to the desk from your account (Settings, Backup and updates).": "គណនីរបស់អ្នកមានតុការងារមួយផ្សេងរួចហើយ ដូច្នេះកុំព្យូទ័រនេះរក្សាតុផ្ទាល់ខ្លួន ហើយមិនបានភ្ជាប់ជាមួយកុំព្យូទ័រផ្សេងរបស់អ្នកទេ។ ដើម្បីភ្ជាប់ សូមចូលតុការងារពីគណនីរបស់អ្នកលើកុំព្យូទ័រនេះ (ការកំណត់ > បម្រុងទុក និងអាប់ដេត)។",
+ "This computer could not join your account's shared space: {0}": "កុំព្យូទ័រនេះមិនអាចចូលរួមកន្លែងរួមរបស់គណនីអ្នកបានទេ៖ {0}",
+ "None yet. Sign in to the same Rex Desk account on your other computer, and it shows here by itself.": "មិនទាន់មានទេ។ ចូលគណនី Rex Desk ដដែលលើកុំព្យូទ័រផ្សេងរបស់អ្នក ហើយវានឹងបង្ហាញនៅទីនេះដោយខ្លួនឯង។"
 }

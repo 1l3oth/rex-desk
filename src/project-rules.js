@@ -83,8 +83,8 @@ export class ProjectRules {
     if (!peers.isRemote(agent)) throw new Error(`${agent.name} already works on this computer.`);
     const from = peers.deviceName(agent.node);
     if (agent.pinned) throw new Error(`${agent.name}'s project (${agent.projectSlug}) is set to run only on ${from}. Turn that off in Settings, Projects first.`);
-    const folder = this.folderHere(agent.projectSlug);
-    if (!folder) throw new Error(`The project "${agent.projectSlug}" is not on this computer. Add its folder in Settings, Projects, then move ${agent.name}.`);
+    const folder = agent.projectSlug ? this.folderHere(agent.projectSlug) : '';
+    if (agent.projectSlug && !folder) throw new Error(`The project "${agent.projectSlug}" is not on this computer. Add its folder in Settings, Projects, then move ${agent.name}.`);
     const status = peers.statusOf(agent);
     if (['busy', 'replying', 'waiting'].includes(status.state)) throw new Error(`${agent.name} is working on ${from} right now. Move it when it is done.`);
     const repository = this.store.config().repositories.find(item => path.resolve(item.path).toLowerCase() === path.resolve(folder).toLowerCase());
