@@ -189,10 +189,10 @@ export class TursoSync {
       this.ready = true; this.error = '';
       await this.flush();
       if (this.state === 'connected') writeFileSync(this.marker, JSON.stringify({ url: this.connection.url, workspace: this.workspace }), { mode: 0o600 });
-      // Then the files the chats point to: missing ones come back first (a restore), then new ones go up.
-      // A restore waits for its files, so the chats open with their pictures.
-      if (this.state === 'connected' && this.restoring) { this.restoring = false; try { this.files.lastRestored = (await this.files.restoreMissing()).restored; } catch (error) { this.files.error = String(error.message || error); } }
-      if (this.state === 'connected') void this.files.run();
+      // Then the files the chats point to. A new device does not wait for them: chats, agents and tasks open at once, the files
+      // come down behind, and one that is opened first is fetched right then (FileBackup.fetchOne). New ones go up after.
+      if (this.state === 'connected' && this.restoring) { this.restoring = false; void this.files.restoreMissing().then(result => { this.files.lastRestored = result.restored; if (result.restored) this.notify?.(); }, error => { this.files.error = String(error.message || error); }).finally(() => { if (this.state === 'connected') void this.files.run(); }); }
+      else if (this.state === 'connected') void this.files.run();
     } catch (error) { this.ready = false; this.fail(error); }
     // Retry even when the first connection fails, so an offline start catches up without a restart.
     if (!this.retryTimer && !this.closed) { this.retryTimer = setInterval(() => void this.retry(), this.retryMs); this.retryTimer.unref(); }

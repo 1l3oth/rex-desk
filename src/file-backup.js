@@ -81,6 +81,23 @@ export class FileBackup {
   }
   // A backup on the person's Rex Desk account keeps its files in the account's private folder, not in the database.
   // A database of the person's own (set up by hand) keeps them in the database, as before.
+  // One file, fetched the moment someone opens it, from the account's private folder or the database: a new device does not wait
+  // for every picture and page to come down before it opens, and a page from the other computer shows when it is clicked.
+  async fetchOne(key) {
+    const file = this.local(key); if (!file) return false;
+    if (existsSync(file)) return true;
+    const { store, client, workspace, account } = this.sync;
+    if (!this.sync.ready) return false;
+    try {
+      if (this.hosted()) {
+        const bytes = await account.getFile(this.remoteKey(key));
+        if (bytes) { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, store.decryptBytes(bytes.toString('base64'))); return true; }
+      }
+      const got = await client.execute({ sql: 'SELECT data FROM rex_files WHERE workspace=? AND path=?', args: [workspace, key] });
+      if (!got.rows[0]) return false;
+      mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, store.decryptBytes(String(got.rows[0].data))); return true;
+    } catch { return false; }
+  }
   hosted() { const { account, connection } = this.sync; return Boolean(account?.signedIn && connection?.url && account.saved?.url === connection.url); }
   remoteKey(key) { return `${this.sync.workspace}/${key}`; }
   // A workspace that kept its files in the database before moves them to the private folder once, then empties them

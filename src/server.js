@@ -292,8 +292,26 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     // The account sign-in is also kept on disk, locked with the workspace, so a restart (an update) does not lose it: Agents
     // online and the welcome answers use it. A sign-in that already carries a cloud backup database is left as it is.
     const linked = () => { if (requireAccount && accountFound) { session.account = accountFound.session; accountFound = null; const link = session.store?.cloud?.account; if (link && !link.signedIn && session.account?.token) { try { link.save(session.account, {}); } catch (error) { session.store.event('', 'account-save-error', { message: error.message }); } } } };
-    if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); linked(); return respond(); }
-    if (url.pathname === '/api/auth/login') { await activate(await accounts.signIn(input.email, input.passphrase, { claimId: input.claimId }).catch(slow)); linked(); return respond(); }
+    // One account, many devices: a computer signed in to the account joins the account's shared database by itself, so every
+    // device shows the same agents, chats and tasks, and they reach each other through it. It never mixes two different desks:
+    // when the account's database already holds another desk, this computer keeps its own and says so in Devices.
+    const joinAccount = () => {
+      const opened = session, store = opened?.store, signedIn = opened?.account || store?.cloud?.account?.saved;
+      if (!requireAccount || !store || store.cloud.enabled || !signedIn?.token) return;
+      void (async () => {
+        try {
+          const database = await accountDatabase(signedIn.token, accountOptions);
+          const found = await findCloudWorkspace({ url: database.url, authToken: database.authToken, name: signedIn.user?.email || opened.email || '' }, cloudClientFactory).catch(() => null);
+          if (found && found.id !== store.cloud.workspace) { store.put('meta', 'account-join', { state: 'other-desk', at: new Date().toISOString() }); return; }
+          if (store.cloud.enabled) return;
+          store.cloud.account.save({ token: signedIn.token, expiresAt: signedIn.expiresAt, user: signedIn.user }, database);
+          await store.cloud.connect({ url: database.url, authToken: database.authToken });
+          store.put('meta', 'account-join', { state: 'joined', at: new Date().toISOString() });
+        } catch (error) { store.put('meta', 'account-join', { state: 'failed', error: String(error.message || error).slice(0, 300), at: new Date().toISOString() }); }
+      })();
+    };
+    if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); linked(); joinAccount(); return respond(); }
+    if (url.pathname === '/api/auth/login') { await activate(await accounts.signIn(input.email, input.passphrase, { claimId: input.claimId }).catch(slow)); linked(); joinAccount(); return respond(); }
     // A new computer, from the sign-in screen: Turso's browser sign-in finds the person's existing Rex Desk backup, so they never type its address or key.
     if (url.pathname === '/api/auth/turso-start' || url.pathname === '/api/auth/turso-finish') ownDatabaseOnly();
     if (url.pathname === '/api/auth/turso-start') { tursoPending?.cancel(); tursoFound = null; tursoPending = await tursoSignIn(); return json(response, 200, { url: tursoPending.url }); }
@@ -1058,6 +1076,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         }
         const location = path.join(store.media('artifacts'), runId, path.basename(file));
         if (!existsSync(location)) desk.peers.restoreEvidence(runId, file);
+        // Not carried with the chat: fetched now from the account's backup, only this one file.
+        if (!existsSync(location)) await store.cloud.files?.fetchOne?.(`data/artifacts/${runId}/${path.basename(file)}`).catch(() => false);
         if (!existsSync(location)) { const notHere = () => { response.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" }); return response.end('<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;font:15px/1.6 system-ui,sans-serif;background:#16181d;color:#e6e8eb;text-align:center;padding:24px"><div style="max-width:440px"><p style="font-size:17px;font-weight:600;margin:0 0 8px">This file is not on this computer yet.</p><p style="margin:0;color:#9aa3b1">It was made on your other computer. It arrives here once both computers are connected through your Rex Desk account. Open it on the computer that made it, or try again later.</p></div></body>'); }; return notHere(); }
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
