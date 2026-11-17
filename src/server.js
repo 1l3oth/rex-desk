@@ -1080,6 +1080,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           // Evidence from a chat on another computer comes from the shared copy of that chat.
           const picture = desk.peers.evidencePicture(runId, file);
           if (picture) { response.writeHead(200, { 'Content-Type': mime[path.extname(picture.name).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Length': picture.data.length }); return response.end(picture.data); }
+          // A page (or any other file) an agent shared on the other computer: unpacked from the copy that came with the chat, or
+          // fetched from the account's backup, then served from here the way a page made here is (in its sandbox).
+          const carried = path.join(store.media('artifacts'), runId, path.basename(file));
+          if (!existsSync(carried)) { try { desk.peers.restoreEvidence(runId, file); } catch { /* not carried with the chat */ } }
+          if (!existsSync(carried)) await store.cloud.files?.fetchOne?.(`data/artifacts/${runId}/${path.basename(file)}`).catch(() => false);
+          if (existsSync(carried)) return serveFile(request, response, carried, { sandbox: /\.html?$/i.test(file) ? 'scripts' : false, download: url.searchParams.has('download') });
           const notHere = () => { response.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" }); return response.end('<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;font:15px/1.6 system-ui,sans-serif;background:#16181d;color:#e6e8eb;text-align:center;padding:24px"><div style="max-width:440px"><p style="font-size:17px;font-weight:600;margin:0 0 8px">This file is not on this computer yet.</p><p style="margin:0;color:#9aa3b1">It was made on your other computer. It arrives here once both computers are connected through your Rex Desk account. Open it on the computer that made it, or try again later.</p></div></body>'); };
           return notHere();
         }

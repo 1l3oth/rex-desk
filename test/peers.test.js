@@ -280,3 +280,18 @@ test('an agent without a project can move to the computer the person writes from
   assert.equal(b.desk.store.get('specialist', writer.id).node, b.desk.store.nodeId, 'it works here now');
   assert.equal(b.desk.store.get('specialist', writer.id).follows, true, 'and keeps following the person');
 });
+
+test('a page an agent on another computer shared is unpacked here when opened', async () => {
+  const { a, b } = computers();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  await a.desk.specialistTurn(dara.id, { prompt: 'Hello' });
+  const runId = a.desk.store.get('specialist', dara.id).runId;
+  await waitFor(() => !['starting', 'running'].includes(a.desk.store.get('run', runId).state));
+  const folder = a.desk.evidence.directory(runId); writeFileSync(path.join(folder, 'explain.html'), '<!doctype html><h1>How it works</h1>');
+  a.desk.evidence.attach(runId, 'explain.html', 'How it works', 'text/html');
+  a.desk.peers.copyChat(runId);
+  b.desk.peers.applyAll(['chatcopy', 'chatfile'].flatMap(kind => a.desk.store.list(kind).map(value => ({ kind, id: value.id, value }))));
+  assert.equal(b.desk.peers.evidencePicture(runId, 'explain.html'), null, 'it is not a picture');
+  assert.equal(b.desk.peers.restoreEvidence(runId, 'explain.html'), true, 'but the page came with the chat and is written here');
+  assert.match(readFileSync(path.join(b.desk.store.media('artifacts'), runId, 'explain.html'), 'utf8'), /How it works/);
+});
