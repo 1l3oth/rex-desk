@@ -55,7 +55,10 @@ export class Peers {
   // Reached directly over Tailscale.
   direct(nodeId) { const live = this.live.get(nodeId); return Boolean(live && Date.now() - live.at < ONLINE_MS); }
   // On: reached directly, or it said so in the shared Turso database in the last 90 seconds.
-  seen(nodeId) { const seen = this.cloudSeen?.get(nodeId); return Boolean(seen && Date.now() - seen.at < CLOUD_MS); }
+  seen(nodeId) { const heard = this.heard?.get(nodeId); return Boolean(heard && Date.now() - heard < CLOUD_MS); }
+  // When this computer last heard from another one, by its own clock: a changed heartbeat, or new data from it.
+  hear(nodeId) { if (!nodeId || nodeId === this.self.id) return; (this.heard ||= new Map()).set(nodeId, Date.now()); }
+  lastHeard(nodeId) { return this.heard?.get(nodeId) || 0; }
   online(nodeId) { return this.direct(nodeId) || this.seen(nodeId); }
   deviceName(nodeId) { if (!nodeId || nodeId === this.self.id) return this.self.name; return this.byNode(nodeId)?.name || this.cloudSeen?.get(nodeId)?.name || 'another computer'; }
   isRemote(agent) { return Boolean(agent && agent.kind !== 'main' && agent.node && agent.node !== this.self.id); }
@@ -259,6 +262,8 @@ export class Peers {
       for (let page = 0; page < 50; page++) {
         const rows = await this.store.cloud.pullShared(since);
         if (rows?.length) this.applyAll(rows);
+        // Anything new from a computer means it is on (its own stamp is only used to tell new from already seen).
+        for (const row of rows || []) { const [time, , ...node] = String(row.v).split('.'), stamp = parseInt(time, 36) || 0, from = node.join('.'); if (from && stamp > ((this.newestFrom ||= new Map()).get(from) || 0)) { if (this.newestFrom.has(from)) this.hear(from); this.newestFrom.set(from, stamp); } }
         newest = Math.max(newest, ...(rows || []).map(row => parseInt(String(row.v).split('.')[0], 36) || 0));
         if (!rows || rows.length < 400) break;
         since = String(rows.at(-1).v);
@@ -272,6 +277,8 @@ export class Peers {
       const mine = this.store.list('specialist').filter(agent => agent.kind !== 'main' && !this.isRemote(agent));
       const rows = await this.store.cloud.presence(this.self.name, Object.fromEntries(mine.map(agent => [agent.id, this.desk.specialists.status(agent)])));
       const before = new Set([...(this.cloudSeen || new Map())].filter(([node]) => this.seen(node)).map(([node]) => node));
+      // A heartbeat that changed since the last look means that computer is on now, whatever its clock says.
+      for (const row of rows || []) { const before = this.cloudSeen?.get(row.node); if (before ? before.at !== row.at : Math.abs(Date.now() - row.at) < CLOUD_MS) this.hear(row.node); }
       this.cloudSeen = new Map((rows || []).map(row => [row.node, row]));
       if ([...this.cloudSeen.keys()].some(node => this.seen(node) !== before.has(node))) this.store.emit?.('change', { kind: 'peers' });
     } catch { /* Turso shows its own state in Settings */ }

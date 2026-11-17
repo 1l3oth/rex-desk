@@ -245,3 +245,27 @@ test('a screenshot an agent on another computer saved as evidence shows here too
   b.desk.peers.applyAll(['chatcopy', 'chatfile'].flatMap(kind => a.desk.store.list(kind).map(value => ({ kind, id: value.id, value }))));
   assert.deepEqual([...b.desk.peers.evidencePicture(runId, 'proof.png').data], [137, 80, 78, 71, 5]);
 });
+
+test('a computer whose clock runs behind still counts as on: "on" is judged by when this computer last heard from it', async () => {
+  const { a, b } = computers();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  b.desk.store.put('specialist', dara.id, { ...a.desk.store.get('specialist', dara.id) });
+  const copy = b.desk.store.get('specialist', dara.id);
+  // Its clock is ten minutes behind: by comparing clocks it looked off for good.
+  let beat = Date.now() - 10 * 60000;
+  b.desk.store.cloud = { ready: true, record() {}, remove() {}, event() {}, schedule() {}, shared() {}, enqueue() {}, presence: async () => [{ node: a.desk.store.nodeId, name: 'Home laptop', at: beat, agents: { [dara.id]: { state: 'idle', label: 'Idle' } } }] };
+  await b.desk.peers.presence();
+  assert.equal(b.desk.peers.online(a.desk.store.nodeId), false, 'one old heartbeat alone is not enough');
+  beat += 30000; await b.desk.peers.presence();
+  assert.equal(b.desk.peers.online(a.desk.store.nodeId), true, 'its heartbeat changed since the last look, so it is on');
+  assert.match((await b.desk.peers.command(copy, 'say', { text: 'hi' })).message, /through the shared database/);
+  // New data from it counts too.
+  b.desk.peers.heard.clear();
+  b.desk.store.cloud.pullShared = async () => [];
+  assert.equal(b.desk.peers.online(a.desk.store.nodeId), false);
+  b.desk.peers.newestFrom = new Map([[a.desk.store.nodeId, 1]]);
+  b.desk.store.cloud.pullShared = async since => since < '0' ? [] : [{ kind: 'room', id: 'r', deleted: false, value: null, v: `${(Date.now() - 600000).toString(36).padStart(9, '0')}.0001.${a.desk.store.nodeId}` }];
+  b.desk.peers.applyAll = () => {};
+  await b.desk.peers.pullTurso();
+  assert.equal(b.desk.peers.online(a.desk.store.nodeId), true, 'something new arrived from it');
+});
