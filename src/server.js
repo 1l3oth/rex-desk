@@ -311,7 +311,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           store.cloud.account.save({ token: signedIn.token, expiresAt: signedIn.expiresAt, user: signedIn.user }, database);
           await store.cloud.connect({ url: database.url, authToken: database.authToken });
           note({ state: 'joined', at: new Date().toISOString() });
-        } catch (error) { note({ state: 'failed', error: String(error.message || error).slice(0, 300), at: new Date().toISOString() }); }
+        } catch (error) { note(error.code === 'needs_plan' ? { state: 'no-plan', at: new Date().toISOString() } : { state: 'failed', error: String(error.message || error).slice(0, 300), at: new Date().toISOString() }); }
       })();
     };
     if (url.pathname === '/api/auth/create') { await activate(accounts.create(input.email, input.passphrase)); linked(); joinAccount(); return respond(); }
