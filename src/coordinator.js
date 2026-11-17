@@ -132,7 +132,7 @@ export const WORKTREE_RULE = 'When you make a git worktree, call desk_worktree w
 export const TOOLBOX_RULE = 'Only Rex Desk\'s own tools are loaded. The person\'s other MCP tools and skills (Orbit, Flow, Slack, studybook, design skills and the rest) are reached through two tools: desk_find searches them by plain words, and desk_run uses the one you pick. When a task needs a tool or skill you do not see, search with desk_find before saying you cannot.';
 
 export class Desk {
-  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, toolbox } = {}) {
+  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, netJudge, toolbox } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     this.localAi = new LocalAi(store);
@@ -157,7 +157,7 @@ export class Desk {
     }, () => this.mcpUrl);
     this.peers = new Peers(this, { transport: peerTransport });
     this.team = new Team(this);
-    this.net = new Net(this, { fetcher: netFetcher });
+    this.net = new Net(this, { fetcher: netFetcher, judge: netJudge });
     // The person's other MCP tools and skills, reached through two tools (desk_find, desk_run) instead of all loaded at once.
     this.toolbox = toolbox || new Toolbox({ bundled: root ? path.join(root, 'skills') : '' });
     this.projectRules = new ProjectRules(this);
