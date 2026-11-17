@@ -269,3 +269,12 @@ test('on a new computer the Rex Desk sign-in finds the backup, and its passphras
     assert.equal((await visitor('/api/state')).body.database.account.email, 'person@example.com');
   } finally { await second.close(); }
 });
+
+test('the sign-in screen can go straight to Google or GitHub; anything else gets the account page', async () => {
+  const { accountSignIn: start } = await import('../src/rexdesk-account.js');
+  for (const [provider, expected] of [['google', 'google'], ['github', 'github'], ['', null], ['evil', null]]) {
+    const signIn = await start({ timeoutMs: 2000, base: 'https://api.example', provider });
+    assert.equal(new URL(signIn.url).searchParams.get('provider'), expected, provider || '(email)');
+    signIn.cancel();
+  }
+});

@@ -41,15 +41,12 @@
  "{0} days": "{0} ថ្ងៃ",
  "{0} days ago": "{0} ថ្ងៃមុន",
  "{0} downloads": "{0} ដងទាញយក",
- "{0} Email": "{0} អ៊ីមែល",
  "{0} files of chats, tasks and settings{1}.": "{0} ឯកសារនៃការជជែក កិច្ចការ និងការកំណត់{1}។",
  "{0} follows these in everything it does.": "{0} អនុវត្តតាមទាំងនេះក្នុងអ្វីៗទាំងអស់ដែលវាធ្វើ។",
  "{0} follows these on every task in {1}.": "{0} អនុវត្តតាមទាំងនេះលើគ្រប់កិច្ចការក្នុង {1}។",
  "{0} free · {1} agent working": "{0} ទំនេរ · {1} ភ្នាក់ងារកំពុងធ្វើការ",
  "{0} free · {1} agents working": "{0} ទំនេរ · {1} ភ្នាក់ងារកំពុងធ្វើការ",
  "{0} from cache": "{0} ពីឃ្លាំងបម្រុង",
- "{0} GitHub": "{0} GitHub",
- "{0} Google": "{0} Google",
  "{0} h": "{0} ម៉ោង",
  "{0} h ago": "{0} ម៉ោងមុន",
  "{0} has a new avatar.": "{0} មានរូបតំណាងថ្មី។",
@@ -2107,5 +2104,8 @@
  "It now works on whichever computer you write to it from.": "ឥឡូវវាធ្វើការលើកុំព្យូទ័រណាដែលអ្នកសរសេរទៅវា។",
  "Your account already holds another desk, so this computer kept its own and is not linked to your other computers. To link it, sign in on this computer to the desk from your account (Settings, Backup and updates).": "គណនីរបស់អ្នកមានតុការងារមួយផ្សេងរួចហើយ ដូច្នេះកុំព្យូទ័រនេះរក្សាតុផ្ទាល់ខ្លួន ហើយមិនបានភ្ជាប់ជាមួយកុំព្យូទ័រផ្សេងរបស់អ្នកទេ។ ដើម្បីភ្ជាប់ សូមចូលតុការងារពីគណនីរបស់អ្នកលើកុំព្យូទ័រនេះ (ការកំណត់ > បម្រុងទុក និងអាប់ដេត)។",
  "This computer could not join your account's shared space: {0}": "កុំព្យូទ័រនេះមិនអាចចូលរួមកន្លែងរួមរបស់គណនីអ្នកបានទេ៖ {0}",
- "None yet. Sign in to the same Rex Desk account on your other computer, and it shows here by itself.": "មិនទាន់មានទេ។ ចូលគណនី Rex Desk ដដែលលើកុំព្យូទ័រផ្សេងរបស់អ្នក ហើយវានឹងបង្ហាញនៅទីនេះដោយខ្លួនឯង។"
+ "None yet. Sign in to the same Rex Desk account on your other computer, and it shows here by itself.": "មិនទាន់មានទេ។ ចូលគណនី Rex Desk ដដែលលើកុំព្យូទ័រផ្សេងរបស់អ្នក ហើយវានឹងបង្ហាញនៅទីនេះដោយខ្លួនឯង។",
+ "{0} Continue with Google": "{0} បន្តជាមួយ Google",
+ "{0} Continue with GitHub": "{0} បន្តជាមួយ GitHub",
+ "{0} Continue with email": "{0} បន្តជាមួយអ៊ីមែល"
 }

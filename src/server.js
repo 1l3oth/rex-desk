@@ -326,7 +326,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       finally { if (tursoPending === pending) tursoPending = null; }
     }
     // The same, with a Rex Desk account: the account service knows which database is this person's and hands over a key.
-    if (url.pathname === '/api/auth/account-start') { accountPending?.cancel(); accountFound = null; accountPending = await accountSignIn(accountOptions); return json(response, 200, { url: accountPending.url }); }
+    if (url.pathname === '/api/auth/account-start') { accountPending?.cancel(); accountFound = null; accountPending = await accountSignIn({ ...accountOptions, provider: String(input.provider || '') }); return json(response, 200, { url: accountPending.url }); }
     if (url.pathname === '/api/auth/account-finish') {
       if (!accountPending) throw new Error('Start the Rex Desk sign-in first.');
       const pending = accountPending;

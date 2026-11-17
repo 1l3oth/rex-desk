@@ -2007,3 +2007,6 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .st-panel .tb-filter+.tb-list{max-height:460px;overflow:auto}
 .tb-text .tb-status{align-items:flex-start;overflow-wrap:anywhere}.tb-status i{margin-top:6px}
 .st-panel .tb-computer{flex:none;margin:-8px 0 0;font-size:13px;font-weight:600;color:var(--accent)}
+.si-ways.si-ways-buttons{display:flex;flex-direction:column;gap:8px;margin:4px 0 14px}
+.si-way{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;min-height:44px;font-size:14.5px;font-weight:600;border-radius:12px}
+.si-way svg{width:18px;height:18px;flex:none}

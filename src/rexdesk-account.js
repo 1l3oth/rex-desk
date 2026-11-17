@@ -23,7 +23,7 @@ async function call(fetcher, base, method, pathname, { token, body } = {}) {
 
 // Opens a one-time address on this computer for the browser to come back to. The code it brings is worth nothing without
 // the secret made here (the verifier), which never leaves this computer except to trade the code for the sign-in.
-export function accountSignIn({ timeoutMs = 270000, base = ACCOUNT_API, fetcher = fetch } = {}) {
+export function accountSignIn({ timeoutMs = 270000, base = ACCOUNT_API, fetcher = fetch, provider = '' } = {}) {
   const state = randomBytes(16).toString('hex'), verifier = randomBytes(32).toString('base64url');
   const challenge = createHash('sha256').update(verifier).digest('base64url');
   let finish, fail; const result = new Promise((resolve, reject) => { finish = resolve; fail = reject; }); result.catch(() => {});
@@ -39,7 +39,7 @@ export function accountSignIn({ timeoutMs = 270000, base = ACCOUNT_API, fetcher 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => {
-      const url = `${base}/desktop/start?${new URLSearchParams({ port: String(server.address().port), state, challenge })}`;
+      const url = `${base}/desktop/start?${new URLSearchParams({ port: String(server.address().port), state, challenge, ...(['google', 'github'].includes(provider) ? { provider } : {}) })}`;
       // session: { token, expiresAt, user: { id, email, name, image } }
       resolve({ url, session: result, cancel: () => { fail(new Error('The Rex Desk sign-in was cancelled.')); } });
     });

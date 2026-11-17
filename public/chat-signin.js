@@ -40,8 +40,7 @@ function drawAccount() {
   } else if (!account) {
     const waiting = state.account === 'waiting';
     body = `<h2 class="si-title">${t`Sign in to your desk`}</h2><p class="si-note">${t`Use your Rex Desk account. The sign-in opens in your browser.`}</p>
-      <div class="si-ways" aria-label="${t`Ways to sign in`}"><span>${t`${ICON.mail} Email`}</span><span>${t`${ICON.google} Google`}</span><span>${t`${ICON.github} GitHub`}</span></div>
-      <button type="button" class="btn primary si-submit si-big" data-account ${waiting ? 'disabled' : ''}>${waiting ? t('Waiting for you in the browser…') : t('Sign in with Rex Desk')}</button>
+      ${waiting ? `<button type="button" class="btn primary si-submit si-big" disabled>${t`Waiting for you in the browser…`}</button>` : `<div class="si-ways si-ways-buttons" role="group" aria-label="${t`Ways to sign in`}"><button type="button" class="btn si-way" data-account data-provider="google">${t`${ICON.google} Continue with Google`}</button><button type="button" class="btn si-way" data-account data-provider="github">${t`${ICON.github} Continue with GitHub`}</button><button type="button" class="btn primary si-way" data-account data-provider="">${t`${ICON.mail} Continue with email`}</button></div>`}
       ${waiting ? `<button type="button" class="si-link si-center" data-cancel>${t`Cancel`}</button>` : ''}
       <p class="si-error" role="alert">${esc(state.error)}</p>
       <p class="si-foot">${t`No account yet?`} <a href="${SIGNUP}" target="_blank" rel="noopener">${t`Create one on rexdesk.app`}</a></p>`;
@@ -105,7 +104,7 @@ root.addEventListener('click', event => {
     state.email = root.querySelector('input[name=email]')?.value || state.email; state.account = 'waiting'; state.error = ''; state.offline = false; draw();
     void (async () => {
       try {
-        const { url } = await post('/auth/account-start', {}); window.open(url, '_blank', 'noopener');
+        const { url } = await post('/auth/account-start', { provider: event.target.closest('[data-account]')?.dataset.provider || '' }); window.open(url, '_blank', 'noopener');
         const found = await post('/auth/account-finish', {});
         if (state.auth.requireAccount) { state.auth.account = found; state.account = ''; }
         else { state.account = 'found'; state.email ||= found?.email || ''; }
