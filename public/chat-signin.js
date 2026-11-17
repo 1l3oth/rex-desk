@@ -1,6 +1,6 @@
 import { t, languagePicker } from './i18n.js';
 // Sign in to Rex Desk. With the account service on (the real app): the Rex Desk account signs in first in the browser
-// (email and password, Google or GitHub; accounts are made on rexdesk.app only), then the workspace passphrase opens,
+// (Google, GitHub, or a 6-digit email code; a new person gets an account on the way), then the workspace passphrase opens,
 // sets up or restores this person's workspace. Without it (tests, scripts): email and passphrase, as before.
 import { windowBar } from '/win-bar.js';
 // In the desktop app the sign-in page has the window bar too, so the window can be moved, minimized and closed.
@@ -9,7 +9,6 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&a
 const root = document.getElementById('signin');
 const TABS = [['signin', t('Sign in')], ['create', t('New account')], ['cloud', t('Bring back from backup')]];
 const state = { auth: null, tab: '', error: '', email: '', scene: undefined, account: '', offline: false };
-const SIGNUP = 'https://rexdesk.app/signup';
 const ICON = {
   key: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3m-4 4 3 3m-5-1 2 2"/></svg>',
   mail: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
@@ -43,7 +42,7 @@ function drawAccount() {
       ${waiting ? `<button type="button" class="btn primary si-submit si-big" disabled>${t`Waiting for you in the browser…`}</button>` : `<div class="si-ways si-ways-buttons" role="group" aria-label="${t`Ways to sign in`}"><button type="button" class="btn si-way" data-account data-provider="google">${t`${ICON.google} Continue with Google`}</button><button type="button" class="btn si-way" data-account data-provider="github">${t`${ICON.github} Continue with GitHub`}</button><button type="button" class="btn primary si-way" data-account data-provider="">${t`${ICON.mail} Continue with email`}</button></div>`}
       ${waiting ? `<button type="button" class="si-link si-center" data-cancel>${t`Cancel`}</button>` : ''}
       <p class="si-error" role="alert">${esc(state.error)}</p>
-      <p class="si-foot">${t`No account yet?`} <a href="${SIGNUP}" target="_blank" rel="noopener">${t`Create one on rexdesk.app`}</a></p>`;
+      <p class="si-foot">${t`New here? These buttons also make your account.`}</p>`;
   } else {
     const who = `<div class="si-who"><span class="si-avatar">${account.image ? `<img src="${esc(account.image)}" alt="" referrerpolicy="no-referrer">` : esc((account.name || account.email || '?')[0].toUpperCase())}</span><span><b>${esc(account.name || account.email)}</b><small>${esc(account.name ? account.email : t('Rex Desk account'))}</small></span><button type="button" class="si-link" data-switch>${t`Not you?`}</button></div>`;
     const unclaimed = auth.workspaces.find(item => !item.claimed);

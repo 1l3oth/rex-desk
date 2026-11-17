@@ -461,7 +461,6 @@
  "Create an agent first (the + next to Agents), then assign this task to it.": "បង្កើតភ្នាក់ងារជាមុនសិន (ប៊ូតុង + ក្បែរភ្នាក់ងារ) រួចប្រគល់កិច្ចការនេះឱ្យវា។",
  "Create an agent for a project": "បង្កើតភ្នាក់ងារសម្រាប់គម្រោងមួយ",
  "Create and sign in": "បង្កើត និងចូល",
- "Create one on rexdesk.app": "បង្កើតមួយនៅ rexdesk.app",
  "Created": "បានបង្កើត",
  "Created by {0}{1}.": "បង្កើតដោយ {0}{1}។",
  "Creates the agent “{0}” for {1}": "បង្កើតភ្នាក់ងារ “{0}” សម្រាប់ {1}",
@@ -943,7 +942,6 @@
  "Next picture": "រូបភាពបន្ទាប់",
  "Next: #39349": "បន្ទាប់: #39349",
  "No {0} account is signed in yet. Press Sign in: a window opens, installs {1} if this computer does not have it yet, and opens the sign-in in your browser.": "មិនទាន់មានគណនី {0} បានចូលទេ។ ចុចចូល: បង្អួចមួយបើក ដំឡើង {1} ប្រសិនបើកុំព្យូទ័រនេះមិនទាន់មាន ហើយបើកការចូលក្នុងកម្មវិធីរុករករបស់អ្នក។",
- "No account yet?": "មិនទាន់មានគណនីទេ?",
  "No agent conversation here.": "គ្មានការសន្ទនាភ្នាក់ងារនៅទីនេះទេ។",
  "No agent is working right now.": "គ្មានភ្នាក់ងារកំពុងធ្វើការឥឡូវនេះទេ។",
  "No agent to stop here.": "គ្មានភ្នាក់ងារត្រូវបញ្ឈប់នៅទីនេះទេ។",
@@ -2188,5 +2186,7 @@
  "Database space used": "ទំហំមូលដ្ឋានទិន្នន័យដែលបានប្រើ",
  "Stop using this database": "ឈប់ប្រើមូលដ្ឋានទិន្នន័យនេះ",
  "Stop copying to this cloud database? Everything stays on this computer and nothing is deleted in the cloud. You can then turn on the Rex Desk account backup.": "ឈប់ចម្លងទៅមូលដ្ឋានទិន្នន័យ cloud នេះ? អ្វីៗទាំងអស់នៅតែលើកុំព្យូទ័រនេះ ហើយគ្មានអ្វីត្រូវបានលុបនៅលើ cloud ទេ។ បន្ទាប់មកអ្នកអាចបើកការបម្រុងទុកគណនី Rex Desk បាន។",
- "This computer no longer copies to that database.": "កុំព្យូទ័រនេះលែងចម្លងទៅមូលដ្ឋានទិន្នន័យនោះហើយ។"
+ "This computer no longer copies to that database.": "កុំព្យូទ័រនេះលែងចម្លងទៅមូលដ្ឋានទិន្នន័យនោះហើយ។",
+ "New here? These buttons also make your account.": "ថ្មីនៅទីនេះ? ប៊ូតុងទាំងនេះក៏បង្កើតគណនីរបស់អ្នកដែរ។",
+ "New here? Signing in also makes your account.": "ថ្មីនៅទីនេះ? ការចូលគណនីក៏បង្កើតគណនីរបស់អ្នកដែរ។"
 }
