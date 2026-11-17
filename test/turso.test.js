@@ -294,3 +294,29 @@ test('a part left out of the backup is deleted from the cloud, skipped from then
   assert.equal(count('SELECT COUNT(*) n FROM rex_events'), 2);
   await store.cloud.close(); store.close();
 });
+
+test('a full cloud space says so plainly, warns once at 80% and at 95%, and pauses file uploads without stopping the sync', async () => {
+  const store = new Store(mkdtempSync(path.join(os.tmpdir(), 'rex-desk-space-')));
+  const sync = new TursoSync(store, { clientFactory: fakeTurso().clientFactory, retryMs: 1000 });
+  try {
+    // The database hit its size limit: a plain message, the changes stay queued.
+    sync.fail(new Error('SQLite error: database size limit exceeded'));
+    assert.equal(sync.state, 'full'); assert.match(sync.error, /cloud space is full[\s\S]*stays on this computer/);
+    sync.fail(new Error('fetch failed'));
+    assert.equal(sync.state, 'offline', 'any other trouble is still offline');
+    // Warnings: once when crossing 80%, once when crossing 95%, again after it went back under.
+    const heard = []; sync.onSpace = level => heard.push(level);
+    let used = 0;
+    sync.account = { summary: () => null, signedIn: true, saved: { token: 'k' }, fetcher: async () => ({ ok: true, status: 200, json: async () => ({ plan: 'cloud', space: { paid: true, packs: 0, files: { used, limit: 1000 } } }) }), base: 'https://api.example' };
+    const look = async value => { used = value; sync.spaceAt = 0; await sync.checkSpace(); };
+    await look(500); await look(850); await look(870); await look(960); await look(980); await look(100); await look(820);
+    assert.deepEqual(heard, [80, 95, 80]);
+    assert.equal(sync.status().space.files.used, 820);
+    // Files: full means stop uploading files and say why; going back under lets them go on.
+    sync.files.full = true;
+    sync.files.hosted = () => true;
+    assert.match((await sync.files.backup()).skipped, /full/);
+    await look(100);
+    assert.equal(sync.files.full, false, 'room again: files go up again');
+  } finally { sync.close?.(); store.close(); }
+});

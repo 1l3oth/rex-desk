@@ -162,6 +162,13 @@ export class Desk {
     this.toolbox = toolbox || new Toolbox({ bundled: root ? path.join(root, 'skills') : '' });
     // Tools and skills differ by computer: the toolbox says which one it is, so nobody mixes two computers' lists.
     this.toolbox.computer = () => this.peers.self.name;
+    // Cloud space nearly full: said once in Rex Agent's chat, with what to do.
+    if (store.cloud) store.cloud.onSpace = (level, space) => {
+      const main = this.store.list('run').filter(run => run.role === 'coordinator' && run.main && run.computer === thisComputer()).at(-1) || this.store.list('run').filter(run => run.role === 'coordinator' && run.main).at(-1);
+      const gb = bytes => (bytes / 1024 ** 3).toFixed(bytes >= 1024 ** 3 ? 1 : 2);
+      const text = level >= 95 ? `**Your cloud space is almost full** (${gb(space.files.used)} of ${gb(space.files.limit)} GB). Chats and changes keep syncing; new files wait here until there is room. Add 5 GB on rexdesk.app/pricing, or delete big files you no longer need.` : `**Your cloud space is 80% full** (${gb(space.files.used)} of ${gb(space.files.limit)} GB). Nothing to do yet; when it fills up, new files wait on this computer. You can add 5 GB on rexdesk.app/pricing.`;
+      if (main) this.store.event(main.id, 'message', { text, cloudSpace: level }, true);
+    };
     this.projectRules = new ProjectRules(this);
     // A phone push opens Rex Desk on the phone when it can reach this computer (Tailscale and remote access on).
     this.notifier.pushClick = () => this.peers.settings().remote && this.port ? this.peers.addresses(this.port)[0] || '' : '';

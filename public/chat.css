@@ -2010,3 +2010,8 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .si-ways.si-ways-buttons{display:flex;flex-direction:column;gap:8px;margin:4px 0 14px}
 .si-way{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;min-height:44px;font-size:14.5px;font-weight:600;border-radius:12px}
 .si-way svg{width:18px;height:18px;flex:none}
+.st-space{flex:none;display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.st-space p{margin:0;font-size:13.5px;line-height:1.5}.st-space .btn{align-self:flex-start}
+.st-meter{height:8px;border-radius:999px;background:var(--line);overflow:hidden}.st-meter i{display:block;height:100%;background:var(--accent);border-radius:999px}
+.st-space.high .st-meter i{background:var(--warn)}.st-space.full .st-meter i{background:var(--bad)}.st-space.full{border-color:color-mix(in srgb,var(--bad) 45%,var(--line))}
+.st-space-note{color:var(--muted)}.st-space-actions{display:flex;gap:8px;flex-wrap:wrap}

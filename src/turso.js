@@ -7,7 +7,10 @@ import os from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { SHARED, BACKUP_PARTS } from './store.js';
 import { FileBackup } from './file-backup.js';
-import { AccountLink } from './rexdesk-account.js';
+import { AccountLink, accountMe } from './rexdesk-account.js';
+// A cloud database that hit its size limit answers with words like these.
+export const FULL = /size limit|SQLITE_FULL|database or disk is full|storage (quota|limit)|exceeded.*(storage|size)/i;
+export const SPACE_MS = 30 * 60000;
 import { development } from './folders.js';
 
 // A development copy (npm start) never writes to a cloud database unless asked with REX_DEV_CLOUD=1: the same database may
@@ -39,7 +42,7 @@ export class TursoSync {
     return { configured: this.enabled, url: this.connection?.url || '', state: this.state, error: this.error,
       pending: this.enabled ? Number(this.store.db.prepare('SELECT COUNT(*) AS total FROM cloud_outbox WHERE destination=?').get(this.connection.url).total) : 0,
       account: this.account.summary(), accountNote: this.account.ended || '',
-      lastSyncedAt: this.lastSyncedAt || '', workspace: this.workspace, parts: this.parts(), files: { error: this.files.error || '', restored: this.files.lastRestored || 0 } };
+      lastSyncedAt: this.lastSyncedAt || '', workspace: this.workspace, parts: this.parts(), files: { error: this.files.error || '', restored: this.files.lastRestored || 0, full: Boolean(this.files.full) }, space: this.space || null };
   }
   enqueue(sql, args) {
     if (!this.enabled) return;
@@ -140,7 +143,26 @@ export class TursoSync {
     this.timer.unref();
   }
   notify() { this.store.emit('change', { kind: 'database' }); }
+  // How full the account's cloud space is, asked of the account service now and then. At 80% and at 95% the person is told
+  // once (onSpace); when it goes back under, the next crossing tells them again.
+  async checkSpace(now = Date.now()) {
+    if (!this.account?.signedIn || this.closed || now - (this.spaceAt || 0) < SPACE_MS) return this.space || null;
+    this.spaceAt = now;
+    try {
+      const me = await accountMe(this.account.saved.token, this.account);
+      this.space = me.space ? { ...me.space, plan: me.plan, at: new Date(now).toISOString() } : null;
+      const files = this.space?.files || {}, share = files.limit ? files.used / files.limit : 0;
+      const level = share >= 0.95 ? 95 : share >= 0.8 ? 80 : 0, before = this.store.get('meta', 'cloud-space-level')?.level || 0;
+      if (level !== before) this.store.put('meta', 'cloud-space-level', { level });
+      if (level > before) this.onSpace?.(level, this.space);
+      // Room again: file uploads go on.
+      if (share < 1 && this.files.full) { this.files.full = false; void this.files.run?.(); }
+      this.notify();
+    } catch { /* asked again later */ }
+    return this.space;
+  }
   fail(error) {
+    if (FULL.test(String(error?.message || error))) { this.state = 'full'; this.error = 'Your cloud space is full. Everything stays on this computer, and the changes upload by themselves once there is room. Add space on rexdesk.app.'; this.notify(); return; }
     this.state = 'offline';
     this.error = String(error.message || error).replaceAll(this.connection?.authToken || '\0', '[redacted]').replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]');
     this.notify();
@@ -196,6 +218,8 @@ export class TursoSync {
     } catch (error) { this.ready = false; this.fail(error); }
     // Retry even when the first connection fails, so an offline start catches up without a restart.
     if (!this.retryTimer && !this.closed) { this.retryTimer = setInterval(() => void this.retry(), this.retryMs); this.retryTimer.unref(); }
+    void this.checkSpace();
+    if (!this.spaceTimer && !this.closed) { this.spaceTimer = setInterval(() => void this.checkSpace(), SPACE_MS); this.spaceTimer.unref(); }
     if (!this.filesTimer && !this.closed) { this.filesTimer = setInterval(() => void this.files.run(), Math.max(this.retryMs, 120000)); this.filesTimer.unref(); }
     return this.status();
   }

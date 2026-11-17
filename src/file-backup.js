@@ -121,10 +121,17 @@ export class FileBackup {
     if (!this.hosted()) return { uploaded: 0, skipped: 'Files are kept only with a Rex Desk account backup.' };
     const { store } = this.sync;
     const index = this.index() || { files: {} }; let uploaded = 0;
+    if (this.full) return { uploaded: 0, skipped: 'Your cloud space is full; files wait here until there is room.' };
     for (const item of this.walk()) {
       if (index.files[item.key] === item.stamp) continue;
       let data; try { data = readFileSync(item.file); } catch { continue; }
-      await this.sync.account.putFile(this.remoteKey(item.key), Buffer.from(store.encryptBytes(data), 'base64'));
+      try { await this.sync.account.putFile(this.remoteKey(item.key), Buffer.from(store.encryptBytes(data), 'base64')); }
+      catch (error) {
+        if (error.code !== 'quota' && error.status !== 413) throw error;
+        // Full: stop here; what went up stays recorded, the rest waits. Chats keep syncing, they are not files.
+        this.full = true; this.error = error.message; this.saveIndex(index); this.sync.notify?.();
+        return { uploaded, skipped: error.message };
+      }
       index.files[item.key] = item.stamp; uploaded += 1;
       if (uploaded % 20 === 0) this.saveIndex(index);
     }

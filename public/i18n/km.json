@@ -2108,5 +2108,16 @@
  "{0} Continue with Google": "{0} បន្តជាមួយ Google",
  "{0} Continue with GitHub": "{0} បន្តជាមួយ GitHub",
  "{0} Continue with email": "{0} បន្តជាមួយអ៊ីមែល",
- "Linking your computers and cloud backup are part of a paid plan. Buy it on rexdesk.app, then sign in again here.": "ការភ្ជាប់កុំព្យូទ័ររបស់អ្នក និងការបម្រុងទុកលើពពក ជាផ្នែកនៃគម្រោងបង់ប្រាក់។ ទិញវានៅ rexdesk.app រួចចូលម្តងទៀតនៅទីនេះ។"
+ "Linking your computers and cloud backup are part of a paid plan. Buy it on rexdesk.app, then sign in again here.": "ការភ្ជាប់កុំព្យូទ័ររបស់អ្នក និងការបម្រុងទុកលើពពក ជាផ្នែកនៃគម្រោងបង់ប្រាក់។ ទិញវានៅ rexdesk.app រួចចូលម្តងទៀតនៅទីនេះ។",
+ "Cloud backup is a paid plan": "ការបម្រុងទុកលើពពក ជាគម្រោងបង់ប្រាក់",
+ "Your desk works fully on this computer. To keep it safe in the cloud and the same on all your computers, buy cloud backup.": "តុការងាររបស់អ្នកដំណើរការពេញលេញលើកុំព្យូទ័រនេះ។ ដើម្បីរក្សាវាឱ្យមានសុវត្ថិភាពលើពពក និងដូចគ្នាលើគ្រប់កុំព្យូទ័ររបស់អ្នក សូមទិញការបម្រុងទុកលើពពក។",
+ "See plans": "មើលគម្រោង",
+ "Cloud space": "ទំហំលើពពក",
+ "{0} of {1} GB used": "បានប្រើ {0} នៃ {1} GB",
+ "{0} extra packs": "កញ្ចប់បន្ថែម {0}",
+ "ends at the end of this period": "បញ្ចប់នៅចុងរយៈពេលនេះ",
+ "Cloud space used": "ទំហំលើពពកដែលបានប្រើ",
+ "Almost full. Chats and changes keep syncing; new files wait on this computer until there is room.": "ជិតពេញហើយ។ ការជជែក និងការផ្លាស់ប្តូរនៅតែធ្វើសមកាលកម្ម ឯកសារថ្មីរង់ចាំលើកុំព្យូទ័រនេះ រហូតដល់មានកន្លែង។",
+ "Add 5 GB": "បន្ថែម 5 GB",
+ "Manage plan": "គ្រប់គ្រងគម្រោង"
 }
