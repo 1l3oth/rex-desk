@@ -1872,33 +1872,101 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .side-empty svg{width:34px;height:34px;color:var(--faint,var(--muted));opacity:.8}
 .side-empty p{margin:0;font-size:13px;line-height:1.55;max-width:30ch}
 
-/* Agents online: the person's agents on the internet, and their conversations with other people's agents. */
-.net-page{padding-top:16px;padding-bottom:28px}
-.net-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px;align-items:start}
-.net-card{display:flex;flex-direction:column;gap:10px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
-.net-card header,.net-view header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.net-handle{color:var(--muted);font-size:12.5px}
-.net-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.net-row input{flex:1;min-width:140px}
-.net-field{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}.net-field.narrow{max-width:180px}
-.net-field :is(input,select,textarea),.net-row input{font:inherit;font-size:13.5px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
-.net-field textarea{resize:vertical;line-height:1.45}
-.net-card code{font-size:11.5px;word-break:break-all}
-.net-code{margin:0;padding:10px 12px;border-radius:10px;background:var(--raised);font-size:13px}.net-code b{font-size:17px;letter-spacing:.08em;margin:0 6px}
-.net-links{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}.net-links li{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
-.chip.good{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}.chip.warn{background:color-mix(in srgb,var(--warn,#c98a1b) 20%,transparent);color:var(--warn,#c98a1b)}
+
+/* ---- Agents online: the person's agents on the internet. A list of agents and conversations on the left, the one picked
+   on the right. Amber only for what waits on the person; green for online and linked; the accent for the live talk. ---- */
+.feed-inner:has(> .page.na){max-width:none;padding-left:0;padding-right:0}
+.page.na{max-width:none;margin:0;padding:20px clamp(16px,2.5vw,32px) 32px;display:grid;grid-template-columns:300px minmax(0,1fr);gap:20px;align-items:start}
+.na-rail{position:sticky;top:12px;display:flex;flex-direction:column;gap:18px;max-height:calc(100dvh - 120px);overflow:auto;padding-right:2px}
+.na-group{display:flex;flex-direction:column;gap:2px}
+.na-label{display:flex;align-items:center;gap:6px;margin:0 0 4px;padding:0 8px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);list-style:none;cursor:default}
+.na-past>summary{cursor:pointer}.na-past>summary::-webkit-details-marker{display:none}
+.na-count{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--raised);color:var(--muted);font-size:11px;letter-spacing:0;font-variant-numeric:tabular-nums}
+.na-count.owed{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.na-row{display:flex;align-items:center;gap:10px;width:100%;min-height:36px;padding:6px 8px;border:0;border-radius:8px;background:none;text-align:left;color:var(--ink)}
+.na-row:hover{background:var(--raised)}.na-row.on{background:color-mix(in srgb,var(--accent) 13%,transparent)}
+.na-row:focus-visible,.na-choice:focus-visible,.na-icon-btn:focus-visible,.na-switch button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.na-row b{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.na-row.two{align-items:flex-start;padding:8px}
+.na-row-text{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+.na-row-top{display:flex;align-items:baseline;gap:6px;min-width:0}
+.na-row-sub{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.na-meta{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.na-handle{font:12px var(--mono);color:var(--muted)}
+.na-pip{width:8px;height:8px;margin-top:6px;border-radius:50%;background:var(--warn);flex:none}
+.na-dot{width:8px;height:8px;border-radius:50%;flex:none;background:transparent;box-shadow:inset 0 0 0 1.5px var(--muted)}.na-dot.on{background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 18%,transparent)}
+.na-mark{display:grid;place-items:center;width:30px;height:30px;flex:none;border-radius:9px;background:var(--raised);color:var(--muted);font-size:13px;font-weight:600}
+.na-mark.live{background:color-mix(in srgb,var(--accent) 16%,var(--panel));color:var(--accent)}.na-mark.owed{background:color-mix(in srgb,var(--warn) 18%,var(--panel));color:var(--warn)}
+.na-quiet{margin:0;padding:6px 8px;font-size:12.5px;color:var(--muted);line-height:1.5}
+.na-owed{margin:0;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--warn) 12%,var(--panel));font-size:12.5px;line-height:1.5}
+
+.na-detail{display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+.na-head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.na-head .na-mark{width:38px;height:38px;border-radius:11px;font-size:15px}
+.na-title{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+.na-title h2{margin:0;font-size:15px;font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.na-title p,.na-title>span{margin:0;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.na-head-actions{display:flex;gap:6px;flex:none}
+.na-tag{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:11px;background:var(--raised);color:var(--muted);font-size:11.5px;font-weight:500;white-space:nowrap;flex:none}
+.na-tag.live{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}.na-tag.owed{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.na-tag.done{background:color-mix(in srgb,var(--good) 14%,transparent);color:var(--good)}.na-tag.bad{background:color-mix(in srgb,var(--bad) 13%,transparent);color:var(--bad)}
 .btn.danger{color:var(--bad)}
-.net-split{display:grid;grid-template-columns:minmax(240px,340px) minmax(0,1fr);gap:14px;align-items:start;margin-bottom:22px}
-.net-list{display:flex;flex-direction:column;gap:6px}
-.net-thread{display:grid;grid-template-columns:1fr auto;gap:2px 8px;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:inherit}
-.net-thread:hover,.net-thread.on{background:var(--raised)}.net-thread.needs{border-color:var(--warn,#c98a1b)}
-.net-thread .net-last{grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.net-view{display:flex;flex-direction:column;gap:12px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0}
-.net-msgs{display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto;padding-right:4px}
-.net-msg{max-width:82%;padding:8px 11px;border-radius:12px;background:var(--raised);align-self:flex-start}.net-msg p{margin:0;white-space:pre-wrap;word-break:break-word;font-size:13.5px;line-height:1.5}
-.net-msg.us,.net-msg.owner{align-self:flex-end;background:color-mix(in srgb,var(--accent) 16%,var(--panel))}
-.net-msg.owner-note{align-self:flex-end;background:none;border:1px dashed var(--line)}
-.net-msg.system{align-self:center;background:none;color:var(--muted);font-size:12px;padding:2px 8px}
-.net-from{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:2px}
-.net-controls{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:12px}
-.net-why{margin:0 0 4px;padding:9px 12px;border-radius:10px;background:color-mix(in srgb,var(--warn,#c98a1b) 14%,transparent);font-size:13px}
-@media (max-width:820px){.net-split{grid-template-columns:1fr}.net-grid{grid-template-columns:1fr}.net-msg{max-width:94%}}
+
+/* A conversation reads like a chat: theirs on the left, yours on the right, your private notes dashed, the system centred. */
+.na-msgs{display:flex;flex-direction:column;gap:10px;padding:18px;max-height:min(56vh,560px);min-height:180px;overflow:auto;background:var(--bg)}
+.na-msg{display:flex;flex-direction:column;gap:3px;max-width:min(78%,620px);align-self:flex-start}
+.na-msg p{margin:0;padding:9px 13px;border-radius:14px 14px 14px 4px;background:var(--panel);border:1px solid var(--line);font-size:13.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.na-msg.us,.na-msg.owner,.na-msg.owner-note{align-self:flex-end;align-items:flex-end}
+.na-msg.us p{border-radius:14px 14px 4px 14px;background:var(--mine);border-color:transparent}
+.na-msg.owner p{border-radius:14px 14px 4px 14px;background:var(--accent);border-color:transparent;color:var(--accent-ink)}
+.na-msg.owner-note p{border-radius:14px 14px 4px 14px;background:transparent;border-style:dashed;color:var(--muted)}
+.na-by{display:inline-flex;align-items:center;gap:4px;padding:0 4px;font-size:11.5px;font-weight:600;color:var(--muted)}
+.na-lock{display:inline-flex}.na-lock svg{width:12px;height:12px}
+.na-sys{align-self:center;margin:2px 0;padding:3px 10px;border-radius:10px;background:var(--raised);font-size:12px;color:var(--muted)}
+.na-decide{display:flex;flex-direction:column;gap:10px;margin:0;padding:14px 18px;border-top:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 9%,var(--panel))}
+.na-decide p{margin:0;font-size:13.5px;font-weight:500}
+.na-decide blockquote{margin:0;padding:8px 12px;border-radius:8px;background:var(--panel);font-size:13px;line-height:1.5}
+.na-decide textarea{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font-size:13.5px;line-height:1.5;resize:vertical}
+.na-decide textarea:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+.na-actions{display:flex;gap:8px;flex-wrap:wrap}
+.na-compose{display:flex;flex-direction:column;gap:8px;padding:12px 18px 16px;border-top:1px solid var(--line)}
+.na-switch{display:inline-flex;align-self:flex-start;padding:2px;border-radius:9px;background:var(--bg);border:1px solid var(--line)}
+.na-switch button{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 11px;border:0;border-radius:7px;background:none;color:var(--muted);font-size:12.5px;font-weight:500}
+.na-switch button svg{width:13px;height:13px}.na-switch button.on{background:var(--panel);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.na-box{display:flex;align-items:flex-end;gap:8px;padding:6px 6px 6px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);transition:border-color .12s,box-shadow .12s}
+.na-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+.na-box :is(input,textarea){flex:1;min-width:0;border:0;outline:0;background:none;padding:5px 0;font-size:13.5px;line-height:1.45;resize:none;caret-color:var(--accent)}
+.na-box input{align-self:center}.na-box .btn{flex:none}
+.na-at{align-self:center;color:var(--muted);font:13px var(--mono);margin-right:-4px}
+.na-closed{margin:0;padding:14px 18px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+
+/* An agent: what to decide first (connect), then who may reach it and when it asks, then what it says. */
+.na-sec{display:flex;flex-direction:column;gap:10px;padding:16px 18px;border-top:1px solid var(--line)}.na-head+.na-sec{border-top:0}
+.na-sec h3{display:flex;align-items:center;gap:6px;margin:0;font-size:13.5px;font-weight:600}
+.na-hint{margin:0;font-size:12.5px;color:var(--muted);line-height:1.5}
+.na-start{max-width:560px}
+.na-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.na-pair-side{display:flex;flex-direction:column;gap:8px;align-items:flex-start;padding:12px 14px;border-radius:12px;background:var(--bg)}
+.na-pair-side h4{margin:0;font-size:12.5px;font-weight:600}.na-pair-side .na-box{align-self:stretch;background:var(--panel)}
+.na-code{display:flex;align-items:center;gap:6px;margin:0}.na-code span{font:600 15px var(--mono);letter-spacing:.14em;font-variant-numeric:tabular-nums}
+.na-ask{max-width:460px}
+.na-icon-btn{display:inline-grid;place-items:center;width:26px;height:26px;flex:none;border:0;border-radius:7px;background:none;color:var(--muted)}.na-icon-btn:hover{background:var(--raised);color:var(--ink)}
+.na-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.na-choice{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);text-align:left;color:var(--ink);transition:border-color .12s,background .12s}
+.na-choice:hover{border-color:color-mix(in srgb,var(--line) 50%,var(--muted))}
+.na-choice svg{color:var(--muted);margin-bottom:2px}.na-choice b{font-size:13px;font-weight:600}.na-choice span{font-size:12px;color:var(--muted);line-height:1.4}
+.na-choice.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--panel));box-shadow:0 0 0 1px var(--accent)}.na-choice.on svg{color:var(--accent)}
+.na-links{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.na-link{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)}.na-link:first-child{border-top:0;padding-top:0}
+.na-link .na-title b{font-size:13.5px;font-weight:500}
+.na-more{position:relative;flex:none}.na-more>summary{display:grid;place-items:center;width:28px;height:28px;border-radius:7px;color:var(--muted);cursor:pointer;list-style:none}.na-more>summary::-webkit-details-marker{display:none}.na-more>summary:hover{background:var(--raised)}
+.na-more>div{position:absolute;right:0;top:32px;z-index:5;display:flex;flex-direction:column;gap:4px;padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:0 12px 32px rgba(0,0,0,.28)}
+.na-field{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--muted)}.na-field.na-narrow{max-width:200px}
+.na-field :is(input,textarea){width:100%;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:13.5px;line-height:1.45;resize:vertical;caret-color:var(--accent)}
+.na-field :is(input,textarea):focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+.na-folder{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;border-radius:10px;background:var(--bg);font-size:12.5px;color:var(--muted)}
+.na-folder code{font:12px var(--mono);color:var(--ink);overflow-wrap:anywhere}
+.na-empty{align-items:center;justify-content:center;gap:10px;min-height:320px;color:var(--muted);text-align:center}.na-empty svg{width:30px;height:30px}.na-empty p{margin:0;max-width:34ch;font-size:13px}
+@media (max-width:980px){.na-choices{grid-template-columns:1fr}.na-pair{grid-template-columns:1fr}}
+@media (max-width:820px){.page.na{grid-template-columns:1fr}.na-rail{position:static;max-height:none}.na-msg{max-width:92%}.na-head{flex-wrap:wrap}}
+@media (prefers-reduced-motion:reduce){.na-box,.na-choice{transition:none}}
