@@ -2097,5 +2097,7 @@
  "No team task yet. Ask {0} to hand work to your other agents, like \"ask Dev to build it and QA to check it\".": "មិនទាន់មានការងារក្រុមទេ។ សុំឱ្យ {0} ចែកការងារទៅភ្នាក់ងារផ្សេងទៀតរបស់អ្នក ដូចជា \"សុំឱ្យ Dev សាងវា ហើយ QA ពិនិត្យវា\"។",
  "Team{0}": "ក្រុម{0}",
  "Write the answer first.": "សរសេរចម្លើយជាមុនសិន។",
- "Canceled.": "បានបោះបង់។"
+ "Canceled.": "បានបោះបង់។",
+ "Search {0} skills": "ស្វែងរកក្នុងជំនាញ {0}",
+ "Search skills": "ស្វែងរកជំនាញ"
 }

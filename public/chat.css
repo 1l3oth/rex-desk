@@ -2000,3 +2000,9 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .tm-result summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.tm-result p{margin:6px 0 0;font-size:13px;line-height:1.5;white-space:pre-wrap;max-height:220px;overflow:auto}
 .tm-cancel{align-self:flex-start}
 @media (prefers-reduced-motion:no-preference){.tm-dot.live{animation:tm-pulse 1.8s ease-in-out infinite}}@keyframes tm-pulse{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 10%,transparent)}}
+.st-panel :is(.tb-list,.tb-add,.tb-alert,.tb-filter){flex:none}
+.tb-list .tb-row[hidden]{display:none}
+.st-panel .tb-filter{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:13.5px;margin:0 0 8px}
+.st-panel .tb-filter:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+.st-panel .tb-filter+.tb-list{max-height:460px;overflow:auto}
+.tb-text .tb-status{align-items:flex-start;overflow-wrap:anywhere}.tb-status i{margin-top:6px}

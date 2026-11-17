@@ -270,10 +270,11 @@ ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay
       return `<h2>${t`Tools and skills`}</h2><p class="muted">${t`Everything your agents can use on this computer. They do not carry it all in every chat: they search it when a task needs it, which keeps each chat small.`}</p>
       ${broken ? `<p class="tb-alert" role="status">${t`${broken} need a look. Each one says what is wrong below.`}</p>` : ''}
       <h3 class="st-sub">${t`MCP servers`} <span class="cnt">${box.servers.length}</span></h3>
-      ${list(box.servers.map(item => row(item.name, item.how, item.removable ? 'remove-server' : '', item.name, `${item.error ? status(true, t`Not working: ${item.error}`) : status(false, t`Working · ${item.tools} tools`)}`)), t`No MCP server yet.`)}
+      ${list([...box.servers].sort((a, b) => Boolean(b.error) - Boolean(a.error)).map(item => row(item.name, item.how, item.removable ? 'remove-server' : '', item.name, `${item.error ? status(true, t`Not working: ${item.error}`) : status(false, t`Working · ${item.tools} tools`)}`)), t`No MCP server yet.`)}
       <div class="tb-add"><input name="tb-name" placeholder="${t`Name, like slack`}" autocomplete="off" aria-label="${t`Name`}"><input name="tb-how" placeholder="${t`Command (npx -y @scope/server) or https address`}" autocomplete="off" aria-label="${t`Command or address`}"><button type="button" class="btn small primary" data-st-tb="add-server"${busy ? ' disabled' : ''}>${t`Add`}</button></div>
       <h3 class="st-sub">${t`Skills`} <span class="cnt">${box.skills.length}</span></h3>
-      ${list(box.skills.map(item => row(item.name, item.description, item.removable ? 'remove-skill' : '', item.name, item.error ? status(true, item.error) : '')), t`No skill yet.`)}
+      ${box.skills.length > 8 ? `<input class="tb-filter" type="search" name="tb-filter" placeholder="${t`Search ${box.skills.length} skills`}" aria-label="${t`Search skills`}" autocomplete="off">` : ''}
+      ${list([...box.skills].sort((a, b) => Boolean(b.error) - Boolean(a.error)).map(item => row(item.name, item.description, item.removable ? 'remove-skill' : '', item.name, item.error ? status(true, item.error) : '')), t`No skill yet.`)}
       <div class="tb-add"><input name="tb-skill" placeholder="${t`A skill folder, or a git address`}" autocomplete="off" aria-label="${t`Skill folder or git address`}"><button type="button" class="btn small primary" data-st-tb="add-skill"${busy ? ' disabled' : ''}>${t`Add`}</button></div>
       <h3 class="st-sub">${t`Commands`} <span class="cnt">${box.commands.length}</span></h3>
       ${list(box.commands.map(item => row(`/${item.name}`, item.description, 'remove-command', item.name)), t`No command yet.`)}
@@ -431,7 +432,11 @@ ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay
     } catch (error) { toast(error.message, true); back.querySelector('[data-st-save]')?.removeAttribute('disabled'); }
   });
   back.addEventListener('keydown', event => { if (event.key === 'Escape' && !document.body.classList.contains('driver-active')) back.remove(); });
-  back.addEventListener('input', event => { trackerInput(back, state, event, draw); });
+  back.addEventListener('input', event => {
+    // Tools and skills: the search box narrows the skill list as you type, with no redraw.
+    if (event.target.matches?.('[name="tb-filter"]')) { const words = event.target.value.trim().toLowerCase(); for (const row of event.target.nextElementSibling?.querySelectorAll('.tb-row') || []) row.hidden = Boolean(words) && !row.textContent.toLowerCase().includes(words); return; }
+    trackerInput(back, state, event, draw);
+  });
   back.addEventListener('change', event => { trackerInput(back, state, event, draw); });
   back.addEventListener('toggle', event => { const card = event.target.dataset?.trCard; if (card && event.target.open) state.openTracker = card; }, true);
   // A backup part saves at once; turning one off asks first, because it deletes that part from the cloud.

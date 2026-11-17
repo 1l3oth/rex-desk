@@ -31,6 +31,7 @@ export function skillFolders({ home = os.homedir(), project = '', bundled = '' }
 export function listSkills(folders) {
   const found = new Map();
   for (const folder of folders) for (const entry of readdirSync(folder)) {
+    if (entry.startsWith('.')) continue;
     const file = path.join(folder, entry, 'SKILL.md');
     let isFolder = false; try { isFolder = statSync(path.join(folder, entry)).isDirectory(); } catch { /* a broken link */ }
     if (!isFolder) continue;
@@ -87,7 +88,7 @@ export class Toolbox {
       const list = tools.map(tool => ({ server: name, name: tool.name, description: String(tool.description || '').trim(), inputSchema: tool.inputSchema || { type: 'object' }, readOnly: Boolean(tool.annotations?.readOnlyHint) }));
       this.lists.set(name, { at: Date.now(), config, tools: list }); this.failed.delete(name);
       return list;
-    } catch (error) { this.failed.set(name, { at: Date.now(), error: error.message }); await this.close(name); return known?.tools || []; }
+    } catch (error) { this.failed.set(name, { at: Date.now(), error: plainError(error.message) }); await this.close(name); return known?.tools || []; }
   }
   async catalog(project = '') {
     const servers = this.servers(project);
@@ -214,4 +215,14 @@ export const splitCommand = text => [...String(text).matchAll(/"([^"]*)"|'([^']*
 function runClaude(args) {
   const claude = resolveCommand('claude');
   return new Promise((resolve, reject) => execFile(claude.command, [...claude.args, ...args], { windowsHide: true, timeout: 60000 }, (error, stdout, stderr) => error ? reject(new Error(String(stderr || stdout || error.message).trim().split('\n')[0])) : resolve(stdout)));
+}
+
+// What a server's failure means, in a line: its own message when it sent one ("Invalid API key"), not the transport's wrapping.
+export function plainError(text) {
+  const raw = String(text || '').trim(), inner = raw.match(/"message"\s*:\s*"([^"]+)"/)?.[1];
+  const said = (inner || raw).replace(/^(Streamable HTTP error|SSE error|McpError):\s*/i, '').replace(/^Error POSTing to endpoint:\s*/i, '').replace(/^MCP error -?\d+:\s*/i, '');
+  if (/ENOENT|not recognized|cannot find|spawn .* ENOENT/i.test(raw)) return 'Its command is not installed on this computer.';
+  if (/ECONNREFUSED|fetch failed|ENOTFOUND|getaddrinfo/i.test(raw)) return 'Its address cannot be reached.';
+  if (/^unauthorized/i.test(said) || /\b401\b/.test(raw)) return `The server refused the key: ${said.replace(/^unauthorized:?\s*/i, '') || 'not signed in'}.`.replace(/\.\.$/, '.');
+  return said.slice(0, 160);
 }
