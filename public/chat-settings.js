@@ -12,13 +12,22 @@ import { loadTourAi, aiListHtml, tourAiClick } from '/chat-tour-ai.js';
 // The plan, bought and managed right here with the account this computer is signed in to: Stripe's payment page opens in the
 // browser, already knowing who pays, and the plan shows here by itself once it is paid.
 function planCard(database, state) {
-  const billing = state.extra.billing, space = billing?.space || database.space;
-  if (!billing?.signedIn || !space) return '';
-  const files = space.files || {}, share = files.limit ? Math.min(1, files.used / files.limit) : 0, gb = bytes => (bytes / 1024 ** 3).toFixed(bytes >= 1024 ** 3 ? 1 : 2), busy = state.extra.billingBusy;
-  if (!space.paid) return `<div class="st-space st-plan"><p><b>${t`Cloud backup`}</b> ${t`Keep your whole desk safe in the cloud and the same on all your computers. 1 GB of files, more when you need it.`}</p>
+  const billing = state.extra.billing; if (!billing) return '';
+  const busy = state.extra.billingBusy;
+  if (!billing.signedIn) return `<div class="st-space st-plan"><p><b>${t`Your plan`}</b> ${t`Sign in with your Rex Desk account to see your plan, buy cloud backup or add space.`}</p><div class="st-space-actions"><button type="button" class="btn small primary" data-st-plan-signin ${busy ? 'disabled' : ''}>${t`Sign in with Rex Desk`}</button></div></div>`;
+  const space = billing.space || database.space; if (!space) return '';
+  const files = space.files || {}, share = files.limit ? Math.min(1, files.used / files.limit) : 0, gb = bytes => (bytes / 1024 ** 3).toFixed(bytes >= 1024 ** 3 ? 1 : 2);
+  if (!space.paid) return `<div class="st-space st-plan"><p><b>${t`Your plan: Free`}</b> ${t`Keep your whole desk safe in the cloud and the same on all your computers. 1 GB of files, more when you need it.`}</p>
     ${state.extra.billingWaiting ? `<p class="st-space-note">${t`Finish paying in the browser. Cloud backup turns on here by itself.`}</p>` : ''}
     <div class="st-space-actions"><button type="button" class="btn primary small" data-st-buy="month" ${busy ? 'disabled' : ''}>${t`$2.99 a month`}</button><button type="button" class="btn small" data-st-buy="year" ${busy ? 'disabled' : ''}>${t`$24 a year`}</button></div></div>`;
-  return `<div class="st-space${share >= 0.95 ? ' full' : share >= 0.8 ? ' high' : ''}"><p><b>${t`Cloud space`}</b> ${t`${gb(files.used || 0)} of ${gb(files.limit || 0)} GB used`}${space.packs ? ` · ${t`${space.packs} extra packs`}` : ''}${space.endsAtPeriodEnd ? ` · ${t`ends at the end of this period`}` : ''}</p><div class="st-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(share * 100)}" aria-label="${t`Cloud space used`}"><i style="width:${(share * 100).toFixed(1)}%"></i></div>${share >= 0.95 ? `<p class="st-space-note">${t`Almost full. Chats and changes keep syncing; new files wait on this computer until there is room.`}</p>` : ''}
+  // What was bought: the plan, how often it is paid and what it costs, when it renews (or ends), and the extra space.
+  const yearly = space.interval === 'year', date = space.renews ? new Date(space.renews).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  const price = space.interval ? (yearly ? t`Yearly, $24` : t`Monthly, $2.99`) : t`Given by Rex Desk`;
+  const amount = space.interval ? (yearly ? 24 + 10 * (space.packs || 0) : 2.99 + (space.packs || 0)).toFixed(2).replace(/\.00$/, '') : '';
+  const when = date ? (space.endsAtPeriodEnd ? t`Ends ${date}` : amount ? t`Next payment ${`$${amount}`} on ${date}` : t`Renews ${date}`) : '';
+  const packs = space.packs ? t`+${space.packs * 5} GB extra (${space.packs} ${space.packs === 1 ? t('pack') : t('packs')})` : '';
+  return `<div class="st-space st-plan${share >= 0.95 ? ' full' : share >= 0.8 ? ' high' : ''}"><p><b>${t`Your plan: Cloud backup`}</b> ${String([price, when, packs].filter(Boolean).join(' · ')).replace(/[<>&"]/g, '')}</p>
+    <p>${t`${gb(files.used || 0)} of ${gb(files.limit || 0)} GB used`}</p><div class="st-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(share * 100)}" aria-label="${t`Cloud space used`}"><i style="width:${(share * 100).toFixed(1)}%"></i></div>${share >= 0.95 ? `<p class="st-space-note">${t`Almost full. Chats and changes keep syncing; new files wait on this computer until there is room.`}</p>` : ''}
     <div class="st-space-actions"><button type="button" class="btn small${share >= 0.8 ? ' primary' : ''}" data-st-pack ${busy ? 'disabled' : ''}>${t`Add 5 GB`}</button><button type="button" class="btn small" data-st-manage ${busy ? 'disabled' : ''}>${t`Manage plan`}</button></div></div>`;
 }
 const SECTIONS = [
@@ -35,6 +44,7 @@ const SECTIONS = [
   ['signins', t('Test sign-ins'), t('Accounts agents use in previews')],
   ['tools', t('Tools and skills'), t('MCP servers, skills, commands, hooks')],
   ['devices', t('Devices and phone'), t('Your other computers, your phone')],
+  ['plan', t('Plan and billing'), t('Your plan, space, payments')],
   ['backup', t('Backup and updates'), t('Cloud copy, app updates')],
   ['connect', t('Connect another AI'), t('Let another assistant use Rex Desk')],
   ['about', t('About'), t('Version, storage and what it holds')],
@@ -44,7 +54,7 @@ const GROUPS = [
   [t('You'), ['general', 'notify', 'jev']],
   [t('Agents'), ['agents', 'accounts', 'localai', 'tools', 'schedule', 'signins']],
   [t('Work'), ['projects', 'sources', 'connect']],
-  [t('Data and devices'), ['folders', 'backup', 'devices', 'about']],
+  [t('Data and devices'), ['plan', 'folders', 'backup', 'devices', 'about']],
 ];
 // An icon for each section, shown in the phone's list of sections.
 const ST_ICON = {
@@ -62,6 +72,7 @@ const ST_ICON = {
   schedule: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   signins: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
   devices: '<rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1"/>',
+  plan: '<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M6.5 15h4"/>',
   backup: '<path d="M7 18a5 5 0 1 1 .9-9.9A6 6 0 0 1 19 10a4 4 0 0 1-1 7.9"/><path d="M12 12v8M9 15l3-3 3 3"/>',
   connect: '<path d="M9 15l6-6M10 6l1-1a4.2 4.2 0 0 1 6 6l-1 1M14 18l-1 1a4.2 4.2 0 0 1-6-6l1-1"/>',
 };
@@ -265,12 +276,13 @@ export function openSettings(ctx, section = 'general') {
       ${signins().map((account, index) => `<div class="st-signin"><input name="ta.${index}.site" value="${esc(account.site || '')}" placeholder="${t`Site, like localhost or staging.example.com`}" aria-label="${t`Site`}"><input name="ta.${index}.username" value="${esc(account.username || '')}" placeholder="${t`User name or email`}" aria-label="${t`User name`}"><input type="password" name="ta.${index}.password" value="${esc(account.password || '')}" placeholder="${account.hasPassword ? t('Saved') : t('Password')}" aria-label="${t`Password`}" autocomplete="new-password"><button type="button" class="ag-x" data-st-signin-remove="${index}" aria-label="${t`Remove this sign-in`}">×</button></div>`).join('')}
       <button type="button" class="btn small" data-st-signin-add>${t`+ Add a sign-in`}</button>`,
     devices: () => `<h2>${t`Devices and phone`}</h2><p class="muted">${t`Use Rex Desk on your phone and your other computers over Tailscale. The Devices page has the QR code for your phone.`}</p>${tip('devices', t('Scan the QR code once with your phone, so you can answer agents from anywhere.'))}<button type="button" class="btn primary" data-st-go="devices">${t`Open Devices`}</button>`,
+    plan: () => `<h2>${t`Plan and billing`}</h2>${planCard(ui.snap.database || {}, state) || `<p class="muted">${t`Loading…`}</p>`}<p class="muted">${t`Payments, receipts and your card are handled by Stripe. Manage plan opens your Stripe page, where you can switch between monthly and yearly, change the card, see receipts or cancel.`}</p>`,
     backup: () => { const database = ui.snap.database || {}, update = ui.snap.update || {}, account = database.account, hosted = Boolean(account && account.url === database.url); return `<h2>${t`Backup and updates`}</h2>
       ${tip('backup', t('Sign in with your Rex Desk account to back up, and your agents and chats follow you to your other computers.'))}
-      <h3>${t`Cloud backup`}</h3><p>${esc((hosted ? { connected: t('Backed up with your Rex Desk account.'), syncing: t('Uploading your backup…'), connecting: t('Connecting to your backup…'), offline: t('Your backup is offline; changes wait and upload later.'), error: t('Your backup needs attention.') } : { connected: t('Copied to your Turso database.'), syncing: t('Uploading to Turso…'), connecting: t('Connecting to Turso…'), offline: t('Turso is offline; changes wait and upload later.'), error: t('Turso needs attention.') })[database.state] || t('Kept on this computer only.'))}${database.pending ? t` ${Number(database.pending)} changes waiting.` : ''}</p>
+      <h3>${t`Cloud backup`}</h3>${planCard(database, state)}<p>${esc((hosted ? { connected: t('Backed up with your Rex Desk account.'), syncing: t('Uploading your backup…'), connecting: t('Connecting to your backup…'), offline: t('Your backup is offline; changes wait and upload later.'), error: t('Your backup needs attention.') } : { connected: t('Copied to your Turso database.'), syncing: t('Uploading to Turso…'), connecting: t('Connecting to Turso…'), offline: t('Turso is offline; changes wait and upload later.'), error: t('Turso needs attention.') })[database.state] || t('Kept on this computer only.'))}${database.pending ? t` ${Number(database.pending)} changes waiting.` : ''}</p>
       ${account ? `<div class="st-account st-cloud-account"><span class="si-avatar">${esc((account.name || account.email || '?')[0].toUpperCase())}</span><span><b>${esc(account.name || account.email)}</b><small>${esc(hosted ? t`Rex Desk account${account.name ? ` · ${account.email}` : ''}. This computer renews its backup key by itself.` : t`Rex Desk account${account.name ? ` · ${account.email}` : ''}. Signed in, but the backup uses another database.`)}</small></span><button type="button" class="btn small" data-st-account-out>${t`Sign out`}</button></div>` : ''}
       ${database.configured ? '' : `<div class="st-cloud">${CLOUD_ART}<div class="st-cloud-head"><b>${t`Back up with your Rex Desk account`}</b><small>${t`Your whole desk, kept safe in the cloud and ready on every computer you sign in on.`}</small></div><ul class="st-cloud-why">${CLOUD_WHY.map(([icon, title, text]) => `<li><span class="st-cloud-why-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span><span><b>${title}</b><small>${text}</small></span></li>`).join('')}</ul><button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || t('Sign in with Rex Desk'))}</button><p class="st-cloud-fine">${t`No account yet?`} <a href="https://rexdesk.app/signup" target="_blank" rel="noopener">${t`Create one on rexdesk.app`}</a></p></div>`}${database.accountNote ? `<p class="error-text" role="alert">${esc(database.accountNote)}</p>` : ''}${database.configured ? `<div class="st-actions"><button type="button" class="btn" data-st-db-sync>${t`Upload now and check`}</button></div>${backupPartsHtml(database.parts || {})}` : ''}
-${planCard(database, state)}
+
       ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay on this computer: only a Rex Desk account backup keeps them in the cloud.`}</p>` : ''}${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}
       <h3>${t`App updates`}</h3><p>${esc(update.supported ? t`This is Rex Desk ${[update.current, update.stage].filter(Boolean).join(' ')}. ` : '')}${esc(update.ready ? t`Version ${update.available?.version} is downloaded and checked.` : update.available ? t`Version ${update.available.version} is available.` : update.supported ? (update.checkedAt ? t('Rex Desk is up to date.') : t('Not checked yet.')) : t('This copy runs from source code and updates with Git.'))}</p>${update.error ? `<p class="error-text">${esc(update.error)}</p>` : ''}<div class="st-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${state.extra.checking ? 'disabled' : ''}>${state.extra.checking ? t('Checking…') : t('Check now')}</button>` : ''}${update.ready ? `<button type="button" class="btn primary" data-action="update-install">${t`Install and restart`}</button>` : ''}</div>`; },
     tools: () => {
@@ -311,7 +323,7 @@ ${planCard(database, state)}
   const saves = new Set(['general', 'agents', 'projects', 'sources', 'jev', 'schedule', 'signins']);
   const draw = () => {
     // Connect another AI shows whether A2A is on: read once when the section opens.
-    if (state.section === 'backup' && !state.extra.billing && !state.extra.billingLoading) { state.extra.billingLoading = true; void api('/billing').then(data => { state.extra.billing = data; state.extra.billingLoading = false; draw(); }).catch(() => { state.extra.billing = { signedIn: false }; state.extra.billingLoading = false; draw(); }); }
+    if ((state.section === 'backup' || state.section === 'plan') && !state.extra.billing && !state.extra.billingLoading) { state.extra.billingLoading = true; void api('/billing').then(data => { state.extra.billing = data; state.extra.billingLoading = false; draw(); }).catch(() => { state.extra.billing = { signedIn: false }; state.extra.billingLoading = false; draw(); }); }
     if (state.section === 'tools' && !state.extra.toolbox && !state.extra.toolboxLoading) { state.extra.toolboxLoading = true; void api('/toolbox').then(data => { state.extra.toolbox = data; draw(); }).catch(error => { state.extra.toolbox = { servers: [], skills: [], commands: [], hooks: [] }; toast(error.message, true); draw(); }); }
     if (state.section === 'connect' && !state.extra.a2a && !state.extra.a2aLoading) { state.extra.a2aLoading = true; void api('/a2a').then(data => { state.extra.a2a = data; draw(); }).catch(() => { state.extra.a2a = { enabled: false, addresses: [] }; draw(); }); }
     // A redraw of the same section keeps the place the person scrolled to (ticking a box used to jump back to the top).
@@ -410,6 +422,11 @@ ${planCard(database, state)}
       if (target.closest('[data-st-account-out]')) {
         if (!confirm(t('Sign this computer out of your Rex Desk account? The backup keeps working for up to 30 days, then stops until you sign in again.'))) return;
         await api('/database/account-signout', { method: 'POST' }); toast(t('Signed out of your Rex Desk account on this computer.')); await refresh(); draw(); return;
+      }
+      if (target.closest('[data-st-plan-signin]')) {
+        try { const { url } = await api('/net/sign-in', { method: 'POST' }); if (url) window.open(url, '_blank', 'noopener'); toast(t('Finish signing in in the browser. Your plan shows here by itself.')); const until = Date.now() + 5 * 60000; const look = async () => { const data = await api('/billing').catch(() => null); if (data?.signedIn) { state.extra.billing = data; draw(); return; } if (Date.now() < until) setTimeout(look, 3000); }; setTimeout(look, 3000); }
+        catch (error) { toast(error.message, true); }
+        return;
       }
       const buy = target.closest('[data-st-buy]')?.dataset.stBuy;
       if (buy || target.closest('[data-st-manage]')) {
