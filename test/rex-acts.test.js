@@ -47,6 +47,26 @@ test('Rex Agent makes a group chat, talks in it and in an agent\'s personal chat
   } finally { await client.close().catch(() => {}); await app.close(); }
 });
 
+test('a less-common Rex Desk tool is not loaded up front, but is found with desk_find and run with desk_run', async () => {
+  const app = await createApp({ dataDirectory: temporary('acts-defer'), port: 0, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  const client = new Client({ name: 'acts-defer', version: '1' });
+  try {
+    app.store.put('run', 'rex', { id: 'rex', role: 'coordinator', main: true, state: 'finished', createdAt: now() });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${app.address}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${app.desk.scopeToken('rex')}` } } }));
+    // Deferred tools are not in the directly loaded list.
+    const loaded = (await client.listTools()).tools.map(tool => tool.name);
+    assert.ok(!loaded.includes('desk_monitor'), 'desk_monitor is not loaded up front');
+    assert.ok(loaded.includes('desk_find') && loaded.includes('desk_run'), 'the search and run tools are loaded');
+    // desk_find offers the deferred tool by name, with its input shape.
+    const found = await result(client, 'desk_find', { query: 'what is using my computer memory right now' });
+    const hit = found.found.find(item => item.use === 'desk_monitor');
+    assert.ok(hit && hit.kind === 'rex', 'desk_find offers desk_monitor');
+    // desk_run calls it on the agent's behalf and returns its answer.
+    const ran = await result(client, 'desk_run', { use: 'desk_monitor', input: {} });
+    assert.ok(typeof ran.text === 'string', 'desk_run returns the deferred tool\'s result');
+  } finally { await client.close().catch(() => {}); await app.close(); }
+});
+
 test('only Rex Agent may act as the person', async () => {
   const app = await createApp({ dataDirectory: temporary('acts-scope'), port: 0, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
   const client = new Client({ name: 'acts-scope', version: '1' });

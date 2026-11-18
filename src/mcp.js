@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import { effectiveRepository } from './project-detect.js';
@@ -26,22 +27,48 @@ export function askSchema(input) {
     required: input.required || (input.fields ? [] : input.kind === 'question' ? ['answer'] : []) };
 }
 
+// Rex Desk's own tools that are rarely needed every turn: they are not loaded into the agent, only found and used through
+// desk_find/desk_run (the same search-and-execute path as the person's other tools), to keep the agent's context small and
+// cheap. Everything NOT listed here stays directly loaded, so the everyday and lifecycle tools are always in hand, and a
+// tool left off this list by mistake simply stays visible rather than going missing.
+export const DEFERRED_TOOLS = new Set([
+  'desk_computer', 'desk_computer_actions', 'desk_computer_screenshot',
+  'desk_net_contacts', 'desk_net_send',
+  'desk_monitor', 'desk_free_memory', 'desk_end_process',
+  'desk_worktree', 'desk_worktrees',
+  'desk_room_manage',
+  'desk_set_profile_photo', 'desk_second_brain', 'desk_set_task_sources', 'desk_confirm_workflow', 'desk_source_catalog',
+  'desk_browser', 'desk_run_for_me',
+  'desk_categorize', 'desk_update_agent',
+  'desk_tell_run', 'desk_close_run', 'desk_stop_run',
+]);
+
 export function createMcp(desk, scope) {
   const server = new McpServer({ name: 'rex-desk', version: '0.1.0' });
   const resolveRun = supplied => { const resolved = supplied || scope.runId; if (!resolved) throw new Error('Supply a runId.'); desk.authorize(scope, resolved); return resolved; };
-  const tool = (name, description, schema, handler, readOnly = false) => server.registerTool(name,
-    { description, inputSchema: schema, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, openWorldHint: false } },
-    async (input, extra) => {
-      // Every tool that waits for the person (a question, a file to fill in, a sign-in, an approval) keeps the call alive: a
-      // client that sent a progress token hears from it every 25 seconds. Claude Code ends a tool call that is silent for
-      // 5 minutes, which closed the file and sign-in cards while the person was still typing in them.
-      const token = extra?._meta?.progressToken;
-      let ticks = 0;
-      const alive = token === undefined ? null : setInterval(() => void extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: ++ticks, message: 'Waiting for the human in Rex Desk' } }).catch(() => {}), desk.keepAliveMs || 25000);
-      try { return reply(await handler(input, extra)); }
-      catch (error) { return { ...reply({ error: error.message }), isError: true }; }
-      finally { clearInterval(alive); }
-    });
+  // Deferred tools keep their handler and input shape here instead of being registered, so desk_find can offer them and
+  // desk_run can call them on the agent's behalf.
+  const deferred = new Map();
+  const keepAlive = extra => { const token = extra?._meta?.progressToken; let ticks = 0; return token === undefined ? null : setInterval(() => void extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: ++ticks, message: 'Waiting for the human in Rex Desk' } }).catch(() => {}), desk.keepAliveMs || 25000); };
+  const tool = (name, description, schema, handler, readOnly = false) => {
+    if (DEFERRED_TOOLS.has(name)) {
+      let json = { type: 'object' };
+      try { json = zodToJsonSchema(z.object(schema || {}), { $refStrategy: 'none' }); } catch { /* keep the plain shape */ }
+      deferred.set(name, { name, description, schema: schema || {}, handler, readOnly, json });
+      return;
+    }
+    return server.registerTool(name,
+      { description, inputSchema: schema, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, openWorldHint: false } },
+      async (input, extra) => {
+        // Every tool that waits for the person (a question, a file to fill in, a sign-in, an approval) keeps the call alive: a
+        // client that sent a progress token hears from it every 25 seconds. Claude Code ends a tool call that is silent for
+        // 5 minutes, which closed the file and sign-in cards while the person was still typing in them.
+        const alive = keepAlive(extra);
+        try { return reply(await handler(input, extra)); }
+        catch (error) { return { ...reply({ error: error.message }), isError: true }; }
+        finally { clearInterval(alive); }
+      });
+  };
   tool('desk_connect', 'Register an existing local or cloud AI conversation so it can send dashboard messages and ask questions. This does not start another agent.',
     { name: z.string().min(1).max(100), provider: z.enum(['claude', 'external']).default('external') }, input => {
       desk.authorize(scope, null, { coordinator: true });
@@ -355,14 +382,49 @@ export function createMcp(desk, scope) {
     input => { if (!scope?.runId) throw new Error('Only an agent in a chat can start a job.'); return desk.startHelper(scope.runId, input); });
   // The toolbox: every other MCP tool and skill on this computer, searched and used through these two instead of all loaded at once.
   const toolProject = () => { const run = scope.runId ? desk.store.get('run', scope.runId) : null; return run?.worktree || run?.projectPath || ''; };
-  tool('desk_find', 'Search the person\'s other MCP tools and skills (everything installed on this computer besides Rex Desk) by plain words, like "send a slack message", "read a pdf", "orbit tasks" or "khmer video". Returns the best matches with the "use" id and the input to give desk_run. Search first whenever a task needs a tool or skill you do not have.',
+  // Rank Rex Desk's own deferred tools against the search words, the same way desk_find ranks the person's other tools, so
+  // both show up together. The full input shape is given only for the top few, to keep the answer small.
+  const clipText = (text, size) => { const value = String(text || '').trim(); return value.length > size ? `${value.slice(0, size - 1)}…` : value; };
+  const findDeferred = (query, limit = 8) => {
+    const words = String(query || '').toLowerCase().match(/[a-z0-9]+/g) || [];
+    if (!words.length) return [];
+    const scored = [];
+    for (const [name, native] of deferred) {
+      const hay = `${name} ${native.description}`.toLowerCase();
+      let score = 0; for (const word of words) if (hay.includes(word)) score += name.toLowerCase().includes(word) ? 2 : 1;
+      if (score) scored.push({ name, native, score });
+    }
+    scored.sort((left, right) => right.score - left.score);
+    return scored.slice(0, Math.min(Number(limit) || 8, 8)).map((item, index) => ({
+      use: item.name, kind: 'rex', description: clipText(item.native.description, 400),
+      ...(index < 4 ? { input: item.native.json } : { input: 'Search again with its name to see its input.' }),
+      ...(item.native.readOnly ? { readOnly: true } : {}),
+    }));
+  };
+  tool('desk_find', 'Search for a tool or skill to use by plain words, like "send a slack message", "read a pdf", "control the computer", "open a file for the person to fill in", "orbit tasks" or "khmer video". This covers both the person\'s other MCP tools and skills (Slack, Orbit, design skills…) and Rex Desk\'s own less-common tools (computer control, sign-in, worktrees, rooms…) that are not loaded up front. Returns the best matches with the "use" id and the input to give desk_run. Search first whenever a task needs a tool you do not already see.',
     { query: z.string().min(2).max(300).describe('What you want to do, in a few words.'), kind: z.enum(['tool', 'skill', 'any']).default('any'), limit: z.number().int().min(1).max(20).default(8) },
-    input => desk.toolbox.find(input.query, { project: toolProject(), limit: input.limit, kind: input.kind === 'any' ? '' : input.kind }), true);
-  tool('desk_run', 'Use one tool or skill found with desk_find. For an MCP tool, Rex Desk calls it with your input and gives back its answer. For a skill (use "skill:name"), it gives back the skill\'s instructions: follow them.',
-    { use: z.string().min(3).max(200).describe('The "use" value from desk_find, like "orbit/tasks.next" or "skill:brag".'), input: z.record(z.any()).default({}).describe('The tool\'s input, shaped as desk_find showed. Leave empty for a skill.') },
     async input => {
+      const kind = input.kind === 'any' ? '' : input.kind;
+      const result = await desk.toolbox.find(input.query, { project: toolProject(), limit: input.limit, kind });
+      // Rex Desk's own deferred tools are not skills, so they only join a tool-or-any search.
+      if (kind !== 'skill') { const natives = findDeferred(input.query, input.limit); if (natives.length) { result.found = [...natives, ...(result.found || [])]; result.searched = `${result.searched}; plus ${deferred.size} built-in Rex Desk tools`; } }
+      return result;
+    }, true);
+  tool('desk_run', 'Use one tool or skill found with desk_find. For an MCP tool or a built-in Rex Desk tool, Rex Desk calls it with your input and gives back its answer. For a skill (use "skill:name"), it gives back the skill\'s instructions: follow them.',
+    { use: z.string().min(3).max(200).describe('The "use" value from desk_find, like "orbit/tasks.next", "desk_computer" or "skill:brag".'), input: z.record(z.any()).default({}).describe('The tool\'s input, shaped as desk_find showed. Leave empty for a skill.') },
+    async (input, extra) => {
       const run = scope.runId ? desk.store.get('run', scope.runId) : null, project = toolProject();
       if (run?.locked) throw new Error('This agent cannot use other tools.');
+      // A built-in Rex Desk tool that was not loaded up front: call its own handler, after the same approval a changing tool
+      // would get in a mode that asks first.
+      if (deferred.has(input.use)) {
+        const native = deferred.get(input.use);
+        if (!native.readOnly && run && !['bypassPermissions', 'acceptEdits', 'auto', ''].includes(run.permissionMode || '')) {
+          const answer = await desk.ask(scope.runId, { kind: 'approval', title: `Approve ${input.use}`, request: { tool: input.use, input: input.input }, method: 'claude-permission' });
+          if (answer.action !== 'accept') return { declined: true, note: 'The person said no to this tool.' };
+        }
+        return native.handler(z.object(native.schema).parse(input.input || {}), extra);
+      }
       // In a mode that asks before acting, a tool that changes things waits for the person's yes, like any other tool would.
       const target = await desk.toolbox.resolve(input.use, project);
       if (target.kind === 'tool' && !target.tool.readOnly && run && !['bypassPermissions', 'acceptEdits', 'auto', ''].includes(run.permissionMode || '')) {

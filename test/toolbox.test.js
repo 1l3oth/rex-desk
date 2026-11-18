@@ -81,7 +81,7 @@ test('agents get desk_find and desk_run, and a tool that changes things waits fo
     assert.match(card.title, /Approve bakery\/order_cake/);
     desk.answer(card.id, { action: 'decline' });
     assert.equal(JSON.parse((await asking).content[0].text).declined, true);
-    assert.match(desk.prompt({ id: 'x', role: 'coordinator', main: true, taskIds: [] }), /desk_find searches them by plain words/);
+    assert.match(desk.prompt({ id: 'x', role: 'coordinator', main: true, taskIds: [] }), /reached through desk_find \(search by plain words\)/);
   } finally { await box.closeAll(); await desk.shutdown?.(); store.close(); }
 });
 

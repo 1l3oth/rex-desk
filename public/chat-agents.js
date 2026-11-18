@@ -115,7 +115,8 @@ export async function openAgentChat(ctx, agent) {
 }
 export async function agentAction(ctx, action, target = null) {
   const { ui, api, toast, refresh, open } = ctx, value = id => document.getElementById(id)?.value ?? '';
-  const agent = (ui.snap.specialists || []).find(item => item.id === ui.view.id);
+  // The agent is the one being viewed, or the one a button names (so the same actions work from a chat's Profile panel).
+  const agent = (ui.snap.specialists || []).find(item => item.id === (target?.dataset?.agentId || ui.view.id));
   if (action === 'spec-new') {
     let projects = ui.memory?.projects || [];
     if (!projects.length) { toast(t('Looking for your projects…')); await api('/memory/scan', { method: 'POST', data: {} }).catch(() => {}); await refresh(); projects = ui.memory?.projects || []; }
