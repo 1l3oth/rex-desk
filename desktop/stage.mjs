@@ -42,7 +42,7 @@ async function bundle() {
   // Every package specifier src/ imports. A new import that is missing here fails the check below, never at run time.
   const specifiers = ['@libsql/client/web', '@modelcontextprotocol/sdk/client/index.js', '@modelcontextprotocol/sdk/client/streamableHttp.js', '@modelcontextprotocol/sdk/client/stdio.js', '@modelcontextprotocol/sdk/client/sse.js',
     '@modelcontextprotocol/sdk/server/index.js', '@modelcontextprotocol/sdk/server/mcp.js', '@modelcontextprotocol/sdk/server/stdio.js',
-    '@modelcontextprotocol/sdk/server/streamableHttp.js', '@modelcontextprotocol/sdk/types.js', 'mammoth', 'msedge-tts', 'prettier', 'qrcode', 'xlsx', 'zod'];
+    '@modelcontextprotocol/sdk/server/streamableHttp.js', '@modelcontextprotocol/sdk/types.js', 'mammoth', 'msedge-tts', 'prettier', 'qrcode', 'xlsx', 'zod', 'zod-to-json-schema'];
   const kept = /^(playwright|playwright-core|@anthropic-ai\/claude-agent-sdk|node:.*)$/;
   const imported = new Set();
   for (const file of walk(path.join(project, 'src'))) for (const match of readFile(file).matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*)'((?:@[a-z0-9-]+\/)?[a-z0-9][\w.-]*(?:\/[\w./-]+)?)'/g)) if (!kept.test(match[1])) imported.add(match[1]);
