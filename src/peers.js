@@ -418,23 +418,30 @@ export class Peers {
       }
     })();
   }
+  // When this computer still has an old local run for a chat whose agent now lives on another computer, that other
+  // computer's copy is the live one and wins: the chat then shows the real state and messages forward to where the agent
+  // is, instead of getting stuck on the stale copy left here. A chat whose agent lives here keeps using the local run.
+  copyWins(copy) {
+    if (!copy || !copy.node || copy.node === this.self.id) return false;
+    const local = this.store.get('run', copy.id);
+    if (!local) return true;
+    const agent = local.specialistId ? this.store.get('specialist', local.specialistId) : null;
+    return Boolean(agent && this.isRemote(agent) && copy.node === agent.node);
+  }
   // Another computer's chat, read from its copy: only when it is not here and not reached directly.
   chatCopy(runId) {
     if (this.runOwner(runId)) return null;
-    const copy = this.store.get('chatcopy', runId), local = this.store.get('run', runId);
-    if (!copy || !copy.node || copy.node === this.self.id) return null;
-    // A chat whose agent moved from this computer to another is read from that computer's copy, not from the older one left here.
-    if (local) { const agent = local.specialistId ? this.store.get('specialist', local.specialistId) : null; if (!(agent && this.isRemote(agent) && agent.movedFrom === this.self.id && copy.node === agent.node)) return null; }
-    return copy;
+    const copy = this.store.get('chatcopy', runId);
+    return this.copyWins(copy) ? copy : null;
   }
   cloudRuns() {
     const direct = new Set(this.remoteRuns().map(run => run.id));
-    return this.store.list('chatcopy').filter(copy => copy.node && copy.node !== this.self.id && copy.run && !direct.has(copy.id) && !this.store.get('run', copy.id))
+    return this.store.list('chatcopy').filter(copy => copy.run && !direct.has(copy.id) && this.copyWins(copy))
       .map(copy => ({ ...copy.run, remote: copy.node, cloudCopy: true }));
   }
   cloudInteractions() {
     const direct = new Set(this.remoteInteractions().map(item => item.id));
-    return this.store.list('chatcopy').filter(copy => copy.node && copy.node !== this.self.id && !this.store.get('run', copy.id) && !this.runOwner(copy.id))
+    return this.store.list('chatcopy').filter(copy => !direct.has(copy.id) && !this.runOwner(copy.id) && this.copyWins(copy))
       .flatMap(copy => (copy.asks || []).filter(item => !direct.has(item.id) && !(this.answered ||= new Set()).has(item.id)).map(item => ({ ...item, remote: copy.node, cloudCopy: true })));
   }
   askCopy(interactionId) {
