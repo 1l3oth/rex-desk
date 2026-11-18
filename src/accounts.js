@@ -4,6 +4,7 @@ import { randomBytes, randomUUID, scryptSync, createCipheriv, createDecipheriv }
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { now } from './store.js';
+import { createKeychain } from './keychain.js';
 
 const exec = promisify(execFile);
 // Each account's vault key (which encrypts its API keys and tokens) is sealed with a key derived from the person's
@@ -35,9 +36,11 @@ export function cleanEmail(email) {
   return value;
 }
 
-// "Stay signed in" keeps the vault key protected by Windows for this Windows user only (DPAPI), so a restart can reopen it.
+// "Stay signed in" keeps the vault key where only this person's computer account can read it, so a restart can reopen it:
+// Windows protects it for this Windows user (DPAPI); a Mac keeps it in the login Keychain (see keychain.js). Before the Mac
+// support, a Mac quietly kept nothing, so every restart of Rex Desk (an update, a slow wake from sleep) asked to sign in again.
 async function protectForUser(data, unprotect = false) {
-  if (process.platform !== 'win32') throw new Error('Staying signed in is available on Windows.');
+  if (process.platform !== 'win32') throw new Error('Staying signed in is available on Windows and macOS.');
   const method = unprotect ? 'Unprotect' : 'Protect';
   const script = `Add-Type -AssemblyName System.Security; [Convert]::ToBase64String([Security.Cryptography.ProtectedData]::${method}([Convert]::FromBase64String($env:REX_DATA), $null, 'CurrentUser'))`;
   const { stdout } = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 20000, env: { ...process.env, REX_DATA: data.toString('base64') } });
@@ -45,7 +48,8 @@ async function protectForUser(data, unprotect = false) {
 }
 
 export class Accounts {
-  constructor(root) {
+  constructor(root, { platform = process.platform, keychain = createKeychain() } = {}) {
+    this.platform = platform; this.keychain = keychain;
     this.root = path.resolve(root); this.file = path.join(this.root, 'accounts.json');
     mkdirSync(this.root, { recursive: true, mode: 0o700 });
     const saved = existsSync(this.file) ? JSON.parse(readFileSync(this.file, 'utf8')) : {};
@@ -101,17 +105,31 @@ export class Accounts {
     return { entry: legacy, vaultKey };
   }
   touch(id) { const entry = this.find(id); entry.lastUsedAt = now(); this.save(); return entry; }
-  async remember(id, vaultKey) { const entry = this.find(id); entry.remembered = (await protectForUser(vaultKey)).toString('base64'); this.save(); }
-  forget(id) { const entry = this.workspaces.find(item => item.id === id); if (entry?.remembered) { delete entry.remembered; this.save(); } }
+  // Whether this computer can keep a sign-in across restarts at all (Windows and macOS).
+  get canRemember() { return this.platform === 'win32' || this.platform === 'darwin'; }
+  async remember(id, vaultKey) {
+    const entry = this.find(id);
+    if (!this.canRemember) throw new Error('Staying signed in is available on Windows and macOS.');
+    if (this.platform === 'darwin') { await this.keychain.set(id, vaultKey); entry.remembered = 'keychain'; }
+    else entry.remembered = (await protectForUser(vaultKey)).toString('base64');
+    this.save();
+  }
+  forget(id) {
+    const entry = this.workspaces.find(item => item.id === id);
+    if (!entry?.remembered) return;
+    if (entry.remembered === 'keychain') void this.keychain.remove(id).catch(() => {});
+    delete entry.remembered; this.save();
+  }
   // At startup, reopen the most recent account that chose to stay signed in on this computer.
   async rememberedSession() {
     const entry = this.workspaces.filter(item => item.remembered).sort((left, right) => String(right.lastUsedAt || '').localeCompare(String(left.lastUsedAt || '')))[0];
     if (!entry) return null;
     // Only Windows refusing the key (another Windows user, a reset profile) forgets it. A slow or failed PowerShell start
     // (antivirus, a busy computer right after sign-in) tries once more and keeps "stay signed in" for the next start.
-    const refused = error => /Cryptographic|key not valid|not valid for use/i.test(`${error?.stderr || ''} ${error?.message || ''}`);
+    // On a Mac only a Keychain that no longer holds the item forgets it; a locked Keychain (right after login) is tried again.
+    const refused = error => entry.remembered === 'keychain' ? error?.missing === true : /Cryptographic|key not valid|not valid for use/i.test(`${error?.stderr || ''} ${error?.message || ''}`);
     for (let attempt = 0; attempt < 2; attempt++) {
-      try { return { entry, vaultKey: await protectForUser(Buffer.from(entry.remembered, 'base64'), true) }; }
+      try { return { entry, vaultKey: entry.remembered === 'keychain' ? await this.keychain.get(entry.id) : await protectForUser(Buffer.from(entry.remembered, 'base64'), true) }; }
       catch (error) { if (refused(error)) { this.forget(entry.id); return null; } }
     }
     return null;

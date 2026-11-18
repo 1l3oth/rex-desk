@@ -93,6 +93,13 @@ function serveFile(request, response, file, { sandbox = false, download = false,
 // that did not pass its port on: it was on 4317 and stays there, so a computer using a checkout as its real app keeps its address.
 export const defaultPort = () => Number(process.env.PORT || (process.env.REX_DESK_VERSION || process.env.REX_RESTART_AFTER ? 4317 : 4318));
 
+// How long one "is the browser sign-in done?" question may be held open. A Mac's webview (WebKit) gives up on a request that
+// waits about 60 seconds ("Load failed"), which used to show an error and start the browser sign-in again, round and round.
+// Asked short and repeated, the same wait works everywhere.
+const WAITING = Symbol('waiting');
+const SIGN_IN_POLL_MS = Number(process.env.REX_SIGNIN_POLL_MS) || 20000;
+const settled = (promise, ms = SIGN_IN_POLL_MS) => Promise.race([promise, new Promise(resolve => { const timer = setTimeout(() => resolve(WAITING), ms); timer.unref?.(); })]);
+
 export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, ownDatabase = process.env.REX_DESK_OWN_DATABASE === '1', updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
   // Cloud backup comes with a Rex Desk account (a paid plan later): a database address and key typed by hand, or a Turso
   // account of the person's own, are turned off unless this copy is started with REX_DESK_OWN_DATABASE=1.
@@ -232,7 +239,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   }
   const role = () => accounts ? accounts.role(session?.email) : 'superadmin';
   const cookieOf = request => /(?:^|;\s*)rex_session=([^;]+)/.exec(request.headers.cookie || '')?.[1];
-  const sessionCookie = value => `rex_session=${value}; HttpOnly; SameSite=Strict; Path=/`;
+  // Lasts 30 days, so the webview keeps it on disk: a cookie with no lifetime is dropped whenever macOS restarts WebKit's network
+  // process (memory pressure, sleep), which signed the person out in the middle of work.
+  const sessionCookie = value => `rex_session=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`;
   const signedIn = request => Boolean(session) && (!accounts || cookieOf(request) === session.cookie);
   // "Stay signed in" opens Rex Desk without the passphrase only in a window that proves it is this person's: it holds the
   // window key, a random value kept in a file in their own data folder (other Windows users cannot read it). The desktop app
@@ -317,7 +326,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     const activate = async ({ entry, vaultKey }) => {
       if (session?.id === entry.id) {
         session.cookie = randomBytes(32).toString('base64url');
-        if (input.staySignedIn && !session.staySignedIn) { await accounts.remember(entry.id, vaultKey).catch(() => {}); session.staySignedIn = true; }
+        if (input.staySignedIn && !session.staySignedIn) session.staySignedIn = await accounts.remember(entry.id, vaultKey).then(() => true, error => { console.error(`Stay signed in failed: ${error.message}`); return false; });
       } else { await closeSession(); await openSession(entry, vaultKey, { staySignedIn: Boolean(input.staySignedIn) }); }
     };
     // Signing in with the passphrase also gives this browser the window key, so "stay signed in" works in it from then on.
@@ -348,15 +357,18 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (url.pathname === '/api/auth/account-finish') {
       if (!accountPending) throw new Error('Start the Rex Desk sign-in first.');
       const pending = accountPending;
+      let done = true;
       try {
-        const signedIn = await pending.session;
+        const signedIn = await settled(pending.session);
+        // The browser sign-in is not finished: answer now; the window asks again.
+        if (signedIn === WAITING) { done = false; return json(response, 200, { waiting: true }); }
         // Ask for the database only when the account already has one: signing in must not make a cloud database by itself.
         const me = requireAccount ? await accountMe(signedIn.token, accountOptions).catch(() => null) : null;
         const database = !requireAccount || me?.sync?.on ? await accountDatabase(signedIn.token, accountOptions) : null;
         accountFound = { session: signedIn, database, workspace: await workspaceFor(signedIn.user?.email || '', database) };
         return json(response, 200, requireAccount ? { found: Boolean(database), ...accountView() } : { found: true, email: signedIn.user?.email || '' });
       }
-      finally { if (accountPending === pending) accountPending = null; }
+      finally { if (done && accountPending === pending) accountPending = null; }
     }
     if (url.pathname === '/api/auth/account-forget') { accountPending?.cancel(); accountPending = null; accountFound = null; return json(response, 200, { ok: true }); }
     if (url.pathname === '/api/auth/cloud' && input.account) { if (!accountFound?.database) throw new Error('Sign in with Rex Desk first.'); input.url = accountFound.database.url; input.authToken = accountFound.database.authToken; }
@@ -541,13 +553,16 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/database/account-finish' && request.method === 'POST') {
         if (!accountPending && !session.account) throw new Error('Start the Rex Desk sign-in first.');
         const started = accountPending, pending = started ? started.session : Promise.resolve(session.account);
+        let done = true;
         try {
-          const signedIn = await pending, made = await accountDatabase(signedIn.token, accountOptions);
+          const waited = await settled(pending);
+          if (waited === WAITING) { done = false; return json(response, 200, { waiting: true }); }
+          const signedIn = waited, made = await accountDatabase(signedIn.token, accountOptions);
           const status = await store.cloud.connect({ url: made.url, authToken: made.authToken });
           store.cloud.account.save(signedIn, made); session.account = null;
           return json(response, 200, { ...status, ...store.cloud.status(), created: Boolean(made.created) });
         } catch (error) { if (error.status === 401) session.account = null; throw error; }
-        finally { if (started && accountPending === started) accountPending = null; }
+        finally { if (done && started && accountPending === started) accountPending = null; }
       }
       // Agents online: sign in to the Rex Desk account for it alone (no cloud backup is made). The browser opens, and the sign-in
       // is kept locked on this computer.

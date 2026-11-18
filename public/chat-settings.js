@@ -438,7 +438,8 @@ export function openSettings(ctx, section = 'general') {
           // Already signed in to Rex Desk when this workspace opened: no second trip to the browser.
           const { url } = await api('/database/account-start', { method: 'POST' }); if (url) window.open(url, '_blank', 'noopener');
           state.extra.account = url ? t('Waiting for you to sign in in the browser…') : t('Turning cloud backup on…'); draw();
-          const status = await api('/database/account-finish', { method: 'POST' });
+          // Asked short and repeated: see waitForBrowserSignIn in chat-signin.js (a Mac's webview cuts one long request at about a minute).
+          let status; for (let misses = 0; !status || status.waiting; ) { try { status = await api('/database/account-finish', { method: 'POST' }); misses = 0; } catch (error) { if (error.name !== 'TypeError' || ++misses > 6) throw error; await new Promise(resolve => setTimeout(resolve, 1000)); } }
           toast(status.state === 'connected' ? (status.created ? t('Cloud backup is on. Your private database was made and your history was uploaded.') : t('Cloud backup is on. This computer is connected to your backup.')) : t`Signed in. The backup is ${status.state}; changes wait and upload later.`, status.state !== 'connected');
           await refresh();
         } finally { state.extra.account = ''; draw(); }
