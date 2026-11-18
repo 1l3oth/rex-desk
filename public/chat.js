@@ -570,16 +570,18 @@ async function send() {
     else if (type === 'main' && !mainRun()) await api('/main', { method: 'POST', data: { prompt: text, ...picked } });
     else {
       const run = type === 'main' ? mainRun() : runById(id);
-      const away = run.remote ? { text, at: new Date().toISOString() } : null;
-      if (away) { (ui.outbox ||= new Map()).set(run.id, [...(ui.outbox.get(run.id) || []), away]); box.value = ''; renderAll(); }
+      // Always show the message the moment it is sent, with a status, so it never just vanishes: "starting here" for an
+      // agent on this computer, "sending to <device>" for one on another. The bubble clears itself once the message lands.
+      const away = { text, at: new Date().toISOString(), local: !run.remote };
+      (ui.outbox ||= new Map()).set(run.id, [...(ui.outbox.get(run.id) || []), away]); box.value = ''; renderAll();
       try {
         // Spoken in Voice mode: always through "say", which gives the agent its briefing and how to talk.
         const spoken = ui.voiceNext; ui.voiceNext = false;
         if (spoken) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text, ...picked, voice: true } });
         else if (workingStates.includes(run.state)) await api(`/runs/${run.id}/say`, { method: 'POST', data: { text, ...picked } });
         else await api(`/runs/${run.id}/resume`, { method: 'POST', data: { prompt: text, ...picked } });
-      } catch (error) { if (away) { ui.outbox.set(run.id, ui.outbox.get(run.id).filter(item => item !== away)); box.value = typed; } throw error; }
-      if (away) away.sent = true;
+      } catch (error) { ui.outbox.set(run.id, (ui.outbox.get(run.id) || []).filter(item => item !== away)); box.value = typed; throw error; }
+      away.sent = true;
     }
     if ((type === 'main' || type === 'run') && typed) lastSent.set(draftKey(), typed);
     box.value = ''; box.style.height = ''; ui.drafts.delete(draftKey()); ui.attachments = []; redrawAttachments(ctx); await refresh();
@@ -1359,8 +1361,13 @@ function outboxHtml(run, shown) {
   const left = waiting.filter(item => !arrived(item)); ui.outbox.set(run.id, left);
   const agent = personalAgent(run), where = agent?.device || 'the other computer', off = agent?.status?.state === 'offline';
   return left.map(item => {
-    const state = !item.sent ? t('Sending…') : off ? t`Waiting for ${where} to turn on` : Date.now() - Date.parse(item.at) > 45000 ? t`Still on its way to ${where}…` : t`Sending to ${where}…`;
-    return `<div class="msg mine sending"><div class="bubble"><div class="md">${markdown(spokenText(item.text).text)}</div><div class="send-state"><span class="spin" aria-hidden="true"></span>${esc(state)}</div></div></div>`;
+    const old = Date.now() - Date.parse(item.at) > 20000;
+    // An agent on this computer: "starting"; if nothing picks it up it stays shown as kept, never lost. An agent on
+    // another computer: "sending to <device>", then "still on its way" after a while.
+    const state = item.local
+      ? (old ? t('Not picked up yet. Kept here; send again if needed.') : t('Starting the agent…'))
+      : (!item.sent ? t('Sending…') : off ? t`Waiting for ${where} to turn on` : Date.now() - Date.parse(item.at) > 45000 ? t`Still on its way to ${where}…` : t`Sending to ${where}…`);
+    return `<div class="msg mine sending${item.local && old ? ' stuck' : ''}"><div class="bubble"><div class="md">${markdown(spokenText(item.text).text)}</div><div class="send-state">${item.local && old ? '' : '<span class="spin" aria-hidden="true"></span>'}${esc(state)}</div></div></div>`;
   }).join('');
 }
 // While a message is on its way, the screen looks again every few seconds, so "Still on its way" shows even with no news.
