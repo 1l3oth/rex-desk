@@ -26,7 +26,8 @@ import { autostartStatus, setAutostart } from './autostart.js';
 import { issueBranch } from './branches.js';
 import { profileEnvironment, discoverProfiles } from './agents.js';
 import { kindOf, mimeOf } from './files.js';
-import { speak, NEURAL_VOICES } from './voice-out.js';
+import { NEURAL_VOICES } from './voice-out.js';
+import { Speaker } from './tts.js';
 import { readyLines } from '../public/voice-phrases.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handleA2aHttp, a2aSettings, setA2a } from './a2a.js';
@@ -237,6 +238,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (forget) accounts?.forget(id);
     await desk.shutdown(); await store.cloud.close(); store.close(); notify();
   }
+  const speakerOf = () => (session.speaker ||= new Speaker(session.store));
   const role = () => accounts ? accounts.role(session?.email) : 'superadmin';
   const cookieOf = request => /(?:^|;\s*)rex_session=([^;]+)/.exec(request.headers.cookie || '')?.[1];
   // Lasts 30 days, so the webview keeps it on disk: a cookie with no lifetime is dropped whenever macOS restarts WebKit's network
@@ -964,7 +966,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           if (action === 'voice') {
             // The sentences Voice mode says often are made now, while the body opens, so they play at once: the welcome
             // first, then the rest, a few at a time.
-            if (input.on !== false) { const lines = readyLines(); let next = 0; const work = async () => { while (next < lines.length) { const line = lines[next++]; await speak(line, { lang: 'en' }).catch(() => {}); } }; void work(); void work(); void work(); }
+            if (input.on !== false) { const lines = readyLines(); let next = 0; const work = async () => { while (next < lines.length) { const line = lines[next++]; await speakerOf().speak(line, { lang: 'en' }).catch(() => {}); } }; void work(); void work(); void work(); }
             return json(response, 200, desk.voiceMode(runId, input.on !== false));
           }
           if (action === 'fresh') return json(response, 200, await desk.freshStart(runId));
@@ -976,7 +978,18 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       }
       // The file window: open, view, save, format, and open in another program.
       // Read a reply aloud with a neural voice (Microsoft's Edge voices, as studybook uses): the MP3 comes back as the response.
-      if (url.pathname === '/api/speak' && request.method === 'POST') { const input = await body(request); const audio = await speak(input.text, { lang: input.lang, voice: input.voice }); response.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store', 'Content-Length': audio.length }); response.end(audio); return; }
+      // Every spoken line goes through one speaker (Microsoft's natural voices, or Fish Audio when chosen), so Voice mode, the
+      // speaker button and the short status lines are all in the same voice. The sound is sent as it arrives.
+      if (url.pathname === '/api/speak' && request.method === 'POST') {
+        const input = await body(request); let started = false; const speaker = speakerOf();
+        const send = (chunk, voice) => { if (!started) { started = true; response.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', 'X-Rex-Voice': voice }); } response.write(chunk); };
+        try { await speaker.speak(input.text, { lang: input.lang, voice: input.voice, onChunk: send }); }
+        catch (error) { if (!started) throw error; }
+        response.end(); return;
+      }
+      if (url.pathname === '/api/speak/engine' && request.method === 'GET') return json(response, 200, await speakerOf().status());
+      if (url.pathname === '/api/speak/engine' && request.method === 'POST') { const speaker = speakerOf(); speaker.save(await body(request)); return json(response, 200, await speaker.status()); }
+      if (url.pathname === '/api/speak/fish-key' && request.method === 'POST') { const speaker = speakerOf(); const saved = speaker.saveKey((await body(request)).key); return json(response, 200, { saved, ...await speaker.status() }); }
       if (url.pathname === '/api/speak/voices' && request.method === 'GET') return json(response, 200, NEURAL_VOICES);
       // Opens one of Rex Desk's own pages in the normal browser, for when the app cannot open a window itself.
       if (url.pathname === '/api/open-page' && request.method === 'POST') {

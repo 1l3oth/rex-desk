@@ -3,6 +3,13 @@ import { t } from './i18n.js';
 // It picks a Korean or Khmer voice when the message is in that language, prefers the natural-sounding voices, and reads in short
 // pieces so long replies are not cut off. Pressing it again, or another message's button, stops it.
 let playing = null;
+// The voice engine the server uses (Microsoft's natural voices, or Fish Audio when chosen in Settings). With Fish Audio on, every
+// English line goes to the server, whatever voice was picked for this computer, so one voice says everything.
+let engine = { engine: 'standard', hasKey: false };
+export const setSpeechEngine = status => { if (status && typeof status === 'object') engine = status; };
+export const loadSpeechEngine = () => fetch('/api/speak/engine', { headers: { 'x-rex-desk': '1' } }).then(response => (response.ok ? response.json() : null)).then(setSpeechEngine).catch(() => {});
+const fishSpeaks = lang => lang === 'en' && engine.engine === 'fish' && engine.hasKey && !engine.holding && !engine.capped;
+const viaServer = (lang, chosen) => fishSpeaks(lang) || !chosen || /Neural$/.test(chosen);
 const SPEAKER = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 6h2l3-2.5v9L5 10H3z" fill="currentColor"/><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12 3.8a6 6 0 0 1 0 8.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
 const STOP = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>';
 export const speakButton = (extraClass = '') => (true ? `<button type="button" class="speak ${extraClass}" data-speak title="${t`Listen`}" aria-label="${t`Listen to this message`}">${SPEAKER}</button>` : '');
@@ -84,7 +91,7 @@ async function play(button) {
   playing = { button }; button.innerHTML = STOP; button.classList.add('on', 'loading'); button.title = t('Stop');
   const mine = playing;
   // A neural voice (Microsoft's Edge voices, the same studybook uses) unless the person chose one of the computer's voices.
-  if (!chosen || /Neural$/.test(chosen)) {
+  if (viaServer(lang, chosen)) {
     // Short pieces, so the first one plays within a moment while the next is fetched behind it.
     const parts = [];
     for (const piece of pieces(text)) { const last = parts.at(-1); if (last && (last + piece).length < 380) parts[parts.length - 1] = `${last} ${piece}`; else parts.push(piece); }
@@ -199,13 +206,61 @@ function phraseEnd(pending, finished) {
   if (end < 0 && pending.length > 90) for (const match of pending.matchAll(/[,;:](?=\s)/g)) if (match.index > 30) end = match.index + 1;
   return end;
 }
+const streamable = () => typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported?.('audio/mpeg');
+// Asks the server for a line and keeps what arrives, so it can be played while it is still arriving, or whole when it is due.
+// A line that gets no sound at all is asked once more after a moment.
+function streamSound(text, lang) {
+  const sound = { chunks: [], done: false, failed: false, waiters: [], controller: new AbortController(), cancel() { this.controller.abort(); } };
+  const wake = () => sound.waiters.splice(0).forEach(resolve => resolve());
+  const attempt = async () => {
+    const response = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text, lang }), signal: sound.controller.signal });
+    if (!response.ok) throw new Error('no sound');
+    // Fish Audio could not say it, so the natural voice did: ask the server how things stand, so the person's own voice takes over.
+    if (response.headers.get('X-Rex-Voice') === 'standard') void loadSpeechEngine();
+    const reader = response.body.getReader();
+    for (;;) { const { done, value } = await reader.read(); if (done) break; sound.chunks.push(value); wake(); }
+    if (!sound.chunks.length) throw new Error('no sound');
+  };
+  attempt().catch(async () => { if (sound.controller.signal.aborted || sound.chunks.length) return; await new Promise(resolve => setTimeout(resolve, 1500)); await attempt(); })
+    .catch(() => { sound.failed = !sound.chunks.length; }).finally(() => { sound.done = true; wake(); });
+  return sound;
+}
+const waitFor = sound => new Promise(resolve => sound.waiters.push(resolve));
+// Plays a line from its first bytes through a growing file (MediaSource); a browser that cannot waits for the whole line.
+async function playStreamed(sound, token) {
+  player ||= new Audio(); const audio = player; let url = '';
+  const ended = new Promise(resolve => {
+    audio.onended = () => { live.playing = false; resolve(true); }; audio.onerror = () => { live.playing = false; resolve(false); };
+    audio.onplaying = () => { live.playing = true; measure(audio); };
+  });
+  try {
+    if (!sound.chunks.length && !sound.done) await waitFor(sound);
+    while (!sound.chunks.length && !sound.done) await waitFor(sound);
+    if (sound.failed || token !== live.token) return sound.failed ? false : true;
+    if (sound.done) { url = URL.createObjectURL(new Blob(sound.chunks, { type: 'audio/mpeg' })); audio.src = url; await audio.play(); return await ended; }
+    const source = new MediaSource(); url = URL.createObjectURL(source); audio.src = url;
+    await new Promise(resolve => source.addEventListener('sourceopen', resolve, { once: true }));
+    const buffer = source.addSourceBuffer('audio/mpeg');
+    const append = chunk => new Promise((resolve, reject) => { buffer.addEventListener('updateend', resolve, { once: true }); buffer.addEventListener('error', () => reject(new Error('append')), { once: true }); buffer.appendBuffer(chunk); });
+    let next = 0, started = false;
+    while (next < sound.chunks.length || !sound.done) {
+      if (token !== live.token) { audio.pause(); return true; }
+      if (next < sound.chunks.length) { await append(sound.chunks[next++]); if (!started) { started = true; void audio.play().catch(() => {}); } }
+      else await waitFor(sound);
+    }
+    if (source.readyState === 'open') source.endOfStream();
+    if (!started) return false;
+    return await ended;
+  } catch { if (live.playing) return true; if (sound.done && sound.chunks.length) { try { audio.src = URL.createObjectURL(new Blob(sound.chunks, { type: 'audio/mpeg' })); await audio.play(); return await ended; } catch { return false; } } return false; }
+  finally { if (url) setTimeout(() => URL.revokeObjectURL(url), 5000); }
+}
 // notBefore: a time (performance.now()) the phrase must not start before; its sound is still fetched at once, so it is
 // ready the moment it is due (the welcome waits for the body's opening this way).
 function sayPhrase(phrase, token, notBefore = 0) {
   const text = cleanPhrase(phrase); if (!/[\p{L}\p{N}]/u.test(text)) return;
   const lang = language(text), chosen = chosenVoice(lang);
   const due = () => (notBefore > performance.now() ? new Promise(resolve => setTimeout(resolve, notBefore - performance.now())) : null);
-  if (chosen && !/Neural$/.test(chosen)) {
+  if (!viaServer(lang, chosen)) {
     // The computer's own voice queues phrases by itself.
     void Promise.all([voiceFor(lang), due()]).then(([voice]) => { if (token !== live.token) return; const utterance = new SpeechSynthesisUtterance(text); utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice; utterance.rate = 1.05; speechSynthesis.speak(utterance); });
     return;
@@ -214,6 +269,19 @@ function sayPhrase(phrase, token, notBefore = 0) {
   // A different voice in the middle of a conversation sounds like a different person, so the computer's own voice is the
   // last resort: a slow answer is waited for (up to 30 seconds) and asked for once more; only when Rex Desk's voice
   // service cannot be reached at all, or fails twice, does the computer's voice say it.
+  // Fish Audio streams its sound: the first bytes are played while the rest is still coming (where the browser can play a
+  // growing file), so a sentence starts about a second sooner. Everything else is fetched whole, as before.
+  if (fishSpeaks(lang) && streamable()) {
+    const sound = streamSound(text, lang);
+    live.pending += 1;
+    live.queue = live.queue.then(async () => {
+      await due();
+      if (token !== live.token) { sound.cancel(); return; }
+      const played = await playStreamed(sound, token);
+      if (!played && token === live.token) await sayHere(text, lang, token);
+    }).finally(() => { live.pending = Math.max(0, live.pending - 1); });
+    return;
+  }
   const ask = wait => fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text, lang, voice: chosen }), signal: AbortSignal.timeout?.(wait) })
     .then(response => (response.ok ? response.blob() : null)).then(blob => (blob ? URL.createObjectURL(blob) : null)).catch(() => null);
   const sound = ask(30000).then(url => url || new Promise(resolve => setTimeout(resolve, 1500)).then(() => ask(30000)));
@@ -291,7 +359,7 @@ export function stopLive() { live.token += 1; live.queue = Promise.resolve(); li
 export const readAloudButton = key => { const on = readAloudOn(key); return `<button type="button" class="icon-btn read-aloud${on ? ' on' : ''}" data-action="read-aloud" aria-pressed="${on}" title="${on ? t('Replies are read aloud. Press to stop') : t('Read replies aloud')}" aria-label="${t`Read replies aloud`}">${SPEAKER}</button>`; };
 let ctxToast = null;
 export function wireSpeak(toast) {
-  ctxToast = toast;
+  ctxToast = toast; void loadSpeechEngine();
   if ('speechSynthesis' in window) { speechSynthesis.getVoices(); speechSynthesis.addEventListener?.('voiceschanged', () => speechSynthesis.getVoices()); }
   document.addEventListener('click', event => {
     const button = event.target.closest?.('[data-speak]'); if (!button) return;

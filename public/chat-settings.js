@@ -1,7 +1,7 @@
 import { t, languagePicker } from './i18n.js';
 import { pickerHtml } from '/chat-pick.js';
 import { noticeSettingsHtml } from '/chat-notices.js';
-import { voicesFor, chosenVoice } from '/chat-speak.js';
+import { voicesFor, chosenVoice, setSpeechEngine } from '/chat-speak.js';
 import { loadFolders, foldersHtml, folderClick, startTour } from '/chat-tour.js';
 import { trackerDraft, readTrackers, trackersHtml, trackerSources, trackerClick, trackerInput } from '/chat-trackers.js';
 import { runSettingsTour } from '/chat-settings-tour.js';
@@ -174,6 +174,27 @@ export function openSettings(ctx, section = 'general') {
   const state = { section, extra: {}, list: phone && section === 'general', trackers: trackerDraft(ui) };
   const config = () => ui.snap.config || {};
   const field = (label, control, help = '') => `<label class="st-field"><span>${label}</span>${control}${help ? `<small>${help}</small>` : ''}</label>`;
+  // Spoken replies: which voice says Rex Desk's English lines. Microsoft's natural voices (free), or Fish Audio (online).
+  const speechBlock = () => {
+    const tts = state.extra.tts; if (!tts) return '';
+    const fish = tts.engine === 'fish', money = t`The free model costs nothing (Fish Audio's fair use). The best model costs about ${'$' + (tts.paidCostPerMinute || 0.02).toFixed(2)} for each minute of speech.`;
+    const select = (name, options, current) => `<select data-st-tts="${name}">${options.map(([value, label]) => `<option value="${esc(value)}" ${String(current) === String(value) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>`;
+    const keyRow = tts.hasKey
+      ? `<p class="muted">${tts.keyFrom === 'rex-desk' ? t`Your Fish Audio key is kept locked on this computer.` : t`Your Fish Audio key comes from the FISH_AUDIO_API_KEY setting this computer started Rex Desk with.`} ${tts.keyFrom === 'rex-desk' ? `<button type="button" class="btn small" data-st-fish-remove>${t`Remove key`}</button>` : ''}</p>`
+      : `<div class="st-field"><span>${t`Add your Fish Audio key`}</span><div class="st-row"><input type="password" data-st-fish-key autocomplete="off" spellcheck="false" placeholder="${t`Paste your key`}"><button type="button" class="btn small primary" data-st-fish-save>${t`Add key`}</button></div><small>${t`Make a key at`} <a href="https://fish.audio/app/api-keys" target="_blank" rel="noopener">fish.audio/app/api-keys</a>. ${t`It is kept locked on this computer and sent only to Fish Audio. Without a key, your usual voice stays.`}</small></div>`;
+    const usage = t`Today: ${tts.usedMinutesToday} min. This month: ${tts.usedMinutesMonth} min.`;
+    const details = fish ? `${keyRow}
+      ${field(t('Voice'), select('voice', tts.voices, tts.voice))}
+      ${field(t`Speed ${tts.speed.toFixed(2)}x`, `<input type="range" data-st-tts="speed" min="0.7" max="1.5" step="0.05" value="${tts.speed}">`)}
+      ${field(t('Model'), select('model', [['s2.1-pro-free', t('Free model')], ['s2.1-pro', t('Best model (paid)')]], tts.model), t("Both are Fish Audio's newest generation."))}
+      ${field(t('Daily limit (minutes of speech)'), `<input type="number" data-st-tts="dailyMinutes" min="1" max="600" step="1" value="${tts.dailyMinutes}">`, t('After this your usual voice says the rest of the day, so the cost stays small.'))}
+      <p class="muted"><b>${t`Cost`}</b>: ${money} ${usage}</p>
+      ${tts.problem || tts.holding ? `<p class="error-text" role="alert">${esc(tts.holding || tts.problem)} ${t`Your usual voice is used meanwhile.`}</p>` : ''}
+      <div class="st-actions"><button type="button" class="btn small" data-st-tts-test ${tts.hasKey && !state.extra.ttsTesting ? '' : 'disabled'}>${state.extra.ttsTesting ? t('Playing…') : t('Try this voice')}</button></div>` : '';
+    return `<h3>${t`Spoken replies`}</h3>
+      ${field(t('Voice engine'), select('engine', [['standard', t('Natural voices (Microsoft, free)')], ['fish', t('Fish Audio (online)')]], tts.engine), t('Fish Audio says English only. Korean and Khmer keep the natural voices. If there is no key, or Fish Audio cannot answer, your usual voice says it, so Voice mode never goes silent.'))}
+      ${details}`;
+  };
   const check = (name, on, label, help = '') => `<label class="st-check"><input type="checkbox" name="${name}" ${on ? 'checked' : ''}><span><b>${label}</b>${help ? `<small>${help}</small>` : ''}</span></label>`;
   const input = (name, value, attrs = '') => `<input name="${name}" value="${esc(value ?? '')}" ${attrs}>`;
   // Flow, Morningmate and Orbit only matter once one is connected; until then their settings stay out of the way.
@@ -287,6 +308,7 @@ export function openSettings(ctx, section = 'general') {
       ${check('control.agents', config().control?.agents, t('Let agents control this computer too'))}
       ${(config().control?.allow || []).length ? `<div class="st-field"><span>${t`Done without asking`}</span><div class="st-chips">${config().control.allow.map(action => `<span class="st-chip">${esc(ASKS[action] || action.replaceAll('_', ' '))}<button type="button" class="ag-x" data-st-allow-off="${esc(action)}" aria-label="${t`Ask again before this`}">×</button></span>`).join('')}</div><small>${t`Press × to have Jev ask you again first. "Yes, always" on a Jev question adds one here.`}</small></div>` : ''}
       ${field(t('Voice language'), `<select name="control.language">${LANGS.map(([value, label]) => `<option value="${value}" ${(config().control?.language || 'en') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
+      ${speechBlock()}
       <div class="st-actions"><button type="button" class="btn" data-st-open="voice">${t`Voice engine and compare`}</button></div>`,
     schedule: () => { const schedule = config().schedule || {}; const days = schedule.days || [1, 2, 3, 4, 5]; return `<h2>${t`Schedule`}</h2><p class="muted">${t`At the set time Rex Desk looks for new tasks, Rex Agent sorts them, and agents start work up to your daily limit. Questions wait in Needs you.`}</p>
       ${tip('schedule', t('Set it for when you start your day, with a small limit like 3 runs. You come back to finished work and a short list of questions.'))}
@@ -552,8 +574,34 @@ export function openSettings(ctx, section = 'general') {
     catch (error) { event.target.checked = !on; toast(error.message, true); }
   });
   // The voices on this computer, for the reading voice choices.
+  void api('/speak/engine').then(status => { state.extra.tts = status; setSpeechEngine(status); if (state.section === 'jev' && document.body.contains(back)) draw(); }).catch(() => {});
   void api('/speak/voices').then(neural => { state.extra.neural = neural; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
   if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); if (state.section === 'general' && document.body.contains(back)) draw(); });
+  // Spoken replies: each control saves at once.
+  back.addEventListener('change', async event => {
+    const name = event.target.dataset?.stTts; if (!name) return;
+    try { const status = await api('/speak/engine', { method: 'POST', data: { [name]: event.target.value } }); state.extra.tts = status; setSpeechEngine(status); toast(t('Saved.')); }
+    catch (error) { toast(error.message, true); }
+    draw();
+  });
+  back.addEventListener('click', async event => {
+    const save = event.target.closest('[data-st-fish-save]'), remove = event.target.closest('[data-st-fish-remove]'), test = event.target.closest('[data-st-tts-test]');
+    if (!save && !remove && !test) return;
+    event.preventDefault();
+    try {
+      if (save) { const key = back.querySelector('[data-st-fish-key]')?.value || ''; const result = await api('/speak/fish-key', { method: 'POST', data: { key } }); state.extra.tts = result; setSpeechEngine(result); toast(t('Fish Audio key saved.')); }
+      if (remove) { const result = await api('/speak/fish-key', { method: 'POST', data: { key: '' } }); state.extra.tts = result; setSpeechEngine(result); toast(t('Fish Audio key removed.')); }
+      if (test) {
+        state.extra.ttsTesting = true; draw();
+        const response = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text: 'Hi, this is how I will sound when we talk in Voice mode.', lang: 'en' }) });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || t('The voice service did not answer.'));
+        const audio = new Audio(URL.createObjectURL(await response.blob())); await audio.play().catch(() => {});
+        await new Promise(resolve => { audio.onended = resolve; audio.onerror = resolve; setTimeout(resolve, 15000); });
+        state.extra.tts = await api('/speak/engine'); setSpeechEngine(state.extra.tts);
+      }
+    } catch (error) { toast(error.message, true); }
+    state.extra.ttsTesting = false; draw();
+  });
   back.addEventListener('change', event => { const lang = event.target.dataset?.stVoice; if (!lang) return; try { if (event.target.value) localStorage.setItem(`rex-desk-voice-${lang}`, event.target.value); else localStorage.removeItem(`rex-desk-voice-${lang}`); } catch { /* private window */ } toast(t('Reading voice saved.')); });
   if (section === 'projects') void loadGithub();
   if (section === 'about') void loadAbout();
