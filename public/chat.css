@@ -1301,7 +1301,7 @@ body.dropping-files::after{content:attr(data-drop-hint);position:fixed;inset:10p
 .ring.ctx:hover{color:var(--ink)}.ring.ctx svg{width:18px;height:18px;flex:none}
 .ring.ctx .ring-bg{fill:none;stroke:var(--line);stroke-width:2.4}.ring.ctx .ring-fill{fill:none;stroke:var(--muted);stroke-width:2.4;stroke-linecap:round}
 .ring.ctx.mid .ring-fill{stroke:var(--warn)}.ring.ctx.full .ring-fill{stroke:var(--bad)}.ring.ctx.busy .ring-fill{stroke:var(--accent)}
-.ctx-panel{position:absolute;right:0;bottom:100%;margin-bottom:10px;width:300px;max-width:92vw;z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.18);padding:12px 14px}
+.ctx-panel{--solid-mix:92%;position:absolute;right:0;bottom:100%;margin-bottom:10px;width:300px;max-width:92vw;z-index:40;background:var(--panel);-webkit-backdrop-filter:blur(18px) saturate(1.3);backdrop-filter:blur(18px) saturate(1.3);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.28);padding:12px 14px}
 .ctxd-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px}.ctxd-head strong{font-size:14px}
 .ctxd-bar{height:6px;border-radius:3px;background:var(--raised);overflow:hidden;margin-bottom:8px}
 .ctxd-bar i{display:block;height:100%;background:var(--muted);border-radius:3px}.ctxd-bar i.mid{background:var(--warn)}.ctxd-bar i.full{background:var(--bad)}

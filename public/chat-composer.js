@@ -123,7 +123,7 @@ function contextRing(ctx, working) {
 export function contextDetailHtml(ctx) {
   const { ui, esc } = ctx, view = ui.view, run = view.type === 'main' ? ctx.mainRun() : view.type === 'run' ? ctx.runById(view.id) : null;
   if (!run) return `<div class="ctxd"><p class="muted small">${t`Open a chat with one agent to see its context.`}</p></div>`;
-  const kilo = value => value >= 1000000 ? `${(value / 1000000).toFixed(2)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(Math.round(value || 0));
+  const kilo = value => value >= 1e9 ? `${(value / 1e9).toFixed(2)}B` : value >= 1e6 ? `${(value / 1e6).toFixed(2)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(Math.round(value || 0));
   const used = Number(run.contextUsed || 0), window = Number(run.contextWindow || 200000), share = window ? Math.min(1, used / window) : 0;
   const last = run.lastTokens || {}, total = run.tokensTotal || {};
   const row = (label, value, tip = '') => `<div class="ctxd-row"><span>${esc(label)}</span><b>${esc(value)}</b></div>${tip ? `<div class="ctxd-tip">${esc(tip)}</div>` : ''}`;
