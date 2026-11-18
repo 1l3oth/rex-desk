@@ -464,10 +464,13 @@ document.addEventListener('keydown', event => { if (event.key === 'Escape' && vo
 // The terminal panel keeps its scroll place unless it was at the bottom, where it follows the newest command.
 function drawSide(html, extra = '') {
   const side = document.getElementById('side'); if (!side) return;
-  const body = document.getElementById('side-body'), keep = body ? { top: body.scrollTop, bottom: body.scrollHeight - body.scrollTop - body.clientHeight < 40 } : { top: 0, bottom: true };
+  // The Terminal shows the newest at the top, so it pins to the top (not the bottom): a fresh open, and new commands
+  // arriving while the reader is already at the top, both keep the newest in view. If the reader scrolled down to read
+  // older commands, their place is kept instead.
+  const body = document.getElementById('side-body'), keep = body ? { top: body.scrollTop, atTop: body.scrollTop < 40 } : { top: 0, atTop: true };
   if (side.dataset.html !== html) { side.innerHTML = html; side.dataset.html = html; }
   side.className = `side${html ? ' on' : ''} ${extra}`.trim();
-  const fresh = document.getElementById('side-body'); if (fresh) fresh.scrollTop = keep.bottom ? fresh.scrollHeight : keep.top;
+  const fresh = document.getElementById('side-body'); if (fresh) fresh.scrollTop = keep.atTop ? 0 : keep.top;
 }
 const draftKey = () => `${ui.view.type}:${ui.view.id || ''}`;
 // The message box names the AI the next message goes to: the one picked under the box, else the chat's own.
