@@ -241,7 +241,17 @@ function mount(host) {
   // Two fingers pinch to zoom around the point between them (a phone has no wheel); one finger drags like the mouse.
   const fingers = new Map();
   const pinchStart = () => { const [a, b] = [...fingers.values()], mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, [wx, wy] = toWorld(mx, my); state.pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, k: state.target.k, wx, wy }; state.drag = null; };
-  canvas.addEventListener('pointerdown', event => { const [px, py] = point(event); fingers.set(event.pointerId, [px, py]); canvas.setPointerCapture(event.pointerId); state.touched = true; if (fingers.size === 2) { pinchStart(); return; } if (fingers.size > 2) return; const index = nodeAt(px, py); state.drag = { index, px, py, moved: false, x: state.target.x, y: state.target.y }; });
+  canvas.addEventListener('pointerdown', event => {
+    // The first contact of a gesture (a mouse press, or the first finger) means no other finger is down: anything still listed is a
+    // press that never reported lifting (a touch the system cancelled, a pen that left). Left in the list it made the next click look
+    // like the second finger of a pinch, and clicking and dragging stopped working until the screen was opened again.
+    if (event.isPrimary) { fingers.clear(); state.pinch = null; state.lifted = false; }
+    const [px, py] = point(event); fingers.set(event.pointerId, [px, py]); state.touched = true;
+    try { canvas.setPointerCapture(event.pointerId); } catch { /* the pointer is already gone: nothing to follow */ }
+    if (fingers.size === 2) { pinchStart(); return; }
+    if (fingers.size > 2) return;
+    const index = nodeAt(px, py); state.drag = { index, px, py, moved: false, x: state.target.x, y: state.target.y };
+  });
   canvas.addEventListener('pointermove', event => {
     if (!fingers.has(event.pointerId) || fingers.size < 2 || !state.pinch) return;
     fingers.set(event.pointerId, point(event));
@@ -260,6 +270,7 @@ function mount(host) {
     else { state.target.x = state.view.x = drag.x + (px - drag.px) / state.view.k; state.target.y = state.view.y = drag.y + (py - drag.py) / state.view.k; }
   });
   canvas.addEventListener('pointercancel', lift);
+  canvas.addEventListener('lostpointercapture', lift);
   canvas.addEventListener('pointerup', event => { const pinched = state.lifted || state.pinch; lift(event); if (pinched) { if (!fingers.size) state.lifted = false; return; } const drag = state.drag; state.drag = null; if (!drag) return; if (drag.index >= 0 && drag.moved) worker.postMessage({ type: 'drop', index: drag.index }); else if (!drag.moved) show(drag.index); });
   canvas.addEventListener('pointerleave', () => { state.hover = -1; });
   canvas.addEventListener('wheel', event => {
