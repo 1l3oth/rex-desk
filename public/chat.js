@@ -50,8 +50,10 @@ const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem,
   commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), clear: () => clearAgent().catch(error => toast(error.message, true)), loop: () => loopNow().catch(error => toast(error.message, true)), settings: () => openSettings(ctx) }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
-async function api(path, { method = 'GET', data, retry = false } = {}) {
-  const response = await fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) });
+async function api(path, { method = 'GET', data, retry = false, timeout = 0 } = {}) {
+  // A timeout is set only by callers that must never hang (the live refresh): a slow server then aborts the fetch instead of
+  // freezing every later update. Long calls (uploads, model actions) pass no timeout and wait as before.
+  const response = await fetch(`/api${path}`, { method, ...(timeout ? { signal: AbortSignal.timeout(timeout) } : {}), headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) });
   const body = await response.json().catch(() => ({}));
   // With accounts, a workspace that stays signed in hands this window its cookie through /api/auth; otherwise the window signs in first.
   if (response.status === 401 && body.signIn) {
@@ -516,6 +518,8 @@ async function loadView(early = null) {
   } catch (error) { if (type === 'project') ui.page = error.message; }
 }
 let busy = false, again = false, againFull = false, lastTyped = 0, typingHold = 0;
+// The last message sent to the agent in each chat, so Escape (stop) can drop it back into the input to edit and resend.
+const lastSent = new Map();
 // While the person types, the page is not redrawn: a redraw of a long chat takes the main thread and the letters lag.
 // Updates wait until they pause for a moment, then everything catches up at once.
 document.addEventListener('input', event => { if (event.target.id === 'draft' || event.target.closest?.('#composer')) lastTyped = performance.now(); }, true);
@@ -526,8 +530,8 @@ async function refresh({ full = false } = {}) {
   if (busy) { again = true; againFull ||= full; return; } busy = true;
   try {
     // Everything the page needs is asked for at once, not one after another: opening a chat waited for four answers in a row.
-    const view = ui.view, early = view.type === 'run' ? api(`/runs/${view.id}/messages`).catch(() => null) : null;
-    const [snap, memory, profile] = await Promise.all([api('/state'), api('/memory').catch(() => ui.memory), api('/profile').catch(() => ui.profile)]);
+    const view = ui.view, early = view.type === 'run' ? api(`/runs/${view.id}/messages`, { timeout: 15000 }).catch(() => null) : null;
+    const [snap, memory, profile] = await Promise.all([api('/state', { timeout: 15000 }), api('/memory', { timeout: 15000 }).catch(() => ui.memory), api('/profile', { timeout: 15000 }).catch(() => ui.profile)]);
     ui.snap = snap;
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
     if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = memory; ui.profile = profile;
@@ -577,6 +581,7 @@ async function send() {
       } catch (error) { if (away) { ui.outbox.set(run.id, ui.outbox.get(run.id).filter(item => item !== away)); box.value = typed; } throw error; }
       if (away) away.sent = true;
     }
+    if ((type === 'main' || type === 'run') && typed) lastSent.set(draftKey(), typed);
     box.value = ''; box.style.height = ''; ui.drafts.delete(draftKey()); ui.attachments = []; redrawAttachments(ctx); await refresh();
   } catch (error) { toast(error.message, true); }
   finally { box.disabled = false; box.focus(); }
@@ -607,6 +612,24 @@ async function clearAgent() {
   await api(`/runs/${run.id}/fresh`, { method: 'POST', data: {} }); toast(t('Cleared. Your next message starts a fresh session.')); await refresh();
 }
 async function stopAgent() { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast(t('No agent to stop here.'), true); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
+// Escape stops the working agent in the open chat and drops your last message back into the input to edit and resend,
+// the way Claude Code does. It steps aside for the menus and panels that already use Escape (a slash/@ menu, the reply
+// bar, Voice mode, an open popup), and only acts while an agent is actually working here.
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || event.defaultPrevented) return;
+  if (ui.menu || ui.reply || voiceModeOn(draftKey())) return;
+  // Stay out of the way when the reader is in another input or a dialog; act only from the chat itself or its composer.
+  const active = document.activeElement;
+  if (active && active !== document.body && active.id !== 'draft' && (['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) || active.closest('.popup, .dialog, dialog, [role="dialog"], [aria-modal="true"]'))) return;
+  if (!['main', 'run'].includes(ui.view.type)) return;
+  const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id);
+  if (!run || !workingStates.includes(run.state)) return;
+  event.preventDefault();
+  const box = document.getElementById('draft'), back = lastSent.get(draftKey());
+  if (box && back && !box.value.trim()) { box.value = back; ui.drafts.set(draftKey(), back); box.style.height = 'auto'; box.style.height = `${Math.min(200, box.scrollHeight)}px`; box.focus(); }
+  lastSent.delete(draftKey());
+  void stopAgent().catch(error => toast(error.message, true));
+});
 function newRoomDialog() { openRoomDialog(ctx); }
 document.addEventListener('click', async event => {
   const target = event.target.closest('[data-open],[data-action]'); if (!target) return;
@@ -759,10 +782,20 @@ document.addEventListener('keydown', event => {
 });
 try {
   await refresh({ full: true });
-  const stream = new EventSource('/api/events'); let timer;
-  // Changes in quick bursts are drawn once, 0.7 s after the last; when they never stop (another computer syncing), the page still catches up every 2.5 s.
-  let waitingSince = 0;
-  stream.addEventListener('change', () => { clearTimeout(timer); waitingSince ||= Date.now(); timer = setTimeout(() => { waitingSince = 0; void refresh().catch(() => {}); }, Date.now() - waitingSince > 2500 ? 0 : 700); });
+  const stream = new EventSource('/api/events'); let timer, lastRefresh = 0;
+  // A "something changed" ping asks the page to catch up. While an agent writes, these pings arrive faster than the old 700ms
+  // wait, so the wait was reset every time and the page never refreshed until the agent stopped (the "spinner forever" bug).
+  // Now it still waits a beat to batch a burst, but refreshes at least a few times a second during a stream.
+  const onChange = () => {
+    const since = performance.now() - lastRefresh;
+    const run = () => { lastRefresh = performance.now(); void refresh().catch(() => {}); };
+    if (since > 900) return run();
+    clearTimeout(timer); timer = setTimeout(run, Math.max(120, 900 - since));
+  };
+  stream.addEventListener('change', onChange);
+  // A dropped stream (server busy, network blip, update) reconnects on its own; when it does, catch up at once so the page
+  // never sits blank waiting for the next change.
+  stream.addEventListener('open', () => void refresh().catch(() => {}));
   // Voice mode: when nothing is being written or said, listen for the person's next turn; after they spoke, give the
   // agent a moment to start replying before listening again.
   // When the person says nothing for a while (only listening, no agent at work), Rex asks once whether they are still

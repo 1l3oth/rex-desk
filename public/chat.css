@@ -1297,9 +1297,19 @@ body.dropping-files::after{content:attr(data-drop-hint);position:fixed;inset:10p
 .cleared{display:flex;flex-direction:column;align-items:center;gap:6px;margin:10px 0 18px;color:var(--muted);font-size:12.5px}.cleared span{padding:4px 12px;border-radius:999px;background:var(--raised)}
 
 /* The context ring: how full this chat is */
-.ring.ctx{display:inline-grid;place-items:center;width:20px;height:20px;border:0;background:none;animation:none;cursor:help}
+.ring.ctx{display:inline-flex;align-items:center;gap:4px;width:auto;height:20px;border:0;background:none;animation:none;cursor:pointer;color:var(--muted);font-size:11px;font-weight:600;padding:0 2px;line-height:1}
+.ring.ctx:hover{color:var(--ink)}.ring.ctx svg{width:18px;height:18px;flex:none}
 .ring.ctx .ring-bg{fill:none;stroke:var(--line);stroke-width:2.4}.ring.ctx .ring-fill{fill:none;stroke:var(--muted);stroke-width:2.4;stroke-linecap:round}
 .ring.ctx.mid .ring-fill{stroke:var(--warn)}.ring.ctx.full .ring-fill{stroke:var(--bad)}.ring.ctx.busy .ring-fill{stroke:var(--accent)}
+.ctx-panel{position:absolute;right:0;bottom:100%;margin-bottom:10px;width:300px;max-width:92vw;z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.18);padding:12px 14px}
+.ctxd-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px}.ctxd-head strong{font-size:14px}
+.ctxd-bar{height:6px;border-radius:3px;background:var(--raised);overflow:hidden;margin-bottom:8px}
+.ctxd-bar i{display:block;height:100%;background:var(--muted);border-radius:3px}.ctxd-bar i.mid{background:var(--warn)}.ctxd-bar i.full{background:var(--bad)}
+.ctxd-warn{color:var(--warn);font-size:12px;margin:0 0 8px}
+.ctxd-sec{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:10px 0 4px}
+.ctxd-row{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:2px 0}.ctxd-row b{font-variant-numeric:tabular-nums}
+.ctxd-tip{font-size:11px;color:var(--muted);margin-bottom:4px}
+.ctxd-foot{font-size:11px;margin:10px 0 0;line-height:1.5}
 
 /* Worktrees: one card per git worktree, with the tasks that live in it. The same card sits inside chat messages. */
 .wt-page{padding-top:16px;padding-bottom:24px}

@@ -308,6 +308,7 @@ export class TursoSync {
       const remove = db.prepare('DELETE FROM events WHERE sequence=?');
       for (const row of db.prepare('SELECT sequence,run_id FROM events').all()) if (!remoteSequences.has(Number(row.sequence)) && !this.store.privateRun(row.run_id)) { remove.run(row.sequence); removedEvents++; }
     });
+    this.store.clearListCache();
     const records = { rows: remote }, events = { rows: arrived };
     this.store.token = this.store.decrypt(this.store.get('secret', 'mcp-token'));
     // A chat still working on this computer (its agent process is alive) keeps going; only what stopped elsewhere is interrupted.
@@ -328,6 +329,7 @@ export class TursoSync {
       const event = this.store.db.prepare('INSERT OR REPLACE INTO events(sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?)');
       for (const row of events.rows) event.run(Number(row.sequence), row.run_id, row.kind, Number(row.visible), row.value, row.created_at);
     });
+    this.store.clearListCache();
     this.store.token = this.store.decrypt(this.store.get('secret', 'mcp-token'));
     await this.adoptIdentity(events.rows);
     for (const run of this.store.list('run')) if (['running', 'queued', 'waiting', 'starting', 'verifying'].includes(run.state)) this.store.put('run', run.id, { ...run, state: 'interrupted', error: 'Restored from Turso. Resume this run explicitly.' });

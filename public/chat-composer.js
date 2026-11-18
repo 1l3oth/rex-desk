@@ -5,6 +5,7 @@ const ICON = {
   mic: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   up: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   file: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
+  help: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 2.2-2.6 4"/><path d="M12 17h.01"/></svg>',
 };
 import { pickerHtml } from '/chat-pick.js';
 import { openMicrophone, startRecorder, transcribe } from '/recorder.js';
@@ -76,7 +77,7 @@ export function composerHtml(ctx, model) {
       <button class="send-btn" data-action="send" aria-label="${t`Send`}" title="${t`Send`}">${ICON.up}</button>
       <input type="file" id="file-input" multiple hidden>
     </div>
-    <div class="foot"><span class="hint">${t('Type / for commands · hold Space to talk')}${model.composer.mentions?.length ? t(' · @ to mention · # for a task') : ''}</span><span class="spacer"></span>${model.composer.foot || ''}
+    <div class="foot"><button type="button" class="icon-btn help-btn" data-action="help" aria-label="${t`Help`}" title="${t`See everything you can type here`}">${ICON.help}</button><span class="hint">${t('Type / for commands · hold Space to talk')}${model.composer.mentions?.length ? t(' · @ to mention · # for a task') : ''}</span><span class="spacer"></span>${model.composer.foot || ''}
       ${model.composer.noPickers ? '' : `${optionPickers(ctx)}
       ${contextRing(ctx, working)}`}</div>
   </div></div>`;
@@ -112,8 +113,39 @@ function contextRing(ctx, working) {
   const { ui } = ctx, view = ui.view, run = view.type === 'main' ? ctx.mainRun() : view.type === 'run' ? ctx.runById(view.id) : null;
   const used = Number(run?.contextUsed || 0), window = Number(run?.contextWindow || 200000), share = Math.min(1, used / window), round = 2 * Math.PI * 7;
   const kilo = value => value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value);
-  const title = run ? (used ? t`Context: ${kilo(used)} of ${kilo(window)} (${Math.round(share * 100)}%).${share > 0.7 ? ' Getting full: /clear starts fresh with a summary.' : ''}` : t('Context: empty. It fills as you talk.')) : t('Context shows in a chat with one agent.');
-  return `<span class="ring ctx ${share > 0.85 ? 'full' : share > 0.6 ? 'mid' : ''} ${working ? 'busy' : ''}" title="${ctx.esc(title)}" aria-label="${ctx.esc(title)}" role="img"><svg viewBox="0 0 18 18" width="18" height="18"><circle cx="9" cy="9" r="7" class="ring-bg"/><circle cx="9" cy="9" r="7" class="ring-fill" stroke-dasharray="${(share * round).toFixed(2)} ${round.toFixed(2)}" transform="rotate(-90 9 9)"/></svg></span>`;
+  const title = run ? (used ? t`Context: ${kilo(used)} of ${kilo(window)} (${Math.round(share * 100)}%). Click for details.${share > 0.7 ? ' Getting full: /clear starts fresh with a summary.' : ''}` : t('Context: empty. It fills as you talk. Click for details.')) : t('Context shows in a chat with one agent.');
+  const pct = used ? `<span class="ring-pct">${Math.round(share * 100)}%</span>` : '';
+  return `<button type="button" class="ring ctx ${share > 0.85 ? 'full' : share > 0.6 ? 'mid' : ''} ${working ? 'busy' : ''}" data-action="ctx-detail" title="${ctx.esc(title)}" aria-label="${ctx.esc(title)}"><svg viewBox="0 0 18 18" width="18" height="18"><circle cx="9" cy="9" r="7" class="ring-bg"/><circle cx="9" cy="9" r="7" class="ring-fill" stroke-dasharray="${(share * round).toFixed(2)} ${round.toFixed(2)}" transform="rotate(-90 9 9)"/></svg>${pct}</button><div id="ctx-panel" class="ctx-panel" hidden></div>`;
+}
+// The full context breakdown, opened from the ring: how full the window is, this chat's running token total, and the last
+// reply's tokens (fresh input, cache reuse, output, steps). A per-part split (system, tools, messages) is not shown because
+// the engine reports only totals.
+export function contextDetailHtml(ctx) {
+  const { ui, esc } = ctx, view = ui.view, run = view.type === 'main' ? ctx.mainRun() : view.type === 'run' ? ctx.runById(view.id) : null;
+  if (!run) return `<div class="ctxd"><p class="muted small">${t`Open a chat with one agent to see its context.`}</p></div>`;
+  const kilo = value => value >= 1000000 ? `${(value / 1000000).toFixed(2)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(Math.round(value || 0));
+  const used = Number(run.contextUsed || 0), window = Number(run.contextWindow || 200000), share = window ? Math.min(1, used / window) : 0;
+  const last = run.lastTokens || {}, total = run.tokensTotal || {};
+  const row = (label, value, tip = '') => `<div class="ctxd-row"><span>${esc(label)}</span><b>${esc(value)}</b></div>${tip ? `<div class="ctxd-tip">${esc(tip)}</div>` : ''}`;
+  return `<div class="ctxd">
+    <div class="ctxd-head"><strong>${t`Context in this chat`}</strong><span class="muted">${kilo(used)} / ${kilo(window)} · ${Math.round(share * 100)}%</span></div>
+    <div class="ctxd-bar"><i style="width:${Math.round(share * 100)}%" class="${share > 0.85 ? 'full' : share > 0.6 ? 'mid' : ''}"></i></div>
+    ${share > 0.7 ? `<p class="ctxd-warn">${t`Getting full. Type /clear to start fresh with a short summary.`}</p>` : ''}
+    <div class="ctxd-sec">${t`Right now in the window`}</div>
+    ${row(t`In the agent's mind`, kilo(used))}
+    ${row(t`Room left`, kilo(Math.max(0, window - used)))}
+    <div class="ctxd-sec">${t`Last reply`}</div>
+    ${row(t`Fresh input (billed)`, kilo(last.input || 0))}
+    ${row(t`Reused from cache (cheap)`, kilo(last.cacheRead || 0))}
+    ${row(t`Written to cache`, kilo(last.cacheWrite || 0))}
+    ${row(t`The agent's output`, kilo(last.output || 0))}
+    ${last.steps ? row(t`Tool steps`, String(last.steps)) : ''}
+    <div class="ctxd-sec">${t`This whole chat`}</div>
+    ${row(t`Total input`, kilo(total.input || 0))}
+    ${row(t`Total from cache`, kilo(total.cacheRead || 0))}
+    ${row(t`Total output`, kilo(total.output || 0))}
+    <p class="ctxd-foot muted">${t`A per-part split (system, tools, messages) is not shown: the AI engine reports only these totals.`}</p>
+  </div>`;
 }
 
 // ---------- menus: slash commands and @ mentions share one list ----------
@@ -155,14 +187,21 @@ function drawMenu(ctx) {
 function closeMenu(ctx) { ctx.ui.menu = null; drawMenu(ctx); }
 function choose(ctx, item) {
   const menu = ctx.ui.menu, box = document.getElementById('draft'); if (!menu || !item) return;
-  if (menu.kind === 'slash') { box.value = ''; ctx.ui.drafts.set(ctx.draftKey(), ''); closeMenu(ctx); void item.run?.(); return; }
+  if (menu.kind === 'slash') {
+    // A slash at the very start runs the command as before. One typed mid-sentence puts the command in place of the /query,
+    // keeping the text around it, instead of wiping the box.
+    if (!menu.from) { box.value = ''; ctx.ui.drafts.set(ctx.draftKey(), ''); closeMenu(ctx); void item.run?.(); return; }
+    const end = box.selectionStart;
+    box.value = `${box.value.slice(0, menu.from)}/${item.name} ${box.value.slice(end)}`; ctx.ui.drafts.set(ctx.draftKey(), box.value); closeMenu(ctx); box.focus(); return;
+  }
   const end = box.selectionStart;
   box.value = `${box.value.slice(0, menu.from)}${menu.kind === 'task' ? '#' : '@'}${item.name} ${box.value.slice(end)}`; ctx.ui.drafts.set(ctx.draftKey(), box.value); closeMenu(ctx); box.focus();
 }
 function menuItems(ctx, box) {
   const before = box.value.slice(0, box.selectionStart);
-  const slash = /^\/([\w-]*)$/.exec(before);
-  if (slash) { const items = commands(ctx).filter(item => item.name.startsWith(slash[1].toLowerCase())); return items.length ? { kind: 'slash', items, index: 0, from: 0 } : null; }
+  // A slash opens the command list at the start of the box or anywhere after a space, so /command works mid-sentence too.
+  const slash = /(^|\s)\/([\w-]*)$/.exec(before);
+  if (slash) { const query = slash[2]; const items = commands(ctx).filter(item => item.name.startsWith(query.toLowerCase())); return items.length ? { kind: 'slash', items, index: 0, from: before.length - query.length - 1 } : null; }
   const room = ctx.ui.view.type === 'room' ? ctx.ui.snap.rooms.find(item => item.id === ctx.ui.view.id) : null;
   const at = /(^|\s)@([\p{L}\p{N}_.-]*)$/u.exec(before);
   if (at) {
@@ -401,6 +440,13 @@ export function initComposer(ctx) {
   initPushToTalk(ctx);
   document.addEventListener('click', event => { if (event.target.closest?.('[data-action="st-voice"]')) { event.stopPropagation(); void voiceDialog(ctx); } }, true);
   document.addEventListener('click', event => {
+    // The context ring opens (and closes) a panel with the full breakdown.
+    const ctxBtn = event.target.closest('[data-action="ctx-detail"]');
+    if (ctxBtn) { const panel = document.getElementById('ctx-panel'); if (panel) { const show = panel.hidden; panel.innerHTML = show ? contextDetailHtml(ctx) : ''; panel.hidden = !show; } return; }
+    const panel = document.getElementById('ctx-panel');
+    if (panel && !panel.hidden && !event.target.closest('#ctx-panel')) { panel.hidden = true; panel.innerHTML = ''; }
+    // The help button opens the full command list, the same as typing / at the start of the box.
+    if (event.target.closest('[data-action="help"]')) { ctx.ui.menu = { kind: 'slash', items: commands(ctx), index: 0, from: 0 }; drawMenu(ctx); return; }
     const chip = event.target.closest('[data-remove-attach]');
     if (chip) { ctx.ui.attachments.splice(Number(chip.dataset.removeAttach), 1); drawChips(ctx); return; }
     const entry = event.target.closest('[data-menu]');

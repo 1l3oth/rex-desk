@@ -58,7 +58,9 @@ export function terminalHtml(entries, { esc, hhmm, who = null }) {
   const line = item => {
     const out = item.output, state = out ? (out.failed ? 'bad' : 'ok') : 'run', said = clip(item.input?.description || toolLine(item).replace(/^Runs /, ''), 90);
     const lines = String(out?.text || '').split(/\r?\n/).filter(text => text.trim() && !NOISE.test(text.trim())), shown = lines.slice(-6);
-    const open = closedTerm.has(item.id) ? false : openTerm.has(item.id) || state === 'bad';
+    // A running command opens by itself so its output is seen live; it collapses on its own once it finishes (a plain
+    // "done" is closed), while a failed one stays open. The reader's own open/close always wins over this.
+    const open = closedTerm.has(item.id) ? false : openTerm.has(item.id) || state === 'bad' || state === 'run';
     const face = who ? who(item) : '';
     // "fail 0" and "0 failed" are good news.
     const tone = text => /\b(fail(?:ed|s)?\s*[:=]?\s*0|0\s+fail(?:ed|ures?)?)\b/i.test(text) ? 'ok' : /(error|exception|denied|not found|exceeded|✖|✗|\bfail)/i.test(text) ? 'bad' : /(\bpass|\bok\b|done|success|✔|✓)/i.test(text) ? 'ok' : '';
@@ -69,7 +71,8 @@ export function terminalHtml(entries, { esc, hhmm, who = null }) {
         <div class="tl-links">${lines.length > shown.length ? `<button type="button" class="linkish" data-term-all="${esc(item.id)}">${t`Show all ${lines.length} lines`}</button>` : ''}<button type="button" class="linkish" data-term-copy="${esc(item.id)}">${t`Copy`}</button></div>
         <pre class="tl-full" hidden>${esc(lines.join('\n'))}</pre></div></details>`;
   };
-  const body = groups.map(group => `<div class="tl-turn">${(group.items.length === 1 ? t`${esc(hhmm(new Date(group.start).toISOString()))} · ${group.items.length} step` : t`${esc(hhmm(new Date(group.start).toISOString()))} · ${group.items.length} steps`)}</div>${group.items.map(line).join('')}`).join('');
+  // Newest first: the latest turn sits at the top of the panel, and inside each turn the most recent command is on top.
+  const body = groups.slice().reverse().map(group => `<div class="tl-turn">${(group.items.length === 1 ? t`${esc(hhmm(new Date(group.start).toISOString()))} · ${group.items.length} step` : t`${esc(hhmm(new Date(group.start).toISOString()))} · ${group.items.length} steps`)}</div>${group.items.slice().reverse().map(line).join('')}`).join('');
   const bar = `<div class="tl-bar" role="toolbar" aria-label="${t`Show`}"><button type="button" class="on" data-term-show="all">${t`All`}</button><button type="button" data-term-show="run">${t`Running${running ? ` <b>${running}</b>` : ''}`}</button><button type="button" data-term-show="bad">${t`Failed${failed ? ` <b class="bad">${failed}</b>` : ''}`}</button><label class="tl-find"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="search" placeholder="${t`Search`}" aria-label="${t`Search commands and output`}" data-term-find></label></div>`;
   return `<div class="side-head"><strong>${t`Terminal`}</strong><span class="muted">${(entries.length === 1 ? t`${entries.length} command` : t`${entries.length} commands`)}</span><span class="spacer"></span><button type="button" class="btn small" data-action="term-close" aria-label="${t`Close the terminal panel`}">${t`Close`}</button></div>${bar}<div class="side-body tl-list" id="side-body">${body || `<p class="tl-none">${t`No commands yet.`}</p>`}</div>`;
 }

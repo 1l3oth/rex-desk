@@ -142,7 +142,19 @@ export class Store extends EventEmitter {
     const row = this.db.prepare('SELECT value FROM records WHERE kind=? AND id=?').get(kind, key);
     return row ? JSON.parse(row.value) : undefined;
   }
-  list(kind) { return this.db.prepare('SELECT value FROM records WHERE kind=?').all(kind).map(row => JSON.parse(row.value)); }
+  // Parsed rows are cached per kind: /state rebuilds a dozen lists on every refresh, and re-reading and re-parsing every
+  // record each time was the main cost that grew with use. The cache is dropped for a kind whenever one of its records is
+  // written or removed (put/delete, including changes pulled from another computer, which go through them). A copy is
+  // returned so a caller that sorts or trims the list in place can never disturb the cache.
+  list(kind) {
+    this.lists ??= new Map();
+    let cached = this.lists.get(kind);
+    if (!cached) { cached = this.db.prepare('SELECT value FROM records WHERE kind=?').all(kind).map(row => JSON.parse(row.value)); this.lists.set(kind, cached); }
+    return cached.slice();
+  }
+  // Drop the whole list cache. Code that writes records with raw SQL instead of put/delete (a cloud restore loading many
+  // records at once) must call this after, so a later list() does not read a stale copy.
+  clearListCache() { this.lists?.clear(); }
   // Only the records whose field has this value, filtered by the database: no need to read and parse every record of the kind.
   listBy(kind, field, value) { return this.db.prepare(`SELECT value FROM records WHERE kind=? AND json_extract(value, '$.' || ?)=?`).all(kind, field, value).map(row => JSON.parse(row.value)); }
   // One field of one record, without reading the rest (a shared file's size, without its data).
@@ -203,11 +215,12 @@ export class Store extends EventEmitter {
       this.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value').run(kind, key, JSON.stringify(value));
       this.cloud?.record(kind, key, value);
     });
+    this.lists?.delete(kind);
     this.cloud?.schedule();
     this.emit('change', { kind, id: key });
     return value;
   }
-  delete(kind, key) { if (kind === 'specialist') this.privateAgents = null; this.transaction(() => { this.db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(kind, key); this.logChange(kind, key, true); this.cloud?.remove(kind, key); }); this.cloud?.schedule(); this.emit('change', { kind, id: key }); }
+  delete(kind, key) { if (kind === 'specialist') this.privateAgents = null; this.transaction(() => { this.db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(kind, key); this.logChange(kind, key, true); this.cloud?.remove(kind, key); }); this.lists?.delete(kind); this.cloud?.schedule(); this.emit('change', { kind, id: key }); }
   event(runId, kind, value, visible = false) {
     this.transaction(() => {
       const result = this.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?)').run(runId ?? '', kind, visible ? 1 : 0, JSON.stringify(redact(value)), now());

@@ -241,6 +241,9 @@ export class Peers {
         result = ['starting', 'running', 'queued', 'waiting', 'verifying'].includes(run.state) ? await this.desk.say(run.id, text, {}) : await this.desk.resume(run.id, { prompt: text });
       }
     } catch (failure) { error = failure.message; }
+    // A message that could not be delivered must never just vanish: show it in the chat so the person sees it failed,
+    // instead of silently marking the command done. The error also travels back on the command record below.
+    if (error) { const runId = command.runId || result?.id; if (runId && this.store.get('run', runId)) this.store.event(runId, 'error', { message: `A message from ${this.deviceName(command.node) || 'your other computer'} could not be delivered: ${error}` }, true); }
     // A locked file answer is not kept once it is used: only its question id stays.
     const sealed = command.action === 'answer' && command.input?.answer?.sealed;
     this.store.put('peercmd', command.id, { ...this.store.get('peercmd', command.id), ...(sealed ? { input: { interactionId: command.input.interactionId } } : {}), done: true, doneAt: now(), error, runId: result?.id || '' });
@@ -476,7 +479,10 @@ export class Peers {
         await bounded(() => this.pullFrom(peer));
         this.timers.set(peer.id, Date.now() + (this.direct(peer.id) ? 2500 : 10000));
       }
-      if ((this.timers.get('turso') || 0) <= Date.now()) { this.timers.set('turso', Date.now() + 5000); await bounded(() => this.pullTurso()); this.timers.set('turso', Date.now() + 5000); }
+      // Read the shared cloud fast while something is in flight (an agent replying here, or a message waiting to cross
+      // between computers), slowly when nothing is happening. A cross-device chat then feels near-instant without the
+      // cost of a fast poll when idle. store.list is cached, so this check is cheap on every tick.
+      if ((this.timers.get('turso') || 0) <= Date.now()) { this.timers.set('turso', Date.now() + (this.inFlight() ? 1500 : 5000)); await bounded(() => this.pullTurso()); this.timers.set('turso', Date.now() + (this.inFlight() ? 1500 : 5000)); }
       if ((this.timers.get('presence') || 0) <= Date.now()) { this.timers.set('presence', Date.now() + 30000); await bounded(() => this.presence()); }
       if ((this.timers.get('secure') || 0) <= Date.now()) { this.timers.set('secure', Date.now() + 300000); this.refreshSecure(); }
     };
@@ -484,6 +490,12 @@ export class Peers {
     this.loop.unref?.();
   }
   stop() { clearInterval(this.loop); this.stopped = true; }
+  // Something is worth polling fast for: an agent on this computer is mid-reply, or a command (a chat message, a task) is
+  // still waiting to be picked up or answered on either computer.
+  inFlight() {
+    const working = new Set(['starting', 'running', 'queued', 'waiting', 'verifying', 'replying']);
+    return this.store.list('run').some(run => working.has(run.state)) || this.store.list('peercmd').some(command => !command.done);
+  }
   selfUrl() { return this.port ? this.addresses(this.port).find(address => address.startsWith('http://')) || '' : ''; }
   async http(peer, method, route, data) {
     const response = await fetch(`${peer.url}${route}`, { method, signal: AbortSignal.timeout(6000),
