@@ -4,6 +4,7 @@ import { rexCore } from '/rex-core.js';
 import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter } from '/chat-sidebar.js';
 import { agentStage, agentAction, agentGroups, chatTakers, moveRunDialog, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { subagentHtml as subagentCard, subagentsFromEvents, subagentsPanel } from '/chat-subagents.js';
+import { sideTabsHtml, crewHtml } from '/chat-sidetabs.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
 import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.js';
@@ -518,7 +519,7 @@ async function loadView(early = null) {
       const events = await (early && type === 'run' ? early : api(`/runs/${run.id}/messages`)); ui.events.set(run.id, events);
     } else if (type === 'room') {
       const room = ui.snap.rooms.find(item => item.id === id);
-      if (room && ui.infoOpen !== false && ['activity', 'subagents', 'terminal'].includes(ui.sideTab)) await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
+      if (room && ui.infoOpen !== false && ['activity', 'subagents', 'team', 'terminal'].includes(ui.sideTab)) await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
     } else if (type === 'net') { await loadNet(ctx);
     } else if (type === 'worktrees') { await api('/worktrees');
     } else if (type === 'monitor') { ui.monitor = await api('/monitor'); 
@@ -1112,14 +1113,18 @@ function personalSide(run, agent, items, shells) {
   const trees = chatWorktrees(ui, { runId: run.id, agentId: agent.id });
   const subs = items.filter(item => item.role === 'subagent');
   const team = teamOf(agent.id);
-  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'worktrees' ? 'worktrees' : ui.chatTab === 'subagents' ? 'subagents' : ui.chatTab === 'team' ? 'team' : 'profile', part = ['media', 'files', 'links'].includes(ui.chatShared) ? ui.chatShared : 'media';
+  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'worktrees' ? 'worktrees' : ui.chatTab === 'subagents' || ui.chatTab === 'team' ? 'team' : 'profile', part = ['media', 'files', 'links'].includes(ui.chatShared) ? ui.chatShared : 'media';
   const entries = items.filter(item => item.role === 'human' || item.role === 'agent').map(item => ({ from: item.role === 'human' ? t('You') : agent.name, at: item.at, text: item.text }));
   const shared = collectShared(entries, (ui.snap.artifacts || []).filter(item => item.runId === run.id).map(item => ({ ...item, from: agent.name })));
   const close = `<button type="button" class="side-x" data-action="chat-info-close" aria-label="${t`Close the side panel`}" title="${t`Close`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
-  const tabs = `<div class="side-head tabs"><button type="button" class="tab ${tab === 'profile' ? 'on' : ''}" data-action="chat-tab" data-tab="profile">${t`Profile`}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="chat-tab" data-tab="team">${t`Team${team.open ? `<span class="tcount${team.owed ? '' : ' quiet'}">${team.open}</span>` : ''}`}</button><button type="button" class="tab ${tab === 'worktrees' ? 'on' : ''}" data-action="chat-tab" data-tab="worktrees">${t`Worktrees${trees.length ? `<span class="tcount quiet">${trees.length}</span>` : ''}`}</button><button type="button" class="tab ${tab === 'subagents' ? 'on' : ''}" data-action="chat-tab" data-tab="subagents">${t`Sub-agents${subs.length ? `<span class="tcount quiet">${subs.length}</span>` : ''}`}</button>${shells.length ? `<button type="button" class="tab ${tab === 'terminal' ? 'on' : ''}" data-action="chat-tab" data-tab="terminal">${t`Terminal`}<span class="tcount quiet">${shells.length}</span></button>` : ''}<span class="spacer"></span>${close}</div>`;
+  const tabs = sideTabsHtml(esc, { action: 'chat-tab', current: tab, close, tabs: [
+    { id: 'profile', label: t('Profile'), group: 'about' },
+    { id: 'team', label: t('Team'), count: team.open + (stateTone(run) === 'working' ? subs.filter(item => !item.done).length : 0), owed: team.owed, group: 'work' },
+    { id: 'worktrees', label: t('Worktrees'), count: trees.length, group: 'code' },
+    ...(shells.length ? [{ id: 'terminal', label: t('Terminal'), count: shells.length, group: 'code' }] : [])] });
   if (tab === 'worktrees') return tabs + worktreeSideHtml(ctx, trees);
-  if (tab === 'team') return tabs + teamPanel(agent, team);
-  if (tab === 'subagents') return tabs + subagentsPanel(subs.map(item => ({ ...item, runId: run.id })), ctx, { live: () => stateTone(run) === 'working', jump: true });
+  if (tab === 'team') return tabs + crewHtml({ taskBody: teamPanel(agent, team), taskCount: team.tasks.length, subBody: subagentsPanel(subs.map(item => ({ ...item, runId: run.id })), ctx, { live: () => stateTone(run) === 'working', jump: true }), subCount: subs.length, labels: { tasks: t('Team tasks'), subs: t('Sub-agents') },
+    empty: `<div class="side-body"><div class="side-empty">${'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.8c1.5.6 2.6 1.9 3 4.2"/></svg>'}<p>${t`No team work yet. When ${esc(agent.name)} hands work to another agent or runs a sub-agent, it shows here.`}</p></div></div>` });
   if (tab === 'terminal') return tabs + terminalHtml(shells, { esc, hhmm }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="tl-bar)/, '');
   const sharedBox = `<h3>${t`Media, files and links`}</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
   const sources = (agent.taskSources || []).map(id => id === 'local' ? t('Rex Desk tasks') : (ui.snap.config?.sources || []).find(source => source.id === id)?.name).filter(Boolean);

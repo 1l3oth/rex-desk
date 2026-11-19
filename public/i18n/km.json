@@ -169,7 +169,6 @@
  "Account not found.": "រកមិនឃើញគណនីទេ។",
  "Accounts agents use in previews": "គណនីដែលភ្នាក់ងារប្រើក្នុងការមើលជាមុន",
  "Active": "សកម្ម",
- "Activity{0}": "សកម្មភាព{0}",
  "Actual size": "ទំហំពិត",
  "Add": "បន្ថែម",
  "Add a chat": "បន្ថែមការជជែក",
@@ -1921,7 +1920,6 @@
  "Worktrees refreshed.": "បានផ្ទុក worktrees ឡើងវិញ។",
  "Worktrees that were removed. Their tasks stay listed so you can see where the work happened.": "worktrees ដែលត្រូវបានដកចេញ។ កិច្ចការរបស់វានៅតែមានក្នុងបញ្ជី ដើម្បីឱ្យអ្នកឃើញកន្លែងដែលការងារបានកើតឡើង។",
  "Worktrees your agents make, and the ones Rex Desk finds in your projects, show here with the tasks that live in each one.": "worktrees ដែលភ្នាក់ងាររបស់អ្នកបង្កើត និងមួយដែល Rex Desk រកឃើញក្នុងគម្រោងរបស់អ្នក បង្ហាញនៅទីនេះជាមួយកិច្ចការដែលរស់នៅក្នុងមួយៗ។",
- "Worktrees{0}": "Worktrees{0}",
  "Write a comment": "សរសេរមតិយោបល់",
  "Write a comment…": "សរសេរមតិយោបល់…",
  "Write a message first.": "សរសេរសារជាមុនសិន។",
@@ -1965,7 +1963,6 @@
  "Your profile, from what the agents learned": "ប្រវត្តិរូបរបស់អ្នក ពីអ្វីដែលភ្នាក់ងារបានរៀន",
  "Your whole desk, kept safe in the cloud and ready on every computer you sign in on.": "Desk ទាំងមូលរបស់អ្នក រក្សាទុកដោយសុវត្ថិភាពលើពពក ហើយរួចរាល់លើគ្រប់កុំព្យូទ័រដែលអ្នកចូល។",
  "Zoom in": "ពង្រីក",
- "Sub-agents{0}": "ភ្នាក់ងាររង{0}",
  "Show in chat": "បង្ហាញក្នុងការជជែក",
  "No sub-agents yet. When an agent starts one, it is listed here.": "មិនទាន់មានភ្នាក់ងាររងទេ។ នៅពេលភ្នាក់ងារចាប់ផ្តើមមួយ វានឹងបង្ហាញនៅទីនេះ។",
  "That card is not in the chat on screen. Use Show earlier messages.": "កាតនោះមិននៅក្នុងការជជែកលើអេក្រង់ទេ។ ប្រើ «បង្ហាញសារមុនៗ»។",
@@ -2103,7 +2100,6 @@
  "Answer for {0}": "ឆ្លើយជំនួស {0}",
  "Result": "លទ្ធផល",
  "No team task yet. Ask {0} to hand work to your other agents, like \"ask Dev to build it and QA to check it\".": "មិនទាន់មានការងារក្រុមទេ។ សុំឱ្យ {0} ចែកការងារទៅភ្នាក់ងារផ្សេងទៀតរបស់អ្នក ដូចជា \"សុំឱ្យ Dev សាងវា ហើយ QA ពិនិត្យវា\"។",
- "Team{0}": "ក្រុម{0}",
  "Write the answer first.": "សរសេរចម្លើយជាមុនសិន។",
  "Canceled.": "បានបោះបង់។",
  "Search {0} skills": "ស្វែងរកក្នុងជំនាញ {0}",
@@ -2256,5 +2252,10 @@
  "Move to a personal chat": "ផ្លាស់ទីទៅការជជែកផ្ទាល់ខ្លួន",
  "The agent you pick gets this run as its chat: click it in the sidebar to see this work and keep talking. Its current chat stays under Earlier chats.": "ភ្នាក់ងារដែលអ្នកជ្រើសរើសនឹងទទួលការងារនេះជាការជជែករបស់វា៖ ចុចវានៅរបារចំហៀង ដើម្បីមើលការងារនេះ ហើយបន្តនិយាយ។ ការជជែកបច្ចុប្បន្នរបស់វានៅតែមាននៅក្រោម ការជជែកមុនៗ។",
  "Move": "ផ្លាស់ទី",
- "This run is now {0}'s chat.": "ការងារនេះឥឡូវជាការជជែករបស់ {0} ហើយ។"
+ "This run is now {0}'s chat.": "ការងារនេះឥឡូវជាការជជែករបស់ {0} ហើយ។",
+ "Team": "ក្រុម",
+ "Activity": "សកម្មភាព",
+ "Sub-agents": "ភ្នាក់ងាររង",
+ "Team tasks": "កិច្ចការក្រុម",
+ "No team work yet. When {0} hands work to another agent or runs a sub-agent, it shows here.": "មិនទាន់មានការងារក្រុមនៅឡើយទេ។ នៅពេល {0} ប្រគល់ការងារឱ្យភ្នាក់ងារផ្សេង ឬដំណើរការភ្នាក់ងាររង វានឹងបង្ហាញនៅទីនេះ។"
 }
