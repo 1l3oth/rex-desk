@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
-import { voiceBriefing } from '../src/voice-briefing.js';
+import { voiceBriefing, VOICE_RULE, VOICE_REMINDER } from '../src/voice-briefing.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const waitFor = async (check, what) => { for (let i = 0; i < 300; i++) { const value = check(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 20)); } throw new Error(`Timed out waiting for ${what}`); };
@@ -113,4 +113,9 @@ test('a background job runs on Sonnet when the agent asks for it, and on Haiku b
     assert.equal(store.get('run', desk.startHelper(rex.id, { task: 'Read the cart code and say what it does' }).jobId).model, 'haiku');
     assert.equal(store.get('run', desk.startHelper(rex.id, { task: 'Read the cart code and say what it does', model: 'sonnet' }).jobId).model, 'sonnet');
   } finally { await desk.close?.(); }
+});
+
+test('Voice mode tells the agent to say a short sentence before every tool call, so it is never silent while working', () => {
+  assert.match(VOICE_RULE, /before every tool call or long step, first write one short spoken sentence/);
+  assert.match(VOICE_REMINDER, /Before any tool call, first say one short sentence/);
 });
