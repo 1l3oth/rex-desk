@@ -215,7 +215,7 @@ test('an agent that mentions another agent in its reply gets that agent to answe
 
 test('@all from the person wakes every agent in the room, and a Rex Desk task is mentioned as #L1', async () => {
   const { desk, turns, dara, vanna, room } = setup();
-  const task = desk.localTasks.create({ title: 'Plan the checkout redesign' });
+  const task = await desk.localTasks.create({ title: 'Plan the checkout redesign' });
   await desk.rooms.post(room.id, { text: `@all please read #${task.taskNumber}` });
   await waitFor(() => turns.some(item => item.run.specialistId === dara.id) && turns.some(item => item.run.specialistId === vanna.id));
   assert.ok(!turns.some(item => item.run.roomAgent === 'main'), 'the main agent was not in the room, so @all does not pull it in');
@@ -419,7 +419,7 @@ test('each agent runs its own loop: it checks its tasks on schedule, skips when 
   const { store, desk, turns, dara } = setup();
   store.put('specialist', dara.id, { ...store.get('specialist', dara.id), taskSources: ['local'] });
   assert.equal(desk.specialists.loopOf(store.get('specialist', dara.id)).on, true, 'on by default');
-  const created = desk.localTasks.create({ title: 'Fix the cart total', project: 'shop' });
+  const created = await desk.localTasks.create({ title: 'Fix the cart total', project: 'shop' });
   assert.ok(desk.specialists.ownTasks(store.get('specialist', dara.id)).some(task => task.id === created.id));
   await desk.loopTick(Date.now(), { memory: false });
   await waitFor(() => turns.some(turn => /Loop check/.test(turn.prompt)));

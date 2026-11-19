@@ -22,12 +22,14 @@ export const thisComputer = () => process.env.REX_COMPUTER_NAME || os.hostname()
 export const isLocalMain = run => run?.role === 'coordinator' && Boolean(run.main) && !run.roomAgent && run.computer === thisComputer();
 export const latestLocalMain = runs => runs.filter(isLocalMain).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
 // Records every computer of the person shares (see peers.js). The Rex Agent record is each computer's own.
-export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd', 'chatcopy', 'chatfile', 'chatsplit']);
+// Rex Desk's own tasks (ids "local:...") are shared too; tasks from Flow, Morningmate or Orbit come from their tracker on
+// each computer and stay out.
+export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd', 'chatcopy', 'chatfile', 'chatsplit', 'task']);
 // What the person can leave out of the cloud backup (Settings, Backup and updates). Agents, rooms, projects and settings
 // always go up: they are what makes the desk follow the person to another computer.
 export const BACKUP_PARTS = { chats: true, rooms: true, tasks: true, files: true };
 const BACKUP_PART = { roommsg: 'rooms', task: 'tasks', priority: 'tasks', chatfile: 'files', artifact: 'files' };
-const shared = (kind, key) => SHARED.has(kind) && !(kind === 'specialist' && key === 'main');
+export const shared = (kind, key) => SHARED.has(kind) && !(kind === 'specialist' && key === 'main') && !(kind === 'task' && !String(key).startsWith('local:'));
 export const id = () => randomUUID();
 export const defaults = {
   name: 'Rex', notify: true, provider: 'claude', concurrency: 2, branchPrefix: 'rex-desk',
@@ -131,6 +133,14 @@ export class Store extends EventEmitter {
           this.db.prepare('INSERT INTO changes(kind,id) VALUES(?,?)').run(kind, row.id);
         }
         this.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?)').run('meta', 'changes-backfilled', JSON.stringify({ at: now() }));
+      });
+    }
+    // Rex Desk tasks joined the shared records later: the ones already here get a version and go to the other computers once.
+    // Without node they count as made here, so a number two computers both gave out is settled by its date (LocalTasks.settle).
+    if (!this.get('meta', 'tasks-shared')) {
+      this.transaction(() => {
+        for (const task of this.list('task')) if (shared('task', task.id)) this.put('task', task.id, task);
+        this.put('meta', 'tasks-shared', { at: now() });
       });
     }
     // Running processes cannot be resurrected after a crash. Keep their history and make recovery explicit.

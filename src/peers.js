@@ -178,6 +178,7 @@ export class Peers {
       const result = this.store.applyRemote(change.kind, change.id, value, change.deleted);
       if (result.isNew && change.kind === 'roommsg') delivered.push(value);
       if (result.changed && change.kind === 'peercmd') void this.runCommand(this.store.get('peercmd', change.id));
+      if (result.changed && change.kind === 'task') this.tasksArrived = true;
     }
     // A message for one of this computer's agents is answered here, also after this computer was off for a while.
     for (const message of delivered) {
@@ -557,6 +558,8 @@ export class Peers {
       // Chat messages: about every second while an agent works or a message is on its way, every 5 seconds otherwise.
       if ((this.timers.get('chat') || 0) <= Date.now()) { this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); await bounded(() => this.pullChats()); this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); }
       if ((this.timers.get('chatpush') || 0) <= Date.now()) { this.timers.set('chatpush', Date.now() + 60000); try { this.desk.chatSplits?.settleAll(); this.desk.chatSplits?.detect(); this.pushChats(); } catch { /* tried again in a minute */ } }
+      // Rex Desk tasks from another computer: a number both computers gave out is settled (LocalTasks.settle).
+      if (this.tasksArrived || (this.timers.get('tasks') || 0) <= Date.now()) { this.tasksArrived = false; this.timers.set('tasks', Date.now() + 60000); await bounded(() => this.desk.localTasks?.settle()); }
       if ((this.timers.get('commands') || 0) <= Date.now()) { this.timers.set('commands', Date.now() + 3000); this.pendingCommands(); }
       if ((this.timers.get('presence') || 0) <= Date.now()) { this.timers.set('presence', Date.now() + 30000); await bounded(() => this.presence()); }
       if ((this.timers.get('secure') || 0) <= Date.now()) { this.timers.set('secure', Date.now() + 300000); this.refreshSecure(); }

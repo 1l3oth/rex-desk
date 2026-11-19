@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
-import { SHARED, BACKUP_PARTS } from './store.js';
+import { SHARED, BACKUP_PARTS, shared as isShared } from './store.js';
 import { FileBackup } from './file-backup.js';
 import { AccountLink, accountMe } from './rexdesk-account.js';
 // A cloud database that hit its size limit answers with words like these.
@@ -51,7 +51,7 @@ export class TursoSync {
   // Shared records (rooms, messages, agents) also go to one table that every computer of the person reads, so the same
   // Turso database gives each of them the same chats, also while another computer is off. The newest version wins.
   shared(kind, id, value, deleted = false) {
-    if (!SHARED.has(kind) || (kind === 'specialist' && id === 'main') || !value?._v && !deleted) return;
+    if (!isShared(kind, id) || !value?._v && !deleted) return;
     // workspace: only this account's computers read it (another account, or a development copy, in the same database does not).
     this.enqueue('INSERT INTO rex_shared(kind,id,value,deleted,v,node,workspace) VALUES(?,?,?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value,deleted=excluded.deleted,v=excluded.v,node=excluded.node,workspace=excluded.workspace WHERE excluded.v > rex_shared.v',
       [kind, id, deleted ? '' : JSON.stringify(value), deleted ? 1 : 0, deleted ? this.store.stamp() : value._v, this.store.nodeId, this.workspace]);
@@ -87,6 +87,29 @@ export class TursoSync {
       // A record read before comes back without its value: applying it changes nothing, and it still counts for paging.
       return { kind: row.kind, id: row.id, deleted, value: deleted || !full ? null : JSON.parse(full.value), v: row.v };
     });
+  }
+  // The next free number of a kind for this account, taken in the cloud database: the first computer to write a number gets it,
+  // the other one tries the next. floor is the next number this computer knows of. null when the cloud cannot be reached.
+  async claimNumber(kind, id, floor = 1) {
+    if (!this.ready || this.closed || !this.client) return null;
+    const top = await this.client.execute({ sql: 'SELECT max(number) AS top FROM rex_numbers WHERE workspace=? AND kind=?', args: [this.workspace, kind] });
+    let number = Math.max(Number(top.rows[0]?.top || 0) + 1, Number(floor) || 1);
+    for (let attempt = 0; attempt < 25; attempt++, number++) {
+      try { await this.client.execute({ sql: 'INSERT INTO rex_numbers(workspace,kind,number,id) VALUES(?,?,?,?)', args: [this.workspace, kind, number, id] }); return number; }
+      catch (error) { if (!/UNIQUE|constraint/i.test(String(error?.message || error))) throw error; }
+    }
+    return null;
+  }
+  // Numbers given out before they were claimed in the cloud (older tasks, or made while offline) are claimed for their task;
+  // one already taken by another task stays with that one, and LocalTasks.settle gives the later task a new number.
+  async claimTaken(kind, items) {
+    if (!this.ready || this.closed || !this.client || !items.length) return;
+    await this.client.batch(items.map(item => ({ sql: 'INSERT OR IGNORE INTO rex_numbers(workspace,kind,number,id) VALUES(?,?,?,?)', args: [this.workspace, kind, item.number, item.id] })), 'write');
+  }
+  async numberOwners(kind) {
+    if (!this.ready || this.closed || !this.client) return null;
+    const rows = await this.client.execute({ sql: 'SELECT number,id FROM rex_numbers WHERE workspace=? AND kind=?', args: [this.workspace, kind] });
+    return new Map(rows.rows.map(row => [Number(row.number), String(row.id)]));
   }
   // What belongs to a project kept out of the cloud is never written there (see Store.isPrivate): not by a change, not by the
   // first upload of a workspace. Deleting still reaches the cloud, so an older copy there goes away.
@@ -233,6 +256,8 @@ export class TursoSync {
         'CREATE INDEX IF NOT EXISTS rex_chat_v ON rex_chat(workspace, v)',
         'CREATE TABLE IF NOT EXISTS rex_files (workspace TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, updated_at TEXT, PRIMARY KEY(workspace,path))',
         'CREATE TABLE IF NOT EXISTS rex_workspaces (workspace TEXT PRIMARY KEY, name TEXT NOT NULL, kdf TEXT NOT NULL, sealed_key TEXT NOT NULL, updated_at TEXT)',
+        // Numbers handed out once per account (Rex Desk task numbers): a row per number, so two computers can never take the same one.
+        'CREATE TABLE IF NOT EXISTS rex_numbers (workspace TEXT NOT NULL, kind TEXT NOT NULL, number INTEGER NOT NULL, id TEXT NOT NULL, PRIMARY KEY(workspace,kind,number))',
       ], 'write');
       // Which machine each computer id runs on, so a restore can tell a reinstall here from a second computer.
       await this.client.execute({ sql: 'ALTER TABLE rex_presence ADD COLUMN host TEXT', args: [] }).catch(() => {});

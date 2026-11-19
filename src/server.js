@@ -914,7 +914,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (fileMatch && request.method === 'GET') return json(response, 200, desk.fileForPerson(fileMatch[1]));
       if (fileMatch && request.method === 'POST') return json(response, 200, desk.saveFileForPerson(fileMatch[1], (await body(request)).content));
       const interactionMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/answer$/);
-      if (url.pathname === '/api/local-tasks' && request.method === 'POST') return json(response, 200, desk.localTasks.create(await body(request), { by: 'you' }));
+      if (url.pathname === '/api/local-tasks' && request.method === 'POST') return json(response, 200, await desk.localTasks.create(await body(request), { by: 'you' }));
       const localMatch = url.pathname.match(/^\/api\/local-tasks\/([^/]+)(\/comments)?$/);
       if (localMatch && !localMatch[2] && request.method === 'PUT') { const input = await body(request); return json(response, 200, desk.localTasks.update(decodeURIComponent(localMatch[1]), input, { by: 'you', force: Boolean(input.force) })); }
       if (localMatch && !localMatch[2] && request.method === 'DELETE') return json(response, 200, desk.localTasks.remove(decodeURIComponent(localMatch[1])));

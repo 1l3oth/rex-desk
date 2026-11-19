@@ -8,6 +8,8 @@ export const STATUS_NAMES = { backlog: 'Backlog', todo: 'To do', in_progress: 'I
 export const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 // A run moving through its phases moves its local task along the same way a tracker status would.
 const PHASE_STATUS = { working: 'in_progress', review: 'in_review', done: 'done' };
+// How long adding a task waits for the cloud to hand out its number before counting on this computer.
+const CLAIM_MS = 5000;
 
 const now = () => new Date().toISOString();
 const text = (value, limit) => String(value ?? '').replace(/\r\n/g, '\n').trim().slice(0, limit);
@@ -48,10 +50,22 @@ export class LocalTasks {
       assignee: pick('assignee', value => this.agentId(value)) ?? '',
     };
   }
-  create(input = {}, { by = 'you' } = {}) {
+  // The number comes from the account's cloud database when it is on, so two computers adding a task at the same moment get
+  // different numbers. Without the cloud (or when it is slow) this computer counts on; a number that turns out to be taken
+  // twice is settled once the computers see each other's tasks (settle).
+  async number(id) {
+    const floor = this.nextNumber(), cloud = this.store.cloud;
+    if (!cloud?.ready || !cloud.claimNumber) return floor;
+    let timer;
+    try {
+      const claimed = await Promise.race([cloud.claimNumber('task', id, floor), new Promise(resolve => { timer = setTimeout(resolve, CLAIM_MS, null); })]);
+      return Number.isInteger(claimed) ? Math.max(claimed, this.nextNumber()) : this.nextNumber();
+    } catch { return this.nextNumber(); } finally { clearTimeout(timer); }
+  }
+  async create(input = {}, { by = 'you' } = {}) {
     const fields = this.fields(input);
     if (!fields.title) throw new Error('Give the task a title.');
-    const number = this.nextNumber(), id = `local:${randomUUID()}`;
+    const id = `local:${randomUUID()}`, number = await this.number(id);
     const task = { id, local: true, source: 'local', sourceId: 'local', sourceName: 'Rex Desk', externalId: String(number), taskNumber: `L${number}`, ...fields,
       projectName: fields.projectSlug, comments: [], active: true, detailLoaded: true, createdBy: text(by, 60), createdAt: now(), updatedAt: now() };
     this.checkLinks(task, fields);
@@ -81,6 +95,37 @@ export class LocalTasks {
     for (const child of this.all().filter(item => item.parentTaskId === task.id)) this.store.put('task', child.id, { ...child, parentTaskId: '' });
     for (const other of this.all().filter(item => item.blockedBy?.includes(task.id))) this.store.put('task', other.id, { ...other, blockedBy: other.blockedBy.filter(blocker => blocker !== task.id) });
     this.store.delete('task', task.id); return { removed: true };
+  }
+  // Two tasks with one number (made at once while a computer was offline, or before tasks were shared): the one that holds the
+  // number in the cloud keeps it, else the older one. The later one gets a new number, changed only by the computer that made
+  // it so the two computers never both renumber it, with a comment saying what it was called before.
+  async settle() {
+    if (this.settling) return this.settling;
+    this.settling = (async () => {
+      const groups = new Map();
+      for (const task of this.all()) groups.set(task.taskNumber, [...(groups.get(task.taskNumber) || []), task]);
+      const twice = [...groups.values()].filter(group => group.length > 1);
+      const cloud = this.store.cloud;
+      // This computer's numbers go to the cloud once each (per start), so the cloud also knows numbers given out without it.
+      const claimed = this.claimed ||= new Set(), mine = this.all().filter(task => task.node === this.store.nodeId && !claimed.has(`${task.id} ${task.taskNumber}`));
+      if (cloud?.ready && cloud.claimTaken && mine.length) await cloud.claimTaken('task', mine.map(task => ({ number: Number(String(task.taskNumber).replace(/^L/, '')) || 0, id: task.id })).filter(item => item.number))
+        .then(() => { for (const task of mine) claimed.add(`${task.id} ${task.taskNumber}`); }, () => {});
+      if (!twice.length) return [];
+      const owners = await cloud?.numberOwners?.('task').catch(() => null), moved = [];
+      for (const group of twice) {
+        const number = Number(String(group[0].taskNumber).replace(/^L/, '')), owner = owners?.get(number);
+        const keep = group.find(task => task.id === owner) || [...group].sort((left, right) => String(left.createdAt).localeCompare(String(right.createdAt)) || left.id.localeCompare(right.id))[0];
+        for (const task of group) {
+          if (task.id === keep.id || task.node !== this.store.nodeId) continue;
+          const fresh = this.store.get('task', task.id); if (!fresh || fresh.taskNumber !== task.taskNumber) continue;
+          const next = await this.number(task.id);
+          const note = { by: 'Rex Desk', text: `Renumbered from ${task.taskNumber} to L${next}: another computer gave ${task.taskNumber} to "${keep.title}" first.`, at: now() };
+          moved.push(this.store.put('task', task.id, { ...fresh, taskNumber: `L${next}`, externalId: String(next), renumberedFrom: task.taskNumber, comments: [...(fresh.comments || []), note].slice(-200), updatedAt: now() }));
+        }
+      }
+      return moved;
+    })().finally(() => { this.settling = null; });
+    return this.settling;
   }
   // The run's phase moves the task: working is In progress, review is In review, done is Done.
   phase(task, phase) {

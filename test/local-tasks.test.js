@@ -16,13 +16,13 @@ function setup() {
   return { desk, store };
 }
 
-test('Rex Desk tasks are numbered, follow the Orbit status workflow, and stay apart from tracker tasks', () => {
+test('Rex Desk tasks are numbered, follow the Orbit status workflow, and stay apart from tracker tasks', async () => {
   const { desk, store } = setup();
   const agent = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop' });
-  const first = desk.localTasks.create({ title: 'Add a dark theme', project: 'shop', tags: 'ui, theme', checklist: ['Pick colors', 'Ship it'], assignee: 'shopkeeper' }, { by: 'you' });
+  const first = await desk.localTasks.create({ title: 'Add a dark theme', project: 'shop', tags: 'ui, theme', checklist: ['Pick colors', 'Ship it'], assignee: 'shopkeeper' }, { by: 'you' });
   assert.equal(first.taskNumber, 'L1'); assert.equal(first.status, 'todo'); assert.equal(first.statusName, 'To do');
   assert.deepEqual(first.tags, ['ui', 'theme']); assert.equal(first.checklist.length, 2); assert.equal(first.assignee, agent.id);
-  const child = desk.localTasks.create({ title: 'Write the CSS', parentTaskId: 'L1' });
+  const child = await desk.localTasks.create({ title: 'Write the CSS', parentTaskId: 'L1' });
   assert.equal(child.taskNumber, 'L2'); assert.equal(child.parentTaskId, first.id);
   assert.throws(() => desk.localTasks.update('L1', { status: 'done' }), /Still open: #L2/);
   desk.localTasks.update('L2', { status: 'done', comment: 'Done in theme.css' }, { by: 'Shopkeeper' });
@@ -47,15 +47,15 @@ test('an agent records where its tasks come from, and its prompt says so', () =>
 
 test('a run on a Rex Desk task moves the task along without asking', async () => {
   const { desk, store } = setup();
-  const task = desk.localTasks.create({ title: 'Fix the cart total' });
+  const task = await desk.localTasks.create({ title: 'Fix the cart total' });
   store.put('run', 'r1', { id: 'r1', taskId: task.id, state: 'running', checks: {} });
   assert.deepEqual(await desk.status('r1', 'working'), { status: 'in_progress' });
   assert.equal(desk.localTasks.get(task.id).status, 'in_progress');
 });
 
-test('updating a task without a project keeps its project', () => {
+test('updating a task without a project keeps its project', async () => {
   const { desk } = setup();
-  desk.localTasks.create({ title: 'Fix the cart', project: 'shop' });
+  await desk.localTasks.create({ title: 'Fix the cart', project: 'shop' });
   assert.equal(desk.localTasks.update('L1', { comment: 'on it' }).projectSlug, 'shop');
   assert.equal(desk.localTasks.update('L1', { project: '' }).projectSlug, '');
 });

@@ -1723,7 +1723,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       const subject = (await git(folder, ['log', '-1', '--format=%s']).catch(() => '')).trim();
       const title = (subject || branch.split('/').pop().replace(/[-_]+/g, ' ')).slice(0, 200);
       const project = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === path.resolve(repository.path).toLowerCase()), owner = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
-      const made = this.localTasks.create({ title, status: 'in_progress', description: `Work on branch ${branch}, made while publishing it.`, project: project?.slug || '', assignee: owner ? owner.id : '' }, { by: owner?.name || 'Rex Agent' });
+      const made = await this.localTasks.create({ title, status: 'in_progress', description: `Work on branch ${branch}, made while publishing it.`, project: project?.slug || '', assignee: owner ? owner.id : '' }, { by: owner?.name || 'Rex Agent' });
       task = { ...made, roomWork: { agentId, roomId, at: now(), branch } }; this.store.put('task', task.id, task);
     }
     const existing = this.store.list('run').find(item => item.adoptedFrom === folder && item.branch === branch);
