@@ -424,6 +424,8 @@ export class TursoSync {
         this.state = 'connected'; this.error = ''; this.lastSyncedAt = new Date().toISOString();
       } catch (error) { this.fail(error); }
       finally { this.flushing = null; this.notify(); }
+      // A change saved while this upload was finishing would otherwise wait for the next retry (half a minute): it goes now.
+      if (this.state === 'connected' && this.status().pending) this.schedule();
       return this.status();
     })();
     return this.flushing;

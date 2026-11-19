@@ -31,6 +31,13 @@ export const BACKUP_PARTS = { chats: true, rooms: true, tasks: true, files: true
 const BACKUP_PART = { roommsg: 'rooms', task: 'tasks', priority: 'tasks', chatfile: 'files', artifact: 'files' };
 export const shared = (kind, key) => SHARED.has(kind) && !(kind === 'specialist' && key === 'main') && !(kind === 'task' && !String(key).startsWith('local:'));
 export const id = () => randomUUID();
+// A task's comments from two computers, each once, oldest first; null when `other` adds nothing to `base`.
+const commentKey = item => `${item?.at}\u001f${item?.by}\u001f${item?.text}`;
+function mergeComments(base, other) {
+  const known = new Set((base.comments || []).map(commentKey)), extra = (other.comments || []).filter(item => !known.has(commentKey(item)));
+  if (!extra.length) return null;
+  return [...(base.comments || []), ...extra].sort((left, right) => String(left.at).localeCompare(String(right.at))).slice(-200);
+}
 export const defaults = {
   name: 'Rex', notify: true, provider: 'claude', concurrency: 2, branchPrefix: 'rex-desk',
   syncMinutes: 5, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
@@ -199,8 +206,18 @@ export class Store extends EventEmitter {
     this.remote = true;
     try {
       if (deleted) { if (local) this.delete(kind, key); return { changed: Boolean(local) }; }
-      if (!value || (local && String(local._v || '') >= String(value._v || ''))) return { changed: false };
-      this.put(kind, key, value); return { changed: true, isNew: !local };
+      if (!value) return { changed: false };
+      if (local && String(local._v || '') >= String(value._v || '')) {
+        // An older copy can still carry a comment written there at the same time as a change here: it is added, not lost.
+        const merged = kind === 'task' && mergeComments(local, value);
+        if (!merged) return { changed: false };
+        this.remote = false; this.put(kind, key, { ...local, comments: merged }); return { changed: true };
+      }
+      const merged = kind === 'task' && local && mergeComments(value, local);
+      this.put(kind, key, merged ? { ...value, comments: merged } : value);
+      // This computer had comments the newer copy lacked: the joined list goes back out with a new version.
+      if (merged) { this.remote = false; this.put(kind, key, this.get(kind, key)); }
+      return { changed: true, isNew: !local };
     } finally { this.remote = false; }
   }
   // "Keep out of the cloud" is set on a project and carried by each of its agents (noCloud on the agent's card). Their chats,

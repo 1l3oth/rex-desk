@@ -58,9 +58,14 @@ test('a Rex Desk task added, changed, commented on or deleted on one running com
   assert.equal(there.status, 'in_progress'); assert.equal(there.title, 'Sync task A (edited at work)');
   assert.deepEqual(there.comments.map(item => item.text), ['comment from work']);
 
+  // A comment on each computer before either has seen the other's: both are kept on both.
+  work.desk.localTasks.comment(made.id, 'second from work');
+  await new Promise(resolve => setTimeout(resolve, 5));
   home.desk.localTasks.comment(made.id, 'comment from home');
-  await sync();
-  assert.deepEqual(work.store.get('task', made.id).comments.map(item => item.text), ['comment from work', 'comment from home']);
+  await sync(); await sync();
+  const want = ['comment from work', 'second from work', 'comment from home'];
+  assert.deepEqual(work.store.get('task', made.id).comments.map(item => item.text), want);
+  assert.deepEqual(home.store.get('task', made.id).comments.map(item => item.text), want);
 
   work.desk.localTasks.remove(made.id);
   await sync();
