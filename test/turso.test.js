@@ -219,7 +219,7 @@ test('signing in again leaves a chat that is still working on this computer runn
   await store.cloud.close(); store.close();
 });
 
-test('signing in merges the cloud copy: only new messages come down, a chat kept out of the cloud stays, a change elsewhere arrives', async () => {
+test('signing in takes the cloud copy of records, and never overwrites messages by their number (agents chats come by id through rex_chat)', async () => {
   const turso = fakeTurso(); turso.network.online = true;
   const store = new Store(temporary('pull-merge'));
   store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 1000 });
@@ -234,14 +234,14 @@ test('signing in merges the cloud copy: only new messages come down, a chat kept
   const workspace = store.cloud.workspace;
   turso.remote.prepare("UPDATE rex_records SET value=? WHERE workspace=? AND kind='task' AND id='shared'").run('{"id":"shared","title":"Renamed on the other computer"}', workspace);
   turso.remote.prepare('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?)').run(workspace, 5, 'run-2', 'message', 1, '{"text":"From the other computer"}', '');
-  // Count what comes down: only the one new message, not the whole history again.
+  // Messages are numbered per computer: the backup's numbers say nothing about this computer's own messages.
   let fetched = 0; const execute = store.cloud.client.execute.bind(store.cloud.client);
   store.cloud.client.execute = async query => { const result = await execute(query); if (/SELECT \* FROM rex_events/.test(query.sql)) fetched += result.rows.length; return result; };
   const result = await store.cloud.pullLatest();
   assert.equal(result.pulled, true);
-  assert.equal(fetched, 1);
+  assert.equal(fetched, 0);
   assert.equal(store.get('task', 'shared').title, 'Renamed on the other computer');
-  assert.equal(store.events('run-2', { visible: true })[0].text, 'From the other computer');
+  assert.equal(store.events('run-2', { visible: true }).length, 0, "the other computer's numbered backup row is not taken as a message here");
   assert.ok(store.get('run', 'private-run'), 'a chat kept out of the cloud is not deleted by the pull');
   assert.equal(store.events('private-run', { visible: true })[0].text, 'Never in the cloud');
   assert.equal(store.events('run-1', { visible: true })[0].text, 'Here');
@@ -319,4 +319,29 @@ test('a full cloud space says so plainly, warns once at 80% and at 95%, and paus
     await look(100);
     assert.equal(sync.files.full, false, 'room again: files go up again');
   } finally { sync.close?.(); store.close(); }
+});
+
+test("an agent's chat goes through rex_chat by message id: the other computer gets every message once, an unsent one goes away, Rex Agent stays home", async () => {
+  const turso = fakeTurso(); turso.network.online = true;
+  const open = async label => { const store = new Store(temporary(label)); store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 1000 }); await store.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' }); return store; };
+  const work = await open('chat-work'), home = await open('chat-home');
+  home.cloud.workspace = work.cloud.workspace;
+  work.put('specialist', 'dara', { id: 'dara', name: 'Dara', runId: 'chat-1' });
+  work.put('run', 'chat-1', { id: 'chat-1', role: 'specialist', specialistId: 'dara' });
+  work.event('chat-1', 'human-message', { text: 'Fix the refunds' }, true);
+  work.event('chat-1', 'agent-text', { text: 'Done' }, true);
+  work.put('run', 'main-1', { id: 'main-1', role: 'coordinator', main: true });
+  work.event('main-1', 'human-message', { text: 'Only on this computer' }, true);
+  await work.cloud.flush();
+  assert.equal(turso.remote.prepare("SELECT COUNT(*) AS n FROM rex_events WHERE run_id='main-1'").get().n, 0, "Rex Agent's chat is not backed up");
+  const rows = await home.cloud.pullChat('');
+  assert.deepEqual(rows.map(row => JSON.parse(row.value).text), ['Fix the refunds', 'Done']);
+  home.applyChatEvents(rows); home.applyChatEvents(rows);
+  assert.deepEqual(home.events('chat-1', { visible: true }).map(event => event.text), ['Fix the refunds', 'Done'], 'each message once, even read twice');
+  const first = work.events('chat-1', { visible: true })[0];
+  work.unsendEvent('chat-1', first.sequence);
+  await work.cloud.flush();
+  home.applyChatEvents(await home.cloud.pullChat(rows.at(-1).v));
+  assert.deepEqual(home.events('chat-1', { visible: true }).map(event => event.text), ['Done'], 'an unsent message goes away everywhere');
+  await work.cloud.close(); await home.cloud.close(); work.close(); home.close();
 });

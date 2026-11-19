@@ -171,7 +171,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   async function openSession(entry, vaultKey, { staySignedIn = false, remembered = false } = {}) {
     if (bootStage) bootStage = 'Opening your chats and agents';
     const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
-    const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher });
+    const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher, ownRuntime: Boolean(process.env.REX_DESK_VERSION) && !dataDirectory });
     if (address) startDesk(desk, store);
     desk.computer = computer;
     desk.commander = new Commander(computer, { apiKey: () => desk.jev.apiKey(), model: () => store.config().jev?.model, settings: () => store.config().control || {},
@@ -948,7 +948,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (runOwner) return json(response, 200, await desk.peers.forward(runOwner, request.method, `${url.pathname}${url.search}`, request.method === 'POST' ? await body(request) : undefined));
         const copy = desk.peers.chatCopy(runId);
         if (copy) {
-          if (request.method === 'GET') return json(response, 200, action === 'messages' ? copy.events || [] : { ...copy.run, remote: copy.node, cloudCopy: true });
+          // An agent's chat is in full on every computer (rex_chat); the copy's own short list is only for older versions.
+          const shared = action === 'messages' && store.syncedChat(runId) ? store.events(runId, { visible: true }) : [];
+          if (request.method === 'GET') return json(response, 200, action === 'messages' ? (shared.length ? shared : copy.events || []) : { ...copy.run, remote: copy.node, cloudCopy: true });
           if (request.method === 'POST') return json(response, 200, await desk.peers.chatAction(copy, action, await body(request)));
         }
         if (request.method === 'GET') {
@@ -1036,11 +1038,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const ruleMatch = url.pathname.match(/^\/api\/project-rules\/([^/]+)$/);
       if (ruleMatch && request.method === 'PUT') return json(response, 200, desk.projectRules.set(decodeURIComponent(ruleMatch[1]), await body(request)));
       if (url.pathname === '/api/project-rules' && request.method === 'GET') return json(response, 200, desk.projectRules.list());
-      const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say|loop|move|follow))?$/);
+      const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say|loop|move|follow|chat-pick))?$/);
       if (specialistMatch) {
         const [, specialistId, part] = specialistMatch;
         let remoteAgent = store.get('specialist', specialistId);
         // A message for an agent whose computer is off, whose project is also here and not kept to its computer: it moves here.
+        // The person picked which of an agent's two chats to keep (src/chat-split.js).
+        if (request.method === 'POST' && part === 'chat-pick') { const input = await body(request); return json(response, 200, desk.chatSplits.pick(specialistId, String(input.node || ''))); }
         if (request.method === 'POST' && part === 'follow') { const input = await body(request); const agent = store.get('specialist', specialistId); if (!agent || agent.kind === 'main') return json(response, 404, { error: 'No such agent.' }); return json(response, 200, store.put('specialist', specialistId, { ...agent, follows: Boolean(input.on) })); }
         const followsHere = desk.peers.followsHere(remoteAgent);
         if (request.method === 'POST' && ['say', 'assign'].includes(part) && followsHere) { await desk.projectRules.move(specialistId).catch(() => {}); remoteAgent = store.get('specialist', specialistId); }

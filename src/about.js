@@ -25,8 +25,8 @@ async function folderSize(root, limit = 200000) {
 
 export async function aboutRexDesk({ store, rooms = [], update = {}, install = '', fresh = false, now = Date.now() }) {
   if (!fresh && cached && cached.directory === store.directory && now - cached.at < KEEP_MS) return cached.value;
-  const runs = store.list('run'), media = store.config().mediaDirectory || '';
-  const data = await folderSize(store.directory), files = media && path.resolve(media) !== path.resolve(store.directory) ? await folderSize(media) : null;
+  const runs = store.list('run'), media = store.filesFolder();
+  const data = await folderSize(store.directory), files = path.resolve(media) !== path.resolve(store.directory) ? await folderSize(media) : null;
   const artifacts = store.list('artifact').length;
   let disk = null;
   try { const info = await statfs(store.directory); disk = { free: info.bavail * info.bsize, total: info.blocks * info.bsize }; } catch { /* not available here */ }

@@ -87,11 +87,29 @@ test('files from agents move at once, and new files go to the new folder', async
   mkdirSync(path.join(store.directory, 'artifacts', 'run-1'), { recursive: true }); writeFileSync(path.join(store.directory, 'artifacts', 'run-1', 'shot.png'), 'png');
   assert.equal(store.media('artifacts'), path.join(store.directory, 'artifacts'), 'Without a choice, files stay in the data folder');
   await moveMedia(store, to);
-  assert.equal(store.config().mediaDirectory, to);
   assert.equal(readFileSync(path.join(to, 'artifacts', 'run-1', 'shot.png'), 'utf8'), 'png');
   assert.ok(!existsSync(path.join(store.directory, 'artifacts', 'run-1', 'shot.png')), 'The old copy is removed');
   assert.equal(store.media('uploads'), path.join(to, 'uploads'));
+  assert.equal(store.config().mediaDirectory, undefined, 'The choice is not in the shared settings the cloud copies to other computers');
   store.close?.();
+  const reopened = new Store(path.join(root, 'data'));
+  assert.equal(reopened.media('uploads'), path.join(to, 'uploads'), 'The choice survives a restart');
+  reopened.close?.();
+});
+
+test('a files folder chosen on another computer never breaks this one', () => {
+  const root = temp(), here = path.join(root, 'here-files');
+  mkdirSync(here, { recursive: true });
+  const fromOther = new Store(path.join(root, 'a'));
+  fromOther.put('config', 'main', { ...fromOther.get('config', 'main'), mediaDirectory: path.join(root, 'missing-drive', 'Rex Desk') });
+  assert.equal(fromOther.media('artifacts'), path.join(fromOther.directory, 'artifacts'), 'A folder this computer does not have is ignored');
+  fromOther.close?.();
+  const older = new Store(path.join(root, 'b'));
+  older.put('config', 'main', { ...older.get('config', 'main'), mediaDirectory: here });
+  assert.equal(older.media('artifacts'), path.join(here, 'artifacts'), 'A choice made here before the change is kept');
+  older.put('config', 'main', { ...older.get('config', 'main'), mediaDirectory: path.join(root, 'missing-drive') });
+  assert.equal(older.media('uploads'), path.join(here, 'uploads'), 'A later cloud copy of the settings does not move it');
+  older.close?.();
 });
 
 test('a development copy keeps its own home folder; the installed app and a checkout on 4317 use the real one', () => {

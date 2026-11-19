@@ -90,7 +90,25 @@ export class TursoSync {
   record(kind, id, value) { if (this.store.isPrivate(kind, value)) return; this.shared(kind, id, value); this.enqueue('INSERT INTO rex_records(workspace,kind,id,value) VALUES(?,?,?,?) ON CONFLICT(workspace,kind,id) DO UPDATE SET value=excluded.value', [this.workspace, kind, id, JSON.stringify(value)]); }
   remove(kind, id) { this.shared(kind, id, null, true); this.enqueue('DELETE FROM rex_records WHERE workspace=? AND kind=? AND id=?', [this.workspace, kind, id]); }
   removeEvent(sequence) { this.enqueue('DELETE FROM rex_events WHERE workspace=? AND sequence=?', [this.workspace, Number(sequence)]); }
-  event(row) { if (this.store.privateRun(row.run_id) || this.store.backupOff('chats')) return; this.enqueue('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,sequence) DO UPDATE SET run_id=excluded.run_id,kind=excluded.kind,visible=excluded.visible,value=excluded.value,created_at=excluded.created_at', [this.workspace, Number(row.sequence), row.run_id, row.kind, row.visible, row.value, row.created_at]); }
+  // A message of an agent's chat goes to every computer of the account; a removed one is marked removed for them.
+  chatEvent(row) {
+    if (!this.store.sharesEvent(row)) return;
+    this.enqueue('INSERT INTO rex_chat(workspace,uid,run_id,kind,visible,value,created_at,v,node,deleted) VALUES(?,?,?,?,?,?,?,?,?,0) ON CONFLICT(workspace,uid) DO UPDATE SET value=excluded.value,visible=excluded.visible,v=excluded.v,deleted=0',
+      [this.workspace, row.uid, row.run_id, row.kind, Number(row.visible) ? 1 : 0, row.value, row.created_at, this.store.stamp(), this.store.nodeId]);
+    if (this.enabled) this.store.db.prepare('UPDATE events SET pushed=1 WHERE uid=?').run(row.uid);
+  }
+  removeChatEvent(uid, runId) {
+    if (!this.store.syncedChat(runId)) return;
+    this.enqueue('INSERT INTO rex_chat(workspace,uid,run_id,v,node,deleted) VALUES(?,?,?,?,?,1) ON CONFLICT(workspace,uid) DO UPDATE SET deleted=1,v=excluded.v,value=NULL', [this.workspace, uid, runId, this.store.stamp(), this.store.nodeId]);
+  }
+  // Messages other computers wrote since a version, oldest first.
+  async pullChat(since, limit = 500) {
+    if (!this.ready || this.closed) return null;
+    const result = await this.client.execute({ sql: 'SELECT uid,run_id,kind,visible,value,created_at,v,deleted FROM rex_chat WHERE workspace=? AND v>? AND node!=? ORDER BY v LIMIT ?', args: [this.workspace, since, this.store.nodeId, limit] });
+    return result.rows.map(row => ({ ...row }));
+  }
+  // Rex Agent's chats belong to this computer alone and never go to the cloud.
+  event(row) { if (this.store.privateRun(row.run_id) || this.store.backupOff('chats') || this.store.mainRun(row.run_id)) return; this.enqueue('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,sequence) DO UPDATE SET run_id=excluded.run_id,kind=excluded.kind,visible=excluded.visible,value=excluded.value,created_at=excluded.created_at', [this.workspace, Number(row.sequence), row.run_id, row.kind, row.visible, row.value, row.created_at]); }
   // A project was set to stay out of the cloud: what the cloud holds of one of its agents is deleted there. The copies in the
   // shared table are removed outright (not marked deleted), so the other computers keep their own copy of the chat.
   forget(agentId) {
@@ -207,6 +225,9 @@ export class TursoSync {
         'CREATE INDEX IF NOT EXISTS rex_shared_v ON rex_shared(v)',
         'CREATE TABLE IF NOT EXISTS rex_presence (node TEXT PRIMARY KEY, name TEXT NOT NULL, at INTEGER NOT NULL, agents TEXT NOT NULL)',
         'CREATE TABLE IF NOT EXISTS rex_events (workspace TEXT NOT NULL, sequence INTEGER NOT NULL, run_id TEXT, kind TEXT, visible INTEGER, value TEXT, created_at TEXT, PRIMARY KEY(workspace,sequence))',
+        // One row per chat message of an agent's chat, the same id on every computer (docs/design/cross-device-chat.md).
+        'CREATE TABLE IF NOT EXISTS rex_chat (workspace TEXT NOT NULL, uid TEXT NOT NULL, run_id TEXT NOT NULL, kind TEXT, visible INTEGER, value TEXT, created_at TEXT, v TEXT NOT NULL, node TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(workspace,uid))',
+        'CREATE INDEX IF NOT EXISTS rex_chat_v ON rex_chat(workspace, v)',
         'CREATE TABLE IF NOT EXISTS rex_files (workspace TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, updated_at TEXT, PRIMARY KEY(workspace,path))',
         'CREATE TABLE IF NOT EXISTS rex_workspaces (workspace TEXT PRIMARY KEY, name TEXT NOT NULL, kdf TEXT NOT NULL, sealed_key TEXT NOT NULL, updated_at TEXT)',
       ], 'write');
@@ -276,37 +297,21 @@ export class TursoSync {
     const remote = await this.cloudRecords();
     if (!remote.length) return { pulled: false, reason: 'The cloud copy is empty.' };
     const db = this.store.db, key = (kind, id) => `${kind}\u0000${id}`, own = row => row.kind === 'peers' && row.id === 'main';
-    const remoteSequences = new Set(); let after = -1;
-    for (;;) {
-      const page = await this.client.execute({ sql: 'SELECT sequence FROM rex_events WHERE workspace=? AND sequence>? ORDER BY sequence LIMIT 20000', args: [this.workspace, after] });
-      for (const row of page.rows) remoteSequences.add(Number(row.sequence));
-      if (page.rows.length < 20000) break; after = Number(page.rows.at(-1).sequence);
-    }
-    const known = new Set(db.prepare('SELECT sequence FROM events').all().map(row => Number(row.sequence)));
-    const missing = [...remoteSequences].filter(sequence => !known.has(sequence)), arrived = [];
-    for (let index = 0; index < missing.length; index += 500) {
-      const part = missing.slice(index, index + 500);
-      const page = await this.client.execute({ sql: `SELECT * FROM rex_events WHERE workspace=? AND sequence IN (${part.map(() => '?').join(',')})`, args: [this.workspace, ...part] });
-      arrived.push(...page.rows);
-    }
+    const arrived = [];
     // Something changed here while the cloud copy was downloading: it uploads first, and the next pull takes the rest.
     if (this.status().pending) return { pulled: false, reason: 'Local changes arrived while pulling; they upload first.' };
     const local = new Map(db.prepare('SELECT kind,id,value FROM records').all().map(row => [key(row.kind, row.id), row]));
     const remoteKeys = new Set(remote.map(row => key(row.kind, row.id)));
     const changed = remote.filter(row => !own(row) && local.get(key(row.kind, row.id))?.value !== row.value);
     const gone = [...local.values()].filter(row => !own(row) && !remoteKeys.has(key(row.kind, row.id)) && !this.store.isPrivate(row.kind, JSON.parse(row.value)));
-    let removedEvents = 0;
     this.store.transaction(() => {
       const put = db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value');
       for (const row of changed) put.run(row.kind, row.id, row.value);
       const drop = db.prepare('DELETE FROM records WHERE kind=? AND id=?');
       for (const row of gone) drop.run(row.kind, row.id);
       this.store.privateAgents = null;
-      const event = db.prepare('INSERT OR REPLACE INTO events(sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?)');
-      for (const row of arrived) event.run(Number(row.sequence), row.run_id, row.kind, Number(row.visible), row.value, row.created_at);
-      // A message deleted on another computer goes here too, unless its chat is kept out of the cloud.
-      const remove = db.prepare('DELETE FROM events WHERE sequence=?');
-      for (const row of db.prepare('SELECT sequence,run_id FROM events').all()) if (!remoteSequences.has(Number(row.sequence)) && !this.store.privateRun(row.run_id)) { remove.run(row.sequence); removedEvents++; }
+      // Messages are not taken from the backup by their number here: every computer numbers its own, so that overwrote one
+      // computer's messages with another's. Agents' chats arrive through rex_chat by their own ids (Peers.pullChats).
     });
     this.store.clearListCache();
     const records = { rows: remote }, events = { rows: arrived };
@@ -444,6 +449,9 @@ export class TursoSync {
     if (this.files.running) await this.files.running.catch(() => {});
     if (this.opening) await this.opening;
     if (this.ready) await this.flush();
+    // Closing Rex Desk (or the computer going to sleep or shutting down) says so at once: the other computers show it
+    // offline now instead of after 90 seconds without a heartbeat.
+    if (this.ready && this.client) await Promise.race([this.client.execute({ sql: 'UPDATE rex_presence SET at=0 WHERE node=? AND workspace=?', args: [this.store.nodeId, this.workspace] }).catch(() => {}), new Promise(resolve => setTimeout(resolve, 3000))]);
     this.closed = true; this.client?.close();
   }
 }

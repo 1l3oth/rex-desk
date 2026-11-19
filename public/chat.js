@@ -33,6 +33,8 @@ const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 
 const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
 function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash); return match && SCREENS.includes(match[1]) ? { type: match[1], id: match[2] ? decodeURIComponent(match[2]) : '' } : null; }
 function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
+// Task states that count as open on the Team tab. Defined before the first render (the top-level await refresh), which can draw it.
+const TEAM_OPEN = new Set(['queued', 'working', 'needs-manager']);
 const ui = { snap: null, view: viewFromHash() || savedView() || { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map(), termOpen: true, qstep: new Map(), qanswers: new Map(), files: new Map() };
 // Tokens one reply used: what was new, what the agent wrote, and the context it read again from the cache (cheap, but it counts toward limits).
 const kilo = number => number >= 1000000 ? `${(number / 1000000).toFixed(1)}M` : number >= 1000 ? `${(number / 1000).toFixed(number >= 10000 ? 0 : 1)}k` : String(number);
@@ -168,8 +170,9 @@ function renderRail() {
         place('split', 'split', t('Split view'), 0),
       ].join('')}</nav>
     </div>
+    ${newComputerCard(snap)}
     ${section('rooms', t('Rooms'), snap.rooms.length, plus('new-room', t('New room')), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: room.members.length === 1 ? t`${room.members.length} agent` : t`${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })) : `<p class="rail-empty">${t`No rooms yet.`}</p>`)}
-    ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: ['busy', 'replying', 'waiting'].includes(agent.status?.state) ? agent.status.label : agent.status?.state === 'idle' ? ['Asleep', agent.projectSlug].filter(Boolean).join(' · ') : agent.projectSlug || '', live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : `<p class="rail-empty">${t`No agents yet. Press + to create one.`}</p>`)}
+    ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: agentWhere(agent), live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : `<p class="rail-empty">${t`No agents yet. Press + to create one.`}</p>`)}
   </div>${phoneTabs(asks)}<div class="rail-tools" role="toolbar" aria-label="${t`Tools`}"><button type="button" class="tool" data-open="jev" title="${t`Jev: control this computer and websites`}" aria-label="${t`Jev`}">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? t`Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : t('Memory and what uses it'))}" aria-label="${t`Memory`}">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="${t`Devices: your other computers and phone`}" aria-label="${t`Devices`}">${iconAv('devices')}</button><button type="button" class="tool" data-open="net" data-id="" title="${t`Agents online: let other people's agents reach yours`}" aria-label="${t`Agents online`}"><span class="av sm icon">${NET_ICON}</span></button></div><div class="rail-foot"><button class="acct-btn" data-action="accounts" title="${t`Which Claude account the agents use`}">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="${t`Settings`}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>${t`Settings`}</button><button class="btn small" data-action="theme">${t`Theme`}</button><button class="btn small" type="button" data-glass-open title="${t`How see-through Rex Desk is`}">${t`Glass`}</button><button type="button" class="rail-ver${ui.snap.update?.ready || ui.snap.update?.available ? ' new' : ''}" data-action="about-open" title="${t`About Rex Desk: version, storage and what it holds`}">${esc(ui.snap.update?.current ? `v${ui.snap.update.current}` : 'dev')}</button></div>`;
 }
 
@@ -323,7 +326,7 @@ function stageModel() {
   }
   const shown = ui.events.get(run.id) || [], cleared = ui.showEarlier?.[run.id] ? '' : [...shown].reverse().find(event => event.kind === 'chat-cleared')?.createdAt || '';
   const items = [...transcript(shown, run.id), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && (!cleared || String(item.createdAt || item.at || '') >= cleared) && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state) && !run.inApp; // a chat open in the Claude app waits for the person; it is not "typing"
-  const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? t('Nothing recorded yet.') : t('Loading the conversation…')}</p></div>`) + outboxHtml(run, shown)
+  const feed = splitCard(run) + (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? t('Nothing recorded yet.') : t('Loading the conversation…')}</p></div>`) + outboxHtml(run, shown)
     + pending(run.id).map(item => `<div class="msg qfloat"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? t('Preparing…') : '') : '');
   const shells = terminalItems(items), stop = (shells.length && !ui.termOpen ? `<button class="btn small" data-action="term-open">${t`Terminal (${shells.length})`}</button> ` : '') + (live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : !FINISHED.includes(run.state) ? `<button class="btn small danger" data-action="stop" title="${t`This run is not working. Close it so the task can get a new run.`}">${t`Close run`}</button>` : '');
   // A personal chat with an agent shows its profile and what was shared on the right; the terminal is one of those tabs.
@@ -650,7 +653,7 @@ document.addEventListener('click', async event => {
   }
   const action = target.dataset.action;
   try {
-    if (action?.startsWith('spec-')) await agentAction(ctx, action, target);
+    if (action?.startsWith('spec-') || action === 'chat-pick') await agentAction(ctx, action, target);
     else if (action === 'send') await send();
     else if (action === 'agent-signin') { try { await api('/agents/login', { method: 'POST', data: { provider: target.dataset.provider || 'claude', profile: '' } }); toast(t('Sign-in opened. Pick the account that has the plan, finish it, then start a fresh chat.')); } catch (error) { toast(error.message, true); } }
     else if (action === 'update-install') await installUpdate(api);
@@ -1051,6 +1054,29 @@ document.addEventListener('click', async event => {
 });
 
 // ---------- a personal chat with an agent: its profile and what was shared, on the right ----------
+// A computer Rex Desk has not seen before has no name yet: it asks for one, so every screen can tell your computers apart.
+function newComputerCard(snap) {
+  const self = snap.devices?.self; if (!self || self.named !== false) return '';
+  return `<form class="newpc" data-newpc><b>${t('New computer')}</b><span class="muted small">${t('Name it so you can tell your computers apart, like Home or Work.')}</span>
+    <div class="newpc-row"><input name="name" maxlength="40" value="${esc(self.name || '')}" aria-label="${t('Name of this computer')}"><button class="btn small primary">${t('Save')}</button></div></form>`;
+}
+// The sidebar line under an agent: what it is doing and the computer it runs on (named, and whether that one is on).
+function agentWhere(agent) {
+  const where = agent.device || '', state = agent.status?.state;
+  if (['busy', 'replying', 'waiting'].includes(state)) return [agent.status.label, where].filter(Boolean).join(' · ');
+  if (state === 'offline') return t`Offline · ${where}`;
+  return [t('Asleep'), where].filter(Boolean).join(' · ');
+}
+// An agent whose chat went two ways on two computers: the person picks the one every computer keeps (src/chat-split.js).
+function splitCard(run) {
+  const split = (ui.snap.chatSplits || []).find(item => item.runId === run.id); if (!split) return '';
+  const when = value => value ? new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const side = item => `<div class="split-side"><b>${esc(item.name)}${item.here ? ` <span class="muted">${t('(this computer)')}</span>` : ''}</b>
+    <span class="muted">${item.messages === 1 ? t`1 message` : t`${item.messages} messages`}${item.lastAt ? ` · ${t`last ${when(item.lastAt)}`}` : ''}</span>
+    ${item.lastText ? `<q>${esc(item.lastText)}</q>` : ''}<button class="btn small primary" data-action="chat-pick" data-agent-id="${esc(split.agentId)}" data-node="${esc(item.node)}">${t`Keep this chat`}</button></div>`;
+  return `<section class="split-card" role="alert"><h3>${t('This agent has two different chats')}</h3><p class="muted">${t('Your computers each kept their own chat with this agent. Pick the one to keep: every computer then shows that chat, and the other one is put away (not deleted).')}</p>
+    <div class="split-sides">${split.sides.map(side).join('')}</div>${split.sides.length < 2 ? `<p class="muted small">${t('Waiting for the other computer to add its side. It has to be on.')}</p>` : ''}</section>`;
+}
 function personalAgent(run) {
   if (!run || run.roomAgent) return null;
   if (run.role === 'coordinator' && run.main) return { id: 'main', name: t('Rex Agent'), projectSlug: 'all projects', purpose: t('Knows every project and agent, and helps you decide who does what.'), main: true, status: { label: stateLabel(run) } };
@@ -1058,7 +1084,6 @@ function personalAgent(run) {
   return (ui.snap.specialists || []).find(agent => agent.id === run.specialistId && agent.runId === run.id) || null;
 }
 // The Team tab: the tasks this agent gave to others (and got from a manager), live, with what each one needs.
-const TEAM_OPEN = new Set(['queued', 'working', 'needs-manager']);
 function teamOf(agentId) {
   const tasks = (ui.snap.teamTasks || []).filter(task => task.managerId === agentId || task.workerId === agentId);
   return { tasks, open: tasks.filter(task => TEAM_OPEN.has(task.state)).length, owed: tasks.some(task => task.state === 'needs-manager' && task.managerId === agentId) };

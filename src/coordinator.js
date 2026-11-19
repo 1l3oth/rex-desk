@@ -32,6 +32,7 @@ import { effectiveRepository } from './project-detect.js';
 import { inspectRepository } from './repositories.js';
 import { Worktrees, longPath } from './worktrees.js';
 import { ProjectRules } from './project-rules.js';
+import { ChatSplits } from './chat-split.js';
 import { lowDiskMessage, friendlyDiskError } from './disk.js';
 import { voiceBriefing, VOICE_RULE, VOICE_REMINDER, VOICE_GREETING } from './voice-briefing.js';
 import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
@@ -133,7 +134,7 @@ export const WORKTREE_RULE = 'When you make a git worktree, call desk_worktree w
 export const TOOLBOX_RULE = 'Your everyday Rex Desk tools are loaded and ready. Two more groups of tools are not loaded up front, to keep this chat small and cheap, and are reached through desk_find (search by plain words) and desk_run (use the one you pick): the person\'s other MCP tools and skills (Orbit, Flow, Slack, studybook, design skills and the rest), AND some of Rex Desk\'s own less-common tools (controlling the computer, signing in, opening a file for the person to fill in, worktrees, rooms, networking with other people\'s agents, and so on). When a task needs a tool you do not already see, search with desk_find before saying you cannot: it covers both groups. These are the tools and skills of the computer you run on; each of the person\'s computers has its own. When one is only on their other computer, give the task to an agent there with desk_team_task, and never say a tool is installed here because you saw it there.';
 
 export class Desk {
-  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, netJudge, toolbox } = {}) {
+  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, netJudge, toolbox, ownRuntime = false } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     this.localAi = new LocalAi(store);
@@ -145,7 +146,9 @@ export class Desk {
     }
     // The installed app on Windows copies itself beside the data once per version, in the background; agents started after
     // that run from the copy, so an update installs while they work (see prepareRuntime). Until it is ready they start as before.
-    if (!runnerFactory && process.env.REX_DESK_VERSION) void prepareRuntime(path.join(store.directory, 'runtime')).then(runtime => { this.runtime = runtime; }, () => {});
+    // Only the installed app's own server says so (ownRuntime): agents inherit REX_DESK_VERSION, and every test desk an agent
+    // started used to copy the whole runtime (0.7 GB) into the temp folder, which filled the drive.
+    if (!runnerFactory && ownRuntime) void prepareRuntime(path.join(store.directory, 'runtime')).then(runtime => { this.runtime = runtime; }, () => {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
     this.localTasks = new LocalTasks(store);
@@ -171,6 +174,7 @@ export class Desk {
       if (main) this.store.event(main.id, 'message', { text, cloudSpace: level }, true);
     };
     this.projectRules = new ProjectRules(this);
+    this.chatSplits = new ChatSplits(this);
     // A phone push opens Rex Desk on the phone when it can reach this computer (Tailscale and remote access on).
     this.notifier.pushClick = () => this.peers.settings().remote && this.port ? this.peers.addresses(this.port)[0] || '' : '';
     this.worktreeRoot = path.join(path.dirname(store.directory), 'worktrees');
@@ -191,7 +195,7 @@ export class Desk {
       // A local run for a chat whose agent now lives on another computer is hidden: that computer's live copy (in cloudRuns) shows instead, so the chat is not stuck on a stale local version.
       runs: [...this.store.list('run').filter(run => !this.peers.copyWins(this.store.get('chatcopy', run.id))), ...this.peers.remoteRuns(), ...this.peers.cloudRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions(), ...this.peers.cloudInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
-      devices: this.peers.status(this.port),
+      devices: this.peers.status(this.port), chatSplits: this.chatSplits.open().map(split => ({ ...split, sides: split.sides.map(side => ({ ...side, name: this.peers.deviceName(side.node), here: side.node === this.peers.self.id })) })),
       teamTasks: this.store.list('team-task').sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 200).map(task => ({ id: task.id, managerId: task.managerId, managerName: task.managerName || '', workerId: task.workerId, workerName: task.workerName, title: task.title, state: task.state, question: task.question || '', answer: String(task.answer || '').slice(0, 1500), remote: Boolean(task.remote), createdAt: task.createdAt, endedAt: task.endedAt || '' })),
       artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
       directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, projectRules: this.projectRules.list(), choices: { models: modelList(this.store, this.store.config().provider), efforts: effortsFor(this.store.config().provider), modes: modesFor(this.store.config().provider), providers: Object.fromEntries(AI_PROVIDERS.map(provider => [provider, { models: pickerModels(this.store, provider), efforts: effortsFor(provider), modes: modesFor(provider) }])) }, mainAgent: (m => m && { id: m.id, name: m.name, provider: m.provider, model: m.model || '' })(this.store.get('specialist', 'main')), specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent), device: this.peers.deviceName(agent.node), remote: this.peers.isRemote(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
@@ -379,7 +383,8 @@ export class Desk {
     }
     if (this.live.has(runId)) {
       this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
-      this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
+      // A message typed on another computer is already in the shared chat: the agent gets it, the chat does not show it twice.
+      if (!picked.echoed) this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
       return { queued: true };
     }
     await this.resume(runId, { provider: picked.provider || run.provider, prompt: text, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });

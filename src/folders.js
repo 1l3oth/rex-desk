@@ -147,14 +147,14 @@ export async function followMemoryMove({ env = process.env, home = os.homedir(),
 // The files folder moves at once: copy each part, switch the setting, then remove the old copies.
 export async function moveMedia(store, to) {
   to = settle(to, 'Rex Desk');
-  const from = store.config().mediaDirectory || store.directory, target = path.resolve(String(to || ''));
+  const from = store.filesFolder(), target = path.resolve(String(to || ''));
   if (!to || !path.isAbsolute(String(to))) throw new Error('Pick a full folder path.');
   if (target.toLowerCase() === path.resolve(from).toLowerCase()) throw new Error('That is already where it is.');
   if (inside(target, store.directory) && target.toLowerCase() !== store.directory.toLowerCase()) throw new Error('Pick a folder outside Rex Desk\'s data folder.');
   for (const folder of MEDIA_FOLDERS) if (existsSync(path.join(target, folder)) && readdirSync(path.join(target, folder)).length) throw new Error(`That folder already has a ${folder} folder with files in it. Pick another one.`);
   mkdirSync(target, { recursive: true });
   for (const folder of MEDIA_FOLDERS) if (existsSync(path.join(from, folder))) await copyAll(path.join(from, folder), path.join(target, folder));
-  store.saveConfig({ ...store.publicConfig(), mediaDirectory: target === store.directory ? '' : target });
+  store.setFilesFolder(target);
   for (const folder of MEDIA_FOLDERS) {
     const old = path.join(from, folder);
     // Leave the data folder's own (now unused) folders in place but empty them; remove them anywhere else.
@@ -168,6 +168,6 @@ export function folderStatus({ dataRoot, store, memory }) {
   const pending = (() => { try { return JSON.parse(readFileSync(path.join(dataRoot, PENDING), 'utf8')).to; } catch { return ''; } })();
   const failed = (() => { try { return JSON.parse(readFileSync(path.join(dataRoot, 'move-pending.failed.json'), 'utf8')).error; } catch { return ''; } })();
   const memoryPending = (() => { try { return JSON.parse(readFileSync(path.join(pointerHome(), 'memory-move.json'), 'utf8')).to; } catch { return ''; } })();
-  return { data: dataRoot, dataPending: pending, dataFailed: failed, memory, memoryPending, files: store.config().mediaDirectory || store.directory,
-    filesInData: !store.config().mediaDirectory };
+  return { data: dataRoot, dataPending: pending, dataFailed: failed, memory, memoryPending, files: store.filesFolder(),
+    filesInData: store.filesFolder() === store.directory };
 }

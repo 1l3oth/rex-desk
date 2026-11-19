@@ -50,6 +50,12 @@ export class ProjectRules {
   // Every computer keeps its own cloud copy in line with the rule on each agent: deleted when the rule turned on, sent back
   // when it turned off. What was done is remembered per agent, so it happens once.
   sweep() {
+    // An agent that moved to another computer (Follow me) stops here: only one computer runs it, and its chat goes on there.
+    for (const agent of this.store.list('specialist')) {
+      if (agent.kind === 'main' || !agent.runId || !this.desk.peers.isRemote(agent) || !this.desk.live?.has(agent.runId)) continue;
+      const to = this.desk.peers.deviceName(agent.node);
+      void this.desk.stop(agent.runId).then(() => this.store.event(agent.runId, 'notice', { text: `${agent.name} moved to ${to} and carries on there in this same chat.` }, true)).catch(() => {});
+    }
     const cloud = this.store.cloud; if (!cloud?.enabled) return;
     for (const agent of this.store.list('specialist')) {
       if (agent.kind === 'main') continue;

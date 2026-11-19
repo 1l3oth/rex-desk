@@ -22,7 +22,7 @@ export const thisComputer = () => process.env.REX_COMPUTER_NAME || os.hostname()
 export const isLocalMain = run => run?.role === 'coordinator' && Boolean(run.main) && !run.roomAgent && run.computer === thisComputer();
 export const latestLocalMain = runs => runs.filter(isLocalMain).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0];
 // Records every computer of the person shares (see peers.js). The Rex Agent record is each computer's own.
-export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd', 'chatcopy', 'chatfile']);
+export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd', 'chatcopy', 'chatfile', 'chatsplit']);
 // What the person can leave out of the cloud backup (Settings, Backup and updates). Agents, rooms, projects and settings
 // always go up: they are what makes the desk follow the person to another computer.
 export const BACKUP_PARTS = { chats: true, rooms: true, tasks: true, files: true };
@@ -32,7 +32,7 @@ export const id = () => randomUUID();
 export const defaults = {
   name: 'Rex', notify: true, provider: 'claude', concurrency: 2, branchPrefix: 'rex-desk',
   syncMinutes: 5, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
-  models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, mediaDirectory: '', execution: 'headless', defaultMode: 'bypassPermissions',
+  models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, execution: 'headless', defaultMode: 'bypassPermissions',
   schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], fix: true, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
   // Computer control: on for the person here, with a yes asked before shutdown-like actions; agents only when allowed.
   // allow: actions that run without asking even though they normally ask (the person chose "Yes, always"). Closing an app is simple and asks no more.
@@ -113,6 +113,14 @@ export class Store extends EventEmitter {
     if (!existsSync(nodeFile)) writeFileSync(nodeFile, this.fresh ? randomUUID() : this.cloud.workspace, { mode: 0o600 });
     this.nodeId = readFileSync(nodeFile, 'utf8').trim() || this.cloud.workspace; this.clock = 0;
     this.db.exec('CREATE TABLE IF NOT EXISTS changes (seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, id TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)');
+    // Every message has one id on every computer: <computer id>.<its number on that computer>. A message from another
+    // computer keeps its id, so bringing it in twice changes nothing (docs/design/cross-device-chat.md).
+    const columns = this.db.prepare('PRAGMA table_info(events)').all().map(column => column.name);
+    if (!columns.includes('uid')) this.db.exec('ALTER TABLE events ADD COLUMN uid TEXT');
+    // pushed: this computer's message is on its way to the others (in the cloud outbox).
+    if (!columns.includes('pushed')) this.db.exec('ALTER TABLE events ADD COLUMN pushed INTEGER');
+    this.db.prepare("UPDATE events SET uid = ? || '.' || sequence WHERE uid IS NULL").run(this.nodeId);
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS event_uid ON events(uid)');
     if (!this.get('meta', 'changes-backfilled')) {
       this.transaction(() => {
         for (const kind of SHARED) for (const row of this.db.prepare('SELECT id, value FROM records WHERE kind=?').all(kind)) {
@@ -192,6 +200,24 @@ export class Store extends EventEmitter {
     if (!this.privateAgents) this.privateAgents = new Set(this.list('specialist').filter(agent => agent.noCloud).map(agent => agent.id));
     return this.privateAgents.has(agentId);
   }
+  // The one chat of an agent (its card's runId), which every computer of the account shares. Not Rex Agent's, not an
+  // agent kept out of the cloud, not when chats are left out of the backup, and not while its chats are split between
+  // computers and the person has not picked one yet.
+  syncedChat(runId) {
+    if (!runId || this.backupOff('chats')) return false;
+    const run = this.get('run', runId);
+    const agent = run?.specialistId ? this.get('specialist', run.specialistId) : this.list('specialist').find(item => item.runId === runId);
+    return Boolean(agent && agent.kind !== 'main' && agent.id !== 'main' && agent.runId === runId && !agent.noCloud);
+  }
+  // Only the computer running the agent writes its chat; another computer adds only what the person typed there. Anything
+  // else written here in that chat (an old story from before chats were shared, a note) stays here (src/chat-split.js).
+  sharesEvent(row) {
+    if (!row?.uid || !this.syncedChat(row.run_id)) return false;
+    const run = this.get('run', row.run_id), agent = run?.specialistId ? this.get('specialist', run.specialistId) : this.list('specialist').find(item => item.runId === row.run_id);
+    if (agent?.node === this.nodeId) return true;
+    try { return JSON.parse(row.value || '{}').from === this.nodeId; } catch { return false; }
+  }
+  mainRun(runId) { const run = runId ? this.get('run', runId) : null; return Boolean(run && run.role === 'coordinator' && run.main && !run.roomAgent); }
   privateRun(runId) {
     if (!runId) return false;
     const run = this.get('run', runId);
@@ -224,7 +250,9 @@ export class Store extends EventEmitter {
   event(runId, kind, value, visible = false) {
     this.transaction(() => {
       const result = this.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?)').run(runId ?? '', kind, visible ? 1 : 0, JSON.stringify(redact(value)), now());
-      this.cloud?.event(this.db.prepare('SELECT * FROM events WHERE sequence=?').get(result.lastInsertRowid));
+      this.db.prepare('UPDATE events SET uid=? WHERE sequence=?').run(`${this.nodeId}.${result.lastInsertRowid}`, result.lastInsertRowid);
+      const row = this.db.prepare('SELECT * FROM events WHERE sequence=?').get(result.lastInsertRowid);
+      this.cloud?.event(row); this.cloud?.chatEvent?.(row);
     });
     this.cloud?.schedule();
     this.emit('change', { kind: 'event', runId });
@@ -233,9 +261,12 @@ export class Store extends EventEmitter {
   importEvents(runId, events) {
     this.transaction(() => {
       for (const event of events) {
-        const { sequence, kind, visible, createdAt, ...value } = event;
+        const { sequence, kind, visible, createdAt, uid, ...value } = event;
+        if (uid && this.db.prepare('SELECT 1 FROM events WHERE uid=?').get(uid)) continue;
         const result = this.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?)').run(runId, kind, visible === false ? 0 : 1, JSON.stringify(value), createdAt || now());
-        this.cloud?.event(this.db.prepare('SELECT * FROM events WHERE sequence=?').get(result.lastInsertRowid));
+        this.db.prepare('UPDATE events SET uid=? WHERE sequence=?').run(uid || `${this.nodeId}.${result.lastInsertRowid}`, result.lastInsertRowid);
+        const row = this.db.prepare('SELECT * FROM events WHERE sequence=?').get(result.lastInsertRowid);
+        this.cloud?.event(row); if (!uid) this.cloud?.chatEvent?.(row);
       }
     });
     this.cloud?.schedule();
@@ -243,16 +274,34 @@ export class Store extends EventEmitter {
   }
   // The person unsends one of their own messages in a personal chat.
   unsendEvent(runId, sequence) {
-    const row = this.db.prepare("SELECT value FROM events WHERE run_id=? AND sequence=? AND kind='human-message'").get(runId, Number(sequence));
+    const row = this.db.prepare("SELECT value, uid FROM events WHERE run_id=? AND sequence=? AND kind='human-message'").get(runId, Number(sequence));
     if (!row) return null;
-    this.transaction(() => { this.db.prepare('DELETE FROM events WHERE run_id=? AND sequence=?').run(runId, Number(sequence)); this.cloud?.removeEvent(sequence); });
+    this.transaction(() => { this.db.prepare('DELETE FROM events WHERE run_id=? AND sequence=?').run(runId, Number(sequence)); this.cloud?.removeEvent(sequence); if (row.uid) this.cloud?.removeChatEvent?.(row.uid, runId); });
     this.cloud?.schedule();
     this.emit('change', { kind: 'event', runId });
     return JSON.parse(row.value);
   }
   events(runId, { visible = false, after = 0, limit = 500 } = {}) {
     return this.db.prepare(`SELECT * FROM events WHERE run_id=? AND sequence>? ${visible ? 'AND visible=1' : ''} ORDER BY sequence DESC LIMIT ?`)
-      .all(runId, after, limit).reverse().map(row => ({ sequence: row.sequence, kind: row.kind, visible: Boolean(row.visible), ...JSON.parse(row.value), createdAt: row.created_at }));
+      .all(runId, after, limit).reverse().map(row => ({ sequence: row.sequence, uid: row.uid, kind: row.kind, visible: Boolean(row.visible), ...JSON.parse(row.value), createdAt: row.created_at }));
+  }
+  // Messages from another computer's copy of a shared chat, each once (by its id); a removed one goes here too.
+  applyChatEvents(rows) {
+    const touched = new Set();
+    this.transaction(() => {
+      const insert = this.db.prepare('INSERT OR IGNORE INTO events(run_id,kind,visible,value,created_at,uid) VALUES(?,?,?,?,?,?)');
+      const remove = this.db.prepare('DELETE FROM events WHERE uid=?');
+      for (const row of rows) {
+        const result = Number(row.deleted) ? remove.run(row.uid) : insert.run(row.run_id, row.kind, Number(row.visible) ? 1 : 0, row.value, row.created_at, row.uid);
+        if (result.changes) touched.add(row.run_id);
+      }
+    });
+    for (const runId of touched) this.emit('change', { kind: 'event', runId });
+    return touched.size;
+  }
+  // This computer's own messages of a chat that have not gone to the other computers yet.
+  unsentEvents(runId, limit = 2000) {
+    return this.db.prepare("SELECT * FROM events WHERE run_id=? AND pushed IS NULL AND uid LIKE ? || '.%' ORDER BY sequence LIMIT ?").all(runId, this.nodeId, limit);
   }
   encrypt(text) {
     const nonce = randomBytes(12);
@@ -304,7 +353,27 @@ export class Store extends EventEmitter {
   }
   // Files from agents and chats (screenshots, recordings, attachments, room pictures) live in the files folder the person chose,
   // or inside the data folder when none is set (every workspace made before the choice existed).
-  media(folder) { const root = this.config().mediaDirectory || this.directory, full = path.join(root, folder); mkdirSync(full, { recursive: true }); return full; }
+  media(folder) { const full = path.join(this.filesFolder(), folder); mkdirSync(full, { recursive: true }); return full; }
+  // The files folder is this computer's own choice. It used to sit in the shared settings (config/main), which every computer
+  // of the account downloads, so one laptop's D:\Rex Desk reached a laptop without a D: drive and every message failed there.
+  // It lives in a file in the data folder now; the old setting is taken over once, only where that folder exists.
+  filesFolder() {
+    if (this.filesRoot === undefined) {
+      const file = path.join(this.directory, 'files-folder.txt');
+      let chosen = '';
+      try { chosen = readFileSync(file, 'utf8').trim(); } catch {
+        const legacy = this.get('config', 'main')?.mediaDirectory;
+        if (legacy && existsSync(legacy)) { chosen = path.resolve(legacy); writeFileSync(file, chosen); }
+      }
+      this.filesRoot = chosen && existsSync(chosen) ? chosen : '';
+    }
+    return this.filesRoot || this.directory;
+  }
+  setFilesFolder(folder) {
+    const chosen = folder && path.resolve(folder).toLowerCase() !== this.directory.toLowerCase() ? path.resolve(folder) : '';
+    writeFileSync(path.join(this.directory, 'files-folder.txt'), chosen);
+    this.filesRoot = chosen;
+  }
   config() { const saved = this.get('config', 'main') || {}; return { ...defaults, ...saved, control: { ...defaults.control, ...(saved.control || {}) } }; }
   publicConfig() {
     const config = this.config();
@@ -349,7 +418,7 @@ export class Store extends EventEmitter {
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'rex-desk').replace(/^\/+|\/+$/g, ''),
       syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), saver: input.saver !== false, autoFree: input.autoFree !== false, models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex), gemini: modelName('gemini', input.models?.gemini) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex'), gemini: agentProfile(input.agentProfiles?.gemini, 'Gemini') },
-      tourDismissed: Boolean(input.tourDismissed), mediaDirectory: path.isAbsolute(String(input.mediaDirectory || '')) ? path.resolve(input.mediaDirectory) : '', execution: 'headless', testAccounts: accounts,
+      tourDismissed: Boolean(input.tourDismissed), execution: 'headless', testAccounts: accounts,
       // The permission mode a new agent or chat starts in.
       defaultMode: ['bypassPermissions', 'auto', 'acceptEdits', 'manual', 'plan'].includes(input.defaultMode) ? input.defaultMode : 'bypassPermissions',
       // How full a chat's context may get before it hands over to a fresh session by itself (false: never).

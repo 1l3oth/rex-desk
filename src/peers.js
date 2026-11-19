@@ -12,6 +12,7 @@ import { HUMAN } from './rooms.js';
 import { execFile } from 'node:child_process';
 
 const now = () => new Date().toISOString();
+const STALE_CHAT_MS = 24 * 3600000;
 const STEP_MS = 30000, ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000, PICTURE_BYTES = 2 * 1024 * 1024, CARRY_BYTES = 8 * 1024 * 1024;
 const isPageArtifact = item => Boolean(item.page) || /\.html?$/i.test(item.file);
 const PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
@@ -82,7 +83,8 @@ export class Peers {
   interactionOwner(id) { return [...this.live].find(([, live]) => (live.interactions || []).some(item => item.id === id))?.[0] || ''; }
   status(port) {
     const settings = this.settings();
-    return { self: { ...this.self, addresses: port ? this.addresses(port) : [] }, remote: Boolean(settings.remote), key: this.key(), tailscale: tailscaleAddresses().length > 0,
+    // named: the person gave this computer a name. A new computer has none yet and asks for one (Home, Work...).
+    return { self: { ...this.self, named: Boolean(settings.name), addresses: port ? this.addresses(port) : [] }, remote: Boolean(settings.remote), key: this.key(), tailscale: tailscaleAddresses().length > 0,
       peers: [...settings.peers.map(peer => ({ id: peer.id, name: peer.name, url: peer.url, online: this.online(peer.id), via: this.direct(peer.id) ? 'tailscale' : this.seen(peer.id) ? 'turso' : '', lastSeen: this.live.get(peer.id)?.at ? new Date(this.live.get(peer.id).at).toISOString() : peer.lastSeen || '', error: peer.error || '' })),
         ...[...(this.cloudSeen || new Map()).values()].filter(row => !settings.peers.some(peer => peer.id === row.node)).map(row => ({ id: row.node, name: row.name, url: 'through Turso', online: this.seen(row.node), via: 'turso', lastSeen: new Date(this.lastHeard(row.node) || row.at).toISOString(), error: '' }))],
       // Whether this computer joined the account's shared space when the person signed in, and why not if it did not.
@@ -243,9 +245,14 @@ export class Peers {
       else if (command.action === 'answer') result = this.desk.answer(command.input?.interactionId, command.input?.answer || {});
       else if (command.action === 'chat-say') {
         // Written on another computer in this agent's personal chat: said to the agent while it works, or it picks the chat up again.
+        // A message that waited more than a day (this computer was off) is not acted on late; the chat says so instead.
+        if (Date.now() - Date.parse(command.at || 0) > STALE_CHAT_MS) throw new Error('it waited more than a day while this computer was off, so it was not passed to the agent. Send it again if it still matters.');
         const run = this.store.get('run', command.runId), text = await this.unpackFiles(command.input);
         if (!run) throw new Error('That chat is no longer on this computer.');
-        result = ['starting', 'running', 'queued', 'waiting', 'verifying'].includes(run.state) ? await this.desk.say(run.id, text, {}) : await this.desk.resume(run.id, { prompt: text });
+        // The message is already in the shared chat (written on the computer it was typed on): only the agent gets it.
+        const echoed = Boolean(command.input?.uid);
+        if (command.input?.echo?.uid) this.store.applyChatEvents([{ ...command.input.echo, run_id: run.id, deleted: 0 }]);
+        result = ['starting', 'running', 'queued', 'waiting', 'verifying'].includes(run.state) ? await this.desk.say(run.id, text, { echoed }) : await this.desk.resume(run.id, { prompt: text, silent: echoed });
       }
     } catch (failure) { error = failure.message; }
     // A message that could not be delivered must never just vanish: show it in the chat so the person sees it failed,
@@ -263,7 +270,46 @@ export class Peers {
     if (!task) throw new Error(`Task #${number || input.taskId} is not on this computer yet. Sync its tracker here first.`);
     return { ...input, taskId: task.id };
   }
+  // Every tick, not only at start: a command can also arrive with the start-up copy of the cloud (TursoSync.pullLatest),
+  // which writes records without going through applyAll.
   pendingCommands() { for (const command of this.store.list('peercmd').filter(item => !item.done && item.target === this.self.id)) void this.runCommand(command); }
+
+  // ---------- agents' chats, the same on every computer (docs/design/cross-device-chat.md) ----------
+  // Messages the other computers wrote, brought in by their ids. A short overlap re-reads what clocks that differ may
+  // have stamped a little in the past; reading a message twice changes nothing.
+  async pullChats() {
+    if (!this.store.cloud?.ready || !this.store.cloud.pullChat) return 0;
+    doing('sync: reading chat messages');
+    const settings = this.settings(), again = settings.chatNode !== this.self.id;
+    let since = again ? '' : String(settings.chatAt || ''), newest = since, total = 0;
+    if (since) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - 120000).toString(36).padStart(9, '0'); }
+    for (let page = 0; page < 40; page++) {
+      const rows = await this.store.cloud.pullChat(since);
+      if (!rows?.length) break;
+      total += this.store.applyChatEvents(rows);
+      for (const row of rows) { const [, , ...node] = String(row.v).split('.'); this.hear(node.join('.')); }
+      newest = String(rows.at(-1).v) > newest ? String(rows.at(-1).v) : newest; since = String(rows.at(-1).v);
+      if (rows.length < 500) break;
+    }
+    if (again || newest !== String(settings.chatAt || '')) this.save({ chatAt: newest, chatNode: this.self.id });
+    return total;
+  }
+  // Messages written here before chats were shared (or while offline with nothing queued) go up once.
+  // Only the computer running the agent: another computer's own unsent messages of that chat are a story of their own,
+  // which the person settles by picking one chat (src/chat-split.js), never by mixing them in.
+  pushChats() {
+    const cloud = this.store.cloud; if (!cloud?.ready || !cloud.chatEvent) return 0;
+    let sent = 0;
+    for (const agent of this.store.list('specialist')) {
+      if (!agent.runId || agent.node !== this.self.id || !this.store.syncedChat(agent.runId) || this.store.get('chatsplit', agent.id)?.open) continue;
+      const rows = this.store.unsentEvents(agent.runId);
+      if (!rows.length) continue;
+      this.store.transaction(() => { for (const row of rows) cloud.chatEvent(row); });
+      sent += rows.length;
+    }
+    if (sent) cloud.schedule();
+    return sent;
+  }
 
   // With the same Turso database on every computer, the chats also arrive from there, even while the other computer is off.
   async pullTurso() {
@@ -294,7 +340,8 @@ export class Peers {
       const rows = await this.store.cloud.presence(this.self.name, Object.fromEntries(mine.map(agent => [agent.id, this.desk.specialists.status(agent)])));
       const before = new Set([...(this.cloudSeen || new Map())].filter(([node]) => this.seen(node)).map(([node]) => node));
       // A heartbeat that changed since the last look means that computer is on now, whatever its clock says.
-      for (const row of rows || []) { const before = this.cloudSeen?.get(row.node); if (before ? before.at !== row.at : Math.abs(Date.now() - row.at) < CLOUD_MS) this.hear(row.node); }
+      // One that said it is closing (at 0) is off now.
+      for (const row of rows || []) { const before = this.cloudSeen?.get(row.node); if (!Number(row.at)) { this.heard?.delete(row.node); continue; } if (before ? before.at !== row.at : Math.abs(Date.now() - row.at) < CLOUD_MS) this.hear(row.node); }
       this.cloudSeen = new Map((rows || []).map(row => [row.node, row]));
       if ([...this.cloudSeen.keys()].some(node => this.seen(node) !== before.has(node))) this.store.emit?.('change', { kind: 'peers' });
     } catch { /* Turso shows its own state in Settings */ }
@@ -475,7 +522,16 @@ export class Peers {
     if (!['say', 'resume', 'stop'].includes(action)) throw new Error(`Open this chat on ${this.deviceName(copy.node)} to do that.`);
     const text = String(input.text || input.prompt || '').slice(0, 20000);
     if (action !== 'stop' && !text.trim()) throw new Error('Write a message first.');
+    if (action !== 'stop' && this.store.get('chatsplit', copy.agentId)?.open) throw new Error('This agent has two different chats on your computers. Pick the one to keep first.');
     const id = randomUUID(), packed = action === 'stop' ? { text, files: [] } : this.packFiles(text, copy.node, copy.agentId);
+    // The message shows in this computer's copy of the shared chat at once and reaches the others with its own id; the
+    // computer running the agent passes it on without writing it again.
+    if (action !== 'stop' && this.store.syncedChat(copy.id)) {
+      this.store.event(copy.id, 'human-message', { text: text.replace(/\s+/g, ' ').trim(), via: 'rex', from: this.self.id }, true);
+      const row = this.store.db.prepare('SELECT uid, kind, visible, value, created_at FROM events WHERE run_id=? ORDER BY sequence DESC LIMIT 1').get(copy.id);
+      // The message itself travels with the command, so the agent's computer shows it before the answer to it.
+      if (row?.uid) { packed.uid = row.uid; packed.echo = { ...row }; }
+    }
     this.store.put('peercmd', id, { id, target: copy.node, action: `chat-${action === 'stop' ? 'stop' : 'say'}`, runId: copy.id, agentId: copy.agentId, input: packed, at: now(), done: false });
     const name = this.store.get('specialist', copy.agentId)?.name || 'The agent';
     return { queued: true, message: this.online(copy.node) ? `Sent to ${name} on ${this.deviceName(copy.node)}. The reply shows here in a few seconds.` : `${this.deviceName(copy.node)} is off. ${name} gets this when it is back on.` };
@@ -497,6 +553,10 @@ export class Peers {
       // between computers), slowly when nothing is happening. A cross-device chat then feels near-instant without the
       // cost of a fast poll when idle. store.list is cached, so this check is cheap on every tick.
       if ((this.timers.get('turso') || 0) <= Date.now()) { this.timers.set('turso', Date.now() + (this.inFlight() ? 1500 : 5000)); await bounded(() => this.pullTurso()); this.timers.set('turso', Date.now() + (this.inFlight() ? 1500 : 5000)); }
+      // Chat messages: about every second while an agent works or a message is on its way, every 5 seconds otherwise.
+      if ((this.timers.get('chat') || 0) <= Date.now()) { this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); await bounded(() => this.pullChats()); this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); }
+      if ((this.timers.get('chatpush') || 0) <= Date.now()) { this.timers.set('chatpush', Date.now() + 60000); try { this.desk.chatSplits?.settleAll(); this.desk.chatSplits?.detect(); this.pushChats(); } catch { /* tried again in a minute */ } }
+      if ((this.timers.get('commands') || 0) <= Date.now()) { this.timers.set('commands', Date.now() + 3000); this.pendingCommands(); }
       if ((this.timers.get('presence') || 0) <= Date.now()) { this.timers.set('presence', Date.now() + 30000); await bounded(() => this.presence()); }
       if ((this.timers.get('secure') || 0) <= Date.now()) { this.timers.set('secure', Date.now() + 300000); this.refreshSecure(); }
     };

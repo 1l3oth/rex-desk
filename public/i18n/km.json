@@ -2236,5 +2236,18 @@
  "After this your usual voice says the rest of the day, so the cost stays small.": "បន្ទាប់ពីនេះ សំឡេងធម្មតារបស់អ្នកនិយាយបន្តពេញមួយថ្ងៃ ដូច្នេះថ្លៃចំណាយនៅតែតិច។",
  "Your usual voice is used meanwhile.": "ក្នុងពេលនេះ ប្រើសំឡេងធម្មតារបស់អ្នក។",
  "Fish Audio says English only. Korean and Khmer keep the natural voices. If there is no key, or Fish Audio cannot answer, your usual voice says it, so Voice mode never goes silent.": "Fish Audio និយាយតែភាសាអង់គ្លេសប៉ុណ្ណោះ។ ភាសាកូរ៉េ និងខ្មែរនៅតែប្រើសំឡេងធម្មជាតិ។ បើគ្មានសោ ឬ Fish Audio មិនអាចឆ្លើយបាន សំឡេងធម្មតារបស់អ្នកនឹងនិយាយជំនួស ដូច្នេះរបៀបសំឡេងមិនដែលស្ងាត់ឡើយ។",
- "The free model costs nothing (Fish Audio's fair use). The best model costs about {0} for each minute of speech.": "ម៉ូដែលឥតគិតថ្លៃមិនគិតថ្លៃទេ (ក្រោមការប្រើប្រាស់ដោយយុត្តិធម៌របស់ Fish Audio)។ ម៉ូដែលល្អបំផុតគិតប្រហែល {0} សម្រាប់រាល់នាទីនៃការនិយាយ។"
+ "The free model costs nothing (Fish Audio's fair use). The best model costs about {0} for each minute of speech.": "ម៉ូដែលឥតគិតថ្លៃមិនគិតថ្លៃទេ (ក្រោមការប្រើប្រាស់ដោយយុត្តិធម៌របស់ Fish Audio)។ ម៉ូដែលល្អបំផុតគិតប្រហែល {0} សម្រាប់រាល់នាទីនៃការនិយាយ។",
+ "Kept. Every computer now shows this chat.": "បានរក្សាទុក។ កុំព្យូទ័រទាំងអស់ឥឡូវបង្ហាញការជជែកនេះ។",
+ "This computer is now {0}.": "កុំព្យូទ័រនេះឥឡូវឈ្មោះ {0}។",
+ "New computer": "កុំព្យូទ័រថ្មី",
+ "Name it so you can tell your computers apart, like Home or Work.": "ដាក់ឈ្មោះវា ដើម្បីងាយស្គាល់កុំព្យូទ័ររបស់អ្នក ដូចជា Home ឬ Work។",
+ "Offline · {0}": "ក្រៅបណ្ដាញ · {0}",
+ "(this computer)": "(កុំព្យូទ័រនេះ)",
+ "1 message": "សារ ១",
+ "{0} messages": "សារ {0}",
+ "last {0}": "ចុងក្រោយ {0}",
+ "Keep this chat": "រក្សាការជជែកនេះ",
+ "This agent has two different chats": "ភ្នាក់ងារនេះមានការជជែកពីរផ្សេងគ្នា",
+ "Your computers each kept their own chat with this agent. Pick the one to keep: every computer then shows that chat, and the other one is put away (not deleted).": "កុំព្យូទ័រនីមួយៗរបស់អ្នកបានរក្សាការជជែកផ្ទាល់ខ្លួនជាមួយភ្នាក់ងារនេះ។ ជ្រើសរើសមួយដើម្បីរក្សាទុក៖ កុំព្យូទ័រទាំងអស់នឹងបង្ហាញការជជែកនោះ ហើយមួយទៀតត្រូវបានដាក់ទុកដោយឡែក (មិនលុបទេ)។",
+ "Waiting for the other computer to add its side. It has to be on.": "កំពុងរង់ចាំកុំព្យូទ័រមួយទៀតបន្ថែមផ្នែករបស់វា។ វាត្រូវតែបើក។"
 }

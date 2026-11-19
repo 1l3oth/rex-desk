@@ -52,6 +52,13 @@ export async function devicesAction(ctx, action, target) {
 }
 // The name saves when you leave the field or press Enter.
 export function initDevices(ctx) {
+  // The "New computer" card in the sidebar.
+  document.addEventListener('submit', event => {
+    if (!event.target.matches?.('[data-newpc]')) return;
+    event.preventDefault();
+    const name = event.target.elements.name.value.trim(); if (!name) return;
+    void ctx.api('/peers', { method: 'POST', data: { action: 'rename', name } }).then(() => { ctx.toast(t`This computer is now ${name}.`); return ctx.refresh(); }).catch(error => ctx.toast(error.message, true));
+  });
   document.addEventListener('keydown', event => { if (event.target.id === 'dev-name' && event.key === 'Enter') { event.preventDefault(); event.target.blur(); } });
   document.addEventListener('focusout', event => {
     if (event.target.id !== 'dev-name') return;

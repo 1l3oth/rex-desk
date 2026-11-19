@@ -129,6 +129,7 @@ export async function agentAction(ctx, action, target = null) {
   }
   if (!agent) return;
   if (action === 'spec-chat') return openAgentChat(ctx, agent);
+  if (action === 'chat-pick') { await api(`/specialists/${agent.id}/chat-pick`, { method: 'POST', data: { node: target.dataset.node } }); toast(t('Kept. Every computer now shows this chat.')); await refresh({ full: true }); return; }
   if (action === 'spec-answer') {
     const question = (agent.unsure || []).filter(Boolean)[Number(target.dataset.index)] || '';
     const runId = agent.runId && ctx.runById(agent.runId) ? agent.runId : ''; if (!runId) { await agentAction(ctx, 'spec-chat'); return; }

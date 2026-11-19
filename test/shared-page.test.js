@@ -27,7 +27,8 @@ test('a message to a chat with an agent that lives on another computer goes ther
   const app = await createApp({ dataDirectory: temporary('home-agent'), port: 0 });
   try {
     const { store, desk } = app, runId = randomUUID();
-    store.put('specialist', 'far', { id: 'far', kind: 'specialist', name: 'Far_bot', slug: 'far', node: 'other-computer', provider: 'claude' });
+    // "Works where you are" off: it stays on its computer (on, the default, it would move here).
+    store.put('specialist', 'far', { id: 'far', kind: 'specialist', name: 'Far_bot', slug: 'far', node: 'other-computer', provider: 'claude', follows: false });
     store.put('run', runId, { id: runId, specialistId: 'far', state: 'finished', provider: 'claude', createdAt: new Date().toISOString() });
     const sent = []; let online = true;
     desk.peers.online = () => online; desk.peers.chatAction = async (copy, action, input) => { sent.push({ copy, action, text: input.text }); return { queued: true }; };
