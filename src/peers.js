@@ -62,6 +62,13 @@ export class Peers {
   lastHeard(nodeId) { return this.heard?.get(nodeId) || 0; }
   online(nodeId) { return this.direct(nodeId) || this.seen(nodeId); }
   deviceName(nodeId) { if (!nodeId || nodeId === this.self.id) return this.self.name; return this.byNode(nodeId)?.name || this.cloudSeen?.get(nodeId)?.name || 'another computer'; }
+  // An agent follows the person by default: a message from this computer brings it here, unless "Works where you are" is
+  // off, its project runs only on its own computer or is not on this one, or it is busy over there.
+  followsHere(agent) {
+    return Boolean(agent && this.isRemote(agent) && agent.follows !== false && !agent.pinned
+      && !(agent.projectSlug && !this.desk.projectRules.folderHere(agent.projectSlug))
+      && !['busy', 'replying', 'waiting'].includes(this.statusOf(agent).state));
+  }
   isRemote(agent) { return Boolean(agent && agent.kind !== 'main' && agent.node && agent.node !== this.self.id); }
   statusOf(agent) {
     if (this.direct(agent.node)) return this.live.get(agent.node).agents?.[agent.id] || { state: 'idle', label: 'Idle' };

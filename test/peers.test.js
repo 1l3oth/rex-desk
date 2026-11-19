@@ -281,6 +281,19 @@ test('an agent without a project can move to the computer the person writes from
   assert.equal(b.desk.store.get('specialist', writer.id).follows, true, 'and keeps following the person');
 });
 
+test('an agent follows the person by default, unless that is turned off or its project stays on its own computer', async () => {
+  const { a, b } = computers();
+  const writer = a.desk.specialists.create({ name: 'Writer', purpose: 'Writes posts' });
+  b.desk.store.put('specialist', writer.id, { ...a.desk.store.get('specialist', writer.id) });
+  const card = () => b.desk.store.get('specialist', writer.id);
+  assert.equal(b.desk.peers.followsHere(card()), true, 'a message from this computer brings it here');
+  b.desk.store.put('specialist', writer.id, { ...card(), follows: false });
+  assert.equal(b.desk.peers.followsHere(card()), false, '"Works where you are" off keeps it where it is');
+  b.desk.store.put('specialist', writer.id, { ...card(), follows: true, pinned: true });
+  assert.equal(b.desk.peers.followsHere(card()), false, 'a project that runs only on its computer stays there');
+  assert.equal(a.desk.peers.followsHere(a.desk.store.get('specialist', writer.id)), false, 'on its own computer there is nothing to move');
+});
+
 test('a page an agent on another computer shared is unpacked here when opened', async () => {
   const { a, b } = computers();
   const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
