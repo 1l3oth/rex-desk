@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store, now } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
-import { MAX_HOPS } from '../src/rooms.js';
+import { WRAP_UP_HOPS } from '../src/rooms.js';
 import { mainLooks } from '../src/runners.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
@@ -77,15 +77,19 @@ test('what is said in one group chat never reaches another: each room has its ow
   assert.notEqual(asked.run.id, billing.run.id);
 });
 
-test('agent-to-agent threads pause after the hop limit and a person resets the count', async () => {
-  const replies = Array.from({ length: 12 }, (_, index) => `${index % 2 ? '@dara' : '@vanna'} your turn ${index}`);
-  const { desk, room } = setup({ replies });
+test('agents decide when their thread ends: no pause after a number of replies, a long one is asked to wrap up, a person resets the count', async () => {
+  const replies = Array.from({ length: WRAP_UP_HOPS + 2 }, (_, index) => `${index % 2 ? '@dara' : '@vanna'} your turn ${index}`);
+  const { desk, room, turns } = setup({ replies });
   await desk.rooms.post(room.id, { text: '@dara start' });
-  await waitFor(() => desk.rooms.messages(room.id).some(item => item.paused || (item.from.type === 'system' && /paused/.test(item.text))));
-  assert.ok(desk.rooms.messages(room.id).some(item => item.from.type === 'system' && /Thread paused after/.test(item.text)));
+  for (let attempt = 0; attempt < 1200 && desk.rooms.messages(room.id).filter(item => item.from.type === 'agent').length < WRAP_UP_HOPS + 2; attempt++) await new Promise(resolve => setTimeout(resolve, 50));
+  assert.ok(desk.rooms.messages(room.id).filter(item => item.from.type === 'agent').length >= WRAP_UP_HOPS + 2, 'agents kept talking past the old limit');
+  const messages = desk.rooms.messages(room.id);
+  assert.ok(!messages.some(item => item.paused || (item.from.type === 'system' && /paused/i.test(item.text))), 'the thread is never paused by a count');
+  assert.ok(turns.some(item => /Wrap up unless real work is still open/.test(item.prompt)), 'a long thread is asked to wrap up');
+  assert.match(turns[0].prompt, /You decide when a talk with other agents is done/);
+  assert.match(turns[0].prompt, /never wait for them/);
   const human = await desk.rooms.post(room.id, { text: 'carry on' });
   assert.equal(desk.rooms.messages(room.id).find(item => item.id === human.id).hops, 0);
-  assert.ok(MAX_HOPS >= 1);
 });
 
 test('a task given in a room is done by the agent right there, in its room session, with no separate run', async () => {
