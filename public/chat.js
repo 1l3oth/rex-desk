@@ -2,7 +2,7 @@ import { t, locale } from './i18n.js';
 import { splitStage } from '/chat-split.js';
 import { rexCore } from '/rex-core.js';
 import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter } from '/chat-sidebar.js';
-import { agentStage, agentAction, agentGroups, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
+import { agentStage, agentAction, agentGroups, chatTakers, moveRunDialog, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { subagentHtml as subagentCard, subagentsFromEvents, subagentsPanel } from '/chat-subagents.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
@@ -334,7 +334,8 @@ function stageModel() {
   // A personal chat with an agent shows its profile and what was shared on the right; the terminal is one of those tabs.
   const personal = personalAgent(run);
   const side = personal ? (ui.chatInfo === false ? '' : personalSide(run, personal, items, shells)) : shells.length && ui.termOpen ? terminalHtml(shells, { esc, hhmm }) : '';
-  const actions = appControl(run, live) + (personal ? `<button class="icon-btn head-add" data-action="chat-to-room" title="${t`Add agents: start a group chat with this agent and others`}" aria-label="${t`Add agents`}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></button> ${ui.chatInfo === false ? `<button class="btn small" data-action="chat-info">${t`Info`}</button> ` : ''}${live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : ''}` : run.inApp ? '' : stop);
+  const take = !personal && !run.inApp && chatTakers(ctx, run).length ? `<button class="btn small" data-action="move-to-chat" title="${t`Make this run an agent's personal chat: click the agent to see this work and keep talking`}">${t`Move to chat`}</button> ` : '';
+  const actions = take + appControl(run, live) + (personal ? `<button class="icon-btn head-add" data-action="chat-to-room" title="${t`Add agents: start a group chat with this agent and others`}" aria-label="${t`Add agents`}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></button> ${ui.chatInfo === false ? `<button class="btn small" data-action="chat-info">${t`Info`}</button> ` : ''}${live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : ''}` : run.inApp ? '' : stop);
   return { title: personal ? personal.name : runTitle(run), meta: personal ? '' : `${provider(run.provider)}${run.branch ? ` · ${run.branch}` : ''}`, chips: run.inApp ? `<span class="chip working">${t`In Claude app`}</span>` : personal ? '' : `<span class="chip ${stateTone(run)}">${esc(stateLabel(run))}</span>`, actions, feed, side, sideClass: personal ? 'info' : '',
     working: workingStates.includes(run.state), composer: { placeholder: composerHint(run, workingStates.includes(run.state)), mentions: [] } };
 }
@@ -675,6 +676,7 @@ document.addEventListener('click', async event => {
     else if (action === 'update-cancel') await updateWhenIdle(api, false);
     else if (action === 'new-room') newRoomDialog();
     else if (action === 'show-earlier') { ui.showEarlier = { ...(ui.showEarlier || {}), [ui.view.type === 'main' ? mainRun()?.id : ui.view.id]: true }; renderAll(true); }
+    else if (action === 'move-to-chat') { const run = runById(ui.view.id); if (run) moveRunDialog(ctx, run); }
     else if (action === 'chat-to-room') { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id), agent = personalAgent(run); if (agent) openRoomDialog(ctx, { id: agent.id, name: agent.name }); }
     else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
     else if (action === 'term-open') { ui.termOpen = true; renderAll(); }
@@ -1082,7 +1084,7 @@ function splitCard(run) {
 function personalAgent(run) {
   if (!run || run.roomAgent) return null;
   if (run.role === 'coordinator' && run.main) return { id: 'main', name: t('Rex Agent'), projectSlug: 'all projects', purpose: t('Knows every project and agent, and helps you decide who does what.'), main: true, status: { label: stateLabel(run) } };
-  if (run.role !== 'specialist' || !run.specialistId) return null;
+  if (!run.specialistId) return null;
   return (ui.snap.specialists || []).find(agent => agent.id === run.specialistId && agent.runId === run.id) || null;
 }
 // The Team tab: the tasks this agent gave to others (and got from a manager), live, with what each one needs.

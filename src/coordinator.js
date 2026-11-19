@@ -695,7 +695,7 @@ export class Desk {
       // A headless session that is being reopened already holds the whole conversation, so it is given only what is new.
       const reopened = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && run.followUp;
       if (run.followUp) this.patchRun(runId, { followUp: '' });
-      const chat = run.role === 'specialist' || run.role === 'web' || (run.role === 'coordinator' && (run.main || run.roomAgent));
+      const chat = run.role === 'specialist' || run.role === 'web' || (run.role === 'coordinator' && (run.main || run.roomAgent)) || this.personalRun(run);
       const owner = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
       const person = owner ? this.memory.person() : '', personKey = person ? createHash('sha256').update(person).digest('hex').slice(0, 16) : '';
       const personUpdate = reopened && person && run.personSeen !== personKey ? `What you know about the person (updated, all agents share this):\n${person}` : '';
@@ -718,7 +718,7 @@ ${message}` : message);
       }
       if (await this.switchIfLimited(runId)) { handedOn = true; return; }
       const current = this.run(runId);
-      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' || run.role === 'helper' || run.role === 'net' ? 'finished' : 'needs_evidence', endedAt: now() });
+      if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' || run.role === 'helper' || run.role === 'net' || this.personalRun(run) ? 'finished' : 'needs_evidence', endedAt: now() });
       if (run.role === 'helper') this.helperDone(runId);
       // The quiet turn that read Voice mode's report is over: what the agent says next is said out loud.
       const voiceAfter = this.store.get('run', runId)?.voice; if (voiceAfter?.reading) this.patchRun(runId, { voice: { ...voiceAfter, reading: false } });
@@ -1219,7 +1219,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // so the personal chat knows the rooms and the room session knows the personal chat, while both can run at the same time.
   sessionDigest(run) {
     const agentId = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
-    if (!agentId || run.role === 'worker') return '';
+    if (!agentId || (run.role === 'worker' && !this.personalRun(run))) return '';
     if (agentId === 'main') this.specialists.ensureMain();
     const agent = this.store.get('specialist', agentId); if (!agent) return '';
     const clip = text => { const value = String(text || '').replace(/\s+/g, ' ').trim(); return value.length > 300 ? `${value.slice(0, 299)}…` : value; };
@@ -1236,6 +1236,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (lines.length) this.store.put('specialist', agentId, { ...this.store.get('specialist', agentId), personalRoomSeen: seen });
     return lines.length ? `Meanwhile in your group chats:\n${lines.join('\n')}` : '';
   }
+  // A task run an agent took into its personal chat: it is talked to like that chat from then on.
+  personalRun(run) { return Boolean(run?.specialistId) && !run.roomAgent && this.store.get('specialist', run.specialistId)?.runId === run.id; }
   // What the person and the agent said in the agent's personal chat, for its room session to read when it needs to.
   personalChat(agentId, limit = 30) {
     const agent = this.specialists.get(agentId);

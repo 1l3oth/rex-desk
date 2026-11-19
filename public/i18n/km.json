@@ -2249,5 +2249,12 @@
  "Keep this chat": "រក្សាការជជែកនេះ",
  "This agent has two different chats": "ភ្នាក់ងារនេះមានការជជែកពីរផ្សេងគ្នា",
  "Your computers each kept their own chat with this agent. Pick the one to keep: every computer then shows that chat, and the other one is put away (not deleted).": "កុំព្យូទ័រនីមួយៗរបស់អ្នកបានរក្សាការជជែកផ្ទាល់ខ្លួនជាមួយភ្នាក់ងារនេះ។ ជ្រើសរើសមួយដើម្បីរក្សាទុក៖ កុំព្យូទ័រទាំងអស់នឹងបង្ហាញការជជែកនោះ ហើយមួយទៀតត្រូវបានដាក់ទុកដោយឡែក (មិនលុបទេ)។",
- "Waiting for the other computer to add its side. It has to be on.": "កំពុងរង់ចាំកុំព្យូទ័រមួយទៀតបន្ថែមផ្នែករបស់វា។ វាត្រូវតែបើក។"
+ "Waiting for the other computer to add its side. It has to be on.": "កំពុងរង់ចាំកុំព្យូទ័រមួយទៀតបន្ថែមផ្នែករបស់វា។ វាត្រូវតែបើក។",
+ "Make this run an agent's personal chat: click the agent to see this work and keep talking": "ធ្វើឱ្យការងារនេះក្លាយជាការជជែកផ្ទាល់ខ្លួនរបស់ភ្នាក់ងារ៖ ចុចភ្នាក់ងារ ដើម្បីមើលការងារនេះ ហើយបន្តនិយាយ",
+ "Move to chat": "ផ្លាស់ទីទៅការជជែក",
+ "No agent on this project can take this run.": "គ្មានភ្នាក់ងារណាមួយក្នុងគម្រោងនេះអាចទទួលការងារនេះបានទេ។",
+ "Move to a personal chat": "ផ្លាស់ទីទៅការជជែកផ្ទាល់ខ្លួន",
+ "The agent you pick gets this run as its chat: click it in the sidebar to see this work and keep talking. Its current chat stays under Earlier chats.": "ភ្នាក់ងារដែលអ្នកជ្រើសរើសនឹងទទួលការងារនេះជាការជជែករបស់វា៖ ចុចវានៅរបារចំហៀង ដើម្បីមើលការងារនេះ ហើយបន្តនិយាយ។ ការជជែកបច្ចុប្បន្នរបស់វានៅតែមាននៅក្រោម ការជជែកមុនៗ។",
+ "Move": "ផ្លាស់ទី",
+ "This run is now {0}'s chat.": "ការងារនេះឥឡូវជាការជជែករបស់ {0} ហើយ។"
 }
