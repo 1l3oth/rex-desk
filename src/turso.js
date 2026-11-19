@@ -96,7 +96,7 @@ export class TursoSync {
   // A message of an agent's chat goes to every computer of the account; a removed one is marked removed for them.
   chatEvent(row) {
     if (!this.store.sharesEvent(row)) return;
-    this.enqueue('INSERT INTO rex_chat(workspace,uid,run_id,kind,visible,value,created_at,v,node,deleted) VALUES(?,?,?,?,?,?,?,?,?,0) ON CONFLICT(workspace,uid) DO UPDATE SET value=excluded.value,visible=excluded.visible,v=excluded.v,deleted=0',
+    this.enqueue('INSERT INTO rex_chat(workspace,uid,run_id,kind,visible,value,created_at,v,node,deleted) VALUES(?,?,?,?,?,?,?,?,?,0) ON CONFLICT(workspace,uid) DO UPDATE SET run_id=excluded.run_id,kind=excluded.kind,visible=excluded.visible,value=excluded.value,created_at=excluded.created_at,v=excluded.v,node=excluded.node,deleted=0',
       [this.workspace, row.uid, row.run_id, row.kind, Number(row.visible) ? 1 : 0, row.value, row.created_at, this.store.stamp(), this.store.nodeId]);
     if (this.enabled) this.store.db.prepare('UPDATE events SET pushed=1 WHERE uid=?').run(row.uid);
   }

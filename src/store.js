@@ -250,10 +250,13 @@ export class Store extends EventEmitter {
     return value;
   }
   delete(kind, key) { if (kind === 'specialist') this.privateAgents = null; this.transaction(() => { this.db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(kind, key); this.logChange(kind, key, true); this.cloud?.remove(kind, key); }); this.lists?.delete(kind); this.cloud?.schedule(); this.emit('change', { kind, id: key }); }
+  // A message id: this computer, its number here, and a random part, so two computers that once numbered alike under one
+  // id (a restored copy) can never write the same id again.
+  newUid(sequence) { return `${this.nodeId}.${sequence}.${randomBytes(4).toString('hex')}`; }
   event(runId, kind, value, visible = false) {
     this.transaction(() => {
       const result = this.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?)').run(runId ?? '', kind, visible ? 1 : 0, JSON.stringify(redact(value)), now());
-      this.db.prepare('UPDATE events SET uid=? WHERE sequence=?').run(`${this.nodeId}.${result.lastInsertRowid}`, result.lastInsertRowid);
+      this.db.prepare('UPDATE events SET uid=? WHERE sequence=?').run(this.newUid(result.lastInsertRowid), result.lastInsertRowid);
       const row = this.db.prepare('SELECT * FROM events WHERE sequence=?').get(result.lastInsertRowid);
       this.cloud?.event(row); this.cloud?.chatEvent?.(row);
     });
@@ -267,7 +270,7 @@ export class Store extends EventEmitter {
         const { sequence, kind, visible, createdAt, uid, ...value } = event;
         if (uid && this.db.prepare('SELECT 1 FROM events WHERE uid=?').get(uid)) continue;
         const result = this.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?)').run(runId, kind, visible === false ? 0 : 1, JSON.stringify(value), createdAt || now());
-        this.db.prepare('UPDATE events SET uid=? WHERE sequence=?').run(uid || `${this.nodeId}.${result.lastInsertRowid}`, result.lastInsertRowid);
+        this.db.prepare('UPDATE events SET uid=? WHERE sequence=?').run(uid || this.newUid(result.lastInsertRowid), result.lastInsertRowid);
         const row = this.db.prepare('SELECT * FROM events WHERE sequence=?').get(result.lastInsertRowid);
         this.cloud?.event(row); if (!uid) this.cloud?.chatEvent?.(row);
       }

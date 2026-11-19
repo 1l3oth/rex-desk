@@ -752,7 +752,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/local-ai/huggingface' && request.method === 'GET') return json(response, 200, { items: await desk.localAi.searchHuggingFace(url.searchParams.get('q')) });
       if (url.pathname === '/api/agents/tools' && request.method === 'GET') {
         const id = url.searchParams.get('agent') || 'main', agent = id === 'main' ? null : store.get('specialist', id);
-        return json(response, 200, agentTools({ profile: agent?.profile || desk.agents.selected('claude') || '', projectPath: agent?.projectPath || '', extra: desk.orbitAccountMcp() }));
+        return json(response, 200, agentTools({ profile: agent?.profile || desk.agents.selected('claude') || '', projectPath: desk.specialists.folder(agent), extra: desk.orbitAccountMcp() }));
       }
       if (url.pathname === '/api/agents/login' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.agents.login(aiProvider(input.provider || 'claude'), String(input.profile || ''))); }
       if (url.pathname === '/api/agents/add' && request.method === 'POST') { const input = await body(request), provider = aiProvider(input.provider || 'claude'); const created = desk.agents.addProfile(provider, input.name); return json(response, 200, { ...created, ...desk.agents.login(provider, created.profile) }); }

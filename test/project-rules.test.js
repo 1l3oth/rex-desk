@@ -74,10 +74,13 @@ test('a project that runs only on its computer: its agent never starts elsewhere
 });
 
 test('an agent whose project folder is not on this computer does not start here', async () => {
-  const { desk, agent, close } = setup();
+  const { store, desk, agent, project, close } = setup();
   try {
-    agent('lost', { projectPath: path.join(os.tmpdir(), 'rex-desk-no-such-folder-xyz') });
+    agent('lost', { projectSlug: 'gone', projectPath: path.join(os.tmpdir(), 'rex-desk-no-such-folder-xyz') });
     await assert.rejects(desk.specialistTurn('lost', { prompt: 'hi' }), /is not on this computer/);
+    // The same project in another folder here is used instead.
+    agent('found', { projectPath: path.join(os.tmpdir(), 'rex-desk-shop-on-the-other-computer') });
+    assert.equal(desk.specialists.folder(store.get('specialist', 'found')), project);
   } finally { await close(); }
 });
 

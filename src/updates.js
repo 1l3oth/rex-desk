@@ -162,6 +162,8 @@ export class Updates {
       'function Set-Bar($percent) { if ($ui) { $bar.Fill.Width = [int]($bar.Track.Width * [Math]::Min(100, [Math]::Max(0, $percent)) / 100) } }',
       'function Pump { if ($ui) { [Windows.Forms.Application]::DoEvents() } }',
       'function Step($text, $say, $percent) { Add-Content -Path $Log -Value "$(Get-Date -Format s) $text"; if ($ui -and $say) { $label.Text = $say; if ($percent -ge 0) { Set-Bar $percent }; Pump } }',
+      // Started twice (Task Scheduler late, and the Explorer fallback), only the first one runs.
+      '$lock = New-Object Threading.Mutex($false, "Local\\RexDeskUpdate"); if (-not $lock.WaitOne(0)) { exit }',
       'Set-Content -Path $Log -Value "$(Get-Date -Format s) update helper started"',
       'Step "closing" "Closing Rex Desk" 5',
       '$until = (Get-Date).AddSeconds(60); while ((Get-Process -Id $ServerPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $until) { Pump; Start-Sleep -Milliseconds 200 }',
@@ -198,17 +200,24 @@ export class Updates {
     if (this.startHelper) return this.startHelper(helper); // tests read the helper instead of running it
     const task = `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${helper}"`;
     if (task.length > 260) throw new Error('The update folder path is too long for Windows Task Scheduler.');
+    const log = path.join(this.directory, 'install-update.log');
+    rmSync(log, { force: true });
+    // Some computers do not let an app start Task Scheduler (a security setting or antivirus: "spawnSync schtasks.exe EPERM"),
+    // and on some the task is made but never runs. Then Windows Explorer starts the helper: like a double-click, it runs in the
+    // person's own session, outside this server, so it keeps going when the old Rex Desk closes for the install.
+    const explorer = () => {
+      const launcher = path.join(path.dirname(helper), 'rex-desk-update.cmd');
+      writeFileSync(launcher, `@echo off\r\nstart "" /min ${task}\r\n`);
+      spawn(path.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe'), [launcher], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    };
     try {
       execFileSync('schtasks.exe', ['/Create', '/TN', 'Rex Desk update', '/TR', task, '/SC', 'ONCE', '/ST', '00:00', '/RL', 'LIMITED', '/F'], { windowsHide: true, timeout: 30000, stdio: 'ignore' });
       execFileSync('schtasks.exe', ['/Run', '/TN', 'Rex Desk update'], { windowsHide: true, timeout: 30000, stdio: 'ignore' });
     } catch (error) {
-      // Some computers do not let an app start Task Scheduler (a security setting or antivirus: "spawnSync schtasks.exe EPERM").
-      // Then Windows Explorer starts the helper: like a double-click, it runs in the person's own session, outside this server,
-      // so it keeps going when the old Rex Desk closes for the install.
-      const launcher = path.join(path.dirname(helper), 'rex-desk-update.cmd');
-      writeFileSync(launcher, `@echo off\r\nstart "" /min ${task}\r\n`);
-      try { spawn(path.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe'), [launcher], { detached: true, stdio: 'ignore', windowsHide: true }).unref(); }
-      catch { throw new Error(`Windows did not let Rex Desk start the update (${error.message}). Close Rex Desk and run the installer in ${path.dirname(helper)} yourself.`); }
+      try { explorer(); } catch { throw new Error(`Windows did not let Rex Desk start the update (${error.message}). Close Rex Desk and run the installer in ${path.dirname(helper)} yourself.`); }
+      return;
     }
+    // The helper writes its log the moment it starts; no log after a few seconds means the task never ran.
+    setTimeout(() => { if (!existsSync(log)) { try { explorer(); } catch { /* the installer is still in the updates folder */ } } }, 6000).unref?.();
   }
 }

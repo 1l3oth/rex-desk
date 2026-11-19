@@ -32,6 +32,22 @@ export const warmFor = ttl => ttl >= 3600 ? ttl - 600 : Math.max(0, ttl - 60);
 const warmUntil = run => { const last = run?.lastTokens; if (!last?.at || !last.cacheTtl) return ''; const until = new Date(last.at).getTime() + warmFor(last.cacheTtl) * 1000; return until > Date.now() ? new Date(until).toISOString() : ''; };
 export class Specialists {
   constructor(desk) { this.desk = desk; this.store = desk.store; this.memory = desk.memory; }
+  // An agent card is shared by every computer, and its folder is the one on the computer that made it. Here the same project
+  // is found by its name. A folder that is not on this computer is never used: a drive letter with no disk in it fails with
+  // "UNKNOWN: unknown error" instead of "not found", and an agent told to work in F:\studybook went looking for it.
+  folder(agent) {
+    const stored = agent?.projectPath || '';
+    if (!stored || existsSync(stored)) return stored;
+    const slug = String(agent.projectSlug || '').toLowerCase(), project = slug ? this.memory.list().find(item => item.slug === slug) : null;
+    return project?.path && existsSync(project.path) ? project.path : '';
+  }
+  // The same for a project's repository settings (Settings, Projects is shared too).
+  repository(repositoryId, folder) {
+    const repositories = this.store.config().repositories, same = item => folder && path.resolve(item.path).toLowerCase() === path.resolve(folder).toLowerCase();
+    const byId = repositories.find(item => item.id === repositoryId);
+    if (byId?.path && existsSync(byId.path)) return byId;
+    return repositories.find(same) || (byId && folder ? { ...byId, path: folder } : null);
+  }
 
   list() { return this.store.list('specialist').filter(item => item.kind !== 'main').sort((left, right) => left.name.localeCompare(right.name)); }
   // The main agent as a room member. Its session is the main agent's run, so it answers in rooms with everything it knows.
@@ -216,8 +232,9 @@ export class Specialists {
       .filter(task => task.local ? sources.includes('local') && (task.assignee === agent.id || (!task.assignee && (!task.projectSlug || task.projectSlug === agent.projectSlug))) : sources.includes(task.sourceId));
   }
   identity(agent) {
-    const who = agent.projectSlug ? `the specialist agent for the project "${agent.projectSlug}" at ${agent.projectPath}`
-      : `an agent the person made for this: ${agent.purpose}. You are not tied to a code project${agent.projectPath ? `; you work in the folder ${agent.projectPath}` : '; you work in your own folder'}. Do what you are for, whatever kind of work it is (writing, research, study, planning, numbers, anything), with the tools you have`;
+    const folder = this.folder(agent);
+    const who = agent.projectSlug ? `the specialist agent for the project "${agent.projectSlug}"${folder ? ` at ${folder}` : ''}`
+      : `an agent the person made for this: ${agent.purpose}. You are not tied to a code project${folder ? `; you work in the folder ${folder}` : '; you work in your own folder'}. Do what you are for, whatever kind of work it is (writing, research, study, planning, numbers, anything), with the tools you have`;
     return [`You are ${agent.name}, ${who}. You keep one conversation of your own, and you take part in the person's group chats when you are mentioned. Your name is ${agent.name} and nothing else: other names you read in notes, memory, workflow rules or handoffs (like "(2026-11-12, SomeName)") belong to other agents, never to you.`,
       agent.purpose && agent.projectSlug ? `What the project is for: ${agent.purpose}` : '', agent.rules ? `Rules from the person:\n${agent.rules}` : '', agent.unsure?.length ? `Still unsure about: ${agent.unsure.join('; ')}` : '', this.tasksText(agent),
       this.memory.chatStyle(), this.memory.person() ? `What you know about the person (all agents share this). Follow "How to explain things to me" in every answer:\n${this.memory.person()}` : '', this.lessonsText(agent.id), "Notice what the person likes and dislikes from how they react to you: corrections, praise, frustration, things they ask for again. Save what you notice with desk_learn_person; lessons about your own work go to desk_learn. Preferences can change with time and events: treat the notes about the person as hints, prefer the newest, and when what the person says now differs, follow what they say now and update the note with replaces.", this.memory.secondBrain(),

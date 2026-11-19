@@ -6,7 +6,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import { effectiveRepository } from './project-detect.js';
 import { cachedTaskMedia } from './images.js';
-import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const runId = z.string().optional().describe('Run ID. Omit when using a run-scoped agent connection.');
@@ -381,7 +381,7 @@ export function createMcp(desk, scope) {
     { task: z.string().min(3).max(6000).describe('Everything the job needs: what to do, where (paths, project), and what result to report.'), title: z.string().max(80).optional().describe('A few words naming it.'), model: z.enum(['haiku', 'sonnet']).default('haiku').describe('haiku for quick lookups and checks; sonnet for work that needs more care, like reading code or writing.') },
     input => { if (!scope?.runId) throw new Error('Only an agent in a chat can start a job.'); return desk.startHelper(scope.runId, input); });
   // The toolbox: every other MCP tool and skill on this computer, searched and used through these two instead of all loaded at once.
-  const toolProject = () => { const run = scope.runId ? desk.store.get('run', scope.runId) : null; return run?.worktree || run?.projectPath || ''; };
+  const toolProject = () => { const run = scope.runId ? desk.store.get('run', scope.runId) : null; return [run?.worktree, run?.projectPath].find(folder => folder && existsSync(folder)) || ''; };
   // Rank Rex Desk's own deferred tools against the search words, the same way desk_find ranks the person's other tools, so
   // both show up together. The full input shape is given only for the top few, to keep the answer small.
   const clipText = (text, size) => { const value = String(text || '').trim(); return value.length > size ? `${value.slice(0, size - 1)}…` : value; };

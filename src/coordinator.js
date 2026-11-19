@@ -1191,7 +1191,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       const model = this.specialists.cleanModel(agent.model, { provider: agent.provider });
       const created = { id: id(), role: agent.kind === 'main' ? 'coordinator' : 'specialist', ...(agent.kind === 'main' ? {} : { specialistId: agent.id }), ...(roomId ? { roomAgent: agent.id, roomOf: roomId } : {}),
         title: roomId ? `${agent.name} · ${this.rooms.room(roomId)?.name || 'group chat'}` : agent.name, provider: aiProvider(agent.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home,
-        projectPath: agent.projectPath || '', repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}) };
+        projectPath: this.specialists.folder(agent), repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}) };
       this.store.put('run', created.id, created); const fresh = this.specialists.get(agentId); this.store.put('specialist', agent.id, roomId ? { ...fresh, roomRuns: { ...(fresh.roomRuns || {}), [roomId]: created.id } } : { ...fresh, runId: created.id });
       if (!roomId && !quiet) this.store.event(created.id, 'human-message', { text: String(prompt).trim(), via: 'rex' }, true);
       void this.drain(); return created;
@@ -1309,8 +1309,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const task = this.task(taskId), number = task.taskNumber || task.externalId || '', config = this.store.config();
     // The team shares one worktree and branch, in the project of the agent who leads the task.
     const owner = lead || agent;
-    const repository = config.repositories.find(item => item.id === owner.repositoryId) || config.repositories.find(item => owner.projectPath && path.resolve(item.path).toLowerCase() === path.resolve(owner.projectPath).toLowerCase());
-    const base = repository?.baseBranch || 'main', project = repository?.path || owner.projectPath || '';
+    const folder = this.specialists.folder(owner), repository = this.specialists.repository(owner.repositoryId, folder);
+    const base = repository?.baseBranch || 'main', project = repository?.path || folder || '';
     const branch = `${config.branchPrefix || 'rex-desk'}/${String(number).toLowerCase()}-${slug(name).slice(0, 40)}`.replace(/\/+/g, '/');
     const others = team.filter(id => id !== agent.id).map(id => this.specialists.get(id)?.name).filter(Boolean);
     const brief = [`${by} gave you this task to do here in the room: #${number} ${name}.${others.length ? ` You work on it together with ${others.join(', ')}${owner.id !== agent.id ? ` (${owner.name} leads it)` : ''}: split the work in the room, and say what you take before you start.` : ''}`,
@@ -1473,7 +1473,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       ? [{ url: run.prUrl, target: run.targetBranch, head: run.branch }, ...list] : list;
   }
   repositoryFor(run) {
-    const repository = this.store.config().repositories.find(item => item.id === run.repositoryId);
+    const agent = run.specialistId ? this.specialists.get(run.specialistId) : null;
+    const repository = this.specialists.repository(run.repositoryId, [run.projectPath].find(folder => folder && existsSync(folder)) || this.specialists.folder(agent));
     if (!repository?.path) throw new Error('This run has no project, so nothing can be pushed.');
     return repository;
   }
@@ -1491,7 +1492,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // pull request is judged against that one: the human took these commits once, so the proof is not asked for twice.
   // A project agent works in its own project like a person on that team: it reads, changes, runs, commits and pushes there when asked.
   ownProjectRule(agent) {
-    const folder = agent?.projectPath || '';
+    const folder = this.specialists.folder(agent);
     // An agent with no code project: no git rules, only where it keeps its files.
     if (agent?.general) return `You have no code project. Keep the files you make in ${folder || 'your own folder (your working folder)'}, and show them to the person with desk_show_file. Answer from this chat and from what the person gives you. When the person asks you to look at or change a project or folder, do it.`;
     return [`Your project${folder ? ` is at ${folder}` : ''}. You work in it directly: read it, change the code, run it, test it, commit, and push or open a pull request when the person asks (desk_publish with worktree set to the folder you worked in, or git yourself). Work the way the person says (straight in the folder, on a branch, or in a worktree); when they say nothing, use a branch in the project folder and leave others' uncommitted changes alone.`, WORKTREE_RULE, 'When you point the person at code, write it as `path:start-end` in backticks (like `src/server.js:42-58`): a click opens the file with those lines highlighted.',
@@ -1501,7 +1502,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   slashTools(run) {
     const agentId = run.specialistId || (run.roomAgent && run.roomAgent !== 'main' ? run.roomAgent : '');
     const agent = agentId ? this.store.get('specialist', agentId) : null;
-    try { return agentTools({ profile: this.accountFor(run) || agent?.profile || this.agents.selected(run.provider || 'claude') || '', projectPath: agent?.projectPath || run.projectPath || '' }); } catch { return null; }
+    try { return agentTools({ profile: this.accountFor(run) || agent?.profile || this.agents.selected(run.provider || 'claude') || '', projectPath: this.specialists.folder(agent) || [run.projectPath].find(folder => folder && existsSync(folder)) || '' }); } catch { return null; }
   }
   // The usage of each signed-in account: the share of its 5-hour and weekly limits used, and when each resets. Claude Code and
   // Codex report it while they work, so it is as fresh as the account's last turn. Kept per account, never the sign-in itself.

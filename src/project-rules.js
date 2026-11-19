@@ -78,8 +78,8 @@ export class ProjectRules {
     if (!agent || agent.kind === 'main') return;
     if (agent.pinned && this.desk.peers.isRemote(agent)) throw new Error(`${agent.name}'s project (${agent.projectSlug}) runs only on ${this.desk.peers.deviceName(agent.node)}. Your message is sent there when that computer is on.`);
     if (this.desk.peers.isRemote(agent)) return;
-    const folder = agent.projectPath || '';
-    if (folder && !existsSync(folder)) throw new Error(`${agent.name}'s project folder (${folder}) is not on this computer, so it cannot work here.${this.folderHere(agent.projectSlug) ? ' Use "Move to this computer" on its card to point it at the folder here.' : ''}`);
+    const folder = this.desk.specialists.folder(agent);
+    if (agent.projectPath && !folder) throw new Error(`${agent.name}'s project (${agent.projectSlug || agent.projectPath}) is not on this computer, so it cannot work here. Add its folder in Settings, Projects.`);
   }
   // Move an agent from another computer to this one. Its personal chat comes along: the messages this computer has of it become
   // the chat here, and the agent starts a fresh session that first reads a handoff of that chat (an AI session cannot travel).
