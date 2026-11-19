@@ -10,8 +10,21 @@ import { findProjectLogo } from './project-logo.js';
 const EXPLAINER = path.join(os.homedir(), '.agents', 'skills', 'code-explainer-page');
 // Explaining an idea, a cause or how something works: a picture page in eli5 style, the way the person likes to learn.
 export const LOOP_EVERY = [15, 30, 60, 120, 240, 1440];
-const LOOP_DEFAULT = { on: true, every: 60, prompt: '' };
-const cleanLoop = loop => ({ ...(loop.on !== undefined ? { on: Boolean(loop.on) } : {}), ...(loop.every !== undefined ? { every: LOOP_EVERY.includes(Number(loop.every)) ? Number(loop.every) : 60 } : {}), ...(loop.prompt !== undefined ? { prompt: String(loop.prompt || '').slice(0, 2000) } : {}) });
+const LOOP_DEFAULT = { on: true, every: 60, prompt: '', hours: { on: false, start: '08:00', end: '17:00', days: [1, 2, 3, 4, 5] } };
+const clock = (value, fallback) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || '')) ? String(value) : fallback;
+// Work hours, like an employee's shift: the loop checks only on these days between start and end (an end before the start runs past midnight).
+export const cleanHours = (hours = {}) => ({ on: Boolean(hours.on), start: clock(hours.start, '08:00'), end: clock(hours.end, '17:00'),
+  days: [...new Set((Array.isArray(hours.days) ? hours.days : [1, 2, 3, 4, 5]).map(Number).filter(day => Number.isInteger(day) && day >= 0 && day <= 6))].sort() });
+const minutesOf = value => { const [hour, minute] = String(value).split(':').map(Number); return hour * 60 + minute; };
+export function inHours(hours, date = new Date()) {
+  if (!hours?.on) return true;
+  const start = minutesOf(hours.start), end = minutesOf(hours.end), at = date.getHours() * 60 + date.getMinutes();
+  if (start === end) return hours.days.includes(date.getDay());
+  if (start < end) return hours.days.includes(date.getDay()) && at >= start && at < end;
+  // A night shift: the evening part belongs to today, the early-morning part to the day before.
+  return at >= start ? hours.days.includes(date.getDay()) : at < end && hours.days.includes((date.getDay() + 6) % 7);
+}
+const cleanLoop = loop => ({ ...(loop.hours !== undefined ? { hours: cleanHours(loop.hours) } : {}), ...(loop.on !== undefined ? { on: Boolean(loop.on) } : {}), ...(loop.every !== undefined ? { every: LOOP_EVERY.includes(Number(loop.every)) ? Number(loop.every) : 60 } : {}), ...(loop.prompt !== undefined ? { prompt: String(loop.prompt || '').slice(0, 2000) } : {}) });
 export const ELI5_RULE = 'When you explain to the person how something works, why something broke, what a choice means, or anything longer than a few lines, explain like they are five: big pictures, few words. Make one self-contained HTML page named eli5-<short-topic>.html in your work folder (inline CSS and inline SVG drawings only, no external files, no emoji; a few numbered picture steps, each with one or two plain sentences; light and dark friendly), never open it yourself, and show it with desk_show_page beside a two or three line answer in the chat. For your own code changes use the code explainer page instead. Short answers and yes/no questions stay plain chat.';
 // When the person asks what you changed, they get a page to read, not a wall of text.
 const EXPLAIN_RULE = existsSync(path.join(EXPLAINER, 'scripts', 'render.mjs'))
@@ -242,7 +255,7 @@ export class Specialists {
       : 'Nobody has told you where this project keeps its tasks yet. Before looking for tasks, ask the person (desk_ask) whether they live in a connected tracker, in Rex Desk tasks, or somewhere else, and save the answer with desk_set_task_sources. Never assume Flow or Morningmate.';
   }
   // Each agent's own loop: every so often it looks at its own tasks and starts work, following its project's workflow.
-  loopOf(agent) { return { ...LOOP_DEFAULT, ...(agent?.loop || {}) }; }
+  loopOf(agent) { const loop = { ...LOOP_DEFAULT, ...(agent?.loop || {}) }; return { ...loop, hours: cleanHours({ ...LOOP_DEFAULT.hours, ...(loop.hours || {}) }) }; }
   // The tasks that are this agent's to look at: from the sources chosen for its project, Rex Desk tasks given to it or to nobody on its project, never done ones.
   ownTasks(agent) {
     const sources = agent.taskSources || [];

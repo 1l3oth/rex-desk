@@ -4,10 +4,11 @@ import { LocalAi, isLocalModel, parseLocalModel } from './local-ai.js';
 import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
 import { Team } from './team.js';
+import { Schedules } from './schedules.js';
 import { Net } from './net.js';
 import { Toolbox } from './toolbox.js';
 import { Memory } from './memory.js';
-import { Specialists, EVIDENCE_RULE, ELI5_RULE } from './specialists.js';
+import { Specialists, EVIDENCE_RULE, ELI5_RULE, inHours } from './specialists.js';
 import { PROTECT_RULE, APP_GUIDE } from './app-guard.js';
 import { ClaudeRunner } from './runners.js';
 import { Notifier } from './notify.js';
@@ -21,7 +22,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { now, id, thisComputer, latestLocalMain, modelName, deskStatus, deskStatusLabels } from './store.js';
 import { Sources } from './providers.js';
-import { AgentProfiles, conversationHere } from './agents.js';
+import { AgentProfiles, conversationHere, canonical as canonicalProfile } from './agents.js';
 import { Evidence } from './browser.js';
 import { Monitor } from './monitor.js';
 import { Files } from './files.js';
@@ -133,6 +134,8 @@ export const WORKTREE_RULE = 'When you make a git worktree, call desk_worktree w
 
 export const TOOLBOX_RULE = 'Your everyday Rex Desk tools are loaded and ready. Two more groups of tools are not loaded up front, to keep this chat small and cheap, and are reached through desk_find (search by plain words) and desk_run (use the one you pick): the person\'s other MCP tools and skills (Orbit, Flow, Slack, studybook, design skills and the rest), AND some of Rex Desk\'s own less-common tools (controlling the computer, signing in, opening a file for the person to fill in, worktrees, rooms, networking with other people\'s agents, and so on). When a task needs a tool you do not already see, search with desk_find before saying you cannot: it covers both groups. These are the tools and skills of the computer you run on; each of the person\'s computers has its own. When one is only on their other computer, give the task to an agent there with desk_team_task, and never say a tool is installed here because you saw it there.';
 
+// The shortest rest between the end of one loop check and the start of the next.
+const LOOP_REST = 10 * 60000;
 export class Desk {
   constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, netJudge, toolbox, ownRuntime = false } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
@@ -161,6 +164,7 @@ export class Desk {
     }, () => this.mcpUrl);
     this.peers = new Peers(this, { transport: peerTransport });
     this.team = new Team(this);
+    this.schedules = new Schedules(store, this);
     this.net = new Net(this, { fetcher: netFetcher, judge: netJudge });
     // The person's other MCP tools and skills, reached through two tools (desk_find, desk_run) instead of all loaded at once.
     this.toolbox = toolbox || new Toolbox({ bundled: root ? path.join(root, 'skills') : '' });
@@ -191,7 +195,7 @@ export class Desk {
   snapshot() {
     // sidebar: the person's own order and pins for agents and group chats (dragged in the sidebar), on every computer.
     return { computer: thisComputer(), sidebar: this.store.get('sidebar', 'main') || {}, config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
-      notices: this.notifier.summary(), usage: this.store.list('usage'), shownFile: this.shownFile, fileWindow: this.fileWindow || null, worktrees: this.worktrees.all(),
+      notices: this.notifier.summary(), usage: this.store.list('usage'), schedules: this.schedules.list(), shownFile: this.shownFile, fileWindow: this.fileWindow || null, worktrees: this.worktrees.all(),
       // A local run for a chat whose agent now lives on another computer is hidden: that computer's live copy (in cloudRuns) shows instead, so the chat is not stuck on a stale local version.
       runs: [...this.store.list('run').filter(run => !this.peers.copyWins(this.store.get('chatcopy', run.id))), ...this.peers.remoteRuns(), ...this.peers.cloudRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions(), ...this.peers.cloudInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
@@ -282,6 +286,26 @@ export class Desk {
   }
   // When a turn stops because the account hit its usage limit, Rex Desk moves to another signed-in account and continues
   // the same conversation there (both accounts share their history folder), unless the person turned this off.
+  // Every account is out: the chat is sent "continue" by itself a minute after the first limit resets, so the agent carries on
+  // without anyone there (Rex: like an alarm set for when the usage comes back).
+  resumeAfterLimit(runId, profiles = null) {
+    const until = this.store.get('accounts', 'limited')?.until || {}, keys = profiles ? profiles.map(profile => canonicalProfile(profile || '')) : Object.keys(until);
+    const soonest = Math.min(...keys.map(key => Number(until[key]) || 0).filter(value => value > Date.now()));
+    const at = new Date((Number.isFinite(soonest) ? soonest : Date.now() + 5 * 3600000) + 60000);
+    this.patchRun(runId, { resumeAt: at.toISOString(), resumeSetAt: now() });
+    return `It carries on by itself at ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, right after the limit resets (or send a message sooner)`;
+  }
+  // Called by the server's timer: chats whose usage limit has reset are told to continue.
+  async resumeTick(at = Date.now()) {
+    for (const run of this.store.list('run').filter(item => item.resumeAt && Date.parse(item.resumeAt) <= at)) {
+      this.patchRun(run.id, { resumeAt: '' });
+      // The person already wrote in the chat after the limit, so it is going again: no extra "continue".
+      if (this.store.events(run.id, { limit: 40 }).some(event => event.kind === 'human-message' && event.createdAt > (run.resumeSetAt || ''))) continue;
+      if (this.live.has(run.id) || ['starting', 'running', 'queued', 'verifying'].includes(run.state)) continue;
+      this.store.event(run.id, 'limit-resumed', { text: 'The usage limit reset. Carrying on where it stopped.' }, true);
+      await this.resume(run.id, { prompt: 'You were cut off by a usage limit. Continue exactly where you left off.' }).catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
+    }
+  }
   async switchIfLimited(runId, message = '') {
     const run = this.store.get('run', runId), provider = run?.provider || 'claude'; if (!run || !['claude', 'codex'].includes(provider)) return false;
     const title = providerTitle(provider);
@@ -298,10 +322,10 @@ export class Desk {
     // later was skipped for hours, and Rex Desk said every account was full while one was at 7%.
     const usage = this.store.get('usage', `${provider}:${current || 'default'}`)?.windows || {};
     this.agents.markLimited(current, Math.max(0, ...Object.values(usage).filter(window => window?.status === 'rejected' || Number(window?.used) >= 100).map(window => Number(window.resetsAt) || 0)));
-    if (this.store.get('accounts', 'auto')?.off) { this.store.event(runId, 'account-limit', { text: `This ${title} account hit its usage limit. Switch accounts at the bottom left, then continue.` }, true); return false; }
+    if (this.store.get('accounts', 'auto')?.off) { this.store.event(runId, 'account-limit', { text: `This ${title} account hit its usage limit. Switch accounts at the bottom left, or ${this.resumeAfterLimit(runId, [current])}.` }, true); return false; }
     if (run.accountSwitchedAt && Date.now() - Date.parse(run.accountSwitchedAt) < 120000) return false;
     const next = await this.agents.alternative(provider, current);
-    if (!next) { this.store.event(runId, 'account-limit', { text: `Every signed-in ${title} account has hit its usage limit. The run continues when you send a message after one resets.` }, true); return false; }
+    if (!next) { this.store.event(runId, 'account-limit', { text: `Every signed-in ${title} account has hit its usage limit. ${this.resumeAfterLimit(runId)}.` }, true); return false; }
     const owner = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
     if (pinned && owner) this.store.put('specialist', owner, { ...this.store.get('specialist', owner), profile: next.profile });
     else this.store.saveConfig({ ...this.store.publicConfig(), agentProfiles: { ...this.store.config().agentProfiles, [provider]: next.profile } });
@@ -1251,15 +1275,37 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   async loopTick(at = Date.now(), { memory = true } = {}) {
     // When memory runs low, loops wait: a working agent and its tools take several hundred MB.
     if (memory && this.store.config().autoFree !== false && os.freemem() / os.totalmem() < 0.15) return;
-    for (const agent of this.store.list('specialist').filter(item => item.id !== 'main' && this.peers.owns(item.id))) {
-      const loop = this.specialists.loopOf(agent);
-      if (!loop.on || at - (Date.parse(loop.lastAt || 0) || 0) < loop.every * 60000) continue;
-      if (this.specialists.status(agent).state !== 'idle') continue;
+    for (const listed of this.store.list('specialist').filter(item => item.id !== 'main' && this.peers.owns(item.id))) {
+      const agent = this.loopSettle(listed, at), loop = this.specialists.loopOf(agent), idle = this.specialists.status(agent).state === 'idle';
+      // The shift is over: a check still working is asked once to finish the step it is on and stop, like leaving at 5pm.
+      if (loop.on && !inHours(loop.hours, new Date(at))) { if (!idle && loop.runId) this.endShift(agent, loop, at); continue; }
+      if (!loop.on || at < this.loopNextAt(loop)) continue;
+      if (!idle) continue;
       const tasks = this.specialists.ownTasks(agent), key = createHash('sha256').update(JSON.stringify(tasks.map(task => [task.id, task.status, task.statusName, task.updatedAt, task.assignee]).sort())).digest('hex').slice(0, 16);
       if (key === loop.lastKey || !tasks.length) { this.store.put('specialist', agent.id, { ...agent, loop: { ...loop, lastAt: new Date(at).toISOString(), lastKey: key } }); continue; }
       await this.runLoop(agent.id, { key, at });
       return; // one agent per tick, so several loops never start all at once
     }
+  }
+  // Cooling down, so a loop never runs flat out: the next check waits the chosen time from the last one, and at least
+  // 10 minutes after the last check finished. Each check in a row that found nothing to do doubles the wait, up to 4 times.
+  loopNextAt(loop) {
+    const quiet = Math.min(Number(loop.quiet) || 0, 2), every = loop.every * 60000 * (2 ** quiet);
+    return Math.max((Date.parse(loop.lastAt || 0) || 0) + every, (Date.parse(loop.doneAt || 0) || 0) + LOOP_REST);
+  }
+  // A loop check that has ended: note when, and whether it found work ("Nothing new." means it did not).
+  loopSettle(agent, at) {
+    const loop = this.specialists.loopOf(agent); if (!loop.runId || this.specialists.status(agent).state !== 'idle') return agent;
+    const last = this.store.events(loop.runId, { limit: 40 }).filter(event => ['agent-text', 'agent-result'].includes(event.kind)).at(-1);
+    const nothing = /^\s*nothing new\.?\s*$/i.test(String(last?.text || last?.result || ''));
+    const updated = { ...agent, loop: { ...(agent.loop || {}), runId: '', doneAt: new Date(at).toISOString(), quiet: nothing ? (Number(loop.quiet) || 0) + 1 : 0 } };
+    this.store.put('specialist', agent.id, updated); return updated;
+  }
+  endShift(agent, loop, at) {
+    const day = new Date(at).toDateString(); if (loop.shiftEnded === day) return;
+    this.store.put('specialist', agent.id, { ...agent, loop: { ...(agent.loop || {}), shiftEnded: day } });
+    const text = `Your work hours ended (${loop.hours.start} to ${loop.hours.end}). Finish the step you are on, write one line on where you stopped and what is next, and stop. The next check picks it up.`;
+    if (this.live.has(loop.runId)) void this.say(loop.runId, text).catch(() => {});
   }
   async runLoop(agentId, { key = '', at = Date.now() } = {}) {
     const agent = this.specialists.get(agentId), loop = this.specialists.loopOf(agent), every = loop.every >= 60 ? `${loop.every / 60} hour${loop.every === 60 ? '' : 's'}` : `${loop.every} minutes`;
@@ -1269,8 +1315,11 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       `1. Read your tasks with desk_tasks. Yours are the Rex Desk tasks given to you or to nobody on ${agent.projectSlug}, and the issues from your task sources.`,
       '2. Skip tasks that are done, blocked, waiting for the person, or already given to another agent.',
       `3. If one needs work, pick the most important (priority, then due date) and take it with desk_take_task and do it right here, following the ${agent.projectSlug} workflow, testing it and sharing the evidence.`,
-      '4. If nothing needs you, reply exactly "Nothing new." and stop. In a loop check, ask the person only when a task cannot move without them.'].filter(Boolean).join('\n');
+      '4. If nothing needs you, reply exactly "Nothing new." and stop. In a loop check, ask the person only when a task cannot move without them.',
+      'Pace yourself: do one task per check, then stop; the next check comes by itself. If the same step fails twice, stop, write one line on why, and leave it for the next check or the person.',
+      loop.hours.on ? `Your work hours are ${loop.hours.start} to ${loop.hours.end}. Do not start a big new piece of work in the last half hour; leave it for the next shift.` : ''].filter(Boolean).join('\n');
     const run = await this.specialistTurn(agentId, { prompt, quiet: true });
+    this.store.put('specialist', agentId, { ...this.store.get('specialist', agentId), loop: { ...(this.store.get('specialist', agentId).loop || {}), runId: run.id } });
     this.store.event(run.id, 'loop-check', { text: 'Loop check: looking at my tasks' }, true);
     return { started: true, runId: run.id };
   }

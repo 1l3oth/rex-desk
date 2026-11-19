@@ -1038,12 +1038,16 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const ruleMatch = url.pathname.match(/^\/api\/project-rules\/([^/]+)$/);
       if (ruleMatch && request.method === 'PUT') return json(response, 200, desk.projectRules.set(decodeURIComponent(ruleMatch[1]), await body(request)));
       if (url.pathname === '/api/project-rules' && request.method === 'GET') return json(response, 200, desk.projectRules.list());
-      const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say|loop|move|follow|chat-pick|take-run))?$/);
+      const scheduleMatch = url.pathname.match(/^\/api\/schedules\/([^/]+)$/);
+      if (scheduleMatch && request.method === 'DELETE') return json(response, 200, desk.schedules.remove(scheduleMatch[1]));
+      if (scheduleMatch && request.method === 'PUT') return json(response, 200, desk.schedules.toggle(scheduleMatch[1], (await body(request)).on));
+      const specialistMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)(?:\/(rename|duplicate|assign|say|loop|move|follow|chat-pick|take-run|schedules))?$/);
       if (specialistMatch) {
         const [, specialistId, part] = specialistMatch;
         let remoteAgent = store.get('specialist', specialistId);
         // A message for an agent whose computer is off, whose project is also here and not kept to its computer: it moves here.
         // The person picked which of an agent's two chats to keep (src/chat-split.js).
+        if (request.method === 'POST' && part === 'schedules') return json(response, 200, desk.schedules.create(specialistId, await body(request)));
         if (request.method === 'POST' && part === 'take-run') return json(response, 200, desk.specialists.moveToChat(String((await body(request)).runId || ''), specialistId));
         if (request.method === 'POST' && part === 'chat-pick') { const input = await body(request); return json(response, 200, desk.chatSplits.pick(specialistId, String(input.node || ''))); }
         if (request.method === 'POST' && part === 'follow') { const input = await body(request); const agent = store.get('specialist', specialistId); if (!agent || agent.kind === 'main') return json(response, 404, { error: 'No such agent.' }); return json(response, 200, store.put('specialist', specialistId, { ...agent, follows: Boolean(input.on) })); }
@@ -1060,7 +1064,6 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (desk.peers.isRemote(remoteAgent) && request.method === 'POST' && part === 'duplicate') return json(response, 200, await desk.peers.forward(remoteAgent.node, 'POST', url.pathname, await body(request)));
         if (request.method === 'POST' && part === 'assign') { const input = await body(request); return json(response, 200, await desk.assignTask({ specialistId, ...desk.peers.localTask(input) })); }
         if (request.method === 'PUT' && !part) return json(response, 200, desk.specialists.update(specialistId, await body(request)));
-        if (request.method === 'POST' && part === 'take-run') return json(response, 200, desk.specialists.moveToChat(String((await body(request)).runId || ''), specialistId));
         if (request.method === 'POST' && part === 'loop') return json(response, 200, await desk.runLoop(specialistId));
         if (request.method === 'POST' && part === 'rename') return json(response, 200, desk.specialists.rename(specialistId, (await body(request)).name));
         if (request.method === 'POST' && part === 'duplicate') return json(response, 200, desk.specialists.duplicate(specialistId, (await body(request)).name));
@@ -1226,6 +1229,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     void desk.scheduleTick().catch(error => store.event('', 'schedule-error', { message: error.message }, true));
     void desk.rooms.awayTick().catch(error => store.event('', 'away-error', { message: error.message }, true));
     void desk.loopTick().catch(error => store.event('', 'loop-error', { message: error.message }, true));
+    void desk.resumeTick().catch(error => store.event('', 'resume-error', { message: error.message }, true));
+    void desk.schedules.tick().catch(error => store.event('', 'schedule-message-error', { message: error.message }, true));
     if (++ticks % 8 === 0) void desk.findPullRequests();
     if (ticks % 4 === 0) remoteOpen(); // Tailscale may start after Rex Desk
     if (ticks % 4 === 0) void desk.worktrees.scan().catch(() => {});

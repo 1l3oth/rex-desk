@@ -30,7 +30,7 @@ const psQuote = value => `'${String(value).replace(/'/g, "''")}'`;
 // Agent sign-in lives in each CLI profile. Rex Desk only reads status; it never reads or copies credentials.
 const home = os.homedir();
 const appData = process.env.APPDATA || path.join(home, 'AppData/Roaming');
-const canonical = value => path.resolve(value).replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
+export const canonical = value => path.resolve(value).replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
 const directory = value => { try { return statSync(value).isDirectory(); } catch { return false; } };
 const tilde = value => canonical(value).startsWith(canonical(home) + '/') ? `~${path.resolve(value).slice(path.resolve(home).length).replaceAll('\\', '/')}` : path.resolve(value);
 

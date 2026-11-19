@@ -47,13 +47,21 @@ export function agentStage(ctx) {
   const loop = { on: true, every: 60, prompt: '', ...(agent.loop || {}) }, everyLabel = minutes => minutes >= 1440 ? t('Once a day') : minutes >= 60 ? (minutes === 60 ? t`Every ${minutes / 60} hour` : t`Every ${minutes / 60} hours`) : t`Every ${minutes} minutes`;
   const STEP = { 15: '15m', 30: '30m', 60: '1h', 120: '2h', 240: '4h', 1440: '1 day' }, next = loop.on && loop.lastAt ? new Date(new Date(loop.lastAt).getTime() + Number(loop.every) * 60000) : null;
   const nextIn = next ? Math.max(0, Math.round((next.getTime() - Date.now()) / 60000)) : null;
+  // Work hours, like a shift: the loop checks only then, and is told to stop when the shift ends.
+  const hours = { on: false, start: '08:00', end: '17:00', days: [1, 2, 3, 4, 5], ...(loop.hours || {}) }, offDuty = hours.on && !onShift(hours);
+  const dayName = day => new Date(2024, 0, 7 + day).toLocaleDateString(locale(), { weekday: 'short' });
+  const hoursBox = `<div class="lp-hours${hours.on ? ' on' : ''}"><label class="lp-hours-on"><input type="checkbox" data-loop-hours-on ${hours.on ? 'checked' : ''}><span>${t`Work hours`}</span></label>
+      <div class="lp-shift"><input type="time" data-loop-hours="start" value="${esc(hours.start)}" aria-label="${t`Starts at`}"><span>${t`to`}</span><input type="time" data-loop-hours="end" value="${esc(hours.end)}" aria-label="${t`Ends at`}"></div>
+      <div class="lp-days" role="group" aria-label="${t`Work days`}">${[1, 2, 3, 4, 5, 6, 0].map(day => `<label><input type="checkbox" data-loop-day="${day}" ${hours.days.includes(day) ? 'checked' : ''}><span>${esc(dayName(day))}</span></label>`).join('')}</div></div>`;
   const loopBox = `<section class="ag-sec ag-loop${loop.on ? ' on' : ''}"><div class="lp-head"><div><h2>${t`Own loop`}</h2><p>${t`${esc(agent.name)} checks its own tasks and starts work by itself.`}</p></div>
       <label class="switch" title="${loop.on ? t('Turn the loop off') : t('Turn the loop on')}"><input type="checkbox" role="switch" data-loop-on ${loop.on ? 'checked' : ''} aria-label="${t`Own loop`}"><span></span></label></div>
     <div class="lp-body">
       <div class="lp-every" role="radiogroup" aria-label="${t`How often`}">${[15, 30, 60, 120, 240, 1440].map(minutes => `<label title="${everyLabel(minutes)}"><input type="radio" name="loop-every-${esc(agent.id)}" value="${minutes}" data-loop-every ${Number(loop.every) === minutes ? 'checked' : ''}><span>${STEP[minutes]}</span></label>`).join('')}</div>
+      ${hoursBox}
       <textarea data-loop-prompt rows="3" maxlength="2000" placeholder="${t`What to do on each check (optional). For example: pick up QA issues first and test them in the browser.`}">${esc(loop.prompt || '')}</textarea>
-      <div class="lp-foot"><span class="lp-status">${loop.on ? `<i class="lp-dot"></i>${nextIn === null ? t('First check soon') : nextIn <= 0 ? t('Checking soon') : t`Next check in ${nextIn >= 60 ? `${Math.round(nextIn / 60)} h` : t`${nextIn} min`}`}` : t('Off')}${loop.lastAt ? `<small>${t`Last ${esc(new Date(loop.lastAt).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}`}</small>` : ''}</span>
+      <div class="lp-foot"><span class="lp-status">${loop.on && offDuty ? `<i class="lp-dot rest"></i>${t`Off duty until ${esc(hours.start)}`}` : loop.on ? `<i class="lp-dot"></i>${nextIn === null ? t('First check soon') : nextIn <= 0 ? t('Checking soon') : t`Next check in ${nextIn >= 60 ? `${Math.round(nextIn / 60)} h` : t`${nextIn} min`}`}` : t('Off')}${loop.lastAt ? `<small>${t`Last ${esc(new Date(loop.lastAt).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}`}</small>` : ''}</span>
         <button type="button" class="btn small lp-now" data-action="spec-loop-now"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>${t`Check now`}</button></div>
+      <p class="ag-help">${t`After each check it rests at least 10 minutes, and checks that find nothing to do space out by themselves.`}</p>
       <p class="ag-help">${agent.projectSlug ? t`A check costs nothing when its tasks have not changed. It follows the ${esc(agent.projectSlug)} workflow and asks you before anything risky.` : t`A check costs nothing when its tasks have not changed. It asks you before anything risky.`}</p>
     </div></section>`;
   const side = `<aside class="ag-side">
@@ -61,6 +69,7 @@ export function agentStage(ctx) {
     <section class="ag-sec"><h2>${t`Lessons learned`}</h2>${lessonList}</section>
     <section class="ag-sec"><h2>${t`Tasks come from`}</h2>${taskSources}</section>
     ${loopBox}
+    ${scheduleBox(ctx, agent)}
     <section class="ag-sec"><h2>AI</h2>${pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: [{ value: 'claude', label: t('Claude Code'), hint: t('Your Claude plan') }, { value: 'codex', label: t('Codex'), hint: t('Your ChatGPT plan') }, { value: 'gemini', label: t('Gemini'), hint: t('Google account, through Antigravity') }] })}<p class="ag-help">${t`Switching starts fresh; the new AI gets a summary of the chat so far.`}</p></section>
     <section class="ag-sec"><h2>${t`${ai === 'codex' ? t('Codex') : ai === 'gemini' ? t('Google (Antigravity)') : t('Claude')} account`}</h2>${pickerHtml(ctx, { id: 'sp-profile', label: t('Account'), value: agent.profile || '', items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[ai]?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}</section>
     <section class="ag-sec"><h2>${t`Model`}</h2>${pickerHtml(ctx, { id: 'sp-model', label: t('Model'), value: agent.model || '', items: models })}</section>
@@ -81,6 +90,25 @@ function dialog(ctx, { title, nameValue = '', projects = null, submit }) {
   });
 }
 
+// Is it work time now for these hours (the same rule as the server's inHours).
+const minutesOf = value => { const [hour, minute] = String(value).split(':').map(Number); return hour * 60 + minute; };
+function onShift(hours, date = new Date()) {
+  const start = minutesOf(hours.start), end = minutesOf(hours.end), at = date.getHours() * 60 + date.getMinutes(), days = hours.days || [];
+  if (start === end) return days.includes(date.getDay());
+  if (start < end) return days.includes(date.getDay()) && at >= start && at < end;
+  return at >= start ? days.includes(date.getDay()) : at < end && days.includes((date.getDay() + 6) % 7);
+}
+// Scheduled messages for this agent: sent into its personal chat at the set time, as if the person typed them.
+const repeatLabel = item => ({ once: t('Once'), daily: t('Every day'), weekdays: t('Weekdays'), weekly: t`Every ${new Date(2024, 0, 7 + Number(item.day || 0)).toLocaleDateString(locale(), { weekday: 'long' })}` })[item.repeat] || '';
+function scheduleBox(ctx, agent) {
+  const { esc, ui } = ctx, items = (ui.snap.schedules || []).filter(item => item.agentId === agent.id);
+  const when = item => item.on && item.nextAt ? t`Next ${new Date(item.nextAt).toLocaleString(locale(), { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : item.lastAt ? t('Sent') : t('Paused');
+  const list = items.length ? `<ul class="sm-list">${items.map(item => `<li class="${item.on ? '' : 'off'}"><div class="sm-when"><b>${esc(item.time)}</b><span>${esc(repeatLabel(item))}</span></div><p class="sm-text">${esc(item.text)}</p><small class="sm-next">${esc(when(item))}${item.error ? ` · ${esc(item.error)}` : ''}</small>
+      <div class="sm-acts">${item.repeat === 'once' && !item.on ? '' : `<label class="switch small" title="${item.on ? t('Pause') : t('Turn on')}"><input type="checkbox" role="switch" data-sched-on="${esc(item.id)}" ${item.on ? 'checked' : ''} aria-label="${t`On`}"><span></span></label>`}<button type="button" class="icon-btn" data-action="spec-sched-del" data-id="${esc(item.id)}" title="${t`Delete`}" aria-label="${t`Delete`}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></li>`).join('')}</ul>` : '';
+  return `<section class="ag-sec ag-sched"><h2>${t`Scheduled messages`}</h2><p class="ag-help">${t`Rex Desk sends these to ${esc(agent.name)} at the time you set, as if you typed them.`}</p>${list}
+    <form class="sm-form" data-sched-form><textarea name="text" rows="2" maxlength="4000" required placeholder="${t`For example: check new Orbit tasks and start the most urgent one.`}"></textarea>
+      <div class="sm-row"><input type="time" name="time" value="09:00" required aria-label="${t`Time`}"><select name="repeat" aria-label="${t`How often`}"><option value="once">${t`Once`}</option><option value="daily">${t`Every day`}</option><option value="weekdays" selected>${t`Weekdays`}</option><option value="weekly">${t`Every week`}</option></select><button class="btn small primary">${t`Add`}</button></div></form></section>`;
+}
 // The loop settings save as soon as they change.
 let loopWired = false;
 export function wireLoop(ctx) {
@@ -89,6 +117,16 @@ export function wireLoop(ctx) {
   document.addEventListener('change', event => {
     if (event.target.matches?.('[data-loop-on]')) void save({ on: event.target.checked });
     else if (event.target.matches?.('[data-loop-every]')) void save({ every: Number(event.target.value) });
+    else if (event.target.matches?.('[data-loop-hours-on], [data-loop-hours], [data-loop-day]')) {
+      const box = event.target.closest('.lp-hours'), value = name => box.querySelector(`[data-loop-hours="${name}"]`).value;
+      void save({ hours: { on: box.querySelector('[data-loop-hours-on]').checked, start: value('start'), end: value('end'), days: [...box.querySelectorAll('[data-loop-day]:checked')].map(input => Number(input.dataset.loopDay)) } });
+    } else if (event.target.matches?.('[data-sched-on]')) void ctx.api(`/schedules/${event.target.dataset.schedOn}`, { method: 'PUT', data: { on: event.target.checked } }).then(() => ctx.refresh(), error => ctx.toast(error.message, true));
+  });
+  document.addEventListener('submit', async event => {
+    const form = event.target.closest?.('[data-sched-form]'); if (!form) return;
+    event.preventDefault(); const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
+    const data = Object.fromEntries(new FormData(form));
+    try { await ctx.api(`/specialists/${agent.id}/schedules`, { method: 'POST', data }); form.reset(); ctx.toast(t('Scheduled.')); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); }
   });
   document.addEventListener('focusout', event => { if (event.target.matches?.('[data-loop-prompt]')) { const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (agent && event.target.value !== (agent.loop?.prompt || '')) void save({ prompt: event.target.value }); } });
 }
@@ -152,6 +190,7 @@ export async function agentAction(ctx, action, target = null) {
     const runId = agent.runId && ctx.runById(agent.runId) ? agent.runId : ''; if (!runId) { await agentAction(ctx, 'spec-chat'); return; }
     ui.drafts.set(`run:${runId}`, `About "${question}": `); open('run', runId); setTimeout(() => { const box = document.getElementById('draft'); if (box) { box.value = t`About "${question}": `; box.focus(); } }, 50); return;
   }
+  if (action === 'spec-sched-del') { await api(`/schedules/${target?.dataset?.id || ''}`, { method: 'DELETE' }); toast(t('Deleted.')); await refresh(); return; }
   if (action === 'spec-loop-now') { await api(`/specialists/${agent.id}/loop`, { method: 'POST', data: {} }); toast(t`${agent.name} is checking its tasks.`); await refresh(); return; }
   if (action === 'spec-settled') {
     const unsure = (agent.unsure || []).filter(Boolean).filter((_, index) => index !== Number(target.dataset.index));
