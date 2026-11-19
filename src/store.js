@@ -98,7 +98,8 @@ export class Store extends EventEmitter {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-65536; PRAGMA temp_store=MEMORY;
       CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, value TEXT NOT NULL, PRIMARY KEY(kind,id));
       CREATE TABLE IF NOT EXISTS events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, kind TEXT, visible INTEGER, value TEXT, created_at TEXT);
-      CREATE INDEX IF NOT EXISTS event_run ON events(run_id, sequence);`);
+      CREATE INDEX IF NOT EXISTS event_run ON events(run_id, sequence);
+      CREATE INDEX IF NOT EXISTS event_run_time ON events(run_id, created_at);`);
     this.fresh = !this.get('config', 'main');
     if (this.fresh) this.put('config', 'main', defaults);
     let token = this.get('secret', 'mcp-token');
@@ -288,10 +289,22 @@ export class Store extends EventEmitter {
       .all(runId, after, limit).reverse().map(row => ({ sequence: row.sequence, uid: row.uid, kind: row.kind, visible: Boolean(row.visible), ...JSON.parse(row.value), createdAt: row.created_at }));
   }
   // Messages from another computer's copy of a shared chat, each once (by its id); a removed one goes here too.
+  // This computer shared its id with another one (src/turso.js presence). It takes a new id; its own messages take new ids
+  // and go up again, and what the other computer wrote, skipped until now as this computer's own, is read from the start.
+  reidentify() {
+    const old = this.nodeId, fresh = randomUUID();
+    this.transaction(() => { this.db.prepare("UPDATE events SET uid = ? || '.' || sequence, pushed = NULL WHERE uid LIKE ? || '.%'").run(fresh, old); });
+    writeFileSync(path.join(this.directory, 'node.id'), fresh, { mode: 0o600 });
+    this.nodeId = fresh;
+    return fresh;
+  }
   applyChatEvents(rows) {
     const touched = new Set();
     this.transaction(() => {
-      const insert = this.db.prepare('INSERT OR IGNORE INTO events(run_id,kind,visible,value,created_at,uid) VALUES(?,?,?,?,?,?)');
+      // A message this computer already has under another id (both computers once wrote under one id) is not added twice.
+      const known = this.db.prepare('SELECT 1 FROM events WHERE run_id=? AND created_at=? AND kind=? AND value=? LIMIT 1');
+      const add = this.db.prepare('INSERT OR IGNORE INTO events(run_id,kind,visible,value,created_at,uid) VALUES(?,?,?,?,?,?)');
+      const insert = { run: (runId, kind, visible, value, createdAt, uid) => known.get(runId, createdAt, kind, value) ? { changes: 0 } : add.run(runId, kind, visible, value, createdAt, uid) };
       const remove = this.db.prepare('DELETE FROM events WHERE uid=?');
       for (const row of rows) {
         const result = Number(row.deleted) ? remove.run(row.uid) : insert.run(row.run_id, row.kind, Number(row.visible) ? 1 : 0, row.value, row.created_at, row.uid);

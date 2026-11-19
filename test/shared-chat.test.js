@@ -142,3 +142,11 @@ test('only what the chat shows goes to the cloud: hidden records stay home and n
   assert.ok(sent.every(row => Number(row.visible)), 'No hidden record is uploaded');
   assert.ok(sent.some(row => JSON.parse(row.value).text === 'after the hidden ones'), 'A visible message behind 2,500 hidden ones still goes up');
 });
+
+test('a message the computer already has under another id is not added twice', () => {
+  const { a } = account();
+  const row = { run_id: 'run-x', kind: 'agent-text', visible: 1, value: JSON.stringify({ text: 'same words' }), created_at: '2026-11-19T09:00:00.000Z', deleted: 0 };
+  assert.equal(a.store.applyChatEvents([{ ...row, uid: 'one.1' }]), 1);
+  assert.equal(a.store.applyChatEvents([{ ...row, uid: 'two.1' }]), 0);
+  assert.equal(a.store.db.prepare('SELECT count(*) n FROM events WHERE run_id=?').get('run-x').n, 1);
+});

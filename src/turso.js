@@ -60,6 +60,9 @@ export class TursoSync {
   // directly (no Tailscale) still knows it is on, and messages for its agents go through this database.
   async presence(name, agents) {
     if (!this.ready || this.closed) return null;
+    // Two computers already sharing one id: the one whose hostname sorts later takes a new id, so exactly one of them moves.
+    const own = (await this.client.execute({ sql: 'SELECT host,at FROM rex_presence WHERE node=?', args: [this.store.nodeId] })).rows[0];
+    if (own?.host && own.host !== os.hostname() && Date.now() - Number(own.at) < 7 * 86400000 && os.hostname() > own.host) this.store.reidentify();
     await this.client.execute({ sql: 'INSERT INTO rex_presence(node,name,at,agents,host,workspace) VALUES(?,?,?,?,?,?) ON CONFLICT(node) DO UPDATE SET name=excluded.name,at=excluded.at,agents=excluded.agents,host=excluded.host,workspace=excluded.workspace', args: [this.store.nodeId, name, Date.now(), JSON.stringify(agents), os.hostname(), this.workspace] });
     const result = await this.client.execute({ sql: 'SELECT node,name,at,agents FROM rex_presence WHERE node != ? AND workspace = ?', args: [this.store.nodeId, this.workspace] });
     return result.rows.map(row => ({ node: row.node, name: row.name, at: Number(row.at), agents: JSON.parse(row.agents || '{}') }));
@@ -350,7 +353,9 @@ export class TursoSync {
     const old = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] || this.workspace;
     if (old === this.store.nodeId) return { node: old, own: true };
     const row = (await this.client.execute({ sql: 'SELECT host,at FROM rex_presence WHERE node=?', args: [old] }).catch(() => ({ rows: [] }))).rows[0];
-    const elsewhere = row && (row.host ? row.host !== os.hostname() : Date.now() - Number(row.at) < 10 * 60000);
+    // Only the same machine takes its id back. A row without a hostname (older versions) or a quiet one proved nothing:
+    // a second laptop took the first one's id that way and each then skipped every message the other wrote as its own.
+    const elsewhere = !row || !row.host || row.host !== os.hostname();
     if (!elsewhere) {
       writeFileSync(path.join(this.store.directory, 'node.id'), old, { mode: 0o600 }); this.store.nodeId = old;
       return { node: old, own: true };

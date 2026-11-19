@@ -345,3 +345,43 @@ test("an agent's chat goes through rex_chat by message id: the other computer ge
   assert.deepEqual(home.events('chat-1', { visible: true }).map(event => event.text), ['Done'], 'an unsent message goes away everywhere');
   await work.cloud.close(); await home.cloud.close(); work.close(); home.close();
 });
+
+test('two computers that ended up with one id split again: the later hostname takes a new id and sends its own messages again', async () => {
+  const turso = fakeTurso(); turso.network.online = true;
+  const store = new Store(temporary('clash'));
+  store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await store.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' });
+  store.event('run-1', 'message', { text: 'Written here' }, true);
+  await store.cloud.presence('Work', {});
+  const shared = store.nodeId;
+  assert.equal(store.nodeId, shared, 'Its own heartbeat is no clash');
+  turso.remote.prepare('UPDATE rex_presence SET host=?, at=? WHERE node=?').run('~LATER-PC', Date.now(), shared);
+  await store.cloud.presence('Work', {});
+  assert.equal(store.nodeId, shared, 'The computer whose name sorts first keeps the id');
+  turso.remote.prepare('UPDATE rex_presence SET host=?, at=? WHERE node=?').run('0-EARLIER-PC', Date.now(), shared);
+  await store.cloud.presence('Work', {});
+  assert.notEqual(store.nodeId, shared, 'The other one takes a new id');
+  const row = store.db.prepare('SELECT uid, pushed FROM events WHERE run_id=?').get('run-1');
+  assert.ok(row.uid.startsWith(`${store.nodeId}.`), 'Its messages carry the new id');
+  assert.equal(row.pushed, null, 'and go up again');
+  await store.cloud.close(); store.close();
+});
+
+test('a restore never takes an id whose computer left no hostname', async () => {
+  const original = temporary('nohost'), turso = fakeTurso(); turso.network.online = true;
+  const first = new Store(original);
+  first.cloud = new TursoSync(first, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await first.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' });
+  first.put('specialist', 'agent-1', { id: 'agent-1', name: 'Dara', node: first.nodeId });
+  await first.cloud.flush(); await first.cloud.presence('Work', {});
+  const firstNode = first.nodeId;
+  await first.cloud.close(); first.close();
+  turso.remote.prepare('UPDATE rex_presence SET host=NULL, at=? WHERE node=?').run(Date.now() - 3600000, firstNode);
+  const directory = temporary('nohost-b');
+  for (const file of ['workspace.id', 'vault.key', 'turso.connection']) copyFileSync(path.join(original, file), path.join(directory, file));
+  const second = new Store(directory);
+  second.cloud = new TursoSync(second, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await second.cloud.open();
+  assert.notEqual(second.nodeId, firstNode);
+  await second.cloud.close(); second.close();
+});
