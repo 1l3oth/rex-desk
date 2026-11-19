@@ -210,7 +210,7 @@ export class TursoSync {
     this.opening ||= this.connectNow().finally(() => { this.opening = null; });
     return this.opening;
   }
-  retry() { return this.ready && !this.account.due(this.connection) ? this.flush() : this.open(); }
+  retry() { if (this.closed) return Promise.resolve(); return this.ready && !this.account.due(this.connection) ? this.flush() : this.open(); }
   async connectNow() {
     if (this.flushing) await this.flushing;
     // A Rex Desk account's key lasts about a month: take a fresh one before it runs out, or when the old one stopped working.
@@ -457,7 +457,11 @@ export class TursoSync {
     // Closing Rex Desk (or the computer going to sleep or shutting down) says so at once: the other computers show it
     // offline now instead of after 90 seconds without a heartbeat.
     if (this.ready && this.client) await Promise.race([this.client.execute({ sql: 'UPDATE rex_presence SET at=0 WHERE node=? AND workspace=?', args: [this.store.nodeId, this.workspace] }).catch(() => {}), new Promise(resolve => setTimeout(resolve, 3000))]);
-    this.closed = true; this.client?.close();
+    this.closed = true;
+    // A connection that finished while this waited starts its timers again; stop them after the database is closed for good.
+    clearInterval(this.retryTimer); clearInterval(this.spaceTimer); clearInterval(this.filesTimer);
+    this.retryTimer = this.spaceTimer = this.filesTimer = null;
+    this.client?.close();
   }
 }
 
