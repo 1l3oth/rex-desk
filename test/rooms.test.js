@@ -561,3 +561,26 @@ test('a follow-up message does not repeat what the session already holds: lesson
   await desk.specialistTurn(dara.id, { prompt: 'Fourth question.' }); await done(4);
   assert.match(turns[3].prompt, /Never push without a yes/, 'a changed lesson list is sent again');
 });
+
+test('meeting rooms: an agent calls one, invites others, only the host or the person ends it, and an old one opens again with its history', async () => {
+  const { desk, turns, dara, vanna } = setup({ replies: ['On it.', 'Agreed.'] });
+  const { room, reopened } = await desk.rooms.startMeeting(dara.id, { name: 'Checkout plan', agents: [vanna.id], topic: 'Split the checkout work' });
+  assert.equal(reopened, false); assert.equal(room.host, dara.id); assert.deepEqual(room.members, [dara.id, vanna.id]);
+  await waitFor(() => turns.some(item => item.run.roomOf === room.id && item.run.roomAgent === vanna.id));
+  const asked = turns.find(item => item.run.roomOf === room.id && item.run.roomAgent === vanna.id);
+  assert.match(asked.prompt, /meeting room "Checkout plan", called by Dara, about: Split the checkout work/);
+  assert.match(asked.prompt, /Only the agent who called it \(or the person\) ends it/);
+  assert.throws(() => desk.rooms.endMeeting(room.id, vanna.id), /Only Dara/);
+  const ended = desk.rooms.endMeeting(room.id, dara.id, 'Dara does the API, Vanna the invoices.');
+  assert.ok(ended.endedAt);
+  assert.ok(desk.rooms.messages(room.id).some(item => item.from.type === 'system' && /ended the meeting: Dara does the API/.test(item.text)), 'the summary stays in the history');
+  // Leaving keeps the room; asking for it by name brings back the same room with its history.
+  desk.rooms.removeMember(room.id, vanna.id);
+  const again = await desk.rooms.startMeeting(vanna.id, { name: 'checkout plan', agents: [dara.id], message: '@dara one more thing' });
+  assert.equal(again.room.id, room.id); assert.equal(again.reopened, true); assert.equal(again.room.host, vanna.id); assert.equal(again.room.endedAt, '');
+  assert.ok(desk.rooms.messages(room.id).some(item => /ended the meeting/.test(item.text)), 'old history kept');
+  // The person writing in an ended meeting opens it again.
+  desk.rooms.endMeeting(room.id, 'you');
+  await desk.rooms.post(room.id, { text: '@dara status?' });
+  assert.equal(desk.rooms.room(room.id).endedAt, '');
+});

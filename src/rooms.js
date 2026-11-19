@@ -53,10 +53,12 @@ export class Rooms {
   cleanup() { for (const room of this.list()) { const kept = room.members.filter(id => this.agent(id)); if (kept.length !== room.members.length) this.store.put('room', room.id, { ...room, members: kept }); } }
   roomsOf(agentId) { return this.list().filter(room => room.members.includes(agentId)); }
 
-  create(name, members = []) {
+  // A meeting room: host is who called it (an agent id, or "you"); only the host or the person ends it. It stays with its
+  // history after it ends, and anyone can bring it back (rejoin) instead of making a new one.
+  create(name, members = [], { host = '', topic = '' } = {}) {
     const title = String(name || '').trim().slice(0, 80);
     if (!title) throw new Error('Name the room.');
-    const room = { id: randomUUID(), name: title, members: [], createdAt: now(), seq: 0 };
+    const room = { id: randomUUID(), name: title, members: [], createdAt: now(), seq: 0, ...(host ? { host } : {}), ...(topic ? { topic: String(topic).trim().slice(0, 300) } : {}) };
     this.store.put('room', room.id, room);
     for (const id of members) this.addMember(room.id, id);
     return this.room(room.id);
@@ -83,6 +85,27 @@ export class Rooms {
     if (room.members.includes(agentId)) return room;
     const updated = { ...room, members: [...room.members, agentId] };
     this.store.put('room', roomId, updated); this.system(roomId, `${this.member(agentId).name} joined the room.`); return updated;
+  }
+  findByName(name) { const key = String(name || '').trim().toLowerCase(); return key ? this.list().find(room => String(room.name).toLowerCase() === key) || null : null; }
+  // Calls a meeting: a room by that name comes back to life (its history stays), or a new one is made. The caller hosts it.
+  async startMeeting(hostId, { name, agents = [], topic = '', message = '' } = {}) {
+    let room = this.findByName(name), reopened = false;
+    if (room) { reopened = Boolean(room.endedAt); this.store.put('room', room.id, { ...room, host: hostId, endedAt: '', endedBy: '', ...(topic ? { topic: String(topic).trim().slice(0, 300) } : {}) }); }
+    else room = this.create(name, [], { host: hostId, topic });
+    for (const id of [hostId, ...agents].filter(id => id && id !== HUMAN)) this.addMember(room.id, id);
+    if (reopened) this.system(room.id, `${this.member(hostId).name} opened the meeting again${topic ? `: ${topic}` : ''}.`);
+    const invited = agents.filter(id => id !== hostId && id !== HUMAN);
+    const text = String(message || '').trim() || `Meeting: ${topic || name}. ${invited.map(id => `@${this.member(id).handle}`).join(' ')}`.trim();
+    if (text) await this.post(room.id, { fromAgentId: hostId, text, to: [...invited.map(id => this.member(id).handle), ...(agents.includes(HUMAN) ? [HUMAN] : [])] });
+    return { room: this.room(room.id), reopened };
+  }
+  endMeeting(roomId, by, summary = '') {
+    const room = this.room(roomId);
+    if (by !== HUMAN && room.host && room.host !== by) throw new Error(`Only ${this.member(room.host).name}, who called this meeting, or the person can end it.`);
+    if (room.endedAt) return room;
+    this.store.put('room', roomId, { ...room, endedAt: now(), endedBy: by, summary: String(summary || '').trim().slice(0, 1000) });
+    this.system(roomId, `${by === HUMAN ? 'You' : this.member(by).name} ended the meeting${summary ? `: ${String(summary).trim().slice(0, 1000).replace(/([^.!?])$/, '$1.')}` : '.'} The room and its history stay; anyone can open it again.`);
+    return this.room(roomId);
   }
   removeMember(roomId, agentId) {
     const room = this.room(roomId);
@@ -155,6 +178,7 @@ export class Rooms {
     targets = targets.filter(target => target !== fromAgentId);
     // The person talking without naming anyone is talking to the main agent, which joins the room the first time.
     if (!fromAgentId && to === undefined && !targets.some(target => target !== HUMAN)) { if (!room.members.includes('main')) { this.addMember(roomId, 'main'); room = this.room(roomId); } targets = ['main']; }
+    if (!fromAgentId && !system && room.endedAt) { this.store.put('room', roomId, { ...room, endedAt: '', endedBy: '' }); room = this.room(roomId); this.system(roomId, 'You opened the meeting again.'); }
     const parent = replyTo ? this.store.get('roommsg', replyTo) : null;
     // A person resets the count. An agent talking to another agent extends the thread's count by one.
     const agentToAgent = Boolean(fromAgentId) && targets.some(target => target !== HUMAN);
@@ -187,6 +211,13 @@ export class Rooms {
   }
 
   // Everything an agent needs to answer as if it had been in the room all along.
+  meetingRules(room, agentId) {
+    const host = room.host === HUMAN ? 'the person' : room.host ? this.member(room.host).name : '';
+    const head = `This is the meeting room "${room.name}"${host ? `, called by ${host}` : ''}${room.topic ? `, about: ${room.topic}` : ''}.`;
+    const ended = room.endedAt ? ' It has ended; answer only if you were asked something directly.' : '';
+    const own = room.host === agentId ? ' You called it: when its goal is reached, end it with desk_meeting_end and a one-line summary of what was decided.' : ' Only the agent who called it (or the person) ends it. Leave with desk_meeting_leave when you are no longer needed; your work outside goes on meanwhile.';
+    return head + ended + own;
+  }
   promptFor(room, message, agentId) {
     // A room session that does not exist yet starts with the rooms' recent history, not only what is new.
     const agent = this.agent(agentId), session = agent?.roomRuns?.[room.id], seen = session && this.store.get('run', session) ? (agent.roomSeen || {}) : {};
@@ -206,6 +237,7 @@ export class Rooms {
       here.length ? `The conversation so far (read it before you answer):\n${here.map(line).join('\n')}` : 'Nothing new in this room before this message.',
       owners.length ? `Who works on which task (the person decided this). Work on tasks here in the room; never start a new run for one. To hand a task to another agent, or to add agents to work on it with you, use desk_task_team:\n${owners.join('\n')}` : '',
       room.away?.on ? awayRules(room.away) : '',
+      this.meetingRules(room, agentId),
       `New message from ${who(message)} to ${message.to.map(id => id === HUMAN ? 'the person' : this.member(id).name).join(', ')}:\n${message.instruction || message.text}`,
       since.length ? `Already answered after that message (do not repeat it; build on it or say you agree in a few words):\n${since.map(line).join('\n')}` : '',
       tasks.length ? `Tasks mentioned (always call a task by its English name):\n${tasks.join('\n')}` : '',

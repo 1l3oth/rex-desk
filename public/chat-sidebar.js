@@ -1,6 +1,6 @@
 import { t } from './i18n.js';
 // The sidebar's lists of agents and group chats: the person's own order and pins (dragged, or Alt+Up/Down), saved with their
-// workspace so every computer shows the same. Agents are grouped by where they are: pinned, on this computer, on other
+// workspace so every computer shows the same. Agents are grouped: pinned, then one team per project on this computer, then other
 // computers (dimmed, and the group folds away). A filter box finds an agent by name or project.
 const PIN = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></svg>';
 const here = agent => agent.status?.state !== 'offline' && !agent.remote;
@@ -23,6 +23,13 @@ const subhead = (ctx, key, title, count, foldable) => {
   return `<button type="button" class="sub-sec${shut ? ' shut' : ''}" ${foldable ? `data-action="sec-toggle" data-sec="${key}" aria-expanded="${!shut}"` : 'tabindex="-1"'} data-drop-pin="${key === 'pinned-agents' || key === 'pinned-rooms' ? 'yes' : ''}">${foldable ? '<span class="chev" aria-hidden="true">▾</span>' : ''}${title}<span class="cnt">${count}</span></button>`;
 };
 
+// The agents of one project work as its team ("Team Orbit"); agents with no code project come last, as Other agents.
+export const teamName = slug => String(slug || '').split(/[-_\s]+/).filter(Boolean).map(word => word.length <= 3 && word === word.toUpperCase() ? word : word[0].toUpperCase() + word.slice(1)).join(' ');
+const teams = list => {
+  const groups = new Map();
+  for (const agent of list) { const slug = agent.projectSlug || ''; if (!groups.has(slug)) groups.set(slug, []); groups.get(slug).push(agent); }
+  return [...groups].sort(([left], [right]) => (left === '') - (right === '') || teamName(left).localeCompare(teamName(right)));
+};
 export function agentListHtml(ctx, agents, inner) {
   const { ui, esc } = ctx, saved = ui.snap.sidebar?.agents || {}, { pinned, rest } = arrange(agents, saved);
   const search = agent => `${agent.name} ${agent.projectSlug || ''}`;
@@ -31,15 +38,18 @@ export function agentListHtml(ctx, agents, inner) {
   const filter = agents.length > 6 ? `<label class="rail-filter"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input type="search" data-rail-filter="agents" value="${esc(ui.agentFilter || '')}" placeholder="${t`Filter agents or projects`}" aria-label="${t`Filter agents or projects`}"></label>` : '';
   return filter
     + (pinned.length ? `${subhead(ctx, 'pinned-agents', t('Pinned'), pinned.length, false)}<div class="drag-list" data-list="agents" data-pins="yes">${rows(pinned, true)}</div>` : '')
-    + (local.length ? `${subhead(ctx, 'agents-here', t('On this computer'), local.length, away.length > 0 || pinned.length > 0)}${ctx.isCollapsed?.('agents-here') ? '' : `<div class="drag-list" data-list="agents">${rows(local, false)}</div>`}` : '')
+    + teams(local).map(([slug, list]) => { const key = `team-${slug || 'none'}`; return `${subhead(ctx, key, slug ? t`Team ${teamName(slug)}` : t('Other agents'), list.length, true)}${ctx.isCollapsed?.(key) ? '' : `<div class="drag-list" data-list="agents">${rows(list, false)}</div>`}`; }).join('')
     + (away.length ? `${subhead(ctx, 'agents-away', t('On other computers'), away.length, true)}${ctx.isCollapsed?.('agents-away') ? '' : `<div class="drag-list away" data-list="agents">${rows(away, false)}</div>`}` : '');
 }
 
 export function roomListHtml(ctx, rooms, inner) {
   const { ui } = ctx, { pinned, rest } = arrange(rooms, ui.snap.sidebar?.rooms || {});
   const rows = (list, isPinned) => list.map(room => rowHtml(ctx, 'rooms', room, inner(room), isPinned, room.name)).join('');
+  // Open meetings first; ended ones fold away under Ended, still there to open again.
+  const open = rest.filter(room => !room.endedAt), ended = rest.filter(room => room.endedAt);
   return (pinned.length ? `${subhead(ctx, 'pinned-rooms', t('Pinned'), pinned.length, false)}<div class="drag-list" data-list="rooms" data-pins="yes">${rows(pinned, true)}</div>` : '')
-    + `<div class="drag-list" data-list="rooms">${rows(rest, false)}</div>`;
+    + `<div class="drag-list" data-list="rooms">${rows(open, false)}</div>`
+    + (ended.length ? `${subhead(ctx, 'rooms-ended', t('Ended'), ended.length, true)}${ctx.isCollapsed?.('rooms-ended') ? '' : `<div class="drag-list ended" data-list="rooms">${rows(ended, false)}</div>`}` : '');
 }
 
 // Hides the rows the filter does not match, without drawing the sidebar again (the cursor stays in the box).

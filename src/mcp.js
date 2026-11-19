@@ -40,7 +40,8 @@ export const DEFERRED_TOOLS = new Set([
   'desk_set_profile_photo', 'desk_second_brain', 'desk_set_task_sources', 'desk_confirm_workflow', 'desk_source_catalog',
   'desk_browser', 'desk_run_for_me',
   'desk_categorize', 'desk_update_agent',
-  'desk_tell_run', 'desk_close_run', 'desk_stop_run',
+  'desk_tell_run', 'desk_close_run', 'desk_stop_run', 'desk_move_to_chat',
+  'desk_meeting_join', 'desk_meeting_leave',
 ]);
 
 export function createMcp(desk, scope) {
@@ -377,6 +378,24 @@ export function createMcp(desk, scope) {
       await desk.specialistTurn(agent.id, { prompt: input.text });
       return { sent: true, agent: agent.name };
     });
+  // Meeting rooms: any agent can call one while it works, with any other agents (it finds them by their agent cards in
+  // desk_team), talk there, step out to work and come back. Only the one who called it ends it; the room and its history stay.
+  const meetingRoom = text => { const key = String(text || '').trim().toLowerCase(); const room = desk.rooms.list().find(item => item.id === text || String(item.name || '').toLowerCase() === key); if (!room) throw new Error(`No meeting room "${text}". Read desk_meetings.`); return room; };
+  const meetingInfo = room => ({ id: room.id, name: room.name, topic: room.topic || '', host: room.host === 'you' ? 'the person' : room.host ? desk.rooms.member(room.host).name : '', state: room.endedAt ? 'ended' : 'open', members: room.members.map(id => desk.rooms.member(id).name), lastMessageAt: desk.rooms.messages(room.id, { limit: 1 }).at(-1)?.at || room.createdAt });
+  tool('desk_meetings', 'List every meeting room (open and ended), with who called it, what it is about and who is in it, so you can rejoin an old one instead of making a new one.', {}, () => desk.rooms.list().map(meetingInfo), true);
+  tool('desk_meeting_start', 'Call a meeting while you work: when you need other agents (or the person) to sync context, plan something big or decide together. Name it anything. A meeting room with that name opens again with its history; otherwise a new one is made. You host it, the agents you name join and are asked in it, and you end it with desk_meeting_end when it is done. Never wait for the person there: if they do not answer, park that small question and carry on.',
+    { name: z.string().min(1).max(80).describe('Meeting room name, new or old.'), agents: z.array(z.string()).max(12).default([]).describe('Agents to invite, by name or handle (see desk_team). Add "you" to ask the person too.'), topic: z.string().max(300).optional().describe('What it is about, in one line.'), message: z.string().max(4000).optional().describe('Your first message; @mention who should answer.') },
+    async input => {
+      const me = myAgent(), invited = input.agents.map(name => (/^@?(you|the person|person)$/i.test(String(name).trim()) ? 'you' : findAgent(name).id));
+      const { room, reopened } = await desk.rooms.startMeeting(me.id, { name: input.name, agents: invited, topic: input.topic || '', message: input.message || '' });
+      return { roomId: room.id, name: room.name, reopened, members: room.members.map(id => desk.rooms.member(id).name), note: 'They answer in the room; you are told when they do. Keep working meanwhile.' };
+    });
+  tool('desk_meeting_join', 'Join a meeting room (an open one, or an old one to bring it back), to read it and talk there.', { room: z.string().describe('Meeting room name or id.') },
+    input => { const me = myAgent(), room = meetingRoom(input.room); desk.rooms.addMember(room.id, me.id); return meetingInfo(desk.rooms.room(room.id)); });
+  tool('desk_meeting_leave', 'Leave a meeting room when you are no longer needed there. The room and its history stay; you can join again any time.', { room: z.string().describe('Meeting room name or id.') },
+    input => { const me = myAgent(), room = meetingRoom(input.room); desk.rooms.removeMember(room.id, me.id); return { left: true, room: room.name }; });
+  tool('desk_meeting_end', 'End a meeting you called, once its goal is reached, with a one-line summary of what was decided. The room and its history stay.', { room: z.string().describe('Meeting room name or id.'), summary: z.string().max(1000).optional() },
+    input => { const me = myAgent(), room = meetingRoom(input.room); return meetingInfo(desk.rooms.endMeeting(room.id, me.id, input.summary || '')); });
   tool('desk_background', 'Start a background job: a quick helper (Claude Haiku, or Sonnet when you ask for it) does one task in a run of its own while you keep talking with the person. Use it for anything that takes more than a moment (look into a project, search files or logs, run or check something), then tell the person in one short sentence that you are on it and end your reply: do not wait for it. Its result is posted in your chat (said out loud in Voice mode) and given to you with the person\'s next message. Never mention helpers or jobs to the person.',
     { task: z.string().min(3).max(6000).describe('Everything the job needs: what to do, where (paths, project), and what result to report.'), title: z.string().max(80).optional().describe('A few words naming it.'), model: z.enum(['haiku', 'sonnet']).default('haiku').describe('haiku for quick lookups and checks; sonnet for work that needs more care, like reading code or writing.') },
     input => { if (!scope?.runId) throw new Error('Only an agent in a chat can start a job.'); return desk.startHelper(scope.runId, input); });

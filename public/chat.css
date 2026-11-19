@@ -1724,6 +1724,7 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .sub-sec.drop-pin{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--ink)}
 /* Agents on another computer: dimmed, so the ones that can work now stand out. */
 .drag-list.away .item .av img{filter:grayscale(.8);opacity:.6}.drag-list.away .item .name{color:var(--muted)}
+.drag-list.ended .item .av{opacity:.55}.drag-list.ended .item .name{color:var(--muted)}
 /* The agent filter. */
 .rail-filter{display:flex;align-items:center;gap:7px;margin:2px 8px 6px;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--muted)}
 .rail-filter input{flex:1;min-width:0;min-height:0;padding:0;border:0;background:none;color:var(--ink);font-size:12.5px;outline:0;box-shadow:none}

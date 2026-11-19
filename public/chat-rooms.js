@@ -51,7 +51,7 @@ const dotFor = state => ({ busy: 'working', replying: 'working', waiting: 'warn'
 // ---------- rooms ----------
 export function roomStage(ctx) {
   const { ui, esc, bubble, note, typing, markdown, hhmm } = ctx, room = ui.snap.rooms.find(item => item.id === ui.view.id);
-  if (!room) return { title: t('Room'), meta: '', feed: `<div class="empty"><h2>${t`That room is gone.`}</h2></div>` };
+  if (!room) return { title: t('Meeting room'), meta: '', feed: `<div class="empty"><h2>${t`That meeting room is gone.`}</h2></div>` };
   const handles = room.members.map(member => member.handle).filter(Boolean), tasks = Object.fromEntries((ui.snap.tasks || []).map(task => [taskNumber(task), taskName(task)]));
   const messages = (ui.snap.messages || []).filter(message => message.roomId === room.id).sort((left, right) => left.seq - right.seq);
   const names = new Map(room.members.map(member => [member.id, member.name]));
@@ -79,11 +79,15 @@ export function roomStage(ctx) {
   const free = [{ id: 'main', name: t('Rex Agent'), projectSlug: 'all projects', status: { label: t('Knows every project') } }, ...(ui.snap.specialists || [])].filter(agent => !room.members.some(member => member.id === agent.id));
   const chip = member => `<span class="chip member ${esc(member.state)}"><button class="member-open" data-open="${member.runId ? 'run' : 'specialist'}" data-id="${esc(member.runId || member.id)}" title="${t`Open ${esc(member.name)}`}"><span class="dot ${dotFor(member.state)}"></span><strong>${esc(member.name)}</strong><span class="mlabel">${esc(member.label)}</span></button><button class="btn small x" data-action="room-remove" data-id="${esc(member.id)}" title="${t`Remove from the room`}">×</button></span>`;
   const awayBanner = room.away?.on ? `<div class="away-banner"><span class="dot working"></span><span><b>${t`Away mode`}</b> · ${t`${[room.away.goal ? t`The agents keep working on ${esc(room.away.goal)}` : t('The agents keep working'), room.away.every === 'auto' ? t`next check-in in about ${room.away.nextMinutes || 30} min (auto)` : t`check-in every ${room.away.every} min`, room.away.until ? t`until ${esc(new Date(room.away.until).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }))}` : t('until you are back')].join(' · ')}. Write here to end it.`}</span></div>` : '';
-  return { title: room.name, meta: t`${room.members.length} agents`, feedClass: 'room', banner: awayBanner,
-    composer: { placeholder: t('Message the room (Rex Agent answers unless you @mention someone)…'), mentions: handles, noPickers: true, foot: `<span class="agents-pop-host"><button type="button" class="btn small agents-btn" data-action="agents-pop" aria-haspopup="true" title="${t`Each agent's AI and model`}">${t`AI · Model`} <span aria-hidden="true">▴</span></button><div class="agents-pop" id="agents-pop" role="dialog" aria-label="${t`Agents`}" ${ui.agentsPop ? '' : 'hidden'}>${ui.agentsPop ? roomAgentsHtml(ctx, room) : ''}</div></span>` },
+  const hostName = room.host === 'you' ? t('you') : room.host ? (room.members.find(member => member.id === room.host)?.name || '') : '';
+  const meetMeta = [hostName ? t`Called by ${hostName}` : '', room.topic || '', t`${room.members.length} agents`].filter(Boolean).join(' · ');
+  const endedBanner = room.endedAt ? `<div class="away-banner ended"><span class="dot"></span><span><b>${t`Meeting ended`}</b>${room.summary ? ` · ${esc(room.summary)}` : ''} · ${t`Write here to open it again.`}</span></div>` : '';
+  const endButton = room.endedAt ? '' : `<button class="btn small" data-action="room-end" title="${t`End the meeting. The room and its history stay.`}">${t`End meeting`}</button> `;
+  return { title: room.name, meta: meetMeta, feedClass: 'room', banner: endedBanner + awayBanner,
+    composer: { placeholder: t('Message the meeting (Rex Agent answers unless you @mention someone)…'), mentions: handles, noPickers: true, foot: `<span class="agents-pop-host"><button type="button" class="btn small agents-btn" data-action="agents-pop" aria-haspopup="true" title="${t`Each agent's AI and model`}">${t`AI · Model`} <span aria-hidden="true">▴</span></button><div class="agents-pop" id="agents-pop" role="dialog" aria-label="${t`Agents`}" ${ui.agentsPop ? '' : 'hidden'}>${ui.agentsPop ? roomAgentsHtml(ctx, room) : ''}</div></span>` },
     side: ui.infoOpen === false ? '' : roomSideHtml(ctx, room), sideClass: 'info',
-    actions: `${room.away?.on ? `<button class="btn small away-on" data-action="away-stop">${t`Away mode on · Stop`}</button>` : `<button class="btn small" data-action="away-start" title="${t`Let the agents keep working while you are away`}">${t`Away mode`}</button>`} ${ui.infoOpen === false ? `<button class="btn small" data-action="info-toggle">${t`Info`}</button>` : ''}`,
-    members: ui.infoOpen !== false ? '' : `<div class="members">${room.members.map(chip).join('')}${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: t('Add an agent to this room'), placeholder: '+ Add agent', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || t('Idle')}` })) }) : ''}</div>`,
+    actions: `${endButton}${room.away?.on ? `<button class="btn small away-on" data-action="away-stop">${t`Away mode on · Stop`}</button>` : `<button class="btn small" data-action="away-start" title="${t`Let the agents keep working while you are away`}">${t`Away mode`}</button>`} ${ui.infoOpen === false ? `<button class="btn small" data-action="info-toggle">${t`Info`}</button>` : ''}`,
+    members: ui.infoOpen !== false ? '' : `<div class="members">${room.members.map(chip).join('')}${free.length ? pickerHtml(ctx, { id: 'room-add-pick', label: t('Add an agent to this meeting'), placeholder: '+ Add agent', searchable: free.length > 6, action: 'room-add', items: free.map(agent => ({ value: agent.id, label: agent.name, hint: `${agent.projectSlug} · ${agent.status?.label || t('Idle')}` })) }) : ''}</div>`,
     feed: `${messages.length ? messages.map(render).join('') : empty}${asks(ctx, room)}${doing}${stopBar}` };
 }
 
@@ -192,7 +196,7 @@ function roomInfoHtml(ctx, room) {
   const member = person => `<li class="rperson"><button class="rperson-main" data-open="${person.runId ? 'run' : 'specialist'}" data-id="${esc(person.runId || person.id)}" title="${t`Open ${esc(person.name)}`}"><span data-agent-card="${esc(person.id)}" title="${t`${esc(person.name)}'s card`}">${avatarHtml(ctx, { name: person.name, agent: person.id === 'main' ? null : (ctx.ui.snap.specialists || []).find(agent => agent.id === person.id) || null, size: 'sm' })}</span><span class="rperson-text"><b>${esc(person.name)}</b><small>${esc(person.project)} · <span class="st ${esc(person.state)}">${esc(person.label)}</span></small></span></button><button class="btn small x" data-action="room-remove" data-id="${esc(person.id)}" title="${t`Remove from the room`}" aria-label="${t`Remove ${esc(person.name)}`}">×</button></li>`;
   return `<div class="side-body rinfo">
       <div class="rhero"><button type="button" class="ravatar" data-action="room-image" title="${t`Change the picture`}">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'xl' })}<span class="cam">${t`Change`}</span></button><input type="file" id="room-image-input" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
-        <input class="rname" id="room-name" value="${esc(room.name)}" maxlength="80" aria-label="${t`Room name`}" spellcheck="false">
+        <input class="rname" id="room-name" value="${esc(room.name)}" maxlength="80" aria-label="${t`Meeting name`}" spellcheck="false">
         <p class="rsub">${((when) => room.members.length === 1 ? t`${room.members.length} agent · started ${when}` : t`${room.members.length} agents · started ${when}`)(esc(new Date(room.createdAt).toLocaleDateString(locale(), { month: 'short', day: 'numeric', year: 'numeric' })))}</p></div>
       <h3>${t`Members`} <span>${room.members.length + 1}</span></h3>
       <ul class="rmembers"><li class="rperson me"><span class="rperson-main">${avatarHtml(ctx, { name: t('You'), size: 'sm' })}<span class="rperson-text"><b>${t`You`}</b><small>${t`The person`}</small></span></span></li>${room.members.map(member).join('')}</ul>
@@ -200,7 +204,7 @@ function roomInfoHtml(ctx, room) {
       ${roomSharedHtml(ctx, room)}
       <h3>${t`Tasks in this chat`} <span>${mentioned.length}</span></h3>
       ${mentioned.length ? `<ul class="rtasks">${mentioned.map(task => `<li><button class="rtask" data-open="task" data-id="${esc(task.id)}"><span class="tnum">#${esc(taskNumber(task))}</span><span>${esc(taskName(task))}</span></button></li>`).join('')}</ul>` : `<p class="muted small">${t`None yet. Type # in the message box to mention a task.`}</p>`}
-      <div class="rdanger"><button class="btn danger small" data-action="room-delete">${t`Delete this room`}</button></div>
+      <div class="rdanger"><button class="btn danger small" data-action="room-delete">${t`Delete this meeting room`}</button></div>
     </div>`;
 }
 
@@ -214,12 +218,12 @@ export function newRoomDialog(ctx, from = null) {
     ${avatarHtml(ctx, { name: person.name, agent: person.main ? null : person, size: 'sm' })}<span class="ra-text"><b>${esc(person.name)}</b><small>${esc(person.projectSlug || '')}</small></span>
     <span class="ra-tick" aria-hidden="true"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>`;
   back.innerHTML = `<form class="dialog ra-dialog" aria-labelledby="ra-title">
-    <header class="ra-head"><div><h2 id="ra-title">${from ? t('Add agents') : t('New group chat')}</h2><p>${from ? t`${esc(from.name)} comes along with the last 20 messages, so everyone carries on with the same topic.` : t('Pick who joins. You can add more later.')}</p></div><button type="button" class="ra-x" data-close aria-label="${t`Close`}">×</button></header>
+    <header class="ra-head"><div><h2 id="ra-title">${from ? t('Add agents') : t('New meeting room')}</h2><p>${from ? t`${esc(from.name)} comes along with the last 20 messages, so everyone carries on with the same topic.` : t('Pick who joins. You can add more later.')}</p></div><button type="button" class="ra-x" data-close aria-label="${t`Close`}">×</button></header>
     <label class="ra-field"><span>${t`Name`}</span><input type="text" name="name" placeholder="${t`Checkout bug`}" required maxlength="80" value="${from ? esc(t`${from.name} and team`) : ''}"></label>
     <div class="ra-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="search" placeholder="${t`Find an agent or a project`}" aria-label="${t`Find an agent or a project`}" data-ra-find></div>
     <div class="ra-chosen" data-ra-chosen>${from ? `<span class="ra-chip fixed">${esc(from.name)}</span>` : ''}<span class="ra-none">${t`Nobody picked yet`}</span></div>
     <div class="ra-grid" role="group" aria-label="${t`Agents`}">${people.length ? people.map(card).join('') : `<p class="muted">${t`No agents yet. Create one with the + next to Agents.`}</p>`}</div>
-    <footer class="ra-foot"><span class="ra-count" data-ra-count>${t`0 picked`}</span><button class="btn" type="button" data-close>${t`Cancel`}</button><button class="btn primary" data-ra-go disabled>${from ? t('Start group chat') : t('Create')}</button></footer></form>`;
+    <footer class="ra-foot"><span class="ra-count" data-ra-count>${t`0 picked`}</span><button class="btn" type="button" data-close>${t`Cancel`}</button><button class="btn primary" data-ra-go disabled>${from ? t('Start meeting') : t('Create')}</button></footer></form>`;
   document.body.append(back);
   const form = back.querySelector('form'), chosen = back.querySelector('[data-ra-chosen]'), count = back.querySelector('[data-ra-count]'), go = back.querySelector('[data-ra-go]');
   const draw = () => {
@@ -589,9 +593,10 @@ function awayDialog(ctx, room) {
   });
 }
 document.addEventListener('click', async event => {
-  const button = event.target.closest?.('[data-action="away-start"],[data-action="away-stop"]'); if (!button) return;
+  const button = event.target.closest?.('[data-action="away-start"],[data-action="away-stop"],[data-action="room-end"]'); if (!button) return;
   event.stopPropagation(); const ctx = window.__rexCtx; if (!ctx) return;
   const room = (ctx.ui.snap.rooms || []).find(item => item.id === ctx.ui.view.id); if (!room) return;
+  if (button.dataset.action === 'room-end') { try { await ctx.api(`/rooms/${room.id}/end`, { method: 'POST', data: {} }); ctx.toast(t('Meeting ended. The room stays.')); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); } return; }
   if (button.dataset.action === 'away-start') return awayDialog(ctx, room);
   try { await ctx.api(`/rooms/${room.id}/away`, { method: 'PUT', data: { on: false } }); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); }
 }, true);
