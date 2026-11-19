@@ -300,7 +300,7 @@ export class Desk {
     for (const run of this.store.list('run').filter(item => item.resumeAt && Date.parse(item.resumeAt) <= at)) {
       this.patchRun(run.id, { resumeAt: '' });
       // The person already wrote in the chat after the limit, so it is going again: no extra "continue".
-      if (this.store.events(run.id, { limit: 40 }).some(event => event.kind === 'human-message' && event.createdAt > (run.resumeSetAt || ''))) continue;
+      if (this.store.events(run.id, { limit: 40 }).some(event => event.kind === 'human-message' && event.createdAt >= (run.resumeSetAt || '~'))) continue;
       if (this.live.has(run.id) || ['starting', 'running', 'queued', 'verifying'].includes(run.state)) continue;
       this.store.event(run.id, 'limit-resumed', { text: 'The usage limit reset. Carrying on where it stopped.' }, true);
       await this.resume(run.id, { prompt: 'You were cut off by a usage limit. Continue exactly where you left off.' }).catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
