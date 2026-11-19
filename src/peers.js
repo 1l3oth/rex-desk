@@ -280,7 +280,8 @@ export class Peers {
   async pullChats() {
     if (!this.store.cloud?.ready || !this.store.cloud.pullChat) return 0;
     doing('sync: reading chat messages');
-    const settings = this.settings(), again = settings.chatNode !== this.self.id;
+    // chatRead 2: read everything once more, so messages dropped by an id clash (see Store.applyChatEvents) come in.
+    const settings = this.settings(), again = settings.chatNode !== this.self.id || settings.chatRead !== 2;
     let since = again ? '' : String(settings.chatAt || ''), newest = since, total = 0;
     if (since) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - 120000).toString(36).padStart(9, '0'); }
     for (let page = 0; page < 40; page++) {
@@ -291,7 +292,7 @@ export class Peers {
       newest = String(rows.at(-1).v) > newest ? String(rows.at(-1).v) : newest; since = String(rows.at(-1).v);
       if (rows.length < 500) break;
     }
-    if (again || newest !== String(settings.chatAt || '')) this.save({ chatAt: newest, chatNode: this.self.id });
+    if (again || newest !== String(settings.chatAt || '')) this.save({ chatAt: newest, chatNode: this.self.id, chatRead: 2 });
     return total;
   }
   // Messages written here before chats were shared (or while offline with nothing queued) go up once.

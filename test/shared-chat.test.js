@@ -150,3 +150,13 @@ test('a message the computer already has under another id is not added twice', (
   assert.equal(a.store.applyChatEvents([{ ...row, uid: 'two.1' }]), 0);
   assert.equal(a.store.db.prepare('SELECT count(*) n FROM events WHERE run_id=?').get('run-x').n, 1);
 });
+
+test('a reply whose id another message already uses still arrives, and arriving twice adds it once', () => {
+  const { a } = account();
+  const mine = { run_id: 'run-old', kind: 'human-message', visible: 1, value: JSON.stringify({ text: 'hi' }), created_at: '2026-11-19T09:35:03.000Z', deleted: 0, uid: 'shared.1000041697' };
+  const reply = { run_id: 'run-new', kind: 'agent-text', visible: 1, value: JSON.stringify({ text: 'Hi Rex' }), created_at: '2026-11-19T10:08:50.000Z', deleted: 0, uid: 'shared.1000041697' };
+  a.store.applyChatEvents([mine]);
+  assert.equal(a.store.applyChatEvents([reply]), 1, 'The reply is not dropped');
+  assert.equal(a.store.applyChatEvents([reply]), 0, 'Reading it again adds nothing');
+  assert.deepEqual(a.store.db.prepare("SELECT run_id FROM events WHERE uid LIKE 'shared.1000041697%' ORDER BY run_id").all().map(row => row.run_id), ['run-new', 'run-old']);
+});

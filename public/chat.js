@@ -326,8 +326,10 @@ function stageModel() {
   }
   const shown = ui.events.get(run.id) || [], cleared = ui.showEarlier?.[run.id] ? '' : [...shown].reverse().find(event => event.kind === 'chat-cleared')?.createdAt || '';
   const items = [...transcript(shown, run.id), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && (!cleared || String(item.createdAt || item.at || '') >= cleared) && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state) && !run.inApp; // a chat open in the Claude app waits for the person; it is not "typing"
-  const feed = splitCard(run) + (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? t('Nothing recorded yet.') : t('Loading the conversation…')}</p></div>`) + outboxHtml(run, shown)
-    + pending(run.id).map(item => `<div class="msg qfloat"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? t('Preparing…') : '') : '');
+  const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? t('Nothing recorded yet.') : t('Loading the conversation…')}</p></div>`) + outboxHtml(run, shown)
+    + pending(run.id).map(item => `<div class="msg qfloat"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? t('Preparing…') : '') : '')
+    // At the end, beside the composer: at the top of a long chat it sat above a thousand messages and nobody saw it.
+    + splitCard(run);
   const shells = terminalItems(items), stop = (shells.length && !ui.termOpen ? `<button class="btn small" data-action="term-open">${t`Terminal (${shells.length})`}</button> ` : '') + (live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : !FINISHED.includes(run.state) ? `<button class="btn small danger" data-action="stop" title="${t`This run is not working. Close it so the task can get a new run.`}">${t`Close run`}</button>` : '');
   // A personal chat with an agent shows its profile and what was shared on the right; the terminal is one of those tabs.
   const personal = personalAgent(run);

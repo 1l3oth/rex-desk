@@ -24,8 +24,11 @@ export class ChatSplits {
     if (!this.store.cloud?.ready) return opened;
     for (const agent of this.store.list('specialist')) {
       if (agent.kind === 'main' || agent.id === 'main' || !agent.runId || !agent.node || agent.noCloud) continue;
-      const split = this.store.get('chatsplit', agent.id);
-      if (split && !split.open) continue;
+      const answered = this.store.get('chatsplit', agent.id);
+      // An answered question settles the chats as they were then. Messages written here afterwards, under another computer id
+      // (two laptops shared one id until 0.0.82), ask again: a closed question used to keep them here for good.
+      const split = answered?.open ? answered : null;
+      if (answered && !split && agent.node === this.self) continue;
       if (agent.node === this.self) {
         // The computer running the agent adds its side to a question another computer opened.
         if (split?.open && !split.sides?.some(item => item.node === this.self)) {
@@ -34,7 +37,7 @@ export class ChatSplits {
         }
         continue;
       }
-      const mine = this.ownUnshared(agent);
+      const mine = this.ownUnshared(agent).filter(row => !answered || answered.open || row.created_at > (answered.pickedAt || answered.at || ''));
       if (!mine.some(row => row.kind === 'human-message')) continue;
       if (split?.sides?.some(item => item.node === this.self)) continue;
       const sides = [...(split?.sides || []), this.side(mine, this.self)];

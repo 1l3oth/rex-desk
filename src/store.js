@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'no
 import path from 'node:path';
 import os from 'node:os';
 import { EventEmitter } from 'node:events';
-import { randomUUID, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
+import { randomUUID, randomBytes, createCipheriv, createDecipheriv, createHash, timingSafeEqual } from 'node:crypto';
 import { issueBranch } from './branches.js';
 import { validateFlowRuntime } from './flow-runtime.js';
 import { validateElectronRuntime } from './electron-runtime.js';
@@ -304,7 +304,11 @@ export class Store extends EventEmitter {
       // A message this computer already has under another id (both computers once wrote under one id) is not added twice.
       const known = this.db.prepare('SELECT 1 FROM events WHERE run_id=? AND created_at=? AND kind=? AND value=? LIMIT 1');
       const add = this.db.prepare('INSERT OR IGNORE INTO events(run_id,kind,visible,value,created_at,uid) VALUES(?,?,?,?,?,?)');
-      const insert = { run: (runId, kind, visible, value, createdAt, uid) => known.get(runId, createdAt, kind, value) ? { changes: 0 } : add.run(runId, kind, visible, value, createdAt, uid) };
+      // Two computers that shared one id numbered their messages alike, so one id can name two different messages. The
+      // second one gets an id of its own here instead of being dropped (a reply that never showed).
+      const taken = this.db.prepare('SELECT run_id, created_at, kind FROM events WHERE uid=?');
+      const ownId = (runId, kind, createdAt, uid) => { const other = taken.get(uid); return other && (other.run_id !== runId || other.created_at !== createdAt || other.kind !== kind) ? `${uid}~${createHash('sha1').update(`${runId}|${createdAt}|${kind}`).digest('hex').slice(0, 10)}` : uid; };
+      const insert = { run: (runId, kind, visible, value, createdAt, uid) => known.get(runId, createdAt, kind, value) ? { changes: 0 } : add.run(runId, kind, visible, value, createdAt, ownId(runId, kind, createdAt, uid)) };
       const remove = this.db.prepare('DELETE FROM events WHERE uid=?');
       for (const row of rows) {
         const result = Number(row.deleted) ? remove.run(row.uid) : insert.run(row.run_id, row.kind, Number(row.visible) ? 1 : 0, row.value, row.created_at, row.uid);
