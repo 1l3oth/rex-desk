@@ -212,7 +212,9 @@ export class Store extends EventEmitter {
   // Only the computer running the agent writes its chat; another computer adds only what the person typed there. Anything
   // else written here in that chat (an old story from before chats were shared, a note) stays here (src/chat-split.js).
   sharesEvent(row) {
-    if (!row?.uid || !this.syncedChat(row.run_id)) return false;
+    // Only what the chat shows travels: the hidden records (raw agent output, sessions) were three quarters of the rows and
+    // 200 MB on one laptop, enough to fill the account's cloud database on the first upload.
+    if (!row?.uid || !Number(row.visible) || !this.syncedChat(row.run_id)) return false;
     const run = this.get('run', row.run_id), agent = run?.specialistId ? this.get('specialist', run.specialistId) : this.list('specialist').find(item => item.runId === row.run_id);
     if (agent?.node === this.nodeId) return true;
     try { return JSON.parse(row.value || '{}').from === this.nodeId; } catch { return false; }
@@ -301,7 +303,7 @@ export class Store extends EventEmitter {
   }
   // This computer's own messages of a chat that have not gone to the other computers yet.
   unsentEvents(runId, limit = 2000) {
-    return this.db.prepare("SELECT * FROM events WHERE run_id=? AND pushed IS NULL AND uid LIKE ? || '.%' ORDER BY sequence LIMIT ?").all(runId, this.nodeId, limit);
+    return this.db.prepare("SELECT * FROM events WHERE run_id=? AND visible=1 AND pushed IS NULL AND uid LIKE ? || '.%' ORDER BY sequence LIMIT ?").all(runId, this.nodeId, limit);
   }
   encrypt(text) {
     const nonce = randomBytes(12);

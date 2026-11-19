@@ -126,3 +126,19 @@ test('Rex Agent chats stay on their computer', async () => {
   assert.equal(a.store.syncedChat('main-run'), false);
   assert.equal(a.store.mainRun('main-run'), true);
 });
+
+test('only what the chat shows goes to the cloud: hidden records stay home and never hold up the visible ones', async () => {
+  const { hub, a } = account();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  await a.desk.specialistTurn(dara.id, { prompt: 'Fix the refund bug' });
+  const runId = a.store.get('specialist', dara.id).runId;
+  await idle(a.desk, runId);
+  a.store.importEvents(runId, [
+    ...Array.from({ length: 2500 }, (_, index) => ({ kind: 'agent-operation', text: `raw ${index}`, visible: false })),
+    { kind: 'agent-text', text: 'after the hidden ones', visible: true },
+  ]);
+  a.desk.peers.pushChats();
+  const sent = [...hub.chat.values()].filter(row => row.run_id === runId);
+  assert.ok(sent.every(row => Number(row.visible)), 'No hidden record is uploaded');
+  assert.ok(sent.some(row => JSON.parse(row.value).text === 'after the hidden ones'), 'A visible message behind 2,500 hidden ones still goes up');
+});
