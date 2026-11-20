@@ -280,6 +280,29 @@ function transcript(all, runId = '') {
 }
 const UNSEND_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const bubble = ({ mine, name, time, html, voice = false, unsend = '' }) => `<div class="msg ${mine ? 'mine' : ''}">${unsend ? `<button type="button" class="unsend" data-unsend="${unsend}" title="${t`Unsend`}" aria-label="${t`Unsend this message`}">${UNSEND_ICON}</button>` : ''}<div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}${voice ? ` ${micIcon()}` : ''}</span></div><div class="md">${html}</div>${mine ? '' : `<div class="msg-acts">${speakButton()}</div>`}</div></div>`;
+// The reply as it is written (L56): the server sends the text so far of the block the agent is writing ("partial"); it shows in
+// a bubble that grows under the chat, and goes away once the saved message is drawn, so it never shows twice.
+const live = { runId: '', text: '', doneAt: 0 };
+function showLive({ runId, text = '', done = false, tool = '' }) {
+  if (tool || !runId || runId !== ctx.currentRunId()) return;
+  if (live.runId !== runId) Object.assign(live, { runId, text: '', doneAt: 0 });
+  if (done) { live.doneAt = Date.now(); live.text = String(text || live.text); }
+  else { live.text = String(text || ''); live.doneAt = 0; }
+  drawLive();
+}
+function drawLive() {
+  const box = document.getElementById('live-reply'); if (!box) return;
+  // Once a block is done, the next redraw carries the saved message: the live copy goes then (after a beat, so nothing blinks).
+  const stale = live.runId !== ctx.currentRunId() || !live.text.trim() || (live.doneAt && Date.now() - live.doneAt > 400);
+  const feed = document.getElementById('feed'), atEnd = feed && feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+  if (stale) { if (box.innerHTML) { box.innerHTML = ''; document.body.classList.remove('live-replying'); } if (live.doneAt) Object.assign(live, { text: '', doneAt: 0 }); return; }
+  const run = runById(live.runId), name = run ? (personalAgent(run)?.name || provider(run.provider)) : t('Agent');
+  box.innerHTML = `<div class="msg live"><div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="md">${markdown(live.text)}</div><span class="live-caret" aria-hidden="true"></span></div></div>`;
+  document.body.classList.add('live-replying');
+  // The same scroll rule as the feed (L55): follow the newest words only when the person is at the bottom.
+  if (feed && ui.stick && atEnd) feed.scrollTop = feed.scrollHeight;
+  if (live.doneAt) setTimeout(drawLive, 450);
+}
 const typing = (name, caption = '') => `<div class="msg" aria-live="polite" aria-label="${t`${esc(name)} is typing`}"><div class="avatar">${esc(initials(name))}</div><div class="bubble typing"><span class="dots"><i></i><i></i><i></i></span>${caption ? `<span class="cap">${esc(caption)}</span>` : ''}</div></div>`;
 const note = text => `<div class="note">${text}</div>`;
 // Runs that are over. Any other run that is not working can still be closed, so a stuck run never blocks its task.
@@ -401,7 +424,7 @@ function renderStage(full) {
   const head = `<div class="stage-head"><button type="button" class="pane-toggle" data-pane="rail" aria-pressed="true" aria-label="${t`Show or hide the list`}" title="${t`Show or hide the list (Ctrl+B)`}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="3" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M9.5 4v16"/></svg></button><button class="m-menu" data-action="m-rail" aria-label="${t`Back to the list`}"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="head-title"><h1>${esc(model.title)}</h1><span class="meta">${esc(model.meta || '')}</span>${model.chips || ''}</div><span class="spacer"></span><div class="head-actions">${model.composer && ['run', 'main', 'room'].includes(ui.view.type) ? readAloudButton(draftKey()) + voiceModeButton(draftKey()) : ''}${model.actions || ''}</div><button type="button" class="pane-toggle" data-pane="side" aria-pressed="true" aria-label="${t`Show or hide the side panel`}" title="${t`Show or hide the side panel (Ctrl+.)`}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><rect class="fill" x="14.5" y="4" width="6.5" height="16" rx="3" fill="currentColor" stroke="none" opacity=".55"/><path d="M14.5 4v16"/></svg></button></div>`;
   // A view that needs the message box always gets it, even when an earlier view had none.
   if (full || !document.getElementById('feed') || Boolean(model.composer) !== Boolean(document.getElementById('composer'))) {
-    stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}${model.top ? '' : `<button type="button" class="to-end" id="to-end" hidden aria-label="${t`Go to the newest messages`}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span class="to-end-new">${t`New messages`}</span></button>`}</div><aside class="side" id="side"></aside>`;
+    stage.innerHTML = `<div class="stage-main"><div><div id="head">${head}</div><div id="members">${model.members || ''}</div></div><div id="banner"></div><div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div><div class="feed-inner live-reply" id="live-reply" aria-live="polite"></div></div>${model.composer ? composerHtml(ctx, model) : '<div></div>'}${model.top ? '' : `<button type="button" class="to-end" id="to-end" hidden aria-label="${t`Go to the newest messages`}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span class="to-end-new">${t`New messages`}</span></button>`}</div><aside class="side" id="side"></aside>`;
     ui.stick = !model.top; redrawAttachments(ctx); if (model.top) document.getElementById('feed').scrollTop = 0;
   } else { document.getElementById('head').innerHTML = head; const slot = document.getElementById('members'); if (!slot.contains(document.activeElement) && !pickerOpen()) slot.innerHTML = model.members || ''; }
   // The hint in the message box follows the AI picked under it without redrawing what is typed.
@@ -419,6 +442,7 @@ function renderStage(full) {
   syncToEnd();
   ui.mentions = model.composer?.mentions || [];
   syncVoiceStage();
+  drawLive();
 }
 // Voice mode's screen: Rex's body over the chat, nothing else but a faint way out (or Esc). It is made once and kept
 // (re-attached after a redraw), so its animation never restarts. What it shows comes from what is happening right now.
@@ -873,7 +897,7 @@ async function openApp() {
     void voiceTurn(ctx, { onState: state => { if (state === 'thinking') { voiceRest = Date.now() + 4000; voiceQuiet.since = 0; } } }).then(started => { if (!started) { toggleVoiceMode(draftKey()); renderAll(); } });
   }, 400);
   // An agent's words as they are written: Voice mode speaks them a phrase behind, without waiting for the whole reply.
-  stream.addEventListener('partial', event => { try { speakLive(JSON.parse(event.data), draftKey(), ctx.currentRunId()); } catch { /* a broken message is skipped */ } });
+  stream.addEventListener('partial', event => { try { const data = JSON.parse(event.data); speakLive(data, draftKey(), ctx.currentRunId()); showLive(data); } catch { /* a broken message is skipped */ } });
   setInterval(() => void refresh().catch(() => {}), 15000);
 }
 try { await openApp(); } catch (error) {

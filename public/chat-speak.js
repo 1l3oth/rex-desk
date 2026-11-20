@@ -336,8 +336,8 @@ function sayTool(tool, input) {
   told.at = now; told.last = line; sayPhrase(line, live.token);
 }
 export function speakLive({ runId, text = '', done = false, tool = '', input = {} }, key, openRunId) {
-  if (!runId || runId !== openRunId || !voiceModeOn(key)) return;
-  if (tool) { sayTool(tool, input); return; }
+  if (!runId || runId !== openRunId || !(voiceModeOn(key) || readAloudOn(key))) return;
+  if (tool) { if (voiceModeOn(key)) sayTool(tool, input); return; }
   const said = sayable(text);
   // A new block (the agent wrote, used a tool, and writes again) starts over.
   if (runId !== live.runId || !said.startsWith(live.text.slice(0, live.said))) { live.runId = runId; live.said = 0; }
