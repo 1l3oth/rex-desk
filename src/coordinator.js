@@ -82,6 +82,7 @@ const firstTaskReview = project => `This is the first task on ${project} whose w
 const addTokens = (total = {}, more = {}) => Object.fromEntries(['input', 'output', 'cacheRead', 'cacheWrite'].map(key => [key, (total?.[key] || 0) + (more?.[key] || 0)]));
 // Codex on a ChatGPT plan says "The '<model>' model is not supported when using Codex with a ChatGPT account" (model_not_found).
 const MODEL_MISSING = /issue with the selected model|may not have access to it|model[^.]{0,40}(does not exist|not found|is not available|is not supported)|model_not_found/i;
+const kiloTokens = value => { const n = Number(value || 0); return n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : `${Math.round(n / 1000)}k`; };
 const terminalStates = new Set(['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked']);
 
 export function validateAnswer(interaction, answer) {
@@ -691,7 +692,7 @@ export class Desk {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           // How full the chat's context is, for the ring by the message box. A 1M-context model says so in its name.
-          if (kind === 'context') { const window = data.window || run.contextWindowReported || (/\[1m\]|-1m\b|1m-context/i.test(`${run.model || ''} ${data.model || ''}`) ? 1000000 : 200000); this.patchRun(runId, { contextUsed: data.used, contextWindow: window, contextAt: now(), ...(data.window ? { contextWindowReported: data.window } : {}) }); return; }
+          if (kind === 'context') { const window = data.window || run.contextWindowReported || (/\[1m\]|-1m\b|1m-context/i.test(`${run.model || ''} ${data.model || ''}`) ? 1000000 : 200000); this.patchRun(runId, { contextUsed: data.used, contextWindow: window, contextAt: now(), ...(data.window ? { contextWindowReported: data.window } : {}) }); this.handoffMidTurn(runId); return; }
           if (kind === 'rate-limit') { this.recordUsage(run.provider, this.accountFor(run) || this.agents.selected(run.provider), data); if (data.status === 'rejected') this.store.event(runId, 'rate-limit', { status: 'rejected', type: data.rateLimitType || '' }); return; }
           // The open session is connected to the Claude app (or could not be): keep its link on the run for the chat to show.
           if (kind === 'remote-control') {
@@ -783,8 +784,12 @@ ${message}` : message);
         this.store.event(runId, 'message', { text: `The model this agent was set to is not available on this ${run.provider === 'codex' ? 'Codex (ChatGPT)' : run.provider === 'gemini' ? 'Antigravity (Google)' : 'Claude'} account, so it now uses the account's default model. Pick another one on the agent's card if you want.` }, true);
         return;
       }
+      // A turn cut at a step boundary for a fresh start (handoffMidTurn) ended on purpose: it goes on to the handoff, not to failed.
+      if (!controller.signal.aborted && this.store.get('run', runId)?.handoffMidTurn) this.patchRun(runId, { state: 'finished', endedAt: now() });
+      else {
       this.patchRun(runId, { state: controller.signal.aborted ? 'stopped' : 'failed', error: friendlyDiskError(error.message), endedAt: now() });
       this.store.event(runId, 'error', { message: friendlyDiskError(error.message) }, true);
+      }
       if (run.role === 'helper') this.helperDone(runId, friendlyDiskError(error.message));
     } finally {
       if (handedOn) {
@@ -1061,14 +1066,26 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // the agent first writes its own short handoff in one quiet turn; when that turn ends, the chat starts fresh with that note and the
   // recent conversation, and the next message (or one already waiting) goes to the fresh session. A room agent skips the note, so the
   // room does not fill with it. Returns true when it took over the end of the turn.
+  // Mid-turn (L58): a long working turn that passes the token limit by half again is cut at the step it just finished, so the
+  // handoff and fresh start come now, not after more steps that each re-send the whole chat. Not during the handoff turn itself.
+  handoffMidTurn(runId) {
+    const run = this.store.get('run', runId), config = this.store.config(), tokens = config.handoffTokens ?? 200000;
+    if (!run || !tokens || config.autoHandoff === false || run.external || run.autoHandoff === 'writing' || run.handoffMidTurn) return false;
+    if (Number(run.contextUsed || 0) < 1.5 * tokens) return false;
+    const live = this.live.get(runId); if (!live?.runner) return false;
+    this.patchRun(runId, { handoffMidTurn: true });
+    this.store.event(runId, 'phase', { text: `Context at ${kiloTokens(run.contextUsed)} tokens, far past ${kiloTokens(tokens)}: stopping after this step for a fresh session` }, true);
+    void Promise.resolve(live.runner.interrupt?.()).catch(() => {});
+    return true;
+  }
   async autoHandoff(runId) {
     const run = this.store.get('run', runId), limit = this.store.config().autoHandoff ?? 0.85;
     if (run?.autoHandoff && run.state === 'stopped') this.patchRun(runId, { autoHandoff: undefined });
     if (!run || run.external || limit === false || run.state === 'stopped') return false;
     if (run.autoHandoff === 'writing') {
       const note = this.store.events(runId, { visible: true, limit: 400 }).filter(event => event.kind === 'agent-text' && String(event.createdAt || '') >= String(run.turnStartedAt || '')).map(event => event.text).join('\n\n');
-      this.patchRun(runId, { autoHandoff: undefined });
-      await this.freshStart(runId, { note, reason: `automatically, because the conversation filled ${Math.round(100 * (run.handoffShare || limit))}% of the context` });
+      this.patchRun(runId, { autoHandoff: undefined, handoffWhy: undefined });
+      await this.freshStart(runId, { note, reason: `automatically, because the conversation ${run.handoffWhy || `filled ${Math.round(100 * (run.handoffShare || limit))}% of the context`}` });
       const waiting = this.store.get('run', runId);
       if (waiting?.queued?.length && !this.closed) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
       // Nothing waiting: the fresh session carries on by itself from the handoff, so the person does not have to say "continue".
@@ -1082,11 +1099,13 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       }
       return true;
     }
-    const share = Number(run.contextUsed || 0) / Number(run.contextWindow || 200000);
-    if (!(share >= Number(limit)) || !['finished', 'needs_evidence'].includes(run.state)) return false;
-    if (run.roomAgent) { await this.freshStart(runId, { reason: `automatically, because the conversation filled ${Math.round(100 * share)}% of the context` }); return false; }
-    this.patchRun(runId, { autoHandoff: 'writing', handoffShare: share });
-    this.store.event(runId, 'phase', { text: `Context ${Math.round(100 * share)}% full: writing a handoff for a fresh session` }, true);
+    const used = Number(run.contextUsed || 0), share = used / Number(run.contextWindow || 200000), tokens = this.store.config().handoffTokens ?? 200000;
+    const byTokens = Boolean(tokens) && used >= tokens;
+    if (!(byTokens || share >= Number(limit)) || !['finished', 'needs_evidence'].includes(run.state)) { if (run.handoffMidTurn) this.patchRun(runId, { handoffMidTurn: undefined }); return false; }
+    const why = byTokens ? `reached ${kiloTokens(used)} tokens (the limit is ${kiloTokens(tokens)})` : `filled ${Math.round(100 * share)}% of the context`;
+    if (run.roomAgent) { this.patchRun(runId, { handoffMidTurn: undefined }); await this.freshStart(runId, { reason: `automatically, because the conversation ${why}` }); return false; }
+    this.patchRun(runId, { autoHandoff: 'writing', handoffShare: share, handoffWhy: why, handoffMidTurn: undefined });
+    this.store.event(runId, 'phase', { text: byTokens ? `Context at ${kiloTokens(used)} tokens: writing a handoff for a fresh session` : `Context ${Math.round(100 * share)}% full: writing a handoff for a fresh session` }, true);
     await this.resume(runId, { silent: true, prompt: 'Your context is nearly full, so this chat moves to a fresh session after this reply. Write the handoff for your successor now, as your whole reply: what the person asked for and what is done, what you are in the middle of, decisions and rules the person gave, files and branches involved, and the next step. Plain English, short lists, no greetings. Do not start new work.' });
     return true;
   }

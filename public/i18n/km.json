@@ -2388,6 +2388,8 @@
  "On each check": "នៅរាល់ការពិនិត្យ",
  "Optional. For example: pick up QA issues first and test them in the browser.": "ស្រេចចិត្ត។ ឧទាហរណ៍៖ យកបញ្ហា QA មុន ហើយសាកល្បងវានៅក្នុងកម្មវិធីរុករក។",
  "AI": "AI",
+ "Start a fresh chat at": "ចាប់ផ្ដើមការជជែកថ្មីនៅ",
+ "When a chat holds this many tokens, the agent writes a short handoff and carries on in a fresh chat. Every step re-sends the whole chat, so smaller uses much less of your plan.": "នៅពេលការជជែកមួយមាន token ច្រើនប៉ុណ្ណេះ ភ្នាក់ងារសរសេរសេចក្ដីសង្ខេបខ្លីមួយ ហើយបន្តការងារក្នុងការជជែកថ្មី។ ជំហាននីមួយៗផ្ញើការជជែកទាំងមូលម្ដងទៀត ដូច្នេះទំហំតូចជាងប្រើគម្រោងរបស់អ្នកតិចជាងច្រើន។",
  "Stays here": "នៅទីនេះ",
  "Moves to the computer you write from.": "ផ្លាស់ទៅកុំព្យូទ័រដែលអ្នកសរសេរពី។",
  "Working here": "កំពុងធ្វើការនៅទីនេះ",

@@ -109,7 +109,8 @@ function contextRing(ctx, working) {
   const used = Number(run?.contextUsed || 0), window = Number(run?.contextWindow || 200000), share = Math.min(1, used / window), round = 2 * Math.PI * 7;
   const kilo = value => value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : value >= 1000 ? `${Math.round(value / 1000)}k` : String(value);
   const title = run ? (used ? t`Context: ${kilo(used)} of ${kilo(window)} (${Math.round(share * 100)}%). Click for details.${share > 0.7 ? ' Getting full: /clear starts fresh with a summary.' : ''}` : t('Context: empty. It fills as you talk. Click for details.')) : t('Context shows in a chat with one agent.');
-  const pct = used ? `<span class="ring-pct">${Math.round(share * 100)}%</span>` : '';
+  // Tokens, not a share (L58): on a 1M window 20% is already 200k, which the share hides.
+  const pct = used ? `<span class="ring-pct">${kilo(used)}</span>` : '';
   return `<button type="button" class="ring ctx ${share > 0.85 ? 'full' : share > 0.6 ? 'mid' : ''} ${working ? 'busy' : ''}" data-action="ctx-detail" title="${ctx.esc(title)}" aria-label="${ctx.esc(title)}"><svg viewBox="0 0 18 18" width="18" height="18"><circle cx="9" cy="9" r="7" class="ring-bg"/><circle cx="9" cy="9" r="7" class="ring-fill" stroke-dasharray="${(share * round).toFixed(2)} ${round.toFixed(2)}" transform="rotate(-90 9 9)"/></svg>${pct}</button><div id="ctx-panel" class="ctx-panel" hidden></div>`;
 }
 // The full context breakdown, opened from the ring: how full the window is, this chat's running token total, and the last

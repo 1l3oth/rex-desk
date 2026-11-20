@@ -43,7 +43,7 @@ function mergeComments(base, other) {
 export const defaults = {
   name: 'Rex', notify: true, provider: 'claude', concurrency: 2, branchPrefix: 'rex-desk',
   syncMinutes: 5, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
-  models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, execution: 'headless', defaultMode: 'bypassPermissions',
+  models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, execution: 'headless', defaultMode: 'bypassPermissions', handoffTokens: 200000,
   schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], fix: true, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
   // Computer control: on for the person here, with a yes asked before shutdown-like actions; agents only when allowed.
   // allow: actions that run without asking even though they normally ask (the person chose "Yes, always"). Closing an app is simple and asks no more.
@@ -88,6 +88,8 @@ export function redact(value) {
     [key, secretKey(key) ? '[redacted]' : redact(item)]));
 }
 
+// Tokens that start a fresh session: 200k unless the person picked another size; 0 turns the token limit off.
+export const handoffTokens = value => value === 0 || value === '0' ? 0 : Math.min(2000000, Math.max(50000, Math.round(Number(value) || 200000)));
 export class Store extends EventEmitter {
   // A workspace opened through an account passes its unsealed key; a plain data folder keeps vault.key beside the database.
   constructor(directory, { key, auth, cloud } = {}) {
@@ -477,6 +479,9 @@ export class Store extends EventEmitter {
       defaultMode: ['bypassPermissions', 'auto', 'acceptEdits', 'manual', 'plan'].includes(input.defaultMode) ? input.defaultMode : 'bypassPermissions',
       // How full a chat's context may get before it hands over to a fresh session by itself (false: never).
       autoHandoff: input.autoHandoff === false ? false : Math.min(0.98, Math.max(0.5, Number(input.autoHandoff) || 0.85)),
+      // And the size in tokens that starts a fresh session whatever the window (L58): a 1M window at 85% let chats grow to 700k+
+      // tokens, and every step re-sent all of it. 0: only the share above counts.
+      handoffTokens: handoffTokens(input.handoffTokens),
       // After such a handoff the fresh session carries on by itself (false: it waits for the person's next message).
       autoContinue: input.autoContinue !== false,
       schedule: scheduleSettings(input.schedule), jev: { model: String(input.jev?.model || '').trim().slice(0, 120), auto: input.jev?.auto !== false, versions: String(input.jev?.versions || '').trim().slice(0, 300) },

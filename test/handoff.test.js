@@ -84,3 +84,57 @@ test('automatic handoff stays off below the threshold and when turned off', asyn
     assert.ok(!store.events(run.id, { visible: true }).some(event => event.kind === 'chat-cleared'));
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('on a 1M window the fresh start comes at 200k tokens, not at 85% of the window (L58)', async () => {
+  const store = new Store(temporary('handoff-tokens')), prompts = [];
+  const desk = new Desk(store, { root: temporary('handoff-tokens-root'), runnerFactory: options => ({ async start(prompt) {
+    prompts.push(prompt); options.event('context', { used: prompts.length === 1 ? 210000 : prompts.length === 2 ? 215000 : 15000, window: 1000000 });
+    options.event('agent-text', { text: prompts.length === 2 ? 'HANDOFF: next step is the test.' : 'ok' });
+  }, async interrupt() {} }) });
+  try {
+    assert.equal(store.config().handoffTokens, 200000, '200k by default');
+    const run = await desk.startWebTask('fix the login page');
+    await waitFor(() => store.events(run.id, { visible: true }).some(event => event.kind === 'chat-cleared'), 'the fresh start at 210k of 1M');
+    assert.match(prompts[1], /context is nearly full/);
+    const folder = path.join(store.directory, 'handoffs'), handoff = readFileSync(path.join(folder, readdirSync(folder)[0]), 'utf8');
+    assert.match(handoff, /reached 210k tokens \(the limit is 200k\)/);
+  } finally { await desk.shutdown(); store.close(); }
+});
+
+test('the token limit is a setting: 300k waits longer, and off leaves only the share of the window (L58)', async () => {
+  const store = new Store(temporary('handoff-setting')); let turns = 0;
+  const desk = new Desk(store, { root: temporary('handoff-setting-root'), runnerFactory: options => ({ async start() { turns++; options.event('context', { used: 250000, window: 1000000 }); }, async interrupt() {} }) });
+  try {
+    store.saveConfig({ ...store.publicConfig(), handoffTokens: 300000 });
+    assert.equal(store.config().handoffTokens, 300000);
+    const run = await desk.startWebTask('look at this');
+    await waitFor(() => store.get('run', run.id).state === 'finished', 'the turn');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(turns, 1, 'no handoff below 300k');
+    store.saveConfig({ ...store.publicConfig(), handoffTokens: '0' });
+    assert.equal(store.config().handoffTokens, 0);
+  } finally { await desk.shutdown(); store.close(); }
+});
+
+test('a long turn far past the limit stops at the next step and hands off, without waiting for the turn to end (L58)', async () => {
+  const store = new Store(temporary('handoff-mid')), prompts = []; let cut = false, stepsAfter = 0;
+  const desk = new Desk(store, { root: temporary('handoff-mid-root'), runnerFactory: options => {
+    let stopped = false;
+    return { async start(prompt) {
+      prompts.push(prompt);
+      if (prompts.length > 1) { options.event('context', { used: prompts.length === 2 ? 330000 : 12000, window: 1000000 }); options.event('agent-text', { text: prompts.length === 2 ? 'HANDOFF: half way.' : 'ok' }); return; }
+      // A working turn that keeps growing: each step re-sends more. It ends only when interrupted.
+      for (let step = 1; step <= 50 && !stopped; step++) { options.event('context', { used: 100000 * step, window: 1000000 }); if (cut) stepsAfter++; await new Promise(resolve => setTimeout(resolve, 10)); }
+    }, async interrupt() { cut = true; stopped = true; } };
+  } });
+  try {
+    const run = await desk.startWebTask('a long job');
+    await waitFor(() => store.events(run.id, { visible: true }).some(event => event.kind === 'chat-cleared'), 'the mid-turn fresh start');
+    assert.ok(cut, 'the turn was cut');
+    assert.ok(stepsAfter <= 1, 'it stopped at the next step');
+    assert.ok(store.events(run.id, { visible: true }).some(event => event.kind === 'phase' && /far past 200k/.test(event.text)));
+    assert.match(prompts[1], /context is nearly full/);
+    assert.notEqual(store.get('run', run.id).state, 'failed');
+    assert.equal(store.get('run', run.id).handoffMidTurn, undefined);
+  } finally { await desk.shutdown(); store.close(); }
+});
