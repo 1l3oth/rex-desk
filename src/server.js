@@ -339,6 +339,19 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     }, 5000);
     billingWatch.unref?.();
   };
+  // A plan can also come without the payment page: the owner grants one in the admin dashboard. A signed-in desk that is not in
+  // the cloud yet looks at its plan every 5 minutes and whenever the Backup card opens, and joins by itself once it is paid,
+  // without signing in again (L39). A desk whose account already holds another desk is left as it is.
+  let planChecking = null;
+  const checkPlan = (known = null) => planChecking ||= (async () => {
+    const opened = session, store = opened?.store;
+    if (!requireAccount || !store || store.cloud.enabled || billingWatch) return false;
+    if (store.get('meta', 'account-join')?.state === 'other-desk') return false;
+    const token = opened.account?.token || store.cloud.account?.saved?.token; if (!token) return false;
+    const me = known || await accountMe(token, accountOptions).catch(() => null);
+    if (!me?.space?.paid || session !== opened || store.cloud.enabled) return false;
+    store.event('', 'billing-paid', { plan: me.plan, granted: true }); joinAccount(); notify(); return true;
+  })().finally(() => { planChecking = null; });
   async function handleAuth(request, response, url, peerSignedIn = false) {
     if (url.pathname === '/api/auth' && request.method === 'GET') {
       // A session that chose to stay signed in on this computer hands its cookie to the person's own window (it holds the window
@@ -615,6 +628,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (url.pathname === '/api/billing' && request.method === 'GET') {
           if (!token) return json(response, 200, { signedIn: false });
           const me = await accountMe(token, accountOptions).catch(error => ({ error: error.message }));
+          if (me.space?.paid && !store.cloud.enabled) void checkPlan(me);
           const details = me.space?.paid ? await billingDetails(token, accountOptions).catch(() => null) : null;
           return json(response, 200, { signedIn: true, email: who?.email || me.user?.email || '', plan: me.plan || '', space: me.space || null, card: details?.card || null, invoices: details?.invoices || [], error: me.error || '', watching: Boolean(billingWatch) });
         }
@@ -1268,6 +1282,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (ticks % 4 === 0) remoteOpen(); // Tailscale may start after Rex Desk
     if (ticks % 4 === 0) void desk.worktrees.scan().catch(() => {});
     if (ticks % 20 === 3) void sendSurvey();
+    if (ticks % 20 === 7) void checkPlan();
     // Claude account usage, as /usage shows it, every 5 minutes (and whenever the accounts window opens).
     if (ticks % 20 === 1) void desk.refreshClaudeUsage().then(notify, () => {});
     // The computer stays awake (the screen may still lock) while an agent works or other devices may connect.

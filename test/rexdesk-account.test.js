@@ -31,7 +31,8 @@ function fakeAccounts() {
     }
     if (route === 'GET /health') { if (service.down) throw new TypeError('fetch failed'); return reply(200, { ok: true }); }
     if (!service.sessions.has(token)) return reply(401, { error: { code: 'signed_out', message: 'Your sign-in ended. Sign in to Rex Desk again.' } });
-    if (route === 'GET /v1/me') return reply(200, { user: { id: 'u1', email: 'person@example.com' }, plan: 'free', sync: { on: service.keys > 0 } });
+    if (route === 'GET /v1/me') return reply(200, { user: { id: 'u1', email: 'person@example.com' }, plan: service.needsPlan ? 'free' : 'pro', sync: { on: service.keys > 0 }, ...(service.needsPlan === undefined ? {} : { space: { paid: !service.needsPlan } }) });
+    if (route === 'POST /v1/sync/database' && service.needsPlan) return reply(402, { error: { code: 'needs_plan', message: 'Cloud backup needs a plan.' } });
     if (route === 'POST /v1/sync/database') { service.keys += 1; return reply(200, { url: service.url, authToken: `database-key-${service.keys}`, expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(), database: 'rd-test-person', created: service.keys === 1 }); }
     if (route === 'POST /v1/survey') { if (service.surveyDown) return reply(500, { error: { code: 'down', message: 'Down.' } }); (service.surveys ||= []).push(JSON.parse(options.body)); return reply(200, { saved: true }); }
     if (route === 'DELETE /v1/session') { service.sessions.delete(token); return reply(200, { ok: true }); }
@@ -304,4 +305,28 @@ test('the sign-in screen can go straight to Google or GitHub; anything else gets
     assert.equal(new URL(signIn.url).searchParams.get('provider'), expected, provider || '(email)');
     signIn.cancel();
   }
+});
+
+test('a plan the owner grants in the admin is noticed by a signed-in desk, which joins the cloud without signing in again', async () => {
+  const service = fakeAccounts(), turso = fakeTurso(); service.needsPlan = true;
+  const app = await accountApp(temporary('granted'), { cloudClientFactory: turso.clientFactory, accountFetcher: service.fetcher, accountApi: API, requireAccount: true });
+  const person = browser(app);
+  const until = async predicate => { for (let attempt = 0; attempt < 200; attempt++) { if (await predicate()) return true; await new Promise(resolve => setTimeout(resolve, 25)); } return false; };
+  try {
+    await frontDoor(person, service);
+    assert.equal((await person('/api/auth/create', { method: 'POST', data: { email: 'person@example.com', passphrase } })).status, 200);
+    // No plan yet: signing in made no database and the desk stays local.
+    await until(() => app.store.get('meta', 'account-join')?.state === 'no-plan');
+    assert.equal(app.store.get('meta', 'account-join')?.state, 'no-plan'); assert.equal(service.keys, 0);
+    // Opening the Backup card while there is still no plan changes nothing.
+    assert.equal((await person('/api/billing')).body.space.paid, false);
+    assert.equal(service.keys, 0);
+    // The owner grants a plan in the admin dashboard. The next look at the plan (the Backup card, or the 5-minute check) joins.
+    service.needsPlan = false;
+    assert.equal((await person('/api/billing')).body.space.paid, true);
+    assert.ok(await until(() => app.store.cloud.enabled), 'the desk joined the cloud by itself');
+    assert.equal(service.keys, 1); assert.ok(turso.seen.includes('database-key-1'));
+    assert.equal(app.store.get('meta', 'account-join')?.state, 'joined');
+    assert.ok(service.sessions.size === 1, 'no second sign-in was needed');
+  } finally { await app.close(); }
 });
