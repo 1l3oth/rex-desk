@@ -87,18 +87,18 @@ test('the agent reads its soul and memory every session, and a fresh start keeps
   assert.match(memory, /## Before the last fresh start/); assert.match(memory, /My handoff: Building L49; tests next\./); assert.match(memory, /Asked: Build the soul and memory feature/);
 });
 
-test('after a turn with real work the agent is asked once, quietly, whether anything is worth remembering; never after a short chat', async () => {
+test('after a turn with real work no hidden turn runs: the next real message carries a one-line memory reminder (L61)', async () => {
   const { store, desk, agent } = setup(), asked = [];
   desk.resume = async (runId, input) => { asked.push(input); };
   const started = new Date(Date.now() - 5000).toISOString();
   store.put('run', 'chat', { id: 'chat', role: 'specialist', specialistId: agent.id, state: 'finished', turnStartedAt: started, createdAt: started });
   store.event('chat', 'agent-text', { text: 'Hi!' }, true);
-  assert.equal(await desk.nudgeMemory('chat'), false, 'a short chat turn: no check');
+  assert.equal(await desk.nudgeMemory('chat'), false, 'a short chat turn: no reminder');
+  assert.equal(store.get('run', 'chat').memoryDue, undefined);
   store.event('chat', 'agent-tool', { id: 't1', tool: 'Bash', input: { command: 'git commit -m "fix"' } }, true);
   assert.equal(await desk.nudgeMemory('chat'), true);
-  assert.equal(asked.length, 1); assert.equal(asked[0].silent, true); assert.match(asked[0].prompt, /Quiet memory check/);
-  assert.equal(store.get('run', 'chat').memoryNudge, true, 'the check turn is hidden from the chat');
-  assert.equal(await desk.nudgeMemory('chat'), false, 'the check turn itself is not checked again');
-  assert.equal(store.get('run', 'chat').memoryNudge, false);
+  assert.equal(asked.length, 0, 'no extra turn that re-sends the whole chat');
+  assert.equal(store.get('run', 'chat').memoryDue, true, 'the reminder waits for the next real message');
+  store.put('run', 'chat', { ...store.get('run', 'chat'), memoryDue: undefined });
   assert.equal(await desk.nudgeMemory('chat'), false, 'at most every 20 minutes');
 });

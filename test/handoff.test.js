@@ -165,3 +165,26 @@ test('a late context report from the old session after a fresh start is ignored,
     assert.equal(store.get('run', run.id).handoffMidTurn, undefined);
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('a working reply makes no hidden memory turn; the next real message carries the reminder in one line (L61)', async () => {
+  const store = new Store(temporary('memory-fold')), prompts = [];
+  const desk = new Desk(store, { root: temporary('memory-fold-root'), memoryDirectory: temporary('memory-fold-mem'), runnerFactory: options => ({ async start(prompt) {
+    prompts.push(prompt);
+    options.event('session', { sessionId: '11111111-2222-4333-8444-555555555555' });
+    options.event('context', { used: 30000 });
+    if (prompts.length === 1) options.event('agent-tool', { id: 't1', tool: 'Bash', input: { command: 'git commit -m "fix"' } });
+    options.event('agent-text', { text: 'done' });
+  }, async interrupt() {} }) });
+  try {
+    const agent = desk.specialists.create({ name: 'Desky', purpose: 'Looks after the shop.' }), at = new Date().toISOString();
+    store.put('run', 'chat', { id: 'chat', role: 'specialist', specialistId: agent.id, provider: 'claude', state: 'finished', createdAt: at, updatedAt: at });
+    await desk.say('chat', 'fix the checkout');
+    await waitFor(() => prompts.length === 1 && store.get('run', 'chat').state === 'finished', 'the working turn');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    assert.equal(prompts.length, 1, 'no hidden memory-check turn after the reply');
+    await desk.say('chat', 'thanks');
+    await waitFor(() => prompts.length === 2, 'the next real turn');
+    assert.match(prompts[1], /\(Memory: if your last work/);
+    assert.doesNotMatch(prompts[1], /Quiet memory check/);
+  } finally { await desk.shutdown(); store.close(); }
+});

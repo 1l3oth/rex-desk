@@ -84,6 +84,7 @@ const addTokens = (total = {}, more = {}) => Object.fromEntries(['input', 'outpu
 const MODEL_MISSING = /issue with the selected model|may not have access to it|model[^.]{0,40}(does not exist|not found|is not available|is not supported)|model_not_found/i;
 // Cuts long text at a line end, so the handoff stays about 4k tokens (L60).
 const clip = (text, max) => { if (text.length <= max) return text; const end = text.lastIndexOf('\n', max); return `${text.slice(0, end > max / 2 ? end : max)}\n(cut to keep the handoff short)`; };
+const MEMORY_REMINDER = '(Memory: if your last work had a decision, a correction from the person, a finding or a finished task worth keeping, note it with desk_soul_memory, short, while you answer.)';
 const kiloTokens = value => { const n = Number(value || 0); return n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : `${Math.round(n / 1000)}k`; };
 const terminalStates = new Set(['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked']);
 
@@ -759,7 +760,11 @@ export class Desk {
       const notesUpdate = notes && run.notesSeen !== notesKey ? `${notes.replace(/^Your soul/, 'Your soul (updated)')}` : '';
       if (notesKey && run.notesSeen !== notesKey) this.patchRun(runId, { notesSeen: notesKey });
       const styleReminder = reopened && chat ? '(Reply like a teammate in a chat: short, plain, answer first; no code or long lists unless asked. When corrected, save the lesson with desk_learn.)' : '';
-      const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, lessonsUpdate, notesUpdate, styleReminder].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : [this.prompt(run), run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
+      // The memory check rides on the next real message (one line), not on a turn of its own that re-sent the whole chat.
+      const memoryDue = reopened && chat && this.store.get('run', runId)?.memoryDue;
+      if (this.store.get('run', runId)?.memoryDue) this.patchRun(runId, { memoryDue: undefined });
+      const memoryReminder = memoryDue ? MEMORY_REMINDER : '';
+      const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, lessonsUpdate, notesUpdate, styleReminder, memoryReminder].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : [this.prompt(run), run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
       // The handoff is used up only by a turn that really ran: a turn that fails to start reads it next time.
       // An open Claude-app session starts with no message: it waits for the person to write, there or here.
       await runner.start(remoteOn ? '' : digest ? `${digest}
@@ -773,7 +778,7 @@ ${message}` : message);
       if (run.role === 'helper') this.helperDone(runId);
       // The quiet turn that read Voice mode's report is over: what the agent says next is said out loud.
       const voiceAfter = this.store.get('run', runId)?.voice; if (voiceAfter?.reading) this.patchRun(runId, { voice: { ...voiceAfter, reading: false } });
-      const nudge = setTimeout(() => void this.nudgeMemory(runId).catch(() => {}), 1500); nudge.unref?.();
+      void this.nudgeMemory(runId).catch(() => {});
     } catch (error) {
       if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) { handedOn = true; return; }
       // The chosen model is not available on this Claude account: the turn runs again once on the account's default model, and the agent stops asking for that model.
@@ -1135,20 +1140,19 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       list.skills.length ? `Your skills (desk_find finds them; desk_run gives their instructions):\n${list.skills.join('\n')}${list.moreSkills ? `\n(and ${list.moreSkills} more: search desk_find)` : ''}` : ''].filter(Boolean);
     return [...parts, TOOLS_FIRST_RULE].join('\n') + '\n';
   }
-  // After a turn with real work (several tools, a commit, a task change), the agent is asked once, quietly, whether anything is
-  // worth keeping in its memory. Never after a short chat turn, at most every 20 minutes per chat, and the check itself is hidden.
+  // After a turn with real work (several tools, a commit, a task change), the agent's next real message carries a one-line
+  // reminder to note anything worth keeping. It used to be a hidden turn of its own, which re-sent the whole chat each time (L61).
+  // Never after a short chat turn, and at most every 20 minutes per chat.
   async nudgeMemory(runId, at = Date.now()) {
     const run = this.store.get('run', runId); if (!run || run.roomOf || run.roomAgent) return false;
-    if (run.memoryNudge) { this.patchRun(runId, { memoryNudge: false }); return false; }
     const agentId = run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
-    if (!agentId || !['specialist', 'coordinator'].includes(run.role) || this.live.has(runId) || !['finished', 'needs_evidence'].includes(run.state)) return false;
+    if (!agentId || !['specialist', 'coordinator'].includes(run.role) || !['finished', 'needs_evidence'].includes(run.state)) return false;
     if (at - (Date.parse(run.memoryNudgedAt || 0) || 0) < 20 * 60000) return false;
     const since = Date.parse(run.turnStartedAt || 0) || 0;
     const tools = this.store.events(runId, { limit: 300 }).filter(event => event.kind === 'agent-tool' && !event.parent && Date.parse(event.createdAt) >= since - 1000);
     const marked = tools.some(event => /git commit|desk_update_task|desk_take_task|desk_publish|desk_finish|desk_create_task/.test(`${event.tool} ${JSON.stringify(event.input || {}).slice(0, 400)}`));
     if (tools.length < 3 && !marked) return false;
-    this.patchRun(runId, { memoryNudge: true, memoryNudgedAt: new Date(at).toISOString() });
-    await this.resume(runId, { silent: true, prompt: 'Quiet memory check (the person does not see this turn): is anything from the work you just did worth keeping in your memory (a decision, a correction from the person, a finding, a finished task)? If yes, write it now with desk_soul_memory, short. If not, do nothing. Reply with one word only.' });
+    this.patchRun(runId, { memoryDue: true, memoryNudgedAt: new Date(at).toISOString() });
     return true;
   }
   // The gist of a chat that is about to be cleared goes into the agent's memory, replacing the last such note, so a fresh start
