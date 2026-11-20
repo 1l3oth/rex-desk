@@ -9,6 +9,7 @@ const USERS = icon('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.8-3 3-4.6 5
 const WORLD = icon('<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.3 2.4 3.4 5.2 3.4 8.5s-1.1 6.1-3.4 8.5c-2.3-2.4-3.4-5.2-3.4-8.5S9.7 5.9 12 3.5z"/>', 15);
 const FOLDER = icon('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>', 15);
 const DOTS = icon('<circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/>', 16);
+const SEARCH = icon('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>', 15);
 const COPY = icon('<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15V6a1 1 0 0 1 1-1h9"/>', 14);
 
 const STATE = () => ({ active: t('Talking'), 'waiting-owner': t('Needs you'), paused: t('You are answering'), ended: t('Ended') });
@@ -26,6 +27,7 @@ function picked(ui, net) {
   const sel = ui.netSel;
   if (sel?.kind === 'thread' && net.threads.some(item => item.id === sel.id)) return sel;
   if (sel?.kind === 'agent' && net.agents.some(item => item.agentId === sel.id)) return sel;
+  if (sel?.kind === 'find' && net.signedIn) return sel;
   const owed = net.threads.find(item => item.state === 'waiting-owner') || net.threads.find(item => item.state !== 'ended');
   return owed ? { kind: 'thread', id: owed.id } : net.agents[0] ? { kind: 'agent', id: net.agents[0].agentId } : null;
 }
@@ -42,6 +44,7 @@ function rail(ctx, net, sel) {
     ${net.signedIn ? '' : `<div class="na-owed"><p>${t`Agents reach each other through your Rex Desk account. Sign in once on this computer.`}</p><button type="button" class="btn primary small" data-net-act="sign-in">${t`Sign in`}</button></div>`}
     ${group(t('Needs you'), owed, 'owed')}${group(t('Talking'), open)}
     ${net.threads.length ? '' : `<p class="na-quiet">${t`No conversation yet. When another agent writes to yours, it shows here and you decide what happens.`}</p>`}
+    ${net.signedIn ? `<div class="na-group"><button type="button" class="na-row${sel?.kind === 'find' ? ' on' : ''}" data-net-act="pick" data-kind="find" data-id="find"><span class="na-find-icon">${SEARCH}</span><b>${t`Find agents`}</b></button></div>` : ''}
     <div class="na-group"><h3 class="na-label">${t`Your agents`}${net.requests ? `<span class="na-count owed" title="${t`Agents waiting for your yes`}">${net.requests}</span>` : ''}</h3>${net.agents.map(agent).join('')}</div>
     ${done.length ? `<details class="na-group na-past"${ui_open(ctx) ? ' open' : ''}><summary class="na-label">${t`Ended`}<span class="na-count">${done.length}</span></summary>${done.map(thread).join('')}</details>` : ''}
   </aside>`;
@@ -86,7 +89,7 @@ function agentPanel(ctx, agent) {
       <div class="na-pair"><div class="na-pair-side"><h4>${t`Share a code`}</h4>${code ? `<p class="na-code"><span>${esc(code.code)}</span><button type="button" class="na-icon-btn" data-net-act="copy-code" data-code="${esc(code.code)}" aria-label="${t`Copy`}">${COPY}</button></p><p class="na-hint">${t`Works once, for ${code.minutes} minutes. Give it to the other person.`}</p>` : `<p class="na-hint">${t`Make a one-time code and give it to the other person.`}</p><button type="button" class="btn small" data-net-act="code">${t`Make a code`}</button>`}</div>
         <div class="na-pair-side"><h4>${t`Enter a code`}</h4><p class="na-hint">${t`Got a code from someone? Pair with their agent.`}</p><div class="na-box"><input name="code" placeholder="ABCD-EFGH" maxlength="12" autocomplete="off" aria-label="${t`A code someone gave you`}"><button type="button" class="btn small" data-net-act="pair">${t`Pair`}</button></div></div></div>
       ${agent.visibility === 'private' ? '' : `<div class="na-box na-ask"><span class="na-at" aria-hidden="true">@</span><input name="ask" placeholder="${t`Or ask an agent by its handle`}" maxlength="31" autocomplete="off" aria-label="${t`Handle`}"><button type="button" class="btn small" data-net-act="ask">${t`Ask`}</button></div>`}</div>
-    <div class="na-sec"><h3>${t`Linked agents`}<span class="na-count">${links.length}</span></h3>${links.length ? `<ul class="na-links">${links.map(linkRow).join('')}</ul>` : `<p class="na-quiet">${t`No linked agent yet. Share a code, or enter one.`}</p>`}</div>
+    <div class="na-sec"><h3>${t`Linked agents`}<span class="na-count">${links.length}</span></h3>${links.length ? `<ul class="na-links">${links.map(linkRow).join('')}</ul>${useHint(ctx, agent, links.find(link => link.status === 'active'))}` : `<p class="na-quiet">${t`No linked agent yet. Share a code, or enter one.`}</p>`}</div>
     <div class="na-sec"><h3>${t`Who can reach it`}</h3>${choice('visibility', agent.visibility, REACH())}</div>
     <div class="na-sec"><h3>${t`When it asks you`}</h3>${choice('mode', agent.mode, ASKS())}</div>
     <div class="na-sec"><h3>${t`What it says and knows`}</h3>
@@ -98,12 +101,33 @@ function agentPanel(ctx, agent) {
   </section>`;
 }
 
+// How to use a linked agent: the person asks their own agent, in its chat, and it talks to the other one.
+const useHint = (ctx, agent, link) => link ? `<p class="na-hint na-use">${t`To use a linked agent, in ${ctx.esc(agent.name)}'s chat say:`} <code>${t`ask @${ctx.esc(link.agent.handle)} to ...`}</code></p>` : '';
+
+// Find agents: search the public list on the Rex Desk account and ask one to link with one of the person's online agents.
+function findPanel(ctx, net) {
+  const { esc, ui } = ctx, find = ui.netFind || {}, mine = net.agents.filter(item => item.on), as = mine.find(item => item.agentId === find.as) || mine[0];
+  const handles = new Set(net.agents.map(item => item.handle)), links = (as && ui.netExtra?.[as.agentId]?.links) || [];
+  const linkOf = handle => links.find(link => link.agent.handle === handle && link.status !== 'blocked');
+  const row = item => { const link = linkOf(item.handle), own = handles.has(item.handle);
+    return `<li class="na-link na-found">${mark(item.name, item.online ? 'live' : '')}<div class="na-title"><b>${esc(item.name)}</b><span><span class="na-handle">@${esc(item.handle)}</span> · ${item.online ? t`Online` : t`Offline`}</span>${item.description ? `<span class="na-desc">${esc(item.description)}</span>` : ''}</div>
+      ${own ? tag(t('Yours')) : link?.status === 'active' ? tag(t('Linked'), 'done') : link ? tag(t('Waiting for their yes'), 'owed') : as ? `<button type="button" class="btn small" data-net-act="connect" data-handle="${esc(item.handle)}">${t`Connect`}</button>` : ''}</li>`; };
+  const results = find.agents ? (find.agents.length ? `<ul class="na-links">${find.agents.map(row).join('')}</ul>` : `<p class="na-quiet">${t`No public agent matches that. Try another word.`}</p>`) : find.loading ? `<p class="na-quiet">${t`Searching...`}</p>` : '';
+  const linked = links.find(link => link.status === 'active' && find.agents?.some(item => item.handle === link.agent.handle));
+  return `<section class="na-detail na-find" aria-label="${t`Find agents`}">
+    <header class="na-head"><span class="na-mark" aria-hidden="true">${SEARCH}</span><div class="na-title"><h2>${t`Find agents`}</h2><p>${t`Public agents other people put online.`}</p></div></header>
+    <div class="na-sec"><div class="na-box na-search">${SEARCH}<input name="find" value="${esc(find.q || '')}" placeholder="${t`Search by name or topic, like study`}" maxlength="60" autocomplete="off" aria-label="${t`Search agents`}"><button type="button" class="btn small" data-net-act="find">${t`Search`}</button></div>
+      ${mine.length > 1 ? `<label class="na-field na-narrow na-as"><span>${t`Connect as`}</span><select name="as" data-net-as>${mine.map(item => `<option value="${esc(item.agentId)}"${item.agentId === as.agentId ? ' selected' : ''}>${esc(item.name)} (@${esc(item.handle)})</option>`).join('')}</select></label>`
+        : mine.length ? '' : `<p class="na-hint">${t`To connect, put one of your agents online first.`}</p>`}</div>
+    <div class="na-sec">${results}${as ? useHint(ctx, as, linked) : ''}</div></section>`;
+}
+
 export function netStage(ctx) {
   const { ui } = ctx, net = ui.net || { agents: [], threads: [], signedIn: true, requests: 0 }, sel = picked(ui, net);
   const thread = sel?.kind === 'thread' ? (ui.netThread?.id === sel.id ? ui.netThread : net.threads.find(item => item.id === sel.id)) : null;
   const agent = sel?.kind === 'agent' ? net.agents.find(item => item.agentId === sel.id) : null;
   const owed = net.threads.filter(item => item.state === 'waiting-owner').length;
-  const feed = `<div class="page na">${rail(ctx, net, sel)}${thread ? conversation(ctx, thread) : agent ? agentPanel(ctx, agent) : `<section class="na-detail na-empty">${NET_ICON}<p>${t`Pick an agent to put it online, or a conversation to read it.`}</p></section>`}</div>`;
+  const feed = `<div class="page na">${rail(ctx, net, sel)}${sel?.kind === 'find' ? findPanel(ctx, net) : thread ? conversation(ctx, thread) : agent ? agentPanel(ctx, agent) : `<section class="na-detail na-empty">${NET_ICON}<p>${t`Pick an agent to put it online, or a conversation to read it.`}</p></section>`}</div>`;
   return { title: t('Agents online'), meta: owed ? t`${owed} need you` : t`${net.agents.filter(item => item.on).length} online`, feed, top: true, actions: `<button class="btn small" data-net-act="refresh">${t`Refresh`}</button>` };
 }
 
@@ -111,6 +135,7 @@ export async function loadNet(ctx) {
   const { ui, api } = ctx;
   ui.net = await api('/net');
   const sel = picked(ui, ui.net);
+  if (sel?.kind === 'find' && !ui.netFind?.agents && !ui.netFind?.loading) await search(ctx, ui.netFind?.q || '').catch(() => { ui.netFind = { ...(ui.netFind || {}), agents: [] }; });
   if (sel?.kind === 'thread') ui.netThread = await api(`/net/threads/${encodeURIComponent(sel.id)}`).catch(() => null);
   if (sel?.kind === 'agent' && ui.net.agents.find(item => item.agentId === sel.id)?.on && !ui.netExtra?.[sel.id]?.links) {
     const links = (await api(`/net/agents/${encodeURIComponent(sel.id)}/links`).catch(() => ({ links: [] }))).links;
@@ -118,11 +143,25 @@ export async function loadNet(ctx) {
   }
 }
 
+// The public list, and the links of the agent the person connects as, so each result shows Linked or Connect.
+async function search(ctx, q) {
+  const { ui, api } = ctx, mine = (ui.net?.agents || []).filter(item => item.on), as = mine.find(item => item.agentId === ui.netFind?.as) || mine[0];
+  ui.netFind = { ...(ui.netFind || {}), q, loading: true };
+  try {
+    const [found, links] = await Promise.all([api(`/net/directory?q=${encodeURIComponent(q)}`), as ? api(`/net/agents/${encodeURIComponent(as.agentId)}/links`).catch(() => ({ links: [] })) : null]);
+    if (as) ui.netExtra = { ...(ui.netExtra || {}), [as.agentId]: { ...(ui.netExtra?.[as.agentId] || {}), links: links.links } };
+    ui.netFind = { ...ui.netFind, agents: found.agents || [] };
+  } finally { ui.netFind = { ...ui.netFind, loading: false }; }
+}
+
 export function wireNet(ctx) {
   const { api, toast, ui } = ctx;
   const reload = async () => { await loadNet(ctx); ctx.render(); };
   // While the page is open it follows the conversations, unless the person is typing in it.
   setInterval(() => { if (ui.view?.type === 'net' && !document.hidden && !document.activeElement?.closest?.('.page.na :is(input,textarea)')) void reload().catch(() => {}); }, 5000);
+  // Enter searches; picking another of the person's agents reloads which results are linked.
+  document.addEventListener('keydown', event => { if (event.key === 'Enter' && event.target.matches?.('.na-search input')) { event.preventDefault(); event.target.closest('.na-search').querySelector('[data-net-act="find"]')?.click(); } });
+  document.addEventListener('change', event => { if (!event.target.matches?.('[data-net-as]')) return; ui.netFind = { ...(ui.netFind || {}), as: event.target.value }; event.target.blur(); void search(ctx, ui.netFind.q || '').then(() => ctx.render(), error => toast(error.message, true)); });
   document.addEventListener('toggle', event => { if (event.target.matches?.('.na-past')) ui.netPastOpen = event.target.open; }, true);
   document.addEventListener('click', async event => {
     const target = event.target.closest?.('[data-net-act]'); if (!target) return;
@@ -147,6 +186,13 @@ export function wireNet(ctx) {
       else if (act === 'copy-folder') { await navigator.clipboard.writeText(target.dataset.path); toast(t('Folder copied.')); }
       else if (act === 'pair') { const done = await post(`${agentPath}/pair`, { code: value('code') }); toast(t`Paired with ${done.link.agent.name}.`); await links(); ctx.render(); }
       else if (act === 'ask') { const done = await post(`${agentPath}/request`, { handle: value('ask') }); toast(done.link.status === 'active' ? t('Linked.') : t('Asked. It works once their owner says yes.')); await links(); ctx.render(); }
+      else if (act === 'find') { await search(ctx, value('find').trim()); document.activeElement?.blur?.(); ctx.render(); const box = document.querySelector('.na-search input'); box?.focus(); box?.setSelectionRange(box.value.length, box.value.length); }
+      else if (act === 'connect') {
+        const mine = (ui.net?.agents || []).filter(item => item.on), as = mine.find(item => item.agentId === ui.netFind?.as) || mine[0];
+        const done = await post(`/net/agents/${encodeURIComponent(as.agentId)}/request`, { handle: target.dataset.handle });
+        toast(done.link.status === 'active' ? t`Linked. In ${as.name}'s chat, say: ask @${target.dataset.handle} to ...` : t('Asked. It works once their owner says yes.'));
+        await search(ctx, ui.netFind?.q || ''); ctx.render();
+      }
       else if (act === 'link') { await post(`${agentPath}/links`, { link: target.dataset.link, action: target.dataset.do }); await links(); await reload(); }
       else if (act === 'do') {
         const view = target.closest('[data-net-thread]'), text = target.dataset.from ? view.querySelector(`[name="${target.dataset.from}"]`)?.value || '' : '';

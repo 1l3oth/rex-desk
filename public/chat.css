@@ -2000,6 +2000,12 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .na-field{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--muted)}.na-field.na-narrow{max-width:200px}
 .na-field :is(input,textarea){width:100%;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:13.5px;line-height:1.45;resize:vertical;caret-color:var(--accent)}
 .na-field :is(input,textarea):focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+.na-find-icon{display:grid;place-items:center;width:14px;flex:none;color:var(--muted)}.na-find-icon svg{width:14px;height:14px}
+.na-search{align-items:center;max-width:560px}.na-search>svg{flex:none;color:var(--muted)}
+.na-as{margin-top:12px;max-width:280px}.na-as select{padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:13.5px}
+.na-found{align-items:flex-start}.na-found .btn,.na-found .na-tag{margin-top:2px}
+.na-title .na-desc{margin-top:2px;font-size:12.5px;color:var(--ink);opacity:.8;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.na-use{margin-top:12px}.na-use code{padding:1px 6px;border-radius:6px;background:var(--raised);font-size:12.5px}
 .na-folder{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;border-radius:10px;background:var(--bg);font-size:12.5px;color:var(--muted)}
 .na-folder code{font:12px var(--mono);color:var(--ink);overflow-wrap:anywhere}
 .na-empty{align-items:center;justify-content:center;gap:10px;min-height:320px;color:var(--muted);text-align:center}.na-empty svg{width:30px;height:30px}.na-empty p{margin:0;max-width:34ch;font-size:13px}

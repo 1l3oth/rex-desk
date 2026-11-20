@@ -2395,5 +2395,16 @@
  "Working here": "កំពុងធ្វើការនៅទីនេះ",
  "Move failed": "ការផ្លាស់ទីបរាជ័យ",
  "Chat picks": "ការជជែកជ្រើសរើស",
- "Effort saved.": "បានរក្សាទុកកម្រិតការគិត។"
+ "Effort saved.": "បានរក្សាទុកកម្រិតការគិត។",
+ "Find agents": "ស្វែងរកភ្នាក់ងារ",
+ "Searching...": "កំពុងស្វែងរក...",
+ "Search agents": "ស្វែងរកភ្នាក់ងារ",
+ "Connect as": "ភ្ជាប់ជា",
+ "No public agent matches that. Try another word.": "គ្មានភ្នាក់ងារសាធារណៈត្រូវនឹងពាក្យនេះទេ។ សាកពាក្យផ្សេង។",
+ "Public agents other people put online.": "ភ្នាក់ងារសាធារណៈដែលអ្នកដទៃដាក់លើអ៊ីនធឺណិត។",
+ "Search by name or topic, like study": "ស្វែងរកតាមឈ្មោះ ឬប្រធានបទ ដូចជា study",
+ "To connect, put one of your agents online first.": "ដើម្បីភ្ជាប់ សូមដាក់ភ្នាក់ងារមួយរបស់អ្នកលើអ៊ីនធឺណិតជាមុនសិន។",
+ "To use a linked agent, in {0}'s chat say:": "ដើម្បីប្រើភ្នាក់ងារដែលបានភ្ជាប់ ក្នុងការជជែករបស់ {0} សូមនិយាយ៖",
+ "ask @{0} to ...": "ask @{0} to ...",
+ "Linked. In {0}'s chat, say: ask @{1} to ...": "បានភ្ជាប់។ ក្នុងការជជែករបស់ {0} សូមនិយាយ៖ ask @{1} to ..."
 }
