@@ -1210,18 +1210,31 @@ function personalSide(run, agent, items, shells) {
   const sharedBox = `<h3>${t`Media, files and links`}</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared', chatPins(ui, `agent:${agent.id}`).length)}</div><div class="shared">${sharedTabsHtml(ctx, shared, part, `agent:${agent.id}`)}</div></div>`;
   const sources = (agent.taskSources || []).map(id => id === 'local' ? t('Rex Desk tasks') : (ui.snap.config?.sources || []).find(source => source.id === id)?.name).filter(Boolean);
   const rooms = (ui.snap.rooms || []).filter(room => room.members.some(member => member.id === agent.id));
-  return `${tabs}<div class="side-body rinfo pinfo">
-    <div class="rhero">${agent.remote ? avatarHtml(ctx, { name: agent.name, agent, size: 'xl' }) : `<button type="button" class="av-edit" data-action="avatar-pick" data-agent-id="${esc(agent.id)}" title="${t`Change ${esc(agent.name)}'s avatar`}" aria-label="${t`Change ${esc(agent.name)}'s avatar`}">${avatarHtml(ctx, { name: agent.name, agent, size: 'xl' })}<span class="av-edit-badge" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></span></button>`}<h2 class="pname">${esc(agent.name)}</h2><p class="rsub"><span class="dot ${stateTone(run) === 'working' ? 'working' : 'good'}"></span> ${esc(agent.status?.label || stateLabel(run))}${agent.main ? '' : ` on <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>`}</p></div>
-    ${agent.main ? '' : `<div class="ag-actions pactions">${!agent.pinned ? `<button class="btn small${agent.follows !== false ? ' primary' : ''}" data-action="spec-follow" data-agent-id="${esc(agent.id)}" aria-pressed="${agent.follows !== false}" title="${t`When you write to it from a computer, it moves there and works there`}">${agent.follows !== false ? t`Works where you are: on` : t`Works where you are: off`}</button>` : ''}${agent.remote && !agent.pinned ? `<button class="btn small" data-action="spec-move" data-agent-id="${esc(agent.id)}" title="${t`Make this agent work on this computer, with the same chat`}">${t`Move to this computer`}</button>` : ''}<button class="btn small" data-action="spec-duplicate" data-agent-id="${esc(agent.id)}">${t`Duplicate`}</button></div>${agent.pinned ? `<p class="ag-help small">${t`Runs only on ${esc(agent.device || t('its computer'))} (set in Settings, Projects).`}</p>` : ''}`}
-    ${agent.purpose ? `<h3>${t`About`}</h3><p class="pabout">${esc(agent.purpose)}</p>` : ''}
-    ${sharedBox}
-    ${agent.main ? '' : `<h3>${t`${agent.provider === 'codex' ? t('Codex') : agent.provider === 'gemini' ? t('Google (Antigravity)') : t('Claude')} account`}</h3>${pickerHtml(ctx, { id: 'pp-profile', label: t('Account'), value: agent.profile || '', items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[agent.provider === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })}<button type="button" class="btn small quiet" data-action="accounts">${t`Manage accounts`}</button>`}
-    ${agent.main ? '' : earlierChats(agent)}
+  // The Profile tab: who this is and what it is doing, what was shared, and the few things worth changing from a chat.
+  const ai = agent.provider === 'codex' ? 'codex' : agent.provider === 'gemini' ? 'gemini' : 'claude';
+  const model = agent.model ? ((ui.snap.choices?.providers?.[ai] || ui.snap.choices || {}).models || []).find(item => item.id === agent.model)?.label || agent.model : t('Default');
+  const avatar = agent.remote ? avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }) : `<button type="button" class="av-edit" data-action="avatar-pick" data-agent-id="${esc(agent.id)}" title="${t`Change ${esc(agent.name)}'s avatar`}" aria-label="${t`Change ${esc(agent.name)}'s avatar`}">${avatarHtml(ctx, { name: agent.name, agent, size: 'sm' })}</button>`;
+  const openFull = agent.main ? '' : `<button type="button" class="aps-open" data-open="specialist" data-id="${esc(agent.id)}" data-profile="1" title="${t`Open the full profile`}" aria-label="${t`Open the full profile`}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-8.5 8.5M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button>`;
+  const head = `<header class="aps-head">${avatar}<div class="aps-who"><h2>${esc(agent.name)}</h2><p><span class="dot ${stateTone(run) === 'working' ? 'working' : 'good'}"></span>${esc(agent.status?.label || stateLabel(run))}${agent.main || !agent.projectSlug ? '' : ` · <a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>`}</p></div>${openFull}</header>`;
+  const sec = (title, body, count = 0) => `<section class="aps-sec"><h3>${title}${count ? ` <span class="aps-count">${count}</span>` : ''}</h3>${body}</section>`;
+  const row = (label, value) => `<div class="aps-row"><span>${label}</span><div>${value}</div></div>`;
+  const setup = agent.main ? '' : sec(t('Setup'), [
+    row('AI', esc(agent.provider === 'codex' ? t('Codex') : agent.provider === 'gemini' ? t('Gemini') : t('Claude Code'))),
+    row(t('Model'), esc(model)),
+    row(t('Account'), pickerHtml(ctx, { id: 'pp-profile', label: t('Account'), value: agent.profile || '', compact: true, items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[ai === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })),
+    !agent.pinned ? row(t('Works where you are'), `<label class="switch small"><input type="checkbox" role="switch" data-agent-follow="${esc(agent.id)}" ${agent.follows !== false ? 'checked' : ''} aria-label="${t`Works where you are`}"><span></span></label>`) : row(t('Computer'), esc(agent.device || t('its computer'))),
+    row(t('Tasks from'), esc(sources.join(', ') || t('Not set yet'))),
+  ].join('') + (agent.remote && !agent.pinned ? `<button class="btn small aps-wide" data-action="spec-move" data-agent-id="${esc(agent.id)}">${t`Move to this computer`}</button>` : ''));
+  const lessons = (agent.lessons || []).slice(-3).reverse();
+  return `${tabs}<div class="side-body aps">
+    ${head}
+    ${agent.purpose ? `<p class="aps-about">${esc(agent.purpose)}</p>` : ''}
+    ${sec(t('Media, files and links'), `<div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared', chatPins(ui, `agent:${agent.id}`).length)}</div><div class="shared">${sharedTabsHtml(ctx, shared, part, `agent:${agent.id}`)}</div></div>`)}
+    ${setup}
     ${toolsHtml(agent.main ? 'main' : agent.id)}
-    ${agent.main ? '' : `<h3>${t`Tasks come from`}</h3><p class="pabout">${esc(sources.join(', ') || t('Not set yet'))}</p>`}
-    ${(agent.lessons || []).length ? `<h3>${t`Lessons learned`} <span>${agent.lessons.length}</span></h3><ul class="plessons">${agent.lessons.slice(-4).map(lesson => `<li>${esc(lesson.text)}</li>`).join('')}</ul>` : ''}
-    ${rooms.length ? `<h3>${t`Meeting rooms`} <span>${rooms.length}</span></h3><ul class="rtasks">${rooms.map(room => `<li><button class="rtask" data-open="room" data-id="${esc(room.id)}">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'xs' })}<span>${esc(room.name)}</span></button></li>`).join('')}</ul>` : ''}
-    ${agent.main ? '' : `<div class="prow"><button class="btn small" data-open="specialist" data-id="${esc(agent.id)}" data-profile="1">${t`Edit profile`}</button></div>`}
+    ${lessons.length ? sec(t('Lessons learned'), `<ul class="aps-list">${lessons.map(lesson => `<li>${esc(lesson.text)}</li>`).join('')}</ul>`, agent.lessons.length) : ''}
+    ${rooms.length ? sec(t('Meeting rooms'), `<ul class="rtasks">${rooms.map(room => `<li><button class="rtask" data-open="room" data-id="${esc(room.id)}">${avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'xs' })}<span>${esc(room.name)}</span></button></li>`).join('')}</ul>`, rooms.length) : ''}
+    ${agent.main ? '' : earlierChats(agent)}
   </div>`;
 }
 // The Team tab: the person answers a worker's question or cancels a task, in the manager's place.
@@ -1411,12 +1424,14 @@ document.addEventListener('submit', event => { if (event.target.closest?.('.sett
 // The MCP servers and skills an agent has, in its profile panel.
 function toolsHtml(id) {
   const tools = ui.tools?.[id];
-  if (!tools || tools.loading) { ui.tools = ui.tools || {}; if (!tools) { ui.tools[id] = { loading: true, skills: [], commands: [], mcp: [] }; void api(`/agents/tools?agent=${encodeURIComponent(id)}`).then(found => { ui.tools[id] = found; renderAll(); }).catch(() => {}); } return `<h3>${t`Tools`}</h3><p class="muted small">${t`Checking…`}</p>`; }
+  if (!tools || tools.loading) { ui.tools = ui.tools || {}; if (!tools) { ui.tools[id] = { loading: true, skills: [], commands: [], mcp: [] }; void api(`/agents/tools?agent=${encodeURIComponent(id)}`).then(found => { ui.tools[id] = found; renderAll(); }).catch(() => {}); } return `<section class="aps-sec"><h3>${t`Tools`}</h3><p class="aps-faint">${t`Checking…`}</p></section>`; }
   const server = item => `<li><span class="tl-type ${esc(item.type)}">${esc(item.type === 'stdio' ? 'local' : item.type)}</span><b>${esc(item.name)}</b><small>${esc(item.where || '')}${item.source ? ` · ${esc(item.source === 'account' ? t('from the Claude account') : item.source === 'project' ? t('from the project') : item.source)}` : ''}</small></li>`;
   const skills = [...(tools.commands || []), ...(tools.skills || [])];
-  return `<h3>${t`Tools (MCP)`} <span>${tools.mcp.length}</span></h3><ul class="tl-list">${tools.mcp.map(server).join('')}</ul>
-    <details class="tl-skills"><summary><h3>${t`Skills and commands`} <span>${skills.length}</span></h3></summary><ul class="tl-list">${skills.map(item => `<li><b>/${esc(item.name)}</b><small>${esc(item.description || '')}</small></li>`).join('') || '<li class="muted small">None.</li>'}</ul></details>
-    <p class="muted small">${t`Type / in the message box to use one.`}</p>`;
+  // One line until opened: the lists are long, and rarely what a chat needs.
+  return `<details class="aps-tools"><summary><h3>${t`Tools`}</h3><span class="aps-faint">${t`${tools.mcp.length} MCP · ${skills.length} skills`}</span></summary>
+    <ul class="tl-list">${tools.mcp.map(server).join('')}</ul>
+    <ul class="tl-list">${skills.map(item => `<li><b>/${esc(item.name)}</b><small>${esc(item.description || '')}</small></li>`).join('') || `<li class="muted small">${t`None.`}</li>`}</ul>
+    <p class="aps-faint">${t`Type / in the message box to use one.`}</p></details>`;
 }
 
 // ---------- a sign-in an agent needs: open a terminal running the command, sign in, say done ----------
@@ -1468,7 +1483,7 @@ function earlierChats(agent) {
   const runs = (ui.snap?.runs || []).filter(run => run.specialistId === agent.id && !run.roomAgent && !run.roomId && run.id !== agent.runId)
     .sort((left, right) => String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))).slice(0, 12);
   if (!runs.length) return '';
-  return `<h3>${t`Earlier chats`} <span>${runs.length}</span></h3><ul class="tl-list">${runs.map(run => `<li><button type="button" class="link-btn" data-open="run" data-id="${esc(run.id)}"><b>${esc(runTitle(run))}</b></button><small>${esc(ago(run.updatedAt || run.createdAt))}</small></li>`).join('')}</ul>`;
+  return `<section class="aps-sec"><h3>${t`Earlier chats`} <span class="aps-count">${runs.length}</span></h3><ul class="tl-list">${runs.map(run => `<li><button type="button" class="link-btn" data-open="run" data-id="${esc(run.id)}"><b>${esc(runTitle(run))}</b></button><small>${esc(ago(run.updatedAt || run.createdAt))}</small></li>`).join('')}</ul></section>`;
 }
 
 // Messages on their way to an agent on another computer. One leaves the list when that computer's copy of the chat has it.
