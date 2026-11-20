@@ -1068,9 +1068,10 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
         return json(response, 200, { opened: true });
       }
-      if (url.pathname === '/api/files/open' && request.method === 'GET') return json(response, 200, desk.files.open(url.searchParams.get('path'), url.searchParams.get('run') || '', url.searchParams.get('room') || ''));
+      if (url.pathname === '/api/files/open' && request.method === 'GET') return json(response, 200, await desk.files.openFetched(url.searchParams.get('path'), url.searchParams.get('run') || '', url.searchParams.get('room') || ''));
       if (url.pathname === '/api/files/raw' && request.method === 'GET') {
         const file = desk.files.check(url.searchParams.get('path') || ''), kind = kindOf(file);
+        if (!existsSync(file)) await desk.files.fetchMissing(file);
         if (!existsSync(file) || statSync(file).isDirectory()) return json(response, 404, { error: 'No such file.' });
         // HTML runs in a sandbox with no origin; SVG can carry script, so it gets the strict one; everything else may sit in a frame.
         const ext = path.extname(file).toLowerCase(), textual = !['image', 'video', 'audio', 'pdf'].includes(kind);

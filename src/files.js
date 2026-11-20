@@ -84,6 +84,28 @@ export class Files {
     const [runId, name] = path.relative(root, full).split(path.sep); if (!runId || !name) return;
     try { this.desk.peers.restoreEvidence(runId, name); } catch {}
   }
+  // A picture, recording or file made on the other computer is not on this disk until someone opens it: it is fetched now from
+  // the shared copy of the chat or the account's cloud backup (L44). True when the file is here afterwards.
+  async fetchMissing(file) {
+    if (existsSync(file)) return true;
+    this.restoreShared(file); if (existsSync(file)) return true;
+    const full = path.resolve(file);
+    for (const folder of ['artifacts', 'uploads', 'room-images']) {
+      const root = path.resolve(this.desk.store.media(folder));
+      if (!inside(full, root) || full === root) continue;
+      const key = `data/${folder}/${path.relative(root, full).split(path.sep).join('/')}`;
+      await this.desk.store.cloud?.files?.fetchOne?.(key).catch(() => false);
+      return existsSync(file);
+    }
+    return false;
+  }
+  // Rex Desk's own folder for files from agents and attachments: a file there that is missing was made on another computer.
+  fromElsewhere(file) { const full = path.resolve(file); return ['artifacts', 'uploads', 'room-images'].some(folder => inside(full, path.resolve(this.desk.store.media(folder)))); }
+  async openFetched(input, runId, roomId) {
+    const { file } = this.resolve(input, runId, roomId);
+    if (!existsSync(file) && !(await this.fetchMissing(file)) && this.fromElsewhere(file)) throw new Error(`${path.basename(file)} was made on your other computer and could not be fetched. Open it there, or try again when that computer is on and backed up.`);
+    return this.open(input, runId, roomId);
+  }
   open(input, runId, roomId) {
     const { file, line, endLine } = this.resolve(input, runId, roomId);
     if (!existsSync(file)) this.restoreShared(file);

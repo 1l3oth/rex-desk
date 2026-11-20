@@ -584,3 +584,17 @@ test('meeting rooms: an agent calls one, invites others, only the host or the pe
   await desk.rooms.post(room.id, { text: '@dara status?' });
   assert.equal(desk.rooms.room(room.id).endedAt, '');
 });
+
+test('evidence shared in a personal chat without a task is never filed on a task the agent had in a room (L44)', async () => {
+  const { store, desk, dara, room } = setup();
+  // Dara worked on t1 in the room earlier; now it shares a recording in its personal chat about something else.
+  store.put('task', 't1', { ...store.get('task', 't1'), roomWork: { agentId: dara.id, roomId: room.id, at: now() } });
+  store.put('run', 'personal', { id: 'personal', role: 'specialist', specialistId: dara.id, state: 'finished', createdAt: now() });
+  store.put('specialist', dara.id, { ...store.get('specialist', dara.id), runId: 'personal' });
+  const shot = path.join(temporary('shot-personal'), 'slider.png'); writeFileSync(shot, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const shared = desk.shareEvidence('personal', { file: shot, title: 'Slider', result: 'passed' });
+  assert.ok(!shared.taskId, 'not filed on the room task');
+  // A task it took in this personal chat is used.
+  store.put('task', 't2', { id: 't2', local: true, title: 'Slider', status: 'in_progress', chatWork: { agentId: dara.id, at: now() } });
+  assert.equal(desk.shareEvidence('personal', { file: shot, title: 'Slider again', result: 'passed' }).taskId, 't2');
+});

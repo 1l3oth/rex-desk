@@ -330,3 +330,39 @@ test('a plan the owner grants in the admin is noticed by a signed-in desk, which
     assert.ok(service.sessions.size === 1, 'no second sign-in was needed');
   } finally { await app.close(); }
 });
+
+test('a picture and a 10 MB recording an agent shared on one computer open on the other, both running at once; a missing one says so plainly (L44)', async () => {
+  const service = fakeAccounts(), turso = fakeTurso();
+  const options = { cloudClientFactory: turso.clientFactory, accountFetcher: service.fetcher, accountApi: API };
+  const { writeFileSync: write, mkdirSync: make, existsSync: exists, statSync: stat, readFileSync: read } = await import('node:fs');
+  const home = await accountApp(temporary('l44-home'), options), owner = browser(home);
+  let work = null;
+  try {
+    await owner('/api/auth/create', { method: 'POST', data: { email: 'person@example.com', passphrase } });
+    const started = await owner('/api/database/account-start', { method: 'POST' });
+    await Promise.all([owner('/api/database/account-finish', { method: 'POST' }), service.browser(started.body.url)]);
+    await owner('/api/database/sync', { method: 'POST' });
+    // The second computer opens the same desk while the first keeps running.
+    work = await accountApp(temporary('l44-work'), options); const visitor = browser(work);
+    const begin = await visitor('/api/auth/account-start', { method: 'POST', data: {} });
+    await Promise.all([visitor('/api/auth/account-finish', { method: 'POST', data: {} }), service.browser(begin.body.url)]);
+    assert.equal((await visitor('/api/auth/cloud', { method: 'POST', data: { account: '1', email: 'person@example.com', passphrase } })).status, 200);
+    await work.store.cloud.files.run();
+    // Now an agent on Home shares a picture and a 10 MB recording (over the old 4 MB limit).
+    const run = 'run-l44', made = path.join(home.store.media('artifacts'), run); make(made, { recursive: true });
+    const video = Buffer.alloc(10 * 1024 * 1024, 7); write(path.join(made, '1-recording.webm'), video); write(path.join(made, '2-shot.png'), 'a picture');
+    await home.store.cloud.files.run();
+    assert.ok([...service.files.keys()].some(key => key.endsWith(`/data/artifacts/${run}/1-recording.webm`)), 'the 10 MB recording went to the cloud');
+    // On Work nothing is on disk yet; opening it in the file window (the Media tab) fetches it.
+    const there = name => path.join(work.store.media('artifacts'), run, name);
+    assert.equal(exists(there('1-recording.webm')), false);
+    const opened = await visitor(`/api/files/open?path=${encodeURIComponent(there('1-recording.webm'))}`);
+    assert.equal(opened.status, 200, JSON.stringify(opened.body)); assert.equal(opened.body.kind, 'video'); assert.equal(opened.body.size, video.length);
+    assert.equal(stat(there('1-recording.webm')).size, video.length);
+    const shot = await visitor(`/api/files/open?path=${encodeURIComponent(there('2-shot.png'))}`);
+    assert.equal(shot.status, 200); assert.equal(read(there('2-shot.png'), 'utf8'), 'a picture');
+    // A file that is nowhere to be had: a plain message, not a raw path.
+    const gone = await visitor(`/api/files/open?path=${encodeURIComponent(there('3-never-uploaded.webm'))}`);
+    assert.notEqual(gone.status, 200); assert.match(gone.body.error, /^3-never-uploaded\.webm was made on your other computer and could not be fetched/);
+  } finally { await home.close(); await work?.close(); }
+});

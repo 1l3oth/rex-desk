@@ -4,7 +4,9 @@ import path from 'node:path';
 // Files a workspace keeps beside its database: pictures attached in chats, room pictures, screenshots and other evidence, and
 // the person's memory folder (who they are, their profile photo, agents' notes and homes). The database backup has the chats;
 // this keeps the files they point to, so a reinstall, a cleared data folder or a new computer gets everything back.
-export const FILE_LIMIT = 4 * 1024 * 1024;
+// Up to 25 MB, so a screen recording of the work goes too (the account service takes files up to 50 MB; 4 MB left every
+// recording on the computer that made it, L44).
+export const FILE_LIMIT = 25 * 1024 * 1024;
 // Each folder has its own limit, so one busy folder never crowds out the others.
 const MAX_FILES = 2000;
 // Evidence folders keep what proves the work (pictures, recordings, reports, text); an agent's copy of source code is not kept.
@@ -127,6 +129,8 @@ export class FileBackup {
       let data; try { data = readFileSync(item.file); } catch { continue; }
       try { await this.sync.account.putFile(this.remoteKey(item.key), Buffer.from(store.encryptBytes(data), 'base64')); }
       catch (error) {
+        // One file the account service will not take (too big for it) is skipped and remembered, never mistaken for a full space.
+        if (error.code === 'too_big') { index.files[item.key] = item.stamp; continue; }
         if (error.code !== 'quota' && error.status !== 413) throw error;
         // Full: stop here; what went up stays recorded, the rest waits. Chats keep syncing, they are not files.
         this.full = true; this.error = error.message; this.saveIndex(index); this.sync.notify?.();

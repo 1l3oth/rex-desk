@@ -1128,7 +1128,11 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (!type) throw new Error(`Share a picture, a video, a PDF or a text, HTML, JSON or ZIP file, not ${extension || 'a file without an extension'}.`);
     if (page && type !== 'text/html') throw new Error('An explanation page is an .html file.');
     const agentId = run.roomAgent || run.specialistId || '';
-    const owned = taskId || run.taskId || (agentId ? this.store.list('task').filter(item => item.roomWork?.agentId === agentId).sort((left, right) => String(right.roomWork.at).localeCompare(String(left.roomWork.at)))[0]?.id : '') || '';
+    // Without a taskId: the run's own task, else the newest open task this agent took in this same place (this room, or its
+    // personal chat). It used to take the newest task it ever had in any room, so L43's recording was filed on L32 (L44).
+    const work = item => run.roomOf ? (item.roomWork?.agentId === agentId && item.roomWork.roomId === run.roomOf ? item.roomWork.at : '') : (item.chatWork?.agentId === agentId ? item.chatWork.at : '');
+    const guess = agentId ? this.store.list('task').filter(item => item.status !== 'done' && work(item)).sort((left, right) => String(work(right)).localeCompare(String(work(left))))[0]?.id : '';
+    const owned = taskId || run.taskId || guess || '';
     if (owned && !this.store.get('task', owned)) throw new Error('No task has that taskId. Read it from desk_tasks.');
     const directory = this.evidence.directory(runId), name = `${Date.now()}-${path.basename(source).replace(/[^\w.-]+/g, '-').slice(-80)}`;
     copyFileSync(source, path.join(directory, name));
