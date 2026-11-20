@@ -9,7 +9,8 @@
   let reason = '';
   addEventListener('error', event => { reason ||= event.message ? `${event.message}${event.filename ? ` in ${event.filename.replace(location.origin, '')}${event.lineno ? `:${event.lineno}` : ''}` : ''}` : (event.target?.src ? `Could not load ${event.target.src.replace(location.origin, '')}` : ''); }, true);
   setTimeout(() => {
-    const boot = document.querySelector('#app > .boot'); if (!boot || boot.querySelector('h2')) return;
+    // The page script started (chat.js marks the screen) and is only waiting for a slow first answer: that is not a broken page.
+    const boot = document.querySelector('#app > .boot'); if (!boot || boot.querySelector('h2') || boot.dataset.started) return;
     boot.innerHTML = MARK + '<h2>' + L('Rex Desk could not open', 'Rex Desk មិនអាចបើកបានទេ') + '</h2><p class="boot-why"></p><p>' + L('A page file may be mid-edit, or the server may be updating.', 'ឯកសារទំព័រប្រហែលជាកំពុងត្រូវបានកែ ឬម៉ាស៊ីនមេកំពុងធ្វើបច្ចុប្បន្នភាព។') + '</p><div class="boot-actions"><button type="button" class="btn primary">' + L('Reload now', 'ផ្ទុកឡើងវិញឥឡូវនេះ') + '</button><span class="boot-count"></span></div>';
     boot.querySelector('.boot-why').textContent = reason || L('The page script did not start.', 'ស្គ្រីបទំព័រមិនបានចាប់ផ្ដើមទេ។');
     boot.querySelector('button').onclick = () => location.reload();
@@ -35,6 +36,8 @@
   let misses = 0, cover = null;
   setInterval(async () => {
     // The first load failed (the server was restarting for an update): reload once it answers instead of staying on the error.
+    // The page is already trying again in place (chat.js): a reload would only start over the same slow first load.
+    if (document.querySelector('#app > .boot-failed[data-retrying]')) return;
     if (document.querySelector('#app > .boot-failed')) {
       // At most 5 tries in a row, so a server that answers but cannot open the page does not reload it forever.
       let tries = 0; try { tries = Number(sessionStorage.getItem('rex-boot-retries')) || 0; } catch {}

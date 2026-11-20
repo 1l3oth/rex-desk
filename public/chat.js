@@ -556,7 +556,11 @@ async function refresh({ full = false } = {}) {
   try {
     // Everything the page needs is asked for at once, not one after another: opening a chat waited for four answers in a row.
     const view = ui.view, early = view.type === 'run' ? api(`/runs/${view.id}/messages`, { timeout: 15000 }).catch(() => null) : null;
-    const [snap, memory, profile] = await Promise.all([api('/state', { timeout: 15000 }), api('/memory', { timeout: 15000 }).catch(() => ui.memory), api('/profile', { timeout: 15000 }).catch(() => ui.profile)]);
+    // The live refresh gives up after 15 s so one slow answer never freezes later updates; the first load has nothing to show
+    // yet, so it waits up to 90 s (a whole state over a slow relay can take longer than 15 s).
+    // A link that is always slow (the phone over a relay) gets twice the time its last whole answer took, up to 90 s.
+    const wait = ui.snap?.runs ? Math.min(90000, Math.max(15000, (ui.stateMs || 0) * 2)) : 90000, asked = Date.now();
+    const [snap, memory, profile] = await Promise.all([api('/state', { timeout: wait }).then(answer => { ui.stateMs = Date.now() - asked; return answer; }), api('/memory', { timeout: wait }).catch(() => ui.memory), api('/profile', { timeout: wait }).catch(() => ui.profile)]);
     if (!snap || !Array.isArray(snap.runs)) throw new Error(t('The answer from your computer was cut off. Trying again.'));
     ui.snap = snap;
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
@@ -809,7 +813,12 @@ document.addEventListener('keydown', event => {
   if (form.classList.contains('sliding') && !event.ctrlKey) { const step = Number(form.dataset.step); if (step < Number(form.dataset.count) - 1) { if (answered(form.querySelector('.qslide.on'))) slideTo(form, step + 1); return; } }
   if (next && !event.ctrlKey && !form.classList.contains('sliding')) next.focus(); else form.requestSubmit(form.querySelector('[value=accept]'));
 });
-try {
+// Opening the app. Over a slow link (the phone through a Tailscale relay) the first state can take long: it is waited for
+// with the long first-load timeout, and when it still fails the page tries again in place. It never reloads itself,
+// since a reload starts over and failed the same way every time (the phone reloaded every few seconds, forever).
+// The page script is running: the loading screen is waiting for data, not broken (boot-watch.js leaves it alone).
+document.querySelector('#app > .boot')?.setAttribute('data-started', '1');
+async function openApp() {
   await refresh({ full: true });
   const stream = new EventSource('/api/events'); let timer, lastRefresh = 0;
   // A "something changed" ping asks the page to catch up. While an agent writes, these pings arrive faster than the old 700ms
@@ -849,10 +858,10 @@ try {
   // An agent's words as they are written: Voice mode speaks them a phrase behind, without waiting for the whole reply.
   stream.addEventListener('partial', event => { try { speakLive(JSON.parse(event.data), draftKey(), ctx.currentRunId()); } catch { /* a broken message is skipped */ } });
   setInterval(() => void refresh().catch(() => {}), 15000);
-} catch (error) {
-  app.innerHTML = `<div class="boot boot-failed"><h2>${t`Rex Desk is unavailable`}</h2><p>${esc(error.message)}</p><p>${t`Opening it again by itself as soon as the server answers.`}</p></div>`;
-  // It does what it says: the state is asked for again every few seconds, and the page opens once a whole answer arrives.
-  const again = async () => { try { await api('/state', { timeout: 45000 }).then(snap => { if (!Array.isArray(snap?.runs)) throw new Error('incomplete'); }); location.reload(); } catch (failure) { const line = app.querySelector('.boot-failed p'); if (line && failure.message !== 'incomplete') line.textContent = failure.message; setTimeout(again, 5000); } };
+}
+try { await openApp(); } catch (error) {
+  app.innerHTML = `<div class="boot boot-failed" data-retrying="1"><h2>${t`Rex Desk is unavailable`}</h2><p>${esc(error.message)}</p><p>${t`Opening it again by itself as soon as the server answers.`}</p></div>`;
+  const again = async () => { try { await openApp(); } catch (failure) { const line = app.querySelector('.boot-failed p'); if (line) line.textContent = failure.message; setTimeout(again, 5000); } };
   setTimeout(again, 5000);
 }
 
