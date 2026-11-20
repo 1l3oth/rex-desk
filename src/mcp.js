@@ -286,8 +286,8 @@ export function createMcp(desk, scope) {
       const saved = desk.store.saveConfig({ ...desk.store.publicConfig(), handoffTokens: input.value });
       return { setting: input.setting, value: saved.handoffTokens, shown: saved.handoffTokens ? `${saved.handoffTokens / 1000}k` : 'Off' };
     });
-  tool('desk_update_agent','Change an agent the way the person asks: rename it, change its rules, model or AI, bring it to this computer (moveHere), or keep its project on the computer its agents work on (onlyOnItsComputer). Do it at once when they ask; tell them in one line what changed.',
-    { agent: z.string().describe('Agent name, handle or id.'), name: z.string().min(1).max(40).optional().describe('New name.'), rules: z.string().max(4000).optional(), model: z.string().optional(), provider: z.enum(['claude', 'codex', 'gemini']).optional(),
+  tool('desk_update_agent','Change an agent the way the person asks: rename it, change its rules, model, effort or AI, bring it to this computer (moveHere), or keep its project on the computer its agents work on (onlyOnItsComputer). Do it at once when they ask; tell them in one line what changed.',
+    { agent: z.string().describe('Agent name, handle or id.'), name: z.string().min(1).max(40).optional().describe('New name.'), rules: z.string().max(4000).optional(), model: z.string().optional(), effort: z.enum(['', 'low', 'medium', 'high', 'xhigh', 'max']).optional().describe('Its own effort; empty lets each chat pick.'), provider: z.enum(['claude', 'codex', 'gemini']).optional(),
       moveHere: z.boolean().optional().describe('Move the agent to the computer you run on, with its chat (like "Move to this computer").'),
       onlyOnItsComputer: z.boolean().optional().describe('true: the whole project of the agent runs only on the computer its agents work on (after moveHere, this one); false: it may move again. A project setting: every agent of that project follows it.') },
     async input => {
@@ -296,7 +296,7 @@ export function createMcp(desk, scope) {
       if (!agent) throw new Error(`No agent "${input.agent}". Read desk_specialists.`);
       const done = [];
       if (input.name && input.name !== agent.name) { desk.specialists.rename(agent.id, input.name); done.push(`renamed to ${input.name}`); }
-      const changes = Object.fromEntries(['rules', 'model', 'provider'].filter(field => input[field] !== undefined).map(field => [field, input[field]]));
+      const changes = Object.fromEntries(['rules', 'model', 'effort', 'provider'].filter(field => input[field] !== undefined).map(field => [field, input[field]]));
       if (Object.keys(changes).length) { desk.specialists.update(agent.id, changes); done.push(`changed ${Object.keys(changes).join(', ')}`); }
       if (input.moveHere && desk.peers.isRemote(desk.specialists.get(agent.id))) { await desk.projectRules.move(agent.id); done.push('moved to this computer'); }
       if (input.onlyOnItsComputer !== undefined) {

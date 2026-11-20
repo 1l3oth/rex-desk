@@ -14,7 +14,7 @@ function place(anchor) {
 }
 function html(ctx, agent) {
   const { ui } = ctx, provider = ['codex', 'gemini'].includes(agent.provider) ? agent.provider : 'claude';
-  const models = ui.snap.choices?.providers?.[provider]?.models || ui.snap.choices?.models || [];
+  const models = ui.snap.choices?.providers?.[provider]?.models || ui.snap.choices?.models || [], efforts = ui.snap.choices?.providers?.[provider]?.efforts || [];
   const accounts = (ui.accounts?.[provider]?.profiles || []).filter(item => item.loggedIn);
   const loop = { on: true, every: 60, ...(agent.loop || {}) }, status = agent.status || {};
   const select = (name, value, options) => `<select data-card="${name}">${options.map(([key, label]) => `<option value="${esc(key)}" ${String(value ?? '') === String(key) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>`;
@@ -23,6 +23,7 @@ function html(ctx, agent) {
     <div class="pc-rows">
       <label><span>AI</span>${select('provider', provider, [['claude', t('Claude Code')], ['codex', t('Codex')], ['gemini', t('Gemini')]])}</label>
       <label><span>${t`Model`}</span>${select('model', agent.model || '', [['', t('Default')], ...models.map(model => [model.id, model.label])])}</label>
+      <label><span>${t`Effort`}</span>${select('effort', agent.effort || '', [['', t('Chat picks')], ...efforts.map(level => [level, ({ low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') })[level] || level])])}</label>
       <label><span>${t`Account`}</span>${select('profile', agent.profile || '', [['', t('Same as everyone')], ...accounts.map(item => [item.profile, item.account || item.label])])}</label>
       <label><span>${t`Own loop`}</span>${select('loop', loop.on === false ? 'off' : String(loop.every), [['off', t('Off')], ...EVERY.map(([minutes, label]) => [String(minutes), label])])}</label>
     </div>
@@ -33,7 +34,7 @@ async function save(ctx, agent, field, value) {
   const data = field === 'loop' ? { loop: value === 'off' ? { on: false } : { on: true, every: Number(value) } } : field === 'model' ? { rules: agent.rules, unsure: agent.unsure || [], model: value } : { [field]: value };
   try {
     await api(`/specialists/${agent.id}`, { method: 'PUT', data });
-    toast({ provider: t`${agent.name} now runs on ${value === 'codex' ? t('Codex') : value === 'gemini' ? t('Gemini') : t('Claude Code')}.`, model: t('Model saved.'), profile: value ? t`${agent.name} now uses that account.` : t`${agent.name} uses the same account as everyone.`, loop: value === 'off' ? t('Its loop is off.') : t('Loop saved.') }[field]);
+    toast({ provider: t`${agent.name} now runs on ${value === 'codex' ? t('Codex') : value === 'gemini' ? t('Gemini') : t('Claude Code')}.`, model: t('Model saved.'), effort: t('Effort saved.'), profile: value ? t`${agent.name} now uses that account.` : t`${agent.name} uses the same account as everyone.`, loop: value === 'off' ? t('Its loop is off.') : t('Loop saved.') }[field]);
     await refresh({ full: true }); redraw(ctx);
   } catch (error) { toast(error.message, true); }
 }

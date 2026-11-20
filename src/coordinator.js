@@ -676,7 +676,9 @@ export class Desk {
       if (run.cwd && cwd !== run.cwd && !existsSync(run.cwd)) this.patchRun(run.id, { cwd, ...(projectHere && cwd === projectHere ? { projectPath: projectHere } : {}) });
       // A run nobody picked a mode for starts in the person's default mode from Settings.
       const remoteOn = Boolean(this.store.get('run', runId)?.inApp?.on) && (run.provider || 'claude') === 'claude';
-      const options = { run: run.permissionMode ? run : { ...run, permissionMode: defaultModeFor(run.provider || 'claude', this.store.config().defaultMode) }, cwd,
+      // An agent's own effort (its card) is used when nobody picked one for this chat (L64).
+      const ownEffort = !run.effort && this.store.get('specialist', run.roomAgent || run.specialistId || '')?.effort, ran = ownEffort && effortsFor(run.provider || 'claude').includes(ownEffort) ? { ...run, effort: ownEffort } : run;
+      const options = { run: ran.permissionMode ? ran : { ...ran, permissionMode: defaultModeFor(run.provider || 'claude', this.store.config().defaultMode) }, cwd,
         ...(remoteOn ? { remote: this.remoteName(runId) } : {}),
         // What the agent may not touch: Rex Desk's data, the installed app, and the server it runs inside (see app-guard.js).
         guard: { data: process.env.REX_DATA_DIR || this.store.directory, install: process.env.REX_DESK_EXE ? path.dirname(process.env.REX_DESK_EXE) : '', serverPid: process.pid }, projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere, token,

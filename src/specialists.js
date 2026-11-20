@@ -1,7 +1,7 @@
 import { aiProvider } from './codex.js';
 import { randomUUID } from 'node:crypto';
 import { modelName, thisComputer } from './store.js';
-import { modelList } from './choices.js';
+import { modelList, effortsFor } from './choices.js';
 import { redactText } from './memory.js';
 import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
@@ -79,6 +79,8 @@ export class Specialists {
   get(id) { const item = this.store.get('specialist', id); if (!item) throw new Error('Specialist not found.'); return item; }
   cardFile(item) { return this.memory.file('agents', `${item.slug}.md`); }
 
+  // The agent's own effort (L64): empty means the chat's pick, else one of the AI's efforts.
+  cleanEffort(value, provider = 'claude') { const text = String(value || '').trim().toLowerCase(); if (!text) return ''; if (!effortsFor(provider).includes(text)) throw new Error(`Choose ${effortsFor(provider).join(', ')} effort.`); return text; }
   // The model must be one of the listed ones. A value typed by hand in an older version ("Opus 5.5") is turned into the listed id, or dropped.
   cleanModel(value, { strict = false, provider = 'claude' } = {}) {
     const text = String(value || '').trim();
@@ -155,11 +157,11 @@ export class Specialists {
     if (!path.isAbsolute(text) || !existsSync(text)) throw new Error('Give the full path of a folder that is on this computer, or leave it out.');
     return path.resolve(text);
   }
-  update(id, { rules, unsure, provider, model, taskSources, profile, loop, avatar }) {
+  update(id, { rules, unsure, provider, model, effort, taskSources, profile, loop, avatar }) {
     const item = this.get(id);
     const selectedProvider = aiProvider(provider || item.provider || 'claude');
     const updated = { ...item, provider: selectedProvider, ...(selectedProvider !== item.provider ? { model: '', profile: '' } : {}), ...(rules !== undefined ? { rules: String(rules).slice(0, 4000) } : {}), ...(unsure !== undefined ? { unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12) } : {}),
-      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true, provider: selectedProvider }) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), ...(profile !== undefined ? { profile: String(profile || '').slice(0, 500) } : {}), ...(loop !== undefined ? { loop: { ...this.loopOf(item), ...cleanLoop(loop) } } : {}), ...(avatar !== undefined ? { avatar: this.cleanAvatar(avatar) || this.nextAvatar(id) } : {}), updatedAt: now() };
+      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true, provider: selectedProvider }) } : {}), ...(effort !== undefined ? { effort: this.cleanEffort(effort, selectedProvider) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), ...(profile !== undefined ? { profile: String(profile || '').slice(0, 500) } : {}), ...(loop !== undefined ? { loop: { ...this.loopOf(item), ...cleanLoop(loop) } } : {}), ...(avatar !== undefined ? { avatar: this.cleanAvatar(avatar) || this.nextAvatar(id) } : {}), updatedAt: now() };
     this.store.put('specialist', id, updated); this.writeCard(updated); return updated;
   }
   // Renaming moves the card too; the run history and the project stay as they are.

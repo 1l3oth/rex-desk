@@ -44,7 +44,7 @@ test('headless Claude Code starts dangerous, speaks in the chat, and Rex Desk re
   assert.ok(events.some(([kind, data]) => kind === 'session' && data.sessionId === SESSION));
   // The agent decides or asks the person about everything else; the one check before a tool runs protects Rex Desk itself.
   const check = options.hooks.PreToolUse[0].hooks[0];
-  assert.deepEqual(await check({ tool_name: 'Bash', tool_input: { command: 'npm test' } }), {}, 'ordinary work is never refused');
+  assert.deepEqual(await check({ tool_name: 'Bash', tool_input: { command: 'npm run build' } }), {}, 'ordinary work is never refused');
   assert.equal((await check({ tool_name: 'Bash', tool_input: { command: 'taskkill /F /IM node.exe' } })).hookSpecificOutput.permissionDecision, 'deny', 'a command that would end Rex Desk is');
 });
 

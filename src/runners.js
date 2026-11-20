@@ -107,6 +107,18 @@ export function withImages(prompt) {
 // The locked room: an agent answering an outside agent over the internet. It may only read files inside its own public folder.
 // Nothing else runs: no commands, no edits, no web, no sub-agents, no MCP tools, no skills, and nothing outside that folder.
 const LOCKED_READS = new Set(['Read', 'Glob', 'Grep']);
+// Claude Code's cost guide (code.claude.com/docs/en/costs, L64): nothing runs in the background on the person's plan, and
+// sub-agents an agent starts use Sonnet at medium effort, not the parent's Opus. A value the person set in their own env wins.
+export const COST_SETTINGS = { promptSuggestionEnabled: false, idleCompaction: false, awaySummaryEnabled: false, crossSessionInbound: 'hold' };
+export const COST_ENV = { CLAUDE_CODE_GOAL_CHECKIN_MINUTES: '0', CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'false', CLAUDE_CODE_ENABLE_AWAY_SUMMARY: '0', CLAUDE_CODE_SUBAGENT_MODEL: 'sonnet', CLAUDE_CODE_SUBAGENT_EFFORT: 'medium' };
+// A test run's full output is read on every later step of the chat: keep only its last 100 lines (the summary and failures).
+// Bash only, never a command that already pipes or redirects; pipefail keeps the test's own exit code.
+const TEST_COMMAND = /^\s*(npm (run )?test|npx (vitest|jest)|node --test|pnpm (run )?test|yarn test|pytest|python -m pytest|go test|cargo test|mvn( -\S+)* test|\.?\/?gradlew? test)\b/i;
+export function trimTestCommand(name, input = {}) {
+  const command = String(input?.command || '');
+  if (name !== 'Bash' || !TEST_COMMAND.test(command) || /[|>]|&&|;|\n/.test(command)) return null;
+  return { ...input, command: `set -o pipefail; ${command} 2>&1 | tail -n 100` };
+}
 export function lockedDenial(name, input = {}, cwd = '') {
   if (!LOCKED_READS.has(name)) return `This agent is answering an outside agent and cannot use ${name}. It can only read the files in its public folder.`;
   const root = path.resolve(cwd), wanted = [input.file_path, input.path].filter(value => value !== undefined && value !== '');
@@ -125,6 +137,7 @@ export class ClaudeRunner {
     const env = { ...subscriptionEnv(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
     // Tools of the person's own MCP servers are listed by name and loaded only when needed, not all at the start of every chat.
     if (!env.ENABLE_TOOL_SEARCH) env.ENABLE_TOOL_SEARCH = 'true';
+    for (const [key, value] of Object.entries(COST_ENV)) if (env[key] === undefined) env[key] = value;
     delete env.CLAUDECODE;
     const executable = resolveCommand('claude');
     // Not installed: say so plainly (the chat shows an Install button) instead of the Agent SDK's message about its own binary.
@@ -142,13 +155,18 @@ export class ClaudeRunner {
       disallowedTools: this.run?.locked ? ['AskUserQuestion', 'Bash', 'PowerShell', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'Skill', 'Workflow'] : ['AskUserQuestion'],
       additionalDirectories: this.run?.locked ? [] : [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
       settingSources: this.run?.locked ? [] : ['user', 'project', 'local'],
+      settings: COST_SETTINGS,
       // Through the toolbox (desk_find, desk_run) the agent reaches every skill on demand, so none is listed up front.
       ...(this.gateway ? { skills: [] } : {}),
       hooks: {
         // Every command and file edit is checked first: one that would take down Rex Desk itself is refused, with the reason.
         PreToolUse: [{ hooks: [async input => {
           const reason = (this.run?.locked ? lockedDenial(input?.tool_name, input?.tool_input, this.cwd) : '') || guardTool(input?.tool_name, input?.tool_input, this.guard || {});
-          if (!reason) { const note = this.takeCancelNote(); return note ? { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: note } } : {}; }
+          if (!reason) {
+            const note = this.takeCancelNote(), trimmed = mode === 'bypassPermissions' ? trimTestCommand(input?.tool_name, input?.tool_input) : null;
+            if (trimmed) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: trimmed, ...(note ? { additionalContext: note } : {}) } };
+            return note ? { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: note } } : {};
+          }
           this.event('agent-tool', { tool: 'Blocked by Rex Desk', failed: true, text: reason });
           return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } };
         }] }],
