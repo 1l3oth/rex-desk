@@ -138,3 +138,30 @@ test('a long turn far past the limit stops at the next step and hands off, witho
     assert.equal(store.get('run', run.id).handoffMidTurn, undefined);
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('a late context report from the old session after a fresh start is ignored, and no second handoff fires (L60)', async () => {
+  const store = new Store(temporary('handoff-stale')), prompts = [], reporters = [];
+  const desk = new Desk(store, { root: temporary('handoff-stale-root'), runnerFactory: options => ({ async start(prompt) {
+    prompts.push(prompt); reporters.push(options.event);
+    options.event('context', { used: prompts.length === 1 ? 210000 : prompts.length === 2 ? 215000 : 40000, window: 1000000 });
+    options.event('agent-text', { text: prompts.length === 2 ? `HANDOFF:\n${'a long line of notes\n'.repeat(2000)}` : 'ok' });
+  }, async interrupt() {} }) });
+  try {
+    const run = await desk.startWebTask('fix the login page');
+    await waitFor(() => prompts.length === 3 && store.get('run', run.id).state === 'finished', 'the fresh session carrying on');
+    assert.equal(store.get('run', run.id).contextUsed, 40000, 'the ring shows the fresh session');
+    // The old session's runner reports its size once more, after the reset (the cut turn, a late result).
+    reporters[1]('context', { used: 447000, window: 1000000 });
+    reporters[0]('context', { used: 447000, window: 1000000 });
+    assert.equal(store.get('run', run.id).contextUsed, 40000, 'a stale report does not change the ring');
+    await desk.say(run.id, 'next');
+    await waitFor(() => prompts.length === 4 && store.get('run', run.id).state === 'finished', 'the next turn');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(store.events(run.id, { visible: true }).filter(event => event.kind === 'chat-cleared').length, 1, 'no second handoff');
+    // The handoff file stays about 4k tokens even when the agent's note is long.
+    const folder = path.join(store.directory, 'handoffs'), handoff = readFileSync(path.join(folder, readdirSync(folder)[0]), 'utf8');
+    assert.ok(handoff.length < 16000, `handoff is ${handoff.length} characters`);
+    assert.match(handoff, /cut to keep the handoff short/);
+    assert.equal(store.get('run', run.id).handoffMidTurn, undefined);
+  } finally { await desk.shutdown(); store.close(); }
+});

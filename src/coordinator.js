@@ -82,6 +82,8 @@ const firstTaskReview = project => `This is the first task on ${project} whose w
 const addTokens = (total = {}, more = {}) => Object.fromEntries(['input', 'output', 'cacheRead', 'cacheWrite'].map(key => [key, (total?.[key] || 0) + (more?.[key] || 0)]));
 // Codex on a ChatGPT plan says "The '<model>' model is not supported when using Codex with a ChatGPT account" (model_not_found).
 const MODEL_MISSING = /issue with the selected model|may not have access to it|model[^.]{0,40}(does not exist|not found|is not available|is not supported)|model_not_found/i;
+// Cuts long text at a line end, so the handoff stays about 4k tokens (L60).
+const clip = (text, max) => { if (text.length <= max) return text; const end = text.lastIndexOf('\n', max); return `${text.slice(0, end > max / 2 ? end : max)}\n(cut to keep the handoff short)`; };
 const kiloTokens = value => { const n = Number(value || 0); return n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : `${Math.round(n / 1000)}k`; };
 const terminalStates = new Set(['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked']);
 
@@ -616,6 +618,8 @@ export class Desk {
     // handedOn: this turn ended by queueing the next one (another account, the default model). That turn owns the run's
     // browser, tools, questions and room reply now, so this one's clean-up leaves them alone.
     let run = this.run(runId), token, handedOn = false;
+    // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
+    const turnAt = new Date().toISOString();
     try {
       // A nearly full drive makes the agent fail half way with "ENOSPC"; say so before it starts instead.
       const noRoom = lowDiskMessage([this.store.directory, os.tmpdir()], { min: this.minFreeBytes }); if (noRoom) throw new Error(noRoom);
@@ -692,7 +696,7 @@ export class Desk {
           if (kind === 'session') this.patchRun(runId, { sessionId: data.sessionId });
           if (kind === 'agent-result' && data.tokens) this.patchRun(runId, { lastTokens: { ...data.tokens, steps: data.steps || 0, at: now() }, tokensTotal: addTokens(this.store.get('run', runId)?.tokensTotal, data.tokens) });
           // How full the chat's context is, for the ring by the message box. A 1M-context model says so in its name.
-          if (kind === 'context') { const window = data.window || run.contextWindowReported || (/\[1m\]|-1m\b|1m-context/i.test(`${run.model || ''} ${data.model || ''}`) ? 1000000 : 200000); this.patchRun(runId, { contextUsed: data.used, contextWindow: window, contextAt: now(), ...(data.window ? { contextWindowReported: data.window } : {}) }); this.handoffMidTurn(runId); return; }
+          if (kind === 'context') { if (String(this.store.get('run', runId)?.contextResetAt || '') > turnAt) return; const window = data.window || run.contextWindowReported || (/\[1m\]|-1m\b|1m-context/i.test(`${run.model || ''} ${data.model || ''}`) ? 1000000 : 200000); this.patchRun(runId, { contextUsed: data.used, contextWindow: window, contextAt: now(), ...(data.window ? { contextWindowReported: data.window } : {}) }); this.handoffMidTurn(runId); return; }
           if (kind === 'rate-limit') { this.recordUsage(run.provider, this.accountFor(run) || this.agents.selected(run.provider), data); if (data.status === 'rejected') this.store.event(runId, 'rate-limit', { status: 'rejected', type: data.rateLimitType || '' }); return; }
           // The open session is connected to the Claude app (or could not be): keep its link on the run for the chat to show.
           if (kind === 'remote-control') {
@@ -1106,7 +1110,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (run.roomAgent) { this.patchRun(runId, { handoffMidTurn: undefined }); await this.freshStart(runId, { reason: `automatically, because the conversation ${why}` }); return false; }
     this.patchRun(runId, { autoHandoff: 'writing', handoffShare: share, handoffWhy: why, handoffMidTurn: undefined });
     this.store.event(runId, 'phase', { text: byTokens ? `Context at ${kiloTokens(used)} tokens: writing a handoff for a fresh session` : `Context ${Math.round(100 * share)}% full: writing a handoff for a fresh session` }, true);
-    await this.resume(runId, { silent: true, prompt: 'Your context is nearly full, so this chat moves to a fresh session after this reply. Write the handoff for your successor now, as your whole reply: what the person asked for and what is done, what you are in the middle of, decisions and rules the person gave, files and branches involved, and the next step. Plain English, short lists, no greetings. Do not start new work.' });
+    await this.resume(runId, { silent: true, prompt: 'Your context is nearly full, so this chat moves to a fresh session after this reply. Write the handoff for your successor now, as your whole reply: what the person asked for and what is done, what you are in the middle of, decisions and rules the person gave, files and branches involved, and the next step. Plain English, short lists, no greetings, at most about 500 words. Do not start new work.' });
     return true;
   }
   // /clear in a chat: the conversation so far is written to a handoff file, the agent's session is dropped, and the next message
@@ -1165,17 +1169,17 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const lines = this.store.events(runId, { visible: true, limit: 600 }).filter(event => ['human-message', 'message', 'agent-text'].includes(event.kind) && (event.text || event.message))
       .map(event => `**${event.kind === 'human-message' ? 'The person' : name}** (${String(event.createdAt || '').slice(0, 16).replace('T', ' ')}): ${String(event.text || event.message).trim().slice(0, event.kind === 'human-message' ? 1500 : 700)}`);
     let recent = '';
-    for (const line of lines.reverse()) { if (recent.length + line.length > 9000) break; recent = `${line}\n\n${recent}`; }
+    for (const line of lines.reverse()) { if (recent.length + line.length > 5000) break; recent = `${line}\n\n${recent}`; }
     const task = run.taskId ? this.store.get('task', run.taskId) : null;
     const handoff = [`# Handoff for ${name}`, `Written ${now()} ${reason || 'when the person cleared the conversation (/clear)'}. Read it, then continue from here.`,
-      note ? `## Your own handoff, written just before the fresh start\n${String(note).trim().slice(0, 12000)}` : '',
+      note ? `## Your own handoff, written just before the fresh start\n${clip(String(note).trim(), 8000)}` : '',
       task ? `## Task\n#${task.taskNumber || task.externalId} ${task.titleEn || task.title}${task.url ? `\n${task.url}` : ''}` : '',
       run.worktree ? `## Where the work is\nWorktree: ${run.worktree}${run.branch ? `\nBranch: ${run.branch}` : ''}` : '',
       `## The conversation so far (oldest first, recent part)\n${recent || 'Nothing was said yet.'}`].filter(Boolean).join('\n\n');
     if (agentId) this.distillHandoff(agentId, { note, task, lines });
     const directory = path.join(this.store.directory, 'handoffs'); mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `${runId}-${Date.now()}.md`); writeFileSync(file, handoff);
-    this.patchRun(runId, { contextUsed: 0, sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
+    this.patchRun(runId, { contextUsed: 0, contextResetAt: now(), handoffMidTurn: undefined, sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
     this.store.event(runId, 'chat-cleared', { text: notice ? notice : reason ? `${name}'s context was nearly full, so it starts fresh with your next message and reads a handoff of this chat first.` : `${name} starts fresh with your next message and reads a handoff of what was said before.`, auto: Boolean(reason) }, true);
     return { cleared: true, handoff: file };
   }
