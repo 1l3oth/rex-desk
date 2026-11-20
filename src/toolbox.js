@@ -21,7 +21,13 @@ const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'use'
 // A skill's name and description, from the front matter of its SKILL.md.
 export function readSkill(file) {
   const text = readFileSync(file, 'utf8'), head = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] || '';
-  const field = name => head.match(new RegExp(`^${name}:\\s*(.*)$`, 'mi'))?.[1]?.trim().replace(/^["']|["']$/g, '') || '';
+  const field = name => {
+    const lines = head.split(/\r?\n/), at = lines.findIndex(line => new RegExp(`^${name}:`, 'i').test(line)); if (at < 0) return '';
+    const value = lines[at].replace(new RegExp(`^${name}:\\s*`, 'i'), '').trim();
+    // A YAML block (description: >- or |, then indented lines): the indented lines are the value, joined into one line.
+    if (/^[>|][+-]?$/.test(value)) { const block = []; for (const line of lines.slice(at + 1)) { if (line.trim() && !/^\s/.test(line)) break; block.push(line.trim()); } return block.join(' ').replace(/\s+/g, ' ').trim(); }
+    return value.replace(/^["']|["']$/g, '');
+  };
   return { name: field('name') || path.basename(path.dirname(file)), description: field('description'), file, folder: path.dirname(file) };
 }
 // Skill folders: the person's own (~/.claude/skills), the project's (.claude/skills), and the ones that ship with Rex Desk.
@@ -74,7 +80,13 @@ export class Toolbox {
     const serverLines = Object.keys(servers).sort().map(name => { const known = this.lists.get(name)?.tools || []; return `- ${name}${known.length ? `: ${clip(known.slice(0, 4).map(tool => tool.name).join(', '))}${known.length > 4 ? ` and ${known.length - 4} more` : ''}` : ''}`; });
     let all = []; try { all = this.skills(project).filter(skill => !skill.error && skill.name); } catch { /* no skills */ }
     const skillLines = all.slice(0, skills).map(skill => `- ${skill.name}${skill.description ? `: ${clip(skill.description)}` : ''}`);
-    return { servers: serverLines, skills: skillLines, moreSkills: Math.max(0, all.length - skills) };
+    // The same items as data, for the agent's profile (the panel shows exactly what the instructions name, L53).
+    const items = {
+      servers: Object.keys(servers).sort().map(name => ({ name, tools: (this.lists.get(name)?.tools || []).map(tool => tool.name), error: this.failed.get(name)?.error || '' })),
+      skills: all.slice(0, skills).map(skill => ({ name: skill.name, description: clip(skill.description) })),
+      more: all.slice(skills).map(skill => ({ name: skill.name, description: clip(skill.description) })),
+    };
+    return { servers: serverLines, skills: skillLines, moreSkills: Math.max(0, all.length - skills), items };
   }
 
   // ---------- talking to one MCP server ----------

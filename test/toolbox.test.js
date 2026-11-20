@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Toolbox, rank } from '../src/toolbox.js';
+import { Toolbox, rank, listSkills as listSkillsFrom } from '../src/toolbox.js';
 import { Store } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
 import { createMcp } from '../src/mcp.js';
@@ -158,4 +158,33 @@ test('every agent is told its MCP servers and skills up front, and a manual step
     const plain = JSON.parse((await call('desk_ask', { message: 'Which colour do you want?', wait: false })).content[0].text);
     assert.equal(plain.state, 'pending', 'an ordinary question is never held back');
   } finally { await box.closeAll(); desk.closed = true; }
+});
+
+test('an agent profile lists exactly the MCP servers and skills its instructions name (one source)', async () => {
+  const store = new Store(temporary('toolbox-profile')), box = setup();
+  const desk = new Desk(store, { root: temporary('toolbox-root'), memoryDirectory: temporary('toolbox-memory'), toolbox: box, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  try {
+    const agent = desk.specialists.create({ name: 'Baker', purpose: 'Runs the bakery orders.' });
+    store.put('run', 'r1', { id: 'r1', role: 'specialist', specialistId: agent.id, state: 'finished', createdAt: new Date().toISOString() });
+    store.put('specialist', agent.id, { ...store.get('specialist', agent.id), runId: 'r1' });
+    const server = createMcp(desk, { role: 'specialist', runId: 'r1' });
+    await server._registeredTools.desk_find.handler({ query: 'cake', kind: 'any', limit: 8 }, {});
+    const run = desk.toolsRunOf(agent.id), profile = desk.toolsInventory(run).items, text = desk.toolsText(store.get('run', 'r1'));
+    assert.equal(run.id, 'r1', 'the profile describes the agent\'s own chat');
+    assert.deepEqual(profile.servers.map(item => item.name), ['bakery']); assert.deepEqual(profile.servers[0].tools, ['list_bread', 'order_cake']);
+    for (const item of profile.servers) assert.ok(text.includes(`- ${item.name}`), `${item.name} is in the instructions too`);
+    for (const item of profile.skills) assert.ok(text.includes(`- ${item.name}`), `${item.name} is in the instructions too`);
+    const named = [...text.matchAll(/^- ([^:\n]+)/gm)].map(match => match[1]);
+    assert.deepEqual(named.sort(), [...profile.servers.map(item => item.name), ...profile.skills.map(item => item.name)].sort(), 'nothing more, nothing less');
+    // Past the skills named in the instructions, the rest are "found by search", in the profile and in the instructions alike.
+    const short = box.inventory('', { skills: 1 });
+    assert.equal(short.items.skills.length, 1); assert.equal(short.items.more.length, 1); assert.equal(short.moreSkills, 1);
+  } finally { await box.closeAll(); desk.closed = true; }
+});
+
+test('a skill description written as a YAML block (>- or |) is read as its text, not ">-"', () => {
+  const folder = temporary('toolbox-yaml'), file = path.join(folder, 'aws-auth', 'SKILL.md'); mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, '---\nname: aws-auth\ndescription: >-\n  Adds sign-in to web apps\n  with Amazon Cognito.\nlicense: MIT\n---\n# body\n');
+  const skill = listSkillsFrom([folder])[0];
+  assert.equal(skill.description, 'Adds sign-in to web apps with Amazon Cognito.'); assert.equal(skill.error, undefined);
 });

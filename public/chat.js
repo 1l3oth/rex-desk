@@ -1421,17 +1421,20 @@ document.addEventListener('change', async event => {
 // Forms inside popups are handled by their buttons; pressing Enter never reloads the page.
 document.addEventListener('submit', event => { if (event.target.closest?.('.settings-pop,.acct-dialog,.vdialog,.src-dialog')) event.preventDefault(); });
 
-// The MCP servers and skills an agent has, in its profile panel.
+// The MCP servers and skills an agent has, in its profile panel: exactly what its instructions name (one list, read by both),
+// then the skills it can find by searching.
 function toolsHtml(id) {
   const tools = ui.tools?.[id];
-  if (!tools || tools.loading) { ui.tools = ui.tools || {}; if (!tools) { ui.tools[id] = { loading: true, skills: [], commands: [], mcp: [] }; void api(`/agents/tools?agent=${encodeURIComponent(id)}`).then(found => { ui.tools[id] = found; renderAll(); }).catch(() => {}); } return `<section class="aps-sec"><h3>${t`Tools`}</h3><p class="aps-faint">${t`Checking…`}</p></section>`; }
-  const server = item => `<li><span class="tl-type ${esc(item.type)}">${esc(item.type === 'stdio' ? 'local' : item.type)}</span><b>${esc(item.name)}</b><small>${esc(item.where || '')}${item.source ? ` · ${esc(item.source === 'account' ? t('from the Claude account') : item.source === 'project' ? t('from the project') : item.source)}` : ''}</small></li>`;
-  const skills = [...(tools.commands || []), ...(tools.skills || [])];
+  if (!tools || tools.loading) { ui.tools = ui.tools || {}; if (!tools) { ui.tools[id] = { loading: true, servers: [], skills: [], more: [] }; void api(`/agents/tools?agent=${encodeURIComponent(id)}`).then(found => { ui.tools[id] = found; renderAll(); }).catch(() => {}); } return `<section class="aps-sec"><h3>${t`Tools`}</h3><p class="aps-faint">${t`Checking…`}</p></section>`; }
+  const servers = tools.servers || [], skills = tools.skills || [], more = tools.more || [];
+  const server = item => `<li class="${item.error ? 'tl-failed' : ''}"><b>${esc(item.name)}</b><small>${item.error ? `${t`Could not connect`} · ${esc(item.error)}` : item.tools.length ? esc(item.tools.join(', ')) : t('Its tools are listed the first time it is used.')}</small></li>`;
+  const skill = item => `<li><b>${esc(item.name)}</b><small>${esc(item.description || '')}</small></li>`;
+  const count = more.length ? t`${servers.length} MCP · ${skills.length} skills + ${more.length} by search` : t`${servers.length} MCP · ${skills.length} skills`;
   // One line until opened: the lists are long, and rarely what a chat needs.
-  return `<details class="aps-tools"><summary><h3>${t`Tools`}</h3><span class="aps-faint">${t`${tools.mcp.length} MCP · ${skills.length} skills`}</span></summary>
-    <ul class="tl-list">${tools.mcp.map(server).join('')}</ul>
-    <ul class="tl-list">${skills.map(item => `<li><b>/${esc(item.name)}</b><small>${esc(item.description || '')}</small></li>`).join('') || `<li class="muted small">${t`None.`}</li>`}</ul>
-    <p class="aps-faint">${t`Type / in the message box to use one.`}</p></details>`;
+  return `<details class="aps-tools"><summary><h3>${t`Tools`}</h3><span class="aps-faint">${count}</span></summary>
+    <h4 class="tl-h">${t`MCP servers`}</h4><ul class="tl-list">${servers.map(server).join('') || `<li class="muted small">${t`None.`}</li>`}</ul>
+    <h4 class="tl-h">${t`Skills named in its instructions`}</h4><ul class="tl-list">${skills.map(skill).join('') || `<li class="muted small">${t`None.`}</li>`}</ul>
+    ${more.length ? `<details class="tl-more"><summary>${t`${more.length} more it can find with search`}</summary><ul class="tl-list">${more.map(skill).join('')}</ul></details>` : ''}</details>`;
 }
 
 // ---------- a sign-in an agent needs: open a terminal running the command, sign in, say done ----------

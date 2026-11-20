@@ -5,7 +5,6 @@ import http from 'node:http';
 import { gzipSync } from 'node:zlib';
 import { tailscaleAddresses } from './peers.js';
 import QRCode from 'qrcode';
-import { agentTools } from './agent-tools.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -798,8 +797,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/local-ai/models' && request.method === 'DELETE') { const status = await desk.localAi.remove(String(url.searchParams.get('model') || '')); desk.specialists.normalizeModels(); return json(response, 200, status); }
       if (url.pathname === '/api/local-ai/huggingface' && request.method === 'GET') return json(response, 200, { items: await desk.localAi.searchHuggingFace(url.searchParams.get('q')) });
       if (url.pathname === '/api/agents/tools' && request.method === 'GET') {
-        const id = url.searchParams.get('agent') || 'main', agent = id === 'main' ? null : store.get('specialist', id);
-        return json(response, 200, agentTools({ profile: agent?.profile || desk.agents.selected('claude') || '', projectPath: desk.specialists.folder(agent), extra: desk.orbitAccountMcp() }));
+        // Exactly what this agent is told it has (its instructions read the same list), not a general list for the computer.
+        return json(response, 200, desk.toolsInventory(desk.toolsRunOf(url.searchParams.get('agent') || 'main')).items);
       }
       if (url.pathname === '/api/agents/login' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.agents.login(aiProvider(input.provider || 'claude'), String(input.profile || ''))); }
       if (url.pathname === '/api/agents/add' && request.method === 'POST') { const input = await body(request), provider = aiProvider(input.provider || 'claude'); const created = desk.agents.addProfile(provider, input.name); return json(response, 200, { ...created, ...desk.agents.login(provider, created.profile) }); }

@@ -1093,9 +1093,19 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // note: the agent's own handoff (automatic handoff); reason: why it starts fresh, for the handoff and the chat.
   // What the agent has beyond its everyday tools, named up front (L53): an agent scripted its own browser and asked the person to
   // sign in by hand while a browser MCP was one desk_find away.
-  toolsText(run) {
+  // One source for what an agent has: its instructions (toolsText) and its profile (/api/agents/tools) both read this.
+  toolsInventory(run) {
     const project = run?.worktree || run?.projectPath || '';
-    let list = { servers: [], skills: [], moreSkills: 0 }; try { list = this.toolbox.inventory(project); } catch { /* no toolbox */ }
+    try { return this.toolbox.inventory(project); } catch { return { servers: [], skills: [], moreSkills: 0, items: { servers: [], skills: [], more: [] } }; }
+  }
+  // The run an agent's profile describes: its personal chat, or (no chat yet) its own folder.
+  toolsRunOf(agentId) {
+    if (agentId === 'main') { const main = latestLocalMain(this.store.list('run')); return main || { projectPath: '' }; }
+    const agent = this.store.get('specialist', agentId); if (!agent) return { projectPath: '' };
+    return (agent.runId && this.store.get('run', agent.runId)) || { projectPath: this.specialists.folder(agent) || '' };
+  }
+  toolsText(run) {
+    const list = this.toolsInventory(run);
     const parts = [list.servers.length ? `Your MCP servers (use them through desk_find and desk_run):\n${list.servers.join('\n')}` : '',
       list.skills.length ? `Your skills (desk_find finds them; desk_run gives their instructions):\n${list.skills.join('\n')}${list.moreSkills ? `\n(and ${list.moreSkills} more: search desk_find)` : ''}` : ''].filter(Boolean);
     return [...parts, TOOLS_FIRST_RULE].join('\n') + '\n';

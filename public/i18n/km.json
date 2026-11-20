@@ -643,7 +643,6 @@
  "From": "ពី",
  "From elevenlabs.io → Profile → API keys": "ពី elevenlabs.io → ប្រវត្តិរូប → API keys",
  "From Hugging Face": "ពី Hugging Face",
- "from the Claude account": "ពីគណនី Claude",
  "from the project": "ពីគម្រោង",
  "Full card": "កាតពេញ",
  "Gemini": "Gemini",
@@ -1738,7 +1737,6 @@
  "Two files side by side (or drag a tab to the right)": "ឯកសារពីរក្បែរគ្នា (ឬអូសផ្ទាំងទៅខាងស្ដាំ)",
  "Two quick questions so we can make Rex Desk better for people like you. Skip them if you like.": "សំណួរខ្លីពីរ ដើម្បីឱ្យយើងអាចធ្វើឱ្យ Rex Desk ប្រសើរជាងមុនសម្រាប់មនុស្សដូចអ្នក។ រំលងវាបានប្រសិនបើអ្នកចង់។",
  "Type / for commands · hold Space to talk": "វាយ / សម្រាប់ពាក្យបញ្ជា · សង្កត់ Space ដើម្បីនិយាយ",
- "Type / in the message box to use one.": "វាយ / ក្នុងប្រអប់សារដើម្បីប្រើមួយ។",
  "Type a command. Voice can be installed in Rex Desk → Settings → Jev and voice.": "វាយពាក្យបញ្ជា។ សំឡេងអាចត្រូវបានដំឡើងក្នុង Rex Desk → ការកំណត់ → Jev និងសំឡេង។",
  "Type it again": "វាយម្ដងទៀត",
  "Type or browse to a project folder first.": "វាយ ឬរកមើលថតគម្រោងជាមុនសិន។",
@@ -2370,5 +2368,10 @@
  "Open the full profile": "បើកប្រវត្តិរូបពេញ",
  "Tasks from": "កិច្ចការពី",
  "{0} MCP · {1} skills": "MCP {0} · ជំនាញ {1}",
- "None.": "គ្មាន។"
+ "None.": "គ្មាន។",
+ "Could not connect": "មិនអាចភ្ជាប់បានទេ",
+ "Its tools are listed the first time it is used.": "ឧបករណ៍របស់វានឹងត្រូវបង្ហាញនៅពេលប្រើលើកដំបូង។",
+ "{0} MCP · {1} skills + {2} by search": "{0} MCP · {1} ជំនាញ + {2} តាមការស្វែងរក",
+ "Skills named in its instructions": "ជំនាញដែលមានឈ្មោះក្នុងការណែនាំរបស់វា",
+ "{0} more it can find with search": "{0} ទៀតដែលវាអាចរកឃើញតាមការស្វែងរក"
 }
