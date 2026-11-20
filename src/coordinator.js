@@ -35,6 +35,7 @@ import { Worktrees, longPath } from './worktrees.js';
 import { ProjectRules } from './project-rules.js';
 import { ChatSplits } from './chat-split.js';
 import { Pins } from './pins.js';
+import { Storage } from './storage.js';
 import { lowDiskMessage, friendlyDiskError } from './disk.js';
 import { voiceBriefing, VOICE_RULE, VOICE_REMINDER, VOICE_GREETING } from './voice-briefing.js';
 import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
@@ -181,6 +182,7 @@ export class Desk {
     this.projectRules = new ProjectRules(this);
     this.chatSplits = new ChatSplits(this);
     this.pins = new Pins(this.store);
+    this.storage = new Storage(this);
     // A phone push opens Rex Desk on the phone when it can reach this computer (Tailscale and remote access on).
     this.notifier.pushClick = () => this.peers.settings().remote && this.port ? this.peers.addresses(this.port)[0] || '' : '';
     this.worktreeRoot = path.join(path.dirname(store.directory), 'worktrees');

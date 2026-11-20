@@ -959,6 +959,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (fileMatch && request.method === 'GET') return json(response, 200, desk.fileForPerson(fileMatch[1]));
       if (fileMatch && request.method === 'POST') return json(response, 200, desk.saveFileForPerson(fileMatch[1], (await body(request)).content));
       const interactionMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/answer$/);
+      // Settings › Storage: Rex Desk's own folders, what takes the space, deleting files and one-click clean-ups.
+      if (url.pathname === '/api/storage' && request.method === 'GET') return json(response, 200, { usage: desk.storage.usage(), places: desk.storage.places().map(({ id, label, directory }) => ({ id, label, directory })), suggestions: desk.storage.suggestions() });
+      if (url.pathname === '/api/storage/list' && request.method === 'GET') return json(response, 200, desk.storage.list(url.searchParams.get('place') || '', url.searchParams.get('folder') || ''));
+      if (url.pathname === '/api/storage/search' && request.method === 'GET') return json(response, 200, { items: desk.storage.search(url.searchParams.get('q') || '') });
+      if (url.pathname === '/api/storage/file' && request.method === 'GET') return serveFile(request, response, desk.storage.file(url.searchParams.get('place') || '', url.searchParams.get('path') || ''), { sandbox: true });
+      if (url.pathname === '/api/storage/reveal' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.storage.reveal(String(input.place || ''), String(input.path || ''))); }
+      if (url.pathname === '/api/storage/delete' && request.method === 'POST') return json(response, 200, desk.storage.remove((await body(request)).items || []));
+      if (url.pathname === '/api/storage/clean' && request.method === 'POST') return json(response, 200, desk.storage.clean(String((await body(request)).id || '')));
       // Pins: a file, picture or link pinned in a chat, for its Pinned tab.
       if (url.pathname === '/api/pins' && request.method === 'POST') return json(response, 200, desk.pins.add(await body(request), { by: 'you' }));
       const pinMatch = url.pathname.match(/^\/api\/pins\/([^/]+)$/);
@@ -1124,6 +1132,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const uploads = path.resolve(store.media('uploads')); let file = path.resolve(String(url.searchParams.get('path') || ''));
         // A chat restored from the backup into another data folder (a reinstall, a new computer) still names the old folder.
         const moved = /[\\/]uploads[\\/]([^\\/]+)[\\/]([^\\/]+)$/.exec(String(url.searchParams.get('path') || ''));
+        // Deleted in Settings, Storage: the chat shows "File removed" instead of fetching a copy back.
+        if (moved && desk.storage.gone(`data/uploads/${moved[1]}/${moved[2]}`)) { response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }); return response.end('This file was deleted.'); }
         if (moved && !file.toLowerCase().startsWith(`${uploads.toLowerCase()}${path.sep}`)) { const here = path.join(uploads, moved[1], moved[2]); if (existsSync(here)) file = here; }
         if (!file.toLowerCase().startsWith(`${uploads.toLowerCase()}${path.sep}`) || !existsSync(file)) {
           // A picture attached in a chat on another computer comes from the shared copy of that chat.
@@ -1209,6 +1219,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const artifactMatch = url.pathname.match(/^\/artifacts\/([a-f0-9-]+)\/([^/]+)$/);
       if (artifactMatch) {
         const [, runId, encodedFile] = artifactMatch, file = decodeURIComponent(encodedFile);
+        // Deleted in Settings, Storage: the chat shows "File removed" instead of fetching a copy back.
+        if (desk.storage.gone(`data/artifacts/${runId}/${path.basename(file)}`)) { response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }); return response.end('This file was deleted.'); }
         const artifact = store.list('artifact').find(item => item.runId === runId && item.file === file);
         if (!artifact) {
           // Evidence from a chat on another computer comes from the shared copy of that chat.

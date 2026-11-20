@@ -7,6 +7,7 @@ import { trackerDraft, readTrackers, trackersHtml, trackerSources, trackerClick,
 import { runSettingsTour } from '/chat-settings-tour.js';
 import { loadLocalAi, localAiHtml, localAiClick } from '/chat-local-ai.js';
 import { loadTourAi, aiListHtml, tourAiClick } from '/chat-tour-ai.js';
+import { loadStorage, storageHtml, storageClick, storageInput } from '/chat-storage.js';
 // Settings, as a popup over the chat: the sections on the left, one section's settings on the right. Each section saves on its own,
 // so a change never waits for the rest. It replaces the old "Issues & settings" page.
 // The plan, bought and managed right here with the account this computer is signed in to: Stripe's payment page opens in the
@@ -69,6 +70,7 @@ const SECTIONS = [
   ['tools', t('Tools and skills'), t('MCP servers, skills, commands, hooks')],
   ['devices', t('Devices and phone'), t('Your other computers, your phone')],
   ['plan', t('Plan and billing'), t('Your plan, space, payments')],
+  ['storage', t('Storage'), t('What uses space, clean up')],
   ['backup', t('Backup and updates'), t('Cloud copy, app updates')],
   ['connect', t('Connect another AI'), t('Let another assistant use Rex Desk')],
   ['about', t('About'), t('Version, storage and what it holds')],
@@ -78,12 +80,13 @@ const GROUPS = [
   [t('You'), ['general', 'notify', 'jev', 'plan']],
   [t('Agents'), ['agents', 'accounts', 'localai', 'tools', 'schedule', 'signins']],
   [t('Work'), ['projects', 'sources', 'connect']],
-  [t('Data and devices'), ['folders', 'backup', 'devices', 'about']],
+  [t('Data and devices'), ['folders', 'storage', 'backup', 'devices', 'about']],
 ];
 // An icon for each section, shown in the phone's list of sections.
 const ST_ICON = {
   tools: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L4 16.8V20h3.2l5.3-5.3a4 4 0 0 0 5.2-5.4l-2.4 2.4-2.6-.6-.6-2.6z"/>',
   about: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  storage: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
   general: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
   folders: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5 12 16l2.5-2.5"/>',
   notify: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
@@ -264,6 +267,7 @@ export function openSettings(ctx, section = 'general') {
     accounts: () => `<h2>${t`AI accounts`}</h2><p class="muted">${t`The AI your agents think with. Press Set up or Sign in on one: Rex Desk installs what is missing, then opens the sign-in in your browser. Use this picks the one new agents use.`}</p>${aiListHtml(ctx, state)}
       <h3>${t`More accounts`}</h3><p class="muted">${t`Add a second account of the same AI, switch between them, and see how much of each plan is used.`}</p>${tip('accounts', t('One account is enough to start. Add a second only if you often hit the usage limit.'))}<button type="button" class="btn" data-st-open="accounts">${t`Manage accounts`}</button>`,
     localai: () => `<h2>${t`Local AI`}</h2>${localAiHtml(ctx, state)}`,
+    storage: () => storageHtml(ctx, state),
     projects: () => {
       // Each project that has agents: where its agents may work, and whether their chats may go to the cloud.
       const projectRulesHtml = () => {
@@ -412,6 +416,7 @@ export function openSettings(ctx, section = 'general') {
     if (id === 'about') await loadAbout();
     if (id === 'folders') { await loadFolders(ctx, state); if (state.section === 'folders') draw(); }
     if (id === 'localai') { await loadLocalAi(ctx, state); if (state.section === 'localai') draw(); }
+    if (id === 'storage') { await loadStorage(ctx, state); if (state.section === 'storage') draw(); }
     if (id === 'accounts') { await loadTourAi(ctx, state); if (state.section === 'accounts') draw(); }
     back.querySelector('[data-st-panel]')?.scrollTo({ top: 0 });
   }
@@ -426,6 +431,7 @@ export function openSettings(ctx, section = 'general') {
       if (await trackerClick(ctx, state, target, back, draw)) return;
       if (await folderClick(ctx, state, target, draw)) return;
       if (state.section === 'localai' && await localAiClick(ctx, state, target, draw)) return;
+      if (state.section === 'storage' && await storageClick(ctx, state, target, draw)) return;
       if (state.section === 'accounts' && target.closest('[data-tai-local]')) { await goSection('localai'); return; }
       if (state.section === 'accounts' && await tourAiClick(ctx, state, target, () => { if (state.section === 'accounts' && document.body.contains(back)) draw(); }, () => state.section === 'accounts' && document.body.contains(back))) return;
       // A feature tour circles the real controls of a section; "Take the tour" goes through every section.
@@ -553,6 +559,7 @@ export function openSettings(ctx, section = 'general') {
   back.addEventListener('input', event => {
     // Tools and skills: the search box narrows the skill list as you type, with no redraw.
     if (event.target.matches?.('[name="tb-filter"]')) { const words = event.target.value.trim().toLowerCase(); for (const row of event.target.nextElementSibling?.querySelectorAll('.tb-row') || []) row.hidden = Boolean(words) && !row.textContent.toLowerCase().includes(words); return; }
+    if (state.section === 'storage' && storageInput(ctx, state, event, draw)) return;
     trackerInput(back, state, event, draw);
   });
   back.addEventListener('change', event => { trackerInput(back, state, event, draw); });
@@ -607,6 +614,7 @@ export function openSettings(ctx, section = 'general') {
   if (section === 'about') void loadAbout();
   if (section === 'folders') void loadFolders(ctx, state).then(() => state.section === 'folders' && draw());
   if (section === 'localai') void loadLocalAi(ctx, state).then(() => state.section === 'localai' && draw());
+  if (section === 'storage') void loadStorage(ctx, state).then(() => state.section === 'storage' && draw());
   if (section === 'accounts') void loadTourAi(ctx, state).then(() => state.section === 'accounts' && draw());
   if (section === 'general') void api('/autostart').then(result => { state.extra.autostart = result; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
   // The Notifications tab saves on change; redraw it when its settings come back changed, keeping the scroll.
