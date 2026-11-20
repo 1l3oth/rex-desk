@@ -9,6 +9,8 @@ const FOLLOW = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stro
 const SCREEN = '<svg viewBox="0 0 48 40" width="44" height="36" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="38" height="24" rx="3"/><path d="M18 35h12M24 28v7"/></svg>';
 const STEPS = () => [['saved', t('Work saved')], ['committed', t('Committed')], ['moved', t('Moved')], ['pickedUp', t('Picked up')]];
 const RECENT = 120000;
+// A failed move keeps its one-line reason on screen for half an hour, then the control is quiet again.
+const FAILED_FOR = 30 * 60000;
 
 // The person's computers: this one and the others they linked (Devices). Phones are never in this list.
 export function computers(ui) {
@@ -20,7 +22,7 @@ export function computers(ui) {
 const nodeOf = (ui, agent) => agent.node || ui.snap?.devices?.self?.id || 'here';
 const nameOf = (ui, agent) => agent.device || computers(ui).find(item => item.id === nodeOf(ui, agent))?.name || t('this computer');
 // A move the server is doing, or did in the last two minutes (its steps stay lit for a moment, then the chips go away).
-const moveOf = agent => { const move = agent.move; if (!move || !move.steps) return null; return move.state === 'running' || move.state === 'failed' || Date.now() - Date.parse(move.at || 0) < RECENT ? move : null; };
+const moveOf = agent => { const move = agent.move; if (!move || !move.steps) return null; const age = Date.now() - Date.parse(move.at || 0); return move.state === 'running' || (move.state === 'failed' && age < FAILED_FOR) || age < RECENT ? move : null; };
 
 // Full profile, Setup tab.
 export function whereHtml(ctx, agent) {
