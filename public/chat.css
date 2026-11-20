@@ -2203,7 +2203,7 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .pseg .tab{white-space:nowrap;min-width:0}
 
 /* ---- Agent profile: a compact header and one tab at a time ---- */
-.page.agp{max-width:920px;margin:0;padding:26px clamp(20px,3vw,40px) 48px;display:flex;flex-direction:column;gap:0}
+.page.agp{max-width:920px;margin:0;padding:36px clamp(20px,3vw,40px) 48px;display:flex;flex-direction:column;gap:0}
 .agp-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:16px;align-items:center;padding-bottom:18px;border-bottom:0}
 .agp-head .av.xl{width:64px;height:64px;font-size:22px}
 .agp-av{padding:0;border:0;background:none;border-radius:50%;cursor:pointer}.agp-av:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
@@ -2243,7 +2243,7 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .agp-control{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0}.agp-control small{font-size:11.5px;color:var(--muted)}
 .agp .agp-danger{flex-direction:row;align-items:center;justify-content:space-between}.agp-danger p{margin:0;font-size:12.5px;color:var(--muted)}
 @media (max-width:760px){
-  .page.agp{padding:16px 14px 40px}
+  .page.agp{padding:22px 14px 40px}
   .agp-head{grid-template-columns:auto minmax(0,1fr);gap:12px}.agp-actions{grid-column:1/-1}.agp-actions .btn{flex:1}
   .agp-head .av.xl{width:52px;height:52px;font-size:18px}
   .agp-name input{font-size:18px}
@@ -2253,7 +2253,9 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 
 /* ---- The chat side panel's Profile tab ---- */
 .side-body.aps{display:flex;flex-direction:column;gap:0;padding:14px 14px 24px}
-.aps-head{display:flex;align-items:center;gap:11px;padding:2px 0 12px}
+.aps-head{display:flex;align-items:center;gap:11px;padding:0 0 14px}
+/* The panel's own padding: the other side tabs' rule (.side.info .side-body) sets the top to 0, so the header sat on the tab bar. */
+.side.info .side-body.aps{padding:18px 16px 24px}
 .aps-head .av-edit{padding:0;border:0;background:none;border-radius:50%;cursor:pointer;flex:none}
 .aps-head .av.sm{width:44px;height:44px;font-size:16px}
 .aps-who{flex:1;min-width:0}.aps-who h2{margin:0;font-size:15px;font-weight:650;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
