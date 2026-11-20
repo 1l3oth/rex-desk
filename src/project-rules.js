@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { now } from './store.js';
 
@@ -96,7 +97,17 @@ export class ProjectRules {
     // Steps before the chat is here wait until it is (so they come after its earlier messages); a failure is written at once.
     const steps = [], write = (name, text, extra) => this.store.event(runId, 'move-step', { step: name, text, agentId: agent.id, from, to: peers.self.name, ...extra }, true);
     let arrived = false;
-    const step = (name, text, extra = {}) => { if (!runId) return; if (arrived || name === 'failed') write(name, text, extra); else steps.push([name, text, extra]); };
+    // The same steps live on the agent's own record too (shared with every computer), for the profile's chips (L57 UI):
+    // move = { id, from, to, state: running | done | failed, steps: { saved, committed, moved, pickedUp } (true once done), error (one line, when failed), at (last change) }.
+    const moveId = randomUUID(), keys = { saved: 'saved', committed: 'committed', moved: 'moved', 'picked-up': 'pickedUp' };
+    const mark = (name, text) => {
+      const current = this.store.get('specialist', agent.id); if (!current) return;
+      const move = current.move?.id === moveId ? current.move : { id: moveId, from: agent.node, to: peers.self.id, state: 'running', steps: { saved: false, committed: false, moved: false, pickedUp: false }, error: '', at: now() };
+      const next = { ...move, at: now(), steps: { ...move.steps, ...(keys[name] ? { [keys[name]]: true } : {}) }, ...(name === 'failed' ? { state: 'failed', error: text } : name === 'picked-up' ? { state: 'done' } : {}) };
+      this.store.put('specialist', agent.id, { ...current, move: next });
+    };
+    mark('start');
+    const step = (name, text, extra = {}) => { mark(name, text); if (!runId) return; if (arrived || name === 'failed') write(name, text, extra); else steps.push([name, text, extra]); };
     // 1. A reply in progress on the other computer is waited for (up to `wait`), not cut off.
     const until = Date.now() + wait;
     while (['busy', 'replying', 'waiting'].includes(peers.statusOf(this.store.get('specialist', agent.id) || agent).state)) {
@@ -122,7 +133,7 @@ export class ProjectRules {
     const repository = this.store.config().repositories.find(item => path.resolve(item.path).toLowerCase() === path.resolve(folder).toLowerCase());
     const copy = runId ? this.store.get('chatcopy', runId) : null, local = runId ? this.store.get('run', runId) : null;
     let carried = 0;
-    if (local && WORKING.includes(local.state)) throw new Error(`${agent.name} is still working in its chat here. Stop it first.`);
+    if (local && WORKING.includes(local.state)) { step('failed', `${agent.name} is still working in its chat here.`); throw new Error(`${agent.name} is still working in its chat here. Stop it first.`); }
     if (copy?.run && copy.node !== peers.self.id) {
       // Only what this computer does not have yet is added: nothing when the chat is new here, the newer part when it was here before.
       const last = local ? this.store.events(runId, { visible: true, limit: 1 }).at(-1)?.createdAt || '' : '';

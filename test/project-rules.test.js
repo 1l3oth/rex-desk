@@ -123,6 +123,10 @@ test('a move saves the work first and shows each step; when saving fails the age
     assert.equal(store.get('run', 'r11').worktree, result.worktree); assert.equal(store.get('run', 'r11').branch, 'rex/mv3/cart');
     const steps = store.events('r11', { visible: true, limit: 50 }).filter(event => event.kind === 'move-step').map(event => event.step);
     assert.deepEqual(steps, ['saved', 'committed', 'moved', 'picked-up']);
+    // The same steps live on the agent record (shared with the other computer) for the profile's chips.
+    const done = store.get('specialist', 'mv3').move;
+    assert.equal(done.state, 'done'); assert.deepEqual(done.steps, { saved: true, committed: true, moved: true, pickedUp: true }); assert.equal(done.error, '');
+    assert.ok(Date.parse(done.at) > 0, 'at is the time of the last change');
     // Saving fails there: nothing moves, and the chat says why in one line.
     agent('mv4', { node: 'work-pc', runId: 'r12' });
     store.put('run', 'r12', { id: 'r12', role: 'specialist', specialistId: 'mv4', state: 'finished', createdAt: new Date().toISOString() });
@@ -131,5 +135,7 @@ test('a move saves the work first and shows each step; when saving fails the age
     assert.equal(store.get('specialist', 'mv4').node, 'work-pc', 'it stayed where it was');
     const failed = store.events('r12', { visible: true, limit: 50 }).filter(event => event.kind === 'move-step');
     assert.equal(failed.length, 1); assert.equal(failed[0].step, 'failed'); assert.match(failed[0].text, /stayed on .*never committed/);
+    const broken = store.get('specialist', 'mv4').move;
+    assert.equal(broken.state, 'failed'); assert.match(broken.error, /never committed/); assert.deepEqual(broken.steps, { saved: false, committed: false, moved: false, pickedUp: false });
   } finally { await close(); }
 });
