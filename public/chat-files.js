@@ -48,8 +48,21 @@ async function codeMirror(ext) {
 // ---------- opening ----------
 const extOf = name => { const lower = name.toLowerCase(); return lower === 'dockerfile' ? 'dockerfile' : lower.includes('.') ? lower.split('.').pop() : ''; };
 const remember = () => { if (state.standalone) return; try { localStorage.setItem('rex-desk-files', JSON.stringify({ paths: state.tabs.map(tab => tab.path), active: state.active, shown: state.shown })); } catch { /* private window */ } };
+// One file window only (L45): once it is popped out, every file opened after that goes to it as a new tab and it comes to
+// the front. The popped window says it is open every 2 s on this channel; closed (or not heard for 5 s), files open in the app.
+const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('rex-files') : null;
+let poppedAt = 0, popWindow = null;
+const popped = () => !state.standalone && Date.now() - poppedAt < 5000;
+channel?.addEventListener('message', event => {
+  const data = event.data || {};
+  if (data.type === 'here') poppedAt = data.open ? Date.now() : 0;
+  else if (data.type === 'open' && state.standalone && state.ctx) { window.focus(); void openFile(state.ctx, data.path, data.options || {}); }
+  else if (data.type === 'ask' && state.standalone) channel.postMessage({ type: 'here', open: true });
+});
+channel?.postMessage({ type: 'ask' });
 export async function openFile(ctx, input, { line = 0, endLine = 0, run = '', room = '', view = '' } = {}) {
   state.ctx = ctx;
+  if (popped()) { channel.postMessage({ type: 'open', path: input, options: { line, endLine, run, room, view } }); try { if (popWindow && !popWindow.closed) popWindow.focus(); } catch { /* another app's window */ } return; }
   try {
     const info = await ctx.api(`/files/open?path=${encodeURIComponent(input)}${run ? `&run=${encodeURIComponent(run)}` : ''}${room ? `&room=${encodeURIComponent(room)}` : ''}`);
     let index = state.tabs.findIndex(tab => tab.path === info.path);
@@ -402,8 +415,11 @@ async function onClick(event) {
       // The open files move to a window of their own; unsaved edits stay here until saved.
       const unsaved = state.tabs.filter(dirty); if (unsaved.length) { toast(t`Save ${unsaved.map(item => item.name).join(', ')} first, then open in its own window.`, true); return; }
       const paths = state.tabs.map(item => item.page || item.path), active = state.tabs[state.active]?.page || state.tabs[state.active]?.path || '';
+      // Already popped out: these files join that window as tabs; no second window.
+      if (popped()) { for (const path of paths) channel.postMessage({ type: 'open', path, options: /^\/artifacts\//.test(path) ? { view: 'preview' } : {} }); }
       const page = `/files#${encodeURIComponent(JSON.stringify({ paths, active }))}`;
-      const opened = window.open(page, `rexfiles-${Date.now()}`, 'popup,width=1200,height=820');
+      const opened = popped() ? true : window.open(page, 'rexfiles', 'popup,width=1200,height=820');
+      if (opened && opened !== true) { popWindow = opened; poppedAt = Date.now(); }
       // Where windows are blocked (an older desktop app, a strict browser), the page opens in the normal browser instead.
       if (!opened) { try { await api('/open-page', { method: 'POST', data: { path: page } }); toast(t('Opened in your browser.')); } catch (error) { toast(error.message, true); return; } }
       for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.second = -1; state.shown = false; remember(); draw();
@@ -432,6 +448,10 @@ async function onClick(event) {
 export async function standaloneFiles(ctx, { paths = [], active = '' } = {}) {
   state.ctx = ctx; state.standalone = true; state.big = true; document.body.classList.add('fw-alone');
   window.rexOpenFile = (path, options) => openFile(ctx, path, options);
+  // The app windows learn that this window is open, and send new files here (see popped()).
+  const here = open => channel?.postMessage({ type: 'here', open });
+  here(true); setInterval(() => here(true), 2000);
+  window.addEventListener('pagehide', () => here(false));
   window.addEventListener('beforeunload', event => { if (state.tabs.some(dirty)) { event.preventDefault(); event.returnValue = ''; } });
   for (const path of paths) await openFile(ctx, path, /^\/artifacts\//.test(path) ? { view: 'preview' } : {});
   const index = state.tabs.findIndex(tab => (tab.page || tab.path) === active); if (index >= 0) { show(index); draw(); }
