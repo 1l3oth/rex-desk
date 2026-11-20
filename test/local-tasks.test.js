@@ -59,3 +59,14 @@ test('updating a task without a project keeps its project', async () => {
   assert.equal(desk.localTasks.update('L1', { comment: 'on it' }).projectSlug, 'shop');
   assert.equal(desk.localTasks.update('L1', { project: '' }).projectSlug, '');
 });
+
+test('desk_task finds a Rex Desk task by its number (L37, #L37, l37, 37), the same way desk_update_task does', async () => {
+  const { desk } = setup();
+  const task = await desk.localTasks.create({ title: 'Look tasks up by number', project: 'shop' }, { by: 'you' });
+  for (const ref of [task.id, task.taskNumber, `#${task.taskNumber}`, task.taskNumber.toLowerCase(), task.taskNumber.slice(1)]) {
+    assert.equal((await desk.sources.taskDetail(ref)).id, task.id, `desk_task "${ref}"`);
+    assert.equal(desk.localTasks.update(ref, { comment: `by ${ref}` }).id, task.id, `desk_update_task "${ref}"`);
+  }
+  await assert.rejects(desk.sources.taskDetail('L999'), /Task not found/);
+  await assert.rejects(desk.sources.taskDetail('Lx'), /Task not found/);
+});

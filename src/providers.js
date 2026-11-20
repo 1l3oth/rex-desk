@@ -1,5 +1,6 @@
 import { orbitTasks, orbitStatus, orbitCall } from './orbit.js';
 import { now } from './store.js';
+import { findTask } from './local-tasks.js';
 
 const text = value => String(value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 const identity = value => String(value ?? '').trim().toLowerCase();
@@ -367,7 +368,7 @@ export class Sources {
     return [...new Map(tasks.map(task => [task.id, task])).values()];
   }
   async taskDetail(taskId, { refresh = false } = {}) {
-    const task = this.store.get('task', taskId);
+    const task = findTask(this.store, taskId);
     if (!task) throw new Error('Task not found.');
     if (task.demo || (!refresh && task.detailLoaded !== false)) return task;
     const source = this.store.config().sources.find(item => item.id === task.sourceId);

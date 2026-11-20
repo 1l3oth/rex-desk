@@ -16,11 +16,19 @@ const text = (value, limit) => String(value ?? '').replace(/\r\n/g, '\n').trim()
 const list = (value, limit = 20, size = 60) => [...new Set([].concat(value || []).flatMap(item => String(item).split(',')).map(item => item.trim().slice(0, size)).filter(Boolean))].slice(0, limit);
 const day = value => { const match = /^(\d{4}-\d{2}-\d{2})/.exec(String(value || '')); return match ? match[1] : ''; };
 
+// A task by its id ("local:...", a tracker id) or by its number: L37, #L37, l37 or just 37 for a Rex Desk task.
+export function findTask(store, ref) {
+  const key = String(ref ?? '').trim().replace(/^#/, ''); if (!key) return null;
+  const direct = store.get('task', key); if (direct) return direct;
+  const number = /^L?\d+$/i.test(key) ? `L${key.replace(/^L/i, '')}` : '';
+  return (number && store.list('task').find(task => task.local && task.taskNumber === number)) || null;
+}
+
 export class LocalTasks {
   constructor(store) { this.store = store; }
   all() { return this.store.list('task').filter(task => task.local); }
   get(id) {
-    const key = String(id || '').replace(/^#/, ''), task = this.store.get('task', key) || this.all().find(item => item.taskNumber === key || item.taskNumber === key.toUpperCase());
+    const task = findTask(this.store, id);
     if (!task?.local) throw new Error(`No Rex Desk task "${id}". Tasks from Flow or Morningmate are changed in their tracker.`);
     return task;
   }
