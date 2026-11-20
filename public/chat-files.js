@@ -154,7 +154,7 @@ function shell() {
   box.addEventListener('dragstart', event => { const name = event.target.closest?.('.fw-tab-name'); if (!name) return; event.dataTransfer.setData('text/x-fw-tab', name.dataset.index); event.dataTransfer.effectAllowed = 'move'; });
   body.addEventListener('dragover', event => { if (!event.dataTransfer.types.includes('text/x-fw-tab')) return; event.preventDefault(); body.classList.add('dropping'); });
   body.addEventListener('dragleave', event => { if (!body.contains(event.relatedTarget)) body.classList.remove('dropping'); });
-  body.addEventListener('drop', event => { body.classList.remove('dropping'); const index = Number(event.dataTransfer.getData('text/x-fw-tab')); if (Number.isNaN(index)) return; event.preventDefault(); if (index === state.active && state.second < 0) split(); else split(index); });
+  body.addEventListener('drop', event => { body.classList.remove('dropping'); if (!event.dataTransfer.types.includes('text/x-fw-tab')) return; const index = Number(event.dataTransfer.getData('text/x-fw-tab')); if (Number.isNaN(index)) return; event.preventDefault(); if (index === state.active && state.second < 0) split(); else split(index); });
   box.querySelector('.fw-head').addEventListener('dblclick', event => { if (!event.target.closest('button')) { state.big = !state.big; place(); drawChrome(); editors.get(state.tabs[state.active]?.path)?.cm?.refresh(); } });
   place();
   return box;

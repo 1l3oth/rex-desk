@@ -280,7 +280,6 @@
  "At most once a minute": "យ៉ាងច្រើនម្ដងក្នុងមួយនាទី",
  "At the set time Rex Desk looks for new tasks, Rex Agent sorts them, and agents start work up to your daily limit. Questions wait in Needs you.": "នៅម៉ោងដែលបានកំណត់ Rex Desk រកកិច្ចការថ្មី Rex Agent តម្រៀបពួកវា ហើយភ្នាក់ងារចាប់ផ្ដើមធ្វើការរហូតដល់ដែនកំណត់ប្រចាំថ្ងៃរបស់អ្នក។ សំណួររង់ចាំក្នុង ត្រូវការអ្នក។",
  "Attach a file or image": "ភ្ជាប់ឯកសារ ឬរូបភាព",
- "Attach to your message": "ភ្ជាប់ទៅសាររបស់អ្នក",
  "Auto: safe steps run, risky ones ask": "ស្វ័យប្រវត្តិ: ជំហានមានសុវត្ថិភាពដំណើរការ ជំហានមានហានិភ័យសួរ",
  "Auto: the lead decides": "ស្វ័យប្រវត្តិ: អ្នកដឹកនាំសម្រេច",
  "Automatic freeing is off.": "ការដោះលែងដោយស្វ័យប្រវត្តិបានបិទ។",
@@ -1223,7 +1222,6 @@
  "Push to my phone": "ផ្ញើទៅទូរសព្ទរបស់ខ្ញុំ",
  "Pushes, pull requests and clones use the active account. Rex Desk uses the GitHub CLI sign-in and never keeps a GitHub token.": "Push, pull request និង clone ប្រើគណនីដែលសកម្ម។ Rex Desk ប្រើការចូលរបស់ GitHub CLI ហើយមិនដែលរក្សា GitHub token ទេ។",
  "Put chats side by side": "ដាក់ការជជែកក្បែរគ្នា",
- "Put its path here": "ដាក់ផ្លូវរបស់វានៅទីនេះ",
  "Put up to four chats side by side.": "ដាក់ការជជែករហូតដល់បួនក្បែរគ្នា។",
  "QR code that opens Rex Desk on your phone": "កូដ QR ដែលបើក Rex Desk នៅលើទូរសព្ទរបស់អ្នក",
  "Question": "សំណួរ",
@@ -2380,5 +2378,6 @@
  "Empty. {0} writes here after decisions, corrections and finished work.": "ទទេ។ {0} សរសេរនៅទីនេះ ក្រោយការសម្រេចចិត្ត ការកែតម្រូវ និងការងារដែលបានបញ្ចប់។",
  "Clear {0}'s memory? The old text stays under Earlier versions.": "សម្អាតការចងចាំរបស់ {0} ឬ? អត្ថបទចាស់នៅតែមាននៅក្រោម កំណែមុនៗ។",
  "Put back.": "បានដាក់វិញហើយ។",
- "Soul updated.": "បានធ្វើបច្ចុប្បន្នភាពព្រលឹងហើយ។"
+ "Soul updated.": "បានធ្វើបច្ចុប្បន្នភាពព្រលឹងហើយ។",
+ "Drop to attach": "ទម្លាក់ដើម្បីភ្ជាប់"
 }

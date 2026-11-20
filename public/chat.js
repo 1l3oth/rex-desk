@@ -582,9 +582,14 @@ function showNow() {
   if (!['main', 'run', 'room'].includes(type)) return;
   try { renderAll(true); } catch { /* the refresh below draws it */ }
 }
+// The last chat that was open, for a file dropped while none is (chat-composer.js), also when it was opened from the address bar.
+const rememberChat = view => { if (['main', 'run', 'room'].includes(view?.type) && !document.documentElement.classList.contains('embed')) try { localStorage.setItem('rex-last-chat', JSON.stringify(view)); } catch { /* private window */ } };
+rememberChat(ui.view);
+window.addEventListener('hashchange', () => rememberChat(viewFromHash()));
 function open(type, id = '') {
   ui.view = { type, id }; ui.page = ''; window.rexView = noticeKey(ui.view); window.rexPresence?.();
-  if (!document.documentElement.classList.contains('embed')) try { localStorage.setItem('rex-desk-view', JSON.stringify(ui.view)); } catch { /* private window */ }
+  if (!document.documentElement.classList.contains('embed')) try { localStorage.setItem('rex-desk-view', JSON.stringify(ui.view));} catch { /* private window */ }
+  rememberChat(ui.view);
   if (location.hash !== hashOf(ui.view)) { ui.fromOpen = true; location.hash = hashOf(ui.view); } document.querySelector('.chat-shell')?.classList.remove('show-rail'); showNow(); void refresh({ full: true }); }
 
 // ---------- actions ----------
