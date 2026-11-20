@@ -26,7 +26,7 @@ export function setSolid(value, { keep = true } = {}) { const solid = clean(valu
 // A slider, for the window bar (compact) or Settings.
 export function solidSlider({ compact = false } = {}) {
   const value = savedSolid();
-  return `<span class="solid-box${compact ? ' compact' : ''}" data-solid-box style="--solid:${value}%"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor"/></svg>`
+  return `<span class="solid-box${compact ? ' compact' : ''}" data-solid-box><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor"/></svg>`
     + `<input type="range" min="${LEAST}" max="100" step="1" value="${value}" data-solid aria-label="${t`How solid the window is`}" title="${t`See-through window: left shows more of what is behind it`}">`
     + `${compact ? '' : `<output data-solid-value>${value >= 100 ? t('Solid') : `${value}%`}</output>`}</span>`;
 }
@@ -34,6 +34,11 @@ export function solidSlider({ compact = false } = {}) {
 let wired = false;
 export function wireSeeThrough() {
   if (wired || !seeThroughHere()) return; wired = true;
+  // The page blocks inline styles, so a slider's fill is painted from code whenever one is drawn (it showed empty at 100%).
+  let painting = 0;
+  const paint = () => { painting = 0; for (const box of document.querySelectorAll('[data-solid-box]')) { const slider = box.querySelector('[data-solid]'); if (slider) box.style.setProperty('--solid', `${slider.value}%`); } };
+  new MutationObserver(() => { if (!painting) painting = requestAnimationFrame(paint); }).observe(document.body, { childList: true, subtree: true });
+  paint();
   // Opening Rex Desk again puts back the last saved value.
   const start = savedSolid(); if (start < 100) apply(start);
   document.addEventListener('input', event => { if (event.target.matches?.('[data-solid]')) { const value = clean(event.target.value); apply(value); showAll(value); } });
