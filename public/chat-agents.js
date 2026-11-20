@@ -1,6 +1,7 @@
 import { t, locale } from './i18n.js';
 import { notesSection, notesAction, exportNotes } from './chat-notes.js';
 import { pickerHtml } from '/chat-pick.js';
+import { whereHtml, placeWhere } from '/chat-where.js';
 // Specialist agents: one identity per project. The card shows who the agent is and what it was told; the person can rename, edit or duplicate it.
 const providerName = name => name === 'codex' ? t('Codex') : name === 'gemini' ? t('Gemini (Antigravity)') : t('Claude Code');
 
@@ -69,14 +70,16 @@ export function agentStage(ctx) {
     + section(t('Rules'), `<textarea id="sp-rules" class="agp-rules" rows="${Math.min(16, Math.max(5, Math.ceil(String(agent.rules || '').length / 70) + String(agent.rules || '').split(/\n/).length))}" spellcheck="false" placeholder="${t`How ${esc(agent.name)} should work here. For example: ask before changing the database.`}" aria-label="${t`Rules from you`}">${esc(agent.rules)}</textarea><div class="ag-save"><button class="btn primary small" data-action="spec-save" disabled>${t`Save rules`}</button></div>`)
     + section(`${t`Lessons learned`}${lessons.length ? ` <span class="agp-count">${lessons.length}</span>` : ''}`, lessonList);
   const row = (label, control, note = '') => `<div class="agp-row"><span class="agp-label">${label}</span><div class="agp-control">${control}${note ? `<small>${note}</small>` : ''}</div></div>`;
-  const followRow = agent.kind !== 'main' && !agent.pinned ? row(t('Works where you are'), `<label class="switch"><input type="checkbox" role="switch" data-agent-follow ${agent.follows !== false ? 'checked' : ''} aria-label="${t`Works where you are`}"><span></span></label>`, t('It moves to the computer you write to it from.')) : agent.pinned ? row(t('Computer'), `<span>${esc(agent.device || t('its computer'))}</span>`, t('Set in Settings, Projects.')) : '';
+  // Where it works: stays on one computer or follows you, with the computers on a small map (see chat-where.js).
+  const followRow = agent.kind !== 'main' ? whereHtml(ctx, agent) : '';
   const setup = section('', row('AI', pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: [{ value: 'claude', label: t('Claude Code'), hint: t('Your Claude plan') }, { value: 'codex', label: t('Codex'), hint: t('Your ChatGPT plan') }, { value: 'gemini', label: t('Gemini'), hint: t('Google account, through Antigravity') }] }), t('Switching starts fresh with a summary of the chat.'))
       + row(t('Account'), pickerHtml(ctx, { id: 'sp-profile', label: t('Account'), value: agent.profile || '', items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[ai]?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] }))
       + row(t('Model'), pickerHtml(ctx, { id: 'sp-model', label: t('Model'), value: agent.model || '', items: models })))
-    + section(t('Computer'), `${followRow}${agent.remote && !agent.pinned ? row(t('Move'), `<button class="btn small" data-action="spec-move">${t`Move to this computer`}</button>`) : ''}${agent.noCloud ? row(t('Cloud'), `<span>${t`Kept out of the cloud`}</span>`) : ''}`)
+    + section(t('Where it works'), `${followRow}${agent.remote && !agent.pinned ? row(t('Move'), `<button class="btn small" data-action="spec-move">${t`Move to this computer`}</button>`) : ''}${agent.noCloud ? row(t('Cloud'), `<span>${t`Kept out of the cloud`}</span>`) : ''}`)
     + `<section class="agp-sec agp-danger"><p>${t`Created by ${esc(agent.createdBy || t('you'))}${origin ? t`, copied from ${esc(origin.name)}` : ''}.`}</p><button class="btn small danger" data-action="spec-remove">${t`Remove ${esc(agent.name)}`}</button></section>`;
   const work = section(t('Tasks come from'), taskSources) + loopBox + scheduleBox(ctx, agent);
   const body = tabId === 'notes' ? notesSection(ctx, agent) : tabId === 'work' ? work : tabId === 'setup' ? setup : about;
+  requestAnimationFrame(placeWhere);
   const feed = `<div class="page ag agp" data-agent="${esc(agent.id)}">${head}${questions}${tabs}<div class="agp-body" role="tabpanel">${body}</div></div>`;
   return { title: agent.name, meta: [providerName(agent.provider), agent.projectSlug].filter(Boolean).join(' · '), feed, top: true };
 }

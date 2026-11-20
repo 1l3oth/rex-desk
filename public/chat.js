@@ -11,6 +11,7 @@ import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.
 import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction, initRoomInfo, avatarHtml, roomRunIds, initLocalTasks, sharedTabButtons } from '/chat-rooms.js';
 import { collectShared, sharedTabsHtml, attachedFiles } from '/chat-media.js';
 import { chatPins, pinsAction, watchMessagePins } from '/chat-pins.js';
+import { whereLine } from '/chat-where.js';
 import { devicesStage, devicesAction, initDevices } from '/chat-devices.js';
 import { monitorStage, monitorAction } from '/chat-monitor.js';
 import { netStage, loadNet, wireNet, NET_ICON } from '/chat-net.js';
@@ -1222,7 +1223,7 @@ function personalSide(run, agent, items, shells) {
     row('AI', esc(agent.provider === 'codex' ? t('Codex') : agent.provider === 'gemini' ? t('Gemini') : t('Claude Code'))),
     row(t('Model'), esc(model)),
     row(t('Account'), pickerHtml(ctx, { id: 'pp-profile', label: t('Account'), value: agent.profile || '', compact: true, items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[ai === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })),
-    !agent.pinned ? row(t('Works where you are'), `<label class="switch small"><input type="checkbox" role="switch" data-agent-follow="${esc(agent.id)}" ${agent.follows !== false ? 'checked' : ''} aria-label="${t`Works where you are`}"><span></span></label>`) : row(t('Computer'), esc(agent.device || t('its computer'))),
+    whereLine(ctx, agent),
     row(t('Tasks from'), esc(sources.join(', ') || t('Not set yet'))),
   ].join('') + (agent.remote && !agent.pinned ? `<button class="btn small aps-wide" data-action="spec-move" data-agent-id="${esc(agent.id)}">${t`Move to this computer`}</button>` : ''));
   const lessons = (agent.lessons || []).slice(-3).reverse();

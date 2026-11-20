@@ -2295,3 +2295,45 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .pseg [data-tab="pinned"] .tcount,.pseg [data-tab="pinned"]{transform-origin:center}
 .pin-btn svg,.cpin svg,.pin-float svg{transform-origin:50% 70%}
 @media (prefers-reduced-motion:reduce){.pin-fly{display:none}}
+
+/* ---- Where it works: the two-part control, the map of computers, the move steps, and the side panel pill ---- */
+.wh{display:flex;flex-direction:column;gap:12px;max-width:560px}
+.wh-seg{position:relative;display:grid;grid-template-columns:1fr 1fr;padding:3px;border:1px solid var(--line);border-radius:11px;background:var(--bg)}
+.wh-seg button{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:7px;min-width:0;padding:8px 10px;border:0;border-radius:8px;background:none;color:var(--muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:color .2s}
+.wh-seg button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wh-seg button.on{color:var(--ink)}.wh-seg button:not(.on):hover{color:var(--ink)}
+.wh-seg button.on svg{color:var(--accent)}
+.wh-seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.wh-seg button[disabled]{cursor:default}.wh-seg button[disabled]:not(.on){opacity:.5}
+.wh-thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 3px);border-radius:8px;background:var(--panel);box-shadow:0 1px 3px rgb(0 0 0/.14),0 0 0 1px var(--line);transition:transform .3s cubic-bezier(.16,1,.3,1)}
+.wh-seg.follow .wh-thumb{transform:translateX(100%)}
+.wh-map{position:relative;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px;padding:44px 4px 4px;border:1px solid color-mix(in srgb,var(--line) 70%,transparent);border-radius:12px;background:color-mix(in srgb,var(--bg) 60%,transparent)}
+.wh-pc{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 2px 8px;color:var(--muted);font-size:12px;text-align:center;min-width:0;transition:color .3s}
+.wh-pc span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wh-pc small{font-size:10.5px;color:var(--muted)}
+.wh-pc.here{color:var(--ink);font-weight:600}.wh-pc.here svg{color:var(--accent)}
+.wh-pc.off{opacity:.55}
+.wh-dot{position:absolute;top:10px;left:0;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;box-shadow:0 0 0 3px var(--panel),0 4px 12px color-mix(in srgb,var(--accent) 35%,transparent);transition:transform .45s cubic-bezier(.16,1,.3,1)}
+.wh-dot .av{width:28px;height:28px;font-size:11px}
+.wh-badge{position:absolute;top:-5px;right:-7px;display:grid;place-items:center;width:16px;height:16px;border-radius:50%;background:var(--panel);color:var(--accent);box-shadow:0 0 0 1px var(--line);opacity:0;transform:scale(.4);transition:opacity .2s,transform .25s cubic-bezier(.16,1,.3,1)}
+.wh-badge svg{width:10px;height:10px}
+.wh-dot.pinned .wh-badge{opacity:1;transform:scale(1)}
+.wh-trail{position:absolute;top:23px;left:0;width:0;height:2px;opacity:0;background:repeating-linear-gradient(90deg,var(--accent) 0 6px,transparent 6px 12px);pointer-events:none}
+.wh-status,.wh-phone{margin:0;display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
+.wh-status b,.wh-phone b{color:var(--ink);font-weight:600}
+.wh-phone{display:none}
+.wh-steps{display:flex;flex-wrap:wrap;gap:6px}
+.wh-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border:1px solid var(--line);border-radius:99px;font-size:12px;color:var(--muted);opacity:.45;transition:opacity .2s,color .2s,border-color .2s}
+.wh-chip.done{opacity:1;color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent)}
+.wh-error{margin:0;font-size:12.5px;color:var(--bad)}
+.wh-note{margin:0;font-size:11.5px;color:var(--muted)}
+.wh-line>div{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.wh-place{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.wh-pill{flex:none;display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border:0;border-radius:99px;background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent);font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:background .2s}
+button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)}
+.wh-pill svg{width:13px;height:13px;transition:transform .3s cubic-bezier(.16,1,.3,1)}
+.wh-pill.pin svg{transform:rotate(-20deg)}
+.wh-pill:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* On the phone the agent cannot run here: no map, just where it works and that you chat from here. */
+@media (max-width:760px){.wh-map,.wh-status{display:none}.wh-phone{display:flex}.wh-seg button{font-size:12.5px;padding:8px 6px}}
+@media (prefers-reduced-motion:reduce){.wh-thumb,.wh-dot,.wh-badge,.wh-pill svg,.wh-chip{transition:none}}
