@@ -86,7 +86,8 @@ export function composerHtml(ctx, model) {
 // ---------- attachments ----------
 function drawChips(ctx) {
   const host = document.getElementById('attach-chips'); if (!host) return;
-  host.innerHTML = ctx.ui.attachments.map((file, index) => `<span class="attach ${file.error ? 'bad' : ''}">${ICON.file}<span class="nm">${ctx.esc(file.name)}</span>${file.path ? '' : '<span class="sp"></span>'}<button type="button" data-remove-attach="${index}" aria-label="${t`Remove`}">×</button></span>`).join('');
+  const thumb = file => file.path && /\.(png|jpe?g|gif|webp|bmp)$/i.test(file.path) ? `<img class="thumb" src="/api/uploads/file?path=${encodeURIComponent(file.path)}" alt="">` : ICON.file;
+  host.innerHTML = ctx.ui.attachments.map((file, index) => `<span class="attach ${file.error ? 'bad' : ''}">${thumb(file)}<span class="nm">${ctx.esc(file.name)}</span>${file.path ? '' : '<span class="sp"></span>'}<button type="button" data-remove-attach="${index}" aria-label="${t`Remove`}">×</button></span>`).join('');
 }
 // Saves a dropped or pasted file in Rex Desk and gives back where it is, without attaching it to a message.
 async function store(file) {
@@ -485,7 +486,8 @@ export function initComposer(ctx) {
     ctx.ui.menu = menuItems(ctx, box); drawMenu(ctx);
   });
   document.addEventListener('paste', event => {
-    if (event.target.id !== 'draft') return;
+    if (!document.getElementById('draft')) return;
+    if (event.target.id !== 'draft' && field(event.target)) return;
     const files = [...(event.clipboardData?.files || [])]; if (!files.length) return;
     event.preventDefault(); for (const file of files) void upload(ctx, file);
   });

@@ -172,6 +172,8 @@ code,pre{font-family:var(--mono);font-size:12px}
 .attach{display:inline-flex;align-items:center;gap:6px;background:var(--raised);border:1px solid var(--line);border-radius:10px;padding:3px 6px 3px 8px;font-size:12px;max-width:260px}
 .attach .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.attach .sp{width:10px;height:10px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
 .attach button{border:0;background:none;color:var(--muted);font-size:15px;line-height:1;padding:0 2px}.attach.bad{border-color:var(--bad)}
+.attach .thumb{width:28px;height:28px;margin:-1px 0 -1px -4px;border-radius:7px;object-fit:cover;background:var(--bg);flex:none}
+.attach button[data-remove-attach]{display:grid;place-items:center;width:20px;height:20px;border-radius:6px}.attach button[data-remove-attach]:hover{background:color-mix(in srgb,var(--ink) 10%,transparent);color:var(--ink)}
 .menu button{flex-direction:column;align-items:flex-start;gap:0}.menu small{color:var(--muted);font-size:11px}
 .menu{bottom:100%;left:0;margin-bottom:8px;min-width:280px}
 /* ---- question card ---- */

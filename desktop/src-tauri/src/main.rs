@@ -172,6 +172,7 @@ fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::
     }
     let label = format!("page-{}", OPENED.fetch_add(1, Ordering::Relaxed));
     let built = WebviewWindowBuilder::new(app, label, WebviewUrl::External("about:blank".parse().unwrap()))
+        .disable_drag_drop_handler()
         .window_features(features)
         .title("Rex Desk")
         .background_color(tauri::window::Color(10, 14, 25, 255))
@@ -535,6 +536,8 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
             let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                // Dropped files go to the page (attach to a message, open in the file window), not to Tauri (L52).
+                .disable_drag_drop_handler()
                 .on_new_window(move |url, features| open_link(&handle, url, features))
                 .initialization_script(if cfg!(target_os = "macos") { "window.__REX_SHELL = 'macos';" } else { "window.__REX_SHELL = 'windows';" })
                 // Dark before the first page paints, so the window never flashes white while Rex Desk starts.
