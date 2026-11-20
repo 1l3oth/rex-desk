@@ -70,3 +70,20 @@ test('desk_task finds a Rex Desk task by its number (L37, #L37, l37, 37), the sa
   await assert.rejects(desk.sources.taskDetail('L999'), /Task not found/);
   await assert.rejects(desk.sources.taskDetail('Lx'), /Task not found/);
 });
+
+test('every tool that takes a taskId finds a task by its number too (desk_share_evidence, desk_show_page, desk_progress)', async () => {
+  const { desk, store } = setup();
+  const { createMcp } = await import('../src/mcp.js');
+  const task = await desk.localTasks.create({ title: 'Share proof by number', project: 'shop' }, { by: 'you' });
+  store.put('run', 'r1', { id: 'r1', role: 'specialist', state: 'running', createdAt: new Date().toISOString() });
+  const proof = path.join(temporary('proof'), 'result.txt'); writeFileSync(proof, 'passed');
+  const tools = createMcp(desk, { role: 'specialist', runId: 'r1' })._registeredTools, call = (name, input) => tools[name].handler(input, {});
+  for (const ref of [task.taskNumber, `#${task.taskNumber}`, task.taskNumber.slice(1)]) {
+    const shared = await call('desk_share_evidence', { file: proof, title: `Proof for ${ref}`, taskId: ref, result: 'passed' });
+    assert.notEqual(shared.isError, true, `desk_share_evidence "${ref}": ${shared.content[0].text}`);
+    assert.equal(JSON.parse(shared.content[0].text).taskId, task.id);
+  }
+  const progress = await call('desk_progress', { taskId: task.taskNumber, status: 'investigating' });
+  assert.notEqual(progress.isError, true, progress.content[0].text);
+  assert.equal((await call('desk_share_evidence', { file: proof, title: 'Proof', taskId: 'L999' })).isError, true);
+});

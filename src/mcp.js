@@ -8,6 +8,7 @@ import { effectiveRepository } from './project-detect.js';
 import { cachedTaskMedia } from './images.js';
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { findTask as findLocalTask } from './local-tasks.js';
 
 const runId = z.string().optional().describe('Run ID. Omit when using a run-scoped agent connection.');
 const reply = value => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] });
@@ -46,6 +47,13 @@ export const DEFERRED_TOOLS = new Set([
 
 export function createMcp(desk, scope) {
   const server = new McpServer({ name: 'rex-desk', version: '0.1.0' });
+  // A task named by its id or its number (L37, #L37, 37, or a tracker's number like 49760): the id every tool works with.
+  const taskRef = value => {
+    if (!value) return value;
+    const key = String(value).trim().replace(/^#/, ''), local = findLocalTask(desk.store, key); if (local) return local.id;
+    return desk.store.list('task').find(task => String(task.taskNumber || '') === key || String(task.externalId || '') === key)?.id || value;
+  };
+  const withTask = input => (input.taskId ? { ...input, taskId: taskRef(input.taskId) } : input);
   const resolveRun = supplied => { const resolved = supplied || scope.runId; if (!resolved) throw new Error('Supply a runId.'); desk.authorize(scope, resolved); return resolved; };
   // Deferred tools keep their handler and input shape here instead of being registered, so desk_find can offer them and
   // desk_run can call them on the agent's behalf.
@@ -115,18 +123,18 @@ export function createMcp(desk, scope) {
     { taskId: z.string().optional().describe('Omit it inside a run: the issue that run owns is used.'), status: z.enum(['new', 'investigating', 'waiting', 'ready', 'fixing', 'review', 'done', 'parked']), note: z.string().max(300).optional().describe('One line for whoever reads it next.') },
     input => {
       const runId = scope.runId || '';
-      const taskId = input.taskId || (runId ? desk.run(runId).taskId : '');
+      const taskId = taskRef(input.taskId) || (runId ? desk.run(runId).taskId : '');
       if (!taskId) throw new Error('Name the issue with taskId.');
       return desk.setDeskStatus(taskId, { status: input.status, note: input.note, by: runId ? `${desk.run(runId).provider} run` : 'agent' });
     });
-  tool('desk_categorize', 'Set an issue category after analysis. Does not change the source tracker.', { taskId: z.string(), category: z.string().min(1).max(80) }, ({ taskId, category }) => {
-    desk.authorize(scope, null, { coordinator: true }); const task = desk.task(taskId);
+  tool('desk_categorize', 'Set an issue category after analysis. Does not change the source tracker.', { taskId: z.string(), category: z.string().min(1).max(80) }, ({ taskId: ref, category }) => {
+    desk.authorize(scope, null, { coordinator: true }); const taskId = taskRef(ref), task = desk.task(taskId);
     desk.store.put('task', taskId, { ...task, category }); return { updated: true };
   });
   tool('desk_dispatch', 'Ask the human to start a run for one task; it starts only after they approve it in the dashboard. The run gets its own worktree, branch and preview port, and investigates that one issue. Respect task dependencies.',
     { taskId: z.string(), repositoryId: z.string().optional().describe('The repository whose code holds this issue, from desk_repositories. Always set it; omitting it falls back to the connection default, which is right only by chance.'), baseBranch: z.string().optional(), targetBranch: z.string().optional(), instructions: z.string().optional(), category: z.string().optional(),
       runtimeProfile: z.string().optional().describe('Flow/Morningmate Tomcat profile ID from desk_repositories, for example flow or morningmate. Omit for the repository default.') },
-    input => { desk.authorize(scope, null, { coordinator: true }); return desk.dispatch(scope.runId, input); });
+    input => { desk.authorize(scope, null, { coordinator: true }); return desk.dispatch(scope.runId, withTask(input)); });
   tool('desk_runs', 'Read task execution states and evidence checks without internal reasoning.', {}, () =>
     desk.store.list('run').filter(run => scope.role !== 'worker' || run.id === scope.runId), true);
   tool('desk_message', 'Send a deliberate message to the human in the dashboard. Use for meaningful findings, blockers, and reports.',
@@ -154,18 +162,18 @@ export function createMcp(desk, scope) {
   tool('desk_share_evidence', 'Share proof of a test with the person: a screenshot, a screen recording, or the test output. Use it every time you test something (passing or failing). The file is kept as evidence of the task, posted in the chat you are talking in (your room, or your personal chat), and shown in that chat\'s Media tab and on the task.',
     { runId, file: z.string().min(3).describe('Full path of the file on this computer: .png .jpg .gif .webp .webm .mp4 .mov .pdf .txt .log .json .html or .zip.'), title: z.string().min(1).max(120).describe('What it shows, in English, like "Upper task link after the fix".'),
       taskId: z.string().optional().describe('The task it is evidence for. Omit it when you work on one task: that task is used.'), result: z.enum(['passed', 'failed', 'info']).default('info'), note: z.string().max(2000).optional().describe('One or two lines: what was tested and what you saw.') },
-    input => { requireEnglish(`${input.title} ${input.note || ''}`, 'the title and note'); return desk.shareEvidence(resolveRun(input.runId), input); });
+    input => { requireEnglish(`${input.title} ${input.note || ''}`, 'the title and note'); return desk.shareEvidence(resolveRun(input.runId), withTask(input)); });
   tool('desk_show_page', 'Show the person an HTML page you made, most often a code explainer page of your changes. It is posted in the chat you are talking in (your room, or your personal chat) as a button that opens the page full screen inside Rex Desk, and kept on the task.',
     { runId, file: z.string().min(3).describe('Full path of the .html file on this computer.'), title: z.string().min(1).max(120).describe('What the page explains, in English.'),
       taskId: z.string().optional().describe('The task it belongs to. Omit it when you work on one task.'), note: z.string().max(2000).optional().describe('Two or three plain lines: what changed and why.') },
-    input => { requireEnglish(`${input.title} ${input.note || ''}`, 'the title and note'); return desk.shareEvidence(resolveRun(input.runId), { ...input, page: true }); });
+    input => { requireEnglish(`${input.title} ${input.note || ''}`, 'the title and note'); return desk.shareEvidence(resolveRun(input.runId), { ...withTask(input), page: true }); });
   tool('desk_worktrees', 'List the worktree history: every git worktree in the projects of the person (made by Rex Desk, by an agent, or by hand), newest first, with the tasks that live in each one and whether it still exists. Filter by project or state.',
     { project: z.string().optional().describe('Project name or repository id.'), state: z.enum(['active', 'gone']).optional() },
     input => desk.worktrees.list(input), true);
   tool('desk_worktree', 'Show a worktree to the person as a card in the chat you are talking in (your personal chat or your room), or add a task to it so the task lives there with the others (remove_task takes it out). Call show right after you make a git worktree, and whenever the person asks which worktree the work is in.',
     { runId, worktree: z.string().min(1).describe('The worktree: its full folder, its branch, or its id from desk_worktrees.'), action: z.enum(['show', 'add_task', 'remove_task']).default('show'),
       taskId: z.string().optional().describe('Task id or number: shown with the worktree, or the one to add or take out.'), note: z.string().max(600).optional().describe('One short line for the card, like "Made for the login fix".') },
-    input => { requireEnglish(input.note || '', 'the note'); return desk.worktreeAction(resolveRun(input.runId), input); });
+    input => { requireEnglish(input.note || '', 'the note'); return desk.worktreeAction(resolveRun(input.runId), withTask(input)); });
   tool('desk_show_file', 'Open a file in front of the person, in the file window of Rex Desk, at a line if you give one. Use it when they ask to see a file, or to point at the exact code you mean: give line and endLine and those lines stay highlighted. In chat text, write `path:start-end` (like `src/server.js:42-58`) and a click opens it the same way. The window moves out of the way by itself while the person types; place it with place, or later with desk_file_window. Any kind opens: code and text (they can edit and save it), Markdown and HTML with a preview, pictures, videos, PDFs, Excel and Word files.',
     { runId, file: z.string().min(1).describe('Full path, or a path inside your worktree or project, like src/server.js.'), line: z.number().int().min(0).optional().describe('Line to scroll to.'), endLine: z.number().int().min(0).optional().describe('Last line of the code you mean: line to endLine stays highlighted.'), note: z.string().max(300).optional().describe('One short line on why you show it.'),
       place: z.enum(['side', 'right', 'left', 'top', 'center', 'corner', 'big']).optional().describe('Where the window opens: side (beside the chat, the default choice), right or left half, top (above the message box), center, corner (small, top right) or big.') },
