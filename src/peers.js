@@ -9,6 +9,7 @@ import path from 'node:path';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { HUMAN } from './rooms.js';
+import { keepLines } from './store.js';
 import { execFile } from 'node:child_process';
 
 const now = () => new Date().toISOString();
@@ -543,7 +544,7 @@ export class Peers {
     // The message shows in this computer's copy of the shared chat at once and reaches the others with its own id; the
     // computer running the agent passes it on without writing it again.
     if (action !== 'stop' && this.store.syncedChat(copy.id)) {
-      this.store.event(copy.id, 'human-message', { text: text.replace(/\s+/g, ' ').trim(), via: 'rex', from: this.self.id }, true);
+      this.store.event(copy.id, 'human-message', { text: keepLines(text), via: 'rex', from: this.self.id }, true);
       const row = this.store.db.prepare('SELECT uid, kind, visible, value, created_at FROM events WHERE run_id=? ORDER BY sequence DESC LIMIT 1').get(copy.id);
       // The message itself travels with the command, so the agent's computer shows it before the answer to it.
       if (row?.uid) { packed.uid = row.uid; packed.echo = { ...row }; }

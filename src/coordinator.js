@@ -21,7 +21,7 @@ import { mkdirSync, writeFileSync, existsSync, statSync, copyFileSync, readFileS
 import { randomBytes, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { now, id, thisComputer, latestLocalMain, modelName, deskStatus, deskStatusLabels } from './store.js';
+import { now, id, thisComputer, latestLocalMain, modelName, deskStatus, deskStatusLabels, keepLines } from './store.js';
 import { Sources } from './providers.js';
 import { AgentProfiles, conversationHere, canonical as canonicalProfile } from './agents.js';
 import { Evidence } from './browser.js';
@@ -403,7 +403,7 @@ export class Desk {
     return `${VOICE_REMINDER}\n\n${said}`;
   }
   async say(runId, text, picked = {}, { raw = false } = {}) {
-    const run = this.run(runId), line = raw ? String(text || '').trim() : String(text || '').replace(/\s+/g, ' ').trim();
+    const run = this.run(runId), line = raw ? String(text || '').trim() : keepLines(text);
     if (!line) throw new Error('Write a message first.');
     // The person wrote: the count of fresh sessions that carried on by themselves starts again.
     if (run.autoContinues) this.patchRun(runId, { autoContinues: 0 });
@@ -1487,7 +1487,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const carriedTokens = carried ? Math.round(carried.length / 4) : 0;
     if (!sameProvider) this.store.event(runId, 'provider-switch', { text: `Switched from ${providerLabel(run.provider)} to ${providerLabel(provider)}. The earlier conversation was handed over.`, from: run.provider, to: provider, ...(carriedTokens ? { usage: { input: carriedTokens } } : {}) }, true);
     // The follow-up is part of the conversation: it shows in the chat the moment it is sent.
-    if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: String(prompt).replace(/\s+/g, ' ').trim(), via: 'rex' }, true);
+    if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: keepLines(prompt), via: 'rex' }, true);
     // After /clear the next message starts a fresh session that reads the handoff; the message itself goes in as it is.
     if (run.handoffFile && !run.sessionId) {
       this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), execution: 'headless' });

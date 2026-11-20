@@ -42,9 +42,11 @@ export function collectShared(entries, artifacts = []) {
 // it. Both can be pinned from the message. Returns the text without the list, and the cards.
 const FILE_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>';
 export function attachedFiles(text, esc) {
-  const source = String(text || ''), found = /\n*Attached files \(read them from these paths\):\n((?:- .+\n?)+)/.exec(source);
+  const source = String(text || ''), lined = /\n*Attached files \(read them from these paths\):\n((?:- .+\n?)+)/.exec(source);
+  // A message saved before L50 lost its line breaks: the list sits on one line ("...paths): - F:\a.png - F:\b.png").
+  const flat = lined ? null : /\s*Attached files \(read them from these paths\):\s*-\s+(.+)$/s.exec(source), found = lined || flat;
   if (!found) return { text: source, html: '' };
-  const files = found[1].split('\n').map(line => line.replace(/^- /, '').trim()).filter(Boolean);
+  const files = (lined ? found[1].split('\n').map(line => line.replace(/^- /, '')) : found[1].split(/\s+-\s+(?=[A-Za-z]:[\\/]|\/)/)).map(line => line.trim()).filter(Boolean);
   const cards = files.map(file => {
     const name = baseName(file), url = isUpload(file) ? uploadUrl(file) : '';
     if (url && IMAGE.test(file)) return `<a class="md-media-link" href="${esc(url)}" data-file-open="${esc(file)}"><img class="md-media" src="${esc(url)}" alt="${esc(name)}" loading="lazy"></a>`;
