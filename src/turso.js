@@ -67,6 +67,12 @@ export class TursoSync {
     const result = await this.client.execute({ sql: 'SELECT node,name,at,agents FROM rex_presence WHERE node != ? AND workspace = ?', args: [this.store.nodeId, this.workspace] });
     return result.rows.map(row => ({ node: row.node, name: row.name, at: Number(row.at), agents: JSON.parse(row.agents || '{}') }));
   }
+  // The other computers' heartbeats and agent states, without writing this computer's own (Peers reads them every few seconds).
+  async readPresence() {
+    if (!this.ready || this.closed) return null;
+    const result = await this.client.execute({ sql: 'SELECT node,name,at,agents FROM rex_presence WHERE node != ? AND workspace = ?', args: [this.store.nodeId, this.workspace] });
+    return result.rows.map(row => ({ node: row.node, name: row.name, at: Number(row.at), agents: JSON.parse(row.agents || '{}') }));
+  }
   async pullShared(since, limit = 400) {
     if (!this.ready || this.closed) return null;
     // Each look re-reads a short overlap (for clocks that differ), so the versions come first and only the records not read

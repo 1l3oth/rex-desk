@@ -308,3 +308,27 @@ test('a page an agent on another computer shared is unpacked here when opened', 
   assert.equal(b.desk.peers.restoreEvidence(runId, 'explain.html'), true, 'but the page came with the chat and is written here');
   assert.match(readFileSync(path.join(b.desk.store.media('artifacts'), runId, 'explain.html'), 'utf8'), /How it works/);
 });
+
+test('without Tailscale, an agent replying on one computer shows as replying on the other within seconds, and asleep again soon after', async () => {
+  const { a, b } = computers();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  b.desk.store.put('specialist', dara.id, { ...a.desk.store.get('specialist', dara.id) });
+  // One shared presence table, as the cloud database holds it; every other sync step has nothing to say.
+  const table = new Map(), writes = { a: 0, b: 0 };
+  const cloud = (desk, name) => ({ ready: true, record() {}, remove() {}, event() {}, schedule() {}, shared() {}, enqueue() {}, pullShared: async () => [], pullChat: async () => [],
+    presence: async (title, agents) => { writes[name]++; table.set(desk.store.nodeId, { node: desk.store.nodeId, name: title, at: Date.now(), agents }); return [...table.values()].filter(row => row.node !== desk.store.nodeId); },
+    readPresence: async () => [...table.values()].filter(row => row.node !== desk.store.nodeId) });
+  a.desk.store.cloud = cloud(a.desk, 'a'); b.desk.store.cloud = cloud(b.desk, 'b');
+  a.desk.peers.start(); b.desk.peers.start();
+  const copy = () => b.desk.store.get('specialist', dara.id), state = () => b.desk.specialists.status(copy()).state;
+  const within = async (ms, check) => { const start = Date.now(); while (Date.now() - start < ms) { if (check()) return Date.now() - start; await new Promise(resolve => setTimeout(resolve, 100)); } throw new Error(`not within ${ms} ms`); };
+  try {
+    await within(4000, () => state() === 'idle');
+    const before = writes.a;
+    a.desk.store.put('run', 'run-1', { id: 'run-1', specialistId: dara.id, role: 'specialist', state: 'running', createdAt: new Date().toISOString() });
+    await within(3500, () => state() === 'replying');
+    assert.ok(writes.a > before, 'the start went up at once');
+    a.desk.store.put('run', 'run-1', { ...a.desk.store.get('run', 'run-1'), state: 'done' });
+    await within(3500, () => state() === 'idle');
+  } finally { a.desk.peers.stop(); b.desk.peers.stop(); }
+});

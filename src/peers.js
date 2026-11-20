@@ -13,6 +13,10 @@ import { execFile } from 'node:child_process';
 
 const now = () => new Date().toISOString();
 const STALE_CHAT_MS = 24 * 3600000;
+// How often the other computers' agent states are read while one of them is on (a 2 s old "Replying..." is near enough).
+const LOOK_MS = 2000;
+// What an agent is doing, without what changes on its own (warm-cache times), so only a real change counts.
+const statusKey = agents => JSON.stringify(Object.entries(agents || {}).sort(([left], [right]) => left.localeCompare(right)).map(([id, item]) => [id, item?.state || '', item?.label || '', item?.runId || '', item?.taskId || '']));
 const STEP_MS = 30000, ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DAYS = 7, COPY_EVENTS = 400, COPY_KEEP = 160, COPY_TEXT = 6000, COPY_TOOL = 1500, REPEAT_MS = 10 * 60000, PICTURE_BYTES = 2 * 1024 * 1024, CARRY_BYTES = 8 * 1024 * 1024;
 const isPageArtifact = item => Boolean(item.page) || /\.html?$/i.test(item.file);
 const PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
@@ -335,17 +339,27 @@ export class Peers {
       if (again || newest > at) this.save({ tursoAt: newest, tursoNode: this.self.id });
     } catch { /* Turso shows its own state in Settings */ }
   }
-  async presence() {
+  // What this computer's agents are doing, as the other computers show it in their sidebar.
+  mineStatus() {
+    const mine = this.store.list('specialist').filter(agent => agent.kind !== 'main' && !this.isRemote(agent));
+    return Object.fromEntries(mine.map(agent => [agent.id, this.desk.specialists.status(agent)]));
+  }
+  // write: this computer's heartbeat and agents go up too (every 30 s, and at once when an agent starts or stops working).
+  // Without it only the other computers' rows are read, which is how a reply starting over there shows here within seconds.
+  async presence({ write = true } = {}) {
     if (!this.store.cloud?.ready) return;
     try {
-      const mine = this.store.list('specialist').filter(agent => agent.kind !== 'main' && !this.isRemote(agent));
-      const rows = await this.store.cloud.presence(this.self.name, Object.fromEntries(mine.map(agent => [agent.id, this.desk.specialists.status(agent)])));
+      const agents = write ? this.mineStatus() : null;
+      const rows = write ? await this.store.cloud.presence(this.self.name, agents) : await this.store.cloud.readPresence?.();
+      if (!rows) return;
+      if (write) this.sentStatus = statusKey(agents);
       const before = new Set([...(this.cloudSeen || new Map())].filter(([node]) => this.seen(node)).map(([node]) => node));
+      const was = new Map([...(this.cloudSeen || new Map())].map(([node, row]) => [node, statusKey(row.agents)]));
       // A heartbeat that changed since the last look means that computer is on now, whatever its clock says.
       // One that said it is closing (at 0) is off now.
       for (const row of rows || []) { const before = this.cloudSeen?.get(row.node); if (!Number(row.at)) { this.heard?.delete(row.node); continue; } if (before ? before.at !== row.at : Math.abs(Date.now() - row.at) < CLOUD_MS) this.hear(row.node); }
       this.cloudSeen = new Map((rows || []).map(row => [row.node, row]));
-      if ([...this.cloudSeen.keys()].some(node => this.seen(node) !== before.has(node))) this.store.emit?.('change', { kind: 'peers' });
+      if ([...this.cloudSeen.keys()].some(node => this.seen(node) !== before.has(node)) || rows.some(row => was.get(row.node) !== statusKey(row.agents))) this.store.emit?.('change', { kind: 'peers' });
     } catch { /* Turso shows its own state in Settings */ }
   }
   // ---------- personal chats through the shared database ----------
@@ -561,7 +575,11 @@ export class Peers {
       // Rex Desk tasks from another computer: a number both computers gave out is settled (LocalTasks.settle).
       if (this.tasksArrived || (this.timers.get('tasks') || 0) <= Date.now()) { this.tasksArrived = false; this.timers.set('tasks', Date.now() + 60000); await bounded(() => this.desk.localTasks?.settle()); }
       if ((this.timers.get('commands') || 0) <= Date.now()) { this.timers.set('commands', Date.now() + 3000); this.pendingCommands(); }
-      if ((this.timers.get('presence') || 0) <= Date.now()) { this.timers.set('presence', Date.now() + 30000); await bounded(() => this.presence()); }
+      // An agent here started or stopped working: the other computers hear it now, not at the next 30 s heartbeat.
+      const cloud = this.store.cloud?.ready, changed = cloud && this.sentStatus !== undefined && statusKey(this.mineStatus()) !== this.sentStatus;
+      if (changed || (this.timers.get('presence') || 0) <= Date.now()) { this.timers.set('presence', Date.now() + 30000); this.timers.set('look', Date.now() + LOOK_MS); await bounded(() => this.presence()); }
+      // While another computer is on, its agents' state is read every 2 s (one small row per computer).
+      else if (cloud && (this.timers.get('look') || 0) <= Date.now() && [...(this.cloudSeen?.keys() || [])].some(node => this.seen(node))) { this.timers.set('look', Date.now() + LOOK_MS); await bounded(() => this.presence({ write: false })); }
       if ((this.timers.get('secure') || 0) <= Date.now()) { this.timers.set('secure', Date.now() + 300000); this.refreshSecure(); }
     };
     this.loop = setInterval(() => { if (!this.ticking) { this.ticking = true; void tick().finally(() => { this.ticking = false; }); } }, 1000);
