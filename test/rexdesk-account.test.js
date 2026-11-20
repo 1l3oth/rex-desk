@@ -33,6 +33,7 @@ function fakeAccounts() {
     if (!service.sessions.has(token)) return reply(401, { error: { code: 'signed_out', message: 'Your sign-in ended. Sign in to Rex Desk again.' } });
     if (route === 'GET /v1/me') return reply(200, { user: { id: 'u1', email: 'person@example.com' }, plan: 'free', sync: { on: service.keys > 0 } });
     if (route === 'POST /v1/sync/database') { service.keys += 1; return reply(200, { url: service.url, authToken: `database-key-${service.keys}`, expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(), database: 'rd-test-person', created: service.keys === 1 }); }
+    if (route === 'POST /v1/survey') { if (service.surveyDown) return reply(500, { error: { code: 'down', message: 'Down.' } }); (service.surveys ||= []).push(JSON.parse(options.body)); return reply(200, { saved: true }); }
     if (route === 'DELETE /v1/session') { service.sessions.delete(token); return reply(200, { ok: true }); }
     // The account's private file folder.
     const file = route.match(/^(GET|PUT|DELETE) \/v1\/files(?:\/(.+?))?(?:\?.*)?$/);
@@ -121,6 +122,32 @@ test('one sign-in turns cloud backup on: the account service makes the database,
     const out = await person('/api/database/account-signout', { method: 'POST' });
     assert.equal(out.body.account, null); assert.equal(out.body.configured, true);
     assert.equal(service.sessions.size, 0);
+  } finally { await app.close(); }
+});
+
+test('the welcome answers wait until the account service has them: answered before signing in, or while it fails, they go later', async () => {
+  const service = fakeAccounts(), turso = fakeTurso();
+  const app = await accountApp(temporary('survey'), { cloudClientFactory: turso.clientFactory, accountFetcher: service.fetcher, accountApi: API });
+  const person = browser(app);
+  try {
+    await person('/api/auth/create', { method: 'POST', data: { email: 'person@example.com', passphrase } });
+    // No Rex Desk account yet: kept here, nothing sent.
+    assert.equal((await person('/api/survey', { method: 'POST', data: { age: '25 to 34', heard: ['tiktok', 'friend'], other: '' } })).status, 200);
+    assert.equal(app.store.get('survey', 'main').sent, false);
+    assert.ok(!service.calls.includes('POST /v1/survey'));
+    // Signing in sends it, but the service fails: it is kept, with the reason.
+    service.surveyDown = true;
+    const started = await person('/api/database/account-start', { method: 'POST' });
+    await Promise.all([person('/api/database/account-finish', { method: 'POST' }), service.browser(started.body.url)]);
+    for (let wait = 0; wait < 100 && !app.store.get('survey', 'main').tries; wait++) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(app.store.get('survey', 'main').sent, false); assert.equal(app.store.get('survey', 'main').tries, 1);
+    assert.match(app.store.get('survey', 'main').error, /500/);
+    // The next try (every 5 minutes) gets through, once.
+    service.surveyDown = false;
+    assert.equal(await app.sendSurvey(), true);
+    assert.deepEqual(service.surveys, [{ age: '25 to 34', heard: ['tiktok', 'friend'], other: '', at: app.store.get('survey', 'main').at }]);
+    assert.equal(app.store.get('survey', 'main').sent, true);
+    assert.equal(await app.sendSurvey(), false); assert.equal(service.surveys.length, 1, 'sent once');
   } finally { await app.close(); }
 });
 

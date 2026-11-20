@@ -300,6 +300,27 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       } catch (error) { note(error.code === 'needs_plan' ? { state: 'no-plan', at: new Date().toISOString() } : { state: 'failed', error: String(error.message || error).slice(0, 300), at: new Date().toISOString() }); }
     })();
   };
+  // The welcome answers go to the Rex Desk account service, where the owner sees them on the admin Survey page. They wait here
+  // until it says it has them: answered before there was an account, offline, or while the service failed, they go later
+  // (tried again every 5 minutes, see the timer below), never dropped.
+  let surveySending = null;
+  const sendSurvey = () => surveySending ||= (async () => {
+    const store = session?.store, saved = store?.get('survey', 'main');
+    // An answer saved before this existed has no "sent" mark: it goes once more (the service keeps one row per person).
+    if (!saved || saved.sent === true) return false;
+    const token = session.account?.token || store.cloud.account?.saved?.token;
+    if (!token) return false;
+    const { sent, tries, error, ...answer } = saved;
+    try {
+      const reply = await (accountOptions.fetcher || fetch)(`${accountOptions.base || ACCOUNT_API}/v1/survey`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(answer), signal: AbortSignal.timeout(15000) });
+      if (!reply.ok) throw new Error(`The account service answered ${reply.status}.`);
+      if (store.get('survey', 'main')?.at === saved.at) store.put('survey', 'main', { ...answer, sent: true, sentAt: new Date().toISOString() });
+      return true;
+    } catch (failure) {
+      if (store.get('survey', 'main')?.at === saved.at) store.put('survey', 'main', { ...saved, tries: (tries || 0) + 1, error: String(failure.message || failure).slice(0, 200) });
+      return false;
+    }
+  })().finally(() => { surveySending = null; });
   // After the payment page opens: look at the plan every 5 seconds for up to 20 minutes. Paid: join the account's cloud space
   // (or, on a desk with its own database, just show the new plan) and tell the window.
   let billingWatch = null;
@@ -572,6 +593,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           const signedIn = waited, made = await accountDatabase(signedIn.token, accountOptions);
           const status = await store.cloud.connect({ url: made.url, authToken: made.authToken });
           store.cloud.account.save(signedIn, made); session.account = null;
+          void sendSurvey();
           return json(response, 200, { ...status, ...store.cloud.status(), created: Boolean(made.created) });
         } catch (error) { if (error.status === 401) session.account = null; throw error; }
         finally { if (done && started && accountPending === started) accountPending = null; }
@@ -744,9 +766,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/survey' && request.method === 'POST') {
         const input = await body(request), clean = value => String(value || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 120);
         const answer = { age: clean(input.age).slice(0, 40), heard: (Array.isArray(input.heard) ? input.heard : []).map(item => clean(item).slice(0, 30)).filter(Boolean).slice(0, 20), other: clean(input.other), at: new Date().toISOString() };
-        store.put('survey', 'main', answer);
-        const token = session.account?.token || store.cloud.account?.saved?.token;
-        if (token) void (accountOptions.fetcher || fetch)(`${accountOptions.base || ACCOUNT_API}/v1/survey`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(answer), signal: AbortSignal.timeout(15000) }).catch(() => {});
+        store.put('survey', 'main', { ...answer, sent: false });
+        void sendSurvey();
         return json(response, 200, { saved: true });
       }
       if (url.pathname === '/api/config' && request.method === 'PUT') { const saved = store.saveConfig(await body(request)); desk.agents.invalidate(); void desk.refreshModels().catch(() => {}); return json(response, 200, saved); }
@@ -1246,6 +1267,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (++ticks % 8 === 0) void desk.findPullRequests();
     if (ticks % 4 === 0) remoteOpen(); // Tailscale may start after Rex Desk
     if (ticks % 4 === 0) void desk.worktrees.scan().catch(() => {});
+    if (ticks % 20 === 3) void sendSurvey();
     // Claude account usage, as /usage shows it, every 5 minutes (and whenever the accounts window opens).
     if (ticks % 20 === 1) void desk.refreshClaudeUsage().then(notify, () => {});
     // The computer stays awake (the screen may still lock) while an agent works or other devices may connect.
@@ -1261,7 +1283,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   const updateTimer = updates.state.supported ? setInterval(() => void checkForUpdate(), 10 * 60000) : null;
   const firstCheck = updates.state.supported ? setTimeout(() => void checkForUpdate(), 30000) : null;
   updateTimer?.unref(); firstCheck?.unref();
-  const handle = { server, address, accounts, updates, get restartWanted() { return restartWanted; }, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
+  const handle = { server, address, accounts, updates, sendSurvey, get restartWanted() { return restartWanted; }, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
     awake.set(false); computer.stop(); voice.stopAll(); clearInterval(timer); for (const item of remoteServers) item.close(); clearInterval(updateTimer); clearTimeout(firstCheck); await closeSession(); for (const client of clients) client.end();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); unlinkSync(lockPath);
   } };
