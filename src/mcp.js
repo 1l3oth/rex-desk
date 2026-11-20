@@ -40,7 +40,7 @@ export const DEFERRED_TOOLS = new Set([
   'desk_room_manage',
   'desk_set_profile_photo', 'desk_second_brain', 'desk_set_task_sources', 'desk_confirm_workflow', 'desk_source_catalog',
   'desk_browser', 'desk_run_for_me',
-  'desk_categorize', 'desk_update_agent',
+  'desk_categorize',
   'desk_tell_run', 'desk_close_run', 'desk_stop_run', 'desk_move_to_chat',
   'desk_meeting_join', 'desk_meeting_leave',
 ]);
@@ -270,16 +270,26 @@ export function createMcp(desk, scope) {
       const room = desk.rooms.room(roomId);
       return { room: room.name, members: room.members.map(id => desk.rooms.member(id).name), added: added.length, removed: removed.length };
     });
-  tool('desk_update_agent', 'Change an agent the way the person asks: rename it, or change its rules, model or AI. Do it at once when they ask; tell them in one line what changed.',
-    { agent: z.string().describe('Agent name, handle or id.'), name: z.string().min(1).max(40).optional().describe('New name.'), rules: z.string().max(4000).optional(), model: z.string().optional(), provider: z.enum(['claude', 'codex', 'gemini']).optional() },
-    input => {
+  // Always loaded (not found through desk_find): the main agent renames and changes agents the moment the person asks (L29).
+  tool('desk_update_agent', 'Change an agent the way the person asks: rename it, change its rules, model or AI, bring it to this computer (moveHere), or keep its project on the computer its agents work on (onlyOnItsComputer). Do it at once when they ask; tell them in one line what changed.',
+    { agent: z.string().describe('Agent name, handle or id.'), name: z.string().min(1).max(40).optional().describe('New name.'), rules: z.string().max(4000).optional(), model: z.string().optional(), provider: z.enum(['claude', 'codex', 'gemini']).optional(),
+      moveHere: z.boolean().optional().describe('Move the agent to the computer you run on, with its chat (like "Move to this computer").'),
+      onlyOnItsComputer: z.boolean().optional().describe('true: the whole project of the agent runs only on the computer its agents work on (after moveHere, this one); false: it may move again. A project setting: every agent of that project follows it.') },
+    async input => {
       const key = String(input.agent || '').replace(/^@/, '').toLowerCase();
       const agent = desk.specialists.list().find(item => [item.id, item.name, item.slug].some(value => String(value || '').toLowerCase() === key));
       if (!agent) throw new Error(`No agent "${input.agent}". Read desk_specialists.`);
-      if (input.name && input.name !== agent.name) desk.specialists.rename(agent.id, input.name);
+      const done = [];
+      if (input.name && input.name !== agent.name) { desk.specialists.rename(agent.id, input.name); done.push(`renamed to ${input.name}`); }
       const changes = Object.fromEntries(['rules', 'model', 'provider'].filter(field => input[field] !== undefined).map(field => [field, input[field]]));
-      const updated = Object.keys(changes).length ? desk.specialists.update(agent.id, changes) : desk.specialists.get(agent.id);
-      return { agent: updated.name, handle: updated.slug, was: agent.name };
+      if (Object.keys(changes).length) { desk.specialists.update(agent.id, changes); done.push(`changed ${Object.keys(changes).join(', ')}`); }
+      if (input.moveHere && desk.peers.isRemote(desk.specialists.get(agent.id))) { await desk.projectRules.move(agent.id); done.push('moved to this computer'); }
+      if (input.onlyOnItsComputer !== undefined) {
+        if (!agent.projectSlug) throw new Error(`${agent.name} has no project; only a project can be kept on one computer.`);
+        desk.projectRules.set(agent.projectSlug, { pinned: input.onlyOnItsComputer }); done.push(input.onlyOnItsComputer ? `project ${agent.projectSlug} now runs only on its computer` : `project ${agent.projectSlug} may move again`);
+      }
+      const updated = desk.specialists.get(agent.id);
+      return { agent: updated.name, handle: updated.slug, was: agent.name, computer: desk.peers.isRemote(updated) ? desk.peers.deviceName(updated.node) : 'this computer', onlyOnItsComputer: Boolean(updated.pinned), done };
     });
   tool('desk_specialists', 'List the specialist agents (one per project) with their identity cards: name, project, rules, and what they are still unsure about.', {}, () => desk.specialists.list().map(({ id, name, projectSlug, purpose, rules, unsure, provider, model, cloneOf }) => ({ id, name, project: projectSlug, purpose, rules, unsure, provider, model, duplicateOf: cloneOf || undefined })), true);
   const author = () => { const agent = agentOf(); const run = scope.runId && desk.store.get('run', scope.runId); return agent?.name || (run?.main ? 'Rex Agent' : 'agent'); };

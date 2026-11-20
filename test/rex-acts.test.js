@@ -79,3 +79,23 @@ test('only Rex Agent may act as the person', async () => {
     assert.match(answer.content[0].text, /Only the main agent/);
   } finally { await client.close().catch(() => {}); await app.close(); }
 });
+
+test('Rex Agent always has desk_update_agent: it renames an agent, and keeps its project on its computer (L29)', async () => {
+  const app = await createApp({ dataDirectory: temporary('acts-update'), port: 0, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  const client = new Client({ name: 'acts-update', version: '1' });
+  try {
+    const made = app.desk.specialists.create({ name: 'FlowWas_bot', projectPath: temporary('acts-update-project'), purpose: 'Flow WAS', by: 'you' });
+    const agent = app.store.put('specialist', made.id, { ...made, projectSlug: 'flow-was', general: false });
+    app.store.put('run', 'rex', { id: 'rex', role: 'coordinator', main: true, state: 'finished', createdAt: now() });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${app.address}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${app.desk.scopeToken('rex')}` } } }));
+    const loaded = (await client.listTools()).tools.map(tool => tool.name);
+    assert.ok(loaded.includes('desk_update_agent'), 'loaded up front, so calling it directly works');
+    const renamed = await result(client, 'desk_update_agent', { agent: 'FlowWas_bot', name: 'Morningmate_bot' });
+    assert.equal(renamed.agent, 'Morningmate_bot'); assert.equal(renamed.was, 'FlowWas_bot');
+    assert.equal(app.desk.specialists.get(agent.id).name, 'Morningmate_bot');
+    const pinned = await result(client, 'desk_update_agent', { agent: 'Morningmate_bot', onlyOnItsComputer: true, moveHere: true });
+    assert.equal(pinned.onlyOnItsComputer, true); assert.equal(pinned.computer, 'this computer');
+    assert.equal(app.desk.specialists.get(agent.id).pinned, true);
+    assert.equal((await result(client, 'desk_update_agent', { agent: 'Morningmate_bot', onlyOnItsComputer: false })).onlyOnItsComputer, false);
+  } finally { await client.close().catch(() => {}); await app.close(); }
+});
