@@ -10,6 +10,7 @@ import { markdown } from '/chat-markdown.js';
 import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.js';
 import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction, initRoomInfo, avatarHtml, roomRunIds, initLocalTasks, sharedTabButtons } from '/chat-rooms.js';
 import { collectShared, sharedTabsHtml } from '/chat-media.js';
+import { chatPins, pinsAction, watchMessagePins } from '/chat-pins.js';
 import { devicesStage, devicesAction, initDevices } from '/chat-devices.js';
 import { monitorStage, monitorAction } from '/chat-monitor.js';
 import { netStage, loadNet, wireNet, NET_ICON } from '/chat-net.js';
@@ -349,6 +350,8 @@ function stageModel() {
   const shells = terminalItems(items), stop = (shells.length && !ui.termOpen ? `<button class="btn small" data-action="term-open">${t`Terminal (${shells.length})`}</button> ` : '') + (live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : !FINISHED.includes(run.state) ? `<button class="btn small danger" data-action="stop" title="${t`This run is not working. Close it so the task can get a new run.`}">${t`Close run`}</button>` : '');
   // A personal chat with an agent shows its profile and what was shared on the right; the terminal is one of those tabs.
   const personal = personalAgent(run);
+  // The chat on screen, for the Pin button over pictures, files and links in its messages.
+  ui.pinChat = personal ? `agent:${personal.id}` : null;
   const side = personal ? (ui.chatInfo === false ? '' : personalSide(run, personal, items, shells)) : shells.length && ui.termOpen ? terminalHtml(shells, { esc, hhmm }) : '';
   const take = !personal && !run.inApp && chatTakers(ctx, run).length ? `<button class="btn small" data-action="move-to-chat" title="${t`Make this run an agent's personal chat: click the agent to see this work and keep talking`}">${t`Move to chat`}</button> ` : '';
   const actions = take + appControl(run, live) + (personal ? `<button class="icon-btn head-add" data-action="chat-to-room" title="${t`Add agents: start a meeting with this agent and others`}" aria-label="${t`Add agents`}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></button> ${ui.chatInfo === false ? `<button class="btn small" data-action="chat-info">${t`Info`}</button> ` : ''}${live || run.state === 'waiting' ? `<button class="btn small danger" data-action="stop">${t`Stop`}</button>` : ''}` : run.inApp ? '' : stop);
@@ -565,7 +568,7 @@ async function refresh({ full = false } = {}) {
     ui.snap = snap;
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
     if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = memory; ui.profile = profile;
-    await loadView(view === ui.view && early ? early.then(events => events || api(`/runs/${view.id}/messages`)) : null); renderAll(full); maybeStartTour(ctx); if (!window.__starWatch && !document.documentElement.classList.contains('embed')) { window.__starWatch = true; watchForStar(); } showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
+    await loadView(view === ui.view && early ? early.then(events => events || api(`/runs/${view.id}/messages`)) : null); renderAll(full); maybeStartTour(ctx); if (!window.__starWatch && !document.documentElement.classList.contains('embed')) { window.__starWatch = true; watchForStar(); } if (!window.__pinWatch) { window.__pinWatch = true; watchMessagePins(ctx); } showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
   } finally { busy = false; if (again) { const wasFull = againFull; again = false; againFull = false; void refresh({ full: wasFull }); } }
 }
 // A chat opened is drawn at once from what the page already holds (its messages from the last visit), and brought up to
@@ -702,6 +705,7 @@ document.addEventListener('click', async event => {
     else if (action === 'term-close') { ui.termOpen = false; renderAll(); }
     else if (action === 'term-open') { ui.termOpen = true; renderAll(); }
     else if (['room-shared', 'room-stop', 'room-remove', 'task-assign', 'info-toggle', 'room-image', 'room-delete', 'side-tab', 'agents-pop'].includes(action)) await roomAction(ctx, action, target);
+    else if (action?.startsWith('pin-')) await pinsAction(ctx, action, target);
     else if (action?.startsWith('dev-')) await devicesAction(ctx, action, target);
     else if (action?.startsWith('mo-')) await monitorAction(ctx, action, target);
     else if (action?.startsWith('nt-')) await noticesAction(ctx, action, target);
@@ -1143,7 +1147,7 @@ function personalSide(run, agent, items, shells) {
   const trees = chatWorktrees(ui, { runId: run.id, agentId: agent.id });
   const subs = items.filter(item => item.role === 'subagent');
   const team = teamOf(agent.id);
-  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'worktrees' ? 'worktrees' : ui.chatTab === 'subagents' || ui.chatTab === 'team' ? 'team' : 'profile', part = ['media', 'files', 'links'].includes(ui.chatShared) ? ui.chatShared : 'media';
+  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'worktrees' ? 'worktrees' : ui.chatTab === 'subagents' || ui.chatTab === 'team' ? 'team' : 'profile', part = ['media', 'files', 'links', 'pinned'].includes(ui.chatShared) ? ui.chatShared : 'media';
   const entries = items.filter(item => item.role === 'human' || item.role === 'agent').map(item => ({ from: item.role === 'human' ? t('You') : agent.name, at: item.at, text: item.text }));
   const shared = collectShared(entries, (ui.snap.artifacts || []).filter(item => item.runId === run.id).map(item => ({ ...item, from: agent.name })));
   const close = `<button type="button" class="side-x" data-action="chat-info-close" aria-label="${t`Close the side panel`}" title="${t`Close`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
@@ -1156,7 +1160,7 @@ function personalSide(run, agent, items, shells) {
   if (tab === 'team') return tabs + crewHtml({ taskBody: teamPanel(agent, team), taskCount: team.tasks.length, subBody: subagentsPanel(subs.map(item => ({ ...item, runId: run.id })), ctx, { live: () => stateTone(run) === 'working', jump: true }), subCount: subs.length, labels: { tasks: t('Team tasks'), subs: t('Sub-agents') },
     empty: `<div class="side-body"><div class="side-empty">${'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.8c1.5.6 2.6 1.9 3 4.2"/></svg>'}<p>${t`No team work yet. When ${esc(agent.name)} hands work to another agent or runs a sub-agent, it shows here.`}</p></div></div>` });
   if (tab === 'terminal') return tabs + terminalHtml(shells, { esc, hhmm }).replace(/^<div class="side-head">[\s\S]*?<\/div>(?=<div class="tl-bar)/, '');
-  const sharedBox = `<h3>${t`Media, files and links`}</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
+  const sharedBox = `<h3>${t`Media, files and links`}</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'chat-shared', chatPins(ui, `agent:${agent.id}`).length)}</div><div class="shared">${sharedTabsHtml(ctx, shared, part, `agent:${agent.id}`)}</div></div>`;
   const sources = (agent.taskSources || []).map(id => id === 'local' ? t('Rex Desk tasks') : (ui.snap.config?.sources || []).find(source => source.id === id)?.name).filter(Boolean);
   const rooms = (ui.snap.rooms || []).filter(room => room.members.some(member => member.id === agent.id));
   return `${tabs}<div class="side-body rinfo pinfo">

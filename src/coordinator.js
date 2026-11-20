@@ -34,6 +34,7 @@ import { inspectRepository } from './repositories.js';
 import { Worktrees, longPath } from './worktrees.js';
 import { ProjectRules } from './project-rules.js';
 import { ChatSplits } from './chat-split.js';
+import { Pins } from './pins.js';
 import { lowDiskMessage, friendlyDiskError } from './disk.js';
 import { voiceBriefing, VOICE_RULE, VOICE_REMINDER, VOICE_GREETING } from './voice-briefing.js';
 import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
@@ -179,6 +180,7 @@ export class Desk {
     };
     this.projectRules = new ProjectRules(this);
     this.chatSplits = new ChatSplits(this);
+    this.pins = new Pins(this.store);
     // A phone push opens Rex Desk on the phone when it can reach this computer (Tailscale and remote access on).
     this.notifier.pushClick = () => this.peers.settings().remote && this.port ? this.peers.addresses(this.port)[0] || '' : '';
     this.worktreeRoot = path.join(path.dirname(store.directory), 'worktrees');
@@ -201,7 +203,7 @@ export class Desk {
       interactions: [...this.store.list('interaction'), ...this.peers.remoteInteractions(), ...this.peers.cloudInteractions()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),
       devices: this.peers.status(this.port), chatSplits: this.chatSplits.open().map(split => ({ ...split, sides: split.sides.map(side => ({ ...side, name: this.peers.deviceName(side.node), here: side.node === this.peers.self.id })) })),
       teamTasks: this.store.list('team-task').sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 200).map(task => ({ id: task.id, managerId: task.managerId, managerName: task.managerName || '', workerId: task.workerId, workerName: task.workerName, title: task.title, state: task.state, question: task.question || '', answer: String(task.answer || '').slice(0, 1500), remote: Boolean(task.remote), createdAt: task.createdAt, endedAt: task.endedAt || '' })),
-      artifacts: this.store.list('artifact'), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
+      artifacts: this.store.list('artifact'), pins: this.pins.list(), sync: this.store.list('sync').filter(item => this.store.config().sources.some(source => source.id === item.sourceId)), statuses: this.store.list('statuses'),
       directories: this.store.list('directory'), catalog: this.store.list('repository').map(item => ({ id: item.id, name: item.name, path: item.path, configuredId: item.configuredId, branches: item.branches.length, scannedAt: item.scannedAt })), database: this.store.cloud.status(), syncing: this.sources.syncing, schedule: this.store.get('schedule', 'last') || null, projectRules: this.projectRules.list(), choices: { models: modelList(this.store, this.store.config().provider), efforts: effortsFor(this.store.config().provider), modes: modesFor(this.store.config().provider), providers: Object.fromEntries(AI_PROVIDERS.map(provider => [provider, { models: pickerModels(this.store, provider), efforts: effortsFor(provider), modes: modesFor(provider) }])) }, mainAgent: (m => m && { id: m.id, name: m.name, provider: m.provider, model: m.model || '' })(this.store.get('specialist', 'main')), specialists: this.specialists.list().map(agent => ({ ...agent, status: this.specialists.status(agent), device: this.peers.deviceName(agent.node), remote: this.peers.isRemote(agent) })), memory: { directory: this.memory.directory, projects: this.memory.list().length, scannedAt: this.memory.state().scannedAt || null, secondBrain: Boolean(this.memory.secondBrain()), brainCandidates: this.memory.secondBrain() ? [] : this.memory.secondBrainCandidates() }, ...this.rooms.snapshot() };
   }
   // Run keys are kept as hashes in the database, so an agent that kept working through a restart keeps its connection.

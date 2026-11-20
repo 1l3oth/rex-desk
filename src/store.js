@@ -24,7 +24,7 @@ export const latestLocalMain = runs => runs.filter(isLocalMain).sort((left, righ
 // Records every computer of the person shares (see peers.js). The Rex Agent record is each computer's own.
 // Rex Desk's own tasks (ids "local:...") are shared too; tasks from Flow, Morningmate or Orbit come from their tracker on
 // each computer and stay out.
-export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd', 'chatcopy', 'chatfile', 'chatsplit', 'task']);
+export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd', 'chatcopy', 'chatfile', 'chatsplit', 'task', 'pin']);
 // What the person can leave out of the cloud backup (Settings, Backup and updates). Agents, rooms, projects and settings
 // always go up: they are what makes the desk follow the person to another computer.
 export const BACKUP_PARTS = { chats: true, rooms: true, tasks: true, files: true };
@@ -260,6 +260,7 @@ export class Store extends EventEmitter {
     if (BACKUP_PART[kind] && this.backupOff(BACKUP_PART[kind])) return true;
     if (kind === 'run') return this.privateAgent(value.specialistId) || this.privateAgent(value.roomAgent);
     if (kind === 'chatcopy' || kind === 'peercmd' || kind === 'chatfile') return this.privateAgent(value.agentId);
+    if (kind === 'pin') return Boolean(value.agentId) && this.privateAgent(value.agentId);
     if (kind === 'interaction' || kind === 'artifact') return this.privateRun(value.runId);
     return false;
   }

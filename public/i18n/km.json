@@ -2291,5 +2291,11 @@
  "Your computer answered too slowly. Trying again.": "កុំព្យូទ័ររបស់អ្នកឆ្លើយតបយឺតពេក។ កំពុងព្យាយាមម្ដងទៀត។",
  "Cannot reach your computer. Trying again.": "មិនអាចភ្ជាប់ទៅកុំព្យូទ័ររបស់អ្នកបានទេ។ កំពុងព្យាយាមម្ដងទៀត។",
  "The answer from your computer was cut off. Trying again.": "ចម្លើយពីកុំព្យូទ័ររបស់អ្នកត្រូវបានកាត់ផ្ដាច់។ កំពុងព្យាយាមម្ដងទៀត។",
- "Sign in to Rex Desk again on this device.": "សូមចូល Rex Desk ម្ដងទៀតនៅលើឧបករណ៍នេះ។"
+ "Sign in to Rex Desk again on this device.": "សូមចូល Rex Desk ម្ដងទៀតនៅលើឧបករណ៍នេះ។",
+ "Pin": "ខ្ទាស់",
+ "Pin {0}": "ខ្ទាស់ {0}",
+ "Nothing pinned yet. Pin a file, picture or link from the chat.": "មិនទាន់មានអ្វីខ្ទាស់ទេ។ ខ្ទាស់ឯកសារ រូបភាព ឬតំណពីការជជែក។",
+ "Pinned. Find it in the Pinned tab.": "បានខ្ទាស់។ រកវាឃើញក្នុងផ្ទាំងបានខ្ទាស់។",
+ "Unpinned.": "បានដកការខ្ទាស់។",
+ "That message is not in the part of the chat shown now. Scroll up to load earlier messages.": "សារនោះមិននៅក្នុងផ្នែកការជជែកដែលបង្ហាញឥឡូវទេ។ រំកិលឡើងលើដើម្បីផ្ទុកសារមុនៗ។"
 }

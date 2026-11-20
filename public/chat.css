@@ -2108,3 +2108,24 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .crew-h{display:flex;align-items:center;gap:6px;margin:0;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .crew-h .cnt{font-size:10.5px;padding:0 6px;border-radius:999px;background:var(--raised);color:var(--muted);letter-spacing:0}
 .crew-part.tm .tm-sec{font-size:10.5px;margin:2px 0 0;opacity:.85}
+
+/* Pins: a Pin button on each thing in Media, Files and Links, the Pinned list, and the Pin button over a message's pictures, files and links. */
+.sh-cell{position:relative}.sh-cell .sh-thumb{width:100%}
+.sh-cell .cpin{position:absolute;top:5px;right:5px;opacity:0;background:color-mix(in srgb,var(--panel) 88%,transparent);box-shadow:0 1px 4px rgb(0 0 0/.18)}
+.sh-cell:hover .cpin,.sh-cell .cpin:focus-visible,.sh-cell .cpin.on{opacity:1}
+.cpin{flex:none;display:grid;place-items:center;width:28px;height:28px;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--muted);cursor:pointer;transition:color .15s,border-color .15s,background .15s}
+.cpin:hover{color:var(--accent);border-color:var(--accent)}
+.cpin.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));background:color-mix(in srgb,var(--accent) 10%,var(--panel))}
+.cpin.on:hover{color:var(--bad);border-color:var(--bad);background:color-mix(in srgb,var(--bad) 8%,var(--panel))}
+.pin-list .pin-row{align-items:center}
+.pin-open{display:flex;align-items:center;gap:10px;flex:1;min-width:0;color:inherit;text-decoration:none;border-radius:8px}
+.pin-open:hover b{color:var(--accent)}
+.pin-open .sh-text{min-width:0}.pin-open .sh-text b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pin-thumb{flex:none;width:34px;height:34px;border-radius:8px;object-fit:cover;border:1px solid var(--line);background:var(--raised)}
+.sh-icon.pin-video{color:var(--accent);font-size:12px}
+.pin-acts{display:flex;align-items:center;gap:4px;flex:none}
+.pin-acts .btn{white-space:nowrap}
+.pin-float{position:fixed;z-index:60;display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--ink);font-size:12px;font-weight:600;box-shadow:0 4px 14px rgb(0 0 0/.16);cursor:pointer}
+.pin-float:hover{color:var(--accent);border-color:var(--accent)}
+.pin-float[hidden]{display:none}
+@media (prefers-reduced-motion:no-preference){.pin-float:not([hidden]){animation:pin-pop .14s ease-out}}@keyframes pin-pop{from{opacity:0;transform:translateY(3px)}}

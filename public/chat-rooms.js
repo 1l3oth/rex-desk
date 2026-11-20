@@ -6,6 +6,7 @@ import { sideTabsHtml } from '/chat-sidetabs.js';
 import { speakButton } from '/chat-speak.js';
 import { pickerHtml } from '/chat-pick.js';
 import { collectShared, sharedTabsHtml, sharedCount } from '/chat-media.js';
+import { chatPins } from '/chat-pins.js';
 import { toolLine, changeHtml, terminalHtml } from '/chat-activity.js';
 import { AVATARS } from '/avatars.js';
 // Rooms (group chats with agents) and Tasks. Both are their own screens, apart from the main agent.
@@ -51,6 +52,8 @@ const dotFor = state => ({ busy: 'working', replying: 'working', waiting: 'warn'
 // ---------- rooms ----------
 export function roomStage(ctx) {
   const { ui, esc, bubble, note, typing, markdown, hhmm } = ctx, room = ui.snap.rooms.find(item => item.id === ui.view.id);
+  // The chat on screen, for the Pin button over pictures, files and links in its messages.
+  ui.pinChat = room ? `room:${room.id}` : null;
   if (!room) return { title: t('Meeting room'), meta: '', feed: `<div class="empty"><h2>${t`That meeting room is gone.`}</h2></div>` };
   const handles = room.members.map(member => member.handle).filter(Boolean), tasks = Object.fromEntries((ui.snap.tasks || []).map(task => [taskNumber(task), taskName(task)]));
   const messages = (ui.snap.messages || []).filter(message => message.roomId === room.id).sort((left, right) => left.seq - right.seq);
@@ -186,8 +189,8 @@ function roomAgentsHtml(ctx, room) {
 function roomSharedHtml(ctx, room) {
   const messages = (ctx.ui.snap.messages || []).filter(message => message.roomId === room.id && message.from.type !== 'system'), runs = new Set(roomRunIds(ctx.ui, room));
   const shared = collectShared(messages.map(message => ({ from: message.from.type === 'human' ? t('You') : message.from.label, at: message.at, text: message.text })), (ctx.ui.snap.artifacts || []).filter(item => runs.has(item.runId)));
-  const part = ['media', 'files', 'links'].includes(ctx.ui.roomShared) ? ctx.ui.roomShared : 'media';
-  return `<h3>${t`Media, files and links`}</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'room-shared')}</div><div class="shared">${sharedTabsHtml(ctx, shared, part)}</div></div>`;
+  const part = ['media', 'files', 'links', 'pinned'].includes(ctx.ui.roomShared) ? ctx.ui.roomShared : 'media', chat = `room:${room.id}`;
+  return `<h3>${t`Media, files and links`}</h3><div class="pshared"><div class="pseg">${sharedTabButtons(shared, part, 'room-shared', chatPins(ctx.ui, chat).length)}</div><div class="shared">${sharedTabsHtml(ctx, shared, part, chat)}</div></div>`;
 }
 function roomInfoHtml(ctx, room) {
   const { ui, esc } = ctx, messages = (ui.snap.messages || []).filter(message => message.roomId === room.id);
@@ -550,9 +553,9 @@ function connectionsDialog(ctx, startWith = '') {
 document.addEventListener('click', event => { const button = event.target.closest?.('[data-action="task-connect"]'); if (!button) return; event.stopPropagation(); const ctx = window.__rexCtx; if (ctx) connectionsDialog(ctx, button.dataset.service || ''); }, true);
 
 // Media, Files and Links tabs, each with how many there are.
-export function sharedTabButtons(shared, tab, action = 'side-tab') {
-  const count = sharedCount(shared);
-  return [['media', t('Media')], ['files', t('Files')], ['links', t('Links')]].map(([key, label]) => `<button type="button" class="tab ${tab === key ? 'on' : ''}" data-action="${action}" data-tab="${key}">${label}${count[key] ? `<span class="tcount quiet">${count[key]}</span>` : ''}</button>`).join('');
+export function sharedTabButtons(shared, tab, action = 'side-tab', pinned = 0) {
+  const count = { ...sharedCount(shared), pinned };
+  return [['media', t('Media')], ['files', t('Files')], ['links', t('Links')], ['pinned', t('Pinned')]].map(([key, label]) => `<button type="button" class="tab ${tab === key ? 'on' : ''}" data-action="${action}" data-tab="${key}">${label}${count[key] ? `<span class="tcount quiet">${count[key]}</span>` : ''}</button>`).join('');
 }
 
 // The task connectors, as cards at the top of Tasks: Rex Desk (built in), Flow, Morningmate and Orbit.
