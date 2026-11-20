@@ -2205,54 +2205,125 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 /* The Media, Files, Links and Pinned switch stays on one line, also in Khmer. */
 .pseg .tab{white-space:nowrap;min-width:0}
 
-/* ---- Agent profile: a compact header and one tab at a time ---- */
-.page.agp{max-width:920px;margin:0;padding:36px clamp(20px,3vw,40px) 48px;display:flex;flex-direction:column;gap:0}
-.agp-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:16px;align-items:center;padding-bottom:18px;border-bottom:0}
-.agp-head .av.xl{width:64px;height:64px;font-size:22px}
-.agp-av{padding:0;border:0;background:none;border-radius:50%;cursor:pointer}.agp-av:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-.agp-who{display:flex;flex-direction:column;gap:4px;min-width:0}
-.agp-name input{font-size:20px;font-weight:650;letter-spacing:-.015em;padding:1px 8px;margin-left:-9px;max-width:100%}
-.agp-line{margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;color:var(--muted);font-size:12.5px}
-.agp-line a{color:inherit;text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--muted) 45%,transparent);text-underline-offset:3px}.agp-line a:hover{color:var(--accent)}
-.agp-state{display:inline-flex;align-items:center;gap:6px;color:var(--ink)}
-.agp-sep{width:3px;height:3px;border-radius:50%;background:color-mix(in srgb,var(--muted) 60%,transparent)}
-.agp-faint{color:color-mix(in srgb,var(--muted) 80%,transparent)}
-.agp-actions{display:flex;gap:8px;align-items:center}
-.agp-ask{margin:0 0 16px;padding:10px 14px;border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);border-radius:12px;background:color-mix(in srgb,var(--warn) 8%,var(--panel))}
-.agp-ask h2{margin:0 0 4px;font-size:12.5px;font-weight:650;color:var(--warn)}
-.agp-ask ul{list-style:none;margin:0;padding:0}.agp-ask li{display:flex;align-items:center;gap:12px;padding:5px 0;font-size:13px}.agp-ask li>span:first-child{flex:1;min-width:0}
-.agp-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:0 0 4px}
-.agp-tabs button{position:relative;display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 12px;border:0;background:none;color:var(--muted);font:inherit;font-size:13px;font-weight:550;cursor:pointer;border-radius:8px 8px 0 0}
+/* ---- Agent profile: a system Settings page (Windows 11 Settings, macOS System Settings). Grouped lists of rows on
+   hairlines, the label on the left and the control on the right, 13px system text, the accent only for state. ---- */
+.page.agp{--g-bg:color-mix(in srgb,var(--ink) 3.5%,var(--panel));--g-line:color-mix(in srgb,var(--line) 85%,transparent);--g-hover:color-mix(in srgb,var(--ink) 4%,transparent);--g-seg:color-mix(in srgb,var(--ink) 7%,transparent);--g-thumb:var(--raised);
+  max-width:760px;margin:0;padding:24px clamp(18px,3vw,36px) 48px;display:flex;flex-direction:column;gap:0;font-size:13px;line-height:1.4}
+html[data-theme=light] .page.agp{--g-bg:color-mix(in srgb,var(--panel) 80%,#fff);--g-thumb:#fff}
+.agp-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;padding:0 2px 18px}
+.agp-head .av.xl{width:44px;height:44px;font-size:16px}
+.agp-av{padding:0;border:0;background:none;border-radius:50%;cursor:pointer}.agp-av:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.agp-who{display:flex;flex-direction:column;gap:1px;min-width:0}
+.agp-name input{font-size:17px;font-weight:600;letter-spacing:-.01em;padding:1px 6px;margin-left:-7px;max-width:100%;border:1px solid transparent;border-radius:5px;background:none;color:var(--ink)}
+.agp-name input:hover{border-color:var(--g-line)}.agp-name input:focus{outline:0;border-color:var(--accent);background:var(--bg)}
+.agp-line{margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;color:var(--muted);font-size:12px}
+.agp-line a{color:inherit;text-decoration:none}.agp-line a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:2px}
+.agp-state{display:inline-flex;align-items:center;gap:5px;color:var(--ink)}.agp-state .dot{width:7px;height:7px}
+.agp-sep{color:color-mix(in srgb,var(--muted) 60%,transparent)}
+.agp-faint{color:color-mix(in srgb,var(--muted) 75%,transparent)}
+.agp-actions{display:flex;gap:6px;align-items:center}
+.agp .btn.small{height:26px;padding:0 12px;border-radius:6px;font-size:12.5px;font-weight:500;box-shadow:0 1px 1px rgb(0 0 0 / .06)}
+.agp .btn.small.primary{font-weight:600}.agp .btn.small.quiet{box-shadow:none}
+.agp .btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* The four tabs: a segmented control, as in a system toolbar. */
+.agp-tabs{display:inline-flex;align-self:flex-start;gap:2px;padding:2px;margin:0 0 20px;border-radius:7px;background:var(--g-seg)}
+.agp-tabs button{position:relative;display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 12px;border:0;border-radius:5px;background:none;color:var(--muted);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer;transition:background .12s,color .12s}
 .agp-tabs button:hover{color:var(--ink)}
-.agp-tabs button.on{color:var(--ink);font-weight:650}
-.agp-tabs button.on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--accent)}
-.agp-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.agp-tabs button.on{background:var(--g-thumb);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .12),0 0 0 .5px rgb(0 0 0 / .06)}
+.agp-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-1px}
 .agp-live{width:6px;height:6px;border-radius:50%;background:var(--good)}
+
+/* Groups and rows. */
 .agp-body{display:flex;flex-direction:column}
-.agp .agp-sec{display:flex;flex-direction:column;gap:10px;padding:20px 0;border:0;border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent);border-radius:0;background:none;box-shadow:none;margin:0}
-.agp .agp-sec:last-child{border-bottom:0}
-.agp .agp-sec>h2,.agp .lp-head h2{margin:0;font-size:13px;font-weight:650;color:var(--ink);letter-spacing:0;text-transform:none}
-.agp-count{font-weight:500;color:var(--muted);font-size:12px}
-.agp-about{margin:0;font-size:13.5px;line-height:1.55;max-width:72ch;color:var(--ink)}
-.agp-path{margin:0;display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--muted);min-width:0}.agp-path code{font-family:var(--mono);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.agp-rules{width:100%;min-height:120px;max-height:60vh;field-sizing:content;resize:vertical;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:13.5px;line-height:1.55}
-.agp-rules:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
-.agp-lessons{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
-.agp-lessons li{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-top:1px solid color-mix(in srgb,var(--line) 60%,transparent);font-size:13px;line-height:1.5}.agp-lessons li:first-child{border-top:0;padding-top:0}
-.agp-lessons li span{flex:1;min-width:0}
+.agp-grp{display:flex;flex-direction:column;margin:0 0 22px}
+.agp-gh{margin:0 0 6px 2px;font-size:13px;font-weight:600;color:var(--ink);letter-spacing:0;text-transform:none;display:flex;align-items:baseline;gap:6px}
+.agp-count{font-weight:400;color:var(--muted);font-size:12px}
+.agp-list{display:flex;flex-direction:column;border:1px solid var(--g-line);border-radius:8px;background:var(--g-bg);overflow:hidden}
+.agp-note{margin:6px 2px 0;font-size:12px;color:var(--muted);line-height:1.45}
+.agp-r{display:flex;align-items:center;gap:16px;min-height:40px;padding:6px 14px;border-top:1px solid var(--g-line)}
+.agp-list>.agp-r:first-child,.agp-fold>.agp-r:first-child{border-top:0}
+.agp-fold{display:contents}.agp-fold.off>.agp-r:not(.agp-status){opacity:.5}
+.agp-fold>.agp-r:first-child{border-top:1px solid var(--g-line)}
+.agp-rl{flex:1;display:flex;flex-direction:column;gap:1px;min-width:0}
+.agp-rl>span{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px;min-width:0}
+.agp-rl small{font-size:11.5px;color:var(--muted);line-height:1.4}
+.agp-rc{flex:none;display:flex;align-items:center;justify-content:flex-end;gap:8px;max-width:62%;min-width:0}
+.agp-value{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agp-wrap{display:block;white-space:normal;line-height:1.45}
+.agp-code{font-family:var(--mono);font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.agp-block{display:block;padding:10px 14px}
+.agp-about{margin:0;font-size:13px;line-height:1.55;color:var(--ink);max-width:68ch}
 .agp-empty{margin:0;font-size:12.5px;color:var(--muted)}
-.agp-row{display:grid;grid-template-columns:170px minmax(0,1fr);gap:16px;align-items:center;padding:6px 0}
-.agp-label{font-size:13px;color:var(--muted)}
-.agp-control{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0}.agp-control small{font-size:11.5px;color:var(--muted)}
-.agp .agp-danger{flex-direction:row;align-items:center;justify-content:space-between}.agp-danger p{margin:0;font-size:12.5px;color:var(--muted)}
+.agp-blabel{display:block;margin:0 0 6px;font-size:13px;color:var(--ink)}
+.agp-text{display:block;width:100%;min-height:52px;max-height:60vh;field-sizing:content;resize:vertical;padding:7px 9px;border:1px solid var(--g-line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px;line-height:1.5}
+.agp-text::placeholder{color:color-mix(in srgb,var(--muted) 85%,transparent)}
+.agp-text:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.agp-rules{min-height:96px}
+.agp-actrow{justify-content:flex-end;min-height:0;padding:8px 14px}
+.agp-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--muted)}.agp-dot.on{background:var(--good)}.agp-dot.rest{background:var(--warn)}.agp-dot.warn{background:var(--warn)}
+.agp-status .agp-rl>span{color:var(--ink)}
+.agp-x{display:grid;place-items:center;width:24px;height:24px;border:0;border-radius:5px;background:none;color:var(--muted);cursor:pointer}
+.agp-x:hover{background:var(--g-hover);color:var(--ink)}.agp-x:focus-visible{outline:2px solid var(--accent);outline-offset:0}
+.agp-lesson .agp-rc,.agp-sched .agp-rc{align-self:flex-start;margin-top:2px}
+.agp-sched.off .agp-rl>span{color:var(--muted)}
+.agp-ask .agp-list{background:color-mix(in srgb,var(--warn) 5%,var(--g-bg))}
+.agp-ask{margin-bottom:20px}
+
+/* Native controls: a switch, a segmented control, small time fields and a popup. */
+.agp-switch{position:relative;display:inline-flex;flex:none;width:34px;height:20px;cursor:pointer}
+.agp-switch input{position:absolute;inset:0;margin:0;opacity:0;cursor:pointer}
+.agp-switch span{position:absolute;inset:0;border-radius:999px;background:color-mix(in srgb,var(--ink) 20%,transparent);transition:background .18s}
+.agp-switch span::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgb(0 0 0 / .3);transition:transform .18s cubic-bezier(.22,1,.36,1)}
+.agp-switch input:checked+span{background:var(--accent)}.agp-switch input:checked+span::after{transform:translateX(14px)}
+.agp-switch input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+.agp-seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--g-seg);max-width:100%;overflow-x:auto;scrollbar-width:none}
+.agp-seg label{position:relative;display:inline-flex;cursor:pointer}
+.agp-seg input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.agp-seg span,.agp-seg button{display:inline-flex;align-items:center;justify-content:center;height:22px;padding:0 10px;border:0;border-radius:5px;background:none;color:var(--muted);font:inherit;font-size:12px;font-weight:500;white-space:nowrap;cursor:pointer;transition:background .12s,color .12s}
+.agp-seg label:hover span,.agp-seg button:not(.on):not([disabled]):hover{color:var(--ink)}
+.agp-seg input:checked+span,.agp-seg button.on{background:var(--g-thumb);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .12),0 0 0 .5px rgb(0 0 0 / .06)}
+.agp-seg input:focus-visible+span,.agp-seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-1px}
+.agp-seg button[disabled]{cursor:default}.agp-seg button[disabled]:not(.on){opacity:.5}
+.agp-days span{padding:0 7px;min-width:34px}
+.agp-time{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+.agp input[type=time],.agp-formrow select{height:26px;padding:0 8px;border:1px solid var(--g-line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px}
+.agp input[type=time]:focus,.agp-formrow select:focus{outline:0;border-color:var(--accent)}
+.agp .agp-rc .pick2,.agp .agp-rc [class*="pick"]>button{font-size:12.5px}
+.agp-form{display:flex;flex-direction:column;gap:8px;margin:0}
+.agp-formrow{display:flex;align-items:center;gap:6px}.agp-grow{flex:1}
+
+/* Where it works: the mode, then the computers as plain rows; the one the agent is on is checked. */
+.agp-r{transition:background .15s}
+
+/* The Soul and memory tab, in the same language. */
+.agp .ag-notes{display:flex;flex-direction:column;gap:10px;padding:0;border:0;background:none;box-shadow:none}
+.agp .ag-notes>h2{margin:0 0 0 2px;font-size:13px;font-weight:600}
+.agp .nt-tabs{display:inline-flex;align-self:flex-start;gap:2px;padding:2px;border:0;border-radius:7px;background:var(--g-seg)}
+.agp .nt-tabs button{height:22px;padding:0 12px;border:0;border-radius:5px;background:none;color:var(--muted);font-size:12px;font-weight:500}
+.agp .nt-tabs button.on{background:var(--g-thumb);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .12),0 0 0 .5px rgb(0 0 0 / .06)}
+.agp #nt-text{width:100%;padding:12px 14px;border:1px solid var(--g-line);border-radius:8px;background:var(--g-bg);color:var(--ink);font:inherit;font-size:13px;line-height:1.55}
+.agp #nt-text:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.agp .nt-foot{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.agp .nt-proposal{padding:10px 14px;border:1px solid var(--g-line);border-radius:8px;background:color-mix(in srgb,var(--warn) 5%,var(--g-bg))}
+.agp .nt-history{border:1px solid var(--g-line);border-radius:8px;background:var(--g-bg);padding:8px 14px}
+
+/* A phone: one column of grouped rows, like iOS Settings. */
 @media (max-width:760px){
-  .page.agp{padding:22px 14px 40px}
-  .agp-head{grid-template-columns:auto minmax(0,1fr);gap:12px}.agp-actions{grid-column:1/-1}.agp-actions .btn{flex:1}
-  .agp-head .av.xl{width:52px;height:52px;font-size:18px}
-  .agp-name input{font-size:18px}
-  .agp-tabs{overflow-x:auto;scrollbar-width:none}.agp-tabs button{flex:none;padding:0 10px}
-  .agp-row{grid-template-columns:1fr;gap:6px}
+  .page.agp{padding:14px 14px 40px;font-size:14px}
+  .agp-head{grid-template-columns:auto minmax(0,1fr);gap:12px;padding-bottom:14px}
+  .agp-head .av.xl{width:40px;height:40px;font-size:15px}
+  .agp-actions{grid-column:1/-1}.agp-actions .btn{flex:1;height:32px}
+  .agp-tabs{display:flex;align-self:stretch;margin-bottom:16px}.agp-tabs button{flex:1;justify-content:center;padding:0 6px;font-size:12px;height:28px}
+  .agp-list{border-radius:10px}
+  .agp-r{min-height:44px;padding:8px 14px;gap:12px}
+  .agp-rl>span{font-size:14px}
+  .agp-rc{max-width:58%}
+  .agp-r:has(.agp-seg){flex-wrap:wrap}.agp-r:has(.agp-seg) .agp-rc{max-width:100%;flex-basis:100%;justify-content:flex-start}
+  .agp-seg{display:flex;width:100%}.agp-seg label,.agp-seg button{flex:1}.agp-seg span,.agp-seg button{width:100%;height:28px;padding:0 4px}
+  .agp-days span{min-width:0}
 }
+@media (prefers-reduced-motion:reduce){.agp *{transition:none!important}}
 
 /* ---- The chat side panel's Profile tab ---- */
 .side-body.aps{display:flex;flex-direction:column;gap:0;padding:14px 14px 24px}
@@ -2296,37 +2367,20 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .pin-btn svg,.cpin svg,.pin-float svg{transform-origin:50% 70%}
 @media (prefers-reduced-motion:reduce){.pin-fly{display:none}}
 
-/* ---- Where it works: the two-part control, the map of computers, the move steps, and the side panel pill ---- */
-.wh{display:flex;flex-direction:column;gap:12px;max-width:560px}
-.wh-seg{position:relative;display:grid;grid-template-columns:1fr 1fr;padding:3px;border:1px solid var(--line);border-radius:11px;background:var(--bg)}
-.wh-seg button{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:7px;min-width:0;padding:8px 10px;border:0;border-radius:8px;background:none;color:var(--muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:color .2s}
-.wh-seg button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wh-seg button.on{color:var(--ink)}.wh-seg button:not(.on):hover{color:var(--ink)}
-.wh-seg button.on svg{color:var(--accent)}
-.wh-seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-.wh-seg button[disabled]{cursor:default}.wh-seg button[disabled]:not(.on){opacity:.5}
-.wh-thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 3px);border-radius:8px;background:var(--panel);box-shadow:0 1px 3px rgb(0 0 0/.14),0 0 0 1px var(--line);transition:transform .3s cubic-bezier(.16,1,.3,1)}
-.wh-seg.follow .wh-thumb{transform:translateX(100%)}
-.wh-map{position:relative;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px;padding:44px 4px 4px;border:1px solid color-mix(in srgb,var(--line) 70%,transparent);border-radius:12px;background:color-mix(in srgb,var(--bg) 60%,transparent)}
-.wh-pc{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 2px 8px;color:var(--muted);font-size:12px;text-align:center;min-width:0;transition:color .3s}
-.wh-pc span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wh-pc small{font-size:10.5px;color:var(--muted)}
-.wh-pc.here{color:var(--ink);font-weight:600}.wh-pc.here svg{color:var(--accent)}
-.wh-pc.off{opacity:.55}
-.wh-dot{position:absolute;top:10px;left:0;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;box-shadow:0 0 0 3px var(--panel),0 4px 12px color-mix(in srgb,var(--accent) 35%,transparent);transition:transform .45s cubic-bezier(.16,1,.3,1)}
-.wh-dot .av{width:28px;height:28px;font-size:11px}
-.wh-badge{position:absolute;top:-5px;right:-7px;display:grid;place-items:center;width:16px;height:16px;border-radius:50%;background:var(--panel);color:var(--accent);box-shadow:0 0 0 1px var(--line);opacity:0;transform:scale(.4);transition:opacity .2s,transform .25s cubic-bezier(.16,1,.3,1)}
-.wh-badge svg{width:10px;height:10px}
-.wh-dot.pinned .wh-badge{opacity:1;transform:scale(1)}
-.wh-trail{position:absolute;top:23px;left:0;width:0;height:2px;opacity:0;background:repeating-linear-gradient(90deg,var(--accent) 0 6px,transparent 6px 12px);pointer-events:none}
-.wh-status,.wh-phone{margin:0;display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
-.wh-status b,.wh-phone b{color:var(--ink);font-weight:600}
-.wh-phone{display:none}
-.wh-steps{display:flex;flex-wrap:wrap;gap:6px}
-.wh-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border:1px solid var(--line);border-radius:99px;font-size:12px;color:var(--muted);opacity:.45;transition:opacity .2s,color .2s,border-color .2s}
-.wh-chip.done{opacity:1;color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent)}
-.wh-error{margin:0;font-size:12.5px;color:var(--bad)}
-.wh-note{margin:0;font-size:11.5px;color:var(--muted)}
+/* ---- Where it works in the side panel: one line with a pill (the full profile's rows are in the profile block) ---- */
+/* On the phone the agent cannot run here: no map, just where it works and that you chat from here. */
+
+/* Where it works: the mode, then the computers as plain rows; the one the agent is on is checked. */
+.wh-pc .agp-rl>span{font-size:13px}.wh-pc.off .agp-rl>span{color:var(--muted)}
+.wh-check{display:inline-block;width:14px;height:14px;color:var(--accent)}
+.wh-pc.here .agp-value{color:var(--ink)}
+.wh-progress{display:flex;gap:4px 12px;flex-wrap:wrap;justify-content:flex-end;margin:0;padding:0;list-style:none;font-size:12px;color:var(--muted)}
+.wh-progress li{display:inline-flex;align-items:center;gap:5px}
+.wh-progress li::before{content:"";width:6px;height:6px;border-radius:50%;border:1px solid currentColor;transition:background .25s,border-color .25s}
+.wh-progress li.done{color:var(--ink)}.wh-progress li.done::before{background:var(--good);border-color:var(--good)}
+.wh-steps.failed .agp-rl>span{color:var(--bad)}
+
+/* ---- Where it works in the side panel: one line with a pill ---- */
 .wh-line>div{display:flex;align-items:center;justify-content:flex-end;gap:8px}
 .wh-place{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .wh-pill{flex:none;display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border:0;border-radius:99px;background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent);font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:background .2s}
@@ -2335,5 +2389,8 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .wh-pill.pin svg{transform:rotate(-20deg)}
 .wh-pill:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* On the phone the agent cannot run here: no map, just where it works and that you chat from here. */
-@media (max-width:760px){.wh-map,.wh-status{display:none}.wh-phone{display:flex}.wh-seg button{font-size:12.5px;padding:8px 6px}}
-@media (prefers-reduced-motion:reduce){.wh-thumb,.wh-dot,.wh-badge,.wh-pill svg,.wh-chip{transition:none}}
+@media (prefers-reduced-motion:reduce){.wh-pill svg,.wh-progress li::before{transition:none}}
+
+/* Where it works inside the Setup group: full width, quiet radii like the rest of the list. */
+.agp-tabs button{white-space:nowrap}
+@media (max-width:760px){.agp-tabs button{padding-inline:6px;font-size:12.5px}}

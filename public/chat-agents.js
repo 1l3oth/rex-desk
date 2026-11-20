@@ -1,7 +1,7 @@
 import { t, locale } from './i18n.js';
 import { notesSection, notesAction, exportNotes } from './chat-notes.js';
 import { pickerHtml } from '/chat-pick.js';
-import { whereHtml, placeWhere } from '/chat-where.js';
+import { whereHtml } from '/chat-where.js';
 // Specialist agents: one identity per project. The card shows who the agent is and what it was told; the person can rename, edit or duplicate it.
 const providerName = name => name === 'codex' ? t('Codex') : name === 'gemini' ? t('Gemini (Antigravity)') : t('Claude Code');
 
@@ -30,8 +30,15 @@ export function agentStage(ctx) {
   const unsure = (agent.unsure || []).filter(Boolean), lessons = agent.lessons || [];
   const ai = ['codex', 'gemini'].includes(agent.provider) ? agent.provider : 'claude', aiChoices = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
   const models = [{ value: '', label: t('Default'), hint: t('The model set in Settings') }, ...(aiChoices.models || []).map(model => ({ value: model.id, label: model.label }))];
+  // The page reads like a system Settings app: grouped lists of rows on hairlines, the label on the left, the control on the
+  // right; a heading above each group and a note under it. One tab at a time.
+  const row = (label, control, sub = '', extra = '') => `<div class="agp-r${extra}"><div class="agp-rl"><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</div><div class="agp-rc">${control}</div></div>`;
+  const block = (body, extra = '') => `<div class="agp-r agp-block${extra}">${body}</div>`;
+  const group = (title, rows, note = '', extra = '') => `<section class="agp-grp${extra}">${title ? `<h2 class="agp-gh">${title}</h2>` : ''}<div class="agp-list">${rows}</div>${note ? `<p class="agp-note">${note}</p>` : ''}</section>`;
+  const toggle = (attrs, on, label) => `<label class="switch agp-switch"><input type="checkbox" role="switch" ${attrs} ${on ? 'checked' : ''} aria-label="${label}"><span></span></label>`;
   const chosen = new Set(agent.taskSources || []), options = [['local', t('Rex Desk tasks'), t('Kept here, made by you or the agents')], ...(ui.snap.config?.sources || []).map(source => [source.id, source.name, source.type === 'flow' ? t('Flow tasks') : t('Morningmate tasks')])];
-  const taskSources = `<div class="ag-sources">${options.map(([id, label, hint]) => `<label><input type="checkbox" data-task-source="${esc(id)}" ${chosen.has(id) ? 'checked' : ''}><span>${esc(label)}<small>${esc(hint)}</small></span></label>`).join('')}</div>${chosen.size ? '' : `<p class="ag-help">${t`Not set. ${esc(agent.name)} asks you before it looks for tasks.`}</p>`}`;
+  const taskSources = group(t('Tasks come from'), options.map(([id, label, hint]) => row(esc(label), toggle(`data-task-source="${esc(id)}"`, chosen.has(id), esc(label)), esc(hint))).join(''),
+    chosen.size ? '' : t`Not set. ${esc(agent.name)} asks you before it looks for tasks.`);
   // The agent's own loop: how often it looks at its tasks by itself, and what it does on each look.
   const loop = { on: true, every: 60, prompt: '', ...(agent.loop || {}) }, everyLabel = minutes => minutes >= 1440 ? t('Once a day') : minutes >= 60 ? (minutes === 60 ? t`Every ${minutes / 60} hour` : t`Every ${minutes / 60} hours`) : t`Every ${minutes} minutes`;
   const STEP = { 15: '15m', 30: '30m', 60: '1h', 120: '2h', 240: '4h', 1440: '1 day' }, next = loop.on && loop.lastAt ? new Date(new Date(loop.lastAt).getTime() + Number(loop.every) * 60000) : null;
@@ -39,47 +46,45 @@ export function agentStage(ctx) {
   // Work hours, like a shift: the loop checks only then, and is told to stop when the shift ends.
   const hours = { on: false, start: '08:00', end: '17:00', days: [1, 2, 3, 4, 5], ...(loop.hours || {}) }, offDuty = hours.on && !onShift(hours);
   const dayName = day => new Date(2024, 0, 7 + day).toLocaleDateString(locale(), { weekday: 'short' });
-  const hoursBox = `<div class="lp-hours${hours.on ? ' on' : ''}"><label class="lp-hours-on"><input type="checkbox" data-loop-hours-on ${hours.on ? 'checked' : ''}><span>${t`Work hours`}</span></label>
-      <div class="lp-shift"><input type="time" data-loop-hours="start" value="${esc(hours.start)}" aria-label="${t`Starts at`}"><span>${t`to`}</span><input type="time" data-loop-hours="end" value="${esc(hours.end)}" aria-label="${t`Ends at`}"></div>
-      <div class="lp-days" role="group" aria-label="${t`Work days`}">${[1, 2, 3, 4, 5, 6, 0].map(day => `<label><input type="checkbox" data-loop-day="${day}" ${hours.days.includes(day) ? 'checked' : ''}><span>${esc(dayName(day))}</span></label>`).join('')}</div></div>`;
-  const loopBox = `<section class="ag-sec agp-sec ag-loop${loop.on ? ' on' : ''}"><div class="lp-head"><div><h2 title="${t`${esc(agent.name)} checks its own tasks and starts work by itself.`}">${t`Own loop`}</h2></div>
-      <label class="switch" title="${loop.on ? t('Turn the loop off') : t('Turn the loop on')}"><input type="checkbox" role="switch" data-loop-on ${loop.on ? 'checked' : ''} aria-label="${t`Own loop`}"><span></span></label></div>
-    <div class="lp-body">
-      <div class="lp-every" role="radiogroup" aria-label="${t`How often`}">${[15, 30, 60, 120, 240, 1440].map(minutes => `<label title="${everyLabel(minutes)}"><input type="radio" name="loop-every-${esc(agent.id)}" value="${minutes}" data-loop-every ${Number(loop.every) === minutes ? 'checked' : ''}><span>${STEP[minutes]}</span></label>`).join('')}</div>
-      ${hoursBox}
-      <textarea data-loop-prompt rows="3" maxlength="2000" placeholder="${t`What to do on each check (optional). For example: pick up QA issues first and test them in the browser.`}">${esc(loop.prompt || '')}</textarea>
-      <div class="lp-foot"><span class="lp-status">${loop.on && offDuty ? `<i class="lp-dot rest"></i>${t`Off duty until ${esc(hours.start)}`}` : loop.on ? `<i class="lp-dot"></i>${nextIn === null ? t('First check soon') : nextIn <= 0 ? t('Checking soon') : t`Next check in ${nextIn >= 60 ? `${Math.round(nextIn / 60)} h` : t`${nextIn} min`}`}` : t('Off')}${loop.lastAt ? `<small>${t`Last ${esc(new Date(loop.lastAt).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}`}</small>` : ''}</span>
-        <button type="button" class="btn small lp-now" data-action="spec-loop-now"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>${t`Check now`}</button></div>
-    </div></section>`;
+  const status = loop.on && offDuty ? t`Off duty until ${esc(hours.start)}` : loop.on ? (nextIn === null ? t('First check soon') : nextIn <= 0 ? t('Checking soon') : t`Next check in ${nextIn >= 60 ? `${Math.round(nextIn / 60)} h` : t`${nextIn} min`}`) : t('Off');
+  const last = loop.lastAt ? t`Last ${esc(new Date(loop.lastAt).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}` : '';
+  const loopBox = group(t('Own loop'), row(t('Check tasks by itself'), toggle('data-loop-on', loop.on, t('Own loop')), t`${esc(agent.name)} looks at its tasks and starts work on its own.`)
+      + `<div class="agp-fold${loop.on ? '' : ' off'}">`
+      + row(t('How often'), `<div class="agp-seg" role="radiogroup" aria-label="${t`How often`}">${[15, 30, 60, 120, 240, 1440].map(minutes => `<label title="${everyLabel(minutes)}"><input type="radio" name="loop-every-${esc(agent.id)}" value="${minutes}" data-loop-every ${Number(loop.every) === minutes ? 'checked' : ''}><span>${STEP[minutes]}</span></label>`).join('')}</div>`)
+      + row(t('Work hours'), toggle('data-loop-hours-on', hours.on, t('Work hours')), t('Checks only during these hours, and stops when they end.'))
+      + (hours.on ? row(t('Hours'), `<div class="agp-time"><input type="time" data-loop-hours="start" value="${esc(hours.start)}" aria-label="${t`Starts at`}"><span>${t`to`}</span><input type="time" data-loop-hours="end" value="${esc(hours.end)}" aria-label="${t`Ends at`}"></div>`)
+        + row(t('Days'), `<div class="agp-seg agp-days" role="group" aria-label="${t`Work days`}">${[1, 2, 3, 4, 5, 6, 0].map(day => `<label><input type="checkbox" data-loop-day="${day}" ${hours.days.includes(day) ? 'checked' : ''}><span>${esc(dayName(day))}</span></label>`).join('')}</div>`) : '')
+      + block(`<label class="agp-blabel" for="lp-prompt-${esc(agent.id)}">${t`On each check`}</label><textarea id="lp-prompt-${esc(agent.id)}" class="agp-text" data-loop-prompt rows="2" maxlength="2000" placeholder="${t`Optional. For example: pick up QA issues first and test them in the browser.`}">${esc(loop.prompt || '')}</textarea>`)
+      + row(`${loop.on ? `<i class="agp-dot${offDuty ? ' rest' : ' on'}"></i>` : ''}${status}`, `<button type="button" class="btn small" data-action="spec-loop-now">${t`Check now`}</button>`, last, ' agp-status')
+      + '</div>');
   // The page is a decision surface: who the agent is and what it is doing at the top, then one tab at a time.
   const tabId = ['about', 'notes', 'work', 'setup'].includes(ui.agentTab) ? ui.agentTab : 'about';
-  const where = [agent.projectSlug ? `<a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>` : esc(t('No project')), agent.device ? `${esc(agent.device)}${agent.remote ? '' : ` <span class="agp-faint">${t`(this computer)`}</span>`}` : ''].filter(Boolean).join('<span class="agp-sep" aria-hidden="true"></span>');
+  const where = [agent.projectSlug ? `<a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>` : esc(t('No project')), agent.device ? `${esc(agent.device)}${agent.remote ? '' : ` <span class="agp-faint">${t`(this computer)`}</span>`}` : ''].filter(Boolean).join('<span class="agp-sep" aria-hidden="true">·</span>');
   const avatar = agent.remote ? ctx.avatar({ name: agent.name, agent, size: 'xl' }) : `<button type="button" class="av-edit agp-av" data-action="avatar-pick" data-agent-id="${esc(agent.id)}" title="${t`Change ${esc(agent.name)}'s avatar`}" aria-label="${t`Change ${esc(agent.name)}'s avatar`}">${ctx.avatar({ name: agent.name, agent, size: 'xl' })}</button>`;
   const head = `<header class="agp-head">${avatar}
     <div class="agp-who">
       <form class="ag-name agp-name" data-agent-rename><input id="sp-name" type="text" maxlength="40" value="${esc(agent.name)}" aria-label="${t`Agent name`}" spellcheck="false"><button class="btn small" type="submit" hidden>${t`Rename`}</button></form>
-      <p class="agp-line"><span class="agp-state"><span class="dot ${tone}"></span>${esc(agent.status?.label || t('Idle'))}</span><span class="agp-sep" aria-hidden="true"></span>${where}</p>
+      <p class="agp-line"><span class="agp-state"><span class="dot ${tone}"></span>${esc(agent.status?.label || t('Idle'))}</span><span class="agp-sep" aria-hidden="true">·</span>${where}</p>
     </div>
-    <div class="agp-actions"><button class="btn primary" data-action="spec-chat">${t`Chat`}</button><button class="btn" data-action="spec-duplicate">${t`Duplicate`}</button></div>
+    <div class="agp-actions"><button class="btn small" data-action="spec-duplicate">${t`Duplicate`}</button><button class="btn small primary" data-action="spec-chat">${t`Chat`}</button></div>
   </header>`;
-  const questions = unsure.length ? `<section class="agp-ask" aria-label="${t`${esc(agent.name)} is not sure about`}"><h2>${t`${esc(agent.name)} is not sure about`}</h2><ul>${unsure.map((text, index) => `<li><span>${esc(text)}</span><span class="ag-ask-do"><button class="btn small" data-action="spec-answer" data-index="${index}">${t`Answer`}</button><button class="btn small quiet" data-action="spec-settled" data-index="${index}" title="${t`Mark as settled`}">${t`Settled`}</button></span></li>`).join('')}</ul></section>` : '';
+  const questions = unsure.length ? group(t`${esc(agent.name)} is not sure about`, unsure.map((text, index) => row(`<i class="agp-dot warn" aria-hidden="true"></i>${esc(text)}`, `<button class="btn small quiet" data-action="spec-settled" data-index="${index}" title="${t`Mark as settled`}">${t`Settled`}</button><button class="btn small" data-action="spec-answer" data-index="${index}">${t`Answer`}</button>`)).join(''), '', ' agp-ask') : '';
   const tabs = `<nav class="agp-tabs" role="tablist" aria-label="${t`Profile sections`}">${[['about', t('Profile')], ['notes', t('Soul and memory')], ['work', t('Work')], ['setup', t('Setup')]].map(([id, label]) => `<button type="button" role="tab" aria-selected="${tabId === id}" class="${tabId === id ? 'on' : ''}" data-action="spec-tab" data-tab="${id}">${label}${id === 'work' && loop.on ? '<span class="agp-live" title="' + t('Own loop is on') + '"></span>' : ''}</button>`).join('')}</nav>`;
-  const lessonList = lessons.length ? `<ul class="agp-lessons">${lessons.map((lesson, index) => `<li><span>${esc(lesson.text)}</span><button type="button" class="ag-x" data-action="spec-forget" data-index="${index}" title="${t`Forget this lesson`}" aria-label="${t`Forget this lesson`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>` : `<p class="agp-empty">${t`None yet. When you correct ${esc(agent.name)}, it keeps the lesson here.`}</p>`;
-  const section = (title, body, extra = '') => `<section class="agp-sec"${extra}>${title ? `<h2>${title}</h2>` : ''}${body}</section>`;
-  const about = section(t('About'), `<p class="agp-about">${esc(agent.purpose || t('Not recorded yet.'))}</p>${agent.projectPath ? `<p class="agp-path" title="${esc(agent.projectPath)}"><span>${t`Main folder`}</span><code>${esc(agent.projectPath)}</code></p>` : ''}`)
-    + section(t('Rules'), `<textarea id="sp-rules" class="agp-rules" rows="${Math.min(16, Math.max(5, Math.ceil(String(agent.rules || '').length / 70) + String(agent.rules || '').split(/\n/).length))}" spellcheck="false" placeholder="${t`How ${esc(agent.name)} should work here. For example: ask before changing the database.`}" aria-label="${t`Rules from you`}">${esc(agent.rules)}</textarea><div class="ag-save"><button class="btn primary small" data-action="spec-save" disabled>${t`Save rules`}</button></div>`)
-    + section(`${t`Lessons learned`}${lessons.length ? ` <span class="agp-count">${lessons.length}</span>` : ''}`, lessonList);
-  const row = (label, control, note = '') => `<div class="agp-row"><span class="agp-label">${label}</span><div class="agp-control">${control}${note ? `<small>${note}</small>` : ''}</div></div>`;
-  // Where it works: stays on one computer or follows you, with the computers on a small map (see chat-where.js).
-  const followRow = agent.kind !== 'main' ? whereHtml(ctx, agent) : '';
-  const setup = section('', row('AI', pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: [{ value: 'claude', label: t('Claude Code'), hint: t('Your Claude plan') }, { value: 'codex', label: t('Codex'), hint: t('Your ChatGPT plan') }, { value: 'gemini', label: t('Gemini'), hint: t('Google account, through Antigravity') }] }), t('Switching starts fresh with a summary of the chat.'))
+  const lessonRows = lessons.length ? lessons.map((lesson, index) => row(`<span class="agp-wrap">${esc(lesson.text)}</span>`, `<button type="button" class="ag-x agp-x" data-action="spec-forget" data-index="${index}" title="${t`Forget this lesson`}" aria-label="${t`Forget this lesson`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>`, '', ' agp-lesson')).join('')
+    : block(`<p class="agp-empty">${t`None yet. When you correct ${esc(agent.name)}, it keeps the lesson here.`}</p>`);
+  const about = group(t('About'), block(`<p class="agp-about">${esc(agent.purpose || t('Not recorded yet.'))}</p>`) + (agent.projectPath ? row(t('Main folder'), `<code class="agp-code" title="${esc(agent.projectPath)}">${esc(agent.projectPath)}</code>`) : ''))
+    + group(t('Rules'), block(`<textarea id="sp-rules" class="agp-text agp-rules" rows="${Math.min(16, Math.max(4, Math.ceil(String(agent.rules || '').length / 70) + String(agent.rules || '').split(/\n/).length))}" spellcheck="false" placeholder="${t`How ${esc(agent.name)} should work here. For example: ask before changing the database.`}" aria-label="${t`Rules from you`}">${esc(agent.rules)}</textarea>`)
+      + `<div class="agp-r agp-actrow ag-save"><button class="btn primary small" data-action="spec-save" disabled>${t`Save rules`}</button></div>`)
+    + group(`${t`Lessons learned`}${lessons.length ? ` <span class="agp-count">${lessons.length}</span>` : ''}`, lessonRows);
+  // Where it works (L57): stays on one computer or follows you, the map of the person's computers, and the move steps.
+  const followRows = agent.kind !== 'main' ? whereHtml(ctx, agent, { row }) : '';
+  const setup = group(t('AI'), row('AI', pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: [{ value: 'claude', label: t('Claude Code'), hint: t('Your Claude plan') }, { value: 'codex', label: t('Codex'), hint: t('Your ChatGPT plan') }, { value: 'gemini', label: t('Gemini'), hint: t('Google account, through Antigravity') }] }))
       + row(t('Account'), pickerHtml(ctx, { id: 'sp-profile', label: t('Account'), value: agent.profile || '', items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[ai]?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] }))
-      + row(t('Model'), pickerHtml(ctx, { id: 'sp-model', label: t('Model'), value: agent.model || '', items: models })))
-    + section(t('Where it works'), `${followRow}${agent.remote && !agent.pinned ? row(t('Move'), `<button class="btn small" data-action="spec-move">${t`Move to this computer`}</button>`) : ''}${agent.noCloud ? row(t('Cloud'), `<span>${t`Kept out of the cloud`}</span>`) : ''}`)
-    + `<section class="agp-sec agp-danger"><p>${t`Created by ${esc(agent.createdBy || t('you'))}${origin ? t`, copied from ${esc(origin.name)}` : ''}.`}</p><button class="btn small danger" data-action="spec-remove">${t`Remove ${esc(agent.name)}`}</button></section>`;
-  const work = section(t('Tasks come from'), taskSources) + loopBox + scheduleBox(ctx, agent);
+      + row(t('Model'), pickerHtml(ctx, { id: 'sp-model', label: t('Model'), value: agent.model || '', items: models })), t('Switching starts fresh with a summary of the chat.'))
+    + (followRows || agent.remote || agent.noCloud ? group(t('Where it works'), `${followRows}${agent.remote && !agent.pinned ? row(t('Move'), `<button class="btn small" data-action="spec-move">${t`Move to this computer`}</button>`) : ''}${agent.noCloud ? row(t('Cloud'), `<span class="agp-value">${t`Kept out of the cloud`}</span>`) : ''}`, agent.pinned ? t('Set in Settings, Projects.') : '') : '')
+    + group('', row(t`Remove ${esc(agent.name)}`, `<button class="btn small danger" data-action="spec-remove">${t`Remove`}</button>`, t`Created by ${esc(agent.createdBy || t('you'))}${origin ? t`, copied from ${esc(origin.name)}` : ''}.`));
+  const work = taskSources + loopBox + scheduleBox(ctx, agent, { row, block, group, toggle });
   const body = tabId === 'notes' ? notesSection(ctx, agent) : tabId === 'work' ? work : tabId === 'setup' ? setup : about;
-  requestAnimationFrame(placeWhere);
   const feed = `<div class="page ag agp" data-agent="${esc(agent.id)}">${head}${questions}${tabs}<div class="agp-body" role="tabpanel">${body}</div></div>`;
   return { title: agent.name, meta: [providerName(agent.provider), agent.projectSlug].filter(Boolean).join(' · '), feed, top: true };
 }
@@ -105,14 +110,15 @@ function onShift(hours, date = new Date()) {
 }
 // Scheduled messages for this agent: sent into its personal chat at the set time, as if the person typed them.
 const repeatLabel = item => ({ once: t('Once'), daily: t('Every day'), weekdays: t('Weekdays'), weekly: t`Every ${new Date(2024, 0, 7 + Number(item.day || 0)).toLocaleDateString(locale(), { weekday: 'long' })}` })[item.repeat] || '';
-function scheduleBox(ctx, agent) {
+function scheduleBox(ctx, agent, { row, block, group, toggle }) {
   const { esc, ui } = ctx, items = (ui.snap.schedules || []).filter(item => item.agentId === agent.id);
   const when = item => item.on && item.nextAt ? t`Next ${new Date(item.nextAt).toLocaleString(locale(), { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : item.lastAt ? t('Sent') : t('Paused');
-  const list = items.length ? `<ul class="sm-list">${items.map(item => `<li class="${item.on ? '' : 'off'}"><div class="sm-when"><b>${esc(item.time)}</b><span>${esc(repeatLabel(item))}</span></div><p class="sm-text">${esc(item.text)}</p><small class="sm-next">${esc(when(item))}${item.error ? ` · ${esc(item.error)}` : ''}</small>
-      <div class="sm-acts">${item.repeat === 'once' && !item.on ? '' : `<label class="switch small" title="${item.on ? t('Pause') : t('Turn on')}"><input type="checkbox" role="switch" data-sched-on="${esc(item.id)}" ${item.on ? 'checked' : ''} aria-label="${t`On`}"><span></span></label>`}<button type="button" class="icon-btn" data-action="spec-sched-del" data-id="${esc(item.id)}" title="${t`Delete`}" aria-label="${t`Delete`}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></li>`).join('')}</ul>` : '';
-  return `<section class="ag-sec ag-sched agp-sec"><h2 title="${t`Rex Desk sends these to ${esc(agent.name)} at the time you set, as if you typed them.`}">${t`Scheduled messages`}</h2>${list}
-    <form class="sm-form" data-sched-form><textarea name="text" rows="2" maxlength="4000" required placeholder="${t`For example: check new Orbit tasks and start the most urgent one.`}"></textarea>
-      <div class="sm-row"><input type="time" name="time" value="09:00" required aria-label="${t`Time`}"><select name="repeat" aria-label="${t`How often`}"><option value="once">${t`Once`}</option><option value="daily">${t`Every day`}</option><option value="weekdays" selected>${t`Weekdays`}</option><option value="weekly">${t`Every week`}</option></select><button class="btn small primary">${t`Add`}</button></div></form></section>`;
+  const rows = items.map(item => row(`<span class="agp-wrap">${esc(item.text)}</span>`,
+    `${item.repeat === 'once' && !item.on ? '' : toggle(`data-sched-on="${esc(item.id)}"`, item.on, t('On'))}<button type="button" class="icon-btn agp-x" data-action="spec-sched-del" data-id="${esc(item.id)}" title="${t`Delete`}" aria-label="${t`Delete`}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>`,
+    `${esc(item.time)} · ${esc(repeatLabel(item))} · ${esc(when(item))}${item.error ? ` · ${esc(item.error)}` : ''}`, item.on ? ' agp-sched' : ' agp-sched off')).join('');
+  const form = block(`<form class="agp-form" data-sched-form><textarea class="agp-text" name="text" rows="2" maxlength="4000" required aria-label="${t`Message`}" placeholder="${t`For example: check new Orbit tasks and start the most urgent one.`}"></textarea>
+      <div class="agp-formrow"><input type="time" name="time" value="09:00" required aria-label="${t`Time`}"><select name="repeat" aria-label="${t`How often`}"><option value="once">${t`Once`}</option><option value="daily">${t`Every day`}</option><option value="weekdays" selected>${t`Weekdays`}</option><option value="weekly">${t`Every week`}</option></select><span class="agp-grow"></span><button class="btn small primary">${t`Add`}</button></div></form>`);
+  return group(t('Scheduled messages'), rows + form, t`Rex Desk sends these to ${esc(agent.name)} at the time you set, as if you typed them.`);
 }
 // The loop settings save as soon as they change.
 let loopWired = false;
