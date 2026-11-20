@@ -317,13 +317,17 @@ export class Desk {
     const hit = message || (rejected ? 'Claude usage limit reached.' : '') || recent.filter(event => event.kind === 'error' || (['agent-text', 'agent-result'].includes(event.kind) && String(event.text || event.result || '').length <= 240))
       .map(event => String(event.text || event.message || event.result || '')).find(text => LIMIT.test(text));
     if (!hit) return false;
-    const pinned = this.accountFor(run), current = pinned || this.agents.selected(provider);
+    // The account the limited turn ran on. Using "the account chosen now" blamed the account an earlier switch had just moved
+    // everyone to: a second agent hitting the limit marked the fresh account full, and the next limit found none left (L40).
+    const pinned = this.accountFor(run), current = run.turnAccount || pinned || this.agents.selected(provider);
     // Limited until the reset Claude reported for this account, not a blind 5 hours: an account whose window reset minutes
     // later was skipped for hours, and Rex Desk said every account was full while one was at 7%.
     const usage = this.store.get('usage', `${provider}:${current || 'default'}`)?.windows || {};
     this.agents.markLimited(current, Math.max(0, ...Object.values(usage).filter(window => window?.status === 'rejected' || Number(window?.used) >= 100).map(window => Number(window.resetsAt) || 0)));
     if (this.store.get('accounts', 'auto')?.off) { this.store.event(runId, 'account-limit', { text: `This ${title} account hit its usage limit. Switch accounts at the bottom left, or ${this.resumeAfterLimit(runId, [current])}.` }, true); return false; }
-    if (run.accountSwitchedAt && Date.now() - Date.parse(run.accountSwitchedAt) < 120000) return false;
+    // This turn already switched (the limit is noticed twice for one turn): it is handled. A new turn that hits a limit again
+    // switches again, however soon; it used to stop silently for 2 minutes after a switch.
+    if (run.accountSwitchedAt && Date.parse(run.accountSwitchedAt) >= since && since) return true;
     const next = await this.agents.alternative(provider, current);
     if (!next) { this.store.event(runId, 'account-limit', { text: `Every signed-in ${title} account has hit its usage limit. ${this.resumeAfterLimit(runId)}.` }, true); return false; }
     const owner = run.roomAgent || run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
@@ -714,7 +718,8 @@ export class Desk {
         await runner.attach(attach);
       } else {
       // Each turn records its own start, so a resumed run shows time since it resumed, not since it was first created.
-      this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), turnStartedAt: now(), endedAt: null, error: '' });
+      // The account this turn really runs on, so a usage limit is put on that account, not on whatever is chosen by the time it hits.
+      this.patchRun(runId, { state: 'running', startedAt: run.startedAt || now(), turnStartedAt: now(), endedAt: null, error: '', turnAccount: this.usesLocalModel(run) ? '' : this.agents.use(run.provider || 'claude', this.accountFor(run)) || '' });
       this.store.event(runId, 'turn-start', { provider: run.provider, resumed: Boolean(run.startedAt) });
       // A headless session that is being reopened already holds the whole conversation, so it is given only what is new.
       const reopened = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && run.followUp;

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
+import { canonical } from '../src/agents.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 
@@ -69,5 +70,73 @@ test('a Codex turn cut off by a usage limit moves to another signed-in Codex acc
   assert.equal(store.config().agentProfiles.codex, second);
   assert.match(turns[1].env, /codex2/);
   assert.ok(store.events(run.id, { limit: 50 }).some(event => event.kind === 'account-switched' && /Codex/.test(event.text) && /second@example\.com/.test(event.text)));
+  desk.closed = true;
+});
+
+// L40: the switch kept working only once. Three limits in a row each move to a free account and say so; when none is free it
+// says so and carries on at the reset; a second agent hitting the limit on the old account never marks the new one full.
+const keyOf = value => canonical(value || '');
+function threeAccounts(store, desk) {
+  const accounts = [temporary('claudeA'), temporary('claudeB'), temporary('claudeC')], names = ['a@example.com', 'b@example.com', 'c@example.com'];
+  store.saveConfig({ ...store.publicConfig(), agentProfiles: { claude: accounts[0] } });
+  desk.agents.alternative = async (provider, current) => {
+    const limited = store.get('accounts', 'limited')?.until || {};
+    const index = accounts.findIndex(profile => keyOf(profile) !== keyOf(current) && !((limited[keyOf(profile)] || 0) > Date.now()));
+    return index < 0 ? null : { profile: accounts[index], label: names[index], account: names[index] };
+  };
+  return { accounts, names };
+}
+const waitFor = async predicate => { for (let attempt = 0; attempt < 400; attempt++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 25)); } throw new Error('timed out'); };
+
+test('three usage limits in a row switch three times, each time to a free account, and say so each time', async () => {
+  const store = new Store(temporary('acct-three')), turns = [];
+  let accounts;
+  const desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'),
+    runnerFactory: options => ({ start: async () => {
+      turns.push(options.agentEnv.CLAUDE_CONFIG_DIR || '');
+      // Before the third limit, account A's window resets.
+      if (turns.length === 3) { const record = store.get('accounts', 'limited'); const { [keyOf(accounts[0])]: _reset, ...rest } = record.until; store.put('accounts', 'limited', { ...record, until: rest }); }
+      if (turns.length <= 3) options.event('agent-text', { text: 'Claude AI usage limit reached. Your limit resets at 5pm.' }); else options.event('agent-text', { text: 'Done.' });
+    }, interrupt() {}, close() {} }) });
+  ({ accounts } = threeAccounts(store, desk));
+  const run = await desk.startMain({ prompt: 'Hello' });
+  await waitFor(() => turns.length >= 4 && desk.run(run.id).state === 'finished');
+  const used = turns.map(dir => accounts.findIndex(profile => keyOf(profile) === keyOf(dir)));
+  assert.deepEqual(used, [0, 1, 2, 0], 'A, then B, then C, then A again after its reset');
+  const switched = store.events(run.id, { limit: 100 }).filter(event => event.kind === 'account-switched');
+  assert.equal(switched.length, 3, 'every switch is said in the chat');
+  assert.match(switched[2].text, /a@example\.com/);
+  desk.closed = true;
+});
+
+test('when every account is full the chat says so and carries on at the reset, never a silent stop', async () => {
+  const store = new Store(temporary('acct-none')), turns = [];
+  const desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'),
+    runnerFactory: options => ({ start: async () => { turns.push(1); options.event('agent-text', { text: 'You have reached your weekly limit.' }); }, interrupt() {}, close() {} }) });
+  threeAccounts(store, desk);
+  const run = await desk.startMain({ prompt: 'Hello' });
+  await waitFor(() => turns.length >= 3 && store.events(run.id, { limit: 100 }).some(event => event.kind === 'account-limit'));
+  await waitFor(() => desk.run(run.id).state === 'finished');
+  assert.equal(turns.length, 3, 'A, B and C each tried once');
+  const notice = store.events(run.id, { limit: 100 }).find(event => event.kind === 'account-limit');
+  assert.match(notice.text, /Every signed-in Claude( Code)? account has hit its usage limit. It carries on by itself at/);
+  assert.ok(desk.run(run.id).resumeAt, 'a time to carry on is set');
+  desk.closed = true;
+});
+
+test('a second agent hitting the limit on the old account does not mark the new account full', async () => {
+  const store = new Store(temporary('acct-second')), desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'), runnerFactory: () => ({ start: async () => {}, interrupt() {}, close() {} }) });
+  const { accounts } = threeAccounts(store, desk);
+  // The first agent already moved everyone to B; the second agent's turn had started on A and now hits A's limit.
+  store.saveConfig({ ...store.publicConfig(), agentProfiles: { claude: accounts[1] } });
+  store.put('accounts', 'limited', { id: 'limited', until: { [keyOf(accounts[0])]: Date.now() + 3600000 } });
+  const started = new Date(Date.now() - 5000).toISOString();
+  store.put('run', 'second', { id: 'second', role: 'coordinator', main: true, provider: 'claude', state: 'running', turnStartedAt: started, turnAccount: accounts[0], createdAt: started });
+  store.event('second', 'agent-text', { text: 'Claude AI usage limit reached.' }, true);
+  desk.drain = async () => {};
+  assert.equal(await desk.switchIfLimited('second'), true);
+  const limited = store.get('accounts', 'limited').until;
+  assert.ok(!limited[keyOf(accounts[1])], 'B is still free');
+  assert.equal(keyOf(store.config().agentProfiles.claude), keyOf(accounts[1]), 'it moves to B, the free one');
   desk.closed = true;
 });
