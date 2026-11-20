@@ -4,6 +4,7 @@ import path from 'node:path';
 import { memoryFolder } from './folders.js';
 import { createHash } from 'node:crypto';
 import { detectProject } from './project-detect.js';
+import { APP_GUIDE } from './app-guard.js';
 
 const now = () => new Date().toISOString();
 const NOTES_BEGIN = '<!-- notes:begin -->', NOTES_END = '<!-- notes:end -->';
@@ -170,12 +171,28 @@ export class Memory {
   }
   // The profile as agents get it, or nothing while it is empty.
   person() { const text = read(this.file('user.md'), 4000).trim(); return /^- /m.test(text) ? text : ''; }
+  // What every chat starts with about the person (L62): only how to explain and what they dislike; the rest is one
+  // desk_memory("user") away, so a long profile is not re-sent on every step of every chat.
+  personBrief() {
+    const text = this.person(); if (!text) return '';
+    const keep = [PERSON_SECTIONS.explain, PERSON_SECTIONS.dislikes];
+    const parts = text.split(/^(?=## )/m).filter(part => keep.some(name => part.startsWith(`## ${name}`))).map(part => part.trim()).join('\n\n');
+    return `About the person: read all of it with desk_memory("user") when you need it. Follow these in every answer:${parts ? `\n${parts.slice(0, 1600)}` : ''}`;
+  }
+  // One line pointing at the second brain; how to use it is read with desk_memory("second-brain") when needed (L62).
+  secondBrainPointer() {
+    const text = this.secondBrain(); if (!text) return '';
+    const where = /Where:\s*`([^`]+)`/.exec(text)?.[1] || '';
+    return `The person keeps a second brain (notes vault)${where ? ` at ${where}` : ''}. When they mention their own projects, people, tools or plans, or you would ask them something it may answer, first read desk_memory("second-brain") for how to use it, and cite the pages you used.`;
+  }
   // The chat style the person keeps in chat-style.md, or the built-in one.
   chatStyle() { try { const text = readFileSync(this.file('chat-style.md'), 'utf8').trim(); return text ? text.slice(0, 3000) : CHAT_STYLE; } catch { return CHAT_STYLE; } }
   state() { try { return JSON.parse(readFileSync(this.file('scan.json'), 'utf8')); } catch { return { projects: {} }; } }
   list() { return Object.entries(this.state().projects).map(([slug, item]) => ({ slug, ...item })); }
   readDoc(name) {
     const key = String(name || '').toLowerCase();
+    if (key === 'app-help') return APP_GUIDE;
+    if (key === 'second-brain') { const text = this.secondBrain(); if (!text) throw new Error('No second brain is set up yet.'); return text; }
     const file = key === 'user' ? this.file('user.md') : key === 'index' || !key ? this.file('projects', 'index.md') : this.file('projects', `${key.replace(/[^a-z0-9._-]/g, '')}.md`);
     if (!file.startsWith(this.directory) || !exists(file)) throw new Error(`No memory page "${name}". Read "index" to see the projects.`);
     return readFileSync(file, 'utf8');

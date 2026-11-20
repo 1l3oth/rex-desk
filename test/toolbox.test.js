@@ -144,11 +144,12 @@ test('every agent is told its MCP servers and skills up front, and a manual step
     const server = createMcp(desk, { role: 'specialist', runId: 'r1' }), call = (name, input) => server._registeredTools[name].handler(input, {});
     await call('desk_find', { query: 'cake', kind: 'any', limit: 8 });
     const text = desk.toolsText(store.get('run', 'r1'));
-    assert.match(text, /Your MCP servers[\s\S]*- bakery: list_bread, order_cake/);
-    assert.match(text, /Your skills[\s\S]*- studybook: Build a Korean study unit/);
+    // L62: server names and a skill count only; the tools and skill details are one desk_find away.
+    assert.match(text, /MCP servers bakery; \d+ skills\. Search them with desk_find/);
+    assert.doesNotMatch(text, /list_bread|Build a Korean study unit/);
     assert.match(text, /search desk_find for a tool or skill that does it/);
     assert.doesNotMatch(text, /inputSchema|rex_desk/, 'names and one line only, never Rex Desk itself');
-    assert.ok(desk.prompt(store.get('run', 'r1')).includes('- bakery: list_bread, order_cake'), 'it is in the agent\'s instructions');
+    assert.ok(desk.prompt(store.get('run', 'r1')).includes('MCP servers bakery;'), 'it is in the agent\'s instructions');
     // Asking the person to do by hand what a tool does: the agent is shown the tool first, and nothing is asked yet.
     const hinted = JSON.parse((await call('desk_ask', { message: 'Please order the birthday cake by hand on the bakery page.', wait: false })).content[0].text);
     assert.equal(hinted.asked, false); assert.match(hinted.hint, /bakery\/order_cake/);
@@ -172,10 +173,8 @@ test('an agent profile lists exactly the MCP servers and skills its instructions
     const run = desk.toolsRunOf(agent.id), profile = desk.toolsInventory(run).items, text = desk.toolsText(store.get('run', 'r1'));
     assert.equal(run.id, 'r1', 'the profile describes the agent\'s own chat');
     assert.deepEqual(profile.servers.map(item => item.name), ['bakery']); assert.deepEqual(profile.servers[0].tools, ['list_bread', 'order_cake']);
-    for (const item of profile.servers) assert.ok(text.includes(`- ${item.name}`), `${item.name} is in the instructions too`);
-    for (const item of profile.skills) assert.ok(text.includes(`- ${item.name}`), `${item.name} is in the instructions too`);
-    const named = [...text.matchAll(/^- ([^:\n]+)/gm)].map(match => match[1]);
-    assert.deepEqual(named.sort(), [...profile.servers.map(item => item.name), ...profile.skills.map(item => item.name)].sort(), 'nothing more, nothing less');
+    for (const item of profile.servers) assert.ok(text.includes(item.name), `${item.name} is in the instructions too`);
+    assert.match(text, new RegExp(`; ${profile.skills.length + profile.more.length} skills`), 'skills are counted, not listed');
     // Past the skills named in the instructions, the rest are "found by search", in the profile and in the instructions alike.
     const short = box.inventory('', { skills: 1 });
     assert.equal(short.items.skills.length, 1); assert.equal(short.items.more.length, 1); assert.equal(short.moreSkills, 1);

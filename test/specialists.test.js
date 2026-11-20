@@ -145,7 +145,8 @@ test('how to explain things to the person comes first in what every agent reads,
   const person = desk.memory.person();
   assert.ok(person.indexOf('## How to explain things to me') < person.indexOf('## Likes'), 'explain comes first');
   const agent = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop' });
-  assert.match(desk.specialists.identity(agent), /Follow "How to explain things to me" in every answer[\s\S]*Short answer first, then numbered steps/);
+  assert.match(desk.specialists.identity(agent), /Follow these in every answer[\s\S]*How to explain things to me[\s\S]*Short answer first, then numbered steps/);
+  assert.doesNotMatch(desk.specialists.identity(agent), /Plain words/, 'likes are read with desk_memory("user") when needed, not sent every turn');
   assert.deepEqual(desk.memory.forgetPersonNote('explain', 'Short answer first'), { removed: true });
   assert.ok(!desk.memory.person().includes('numbered steps'));
   assert.throws(() => desk.memory.personNote('mood', 'x y z'), /Choose one of: explain, personality/);
@@ -208,4 +209,21 @@ test('a run moves only to an agent on its own project, and never from a group ch
   assert.throws(() => desk.specialists.moveToChat('room'), /group chat/);
   assert.throws(() => desk.specialists.moveToChat('gone'), /gone/);
   assert.equal(desk.specialists.moveToChat('r1').runId, 'r1', 'without an agent it goes to the agent that did it');
+});
+
+test('L62: a project agent starts lean and loads app help, the second brain and the whole profile by tool', () => {
+  const { desk } = setup();
+  const vault = temporary('vault'); mkdirSync(path.join(vault, 'wiki'), { recursive: true }); writeFileSync(path.join(vault, 'wiki', 'index.md'), '# Index');
+  desk.memory.setSecondBrain({ path: vault, how: 'Start from the index.' });
+  desk.memory.personNote('about', 'Lives in Seoul');
+  const agent = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop' });
+  const prompt = desk.prompt({ id: 'r1', role: 'specialist', specialistId: agent.id, provider: 'claude' });
+  assert.doesNotMatch(prompt, /Restart Rex Desk server/, 'app help is not in a project agent\'s start');
+  assert.match(prompt, /desk_memory\("app-help"\)/);
+  assert.match(desk.memory.readDoc('app-help'), /Restart Rex Desk server/);
+  assert.match(prompt, /second brain[^\n]*desk_memory\("second-brain"\)/);
+  assert.doesNotMatch(prompt, /Start from the index/, 'how to use the vault is read when needed');
+  assert.match(desk.memory.readDoc('second-brain'), /Start from the index/);
+  assert.doesNotMatch(prompt, /Lives in Seoul/); assert.match(desk.memory.readDoc('user'), /Lives in Seoul/);
+  assert.match(desk.prompt({ id: 'm1', role: 'coordinator', main: true, taskIds: [], prompt: 'hi' }), /Restart Rex Desk server/, 'the main agent keeps the app help');
 });
