@@ -6,6 +6,7 @@ import { Peers } from './peers.js';
 import { Team } from './team.js';
 import { Schedules } from './schedules.js';
 import { AgentNotes } from './agent-notes.js';
+import { Handover } from './handover.js';
 import { Net } from './net.js';
 import { Toolbox } from './toolbox.js';
 import { Memory } from './memory.js';
@@ -172,6 +173,7 @@ export class Desk {
     this.team = new Team(this);
     this.schedules = new Schedules(store, this);
     this.notes = new AgentNotes(this);
+    this.handover = new Handover(this);
     this.net = new Net(this, { fetcher: netFetcher, judge: netJudge });
     // The person's other MCP tools and skills, reached through two tools (desk_find, desk_run) instead of all loaded at once.
     this.toolbox = toolbox || new Toolbox({ bundled: root ? path.join(root, 'skills') : '' });

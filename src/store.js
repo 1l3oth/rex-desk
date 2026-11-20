@@ -26,7 +26,7 @@ export const latestLocalMain = runs => runs.filter(isLocalMain).sort((left, righ
 // each computer and stay out.
 // The person's message as they wrote it: line breaks kept (Markdown, lists, the Attached files block), extra spaces trimmed (L50).
 export const keepLines = text => String(text || '').replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{4,}/g, '\n\n\n').trim();
-export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd', 'chatcopy', 'chatfile', 'chatsplit', 'task', 'pin', 'agentnote', 'agentnotehist']);
+export const SHARED = new Set(['room', 'roommsg', 'specialist', 'peercmd', 'chatcopy', 'chatfile', 'chatsplit', 'task', 'pin', 'agentnote', 'agentnotehist', 'handover']);
 // What the person can leave out of the cloud backup (Settings, Backup and updates). Agents, rooms, projects and settings
 // always go up: they are what makes the desk follow the person to another computer.
 export const BACKUP_PARTS = { chats: true, rooms: true, tasks: true, files: true };

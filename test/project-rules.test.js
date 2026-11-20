@@ -106,3 +106,30 @@ test('moving an agent here brings its chat, points it at the folder here, and st
     await assert.rejects(desk.projectRules.move('gone'), /is not on this computer/);
   } finally { await close(); }
 });
+
+test('a move saves the work first and shows each step; when saving fails the agent stays where it was (L57)', async () => {
+  const { store, desk, agent, close } = setup();
+  try {
+    desk.peers.statusOf = () => ({ state: 'idle', label: 'Idle' }); desk.peers.online = () => true;
+    // Saved and committed on the other computer, unpacked here into the agent's own worktree.
+    agent('mv3', { node: 'work-pc', runId: 'r11' });
+    store.put('run', 'r11', { id: 'r11', role: 'specialist', specialistId: 'mv3', state: 'finished', createdAt: new Date().toISOString() });
+    const asked = [];
+    desk.handover.request = async (moving, input) => { asked.push([moving.id, input.to]); return { branch: 'rex/mv3/cart', head: 'abc123', committed: 'abc123', bundle: 'YnVuZGxl' }; };
+    desk.handover.pickUp = async input => ({ worktree: input.directory, branch: input.branch, head: input.head });
+    const result = await desk.projectRules.move('mv3');
+    assert.equal(asked.length, 1, 'the other computer was asked to save the work first');
+    assert.equal(result.branch, 'rex/mv3/cart'); assert.equal(store.get('specialist', 'mv3').node, store.nodeId);
+    assert.equal(store.get('run', 'r11').worktree, result.worktree); assert.equal(store.get('run', 'r11').branch, 'rex/mv3/cart');
+    const steps = store.events('r11', { visible: true, limit: 50 }).filter(event => event.kind === 'move-step').map(event => event.step);
+    assert.deepEqual(steps, ['saved', 'committed', 'moved', 'picked-up']);
+    // Saving fails there: nothing moves, and the chat says why in one line.
+    agent('mv4', { node: 'work-pc', runId: 'r12' });
+    store.put('run', 'r12', { id: 'r12', role: 'specialist', specialistId: 'mv4', state: 'finished', createdAt: new Date().toISOString() });
+    desk.handover.request = async () => { throw new Error("Desky's worktree is on master, where work is never committed, so its unsaved changes stayed."); };
+    await assert.rejects(desk.projectRules.move('mv4'), /never committed/);
+    assert.equal(store.get('specialist', 'mv4').node, 'work-pc', 'it stayed where it was');
+    const failed = store.events('r12', { visible: true, limit: 50 }).filter(event => event.kind === 'move-step');
+    assert.equal(failed.length, 1); assert.equal(failed[0].step, 'failed'); assert.match(failed[0].text, /stayed on .*never committed/);
+  } finally { await close(); }
+});

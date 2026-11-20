@@ -245,6 +245,8 @@ export class Peers {
       if (command.action === 'say') result = await this.desk.specialistTurn(command.agentId, { prompt: (await this.unpackFiles(command.input)).slice(0, 8000) });
       else if (command.action === 'assign') result = await this.desk.assignTask({ specialistId: command.agentId, ...this.localTask(command.input) });
       else if (command.action === 'chat-stop') result = await this.desk.stop(command.runId);
+      // The other computer is taking this agent over: save its work here first (L57).
+      else if (command.action === 'handover-save') result = await this.desk.handover.serve(command);
       // A team task, its result, an answer or a cancel, from an agent that manages work on the other computer.
       else if (String(command.action).startsWith('team-')) result = await this.desk.team.remote(command.action, command.input);
       else if (command.action === 'answer' && command.input?.answer?.sealed) result = this.desk.saveSealedFile(command.input.interactionId, command.input.answer.sealed);

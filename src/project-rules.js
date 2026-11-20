@@ -83,7 +83,7 @@ export class ProjectRules {
   }
   // Move an agent from another computer to this one. Its personal chat comes along: the messages this computer has of it become
   // the chat here, and the agent starts a fresh session that first reads a handoff of that chat (an AI session cannot travel).
-  async move(agentId) {
+  async move(agentId, { wait = 180000 } = {}) {
     const desk = this.desk, peers = desk.peers, agent = desk.specialists.get(agentId);
     if (agent.kind === 'main') throw new Error('Every computer has its own Rex Agent.');
     if (!peers.isRemote(agent)) throw new Error(`${agent.name} already works on this computer.`);
@@ -91,10 +91,36 @@ export class ProjectRules {
     if (agent.pinned) throw new Error(`${agent.name}'s project (${agent.projectSlug}) is set to run only on ${from}. Turn that off in Settings, Projects first.`);
     const folder = agent.projectSlug ? this.folderHere(agent.projectSlug) : '';
     if (agent.projectSlug && !folder) throw new Error(`The project "${agent.projectSlug}" is not on this computer. Add its folder in Settings, Projects, then move ${agent.name}.`);
-    const status = peers.statusOf(agent);
-    if (['busy', 'replying', 'waiting'].includes(status.state)) throw new Error(`${agent.name} is working on ${from} right now. Move it when it is done.`);
+    const runId = agent.runId || '';
+    // Each step shows in the agent's chat as it happens (the profile's chips read them): saved, committed, moved, picked up.
+    // Steps before the chat is here wait until it is (so they come after its earlier messages); a failure is written at once.
+    const steps = [], write = (name, text, extra) => this.store.event(runId, 'move-step', { step: name, text, agentId: agent.id, from, to: peers.self.name, ...extra }, true);
+    let arrived = false;
+    const step = (name, text, extra = {}) => { if (!runId) return; if (arrived || name === 'failed') write(name, text, extra); else steps.push([name, text, extra]); };
+    // 1. A reply in progress on the other computer is waited for (up to `wait`), not cut off.
+    const until = Date.now() + wait;
+    while (['busy', 'replying', 'waiting'].includes(peers.statusOf(this.store.get('specialist', agent.id) || agent).state)) {
+      if (Date.now() > until) { step('failed', `${agent.name} is still working on ${from}, so it stayed there.`); throw new Error(`${agent.name} is working on ${from} right now. Move it when it is done.`); }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    // 2. Its work is saved there first (a WIP commit on its own branch, packed for this computer). A computer that is off cannot
+    // save anything: the agent still moves, and the chat says plainly that the unsaved work stays there until it is back.
+    let saved = { nothing: true }, picked = {};
+    try {
+      if (peers.online(agent.node)) {
+        saved = await desk.handover.request(agent, { to: peers.self.name });
+        step('saved', saved.branch ? `Work saved on ${from}.` : `Nothing unsaved on ${from}.`);
+        if (saved.committed) step('committed', `Uncommitted changes committed on ${saved.branch} (WIP).`, { branch: saved.branch, commit: saved.committed });
+      } else step('saved', `${from} is off, so work not committed there stays on it until it is back.`, { skipped: true });
+      // 3. The branch is unpacked here into a worktree of the agent's own before anything moves, so a failure leaves it where it was.
+      if (saved.branch) picked = await desk.handover.pickUp({ project: folder, branch: saved.branch, head: saved.head, bundle: saved.bundle, directory: desk.handover.directoryFor(agent, saved.branch) });
+    } catch (error) {
+      const why = String(error.message || error).split('\n')[0];
+      step('failed', `${agent.name} stayed on ${from}: ${why}`);
+      throw new Error(why);
+    }
     const repository = this.store.config().repositories.find(item => path.resolve(item.path).toLowerCase() === path.resolve(folder).toLowerCase());
-    const runId = agent.runId || '', copy = runId ? this.store.get('chatcopy', runId) : null, local = runId ? this.store.get('run', runId) : null;
+    const copy = runId ? this.store.get('chatcopy', runId) : null, local = runId ? this.store.get('run', runId) : null;
     let carried = 0;
     if (local && WORKING.includes(local.state)) throw new Error(`${agent.name} is still working in its chat here. Stop it first.`);
     if (copy?.run && copy.node !== peers.self.id) {
@@ -108,6 +134,13 @@ export class ProjectRules {
     }
     const moved = this.store.put('specialist', agent.id, { ...this.store.get('specialist', agent.id), node: peers.self.id, projectPath: folder, repositoryId: repository?.id || '', roomRuns: {}, movedAt: now(), movedFrom: agent.node });
     if (this.store.get('run', runId)) await desk.freshStart(runId, { reason: `because ${agent.name} moved here from ${from}`, notice: `${agent.name} moved here from ${from}. It starts a fresh session with your next message and reads a handoff of this chat first.` });
-    return { moved: true, agent: moved.name, from, to: peers.self.name, folder, messages: carried, chat: Boolean(this.store.get('run', runId)) };
+    arrived = true; for (const [name, text, extra] of steps.splice(0)) write(name, text, extra);
+    step('moved', `${agent.name} moved here from ${from}.`);
+    // 4. It carries on in the worktree its work came in.
+    if (picked.worktree && this.store.get('run', runId)) {
+      this.store.put('run', runId, { ...this.store.get('run', runId), worktree: picked.worktree, branch: picked.branch });
+      step('picked-up', `Carrying on in ${picked.worktree} on ${picked.branch}.`, { worktree: picked.worktree, branch: picked.branch });
+    } else step('picked-up', saved.branch ? `Carrying on on ${saved.branch}.` : `${agent.name} carries on here.`);
+    return { moved: true, agent: moved.name, from, to: peers.self.name, folder, messages: carried, chat: Boolean(this.store.get('run', runId)), branch: picked.branch || saved.branch || '', worktree: picked.worktree || '' };
   }
 }
