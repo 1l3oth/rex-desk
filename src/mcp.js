@@ -45,6 +45,8 @@ export const DEFERRED_TOOLS = new Set([
   'desk_meeting_join', 'desk_meeting_leave',
 ]);
 
+// A question that asks the person to do something by hand that a tool may do: sign in, open a page, click, run a command.
+const MANUAL_STEP = /\b(sign[ -]?in|log[ -]?in|log on|open (the |a )?(browser|page|site|url|link)|click|press|run (this|the|a) (command|script)|by hand|manually|copy (and|&) paste|paste (it|the))\b/i;
 export function createMcp(desk, scope) {
   const server = new McpServer({ name: 'rex-desk', version: '0.1.0' });
   // A task named by its id or its number (L37, #L37, 37, or a tracker's number like 49760): the id every tool works with.
@@ -143,9 +145,15 @@ export function createMcp(desk, scope) {
     { runId, message: z.string().min(1), kind: z.enum(['question', 'approval']).default('question'),
       fields: z.record(z.string(), z.object({ type: z.enum(['string', 'boolean', 'number', 'integer']), title: z.string().optional(), enum: z.array(z.string()).optional(),
         options: z.array(z.object({ label: z.string().min(1).max(120), description: z.string().max(200).optional() })).max(6).optional().describe('Suggested answers shown as buttons. Give 2 to 4 whenever you can guess likely ones; the person can pick one or type their own.'), multiSelect: z.boolean().optional() })).optional(),
-      required: z.array(z.string()).optional(), wait: z.boolean().default(true) }, async input => {
+      required: z.array(z.string()).optional(), wait: z.boolean().default(true), toolsChecked: z.boolean().optional().describe('Set when you already checked desk_find for a tool that does this step.') }, async input => {
       requireEnglish(input.message, 'this question');
       const request = { requestedSchema: askSchema(input) };
+      // Asking the person for a manual step a tool could do (L53): the agent is shown the tools that may do it, first.
+      if (MANUAL_STEP.test(input.message) && !input.toolsChecked) {
+        const found = await Promise.race([desk.toolbox.find(input.message, { limit: 5, kind: 'tool' }).catch(() => null), new Promise(resolve => setTimeout(resolve, 4000))]);
+        const tools = (found?.found || []).filter(item => item.kind !== 'rex').slice(0, 5).map(item => item.use);
+        if (tools.length) return { asked: false, hint: `You were about to ask the person for a step by hand. These tools may do it: ${tools.join(', ')}. Try them with desk_run first; if none can, ask again with toolsChecked: true and say which you tried.` };
+      }
       const interaction = desk.beginAsk(resolveRun(input.runId), { kind: input.kind, title: input.message, request, method: 'desk' });
       if (!input.wait) return { questionId: interaction.id, state: 'pending' };
       return interaction.promise;

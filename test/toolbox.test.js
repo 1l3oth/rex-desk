@@ -134,3 +134,28 @@ test('one install box takes the install lines people copy from a README', async 
   assert.deepEqual(calls, [['mcp', 'add', '--scope', 'user', 'docs', '--transport', 'http', 'https://mcp.example.com/mcp']]);
   assert.equal(server.check[0].ok, false);
 });
+
+test('every agent is told its MCP servers and skills up front, and a manual step a tool could do is pointed at the tool (L53)', async () => {
+  const store = new Store(temporary('toolbox-first')), box = setup();
+  const desk = new Desk(store, { root: temporary('toolbox-root'), memoryDirectory: temporary('toolbox-memory'), toolbox: box, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  try {
+    const agent = desk.specialists.create({ name: 'Baker', purpose: 'Runs the bakery orders.' });
+    store.put('run', 'r1', { id: 'r1', role: 'specialist', specialistId: agent.id, state: 'running', permissionMode: 'bypassPermissions', createdAt: new Date().toISOString() });
+    const server = createMcp(desk, { role: 'specialist', runId: 'r1' }), call = (name, input) => server._registeredTools[name].handler(input, {});
+    await call('desk_find', { query: 'cake', kind: 'any', limit: 8 });
+    const text = desk.toolsText(store.get('run', 'r1'));
+    assert.match(text, /Your MCP servers[\s\S]*- bakery: list_bread, order_cake/);
+    assert.match(text, /Your skills[\s\S]*- studybook: Build a Korean study unit/);
+    assert.match(text, /search desk_find for a tool or skill that does it/);
+    assert.doesNotMatch(text, /inputSchema|rex_desk/, 'names and one line only, never Rex Desk itself');
+    assert.ok(desk.prompt(store.get('run', 'r1')).includes('- bakery: list_bread, order_cake'), 'it is in the agent\'s instructions');
+    // Asking the person to do by hand what a tool does: the agent is shown the tool first, and nothing is asked yet.
+    const hinted = JSON.parse((await call('desk_ask', { message: 'Please order the birthday cake by hand on the bakery page.', wait: false })).content[0].text);
+    assert.equal(hinted.asked, false); assert.match(hinted.hint, /bakery\/order_cake/);
+    assert.equal(store.list('interaction').length, 0);
+    const asked = JSON.parse((await call('desk_ask', { message: 'Please order the birthday cake by hand on the bakery page.', wait: false, toolsChecked: true })).content[0].text);
+    assert.equal(asked.state, 'pending', 'asked once the agent says it checked');
+    const plain = JSON.parse((await call('desk_ask', { message: 'Which colour do you want?', wait: false })).content[0].text);
+    assert.equal(plain.state, 'pending', 'an ordinary question is never held back');
+  } finally { await box.closeAll(); desk.closed = true; }
+});

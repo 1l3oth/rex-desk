@@ -65,6 +65,17 @@ export class Toolbox {
     return Object.fromEntries(Object.entries(all).filter(([, config]) => config && (config.command || config.url)));
   }
   skills(project = '') { return listSkills(skillFolders({ home: this.home, project, bundled: this.bundled })); }
+  // A short list for an agent's instructions (L53): the person's MCP servers and skills by name, one short line each, no input
+  // shapes, so the agent knows what it has before it scripts something itself or asks the person for a manual step. Nothing is
+  // connected for it: a server's tools are named only when they were already listed.
+  inventory(project = '', { skills = 40, width = 70 } = {}) {
+    const clip = text => { const line = String(text || '').replace(/\s+/g, ' ').trim(); return line.length > width ? `${line.slice(0, width - 1)}…` : line; };
+    let servers = {}; try { servers = this.servers(project); } catch { /* no config */ }
+    const serverLines = Object.keys(servers).sort().map(name => { const known = this.lists.get(name)?.tools || []; return `- ${name}${known.length ? `: ${clip(known.slice(0, 4).map(tool => tool.name).join(', '))}${known.length > 4 ? ` and ${known.length - 4} more` : ''}` : ''}`; });
+    let all = []; try { all = this.skills(project).filter(skill => !skill.error && skill.name); } catch { /* no skills */ }
+    const skillLines = all.slice(0, skills).map(skill => `- ${skill.name}${skill.description ? `: ${clip(skill.description)}` : ''}`);
+    return { servers: serverLines, skills: skillLines, moreSkills: Math.max(0, all.length - skills) };
+  }
 
   // ---------- talking to one MCP server ----------
   async client(name, config) {
