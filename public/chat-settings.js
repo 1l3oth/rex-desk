@@ -369,8 +369,10 @@ export function openSettings(ctx, section = 'general') {
       <button type="button" class="btn" data-st-prompt>${t`Show the setup text`}</button>${state.extra.prompt ? `<pre class="st-prompt">${esc(state.extra.prompt)}</pre><button type="button" class="btn small" data-st-copy-prompt>${t`Copy`}</button>` : ''}
       <h3 class="st-sub">${t`Let other agents reach yours (A2A)`}</h3><p class="muted">${t`Agents from other apps and other computers can send a task to one of your agents with this address and key. Every message shows in that agent's chat.`}</p>
       ${!state.extra.a2a ? `<p class="muted small">${t`Loading…`}</p>` : state.extra.a2a.enabled ? `<div class="prow"><b>${t`On`}</b><button type="button" class="btn small" data-st-a2a="off">${t`Turn off`}</button></div>
-        <label class="small muted">${t`Address`}</label><pre class="st-prompt">${esc(state.extra.a2a.addresses.join('\n'))}</pre>
-        <div class="prow"><button type="button" class="btn small" data-st-a2a="copy">${t`Copy key`}</button><button type="button" class="btn small" data-st-a2a="newkey">${t`Make a new key`}</button></div>`
+        <label class="small muted">${t`Public address`}</label>${state.extra.a2a.public ? `<pre class="st-prompt">${esc(state.extra.a2a.public)}</pre>`
+          : `<p class="muted small">${!state.extra.a2a.signedIn ? t`Sign in to your Rex Desk account (Agents online) to get an address that works from anywhere.` : state.extra.a2a.relayError ? esc(state.extra.a2a.relayError) : t`Getting the address…`}</p>`}
+        <label class="small muted">${t`On this network`}</label><pre class="st-prompt">${esc(state.extra.a2a.addresses.join('\n'))}</pre>
+        <div class="prow">${state.extra.a2a.public ? `<button type="button" class="btn small" data-st-a2a="copy-url">${t`Copy address`}</button>` : ''}<button type="button" class="btn small" data-st-a2a="copy">${t`Copy key`}</button><button type="button" class="btn small" data-st-a2a="newkey">${t`Make a new key`}</button></div>`
       : `<div class="prow"><span class="muted">${t`Off. No other agent can reach yours this way.`}</span><button type="button" class="btn small" data-st-a2a="on">${t`Turn on`}</button></div>`}`,
   };
   const saves = new Set(['general', 'agents', 'projects', 'sources', 'jev', 'schedule', 'signins']);
@@ -537,6 +539,7 @@ export function openSettings(ctx, section = 'general') {
         return;
       }
       const a2aAct = target.closest('[data-st-a2a]')?.dataset.stA2a;
+      if (a2aAct === 'copy-url') { await navigator.clipboard.writeText(state.extra.a2a?.public || ''); toast(t('Copied.')); return; }
       if (a2aAct === 'copy') { await navigator.clipboard.writeText(state.extra.a2a?.token || ''); toast(t('Copied.')); return; }
       if (a2aAct) { state.extra.a2a = await api('/a2a', { method: 'POST', data: a2aAct === 'newkey' ? { enabled: true, newKey: true } : { enabled: a2aAct === 'on' } }); draw(); return; }
       if (target.closest('[data-st-prompt]')) { state.extra.prompt = (await api('/setup-prompt', { method: 'POST', data: { target: 'claude' } })).prompt; draw(); return; }

@@ -30,7 +30,7 @@ import { NEURAL_VOICES } from './voice-out.js';
 import { Speaker } from './tts.js';
 import { readyLines } from '../public/voice-phrases.js';
 import { setupPrompt } from './setup-prompt.js';
-import { handleA2aHttp, a2aSettings, setA2a } from './a2a.js';
+import { handleA2aHttp, a2aSettings, setA2a, A2aRelay } from './a2a.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
 import { weeklyReport } from './report.js';
@@ -230,6 +230,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     // Agents on the internet use the person's Rex Desk account sign-in, and look in their inbox while any of them is reachable.
     desk.net.token = () => session?.account?.token || store.cloud?.account?.saved?.token || ''; if (accountOptions.base) desk.net.base = accountOptions.base; if (accountOptions.fetcher) desk.net.fetcher = accountOptions.fetcher;
     desk.net.start();
+    // A2A on api.rexdesk.dev, for agents outside this computer.
+    desk.a2aRelay = new A2aRelay(desk); desk.a2aRelay.start();
     // Agents from before avatars each get their own picture (this computer's agents only; the others get theirs at home).
     try { desk.specialists.ensureAvatars(store.nodeId); } catch (error) { store.event('', 'avatar-error', { message: error.message }); }
     desk.peers.onRemoteChange = () => { remoteAt = '-'; remoteOpen(); }; remoteOpen();
@@ -872,9 +874,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (netThread && request.method === 'POST') { const input = await body(request); return json(response, 200, await desk.net.act(decodeURIComponent(netThread[1]), String(input.action || ''), input.text)); }
       if (url.pathname === '/api/a2a') {
         const input = request.method === 'POST' ? await body(request) : null;
-        const settings = input ? setA2a(store, { enabled: input.enabled, newKey: Boolean(input.newKey) }) : a2aSettings(store);
+        if (input) setA2a(store, { enabled: input.enabled, newKey: Boolean(input.newKey) });
+        // A change goes up to api.rexdesk.dev at once, so the public address shows (or goes) right away.
+        let relayError = '';
+        if (input || (a2aSettings(store).enabled && !a2aSettings(store).publicCard)) await desk.a2aRelay?.tick().catch(error => { relayError = error.message; });
+        const settings = a2aSettings(store), signedIn = Boolean(desk.net.token());
         const addresses = [`http://127.0.0.1:${desk.port}`, ...desk.peers.addresses(desk.port)].map(base => `${base}/.well-known/agent-card.json`);
-        return json(response, 200, { enabled: settings.enabled, token: settings.enabled ? settings.token : '', addresses });
+        return json(response, 200, { enabled: settings.enabled, token: settings.enabled ? settings.token : '', addresses, public: settings.enabled && signedIn ? settings.publicCard || '' : '', signedIn, relayError });
       }
       // Settings, Tools and skills: the MCP servers, skills, commands and hooks on this computer.
       if (url.pathname === '/api/toolbox' && request.method === 'GET') return json(response, 200, await desk.toolbox.overview());

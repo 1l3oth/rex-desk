@@ -116,3 +116,36 @@ export async function handleA2aHttp(desk, request, response, url, readBody) {
   let payload; try { payload = await readBody(request); } catch { return reply(400, rpcError(null, -32700, 'The body is not JSON.')); }
   return reply(200, await handleA2aRpc(desk, payload));
 }
+
+// A2A on our address. The desk never opens a port: with A2A on and the person signed in to their Rex Desk account, it puts
+// its card on api.rexdesk.dev (with only a hash of the key), asks there every few seconds for calls, answers each one here,
+// and posts the answer back, the same way agents online get their messages (src/net.js).
+const sha = value => crypto.createHash('sha256').update(String(value)).digest('hex');
+export class A2aRelay {
+  constructor(desk, { everyMs = 3000, waitMs = 30000 } = {}) { this.desk = desk; this.everyMs = everyMs; this.waitMs = waitMs; this.replies = []; this.busy = false; this.timer = null; }
+  get store() { return this.desk.store; }
+  start() { if (this.timer || this.desk.closed) return; this.timer = setInterval(() => void this.tick().catch(() => {}), this.everyMs); this.timer.unref?.(); }
+  stop() { clearInterval(this.timer); this.timer = null; }
+  save(patch) { this.store.put('a2a', settingsKey, { ...a2aSettings(this.store), ...patch }); }
+  async tick() {
+    const net = this.desk.net; if (this.busy || this.desk.closed || !net?.token()) return;
+    this.busy = true;
+    try {
+      const settings = a2aSettings(this.store);
+      if (!settings.enabled) { if (settings.publicId) { await net.api('POST', '/v1/a2a/desk', { enabled: false }); this.save({ publicId: '', publicUrl: '', publicCard: '', publicSig: '' }); } return; }
+      // The card goes up again whenever it or the key changes (a new agent, a new key).
+      const card = agentCard(this.desk, ''), sig = sha(JSON.stringify(card) + settings.token);
+      if (sig !== settings.publicSig) { const done = await net.api('POST', '/v1/a2a/desk', { keyHash: sha(settings.token), card }); this.save({ publicId: done.id, publicUrl: done.url, publicCard: done.card, publicSig: sig }); }
+      const replies = this.replies.splice(0);
+      let data;
+      try { data = await net.api('POST', '/v1/a2a/inbox', { replies }); } catch (error) { this.replies.unshift(...replies); throw error; }
+      if (!data.enabled) { this.save({ publicSig: '' }); return; }
+      for (const call of data.calls || []) void this.answer(call);
+    } finally { this.busy = false; }
+  }
+  async answer(call) {
+    const body = await handleA2aRpc(this.desk, call.body, { waitMs: this.waitMs }).catch(error => rpcError(call.body?.id, -32603, error.message));
+    this.replies.push({ id: call.id, body });
+    void this.tick().catch(() => {});
+  }
+}

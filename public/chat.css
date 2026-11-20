@@ -867,7 +867,7 @@ button.cn-main{cursor:pointer}
 .st-days label{cursor:pointer}.st-days input{position:absolute;opacity:0;width:1px;height:1px}
 .st-days span{display:inline-block;padding:6px 12px;border:1px solid var(--line);border-radius:999px;font-size:13px}.st-days input:checked+span{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
 .st-days input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
-.st-prompt{max-height:260px;overflow:auto;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-size:12px;white-space:pre-wrap}
+.st-prompt{flex-shrink:0;max-height:260px;overflow:auto;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-size:12px;white-space:pre-wrap}
 .st-foot{display:flex;gap:8px;align-items:center;padding:14px 32px;border-top:1px solid var(--line)}
 .st-x{position:absolute;top:12px;right:14px;border:0;background:none;color:var(--muted);font-size:22px;line-height:1;padding:4px 8px;border-radius:8px}.st-x:hover{background:var(--raised);color:var(--ink)}
 .rail-settings{display:inline-flex;align-items:center;gap:6px}

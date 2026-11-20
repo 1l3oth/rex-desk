@@ -1918,5 +1918,5 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     }
   }
   // Closing Rex Desk (a restart or an update) leaves agents in their own process working; the next start follows them again.
-  async shutdown() { this.closed = true; this.net.stop(); void this.toolbox.closeAll().catch(() => {}); for (const timer of this.localTimers || []) { clearTimeout(timer); clearInterval(timer); } this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
+  async shutdown() { this.closed = true; this.net.stop(); this.a2aRelay?.stop(); void this.toolbox.closeAll().catch(() => {}); for (const timer of this.localTimers || []) { clearTimeout(timer); clearInterval(timer); } this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
 }

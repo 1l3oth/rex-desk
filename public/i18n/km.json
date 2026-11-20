@@ -2406,5 +2406,10 @@
  "To connect, put one of your agents online first.": "ដើម្បីភ្ជាប់ សូមដាក់ភ្នាក់ងារមួយរបស់អ្នកលើអ៊ីនធឺណិតជាមុនសិន។",
  "To use a linked agent, in {0}'s chat say:": "ដើម្បីប្រើភ្នាក់ងារដែលបានភ្ជាប់ ក្នុងការជជែករបស់ {0} សូមនិយាយ៖",
  "ask @{0} to ...": "ask @{0} to ...",
- "Linked. In {0}'s chat, say: ask @{1} to ...": "បានភ្ជាប់។ ក្នុងការជជែករបស់ {0} សូមនិយាយ៖ ask @{1} to ..."
+ "Linked. In {0}'s chat, say: ask @{1} to ...": "បានភ្ជាប់។ ក្នុងការជជែករបស់ {0} សូមនិយាយ៖ ask @{1} to ...",
+ "Public address": "អាសយដ្ឋានសាធារណៈ",
+ "On this network": "នៅលើបណ្ដាញនេះ",
+ "Getting the address…": "កំពុងយកអាសយដ្ឋាន…",
+ "Sign in to your Rex Desk account (Agents online) to get an address that works from anywhere.": "ចូលគណនី Rex Desk របស់អ្នក (Agents online) ដើម្បីទទួលបានអាសយដ្ឋានដែលប្រើបានពីគ្រប់ទីកន្លែង។",
+ "Copy address": "ចម្លងអាសយដ្ឋាន"
 }

@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
-import { agentCard, handleA2aRpc, handleA2aHttp, setA2a, a2aSettings } from '../src/a2a.js';
+import { agentCard, handleA2aRpc, handleA2aHttp, setA2a, a2aSettings, A2aRelay } from '../src/a2a.js';
+import crypto from 'node:crypto';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 function setup() {
@@ -50,5 +51,36 @@ test('A2A is off until the person turns it on, and every call needs the key', as
     const renewed = setA2a(store, { newKey: true }); assert.notEqual(renewed.token, settings.token, 'a new key replaces the old one');
     setA2a(store, { enabled: false }); assert.equal(a2aSettings(store).enabled, false);
     assert.equal(await handleA2aHttp(desk, { method: 'GET', headers: {} }, fakeResponse(), new URL('http://127.0.0.1:4317/api/tasks'), async () => ({})), false, 'other addresses are not touched');
+  } finally { await desk.shutdown?.(); store.close(); }
+});
+
+test('A2A on our address: the desk puts up its card with only a key hash, answers calls from the inbox, and takes it down when turned off', async () => {
+  const { store, desk } = setup();
+  try {
+    const sent = [], waiting = [{ id: 'call-1', body: { jsonrpc: '2.0', id: 9, method: 'message/send', params: { message: { parts: [{ kind: 'text', text: 'Is the cart total fixed?' }] } } } }];
+    desk.net.token = () => 'account-key';
+    desk.net.api = async (method, pathname, body) => {
+      sent.push({ pathname, body });
+      if (pathname === '/v1/a2a/desk') return body.enabled === false ? { enabled: false } : { enabled: true, id: 'abc123abc123', url: 'https://api.test/a2a/abc123abc123', card: 'https://api.test/a2a/abc123abc123/.well-known/agent-card.json' };
+      return { enabled: true, calls: waiting.splice(0) };
+    };
+    const relay = new A2aRelay(desk, { waitMs: 10000 });
+    await relay.tick();
+    assert.equal(sent.length, 0, 'nothing goes up while A2A is off');
+    const { token } = setA2a(store, { enabled: true });
+    await relay.tick();
+    const up = sent.find(each => each.pathname === '/v1/a2a/desk');
+    assert.equal(up.body.keyHash, crypto.createHash('sha256').update(token).digest('hex'));
+    assert.ok(!JSON.stringify(up.body).includes(token), 'the key itself never leaves the computer');
+    assert.equal(a2aSettings(store).publicCard, 'https://api.test/a2a/abc123abc123/.well-known/agent-card.json');
+    // The answer goes back with the next look in the inbox, which the answer itself starts.
+    const answered = () => sent.find(each => each.pathname === '/v1/a2a/inbox' && each.body.replies.length)?.body.replies[0];
+    for (let i = 0; i < 100 && !answered(); i++) await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(answered().id, 'call-1'); assert.equal(answered().body.result.status.state, 'completed');
+    await relay.tick(); sent.length = 0; await relay.tick();
+    assert.equal(sent.filter(each => each.pathname === '/v1/a2a/desk').length, 0, 'an unchanged card is not sent again');
+    setA2a(store, { enabled: false }); sent.length = 0; await relay.tick();
+    assert.deepEqual(sent.map(each => each.body), [{ enabled: false }]);
+    assert.equal(a2aSettings(store).publicCard, '');
   } finally { await desk.shutdown?.(); store.close(); }
 });
