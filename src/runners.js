@@ -107,6 +107,8 @@ export class ClaudeRunner {
     if (!env.ENABLE_TOOL_SEARCH) env.ENABLE_TOOL_SEARCH = 'true';
     delete env.CLAUDECODE;
     const executable = resolveCommand('claude');
+    // Not installed: say so plainly (the chat shows an Install button) instead of the Agent SDK's message about its own binary.
+    if (process.platform !== 'win32' && !executable.command.includes('/') && !this.sdk) throw new Error('Claude Code is not installed on this computer. Press Install Claude Code: Rex Desk installs it and signs you in.');
     const connections = existingMcpConnections(this.sourcePath, env.CLAUDE_CONFIG_DIR), allowedTools = new Set();
     delete connections.rex_desk;
     const mode = sdkMode(this.run.permissionMode), resume = sessionId(this.run.sessionId);

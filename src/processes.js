@@ -25,10 +25,18 @@ export async function git(cwd, args) {
 export function slug(value, maximum = 48) {
   return String(value).normalize('NFKD').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, maximum).toLowerCase() || 'issue';
 }
+// Mac and Linux: the full path of a command, so the Agent SDK is always told where Claude Code is (L54). With the bare name it
+// fell back to its own copy of Claude Code, which the installer leaves out, and every agent failed with "Native CLI binary for
+// darwin-arm64 not found". The places the installers use are looked at too, for an app opened from the Dock.
+export function unixCommand(name, { pathValue = process.env.PATH, home = os.homedir(), exists = existsSync } = {}) {
+  const folders = [...String(pathValue || '').split(':'), path.posix.join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin',
+    path.posix.join(home, '.npm-global', 'bin'), path.posix.join(home, '.claude', 'local'), path.posix.join(home, '.bun', 'bin')].filter(Boolean);
+  return [...new Set(folders)].map(folder => `${folder.replace(/\/+$/, '')}/${name}`).find(file => exists(file)) || '';
+}
 export function resolveCommand(name) {
   const override = process.env[`REX_${name.toUpperCase()}_PATH`];
   if (override) return { command: override, args: [] };
-  if (process.platform !== 'win32') return { command: name, args: [] };
+  if (process.platform !== 'win32') return { command: unixCommand(name) || name, args: [] };
   // npm installs a .cmd shim that spawn cannot start without a shell, so the real binary is looked up behind every
   // global npm folder: %APPDATA%\npm, the running Node's own folder (nvm4w), and each PATH entry. A self-update can
   // leave one install with only claude.exe.old.* files, so the first folder holding the binary wins.
