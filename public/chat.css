@@ -2289,3 +2289,9 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .side.info .aps .aps-sec{gap:6px;padding:12px 0}
 .side.info .aps .aps-row{min-height:28px}
 .aps-tools summary .aps-faint{margin:0}
+
+/* Pinning: the small pin that flies to the Pinned tab (placed and moved from code), and the tab and count it nods. */
+.pin-fly{position:fixed;z-index:80;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-ink,#fff);box-shadow:0 6px 16px color-mix(in srgb,var(--accent) 35%,transparent);pointer-events:none;will-change:transform,opacity}
+.pseg [data-tab="pinned"] .tcount,.pseg [data-tab="pinned"]{transform-origin:center}
+.pin-btn svg,.cpin svg,.pin-float svg{transform-origin:50% 70%}
+@media (prefers-reduced-motion:reduce){.pin-fly{display:none}}

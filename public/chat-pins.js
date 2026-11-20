@@ -1,4 +1,5 @@
 import { t, locale } from './i18n.js';
+import { flip, press, fly, bump, leave } from './pin-motion.js';
 // Pins: the person pins a file, a picture or video, or a link in a chat, and finds it again in the chat's Pinned tab
 // (beside Media, Files and Links). Pins are kept per chat and shared with the account's other computers.
 // A chat is "agent:<id>" (a personal chat) or "room:<id>" (a group chat); ui.pinChat names the one on screen.
@@ -85,18 +86,33 @@ export function watchMessagePins(ctx) {
   float.addEventListener('click', async () => {
     if (!current) return;
     const thing = current; float.hidden = true;
+    const from = float.getBoundingClientRect(); press(float);
     if (float.dataset.pinId) await unpin(ctx, float.dataset.pinId);
-    else await pin(ctx, { chat: thing.chat, kind: thing.kind, url: thing.url || '', path: thing.path || '', name: thing.name || '', from: thing.from, at: thing.at, video: thing.video });
+    else await pin(ctx, { chat: thing.chat, kind: thing.kind, url: thing.url || '', path: thing.path || '', name: thing.name || '', from: thing.from, at: thing.at, video: thing.video }, from);
   });
 }
 
-async function pin(ctx, data) {
-  try { await ctx.api('/pins', { method: 'POST', data }); ctx.toast(t('Pinned. Find it in the Pinned tab.')); await ctx.refresh(); }
-  catch (error) { ctx.toast(error.message, true); }
+// Where a new pin lands on screen: the Pinned tab of the side panel, or the panel's Profile tab when another tab is open.
+const pinnedTarget = () => document.querySelector('.pseg [data-tab="pinned"]') || document.querySelector('.stab[data-tab="profile"]');
+const pinRows = '.pin-list .pin-row', pinKey = row => row.querySelector('[data-pin-id]')?.dataset.pinId || '';
+// from: where it was pinned (the button's place on screen), so a small pin can fly from there to the Pinned tab.
+async function pin(ctx, data, from = null) {
+  try {
+    await ctx.api('/pins', { method: 'POST', data });
+    await flip(pinRows, pinKey, () => ctx.refresh());
+    const target = pinnedTarget();
+    // The flight says where it went; without one on screen, a toast says it.
+    if (from && target && target.getBoundingClientRect().width) await fly(from, target); else ctx.toast(t('Pinned. Find it in the Pinned tab.'));
+    bump(document.querySelector('.pseg [data-tab="pinned"] .tcount'));
+  } catch (error) { ctx.toast(error.message, true); }
 }
 async function unpin(ctx, id) {
-  try { await ctx.api(`/pins/${encodeURIComponent(id)}`, { method: 'DELETE' }); ctx.toast(t('Unpinned.')); await ctx.refresh(); }
-  catch (error) { ctx.toast(error.message, true); }
+  try {
+    const row = [...document.querySelectorAll(pinRows)].find(item => pinKey(item) === id);
+    await Promise.all([ctx.api(`/pins/${encodeURIComponent(id)}`, { method: 'DELETE' }), leave(row)]);
+    await flip(pinRows, pinKey, () => ctx.refresh());
+    if (!row) ctx.toast(t('Unpinned.'));
+  } catch (error) { ctx.toast(error.message, true); }
 }
 
 // Loads older messages of the chat on screen. False when there is nothing more to load.
@@ -120,10 +136,10 @@ async function loadOlder(ctx, step) {
 // The pin-* actions of the side panel.
 export async function pinsAction(ctx, action, target) {
   if (action === 'pin-add') {
-    const data = target.dataset;
-    return pin(ctx, { chat: data.pinChat, kind: data.pinKind, url: data.pinUrl, path: data.pinPath, name: data.pinName, from: data.pinFrom, at: data.pinAt, video: data.pinVideo === '1' });
+    const data = target.dataset, from = target.getBoundingClientRect(); press(target);
+    return pin(ctx, { chat: data.pinChat, kind: data.pinKind, url: data.pinUrl, path: data.pinPath, name: data.pinName, from: data.pinFrom, at: data.pinAt, video: data.pinVideo === '1' }, from);
   }
-  if (action === 'pin-remove') return unpin(ctx, target.dataset.pinId);
+  if (action === 'pin-remove') { press(target); return unpin(ctx, target.dataset.pinId); }
   if (action === 'pin-show') {
     // The message that holds it: the picture, file or link with the same address in the chat on screen.
     // A file attached with + shows as its plain path in the message, so the path is looked for in the text too.

@@ -1,4 +1,5 @@
 import { t } from './i18n.js';
+import { flip, press } from './pin-motion.js';
 // The sidebar's lists of agents and group chats: the person's own order and pins (dragged, or Alt+Up/Down), saved with their
 // workspace so every computer shows the same. Agents are grouped: pinned, then one team per project on this computer, then other
 // computers (dimmed, and the group folds away). A filter box finds an agent by name or project.
@@ -61,14 +62,19 @@ export function applyFilter(root, text) {
 // Saving: the order of every row of that kind as it shows now, and the pins.
 async function save(ctx, kind, order, pins) {
   const { ui, api, renderAll, toast } = ctx;
-  ui.snap.sidebar = { ...(ui.snap.sidebar || {}), [kind]: { order, pins } }; renderAll();
+  // The rows glide from where they were to where they go (into or out of Pinned), and the others close the gap.
+  const key = element => element.matches('.drag-row') ? `${element.dataset.dragKind}:${element.dataset.dragId}` : element.dataset.sec ? `sec:${element.dataset.sec}` : '';
+  flip(`.drag-row[data-drag-kind="${kind}"], .sub-sec[data-sec], .sub-sec[data-drop-pin="yes"]`, element => key(element) || (element.matches('.sub-sec') ? `head:${element.textContent.trim()}` : ''), () => { ui.snap.sidebar = { ...(ui.snap.sidebar || {}), [kind]: { order, pins } }; renderAll(); });
+  if (pressed) { press(document.querySelector(`.drag-row[data-drag-kind="${pressed.kind}"][data-drag-id="${CSS.escape(pressed.id)}"] .pin-btn`)); pressed = null; }
   try { ui.snap.sidebar = await api('/sidebar', { method: 'POST', data: { kind, order, pins } }); }
   catch (error) { toast(error.message, true); }
 }
 const currentOrder = kind => [...document.querySelectorAll(`.drag-row[data-drag-kind="${kind}"]`)].map(row => row.dataset.dragId);
 const currentPins = (ctx, kind) => [...(ctx.ui.snap.sidebar?.[kind]?.pins || [])];
 
+let pressed = null;
 export function togglePin(ctx, kind, id) {
+  pressed = { kind, id };
   const pins = currentPins(ctx, kind), order = currentOrder(kind);
   void save(ctx, kind, order, pins.includes(id) ? pins.filter(item => item !== id) : [...pins, id]);
 }
