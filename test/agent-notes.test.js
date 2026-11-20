@@ -1,0 +1,104 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { Store, shared } from '../src/store.js';
+import { Desk } from '../src/coordinator.js';
+import { looksSecret } from '../src/agent-notes.js';
+
+const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
+function setup() {
+  const projects = temporary('projects'), directory = path.join(projects, 'shop');
+  mkdirSync(path.join(directory, '.git'), { recursive: true });
+  writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name: 'shop', description: 'Online shop' }));
+  const store = new Store(temporary('notes')), desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory') });
+  desk.memory.scan({ roots: [projects] });
+  const agent = desk.specialists.create({ name: 'Desky', projectSlug: 'shop', purpose: 'Looks after the shop.', rules: 'Ask before schema changes.' });
+  return { store, desk, agent };
+}
+
+test('a soul starts from the agent card, and memory is the agent\'s own notebook: add, replace a section, rewrite', () => {
+  const { desk, agent } = setup(), notes = desk.notes;
+  const soul = notes.text(agent.id, 'soul');
+  assert.match(soul, /# Desky/); assert.match(soul, /Looks after the shop\./); assert.match(soul, /Ask before schema changes\./);
+  assert.equal(notes.text(agent.id, 'memory'), '');
+  notes.writeMemory(agent.id, { action: 'add', text: 'Rex wants release branches, not task branches.' }, 'Desky');
+  notes.writeMemory(agent.id, { action: 'replace', section: 'Open work', text: '- L49 soul and memory' }, 'Desky');
+  notes.writeMemory(agent.id, { action: 'replace', section: 'Open work', text: '- L49 done, waiting for Rex' }, 'Desky');
+  const memory = notes.text(agent.id, 'memory');
+  assert.match(memory, /^- Rex wants release branches/); assert.match(memory, /## Open work\n- L49 done, waiting for Rex/); assert.doesNotMatch(memory, /L49 soul and memory/);
+  notes.writeMemory(agent.id, { action: 'rewrite', text: '## Short\n- tidy' }, 'Desky');
+  assert.equal(notes.text(agent.id, 'memory'), '## Short\n- tidy');
+  assert.equal(notes.history(agent.id, 'memory').length, 3, 'every change keeps the old text');
+  assert.ok(notes.summary(agent.id).memoryAt, 'last written is known');
+});
+
+test('memory is capped at 8 KB and refuses anything that looks like a key, token or password', () => {
+  const { desk, agent } = setup(), notes = desk.notes;
+  assert.throws(() => notes.writeMemory(agent.id, { action: 'rewrite', text: 'x'.repeat(8 * 1024 + 1) }), /limit is 8 KB\. Tidy first/);
+  for (const secret of ['key: sk_live_51Habcdefghijklmnop', 'password = hunter2hunter2', 'ghp_abcdefghijklmnopqrstuvwxyz0123', '-----BEGIN RSA PRIVATE KEY-----'])
+    assert.throws(() => notes.writeMemory(agent.id, { action: 'add', text: secret }), /looks like a key, token or password/, secret);
+  assert.equal(looksSecret('The Stripe key is in rex-desk-api/.env.stripe'), false, 'saying where a key lives is fine');
+  assert.throws(() => notes.propose(agent.id, '# Desky\nAPI_KEY=abcdef123456', 'x'), /looks like a key/);
+});
+
+test('an agent only proposes a new soul: it waits for the person, who accepts or declines; history can be put back', () => {
+  const { desk, agent } = setup(), notes = desk.notes, before = notes.text(agent.id, 'soul');
+  notes.propose(agent.id, `${before}\n\n## How I work\n- Small commits.`, 'Rex asked for small commits', 'Desky');
+  assert.equal(notes.text(agent.id, 'soul'), before, 'not changed until the person says yes');
+  assert.equal(notes.summary(agent.id).soulPending, true);
+  notes.decide(agent.id, false);
+  assert.equal(notes.text(agent.id, 'soul'), before); assert.equal(notes.summary(agent.id).soulPending, false);
+  notes.propose(agent.id, `${before}\n\n## How I work\n- Small commits.`, 'again', 'Desky');
+  notes.decide(agent.id, true);
+  assert.match(notes.text(agent.id, 'soul'), /Small commits/);
+  const old = notes.history(agent.id, 'soul')[0];
+  notes.restore(agent.id, 'soul', old.id);
+  assert.equal(notes.text(agent.id, 'soul'), before, 'an earlier version comes back');
+});
+
+test('soul and memory sync like agent cards, Rex Agent\'s stay on this computer, and deleting an agent deletes them', () => {
+  const { store, desk, agent } = setup(), notes = desk.notes;
+  notes.writeMemory(agent.id, { action: 'add', text: 'a note' }, 'Desky');
+  assert.equal(shared('agentnote', `${agent.id}:memory`), true);
+  assert.equal(shared('agentnote', 'main:memory'), false);
+  const mine = notes.writeMemory('main', { action: 'add', text: 'only here' }, 'Rex Agent');
+  assert.equal(store.isPrivate('agentnote', mine), true, 'never goes to the cloud');
+  assert.equal(store.isPrivate('agentnote', store.get('agentnote', `${agent.id}:memory`)), false);
+  notes.writeMemory(agent.id, { action: 'add', text: 'another' }, 'Desky');
+  desk.specialists.remove(agent.id);
+  assert.equal(store.list('agentnote').filter(item => item.agentId === agent.id).length, 0);
+  assert.equal(store.list('agentnotehist').filter(item => item.agentId === agent.id).length, 0);
+});
+
+test('the agent reads its soul and memory every session, and a fresh start keeps the gist in memory', async () => {
+  const { store, desk, agent } = setup(), notes = desk.notes;
+  notes.writeMemory(agent.id, { action: 'add', text: 'Rex likes short answers.' }, 'Desky');
+  const identity = desk.specialists.identity(store.get('specialist', agent.id));
+  assert.match(identity, /Your soul \(who you are/); assert.match(identity, /Rex likes short answers\./);
+  assert.match(identity, /after a decision, a correction from the person, a finding worth keeping, or a finished task/);
+  store.put('run', 'chat', { id: 'chat', role: 'specialist', specialistId: agent.id, state: 'finished', createdAt: new Date().toISOString() });
+  store.event('chat', 'human-message', { text: 'Build the soul and memory feature' }, true);
+  store.event('chat', 'agent-text', { text: 'On it.' }, true);
+  desk.resume = async () => {};
+  await desk.freshStart('chat', { note: 'Building L49; tests next.' });
+  const memory = notes.text(agent.id, 'memory');
+  assert.match(memory, /## Before the last fresh start/); assert.match(memory, /My handoff: Building L49; tests next\./); assert.match(memory, /Asked: Build the soul and memory feature/);
+});
+
+test('after a turn with real work the agent is asked once, quietly, whether anything is worth remembering; never after a short chat', async () => {
+  const { store, desk, agent } = setup(), asked = [];
+  desk.resume = async (runId, input) => { asked.push(input); };
+  const started = new Date(Date.now() - 5000).toISOString();
+  store.put('run', 'chat', { id: 'chat', role: 'specialist', specialistId: agent.id, state: 'finished', turnStartedAt: started, createdAt: started });
+  store.event('chat', 'agent-text', { text: 'Hi!' }, true);
+  assert.equal(await desk.nudgeMemory('chat'), false, 'a short chat turn: no check');
+  store.event('chat', 'agent-tool', { id: 't1', tool: 'Bash', input: { command: 'git commit -m "fix"' } }, true);
+  assert.equal(await desk.nudgeMemory('chat'), true);
+  assert.equal(asked.length, 1); assert.equal(asked[0].silent, true); assert.match(asked[0].prompt, /Quiet memory check/);
+  assert.equal(store.get('run', 'chat').memoryNudge, true, 'the check turn is hidden from the chat');
+  assert.equal(await desk.nudgeMemory('chat'), false, 'the check turn itself is not checked again');
+  assert.equal(store.get('run', 'chat').memoryNudge, false);
+  assert.equal(await desk.nudgeMemory('chat'), false, 'at most every 20 minutes');
+});

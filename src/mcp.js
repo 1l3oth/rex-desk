@@ -400,6 +400,19 @@ export function createMcp(desk, scope) {
   // desk_team), talk there, step out to work and come back. Only the one who called it ends it; the room and its history stay.
   const meetingRoom = text => { const key = String(text || '').trim().toLowerCase(); const room = desk.rooms.list().find(item => item.id === text || String(item.name || '').toLowerCase() === key); if (!room) throw new Error(`No meeting room "${text}". Read desk_meetings.`); return room; };
   const meetingInfo = room => ({ id: room.id, name: room.name, topic: room.topic || '', host: room.host === 'you' ? 'the person' : room.host ? desk.rooms.member(room.host).name : '', state: room.endedAt ? 'ended' : 'open', members: room.members.map(id => desk.rooms.member(id).name), lastMessageAt: desk.rooms.messages(room.id, { limit: 1 }).at(-1)?.at || room.createdAt });
+  // The agent's own soul and memory (L49). Every agent reads and writes only its own.
+  tool('desk_soul_memory', 'Your own soul (who you are) and memory (your notebook), kept by Rex Desk and given to you every session. read: see both. add: one short note to your memory. replace: rewrite one "## section" of your memory. rewrite: replace your whole memory (to tidy it; 8 KB at most). propose: a new soul, which waits for the person\'s yes. Write to memory after a decision, a correction from the person, a finding worth keeping, or a finished task. Never write keys, tokens or passwords.',
+    { action: z.enum(['read', 'add', 'replace', 'rewrite', 'propose']), text: z.string().max(12000).optional().describe('The note, the section text, the whole memory, or the whole proposed soul, in Markdown.'), section: z.string().max(120).optional().describe('For replace: the ## heading of the section.'), reason: z.string().max(300).optional().describe('For propose: why, in one line.') },
+    input => {
+      const me = myAgent(), notes = desk.notes;
+      if (input.action === 'read') return { soul: notes.text(me.id, 'soul'), memory: notes.text(me.id, 'memory'), ...notes.summary(me.id) };
+      if (input.action === 'propose') {
+        const pending = notes.propose(me.id, input.text || '', input.reason || '', me.name);
+        return { proposed: true, note: 'It waits on your card for the person\'s yes. Tell them in one line what you would change and why.', at: pending.at };
+      }
+      const saved = notes.writeMemory(me.id, { action: input.action, text: input.text || '', section: input.section || '' }, me.name);
+      return { saved: true, bytes: Buffer.byteLength(saved.text), limit: 8192 };
+    });
   tool('desk_meetings', 'List every meeting room (open and ended), with who called it, what it is about and who is in it, so you can rejoin an old one instead of making a new one.', {}, () => desk.rooms.list().map(meetingInfo), true);
   tool('desk_meeting_start', 'Call a meeting while you work: when you need other agents (or the person) to sync context, plan something big or decide together. Name it anything. A meeting room with that name opens again with its history; otherwise a new one is made. You host it, the agents you name join and are asked in it, and you end it with desk_meeting_end when it is done. Never wait for the person there: if they do not answer, park that small question and carry on.',
     { name: z.string().min(1).max(80).describe('Meeting room name, new or old.'), agents: z.array(z.string()).max(12).default([]).describe('Agents to invite, by name or handle (see desk_team). Add "you" to ask the person too.'), topic: z.string().max(300).optional().describe('What it is about, in one line.'), message: z.string().max(4000).optional().describe('Your first message; @mention who should answer.') },

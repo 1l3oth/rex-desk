@@ -1,4 +1,5 @@
 import { t, locale } from './i18n.js';
+import { notesSection, notesAction, exportNotes } from './chat-notes.js';
 import { pickerHtml } from '/chat-pick.js';
 // Specialist agents: one identity per project. The card shows who the agent is and what it was told; the person can rename, edit or duplicate it.
 const providerName = name => name === 'codex' ? t('Codex') : name === 'gemini' ? t('Gemini (Antigravity)') : t('Claude Code');
@@ -75,7 +76,7 @@ export function agentStage(ctx) {
     <section class="ag-sec"><h2>${t`Model`}</h2>${pickerHtml(ctx, { id: 'sp-model', label: t('Model'), value: agent.model || '', items: models })}</section>
     <section class="ag-sec ag-meta"><p>${t`Created by ${esc(agent.createdBy || t('you'))}${origin ? t`, copied from ${esc(origin.name)}` : ''}.`}</p><button class="btn small danger" data-action="spec-remove">${t`Remove ${esc(agent.name)}`}</button></section>
   </aside>`;
-  const feed = `<div class="page ag" data-agent="${esc(agent.id)}">${head}${questions}<div class="ag-body"><div class="ag-main">${rules}</div>${side}</div></div>`;
+  const feed = `<div class="page ag" data-agent="${esc(agent.id)}">${head}${questions}<div class="ag-body"><div class="ag-main">${rules}${notesSection(ctx, agent)}</div>${side}</div></div>`;
   return { title: agent.name, meta: [providerName(agent.provider), agent.projectSlug].filter(Boolean).join(' · '), feed, top: true };
 }
 
@@ -213,8 +214,11 @@ Its chat comes along and it starts fresh from a summary of the chat. Code that w
   } else if (action === 'spec-duplicate') {
     dialog(ctx, { title: t`Duplicate ${agent.name}`, nameValue: `${agent.name} 2`, submit: async form => {
       const copy = await api(`/specialists/${agent.id}/duplicate`, { method: 'POST', data: { name: form.name } }); await refresh(); open('specialist', copy.id); toast(t('Duplicated. It has the same project and rules, and its own conversation.')); } });
+  } else if (action.startsWith('spec-notes-')) { await notesAction(ctx, action, target, agent);
   } else if (action === 'spec-remove') {
-    if (!confirm(t`Remove ${agent.name}? Its card is deleted. Past runs stay.`)) return;
+    if (!confirm(t`Remove ${agent.name}? Its card, soul and memory are deleted here and in the cloud. Past runs stay.`)) return;
+    // Its soul and memory go with it: offer to keep a copy first.
+    if (confirm(t`Export ${agent.name}'s soul and memory first (SOUL.md and MEMORY.md)?`)) { ui.notes ||= {}; ui.notes[agent.id] ||= await api(`/specialists/${agent.id}/notes`).catch(() => null); exportNotes(ctx, agent); await new Promise(resolve => setTimeout(resolve, 700)); }
     await api(`/specialists/${agent.id}`, { method: 'DELETE' }); await refresh(); open('main');
   }
 }

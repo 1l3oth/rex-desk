@@ -1098,6 +1098,16 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const ruleMatch = url.pathname.match(/^\/api\/project-rules\/([^/]+)$/);
       if (ruleMatch && request.method === 'PUT') return json(response, 200, desk.projectRules.set(decodeURIComponent(ruleMatch[1]), await body(request)));
       if (url.pathname === '/api/project-rules' && request.method === 'GET') return json(response, 200, desk.projectRules.list());
+      // An agent's soul and memory (L49): read, edit, put back an earlier version, accept or decline a proposed soul, export.
+      const notesMatch = url.pathname.match(/^\/api\/specialists\/([^/]+)\/notes(?:\/(restore|decide))?$/);
+      if (notesMatch) {
+        const [, agentId, action] = notesMatch, notes = desk.notes;
+        if (request.method === 'GET' && !action) return json(response, 200, { soul: notes.get(agentId, 'soul'), memory: notes.get(agentId, 'memory'), history: { soul: notes.history(agentId, 'soul'), memory: notes.history(agentId, 'memory') }, ...notes.summary(agentId), limit: 8192 });
+        const input = await body(request);
+        if (request.method === 'PUT' && !action) return json(response, 200, notes.put(agentId, input.kind, input.text, { by: 'you', why: 'Edited by the person' }));
+        if (request.method === 'POST' && action === 'restore') return json(response, 200, notes.restore(agentId, input.kind, String(input.historyId || '')));
+        if (request.method === 'POST' && action === 'decide') return json(response, 200, notes.decide(agentId, Boolean(input.accept)));
+      }
       const scheduleMatch = url.pathname.match(/^\/api\/schedules\/([^/]+)$/);
       if (scheduleMatch && request.method === 'DELETE') return json(response, 200, desk.schedules.remove(scheduleMatch[1]));
       if (scheduleMatch && request.method === 'PUT') return json(response, 200, desk.schedules.toggle(scheduleMatch[1], (await body(request)).on));

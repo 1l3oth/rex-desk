@@ -5,6 +5,7 @@ import { Rooms } from './rooms.js';
 import { Peers } from './peers.js';
 import { Team } from './team.js';
 import { Schedules } from './schedules.js';
+import { AgentNotes } from './agent-notes.js';
 import { Net } from './net.js';
 import { Toolbox } from './toolbox.js';
 import { Memory } from './memory.js';
@@ -167,6 +168,7 @@ export class Desk {
     this.peers = new Peers(this, { transport: peerTransport });
     this.team = new Team(this);
     this.schedules = new Schedules(store, this);
+    this.notes = new AgentNotes(this);
     this.net = new Net(this, { fetcher: netFetcher, judge: netJudge });
     // The person's other MCP tools and skills, reached through two tools (desk_find, desk_run) instead of all loaded at once.
     this.toolbox = toolbox || new Toolbox({ bundled: root ? path.join(root, 'skills') : '' });
@@ -673,6 +675,9 @@ export class Desk {
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
           // The quiet turn that reads Voice mode's report is not said: Rex Desk has welcomed the person already.
           const reading = this.store.get('run', runId)?.voice?.reading;
+          // The quiet memory check after a working turn (L49) is not shown in the chat: the agent only writes its notebook.
+          const hushed = Boolean(this.store.get('run', runId)?.memoryNudge);
+          if (hushed && ['agent-text-partial', 'agent-text', 'agent-tool', 'agent-tool-result', 'subagent-text', 'subagent-done', 'app-message'].includes(kind)) { this.store.event(runId, kind, data, false); return; }
           if (kind === 'agent-text-partial') { if (!reading) this.store.emit('partial', { runId, text: String(data.text || '') }); return; }
           if (kind === 'agent-text' && !reading) this.store.emit('partial', { runId, text: String(data.text || ''), done: true });
           if (kind === 'agent-result' && reading) { const voice = this.store.get('run', runId)?.voice; if (voice) this.patchRun(runId, { voice: { ...voice, reading: false } }); }
@@ -740,8 +745,11 @@ export class Desk {
       // The lessons and the stop note are already in the session's first prompt: a follow-up carries them only when they changed.
       const lessonsUpdate = lessons && run.lessonsSeen !== lessonsKey ? lessons : '';
       if (lessonsKey && run.lessonsSeen !== lessonsKey) this.patchRun(runId, { lessonsSeen: lessonsKey });
+      const notes = reopened && owner ? this.notes.contextText(owner) : '', notesKey = notes ? createHash('sha256').update(notes).digest('hex').slice(0, 16) : '';
+      const notesUpdate = notes && run.notesSeen !== notesKey ? `${notes.replace(/^Your soul/, 'Your soul (updated)')}` : '';
+      if (notesKey && run.notesSeen !== notesKey) this.patchRun(runId, { notesSeen: notesKey });
       const styleReminder = reopened && chat ? '(Reply like a teammate in a chat: short, plain, answer first; no code or long lists unless asked. When corrected, save the lesson with desk_learn.)' : '';
-      const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, lessonsUpdate, styleReminder].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : [this.prompt(run), run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
+      const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, lessonsUpdate, notesUpdate, styleReminder].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : [this.prompt(run), run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
       // The handoff is used up only by a turn that really ran: a turn that fails to start reads it next time.
       // An open Claude-app session starts with no message: it waits for the person to write, there or here.
       await runner.start(remoteOn ? '' : digest ? `${digest}
@@ -755,6 +763,7 @@ ${message}` : message);
       if (run.role === 'helper') this.helperDone(runId);
       // The quiet turn that read Voice mode's report is over: what the agent says next is said out loud.
       const voiceAfter = this.store.get('run', runId)?.voice; if (voiceAfter?.reading) this.patchRun(runId, { voice: { ...voiceAfter, reading: false } });
+      const nudge = setTimeout(() => void this.nudgeMemory(runId).catch(() => {}), 1500); nudge.unref?.();
     } catch (error) {
       if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) { handedOn = true; return; }
       // The chosen model is not available on this Claude account: the turn runs again once on the account's default model, and the agent stops asking for that model.
@@ -845,7 +854,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const config = this.store.config(), repositories = config.repositories.length > 0;
     if (run.main) return [common,
       'You are the main agent of Rex Desk, the first agent the person talks to. Keep every message short and plain. Work in small steps.', ANYWHERE_RULE, "When the person asks about memory, a slow computer, or what is running, read desk_monitor; free unused memory with desk_free_memory, and end one process with desk_end_process (anything opened outside Rex Desk only with their OK). A task on a project that has its own agent always goes to that agent with desk_assign_task (in a room, pass roomId so they do it in the room); do not do it yourself or start a new run for it, unless the person asks you to. You run the desk for the person: with desk_runs, desk_stop_run, desk_assign_task and desk_tell_run you can stop or close any run, give a task to an agent, and tell any run what to do. Do it when the person asks; when you do it on your own judgment, say what you did in one line.",
-      this.memory.chatStyle(), this.memory.person() ? `What you know about the person (all agents share this). Follow "How to explain things to me" in every answer:\n${this.memory.person()}` : '', this.specialists.lessonsText('main'), "Notice what the person likes and dislikes from how they react to you: corrections, praise, frustration, things they ask for again. Save what you notice with desk_learn_person; lessons about your own work go to desk_learn. Preferences can change with time and events: treat the notes about the person as hints, prefer the newest, and when what the person says now differs, follow what they say now and update the note with replaces.", this.memory.secondBrain(), "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
+      this.memory.chatStyle(), this.memory.person() ? `What you know about the person (all agents share this). Follow "How to explain things to me" in every answer:\n${this.memory.person()}` : '', this.specialists.lessonsText('main'), this.notes.contextText('main'), "Notice what the person likes and dislikes from how they react to you: corrections, praise, frustration, things they ask for again. Save what you notice with desk_learn_person; lessons about your own work go to desk_learn. Preferences can change with time and events: treat the notes about the person as hints, prefer the newest, and when what the person says now differs, follow what they say now and update the note with replaces.", this.memory.secondBrain(), "When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn (for example \"Morningmate QA issues: check global/release, not global/develop\"), then follow it. Never save secrets.",
       'While you read projects and the second brain, notice pictures that may be the person (a portfolio, about page, avatar or profile folder). If the About you page has no photo yet, ask the person with desk_ask whether that file is them, and only if they say yes, set it with desk_set_profile_photo.',
       'The person can ask you for any kind of agent, not only one for code: a writer, a researcher, a study partner, a planner, a helper for their shop, anything. Make it with desk_create_specialist and leave project out: give it a short human name, say in purpose exactly what it is for, and put what the person told you in rules. Ask at most 2 short questions first, only if you cannot tell what they want. Never say you can only make coding agents.',
       'When the person names a project that is not in the index or not in desk_repositories, find its folder on this computer (ask if there are several) and add it yourself with desk_add_project. Never ask the person to add a repository in Settings.',
@@ -1079,6 +1088,31 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // /clear in a chat: the conversation so far is written to a handoff file, the agent's session is dropped, and the next message
   // starts a fresh session that reads the handoff first. The chat history stays on screen; only the agent's context is new.
   // note: the agent's own handoff (automatic handoff); reason: why it starts fresh, for the handoff and the chat.
+  // After a turn with real work (several tools, a commit, a task change), the agent is asked once, quietly, whether anything is
+  // worth keeping in its memory. Never after a short chat turn, at most every 20 minutes per chat, and the check itself is hidden.
+  async nudgeMemory(runId, at = Date.now()) {
+    const run = this.store.get('run', runId); if (!run || run.roomOf || run.roomAgent) return false;
+    if (run.memoryNudge) { this.patchRun(runId, { memoryNudge: false }); return false; }
+    const agentId = run.specialistId || (run.role === 'coordinator' && run.main ? 'main' : '');
+    if (!agentId || !['specialist', 'coordinator'].includes(run.role) || this.live.has(runId) || !['finished', 'needs_evidence'].includes(run.state)) return false;
+    if (at - (Date.parse(run.memoryNudgedAt || 0) || 0) < 20 * 60000) return false;
+    const since = Date.parse(run.turnStartedAt || 0) || 0;
+    const tools = this.store.events(runId, { limit: 300 }).filter(event => event.kind === 'agent-tool' && !event.parent && Date.parse(event.createdAt) >= since - 1000);
+    const marked = tools.some(event => /git commit|desk_update_task|desk_take_task|desk_publish|desk_finish|desk_create_task/.test(`${event.tool} ${JSON.stringify(event.input || {}).slice(0, 400)}`));
+    if (tools.length < 3 && !marked) return false;
+    this.patchRun(runId, { memoryNudge: true, memoryNudgedAt: new Date(at).toISOString() });
+    await this.resume(runId, { silent: true, prompt: 'Quiet memory check (the person does not see this turn): is anything from the work you just did worth keeping in your memory (a decision, a correction from the person, a finding, a finished task)? If yes, write it now with desk_soul_memory, short. If not, do nothing. Reply with one word only.' });
+    return true;
+  }
+  // The gist of a chat that is about to be cleared goes into the agent's memory, replacing the last such note, so a fresh start
+  // never forgets what it was doing. Kept short; a full notebook keeps it out rather than failing the fresh start.
+  distillHandoff(agentId, { note = '', task = null, lines = [] } = {}) {
+    // (lines is newest first here: the loop above reversed it.)
+    const asked = lines.filter(line => line.startsWith('**The person**')).slice(0, 3).reverse().map(line => `- Asked: ${line.replace(/^\*\*The person\*\* \([^)]*\): /, '').replace(/\s+/g, ' ').slice(0, 220)}`);
+    const body = [task ? `- Task: #${task.taskNumber || task.externalId} ${task.titleEn || task.title}` : '', note ? `- My handoff: ${String(note).replace(/\s+/g, ' ').slice(0, 700)}` : '', ...asked].filter(Boolean).join('\n');
+    if (!body) return;
+    try { this.notes.writeMemory(agentId, { action: 'replace', section: 'Before the last fresh start', text: `(${now().slice(0, 16).replace('T', ' ')})\n${body}` }, 'Rex Desk'); } catch { /* full or refused: the handoff file still has it */ }
+  }
   async freshStart(runId, { note = '', reason = '', notice = '' } = {}) {
     const run = this.run(runId);
     if (run.external) throw new Error('This conversation lives in another app.');
@@ -1095,6 +1129,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       task ? `## Task\n#${task.taskNumber || task.externalId} ${task.titleEn || task.title}${task.url ? `\n${task.url}` : ''}` : '',
       run.worktree ? `## Where the work is\nWorktree: ${run.worktree}${run.branch ? `\nBranch: ${run.branch}` : ''}` : '',
       `## The conversation so far (oldest first, recent part)\n${recent || 'Nothing was said yet.'}`].filter(Boolean).join('\n\n');
+    if (agentId) this.distillHandoff(agentId, { note, task, lines });
     const directory = path.join(this.store.directory, 'handoffs'); mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `${runId}-${Date.now()}.md`); writeFileSync(file, handoff);
     this.patchRun(runId, { contextUsed: 0, sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
@@ -1320,6 +1355,14 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const text = `Your work hours ended (${loop.hours.start} to ${loop.hours.end}). Finish the step you are on, write one line on where you stopped and what is next, and stop. The next check picks it up.`;
     if (this.live.has(loop.runId)) void this.say(loop.runId, text).catch(() => {});
   }
+  // Once a week (or when the notebook is nearly full) a loop check also asks the agent to tidy its memory.
+  tidyDue(agentId, at = Date.now()) {
+    const summary = this.notes.summary(agentId); if (!summary.memoryBytes) return false;
+    const agent = this.store.get('specialist', agentId), last = Date.parse(agent?.loop?.tidiedAt || 0) || 0;
+    if (summary.memoryBytes < 6 * 1024 && at - last < 7 * 86400000) return false;
+    if (agent) this.store.put('specialist', agentId, { ...agent, loop: { ...(agent.loop || {}), tidiedAt: new Date(at).toISOString() } });
+    return true;
+  }
   async runLoop(agentId, { key = '', at = Date.now() } = {}) {
     const agent = this.specialists.get(agentId), loop = this.specialists.loopOf(agent), every = loop.every >= 60 ? `${loop.every / 60} hour${loop.every === 60 ? '' : 's'}` : `${loop.every} minutes`;
     this.store.put('specialist', agentId, { ...agent, loop: { ...loop, lastAt: new Date(at).toISOString(), ...(key ? { lastKey: key } : {}) } });
@@ -1330,7 +1373,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       `3. If one needs work, pick the most important (priority, then due date) and take it with desk_take_task and do it right here, following the ${agent.projectSlug} workflow, testing it and sharing the evidence.`,
       '4. If nothing needs you, reply exactly "Nothing new." and stop. In a loop check, ask the person only when a task cannot move without them.',
       'Pace yourself: do one task per check, then stop; the next check comes by itself. If the same step fails twice, stop, write one line on why, and leave it for the next check or the person.',
-      loop.hours.on ? `Your work hours are ${loop.hours.start} to ${loop.hours.end}. Do not start a big new piece of work in the last half hour; leave it for the next shift.` : ''].filter(Boolean).join('\n');
+      loop.hours.on ? `Your work hours are ${loop.hours.start} to ${loop.hours.end}. Do not start a big new piece of work in the last half hour; leave it for the next shift.` : '',
+      this.tidyDue(agentId, at) ? 'Also, once this week: tidy your memory with desk_soul_memory (rewrite it shorter: keep what still matters, drop what is done or out of date).' : ''].filter(Boolean).join('\n');
     const run = await this.specialistTurn(agentId, { prompt, quiet: true });
     this.store.put('specialist', agentId, { ...this.store.get('specialist', agentId), loop: { ...(this.store.get('specialist', agentId).loop || {}), runId: run.id } });
     this.store.event(run.id, 'loop-check', { text: 'Loop check: looking at my tasks' }, true);
