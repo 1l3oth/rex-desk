@@ -34,7 +34,7 @@ export function askSchema(input) {
 // tool left off this list by mistake simply stays visible rather than going missing.
 export const DEFERRED_TOOLS = new Set([
   'desk_computer', 'desk_computer_actions', 'desk_computer_screenshot',
-  'desk_net_contacts', 'desk_net_send',
+  'desk_net_contacts', 'desk_net_send', 'desk_setting',
   'desk_monitor', 'desk_free_memory', 'desk_end_process',
   'desk_worktree', 'desk_worktrees',
   'desk_room_manage',
@@ -279,7 +279,14 @@ export function createMcp(desk, scope) {
       return { room: room.name, members: room.members.map(id => desk.rooms.member(id).name), added: added.length, removed: removed.length };
     });
   // Always loaded (not found through desk_find): the main agent renames and changes agents the moment the person asks (L29).
-  tool('desk_update_agent', 'Change an agent the way the person asks: rename it, change its rules, model or AI, bring it to this computer (moveHere), or keep its project on the computer its agents work on (onlyOnItsComputer). Do it at once when they ask; tell them in one line what changed.',
+  // Rex Desk settings an agent may change when the person asks (L63). Only safe ones: never keys, accounts or folders.
+  tool('desk_setting', 'Change a Rex Desk setting when the person asks. "freshChatAt": when a chat holds this many tokens the agent hands off to a fresh chat (Settings, Agents, "Start a fresh chat at"): 150000, 200000, 300000, or 0 for Off. Tell the person in one line what changed.',
+    { setting: z.enum(['freshChatAt']), value: z.union([z.literal(150000), z.literal(200000), z.literal(300000), z.literal(0)]) },
+    input => {
+      const saved = desk.store.saveConfig({ ...desk.store.publicConfig(), handoffTokens: input.value });
+      return { setting: input.setting, value: saved.handoffTokens, shown: saved.handoffTokens ? `${saved.handoffTokens / 1000}k` : 'Off' };
+    });
+  tool('desk_update_agent','Change an agent the way the person asks: rename it, change its rules, model or AI, bring it to this computer (moveHere), or keep its project on the computer its agents work on (onlyOnItsComputer). Do it at once when they ask; tell them in one line what changed.',
     { agent: z.string().describe('Agent name, handle or id.'), name: z.string().min(1).max(40).optional().describe('New name.'), rules: z.string().max(4000).optional(), model: z.string().optional(), provider: z.enum(['claude', 'codex', 'gemini']).optional(),
       moveHere: z.boolean().optional().describe('Move the agent to the computer you run on, with its chat (like "Move to this computer").'),
       onlyOnItsComputer: z.boolean().optional().describe('true: the whole project of the agent runs only on the computer its agents work on (after moveHere, this one); false: it may move again. A project setting: every agent of that project follows it.') },

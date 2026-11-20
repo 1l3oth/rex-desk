@@ -227,3 +227,15 @@ test('L62: a project agent starts lean and loads app help, the second brain and 
   assert.doesNotMatch(prompt, /Lives in Seoul/); assert.match(desk.memory.readDoc('user'), /Lives in Seoul/);
   assert.match(desk.prompt({ id: 'm1', role: 'coordinator', main: true, taskIds: [], prompt: 'hi' }), /Restart Rex Desk server/, 'the main agent keeps the app help');
 });
+
+test('L63: an agent sets "Start a fresh chat at" through desk_setting, and "sonnet" picks the Sonnet model for any agent', async () => {
+  const { desk, store } = setup();
+  const { createMcp } = await import('../src/mcp.js');
+  const agent = desk.specialists.create({ name: 'Shopkeeper', projectSlug: 'shop' });
+  store.put('run', 'r1', { id: 'r1', role: 'specialist', specialistId: agent.id, state: 'running', permissionMode: 'bypassPermissions', createdAt: new Date().toISOString() });
+  const server = createMcp(desk, { role: 'specialist', runId: 'r1' });
+  const out = JSON.parse((await server._registeredTools.desk_run.handler({ use: 'desk_setting', input: { setting: 'freshChatAt', value: 150000 } }, {})).content[0].text);
+  assert.equal(store.config().handoffTokens, 150000, JSON.stringify(out));
+  const sonnet = desk.specialists.update(agent.id, { model: 'sonnet' }).model;
+  assert.match(sonnet, /sonnet/i);
+});

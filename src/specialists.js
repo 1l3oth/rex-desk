@@ -87,6 +87,9 @@ export class Specialists {
     if (list.some(item => item.id === text)) return text;
     if (list.some(item => item.id === id)) return id;
     const byName = list.find(item => item.label.toLowerCase() === text.toLowerCase()); if (byName) return byName.id;
+    // A short name like "sonnet" or "opus" picks the first listed model of that family, the same for every agent (L63).
+    const word = text.toLowerCase(), family = /^[a-z]+$/.test(word) && list.find(item => item.id.toLowerCase().includes(word) || item.label.toLowerCase().includes(word));
+    if (family) return family.id;
     if (provider !== 'claude' && !list.length) return text;
     if (strict) throw new Error('Choose a model from the list.');
     return '';
