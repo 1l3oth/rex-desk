@@ -297,7 +297,11 @@ function drawLive() {
   const feed = document.getElementById('feed'), atEnd = feed && feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
   if (stale) { if (box.innerHTML) { box.innerHTML = ''; document.body.classList.remove('live-replying'); } if (live.doneAt) Object.assign(live, { text: '', doneAt: 0 }); return; }
   const run = runById(live.runId), name = run ? (personalAgent(run)?.name || provider(run.provider)) : t('Agent');
-  box.innerHTML = `<div class="msg live"><div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="md">${markdown(live.text)}</div><span class="live-caret" aria-hidden="true"></span></div></div>`;
+  box.innerHTML = `<div class="msg live"><div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="md">${markdown(live.text)}</div></div></div>`;
+  // The caret sits right after the last word, inside the last paragraph or list item, not on a line of its own.
+  const md = box.querySelector('.md'), caret = document.createElement('span'); caret.className = 'live-caret'; caret.setAttribute('aria-hidden', 'true');
+  let last = md; while (last.lastElementChild && !['PRE', 'TABLE', 'IMG', 'BR', 'HR'].includes(last.lastElementChild.tagName)) last = last.lastElementChild;
+  (last.tagName === 'CODE' && last.parentElement?.tagName !== 'PRE' ? last.parentElement : last).append(caret);
   document.body.classList.add('live-replying');
   // The same scroll rule as the feed (L55): follow the newest words only when the person is at the bottom.
   if (feed && ui.stick && atEnd) feed.scrollTop = feed.scrollHeight;
