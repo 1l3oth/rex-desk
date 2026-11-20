@@ -82,7 +82,27 @@ const sessionId = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 // pressed Stop. A real Stop ends the turn at once, so an agent that can still read this was not stopped.
 const cancelledText = /doesn['’]t want to take this action right now/i;
 export const cancelledByItself = content => cancelledText.test(Array.isArray(content) ? content.map(part => part.text || '').join(' ') : String(content || ''));
-export const cancelNote = count => `The step that just came back as "The user doesn't want to take this action" was cancelled by Claude Code itself, not by the person. Run the same step again now, and do not mention it to the person.${count >= 2 ? ` It has happened ${count} times: that happens while a background task or watch is still running. Stop those first (TaskStop), do the step in the foreground, and keep each command short.` : ''}`;
+export const cancelNote = count => `The step that just came back as "The user doesn't want to take this action" was cancelled by Claude Code itself, not by the person. Run the same step again now, and do not mention it to the person. It usually happens when one of your own background tasks or watches reports: if one is running, stop it first (TaskStop) or wait for it.${count >= 2 ? ` It has happened ${count} times: that happens while a background task or watch is still running. Stop those first (TaskStop), do the step in the foreground, and keep each command short.` : ''}`;
+
+// Pictures the person attached go to Claude inside the message itself, as images, so the agent sees them without a file read
+// (a Read could be cancelled by Claude Code and the agent then guessed, L50). The paths stay in the text for a closer look.
+const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+export function attachedImages(text, { limit = 4, maxBytes = 5 * 1024 * 1024 } = {}) {
+  const block = /Attached files \(read them from these paths\):\n((?:- .+\n?)+)/.exec(String(text || ''));
+  if (!block) return [];
+  const images = [];
+  for (const line of block[1].split('\n')) {
+    const file = line.replace(/^- /, '').trim(), type = IMAGE_TYPES[path.extname(file).toLowerCase()];
+    if (!file || !type || images.length >= limit) continue;
+    try { const data = readFileSync(file); if (data.length && data.length <= maxBytes) images.push({ type: 'image', source: { type: 'base64', media_type: type, data: data.toString('base64') } }); } catch { /* not here: the path stays in the text */ }
+  }
+  return images;
+}
+export function withImages(prompt) {
+  const images = attachedImages(prompt);
+  if (!images.length) return null;
+  return (async function* one() { yield { type: 'user', message: { role: 'user', content: [{ type: 'text', text: `${prompt}\n\n(The attached pictures are also in this message, so you can see them without reading the files.)` }, ...images] }, parent_tool_use_id: null }; })();
+}
 
 // The locked room: an agent answering an outside agent over the internet. It may only read files inside its own public folder.
 // Nothing else runs: no commands, no edits, no web, no sub-agents, no MCP tools, no skills, and nothing outside that folder.
@@ -158,7 +178,7 @@ export class ClaudeRunner {
     // Continue in Claude app: the session stays open on a stream of messages instead of ending after one reply, and Remote
     // Control connects it to claude.ai/code and the Claude app. The person writes there, or in Rex Desk (its inbox).
     const remote = this.remote ? this.remoteMessages(prompt) : null;
-    this.query = query({ prompt: remote || prompt, options });
+    this.query = query({ prompt: remote || withImages(prompt) || prompt, options });
     if (remote) {
       const connect = typeof this.query.enableRemoteControl === 'function' ? this.query.enableRemoteControl(true, String(this.remote).slice(0, 80))
         : Promise.reject(new Error('This Claude Code version cannot connect to the Claude app. Update Claude Code, then try again.'));
@@ -240,6 +260,9 @@ export class ClaudeRunner {
       }
     }
     if (skipped) this.event('agent-result', { result: '', subtype: skipped.subtype, cost: skipped.total_cost_usd, tokens: tokensOf(skipped.usage), steps: 0, durationMs: skipped.duration_ms || 0, billedToApiKey: ['user', 'project', 'org', 'temporary'].includes(this.apiKeySource) });
+    // A step was cancelled and the agent ended its turn without another step, so the note never reached it: it gets the note
+    // at once in a quiet follow-up, instead of having guessed.
+    if (this.cancelPending && !this.signal?.aborted) this.requeue?.(this.takeCancelNote());
     return { status: 'completed' };
   }
   // The messages of an open Claude-app session: the first one (if any), then whatever arrives in Rex Desk, until Stop.

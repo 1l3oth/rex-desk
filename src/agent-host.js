@@ -46,7 +46,9 @@ async function main() {
   runner = new Runner({ ...spec.options, ...(sdk ? { sdk } : {}), controller, signal: controller.signal,
     event: (kind, data) => write({ type: 'event', kind, data }),
     ask: request => new Promise(resolve => { const id = randomUUID(); asks.set(id, resolve); write({ type: 'ask', id, request }); }),
-    inbox: () => inbox.splice(0).join('\n\n') });
+    inbox: () => inbox.splice(0).join('\n\n'),
+    // A note for the agent after its turn ended (a step Claude Code cancelled): handed back with the unread messages.
+    requeue: text => { if (String(text || '').trim()) inbox.push(String(text)); } });
   // Messages that came after the agent's last step were never read: they go back to Rex Desk, which starts the next turn with them.
   const handBack = () => { finished = true; if (inbox.length) write({ type: 'unread', text: inbox.splice(0).join('\n\n') }); };
   try { await runner.start(spec.prompt); handBack(); write({ type: 'done' }); }
