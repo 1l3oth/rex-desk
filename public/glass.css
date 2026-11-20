@@ -216,6 +216,16 @@ html:not([data-theme=dark]) .kg-kind{color:hsl(var(--h) 75% 34%)}
 .win-bar.macos{padding-left:78px}
 .win-fill{flex:1;height:100%;cursor:default}
 .win-btn{display:grid;place-items:center;width:40px;height:26px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);transition:background .15s,color .15s,border-color .15s}
+/* See-through window slider: compact in the window bar, wider in Settings, General. */
+.solid-box{display:inline-flex;align-items:center;gap:7px;color:var(--muted)}
+.solid-box.compact{margin:0 8px 0 4px;padding:0 8px;height:26px;border-radius:8px;-webkit-app-region:no-drag}
+.solid-box.compact:hover{background:color-mix(in srgb,var(--ink) 7%,transparent);color:var(--ink)}
+.solid-box input[type=range][data-solid]{width:150px;height:4px;min-height:0;margin:0;padding:0;border:0;box-shadow:none;appearance:none;border-radius:4px;cursor:pointer;background:linear-gradient(90deg,var(--accent) var(--solid,100%),color-mix(in srgb,var(--ink) 18%,transparent) var(--solid,100%))}
+.solid-box.compact input[type=range]{width:78px}
+.solid-box input[type=range]::-webkit-slider-thumb{appearance:none;width:13px;height:13px;border-radius:50%;background:var(--raised,#fff);border:1px solid color-mix(in srgb,var(--ink) 30%,transparent);box-shadow:0 1px 3px rgb(0 0 0/.25)}
+.solid-box input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.solid-box output{min-width:44px;font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.st-solid{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .win-btn:hover{background:var(--raised);border-color:var(--line);color:var(--ink)}
 .win-btn.close:hover{background:#e5484d;border-color:#e5484d;color:#fff}
 .win-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}

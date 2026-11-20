@@ -42,6 +42,39 @@ fn fix_size(window: &tauri::WebviewWindow) {
 
 const ADDRESS: &str = "127.0.0.1:4317";
 static OPENED: AtomicUsize = AtomicUsize::new(0);
+// How solid the window is, in percent (Settings, General: See-through window). Never below 20, so it never disappears.
+static SOLID: AtomicUsize = AtomicUsize::new(100);
+const LEAST_SOLID: usize = 20;
+
+fn set_solid(window: &tauri::WebviewWindow, percent: usize) {
+    let percent = percent.clamp(LEAST_SOLID, 100);
+    SOLID.store(percent, Ordering::Relaxed);
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW, GWL_EXSTYLE, LWA_ALPHA, WS_EX_LAYERED};
+        if let Ok(handle) = window.hwnd() {
+            let hwnd = handle.0 as windows_sys::Win32::Foundation::HWND;
+            // SAFETY: the handle is this live window's own; these calls only change how it is drawn.
+            unsafe {
+                let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                if percent >= 100 {
+                    // Solid again: no layered window at all, so drawing is exactly as before.
+                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style & !(WS_EX_LAYERED as isize));
+                } else {
+                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED as isize);
+                    SetLayeredWindowAttributes(hwnd, 0, ((percent * 255) / 100) as u8, LWA_ALPHA);
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+}
+// The tray item and the shortcut make it solid at once; the page is told so its slider and saved setting match.
+fn make_solid(window: &tauri::WebviewWindow) {
+    set_solid(window, 100);
+    let _ = window.eval("window.__rexSolid && window.__rexSolid(100)");
+}
 static RESTARTING: AtomicBool = AtomicBool::new(false);
 // Why the server could not start, for the start page to show. The page asks for it (startup_error) instead of being told,
 // because a server that fails fast can fail before the page has loaded its script.
@@ -107,6 +140,10 @@ fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::
                 "/maximize" => { if window.is_maximized().unwrap_or(false) { let _ = window.unmaximize(); } else { let _ = window.maximize(); } }
                 "/close" => { let _ = window.hide(); }
                 "/drag" => { let _ = window.start_dragging(); }
+                "/solid" => {
+                    let value = url.query_pairs().find(|(key, _)| key == "v").and_then(|(_, value)| value.parse::<usize>().ok()).unwrap_or(100);
+                    set_solid(&window, value);
+                }
                 "/badge" => {
                     // How many things wait for the person: a dot on the taskbar icon (Windows), the number on the Dock (Mac).
                     let count = url.query_pairs().find(|(key, _)| key == "n").and_then(|(_, value)| value.parse::<i64>().ok()).unwrap_or(0);
@@ -515,14 +552,16 @@ fn main() {
             // Rex Desk lives in the system tray: closing the window hides it while the server keeps running agents.
             let open = MenuItem::with_id(app, "open", "Open Rex Desk", true, None::<&str>)?;
             let again = MenuItem::with_id(app, "restart", "Restart Rex Desk server", true, None::<&str>)?;
+            let solid = MenuItem::with_id(app, "solid", "Make the window solid", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Rex Desk window", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &again, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &solid, &again, &quit])?;
             let mut tray = TrayIconBuilder::with_id("rex-desk")
                 .tooltip("Rex Desk")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => show_window(app),
+                    "solid" => { if let Some(window) = app.get_webview_window("main") { make_solid(&window); show_window(app); } }
                     "restart" => {
                         if let Some(runtime) = runtime() {
                             thread::spawn(move || { let _ = restart(&runtime); });

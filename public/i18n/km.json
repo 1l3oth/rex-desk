@@ -2355,5 +2355,10 @@
  "File removed": "ឯកសារត្រូវបានលុប",
  "1 file": "ឯកសារ 1",
  "Show {0} in its folder": "បង្ហាញ {0} ក្នុងថតរបស់វា",
+ "See-through window": "បង្អួចថ្លា",
+ "Make solid": "ធ្វើឱ្យដិត",
+ "Drag left to see what is behind Rex Desk, right for solid. It never goes below 20%. Ctrl+Shift+0 or the tray icon makes it solid again.": "អូសទៅឆ្វេង ដើម្បីមើលឃើញអ្វីដែលនៅពីក្រោយ Rex Desk ទៅស្ដាំដើម្បីឱ្យដិត។ វាមិនចុះក្រោម 20% ឡើយ។ Ctrl+Shift+0 ឬរូបតំណាងក្នុងថាសប្រព័ន្ធ ធ្វើឱ្យវាដិតវិញ។",
+ "How solid the window is": "កម្រិតដិតរបស់បង្អួច",
+ "See-through window: left shows more of what is behind it": "បង្អួចថ្លា៖ ទៅឆ្វេងបង្ហាញអ្វីដែលនៅពីក្រោយកាន់តែច្រើន",
  "That message is no longer in this chat.": "សារនោះលែងមាននៅក្នុងការជជែកនេះទៀតហើយ។"
 }
