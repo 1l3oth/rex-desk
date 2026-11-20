@@ -44,7 +44,7 @@ function messageThing(element) {
   const media = element.closest('.md-media, .md-media-link');
   if (media) { const node = media.matches('a') ? media.querySelector('img, video') || media : media, url = node.getAttribute('src') || media.getAttribute('href') || ''; return url ? { element: media, kind: 'media', url, name: nameOf(url), video: node.tagName === 'VIDEO' || VIDEO.test(url) } : null; }
   const file = element.closest('[data-file-open]');
-  if (file) { const value = file.dataset.fileOpen, name = value.split(/[\\/]/).pop(), url = /^\/(api|artifacts)\//.test(value) ? value : ''; return { element: file, kind: IMAGE.test(value) || VIDEO.test(value) ? 'media' : 'file', url, path: url ? '' : value, name, video: VIDEO.test(value) }; }
+  if (file) { const value = file.dataset.fileOpen, name = value.split(/[\\/]/).pop(), upload = /[\\/]uploads[\\/][0-9a-f-]{36}[\\/]/i.test(value), url = /^\/(api|artifacts)\//.test(value) ? value : upload ? `/api/uploads/file?path=${encodeURIComponent(value)}` : ''; return { element: file, kind: IMAGE.test(value) || VIDEO.test(value) ? 'media' : 'file', url, path: url && !upload ? '' : value, name, video: VIDEO.test(value) }; }
   const link = element.closest('a[href]'), href = link?.getAttribute('href') || '';
   if (link && /^https?:\/\//i.test(href)) return { element: link, kind: 'link', url: href, name: link.textContent.trim() !== href ? link.textContent.trim() : '' };
   if (link && /^\/(api\/uploads|artifacts)\//.test(href)) return { element: link, kind: IMAGE.test(href) || VIDEO.test(href) ? 'media' : 'file', url: href, name: link.textContent.trim(), video: VIDEO.test(href) };
@@ -99,6 +99,24 @@ async function unpin(ctx, id) {
   catch (error) { ctx.toast(error.message, true); }
 }
 
+// Loads older messages of the chat on screen. False when there is nothing more to load.
+const STEPS = [2000, 5000, 10000, 20000, 20000];
+async function loadOlder(ctx, step) {
+  const { ui } = ctx, [type, id] = String(ui.pinChat || '').split(':');
+  const earlier = document.querySelector('[data-action="show-earlier"]');
+  if (earlier) { earlier.click(); await new Promise(resolve => setTimeout(resolve, 300)); return true; }
+  if (type === 'room') {
+    const before = (ui.roomHistory?.[id] || []).length, list = await ctx.api(`/rooms/${encodeURIComponent(id)}/messages?limit=${STEPS[step]}`).catch(() => null);
+    if (!list || (step && list.length <= before)) return false;
+    ui.roomHistory = { ...(ui.roomHistory || {}), [id]: list }; ctx.render(); return true;
+  }
+  const runId = ui.view?.type === 'main' ? ctx.mainRun()?.id : ui.view?.id; if (!runId) return false;
+  const had = (ui.events.get(runId) || []).length;
+  if ((ui.historyLimit?.[runId] || 500) >= STEPS[step] || had < (ui.historyLimit?.[runId] || 500)) return false;
+  ui.historyLimit = { ...(ui.historyLimit || {}), [runId]: STEPS[step] };
+  await ctx.refresh(); return (ui.events.get(runId) || []).length > had;
+}
+
 // The pin-* actions of the side panel.
 export async function pinsAction(ctx, action, target) {
   if (action === 'pin-add') {
@@ -112,10 +130,18 @@ export async function pinsAction(ctx, action, target) {
     const pin = (ctx.ui.snap?.pins || []).find(item => item.id === target.dataset.pinId) || {};
     const wants = [target.dataset.pinTarget, pin.url, pin.path].filter(Boolean);
     const path = pin.path || (/[?&]path=([^&]+)/.exec(pin.url || '') ? decodeURIComponent(/[?&]path=([^&]+)/.exec(pin.url)[1]) : '');
-    const found = [...document.querySelectorAll('.msg .md [href], .msg .md [src], .msg .md [data-file-open]')]
-      .find(node => [node.getAttribute('href'), node.getAttribute('src'), node.dataset.fileOpen].some(value => value && wants.includes(value)));
-    const row = found?.closest('.msg') || (path ? [...document.querySelectorAll('.msg .md')].find(node => node.textContent.includes(path))?.closest('.msg') : null);
-    if (!row) return ctx.toast(t('That message is not in the part of the chat shown now. Scroll up to load earlier messages.'), true);
+    const find = () => {
+      const found = [...document.querySelectorAll('.msg .md [href], .msg .md [src], .msg .md [data-file-open], .msg .md [data-file-path]')]
+        .find(node => [node.getAttribute('href'), node.getAttribute('src'), node.dataset.fileOpen, node.dataset.filePath].some(value => value && (wants.includes(value) || (path && value === path))));
+      return found?.closest('.msg') || (path ? [...document.querySelectorAll('.msg .md')].find(node => node.textContent.includes(path))?.closest('.msg') : null);
+    };
+    // Not among the newest messages: older ones are loaded, more each time, until the message turns up.
+    let row = find();
+    for (let step = 0; !row && step < 5; step += 1) {
+      if (!(await loadOlder(ctx, step))) break;
+      await new Promise(resolve => setTimeout(resolve, 150)); row = find();
+    }
+    if (!row) return ctx.toast(t('That message is no longer in this chat.'), true);
     row.scrollIntoView({ block: 'center', behavior: 'smooth' }); row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 1600);
   }
 }

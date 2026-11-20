@@ -78,6 +78,8 @@ async function body(request, limit = 2 * 1024 * 1024) {
   for await (const chunk of request) { input += chunk; if (Buffer.byteLength(input) > limit) throw new Error(`Request exceeds ${Math.round(limit / 1048576)} MB.`); }
   try { return input ? JSON.parse(input) : {}; } catch { throw new Error('Request body must be JSON.'); }
 }
+// How many messages of a chat to send: the newest 500 (200 for a group chat) unless the page asks for more, like "Show in chat" of an old pin.
+const historyLimit = (url, fallback = 500) => Math.min(20000, Math.max(1, Number(url.searchParams.get('limit')) || fallback));
 function serveFile(request, response, file, { sandbox = false, download = false, cache = 'no-store', frame = false, type: forced = '' } = {}) {
   const stat = statSync(file), type = forced || mime[path.extname(file).toLowerCase()] || 'application/octet-stream';
   const headers = { 'Content-Type': type, 'Cache-Control': cache, 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff' };
@@ -1006,12 +1008,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const copy = desk.peers.chatCopy(runId);
         if (copy) {
           // An agent's chat is in full on every computer (rex_chat); the copy's own short list is only for older versions.
-          const shared = action === 'messages' && store.syncedChat(runId) ? store.events(runId, { visible: true }) : [];
+          const shared = action === 'messages' && store.syncedChat(runId) ? store.events(runId, { visible: true, limit: historyLimit(url) }) : [];
           if (request.method === 'GET') return json(response, 200, action === 'messages' ? (shared.length ? shared : copy.events || []) : { ...copy.run, remote: copy.node, cloudCopy: true });
           if (request.method === 'POST') return json(response, 200, await desk.peers.chatAction(copy, action, await body(request)));
         }
         if (request.method === 'GET') {
-          if (action === 'messages') return json(response, 200, store.events(runId, { visible: true }));
+          if (action === 'messages') return json(response, 200, store.events(runId, { visible: true, limit: historyLimit(url) }));
           return json(response, 200, desk.run(runId));
         }
         if (request.method === 'POST') {
@@ -1210,7 +1212,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const roomMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/(messages|members)(?:\/([^/]+))?$/);
       if (roomMatch) {
         const [, roomId, part, extra] = roomMatch;
-        if (part === 'messages' && request.method === 'GET') return json(response, 200, desk.rooms.messages(roomId, { after: Number(url.searchParams.get('after')) || 0 }));
+        if (part === 'messages' && request.method === 'GET') return json(response, 200, desk.rooms.messages(roomId, { after: Number(url.searchParams.get('after')) || 0, limit: historyLimit(url, 200) }));
         if (part === 'messages' && request.method === 'POST') { const input = await body(request); return json(response, 200, await desk.rooms.post(roomId, { text: input.text, to: input.to, replyTo: input.replyTo || '' })); }
         if (part === 'messages' && extra && request.method === 'DELETE') return json(response, 200, desk.rooms.deleteMessage(roomId, extra));
         if (part === 'members' && request.method === 'POST') return json(response, 200, desk.rooms.addMember(roomId, (await body(request)).agentId));

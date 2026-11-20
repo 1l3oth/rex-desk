@@ -2297,7 +2297,6 @@
  "Nothing pinned yet. Pin a file, picture or link from the chat.": "មិនទាន់មានអ្វីខ្ទាស់ទេ។ ខ្ទាស់ឯកសារ រូបភាព ឬតំណពីការជជែក។",
  "Pinned. Find it in the Pinned tab.": "បានខ្ទាស់។ រកវាឃើញក្នុងផ្ទាំងបានខ្ទាស់។",
  "Unpinned.": "បានដកការខ្ទាស់។",
- "That message is not in the part of the chat shown now. Scroll up to load earlier messages.": "សារនោះមិននៅក្នុងផ្នែកការជជែកដែលបង្ហាញឥឡូវទេ។ រំកិលឡើងលើដើម្បីផ្ទុកសារមុនៗ។",
  "What uses space, clean up": "អ្វីប្រើទំហំ និងសម្អាត",
  "Raw agent output": "លទ្ធផលឆៅរបស់ភ្នាក់ងារ",
  "Other records": "កំណត់ត្រាផ្សេងៗ",
@@ -2355,5 +2354,6 @@
  "{0}: {1} freed.": "{0}៖ បានទំនេរ {1}។",
  "File removed": "ឯកសារត្រូវបានលុប",
  "1 file": "ឯកសារ 1",
- "Show {0} in its folder": "បង្ហាញ {0} ក្នុងថតរបស់វា"
+ "Show {0} in its folder": "បង្ហាញ {0} ក្នុងថតរបស់វា",
+ "That message is no longer in this chat.": "សារនោះលែងមាននៅក្នុងការជជែកនេះទៀតហើយ។"
 }

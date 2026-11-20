@@ -5,7 +5,7 @@ import { subagentsFromEvents, subagentsPanel } from '/chat-subagents.js';
 import { sideTabsHtml } from '/chat-sidetabs.js';
 import { speakButton } from '/chat-speak.js';
 import { pickerHtml } from '/chat-pick.js';
-import { collectShared, sharedTabsHtml, sharedCount } from '/chat-media.js';
+import { collectShared, sharedTabsHtml, sharedCount, attachedFiles } from '/chat-media.js';
 import { chatPins } from '/chat-pins.js';
 import { toolLine, changeHtml, terminalHtml } from '/chat-activity.js';
 import { AVATARS } from '/avatars.js';
@@ -56,7 +56,8 @@ export function roomStage(ctx) {
   ui.pinChat = room ? `room:${room.id}` : null;
   if (!room) return { title: t('Meeting room'), meta: '', feed: `<div class="empty"><h2>${t`That meeting room is gone.`}</h2></div>` };
   const handles = room.members.map(member => member.handle).filter(Boolean), tasks = Object.fromEntries((ui.snap.tasks || []).map(task => [taskNumber(task), taskName(task)]));
-  const messages = (ui.snap.messages || []).filter(message => message.roomId === room.id).sort((left, right) => left.seq - right.seq);
+  // Older messages loaded on demand ("Show in chat" of an old pin) join the newest ones the snapshot carries.
+  const messages = [...new Map([...(ui.roomHistory?.[room.id] || []), ...(ui.snap.messages || []).filter(message => message.roomId === room.id)].map(message => [message.id, message])).values()].sort((left, right) => left.seq - right.seq);
   const names = new Map(room.members.map(member => [member.id, member.name]));
   // Like a group chat: an agent's message has its picture and its name in its own colour; messages in a row from the same sender share one header.
   let previous = null;
@@ -67,7 +68,7 @@ export function roomStage(ctx) {
     if (message.from.type === 'system') { previous = null; return note(esc(message.text)); }
     const to = message.from.type === 'human' && message.to.some(id => id !== 'you') ? message.to.filter(id => id !== 'you').map(id => names.get(id)).filter(Boolean) : [];
     const shown = message.from.type === 'human' ? String(message.text).replace(/\s*\(Sent by voice: [^)]*\)\s*$/, '') : message.text;
-    const html = markdown(shown, { mentions: ['you', ...handles], tasks }) + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '') + (message.tokens ? `<div class="tok" title="${t`Tokens this reply used`}">${esc(ctx.tokenText(message.tokens))}</div>` : '');
+    const attached = attachedFiles(shown, esc), html = markdown(attached.text, { mentions: ['you', ...handles], tasks }) + attached.html + (to.length ? `<div class="to">to ${esc(to.join(', '))}</div>` : '') + (message.tokens ? `<div class="tok" title="${t`Tokens this reply used`}">${esc(ctx.tokenText(message.tokens))}</div>` : '');
     const same = previous && previous.from.id === message.from.id && Date.parse(message.at) - Date.parse(previous.at) < 5 * 60000; previous = message;
     if (message.from.type === 'human') return bubble({ mine: true, name: t('You'), time: hhmm(message.at), voice: shown !== message.text, html: quote(message) + html }).replace('<div class="msg mine', `<div data-msg="${esc(message.id)}" class="msg mine`);
     return `<div class="msg rmsg ${same ? 'cont' : ''}" data-msg="${esc(message.id)}"><div class="ravcol"${message.from.type === 'agent' ? ` data-agent-card="${esc(message.from.id)}" title="${t`${esc(message.from.label)}'s card`}"` : ''}>${same ? '' : ctx.avatar({ name: message.from.label, size: 'sm' })}</div><div class="bubble"><div class="who rwho"><strong class="nc${nameHash(message.from.label)}"${message.from.type === 'agent' ? ` data-agent-card="${esc(message.from.id)}"` : ''}>${esc(message.from.label)}</strong><span>${esc(hhmm(message.at))}</span>${message.from.type === 'human' ? `<button type="button" class="rreply rdel" data-msg-delete="${esc(message.id)}" title="${t`Unsend`}" aria-label="${t`Unsend this message`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : ''}${message.from.type === 'agent' ? speakButton('rreply') : ''}<button type="button" class="rreply" data-reply="${esc(message.id)}" title="${t`Reply to ${esc(message.from.label)}`}" aria-label="${t`Reply to ${esc(message.from.label)}`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 4L2 8l4 4M2 8h8a4 4 0 0 1 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>${t`Reply`}</button></div>${quote(message)}<div class="md">${html}</div></div></div>`;

@@ -9,7 +9,7 @@ import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
 import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.js';
 import { roomStage, newRoomDialog as openRoomDialog, tasksStage, taskStage, roomAction, initRoomInfo, avatarHtml, roomRunIds, initLocalTasks, sharedTabButtons } from '/chat-rooms.js';
-import { collectShared, sharedTabsHtml } from '/chat-media.js';
+import { collectShared, sharedTabsHtml, attachedFiles } from '/chat-media.js';
 import { chatPins, pinsAction, watchMessagePins } from '/chat-pins.js';
 import { devicesStage, devicesAction, initDevices } from '/chat-devices.js';
 import { monitorStage, monitorAction } from '/chat-monitor.js';
@@ -33,6 +33,8 @@ const app = document.getElementById('app');
 // Which screen is open lives in the address (#/room/ID) and is also saved, so a refresh or a restart comes back to the same place.
 const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'jev', 'monitor', 'worktrees', 'net', 'split'];
 const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
+// A chat loads its newest messages; "Show in chat" of an old pin asks for more (ui.historyLimit) until it finds the message.
+const historyQuery = runId => (ui?.historyLimit?.[runId] ? `?limit=${ui.historyLimit[runId]}` : '');
 function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash); return match && SCREENS.includes(match[1]) ? { type: match[1], id: match[2] ? decodeURIComponent(match[2]) : '' } : null; }
 function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
 // Task states that count as open on the Team tab. Defined before the first render (the top-level await refresh), which can draw it.
@@ -203,7 +205,7 @@ function renderItems(items, run, live) {
     if (item.role === 'tool') { group.push(item); continue; }
     flush(false);
     out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
-      : item.role === 'human' ? bubble({ mine: true, name: t('You'), time: hhmm(item.at), voice: item.voice, html: markdown(item.text), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
+      : item.role === 'human' ? bubble({ mine: true, name: t('You'), time: hhmm(item.at), voice: item.voice, html: (attached => markdown(attached.text) + attached.html)(attachedFiles(item.text, esc)), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="${t`Tokens this reply used`}">${esc(tokenText(item.tokens))}</div>` : '') })
       : item.role === 'cleared' ? `<div class="cleared"><span>${t`Chat cleared · ${esc(item.text)}`}${item.tokens ? ` · <span class="tok">${esc(typeof item.tokens === 'object' ? tokenText(item.tokens) : typeof item.tokens === 'number' ? `${kilo(item.tokens)} ${t('tokens')}` : String(item.tokens))}</span>` : ''}</span>${item.earlier ? `<button type="button" class="btn small quiet" data-action="show-earlier">${t`Show earlier messages`}</button>` : ''}</div>`
       : item.role === 'subagent' ? subagentHtml(item, live)
@@ -534,7 +536,7 @@ async function loadView(early = null) {
   try {
     if (type === 'main' || type === 'run') {
       const run = type === 'main' ? mainRun() : runById(id); if (!run) return;
-      const events = await (early && type === 'run' ? early : api(`/runs/${run.id}/messages`)); ui.events.set(run.id, events);
+      const events = await (early && type === 'run' ? early : api(`/runs/${run.id}/messages${historyQuery(run.id)}`)); ui.events.set(run.id, events);
     } else if (type === 'room') {
       const room = ui.snap.rooms.find(item => item.id === id);
       if (room && ui.infoOpen !== false && ['activity', 'subagents', 'team', 'terminal'].includes(ui.sideTab)) await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
@@ -558,7 +560,7 @@ async function refresh({ full = false } = {}) {
   if (busy) { again = true; againFull ||= full; return; } busy = true;
   try {
     // Everything the page needs is asked for at once, not one after another: opening a chat waited for four answers in a row.
-    const view = ui.view, early = view.type === 'run' ? api(`/runs/${view.id}/messages`, { timeout: 15000 }).catch(() => null) : null;
+    const view = ui.view, early = view.type === 'run' ? api(`/runs/${view.id}/messages${historyQuery(view.id)}`, { timeout: 15000 }).catch(() => null) : null;
     // The live refresh gives up after 15 s so one slow answer never freezes later updates; the first load has nothing to show
     // yet, so it waits up to 90 s (a whole state over a slow relay can take longer than 15 s).
     // A link that is always slow (the phone over a relay) gets twice the time its last whole answer took, up to 90 s.
@@ -568,7 +570,7 @@ async function refresh({ full = false } = {}) {
     ui.snap = snap;
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
     if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = memory; ui.profile = profile;
-    await loadView(view === ui.view && early ? early.then(events => events || api(`/runs/${view.id}/messages`)) : null); renderAll(full); maybeStartTour(ctx); if (!window.__starWatch && !document.documentElement.classList.contains('embed')) { window.__starWatch = true; watchForStar(); } if (!window.__pinWatch) { window.__pinWatch = true; watchMessagePins(ctx); } showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
+    await loadView(view === ui.view && early ? early.then(events => events || api(`/runs/${view.id}/messages${historyQuery(view.id)}`)) : null); renderAll(full); maybeStartTour(ctx); if (!window.__starWatch && !document.documentElement.classList.contains('embed')) { window.__starWatch = true; watchForStar(); } if (!window.__pinWatch) { window.__pinWatch = true; watchMessagePins(ctx); } showUpdateCard(ui.snap.update); showSyncNote(ui.snap.cloudSync); initSidebarDrag(ctx); if (ui.snap.update?.supported) watchForUpdates(api); watchNotices(ctx); watchShownFile(ctx); watchFileWindow(ctx);
   } finally { busy = false; if (again) { const wasFull = againFull; again = false; againFull = false; void refresh({ full: wasFull }); } }
 }
 // A chat opened is drawn at once from what the page already holds (its messages from the last visit), and brought up to

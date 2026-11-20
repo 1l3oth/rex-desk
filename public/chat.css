@@ -2177,3 +2177,10 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 @media (max-width:760px){.sg-split{grid-template-columns:1fr}.sg-tree{flex-direction:row;overflow:auto;border-right:0;border-bottom:1px solid var(--line);padding:0 0 8px}.sg-place{flex:none}}
 /* A file that was deleted from Storage: its picture in a chat shows a quiet placeholder instead of a broken image. */
 .file-gone{display:inline-flex;align-items:center;gap:7px;margin:6px 0;padding:8px 12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:13px;background:var(--raised)}
+/* Files attached with + in a message: a picture shows itself, any other file a card that opens it (and can be pinned). */
+.att-cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 2px}.att-cards .md-media{margin:0}
+.att-card{display:inline-flex;align-items:center;gap:10px;max-width:280px;padding:8px 12px 8px 10px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);text-align:left;cursor:pointer;font:inherit}
+.att-card:hover{border-color:var(--accent)}.att-card svg{flex:none;color:var(--accent)}
+.att-text{display:flex;flex-direction:column;min-width:0}.att-text b{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.att-text small{font-size:11px;color:var(--muted)}
+/* The Media, Files, Links and Pinned switch stays on one line, also in Khmer. */
+.pseg .tab{white-space:nowrap;min-width:0}
