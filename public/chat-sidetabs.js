@@ -17,7 +17,7 @@ export function sideTabsHtml(esc, { tabs, current, action, close = '' }) {
     const on = tab.id === current, split = group !== null && tab.group !== group ? '<span class="stab-sep" aria-hidden="true"></span>' : '';
     group = tab.group;
     const badge = tab.count ? `<span class="stab-n${tab.owed ? ' owed' : ''}">${tab.count > 99 ? '99+' : tab.count}</span>` : '';
-    return `${split}<button type="button" class="stab${on ? ' on' : ''}" data-action="${action}" data-tab="${esc(tab.id)}" title="${esc(tab.label)}" aria-label="${esc(tab.label)}" aria-pressed="${on}">${icon(tab.icon || tab.id)}${badge}${on ? `<span class="stab-l">${esc(tab.label)}</span>` : ''}</button>`;
+    return `${split}<button type="button" class="stab${on ? ' on' : ''}" data-action="${action}" data-tab="${esc(tab.id)}" title="${esc(tab.label)}" aria-label="${esc(tab.label)}" aria-pressed="${on}">${icon(tab.icon || tab.id)}${on ? `<span class="stab-l">${esc(tab.label)}</span>` : ''}${badge}</button>`;
   }).join('');
   return `<div class="side-head stabs" role="toolbar">${buttons}<span class="spacer"></span>${close}</div>`;
 }
@@ -30,3 +30,8 @@ export function crewHtml({ taskBody, taskCount, subBody, subCount, empty, labels
   const part = (title, count, body, cls) => count ? `<section class="crew-part ${cls}"><h3 class="crew-h">${title}<span class="cnt">${count}</span></h3>${inner(body)}</section>` : '';
   return `<div class="side-body crew">${part(labels.tasks, taskCount, taskBody, 'tm')}${part(labels.subs, subCount, subBody, 'sa-list')}</div>`;
 }
+
+// The picked side tab is kept for every chat (one for personal chats, one for group chats) and over a reload, so switching
+// chats, a refresh or a new message never sends the panel back to the first tab.
+export const savedSideTab = key => { try { return localStorage.getItem(`rex-side-tab-${key}`) || ''; } catch { return ''; } };
+export const saveSideTab = (key, tab) => { try { localStorage.setItem(`rex-side-tab-${key}`, String(tab || '')); } catch { /* private window */ } return tab; };

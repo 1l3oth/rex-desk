@@ -4,7 +4,7 @@ import { rexCore } from '/rex-core.js';
 import { agentListHtml, roomListHtml, initSidebarDrag, togglePin, applyFilter } from '/chat-sidebar.js';
 import { agentStage, agentAction, agentGroups, chatTakers, moveRunDialog, initAgentCard, openAgentChat, savedChatGone, toggleGroup, wireLoop } from '/chat-agents.js';
 import { subagentHtml as subagentCard, subagentsFromEvents, subagentsPanel } from '/chat-subagents.js';
-import { sideTabsHtml, crewHtml } from '/chat-sidetabs.js';
+import { sideTabsHtml, crewHtml, savedSideTab, saveSideTab } from '/chat-sidetabs.js';
 import { stepsHtml, terminalItems, terminalHtml } from '/chat-activity.js';
 import { markdown } from '/chat-markdown.js';
 import { initPickers, setPickActions, pickerOpen, pickerHtml } from '/chat-pick.js';
@@ -39,7 +39,7 @@ function viewFromHash() { const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location
 function savedView() { try { const view = JSON.parse(localStorage.getItem('rex-desk-view') || 'null'); return view && SCREENS.includes(view.type) ? { type: view.type, id: String(view.id || '') } : null; } catch { return null; } }
 // Task states that count as open on the Team tab. Defined before the first render (the top-level await refresh), which can draw it.
 const TEAM_OPEN = new Set(['queued', 'working', 'needs-manager']);
-const ui = { snap: null, view: viewFromHash() || savedView() || { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map(), termOpen: true, qstep: new Map(), qanswers: new Map(), files: new Map() };
+const ui = { chatTab: savedSideTab('chat'), sideTab: savedSideTab('room'), snap: null, view: viewFromHash() || savedView() || { type: 'main' }, events: new Map(), memory: null, page: '', menu: null, done: false, drafts: new Map(), stick: true, attachments: [], openSteps: new Map(), termOpen: true, qstep: new Map(), qanswers: new Map(), files: new Map() };
 // Tokens one reply used: what was new, what the agent wrote, and the context it read again from the cache (cheap, but it counts toward limits).
 const kilo = number => number >= 1000000 ? `${(number / 1000000).toFixed(1)}M` : number >= 1000 ? `${(number / 1000).toFixed(number >= 10000 ? 0 : 1)}k` : String(number);
 // The agent's last reply of this turn: the newest agent message since the person last wrote.
@@ -675,8 +675,8 @@ document.addEventListener('click', async event => {
     // An agent you already chat with opens that chat, like a messenger; its profile is on the right ("Edit profile" opens the card).
     if (target.dataset.open === 'specialist' && !target.dataset.profile) {
       const agent = (ui.snap.specialists || []).find(item => item.id === target.dataset.id);
-      if (agent?.runId && runById(agent.runId)) { ui.chatTab = 'profile'; return open('run', agent.runId); }
-      if (savedChatGone(ctx, agent) && !agent.remote) { ui.chatTab = 'profile'; return openAgentChat(ctx, agent); }
+      if (agent?.runId && runById(agent.runId)) return open('run', agent.runId);
+      if (savedChatGone(ctx, agent) && !agent.remote) return openAgentChat(ctx, agent);
     }
     return open(target.dataset.open, target.dataset.id);
   }
@@ -1198,7 +1198,7 @@ document.addEventListener('click', event => {
   const target = event.target.closest?.('[data-action="chat-tab"],[data-action="chat-shared"],[data-action="chat-info-close"],[data-action="chat-info"],[data-copy]'); if (!target) return;
   event.stopPropagation();
   if (target.dataset.copy !== undefined) { void navigator.clipboard?.writeText(target.dataset.copy).then(() => toast(t('Path copied.')), () => toast(t('Could not copy.'), true)); return; }
-  if (target.dataset.action === 'chat-tab') ui.chatTab = target.dataset.tab;
+  if (target.dataset.action === 'chat-tab') ui.chatTab = saveSideTab('chat', target.dataset.tab);
   else if (target.dataset.action === 'chat-shared') ui.chatShared = target.dataset.tab;
   else ui.chatInfo = target.dataset.action === 'chat-info';
   renderAll();

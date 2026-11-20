@@ -2,7 +2,7 @@ import { t, locale } from './i18n.js';
 import { rexCore } from '/rex-core.js';
 import { chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { subagentsFromEvents, subagentsPanel } from '/chat-subagents.js';
-import { sideTabsHtml } from '/chat-sidetabs.js';
+import { sideTabsHtml, saveSideTab } from '/chat-sidetabs.js';
 import { speakButton } from '/chat-speak.js';
 import { pickerHtml } from '/chat-pick.js';
 import { collectShared, sharedTabsHtml, sharedCount, attachedFiles } from '/chat-media.js';
@@ -398,7 +398,7 @@ function fillAgentsPop(ctx) {
 export async function roomAction(ctx, action, target) {
   const { ui, api, toast, refresh } = ctx;
   if (action === 'agents-pop') { ui.agentsPop = !ui.agentsPop; fillAgentsPop(ctx); return; }
-  if (action === 'side-tab') { ui.sideTab = target.dataset.tab; ctx.render(); return; }
+  if (action === 'side-tab') { ui.sideTab = saveSideTab('room', target.dataset.tab); ctx.render(); return; }
   if (action === 'room-shared') { ui.roomShared = target.dataset.tab; ctx.render(); return; }
   if (action === 'info-toggle') { ui.infoOpen = ui.infoOpen === false; ctx.render(); return; }
   if (action === 'room-image') { document.getElementById('room-image-input')?.click(); return; }
