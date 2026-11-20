@@ -56,8 +56,23 @@ const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0
 async function api(path, { method = 'GET', data, retry = false, timeout = 0 } = {}) {
   // A timeout is set only by callers that must never hang (the live refresh): a slow server then aborts the fetch instead of
   // freezing every later update. Long calls (uploads, model actions) pass no timeout and wait as before.
-  const response = await fetch(`/api${path}`, { method, ...(timeout ? { signal: AbortSignal.timeout(timeout) } : {}), headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) });
-  const body = await response.json().catch(() => ({}));
+  // An answer that cannot be read is an error with its real cause, never an empty {}: over a slow link (the phone through a
+  // Tailscale relay) a cut-off /api/state used to become {} and the page crashed on it ("ui.snap.runs.find").
+  const slow = error => error?.name === 'TimeoutError' || error?.name === 'AbortError';
+  let response, text;
+  try { response = await fetch(`/api${path}`, { method, ...(timeout ? { signal: AbortSignal.timeout(timeout) } : {}), headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) }); }
+  catch (error) { throw new Error(slow(error) ? t('Your computer answered too slowly. Trying again.') : t('Cannot reach your computer. Trying again.')); }
+  try { text = await response.text(); }
+  catch (error) { throw new Error(slow(error) ? t('Your computer answered too slowly. Trying again.') : t('The answer from your computer was cut off. Trying again.')); }
+  let body = {};
+  if (text) {
+    try { body = JSON.parse(text); }
+    catch {
+      // A sign-in page where data was expected: this device was signed out (the key or cookie expired, or a proxy asked again).
+      if (/text\/html/i.test(response.headers.get('content-type') || '')) { if (response.redirected) location.href = response.url; throw new Error(t('Sign in to Rex Desk again on this device.')); }
+      throw new Error(response.ok ? t('The answer from your computer was cut off. Trying again.') : t`Request failed (${response.status})`);
+    }
+  }
   // With accounts, a workspace that stays signed in hands this window its cookie through /api/auth; otherwise the window signs in first.
   if (response.status === 401 && body.signIn) {
     const auth = retry ? null : await fetch('/api/auth', { headers: { 'x-rex-desk': '1' } }).then(reply => reply.json()).catch(() => null);
@@ -542,6 +557,7 @@ async function refresh({ full = false } = {}) {
     // Everything the page needs is asked for at once, not one after another: opening a chat waited for four answers in a row.
     const view = ui.view, early = view.type === 'run' ? api(`/runs/${view.id}/messages`, { timeout: 15000 }).catch(() => null) : null;
     const [snap, memory, profile] = await Promise.all([api('/state', { timeout: 15000 }), api('/memory', { timeout: 15000 }).catch(() => ui.memory), api('/profile', { timeout: 15000 }).catch(() => ui.profile)]);
+    if (!snap || !Array.isArray(snap.runs)) throw new Error(t('The answer from your computer was cut off. Trying again.'));
     ui.snap = snap;
     // The server restarted on new code: load the new page too, so it never asks for a file or route the old one lacked.
     if (ui.snap.code && ui.code && ui.snap.code !== ui.code) { location.reload(); return; } ui.code ||= ui.snap.code; ui.memory = memory; ui.profile = profile;
@@ -833,7 +849,12 @@ try {
   // An agent's words as they are written: Voice mode speaks them a phrase behind, without waiting for the whole reply.
   stream.addEventListener('partial', event => { try { speakLive(JSON.parse(event.data), draftKey(), ctx.currentRunId()); } catch { /* a broken message is skipped */ } });
   setInterval(() => void refresh().catch(() => {}), 15000);
-} catch (error) { app.innerHTML = `<div class="boot boot-failed"><h2>${t`Rex Desk is unavailable`}</h2><p>${esc(error.message)}</p><p>${t`Opening it again by itself as soon as the server answers.`}</p></div>`; }
+} catch (error) {
+  app.innerHTML = `<div class="boot boot-failed"><h2>${t`Rex Desk is unavailable`}</h2><p>${esc(error.message)}</p><p>${t`Opening it again by itself as soon as the server answers.`}</p></div>`;
+  // It does what it says: the state is asked for again every few seconds, and the page opens once a whole answer arrives.
+  const again = async () => { try { await api('/state', { timeout: 45000 }).then(snap => { if (!Array.isArray(snap?.runs)) throw new Error('incomplete'); }); location.reload(); } catch (failure) { const line = app.querySelector('.boot-failed p'); if (line && failure.message !== 'incomplete') line.textContent = failure.message; setTimeout(again, 5000); } };
+  setTimeout(again, 5000);
+}
 
 // A question card with several questions shows one at a time. Back and Next move between them; picking an answer moves on by itself.
 function answered(slide) {

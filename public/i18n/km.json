@@ -2287,5 +2287,9 @@
  "No meeting rooms yet.": "មិនទាន់មានបន្ទប់ប្រជុំនៅឡើយទេ។",
  "Add agents: start a meeting with this agent and others": "បន្ថែមភ្នាក់ងារ៖ ចាប់ផ្ដើមការប្រជុំជាមួយភ្នាក់ងារនេះ និងអ្នកផ្សេងទៀត",
  "Team {0}": "ក្រុម {0}",
- "Other agents": "ភ្នាក់ងារផ្សេងទៀត"
+ "Other agents": "ភ្នាក់ងារផ្សេងទៀត",
+ "Your computer answered too slowly. Trying again.": "កុំព្យូទ័ររបស់អ្នកឆ្លើយតបយឺតពេក។ កំពុងព្យាយាមម្ដងទៀត។",
+ "Cannot reach your computer. Trying again.": "មិនអាចភ្ជាប់ទៅកុំព្យូទ័ររបស់អ្នកបានទេ។ កំពុងព្យាយាមម្ដងទៀត។",
+ "The answer from your computer was cut off. Trying again.": "ចម្លើយពីកុំព្យូទ័ររបស់អ្នកត្រូវបានកាត់ផ្ដាច់។ កំពុងព្យាយាមម្ដងទៀត។",
+ "Sign in to Rex Desk again on this device.": "សូមចូល Rex Desk ម្ដងទៀតនៅលើឧបករណ៍នេះ។"
 }

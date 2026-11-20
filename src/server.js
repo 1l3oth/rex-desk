@@ -2,6 +2,7 @@ import { watchStalls, doing } from './stall-watch.js';
 import { aiProvider } from './codex.js';
 import { agyCommand } from './antigravity.js';
 import http from 'node:http';
+import { gzipSync } from 'node:zlib';
 import { tailscaleAddresses } from './peers.js';
 import QRCode from 'qrcode';
 import { agentTools } from './agent-tools.js';
@@ -57,7 +58,15 @@ const startedCode = process.env.REX_DESK_VERSION ? '' : readCode();
 function readCode() { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } }
 function codeVersion() { return startedCode; }
 const mime = { '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.json': 'application/json; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.csv': 'text/plain; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.zip': 'application/zip', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
-const json = (response, code, data) => { response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(data)); };
+// Over Tailscale (the phone, often through a slow relay) a large answer such as /api/state goes compressed: about a tenth
+// of the size, so it arrives whole instead of being cut off half way.
+const json = (response, code, data) => {
+  const text = JSON.stringify(data);
+  if (response.rexRemote && text.length > 16384 && /\bgzip\b/i.test(String(response.req?.headers['accept-encoding'] || ''))) {
+    response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' }); return response.end(gzipSync(text));
+  }
+  response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(text);
+};
 // Recorded speech for transcription arrives as raw WAV bytes, not JSON.
 async function rawBody(request, limit = 20 * 1024 * 1024) {
   const chunks = []; let size = 0;
@@ -447,6 +456,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       // A2A: other agents reach this desk with the A2A key alone (it is off until the person turns it on), here or over Tailscale.
       if (session?.desk && await handleA2aHttp(session.desk, request, response, url, request => body(request, 1024 * 1024))) return;
       let peerSignedIn = false;
+      if (remoteSocket) response.rexRemote = true;
       if (remoteSocket) {
         const desk = session?.desk;
         if (!desk) return json(response, 503, { error: 'Rex Desk on this computer is locked. Sign in on it first.' });
