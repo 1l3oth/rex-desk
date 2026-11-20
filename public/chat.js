@@ -750,6 +750,12 @@ document.addEventListener('submit', async event => {
   try { await api(`/interactions/${form.dataset.interaction}/answer`, { method: 'POST', data: { action: always ? 'accept' : decision, content: always ? { ...content, always: true } : content } }); toast(decision === 'accept' || always ? t('Sent to the agent.') : t('Declined.')); await refresh(); }
   catch (error) { toast(error.message, true); }
 });
+// Scrolling up with the wheel, a key or the scroll bar while an agent replies stops following the newest message at once (L55):
+// the glide to the bottom used to ignore the person's scrolling, so the chat felt stuck while text kept arriving.
+const letGo = () => { ui.gliding = false; clearTimeout(ui.glideTimer); ui.stick = false; };
+document.addEventListener('wheel', event => { if (event.deltaY < 0 && event.target.closest?.('#feed')) letGo(); }, { passive: true });
+document.addEventListener('pointerdown', event => { const feed = event.target.closest?.('#feed'); if (feed && event.offsetX > feed.clientWidth) letGo(); }, { passive: true });
+document.addEventListener('keydown', event => { if (['PageUp', 'ArrowUp', 'Home'].includes(event.key) && document.activeElement?.closest?.('#feed')) letGo(); });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') { if (ui.gliding) return; ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; if (ui.stick) ui.freshBelow = false; syncToEnd(); } }, true);
 
 initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx); wireAgentCards(ctx); wireSpeak(toast); wireWorktrees(ctx); wireNet(ctx); wireChatSwitch(); wireImageViewer();
