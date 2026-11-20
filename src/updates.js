@@ -141,11 +141,13 @@ export class Updates {
       '$Version = [string]$settings.version',
       '$ui = $null',
       // The update window looks like Rex Desk: no Windows frame, rounded, the colours of the theme the person sees, the four-square
-      // logo, and a thin accent bar (a filled panel, not the green Windows progress bar).
+      // logo, and a thin accent bar (a filled panel, not the green Windows progress bar). It is a normal window, not always on top:
+      // the person can work in other apps, drag it by any part, or minimize it with its own button. It comes to the front by
+      // itself only when something goes wrong.
       '$t = $settings.theme; function Col($value, $fallback) { try { if ($value) { return [Drawing.ColorTranslator]::FromHtml($value) } } catch {}; return [Drawing.ColorTranslator]::FromHtml($fallback) }',
       'try { Add-Type -AssemblyName System.Windows.Forms, System.Drawing; [Windows.Forms.Application]::EnableVisualStyles()',
       '  $panel = Col $t.panel "#16181d"; $ink = Col $t.ink "#e6e8eb"; $muted = Col $t.muted "#9aa3b1"; $accent = Col $t.accent "#5a97ff"; $line = Col $t.line "#2a2f37"',
-      '  $form = New-Object Windows.Forms.Form -Property @{ Text = "Updating Rex Desk"; ClientSize = New-Object Drawing.Size(460, 132); StartPosition = "CenterScreen"; FormBorderStyle = "None"; TopMost = $true; ShowInTaskbar = $true; BackColor = $panel }',
+      '  $form = New-Object Windows.Forms.Form -Property @{ Text = "Updating Rex Desk"; ClientSize = New-Object Drawing.Size(460, 132); StartPosition = "CenterScreen"; FormBorderStyle = "None"; TopMost = $false; ShowInTaskbar = $true; BackColor = $panel }',
       // The taskbar shows Rex Desk's own icon (taken from the app being updated), not PowerShell's.
       '  try { $form.Icon = [Drawing.Icon]::ExtractAssociatedIcon($App) } catch {}',
       '  $path = New-Object Drawing.Drawing2D.GraphicsPath; $r = 28; $w = $form.Width; $h = $form.Height; $path.AddArc(0, 0, $r, $r, 180, 90); $path.AddArc($w - $r, 0, $r, $r, 270, 90); $path.AddArc($w - $r, $h - $r, $r, $r, 0, 90); $path.AddArc(0, $h - $r, $r, $r, 90, 90); $path.CloseFigure(); $form.Region = New-Object Drawing.Region($path)',
@@ -153,12 +155,21 @@ export class Updates {
       '  $logo = New-Object Windows.Forms.Panel -Property @{ Location = New-Object Drawing.Point(24, 24); Size = New-Object Drawing.Size(30, 30); BackColor = $panel }',
       '  $logo.Add_Paint({ param($s, $e) $g = $e.Graphics; $g.SmoothingMode = "AntiAlias"; $brush = New-Object Drawing.SolidBrush($accent); foreach ($p in @(@(0,0),@(16,0),@(0,16),@(16,16))) { $box = New-Object Drawing.Drawing2D.GraphicsPath; $x = $p[0]; $y = $p[1]; $box.AddArc($x, $y, 6, 6, 180, 90); $box.AddArc($x + 8, $y, 6, 6, 270, 90); $box.AddArc($x + 8, $y + 8, 6, 6, 0, 90); $box.AddArc($x, $y + 8, 6, 6, 90, 90); $box.CloseFigure(); $g.FillPath($brush, $box) }; $brush.Dispose() })',
       '  $title = New-Object Windows.Forms.Label -Property @{ Text = "Updating Rex Desk $Version"; Location = New-Object Drawing.Point(66, 22); AutoSize = $true; Font = New-Object Drawing.Font("Segoe UI Semibold", 11.5); ForeColor = $ink; BackColor = $panel }',
-      '  $label = New-Object Windows.Forms.Label -Property @{ Text = "Getting ready"; Location = New-Object Drawing.Point(67, 48); Size = New-Object Drawing.Size(370, 20); Font = New-Object Drawing.Font("Segoe UI", 9.5); ForeColor = $muted; BackColor = $panel }',
+      '  $label = New-Object Windows.Forms.Label -Property @{ Text = "Getting ready"; Location = New-Object Drawing.Point(67, 48); Size = New-Object Drawing.Size(370, 38); Font = New-Object Drawing.Font("Segoe UI", 9.5); ForeColor = $muted; BackColor = $panel }',
       '  $track = New-Object Windows.Forms.Panel -Property @{ Location = New-Object Drawing.Point(24, 92); Size = New-Object Drawing.Size(412, 6); BackColor = $line }',
       '  $fill = New-Object Windows.Forms.Panel -Property @{ Location = New-Object Drawing.Point(0, 0); Size = New-Object Drawing.Size(0, 6); BackColor = $accent }; $track.Controls.Add($fill)',
       '  $foot = New-Object Windows.Forms.Label -Property @{ Text = "Rex Desk opens again by itself when this is done."; Location = New-Object Drawing.Point(23, 106); AutoSize = $true; Font = New-Object Drawing.Font("Segoe UI", 8.5); ForeColor = $muted; BackColor = $panel }',
       '  $bar = [pscustomobject]@{ Track = $track; Fill = $fill }',
-      '  $form.Controls.AddRange(@($logo, $title, $label, $track, $foot)); $form.Show(); [Windows.Forms.Application]::DoEvents(); $ui = $form } catch { $ui = $null }',
+      // Its own minimize button, top right, in the theme colours (a frameless window has no Windows title bar to minimize from).
+      '  $min = New-Object Windows.Forms.Label -Property @{ Text = [string][char]0x2013; Location = New-Object Drawing.Point(420, 12); Size = New-Object Drawing.Size(28, 24); TextAlign = "MiddleCenter"; Font = New-Object Drawing.Font("Segoe UI", 11); ForeColor = $muted; BackColor = $panel; Cursor = [Windows.Forms.Cursors]::Hand }',
+      '  $min.Add_MouseEnter({ $min.BackColor = $line; $min.ForeColor = $ink }); $min.Add_MouseLeave({ $min.BackColor = $panel; $min.ForeColor = $muted }); $min.Add_Click({ $form.WindowState = "Minimized" })',
+      '  try { (New-Object Windows.Forms.ToolTip).SetToolTip($min, "Minimize") } catch {}',
+      // Dragged by any part but the button: there is no title bar to hold.
+      '  $drag = [pscustomobject]@{ On = $false; X = 0; Y = 0 }',
+      '  foreach ($c in @($form, $logo, $title, $label, $foot)) { $c.Add_MouseDown({ param($s, $e) if ($e.Button -eq "Left") { $drag.On = $true; $drag.X = [Windows.Forms.Cursor]::Position.X - $form.Left; $drag.Y = [Windows.Forms.Cursor]::Position.Y - $form.Top } }); $c.Add_MouseMove({ if ($drag.On) { $form.Left = [Windows.Forms.Cursor]::Position.X - $drag.X; $form.Top = [Windows.Forms.Cursor]::Position.Y - $drag.Y } }); $c.Add_MouseUp({ $drag.On = $false }) }',
+      '  $form.Controls.AddRange(@($logo, $title, $label, $track, $foot, $min)); $form.Show(); [Windows.Forms.Application]::DoEvents(); $ui = $form } catch { $ui = $null }',
+      // Only a problem brings the window back and in front of other apps, once, so the person sees it.
+      'function Alert { if ($ui) { try { if ($ui.WindowState -eq "Minimized") { $ui.WindowState = "Normal" }; $ui.TopMost = $true; $ui.Activate(); [Windows.Forms.Application]::DoEvents(); $ui.TopMost = $false } catch {} } }',
       'function Set-Bar($percent) { if ($ui) { $bar.Fill.Width = [int]($bar.Track.Width * [Math]::Min(100, [Math]::Max(0, $percent)) / 100) } }',
       'function Pump { if ($ui) { [Windows.Forms.Application]::DoEvents() } }',
       'function Step($text, $say, $percent) { Add-Content -Path $Log -Value "$(Get-Date -Format s) $text"; if ($ui -and $say) { $label.Text = $say; if ($percent -ge 0) { Set-Bar $percent }; Pump } }',
@@ -182,8 +193,8 @@ export class Updates {
       // copy in AppData while the person's Rex Desk stayed on the old version (0.0.21, after the publisher name changed).
       'function Install($try) { Clear-Folder; Step "installing (try $try)" "Installing the new version" 20; try { $setup = Start-Process -FilePath $Installer -ArgumentList "/S /D=$folder" -PassThru; $started = Get-Date; while (-not $setup.HasExited) { if ($ui) { Set-Bar ([Math]::Min(80, 20 + [int](((Get-Date) - $started).TotalSeconds / 1.2))) }; Pump; Start-Sleep -Milliseconds 250 }; Step "installer exit code $($setup.ExitCode)" "Checking the install" 82; return ($setup.ExitCode -eq 0) } catch { Step "installer failed: $($_.Exception.Message)" "The installer did not finish" 82; return $false } }',
       // Up to three tries; an install is only done when the app is whole, whatever the installer says.
-      '$ok = $false; for ($try = 1; $try -le 3 -and -not $ok; $try++) { $ran = Install $try; $ok = $ran -and (Whole); if (-not $ok) { Step "install incomplete (node $(if (Test-Path $node) { (Get-Item $node).Length } else { 0 }) bytes)" "The install did not finish. Trying again" 20; Start-Sleep -Seconds 3 } }',
-      'if ($ok) { Step "installed" "Installed" 85 } else { Step "install failed after 3 tries" "The update could not be installed. Run the installer again from the updates folder." 85 }',
+      '$ok = $false; for ($try = 1; $try -le 3 -and -not $ok; $try++) { $ran = Install $try; $ok = $ran -and (Whole); if (-not $ok) { Step "install incomplete (node $(if (Test-Path $node) { (Get-Item $node).Length } else { 0 }) bytes)" "The install did not finish. Trying again" 20; Alert; Start-Sleep -Seconds 3 } }',
+      'if ($ok) { Step "installed" "Installed" 85 } else { Step "install failed after 3 tries" "The update could not be installed. Run the installer again from the updates folder." 85; Alert; for ($i = 0; $i -lt 40; $i++) { Pump; Start-Sleep -Milliseconds 250 } }',
       // Rex Desk opens again whatever happened, so an update never leaves it closed.
       'Start-Process -FilePath $App; Step "app opened" "Starting Rex Desk" 90',
       // The window stays until Rex Desk answers (at most two minutes), so there is never a gap with nothing on screen.
