@@ -1360,13 +1360,31 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       if (news.length) this.store.put('specialist', agentId, { ...this.store.get('specialist', agentId), seenPersonalAt: news.at(-1).at });
       return news.length ? `Meanwhile in your personal chat with the person:\n${news.map(item => `- ${item.from}: ${clip(item.text)}`).join('\n')}` : '';
     }
+    const missed = this.missedElsewhere(run, clip);
     const seen = { ...(agent.personalRoomSeen || {}) }, lines = [];
     for (const room of this.rooms.roomsOf(agentId)) {
       const news = this.rooms.messages(room.id, { after: seen[room.id] || 0 }).filter(item => item.from.type !== 'system').slice(-6);
       if (news.length) { seen[room.id] = news.at(-1).seq; lines.push(`[${room.name}]`, ...news.map(item => `- ${item.from.type === 'human' ? 'The person' : item.from.label}: ${clip(item.text)}`)); }
     }
     if (lines.length) this.store.put('specialist', agentId, { ...this.store.get('specialist', agentId), personalRoomSeen: seen });
-    return lines.length ? `Meanwhile in your group chats:\n${lines.join('\n')}` : '';
+    return [missed, lines.length ? `Meanwhile in your group chats:\n${lines.join('\n')}` : ''].filter(Boolean).join('\n\n');
+  }
+  // While the two computers were apart, the agent answered on both, each in its own session (L25). Replies the agent wrote on
+  // the other computer that came in since this session's last turn, with the messages they answered, were never seen by this
+  // session: the next turn gets them, so both stories go on as one. A message typed there and answered here is not repeated
+  // (no reply of the other computer follows it).
+  missedElsewhere(run, clip) {
+    const top = Number(this.store.db.prepare('SELECT max(sequence) AS top FROM events WHERE run_id=?').get(run.id)?.top || 0);
+    const mark = run.seenMark, at = now();
+    this.patchRun(run.id, { seenMark: { sequence: top, at } });
+    if (!mark || !run.sessionId) return '';
+    const self = this.store.nodeId, rows = this.store.db.prepare("SELECT kind, value, created_at, uid FROM events WHERE run_id=? AND sequence>? AND visible=1 AND kind IN ('human-message','agent-text') AND uid NOT LIKE ? || '.%' ORDER BY created_at, sequence")
+      .all(run.id, Number(mark.sequence) || 0, self);
+    const last = rows.findLastIndex(row => row.kind === 'agent-text'); if (last < 0) return '';
+    const picked = rows.slice(0, last + 1).slice(-12);
+    const said = picked.map(row => { let text = ''; try { text = JSON.parse(row.value).text || ''; } catch { text = ''; } const node = String(row.uid || '').split('.').slice(0, -1).join('.');
+      return `- ${row.kind === 'human-message' ? 'The person' : 'You'} (on ${this.peers.deviceName(node) || 'the other computer'}): ${clip(text)}`; });
+    return `While this computer was out of touch with the other one, this was said in this chat there, and you have not seen it yet. Carry it on as part of this conversation:\n${said.join('\n')}`;
   }
   // A task run an agent took into its personal chat: it is talked to like that chat from then on.
   personalRun(run) { return Boolean(run?.specialistId) && !run.roomAgent && this.store.get('specialist', run.specialistId)?.runId === run.id; }

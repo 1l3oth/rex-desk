@@ -417,6 +417,27 @@ test('the model on the agent card reaches a chat made before it was set (L68)', 
   assert.equal(seen[5], 'claude-haiku-5-5', 'recorded as picked before the card is applied');
 });
 
+test('replies the agent gave on the other computer while the two were apart reach its next turn here (L25)', async () => {
+  const { store, desk, turns, dara } = setup({ replies: ['Hi', 'Ok', 'Sure'] });
+  await desk.specialistTurn(dara.id, { prompt: 'Hello' });
+  await waitFor(() => turns.length === 1 && !desk.live.size);
+  const runId = store.get('specialist', dara.id).runId;
+  const add = store.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at,uid) VALUES(?,?,1,?,?,?)'), at = new Date().toISOString();
+  // A message typed on the other computer and answered here: not repeated.
+  add.run(runId, 'human-message', JSON.stringify({ text: 'Typed over there, answered here' }), at, 'far-node.1');
+  await desk.say(runId, 'Second');
+  await waitFor(() => turns.length === 2 && !desk.live.size);
+  assert.doesNotMatch(turns[1].prompt, /out of touch/);
+  // While apart, the agent answered on the other computer too; those rows arrive now.
+  add.run(runId, 'human-message', JSON.stringify({ text: 'WORK chat while OFF' }), at, 'far-node.2');
+  add.run(runId, 'agent-text', JSON.stringify({ text: 'Answered on Work' }), at, 'far-node.3');
+  await desk.say(runId, 'Third');
+  await waitFor(() => turns.length === 3 && !desk.live.size);
+  assert.match(turns[2].prompt, /out of touch with the other one/);
+  assert.match(turns[2].prompt, /The person \(on [^)]+\): WORK chat while OFF/);
+  assert.match(turns[2].prompt, /You \(on [^)]+\): Answered on Work/);
+});
+
 test('an agent shows an explanation page of its changes in the chat, and only HTML counts as a page', async () => {
   const { store, desk, turns, dara } = setup({ replies: ['Done.'] });
   await desk.specialistTurn(dara.id, { prompt: 'Explain your changes' });
