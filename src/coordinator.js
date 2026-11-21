@@ -688,10 +688,9 @@ export class Desk {
       const ownAgent = owner && owner !== 'main' ? this.specialists.get(owner) : null, projectHere = ownAgent?.projectSlug ? this.projectRules.folderHere(ownAgent.projectSlug) : '';
       // The model on the agent's card wins over the one its chat was made with, also for a card changed on another computer (L68).
       if (ownAgent && !run.modelFallback) { this.specialists.syncRuns(ownAgent); run = this.run(runId); }
-      // The run is already live here: a worktree being removed right now is waited out, then it is gone and the line below
-      // picks another folder (worktree-cleanup.js, removeMerged).
-      if ([run.cwd, run.worktree].some(folder => folder && lockedFolder(folder))) { await waitUnlocked([run.cwd, run.worktree]); run = this.run(runId); }
-      const cwd = [run.cwd, run.worktree].find(folder => folder && existsSync(folder)) || (run.cwd || run.worktree ? projectHere || ownHome() : path.join(this.store.directory, 'coordinator'));
+      // The run is already live here; startFolder also keeps clear of a worktree cleanup is removing right now.
+      const cwd = await this.startFolder(runId, () => { const now = this.run(runId); return [now.cwd, now.worktree, ...(now.cwd || now.worktree ? [projectHere, ownHome()] : [path.join(this.store.directory, 'coordinator')])]; });
+      run = this.run(runId);
       if (run.cwd && cwd !== run.cwd && !existsSync(run.cwd)) this.patchRun(run.id, { cwd, ...(projectHere && cwd === projectHere ? { projectPath: projectHere } : {}) });
       // A run nobody picked a mode for starts in the person's default mode from Settings.
       const remoteOn = Boolean(this.store.get('run', runId)?.inApp?.on) && (run.provider || 'claude') === 'claude';
@@ -2007,10 +2006,25 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   workFolderOf(project) { return workFolder(project || '', this.store.directory, this.store.config().repositories || []); }
   worktreeRootFor(repository) { return repository?.path ? path.join(this.workFolderOf(repository.path), 'worktrees') : this.worktreeRoot; }
   // Worktrees in a project's work folder go once their branch is merged and nothing in them is unsaved (worktree-cleanup.js).
+  // The folder an agent starts in: the first of `candidates()` that exists (the last one otherwise). It is claimed for the run
+  // before the lock is checked, and tidyWorktrees reads the claims under its lock, so cleanup either sees the claim or the
+  // agent sees the lock. A locked folder (being removed) is waited out and the choice is made again, saved folders and
+  // fallbacks alike; after three rounds the last candidate (the agent's own folder) is used.
+  async startFolder(runId, candidates) {
+    this.startFolders ??= new Map();
+    for (let round = 0; ; round += 1) {
+      const list = candidates().filter(Boolean), folder = list.find(item => existsSync(item)) || list.at(-1);
+      this.startFolders.set(runId, folder);
+      if (!lockedFolder(folder)) return folder;
+      if (round >= 3) { this.startFolders.set(runId, list.at(-1)); return list.at(-1); }
+      await waitUnlocked([folder]);
+    }
+  }
   async tidyWorktrees() {
     // Any live run or chat, or one active in the last 10 minutes, keeps the worktree it works in (as its worktree, cwd or
     // project folder). Read fresh on every call, never a snapshot: a chat that resumes during the Git checks keeps it too.
-    const used = item => usedBy(busyFolders(this.store.list('run'), { live: run => this.live.has(run.id) }), item);
+    const claimed = () => [...(this.startFolders || new Map())].filter(([runId]) => this.live.has(runId)).map(([, folder]) => path.resolve(folder).toLowerCase());
+    const used = item => usedBy([...busyFolders(this.store.list('run'), { live: run => this.live.has(run.id) }), ...claimed()], item);
     const results = [];
     for (const repository of this.store.config().repositories || []) {
       if (!repository.path || !existsSync(repository.path)) continue;

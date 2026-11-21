@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createWorktree } from '../src/processes.js';
@@ -107,6 +107,26 @@ test('removal holds a lock through its last live check, and an agent starting in
   await new Promise(resolve => setTimeout(resolve, 100));
   assert.equal(waited, false, 'an agent does not start while the worktree is being removed');
   other(); await start; assert.equal(waited, true);
+});
+
+test('an agent never starts in a folder being removed, saved or fallback, and its pick is claimed before the lock check', async () => {
+  const { takeLock } = await import('../src/worktree-cleanup.js');
+  const { Store } = await import('../src/store.js');
+  const { Desk } = await import('../src/coordinator.js');
+  const store = new Store(temporary('start-store'));
+  const desk = new Desk(store, { root: temporary('start-root'), runnerFactory: () => ({}), memoryDirectory: temporary('start-memory') });
+  const fallback = temporary('start-project'), own = temporary('start-own');
+  const release = takeLock(fallback);
+  desk.live.set('r1', {});
+  const picking = desk.startFolder('r1', () => [path.join(fallback, '..', 'gone'), fallback, own]);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(desk.startFolders.get('r1'), fallback, 'the fallback is claimed while it waits');
+  let settled = false; void picking.then(() => { settled = true; });
+  assert.equal(settled, false, 'it waits while the fallback is being removed');
+  rmSync(fallback, { recursive: true, force: true }); release();
+  assert.equal(await picking, own, 'once it is gone, the next safe folder is used');
+  assert.equal(desk.startFolders.get('r1'), own);
+  await desk.shutdown(); store.close();
 });
 
 test('a worktree is a cleanup candidate only after it has been idle for 10 minutes', async () => {
