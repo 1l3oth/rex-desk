@@ -82,7 +82,7 @@ test('promise detection: words inside instructions, UI labels and real answers a
 });
 
 test('promise detection: questions and requests for the person\'s choice are never nudged', () => {
-  for (const text of ['Shall I continue?', 'Tell me which file you mean', 'Let me know which option you want', "I'll wait. Please confirm the branch", "I'll continue once you choose. Which one should I use"])
+  for (const text of ['Shall I continue?', 'Tell me which file you mean', 'Let me know which option you want', "I'll wait. Please confirm the branch", "I'll continue once you choose. Which one should I use", "I'll wait for your approval.", "I'm going to hold off until you give me the input."])
     assert.ok(!isPromise(text), text);
 });
 

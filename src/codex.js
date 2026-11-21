@@ -105,11 +105,13 @@ const ASKS = /\?|\b(?:let me know|tell me|please (?:confirm|choose|pick|tell|sen
 // ("I'll fix it once you send the file", "I'll continue after you confirm").
 const OFFER = /\b(?:if you need|if you want|if you(?:'|’)d like|whenever you(?:'|’)re ready|anything else|any(?:thing| other) (?:questions?|help)|i(?:'|’)ll be (?:here|around|happy|glad))\b/i;
 const WAITS = /\b(?:once|after|when|as soon as|if|until)\s+(?:you|you(?:'|’)ve|you(?:'|’)re|your|i (?:get|have|hear|receive))\b/i;
+// Waiting on the person is not a promise either: "I'll wait for your approval", "I'll hold until I hear from you".
+const WAITS_ON = /\b(?:wait(?:ing)?|hold(?:ing)?(?: off)?|stand(?:ing)? by|pause)\b.*\b(?:you|your)\b/i;
 export function isPromise(text) {
   const value = String(text || '').trim();
   if (!value || ASKS.test(value)) return false;
   const last = value.split(/\n+|(?<=[.!])\s+/).map(part => part.trim().replace(/^[-*>\s]+/, '')).filter(Boolean).at(-1) || '';
-  return PROMISE.test(last) && !OFFER.test(last) && !WAITS.test(last);
+  return PROMISE.test(last) && !OFFER.test(last) && !WAITS.test(last) && !WAITS_ON.test(last);
 }
 const TOOL_ITEMS = ['commandExecution', 'fileChange', 'mcpToolCall'];
 
