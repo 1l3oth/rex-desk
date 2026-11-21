@@ -18,7 +18,7 @@ const ASK = {
 // The steps, each with whether it is done, one line of how, and what "Do it for me" does (an existing app action, or a message to Rex Agent).
 export function setupSteps(snap = {}, ui = {}) {
   const agents = (snap.specialists || []).filter(agent => agent.kind !== 'main' && !agent.demo);
-  const main = (snap.runs || []).some(run => run.role === 'coordinator' && run.main && !run.roomAgent);
+  const main = (snap.runs || []).some(run => run.role === 'coordinator' && run.main && !run.roomAgent && run.computer === snap.computer);
   const extras = [
     { id: 'room', title: t('Group chat'), done: (snap.rooms || []).length > 0, how: t('Put several agents in one chat to plan together.'), action: 'new-room' },
     { id: 'phone', title: t('Phone'), done: Boolean(snap.devices?.remote), how: t('Reach your agents from your phone.'), settings: 'devices' },

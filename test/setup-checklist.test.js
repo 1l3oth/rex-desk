@@ -11,13 +11,15 @@ test('a brand new person starts with nothing ticked, and each step ticks from wh
   const fresh = setupSteps({ runs: [], specialists: [{ kind: 'main' }], rooms: [] }, {});
   assert.deepEqual(done(fresh), { account: false, ai: false, hello: false, work: false, agent: false, task: false, extras: false });
   const snap = {
-    account: { email: 'me@example.com' }, runs: [{ role: 'coordinator', main: true }], config: { repositories: [] },
+    computer: 'pc1', account: { email: 'me@example.com' }, runs: [{ role: 'coordinator', main: true, computer: 'pc1' }], config: { repositories: [] },
     specialists: [{ kind: 'main' }, { kind: 'specialist', name: 'Writer', project: '' }], teamTasks: [{ state: 'done' }],
     rooms: [{ id: 'r' }], devices: { remote: true }, cloudSync: { on: true }, update: { supported: true, available: false },
   };
   const all = setupSteps(snap, { accounts: { claude: { profiles: [{ loggedIn: true }] } } });
   assert.ok(all.every(step => step.done), 'a named workspace agent counts as added work');
   assert.ok(all.filter(step => !step.done).length === 0);
+  const elsewhere = setupSteps({ computer: 'pc2', runs: [{ role: 'coordinator', main: true, computer: 'pc1' }] }, {});
+  assert.equal(elsewhere.find(step => step.id === 'hello').done, false, 'a Rex Agent chat on another computer does not count here');
 });
 
 test('the list hides when everything is done or when closed, and /setup opens it again', () => {
