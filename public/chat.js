@@ -162,6 +162,7 @@ const SVG = {
   mic: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   tasks: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>',
   bell: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>',
+  usage: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19a9 9 0 1 1 16 0"/><path d="M12 14l4-5"/></svg>',
   monitor: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M7 13l3-3 3 2 4-5M8 21h8"/></svg>',
   devices: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1"/></svg>',
   worktrees: WORKTREE_ICON,
@@ -1671,6 +1672,7 @@ document.addEventListener('click', event => {
   back.innerHTML = `<div class="dialog m-sheet" role="dialog" aria-label="${t`More`}">
     ${item('data-action="new-room"', iconAv('main'), t('New meeting room'))}
     ${item('data-action="spec-new"', iconAv('person'), t('New agent'))}
+    ${item('data-action="accounts"', iconAv('usage'), t('AI usage'))}
     ${item('data-open="devices" data-id=""', iconAv('devices'), t('Devices'))}
     ${item('data-open="monitor" data-id=""', iconAv('monitor'), t('Memory'))}
     ${item('data-open="net" data-id=""', `<span class="av sm icon">${NET_ICON}</span>`, t('Agents online'))}

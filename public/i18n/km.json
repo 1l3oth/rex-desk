@@ -2452,5 +2452,6 @@
  "Remove {0}? Its tasks stop syncing.": "ដក {0} ចេញឬ? កិច្ចការរបស់វាឈប់ធ្វើសមកាលកម្ម។",
  "Advanced": "កម្រិតខ្ពស់",
  "No task app is connected. Connect one from the task list in the main window.": "មិនទាន់មានកម្មវិធីកិច្ចការតភ្ជាប់ទេ។ តភ្ជាប់ពីបញ្ជីកិច្ចការក្នុងផ្ទាំងមេ។",
- "Loading": "កំពុងផ្ទុក"
+ "Loading": "កំពុងផ្ទុក",
+ "AI usage": "ការប្រើប្រាស់ AI"
 }
