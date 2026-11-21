@@ -7,6 +7,7 @@ import { tailscaleAddresses } from './peers.js';
 import QRCode from 'qrcode';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { installedServer } from './disk.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, openSync, createReadStream, createWriteStream, rmSync, statSync } from 'node:fs';
 import { Store } from './store.js';
@@ -181,7 +182,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   async function openSession(entry, vaultKey, { staySignedIn = false, remembered = false } = {}) {
     if (bootStage) bootStage = 'Opening your chats and agents';
     const store = accounts ? new Store(accounts.directory(entry), { key: vaultKey, auth: { name: entry.email, kdf: entry.kdf, sealedKey: entry.sealedKey }, cloud }) : new Store(dataRoot, { cloud });
-    const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher, ownRuntime: Boolean(process.env.REX_DESK_VERSION) && !dataDirectory });
+    const desk = new Desk(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, imageFetcher, ownRuntime: Boolean(process.env.REX_DESK_VERSION) && !dataDirectory, diskWatch: installedServer(root, dataDirectory) });
     if (address) startDesk(desk, store);
     desk.computer = computer;
     desk.commander = new Commander(computer, { apiKey: () => desk.jev.apiKey(), model: () => store.config().jev?.model, settings: () => store.config().control || {},

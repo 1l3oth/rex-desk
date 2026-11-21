@@ -24,6 +24,8 @@ export function watchDisk(folders, { notify, min = WARN_FREE_BYTES, free = freeB
   const check = () => {
     for (const folder of folders.filter(Boolean)) {
       const name = driveName(folder), left = free(folder);
+      // A folder that is not there yet (the runtime copy before it is made) says nothing; it must not end a warning.
+      if (!Number.isFinite(left)) continue;
       if (left >= min) { low.delete(name); continue; }
       if (low.has(name)) continue;
       low.add(name);
@@ -32,5 +34,12 @@ export function watchDisk(folders, { notify, min = WARN_FREE_BYTES, free = freeB
   };
   check();
   const timer = setInterval(check, everyMs); timer.unref?.();
-  return () => clearInterval(timer);
+  return Object.assign(() => clearInterval(timer), { check });
+}
+// Only the installed app's own server watches the disk: it runs from the app's payload beside its program (REX_DESK_EXE) with
+// its version set. A test copy or an agent's copy runs from a checkout or a temp folder, even when it inherits those settings.
+export function installedServer(appRoot, dataDirectory, env = process.env) {
+  if (dataDirectory || !env.REX_DESK_VERSION || !env.REX_DESK_EXE) return false;
+  const inside = path.relative(path.resolve(path.dirname(env.REX_DESK_EXE)), path.resolve(appRoot));
+  return Boolean(inside) && !inside.startsWith('..') && !path.isAbsolute(inside);
 }

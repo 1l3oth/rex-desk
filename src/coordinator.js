@@ -152,7 +152,7 @@ const LOOP_REST = 10 * 60000;
 // the new session introduce itself again instead of answering, so handoffs leave it out. The flag, not the words, marks it.
 const isGreeting = event => event.kind === 'human-message' && event.greeting === true;
 export class Desk {
-  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, netJudge, toolbox, ownRuntime = false } = {}) {
+  constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, netJudge, toolbox, ownRuntime = false, diskWatch = false } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
     this.agents = new AgentProfiles(store, agentCommand ? { run: agentCommand } : {});
     this.localAi = new LocalAi(store);
@@ -174,7 +174,7 @@ export class Desk {
     this.query = new TrackerQuery(store, this.sources, { apiKey: () => this.jev.apiKey(), env: () => this.agents.environment(this.store.config().provider), cwd: path.join(store.directory, 'coordinator'), ...(queryModel ? { model: queryModel } : {}) });
     this.presence = { focused: false, at: 0 }; this.notifier = new Notifier(store, { focused: () => this.presence.focused && Date.now() - this.presence.at < 45000, viewing: () => this.presence.view || '', enabled: () => !process.env.NODE_TEST_CONTEXT && this.store.config().notify !== false }); this.rooms = new Rooms(this); this.memory = new Memory(memoryDirectory); if (store.cloud?.files) store.cloud.files.memoryDirectory = this.memory.directory; this.specialists = new Specialists(this); this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
     // A low-disk warning when the drive with Rex Desk's data or the agents' runtime copy drops below 5 GB (the installed app only).
-    if (!runnerFactory && ownRuntime) this.stopDiskWatch = watchDisk([store.directory, path.join(store.directory, 'runtime')], { notify: (title, body) => this.notifier.notify({ kind: 'failed', title, body, target: { type: 'notices', id: '' } }) });
+    if (!runnerFactory && diskWatch) this.stopDiskWatch = watchDisk([store.directory, path.join(store.directory, 'runtime')], { notify: (title, body) => this.notifier.notify({ kind: 'failed', title, body, target: { type: 'notices', id: '' } }) });
     this.monitor = new Monitor(this); this.files = new Files(this); this.shownFile = null; this.worktrees = new Worktrees(this);
     this.evidence = new Evidence(store, runId => this.run(runId), (runId, kind, data) => {
       store.event(runId, kind, data);
