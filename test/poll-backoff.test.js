@@ -28,3 +28,19 @@ test('a failing tick counts as quiet and does not stop the poll', async () => {
   poll.start(); await c.step(); await c.step(); await c.step();
   assert.equal(c.wait, 4000); poll.stop();
 });
+
+test('a wake while a poll is on its way never starts a second loop: one timer at a time, next poll at the quick pace', async () => {
+  let at = 0; const live = new Set();
+  const timers = { setTimeout: (fn, ms) => { const item = { fn, due: at + ms }; live.add(item); return item; }, clearTimeout: item => live.delete(item) };
+  let release, calls = 0;
+  const poll = new BackoffPoll(() => { calls++; return new Promise(resolve => { release = resolve; }); }, { minMs: 5000, maxMs: 60000, now: () => at, timers });
+  poll.start(); poll.waitMs = 40000;
+  const [first] = live; live.delete(first); at = first.due; const running = first.fn();
+  poll.wake(); poll.wake();
+  assert.equal(live.size, 0, 'no timer while the poll is in flight');
+  release(false); await running;
+  assert.equal(live.size, 1, 'the finished poll set exactly one next timer');
+  assert.equal([...live][0].due - at, 5000, 'and it is at the quick pace because of the wake');
+  poll.stop(); poll.start(); poll.wake(); assert.equal(live.size, 1, 'start and wake replace the pending timer'); poll.stop();
+  assert.equal(live.size, 0); assert.equal(calls, 1);
+});
