@@ -4,6 +4,8 @@
 //   <channel>/latest.json       the small pointer installed apps read; replacing it is what ships an update
 //
 // Usage: node scripts/release-desktop.mjs --files <folder> [--channel stable|beta] [--notes "What changed"] [--out <folder>] [--upload] [--force] [--keep <n>]
+// To correct the notes of the version a channel already ships: --notes-only --channel <c> --version <x.y.z> --notes "...".
+// It rewrites only that channel's latest.json with the new notes; installers, URLs and signatures stay as they are.
 // After an upload only the newest <n> versions stay in the bucket (3 unless --keep says otherwise); older installers are deleted. A version a channel pointer names is never deleted.
 // Alone, `node scripts/release-desktop.mjs --prune-only [--keep <n>]` does just the cleanup.
 // Without --upload it only stages and signs, so the result can be inspected. The GitHub workflow "Desktop installers" runs it with --upload.
@@ -48,6 +50,14 @@ export function stageRelease({ files, out, channel = 'stable', notes = '', baseU
   mkdirSync(path.join(out, channel), { recursive: true });
   writeFileSync(path.join(out, channel, 'latest.json'), JSON.stringify(manifest, null, 2));
   return manifest;
+}
+
+// The live pointer with only its notes changed. Refused when the channel ships another version, so it never rolls a channel back.
+export function withNotes(current, version, notes) {
+  if (!String(notes || '').trim()) throw new Error('Release notes are empty. Write what changed.');
+  if (!current?.version) throw new Error('The channel has no published latest.json to correct.');
+  if (current.version !== version) throw new Error(`The channel ships ${current.version}, not ${version}; only the notes of the current version can be changed.`);
+  return { ...current, notes };
 }
 
 // Which version folders to delete: everything but the newest `keep`, and never one a channel pointer still names.
@@ -109,10 +119,26 @@ async function confirm(baseUrl, manifest) {
   for (const [platform, update] of Object.entries(live.platforms)) if ((await fetch(update.url, { method: 'HEAD' })).status !== 200) throw new Error(`The published ${platform} update is not reachable: ${update.url}`);
 }
 
+// Puts new notes on the version a channel already ships, touching nothing but that channel's latest.json.
+async function correctNotes(baseUrl, channel, version, notes) {
+  if (!channels.includes(channel)) throw new Error(`Channel must be one of: ${channels.join(', ')}.`);
+  const manifest = withNotes(await published(baseUrl, channel), version, notes);
+  const { aws, bucket } = awsFor(), file = path.join(mkdtempSync(path.join(os.tmpdir(), 'rex-desk-notes-')), 'latest.json');
+  writeFileSync(file, JSON.stringify(manifest, null, 2));
+  aws(['cp', file, `s3://${bucket}/${channel}/latest.json`, '--content-type', 'application/json', '--cache-control', 'no-cache']);
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const live = await published(baseUrl, channel);
+    if (live?.version === version && live.notes === notes) { console.log(`Notes of Rex Desk ${version} on ${channel} updated.`); return; }
+    await new Promise(resolve => setTimeout(resolve, 10000));
+  }
+  throw new Error(`${baseUrl}/${channel}/latest.json does not show the new notes after the upload.`);
+}
+
 async function main() {
   const args = process.argv.slice(2), value = name => args.includes(name) ? args[args.indexOf(name) + 1] || '' : '';
   const keep = Number(value('--keep')) || 3, baseUrl = (process.env.RELEASE_BASE_URL || downloadsUrl).replace(/\/+$/, '');
   if (args.includes('--prune-only')) return prune(baseUrl, keep);
+  if (args.includes('--notes-only')) return correctNotes(baseUrl, value('--channel') || 'stable', value('--version'), value('--notes'));
   const files = value('--files'), channel = value('--channel') || 'stable';
   if (!files || !statSync(files).isDirectory()) throw new Error('Pass --files <folder holding the built installers>.');
   const pem = process.env.REX_RELEASE_KEY_PEM || readFileSync(process.env.REX_RELEASE_KEY || path.join(os.homedir(), '.rex-desk', 'release-signing-key.pem'), 'utf8');

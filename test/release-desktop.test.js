@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { generateKeyPairSync } from 'node:crypto';
 import { Updates } from '../src/updates.js';
-import { stageRelease } from '../scripts/release-desktop.mjs';
+import { stageRelease, withNotes } from '../scripts/release-desktop.mjs';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const keys = generateKeyPairSync('ed25519');
@@ -58,4 +58,13 @@ test('old versions are deleted from the bucket, keeping the newest three and any
   assert.deepEqual(versionsToDelete(['0.0.40', '0.0.41', '0.0.42', '0.0.43', '0.0.44'], 3, ['0.0.40']), ['0.0.41']);
   assert.deepEqual(versionsToDelete(['0.0.1', 'notes', 'beta'], 3), []);
   assert.deepEqual(versionsToDelete(['0.0.1', '0.0.2'], 0), ['0.0.1'], 'never empties the bucket');
+});
+
+test('a notes correction changes only the notes of the version the channel ships, and never rolls it back', () => {
+  const live = { version: '0.0.100', channel: 'stable', notes: '', url: 'https://downloads.rexdesk.dev/releases/0.0.100/a.exe', signature: 'sig', platforms: { 'win32-x64': { url: 'u', sha256: 'h', signature: 's' } } };
+  const fixed = withNotes(live, '0.0.100', 'Task counts show.');
+  assert.deepEqual(fixed, { ...live, notes: 'Task counts show.' }, 'installers, URLs and signatures stay the same');
+  assert.throws(() => withNotes({ ...live, version: '0.0.101' }, '0.0.100', 'x'), /ships 0.0.101/, 'an older version never replaces the newer one');
+  assert.throws(() => withNotes(live, '0.0.100', '  '), /empty/);
+  assert.throws(() => withNotes(null, '0.0.100', 'x'), /no published/);
 });

@@ -26,10 +26,10 @@ on:
         type: string
       notes:
         description: "What changed, shown to people in Settings → Updates. Required for beta and stable"
-        required: true
+        required: false
         type: string
-      republish:
-        description: "Publish again over the same version (to fix its notes); installed apps do not update twice"
+      notes_only:
+        description: "Only correct the notes of the version this channel already ships (give that version); nothing is built"
         required: false
         type: boolean
         default: false
@@ -46,7 +46,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Fails at once, not after the build: beta and stable need notes, and a notes correction needs the version it corrects.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the inputs
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          NOTES: ${{ inputs.notes }}
+          VERSION: ${{ inputs.version }}
+          NOTES_ONLY: ${{ inputs.notes_only }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then exit 0; fi
+          if [ "$CHANNEL" != "none" ] && [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then echo "::error::Release notes are empty. Write what changed in the notes input."; exit 1; fi
+          if [ "$NOTES_ONLY" = "true" ] && { [ "$CHANNEL" = "none" ] || [ -z "$VERSION" ]; }; then echo "::error::A notes correction needs a channel and the version that channel ships."; exit 1; fi
+
+  # Puts new notes on the version a channel already ships: only its latest.json changes, never an installer or another version.
+  notes:
+    needs: check
+    if: github.event_name == 'workflow_dispatch' && inputs.notes_only && inputs.channel != 'none' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: desktop-publish-${{ inputs.channel }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Correct the notes
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          NOTES: ${{ inputs.notes }}
+          VERSION: ${{ inputs.version }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.RELEASE_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RELEASE_S3_SECRET_ACCESS_KEY }}
+          RELEASE_S3_BUCKET: ${{ vars.RELEASE_S3_BUCKET }}
+          RELEASE_S3_ENDPOINT: ${{ vars.RELEASE_S3_ENDPOINT }}
+          RELEASE_S3_REGION: ${{ vars.RELEASE_S3_REGION }}
+          RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
+        run: node scripts/release-desktop.mjs --notes-only --channel "$CHANNEL" --version "$VERSION" --notes "$NOTES"
+
   build:
+    needs: check
+    if: "!inputs.notes_only"
     strategy:
       fail-fast: false
       matrix:
@@ -151,10 +194,7 @@ jobs:
           RELEASE_S3_ENDPOINT: ${{ vars.RELEASE_S3_ENDPOINT }}
           RELEASE_S3_REGION: ${{ vars.RELEASE_S3_REGION }}
           RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
-          REPUBLISH: ${{ inputs.republish }}
-        run: |
-          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then echo "::error::Release notes are empty. Write what changed in the notes input."; exit 1; fi
-          node scripts/release-desktop.mjs --files dist --channel "$CHANNEL" --notes "$NOTES" --upload $([ "$REPUBLISH" = "true" ] && echo --force)
+        run: node scripts/release-desktop.mjs --files dist --channel "$CHANNEL" --notes "$NOTES" --upload
 
   release:
     needs: build
