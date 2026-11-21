@@ -792,6 +792,7 @@ document.addEventListener('click', async event => {
     else if (action === 'sec-toggle') toggleSection(target.dataset.sec);
     else if (action === 'settings-open') openSettings(ctx);
     else if (action === 'about-open') openSettings(ctx, 'about');
+    else if (action === 'account-open') { openSettings(ctx, 'backup'); if (!(ui.snap?.database?.account || ui.snap?.account?.email)) setTimeout(() => document.querySelector('.dialog-back.settings [data-st-account]')?.click(), 400); }
     else if (action === 'settings-sources') { document.querySelector('.dialog-back:not(.settings)')?.remove(); openSettings(ctx, 'sources'); }
     else if (action === 'sync-source') { ui.syncing = target.dataset.source; renderAll(); try { const [result] = await api('/sync', { method: 'POST', data: { sourceId: target.dataset.source } }); toast(result?.error ? t`Sync failed: ${result.error}` : `${result?.name || t('Tracker')} synced.`, Boolean(result?.error)); } finally { ui.syncing = ''; await refresh(); } }
     else if (action === 'know-tab') { ui.knowTab = target.dataset.tab; renderAll(true); }
