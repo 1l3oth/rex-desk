@@ -121,6 +121,9 @@ export function parseClaudeStatus(output) {
   } catch { return null; }
 }
 
+// Where the AI programs send people to sign in.
+const SIGN_IN_HOSTS = ['openai.com', 'chatgpt.com', 'anthropic.com', 'claude.ai', 'claude.com', 'google.com'];
+
 export class AgentProfiles {
   constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn } = {}) { this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
   // Agents and settings travel between computers (the shared database, a restore from backup), but a profile folder is only on the
@@ -275,7 +278,14 @@ export class AgentProfiles {
       if (job.state === 'installing' && job.output.includes(MARK)) job.state = 'signing-in';
       // The sign-in page, for when the browser did not open by itself. Only what the CLI prints after the install.
       const after = job.output.split(MARK)[1];
-      if (after !== undefined && !job.url) { const link = after.match(/https:\/\/[^\s"'<>]+/); if (link) job.url = link[0].replace(/[).,]+$/, ''); }
+      // Only a page on the AI's own sign-in hosts, never any other link the output holds.
+      if (after !== undefined && !job.url) {
+        for (const [found] of after.matchAll(/https:\/\/[^\s"'<>]+/g)) {
+          const link = found.replace(/[).,]+$/, '');
+          let host = ''; try { host = new URL(link).hostname.toLowerCase(); } catch {}
+          if (SIGN_IN_HOSTS.some(known => host === known || host.endsWith(`.${known}`))) { job.url = link; break; }
+        }
+      }
     };
     child.stdout?.on('data', read); child.stderr?.on('data', read);
     child.on('error', error => fail(`Rex Desk could not start the ${name} sign-in: ${error.message}`));
