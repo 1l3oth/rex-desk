@@ -704,7 +704,6 @@ export class Desk {
           const hushed = Boolean(this.store.get('run', runId)?.memoryNudge);
           if (hushed && ['agent-text-partial', 'agent-text', 'agent-tool', 'agent-tool-result', 'subagent-text', 'subagent-done', 'app-message'].includes(kind)) { this.store.event(runId, kind, data, false); return; }
           if (kind === 'agent-text-partial') { if (!reading) this.store.emit('partial', { runId, text: String(data.text || '') }); return; }
-          if (kind === 'agent-text' && !reading) this.store.emit('partial', { runId, text: String(data.text || ''), done: true });
           if (kind === 'agent-result' && reading) { const voice = this.store.get('run', runId)?.voice; if (voice) this.patchRun(runId, { voice: { ...voice, reading: false } }); }
           // A step the agent takes (reading files, running a command, searching), so Voice mode can say what it is doing.
           if (kind === 'agent-tool' && !data.parent) this.store.emit('partial', { runId, tool: String(data.tool || ''), input: { description: String(data.input?.description || '').slice(0, 120) } });
@@ -723,7 +722,9 @@ export class Desk {
           if (kind === 'request-resolved') this.resolveNativeRequest(runId, data.requestId);
           // The event log hides fields named like secrets ("tokens" among them), so the token counts travel as usage.
           if (kind === 'agent-result') data = { ...data, ...(data.tokens ? { usage: data.tokens } : {}), paidByApi: data.billedToApiKey === true };
-          this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result', 'subagent-text', 'subagent-done', 'agent-result', 'app-message'].includes(kind));
+          const eventId = this.store.event(runId, kind, data, ['agent-text', 'agent-tool', 'agent-tool-result', 'subagent-text', 'subagent-done', 'agent-result', 'app-message'].includes(kind));
+          // The finished block carries its saved message's id, so the chat drops the live copy exactly when that message is drawn.
+          if (kind === 'agent-text' && !reading) this.store.emit('partial', { runId, text: String(data.text || ''), done: true, eventId });
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
@@ -1085,9 +1086,9 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   message(runId, text) {
     const run = this.run(runId), personal = run.teamOf ? (run.teamOf === 'main' ? latestLocalMain(this.store.list('run')) : this.store.get('run', this.store.get('specialist', run.teamOf)?.runId || '')) : null;
-    this.store.event(personal?.id || runId, 'message', { text: String(text).slice(0, 50000) }, true);
+    const eventId = this.store.event(personal?.id || runId, 'message', { text: String(text).slice(0, 50000) }, true);
     // In Voice mode what the agent sends with desk_message is said out loud too.
-    if (run.voice) this.store.emit('partial', { runId, text: String(text).slice(0, 4000), done: true });
+    if (run.voice) this.store.emit('partial', { runId, text: String(text).slice(0, 4000), done: true, eventId });
     // What an agent reports on a task it was given in a room is also said in that room.
     if (run.role === 'worker' && run.roomId && run.specialistId) void this.rooms.post(run.roomId, { fromAgentId: run.specialistId, text: String(text).slice(0, 8000) }).catch(() => {});
     return { delivered: true };

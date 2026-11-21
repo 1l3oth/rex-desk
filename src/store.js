@@ -287,15 +287,18 @@ export class Store extends EventEmitter {
   // A message id: this computer, its number here, and a random part, so two computers that once numbered alike under one
   // id (a restored copy) can never write the same id again.
   newUid(sequence) { return `${this.nodeId}.${sequence}.${randomBytes(4).toString('hex')}`; }
+  // Returns the saved event's id, so a live copy of a reply can be matched to it (L56).
   event(runId, kind, value, visible = false) {
+    let uid = '';
     this.transaction(() => {
       const result = this.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?)').run(runId ?? '', kind, visible ? 1 : 0, JSON.stringify(redact(value)), now());
       this.db.prepare('UPDATE events SET uid=? WHERE sequence=?').run(this.newUid(result.lastInsertRowid), result.lastInsertRowid);
-      const row = this.db.prepare('SELECT * FROM events WHERE sequence=?').get(result.lastInsertRowid);
+      const row = this.db.prepare('SELECT * FROM events WHERE sequence=?').get(result.lastInsertRowid); uid = row.uid;
       this.cloud?.event(row); this.cloud?.chatEvent?.(row);
     });
     this.cloud?.schedule();
     this.emit('change', { kind: 'event', runId });
+    return uid;
   }
   // A chat that moved here from another computer keeps its messages with the times they were written.
   importEvents(runId, events) {

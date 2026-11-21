@@ -215,7 +215,7 @@ function renderItems(items, run, live) {
     flush(false);
     out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
       : item.role === 'human' ? bubble({ mine: true, name: t('You'), time: hhmm(item.at), voice: item.voice, html: (attached => markdown(attached.text) + attached.html)(attachedFiles(item.text, esc)), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
-      : item.role === 'agent' ? bubble({ name: provider(run.provider), time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="${t`Tokens this reply used`}">${esc(tokenText(item.tokens))}</div>` : '') })
+      : item.role === 'agent' ? bubble({ name: provider(run.provider), uid: item.uid, time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="${t`Tokens this reply used`}">${esc(tokenText(item.tokens))}</div>` : '') })
       : item.role === 'cleared' ? `<div class="cleared"><span>${t`Chat cleared · ${esc(item.text)}`}${item.tokens ? ` · <span class="tok">${esc(typeof item.tokens === 'object' ? tokenText(item.tokens) : typeof item.tokens === 'number' ? `${kilo(item.tokens)} ${t('tokens')}` : String(item.tokens))}</span>` : ''}</span>${item.earlier ? `<button type="button" class="btn small quiet" data-action="show-earlier">${t`Show earlier messages`}</button>` : ''}</div>`
       : item.role === 'subagent' ? subagentHtml(item, live)
       : item.role === 'error' ? `<div class="card bad"><h4>${t`Needs attention`}</h4><div class="md">${markdown(item.text)}</div>${/is not installed|usage limit|limit reached|not signed in|not logged in|log ?in again|sign ?in again|unauthorized|401/i.test(item.text) ? `<button type="button" class="btn small primary" data-action="agent-signin" data-provider="${esc(run.provider || 'claude')}">${/is not installed/i.test(item.text) ? t`Install Claude Code` : t`Sign in again`}</button>` : ''}</div>`
@@ -277,7 +277,7 @@ function transcript(all, runId = '') {
       items.push({ role: 'status', text: t`Turn ended${event.subtype && event.subtype !== 'success' ? ` · ${event.subtype}` : ''}${typeof event.usage === 'object' && tokenText(event.usage) ? ` · ${tokenText(event.usage)}` : ''}${event.cost && event.paidByApi === true ? ` · $${Number(event.cost).toFixed(2)}` : ''}`, at: event.createdAt });
       if (lastSwitch && !lastSwitch.tokens && typeof event.usage === 'object' && event.usage.input) { lastSwitch.tokens = event.usage; lastSwitch = null; }
     }
-    else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt });
+    else if (event.kind === 'message' || event.kind === 'agent-text') items.push({ role: 'agent', text: event.text || event.message || '', at: event.createdAt, uid: event.uid || '' });
     else if (event.kind === 'agent-tool' && ['desk_ask', 'desk_message', 'desk_elicit'].includes(event.tool)) continue; // shown as chat messages already
     else if (event.kind === 'agent-tool-result') continue;
     else if (event.kind === 'agent-tool') items.push({ role: 'tool', id: event.id, output: results.get(event.id), tool: event.tool, input: event.input, change: event.change, failed: event.failed, text: event.text, at: event.createdAt });
@@ -288,41 +288,33 @@ function transcript(all, runId = '') {
   return items;
 }
 const UNSEND_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const bubble = ({ mine, name, time, html, voice = false, unsend = '' }) => `<div class="msg ${mine ? 'mine' : ''}">${unsend ? `<button type="button" class="unsend" data-unsend="${unsend}" title="${t`Unsend`}" aria-label="${t`Unsend this message`}">${UNSEND_ICON}</button>` : ''}<div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}${voice ? ` ${micIcon()}` : ''}</span></div><div class="md">${html}</div>${mine ? '' : `<div class="msg-acts">${speakButton()}</div>`}</div></div>`;
+const bubble = ({ mine, name, time, html, voice = false, unsend = '', uid = '' }) => `<div class="msg ${mine ? 'mine' : ''}"${uid ? ` data-event="${esc(uid)}"` : ''}>${unsend ? `<button type="button" class="unsend" data-unsend="${unsend}" title="${t`Unsend`}" aria-label="${t`Unsend this message`}">${UNSEND_ICON}</button>` : ''}<div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}${voice ? ` ${micIcon()}` : ''}</span></div><div class="md">${html}</div>${mine ? '' : `<div class="msg-acts">${speakButton()}</div>`}</div></div>`;
 // The reply as it is written (L56): the server sends the text so far of the block the agent is writing ("partial"); it shows in
 // a bubble that grows under the chat, and goes away once the saved message is drawn, so it never shows twice.
-const live = { runId: '', text: '', doneAt: 0, timer: 0, base: 0 };
-const savedReplies = () => document.querySelectorAll('#feed-inner .msg:not(.mine):not(.live) .md');
-function showLive({ runId, text = '', done = false, tool = '' }) {
+const live = { runId: '', text: '', doneAt: 0, timer: 0, eventId: '' };
+// The saved message a finished block became, found by the id the server sends with the finished block (never by its words).
+const savedById = id => Boolean(id) && Boolean(document.querySelector(`#feed-inner .msg[data-event="${CSS.escape(id)}"]`));
+function showLive({ runId, text = '', done = false, tool = '', eventId = '' }) {
   if (tool || !runId || runId !== ctx.currentRunId()) return;
-  if (live.runId !== runId) Object.assign(live, { runId, text: '', doneAt: 0 });
-  // A reply that comes whole (no chunks first, as Codex may send it) and is already drawn in the feed needs no live copy.
-  if (done && !live.text && savedInFeed(text, -1)) return;
-  if (done) { live.doneAt = Date.now(); live.text = String(text || live.text); }
-  else { live.text = String(text || ''); live.doneAt = 0; }
+  if (live.runId !== runId) Object.assign(live, { runId, text: '', doneAt: 0, eventId: '' });
+  if (done) {
+    // A reply that comes whole (no words streamed first, as Codex may send it) gets no live copy: the saved message shows it.
+    if (!live.text || live.doneAt) return;
+    Object.assign(live, { doneAt: Date.now(), text: String(text || live.text), eventId: String(eventId || '') });
+  } else Object.assign(live, { text: String(text || ''), doneAt: 0, eventId: '' });
   drawLive();
 }
 // The live bubble is built once per run; each new chunk swaps only the words inside it and puts the caret back at the end,
 // so the bubble and its avatar never blink or change height for a frame.
-const flat = html => { const probe = document.createElement('div'); probe.innerHTML = html; return probe.textContent.replace(/\s+/g, ' ').trim(); };
-// True once a reply newer than the block's start (live.base) holds the same words as the finished live copy.
-function savedInFeed(text, base = live.base) {
-  const all = savedReplies(), last = all[all.length - 1];
-  return Boolean(last) && all.length > base && last.textContent.replace(/\s+/g, ' ').trim() === flat(markdown(text));
-}
 function drawLive() {
   const box = document.getElementById('live-reply'); if (!box) return;
   clearTimeout(live.timer);
   const feed = document.getElementById('feed'), atEnd = feed && feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
   const shown = live.runId === ctx.currentRunId() && live.text.trim();
-  // A finished block leaves in the same redraw that draws its saved message, so the feed never shrinks and grows back.
-  // If the saved message never comes (another chat was opened, the text was cut), it goes after 4 s anyway.
-  const gone = !shown || (live.doneAt && (savedInFeed(live.text) || Date.now() - live.doneAt > 4000));
-  if (gone) { if (box.firstChild) { box.replaceChildren(); delete box.dataset.run; document.body.classList.remove('live-replying'); } if (live.doneAt) Object.assign(live, { text: '', doneAt: 0 });
-    // While no live copy shows, the count of replies keeps up with the feed; a block (chunked or whole) starts from it, so an
-    // earlier reply with the same words never counts as its saved copy.
-    if (!live.text) live.base = savedReplies().length;
-    return; }
+  // A finished block leaves in the same redraw that draws its saved message (matched by id), so the feed never shrinks and
+  // grows back. With no id, or if the saved message never comes (another chat was opened), it goes after 4 s anyway.
+  const gone = !shown || (live.doneAt && (savedById(live.eventId) || Date.now() - live.doneAt > 4000));
+  if (gone) { if (box.firstChild) { box.replaceChildren(); delete box.dataset.run; document.body.classList.remove('live-replying'); } if (live.doneAt) Object.assign(live, { text: '', doneAt: 0, eventId: '' }); return; }
   let md = box.querySelector('.msg.live .md');
   if (!md || box.dataset.run !== live.runId) {
     const run = runById(live.runId), name = run ? (personalAgent(run)?.name || provider(run.provider)) : t('Agent');
