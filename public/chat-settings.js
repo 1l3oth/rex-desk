@@ -383,9 +383,17 @@ export function openSettings(ctx, section = 'general') {
   const values = () => Object.fromEntries([...back.querySelectorAll('[name]')].filter(el => el.type !== 'checkbox' || el.name === 'schedule.days').map(el => [el.name, el.value]));
   const checked = name => Boolean(back.querySelector(`[name="${name}"]`)?.checked);
   let flushSave = () => {};
-  async function save(quiet = false) {
+  // Saves run one at a time. Each one reads the fields at call time but sends only the top-level keys that edit changed, laid over the config as it is when the request goes out, so a slow earlier save can never put an older copy over a newer edit.
+  let saveChain = Promise.resolve();
+  const save = (quiet = false) => {
+    const job = collectSave(), run = saveChain.then(() => sendSave(job, quiet));
+    saveChain = run.catch(() => {});
+    return run;
+  };
+  function collectSave() {
     const base = JSON.parse(JSON.stringify(config())), v = values(), next = { ...base };
-    if (has('general')) { next.name = v.name; window.rexTheme?.set(v.theme); await api('/autostart', { method: 'POST', data: { enabled: checked('autostart') } }).catch(() => {}); }
+    let autostart = null;
+    if (has('general')) { next.name = v.name; window.rexTheme?.set(v.theme); autostart = checked('autostart'); }
     if (has('agents')) Object.assign(next, { defaultMode: v.defaultMode, reportToOrbit: back.querySelector('[name="reportToOrbit"]') ? checked('reportToOrbit') : Boolean(base.reportToOrbit), saver: checked('saver'), handoffTokens: Number(v.handoffTokens ?? base.handoffTokens ?? 200000), autonomy: checked('autonomy') });
     if (has('accounts') && back.querySelector('#st-model')) next.models = { ...base.models, claude: back.querySelector('#st-model').value };
     if (has('projects') && back.querySelector('[name="branchPrefix"]')) next.branchPrefix = v.branchPrefix;
@@ -396,7 +404,12 @@ export function openSettings(ctx, section = 'general') {
     if (has('schedule') && back.querySelector('[name="schedule.enabled"]')) next.schedule = { enabled: checked('schedule.enabled'), time: v['schedule.time'], maxRuns: Number(v['schedule.maxRuns']), fix: back.querySelector('[name="schedule.fix"]') ? checked('schedule.fix') : schedule0.fix !== false, days: [...back.querySelectorAll('[name="schedule.days"]:checked')].map(box => Number(box.value)) };
     if (has('sources')) { readTrackers(back, state); next.sources = trackerSources(ui, state); if (v.syncMinutes != null) next.syncMinutes = Number(v.syncMinutes); }
     if (has('signins')) { readSignins(); next.testAccounts = state.signins.filter(account => account.username.trim()); }
-    ui.snap.config = await api('/config', { method: 'PUT', data: next }); await refresh(); if (quiet) return; if (has('sources')) state.trackers = trackerDraft(ui); state.signins = null; toast(t('Saved.')); draw();
+    const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(base[key])));
+    return { patch, autostart, sources: has('sources'), signins: has('signins') };
+  }
+  async function sendSave({ patch, autostart, sources, signins }, quiet) {
+    if (autostart !== null) await api('/autostart', { method: 'POST', data: { enabled: autostart } }).catch(() => {});
+    ui.snap.config = await api('/config', { method: 'PUT', data: { ...JSON.parse(JSON.stringify(config())), ...patch } }); await refresh(); if (quiet) return; if (sources) state.trackers = trackerDraft(ui); state.signins = null; toast(t('Saved.')); draw();
   }
   // Settings > About: asks the server for the version, counts and sizes, then draws them.
   async function loadAbout(fresh = false) {

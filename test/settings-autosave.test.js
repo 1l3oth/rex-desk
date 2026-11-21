@@ -79,3 +79,34 @@ test('removing a test sign-in or a connection is saved', async () => {
     assert.equal((await config()).sources.length, 0, 'the removed connection is gone from the saved config');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// A save waiting on a slow /autostart must not later put an older copy of the config over a newer edit.
+test('a slow first save cannot overwrite a newer edit', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    let release = () => {}, held = false;
+    const gate = new Promise(done => { release = done; });
+    await page.goto(`${base}/`); await page.waitForTimeout(2500);
+    await page.route('**/api/autostart', async route => { if (route.request().method() === 'POST') { held = true; await gate; } await route.continue(); });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    const config = async () => (await (await fetch(`${base}/api/state`)).json()).config;
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.locator('.settings-pop [name="name"]').fill('First Name'); // autosaves, then waits on the held /autostart
+    for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(100);
+    assert.ok(held, 'test setup: the first save is waiting on /autostart');
+    await page.evaluate(() => document.querySelector('[data-st-section="agents"]').click()); await page.waitForTimeout(500);
+    const saverBefore = await page.locator('.settings-pop [name="saver"]').isChecked();
+    await page.locator('.settings-pop [name="saver"]').evaluate(box => box.click()); // second edit while the first is still in flight
+    await page.waitForTimeout(1500);
+    release();
+    for (let i = 0; i < 100 && (await config()).saver !== !saverBefore; i++) await page.waitForTimeout(100);
+    await page.waitForTimeout(1500);
+    const saved = await config();
+    assert.equal(saved.saver, !saverBefore, 'the newer edit survives');
+    assert.equal(saved.name, 'First Name', 'the first edit is kept too');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});
