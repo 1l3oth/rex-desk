@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { generateKeyPairSync } from 'node:crypto';
 import { Updates } from '../src/updates.js';
-import { stageRelease, withNotes } from '../scripts/release-desktop.mjs';
+import { stageRelease, withNotes, readArgs } from '../scripts/release-desktop.mjs';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const keys = generateKeyPairSync('ed25519');
@@ -67,4 +67,12 @@ test('a notes correction changes only the notes of the version the channel ships
   assert.throws(() => withNotes({ ...live, version: '0.0.101' }, '0.0.100', 'x'), /ships 0.0.101/, 'an older version never replaces the newer one');
   assert.throws(() => withNotes(live, '0.0.100', '  '), /empty/);
   assert.throws(() => withNotes(null, '0.0.100', 'x'), /no published/);
+});
+
+test('notes on the command line are only ever notes, never flags', () => {
+  assert.deepEqual({ ...readArgs(['--notes=--force', '--channel', 'stable', '--upload']) }, { notes: '--force', channel: 'stable', upload: true });
+  assert.equal(readArgs(['--notes=--prune-only']).notes, '--prune-only');
+  assert.equal(readArgs(['--notes=--prune-only'])['prune-only'], undefined, 'no cleanup runs');
+  assert.throws(() => readArgs(['--notes', '--force']), /ambiguous/, 'a flag-like value without = stops the script');
+  assert.throws(() => readArgs(['--republish']), /Unknown option/);
 });

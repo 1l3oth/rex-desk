@@ -85,7 +85,7 @@ jobs:
           RELEASE_S3_ENDPOINT: ${{ vars.RELEASE_S3_ENDPOINT }}
           RELEASE_S3_REGION: ${{ vars.RELEASE_S3_REGION }}
           RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
-        run: node scripts/release-desktop.mjs --notes-only --channel "$CHANNEL" --version "$VERSION" --notes "$NOTES"
+        run: node scripts/release-desktop.mjs --notes-only --channel "$CHANNEL" --version "$VERSION" --notes="$NOTES"
 
   build:
     needs: check
@@ -194,7 +194,7 @@ jobs:
           RELEASE_S3_ENDPOINT: ${{ vars.RELEASE_S3_ENDPOINT }}
           RELEASE_S3_REGION: ${{ vars.RELEASE_S3_REGION }}
           RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
-        run: node scripts/release-desktop.mjs --files dist --channel "$CHANNEL" --notes "$NOTES" --upload
+        run: node scripts/release-desktop.mjs --files dist --channel "$CHANNEL" --notes="$NOTES" --upload
 
   release:
     needs: build

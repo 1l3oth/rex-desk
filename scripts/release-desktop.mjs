@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync, copyFileSync, mkdirSync, mkdtempSync, read
 import { createHash, createPrivateKey, sign } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
 import { downloadsUrl, newer, updaters, verifyInstaller } from '../src/updates.js';
 
 export const channels = ['stable', 'beta'];
@@ -134,8 +135,17 @@ async function correctNotes(baseUrl, channel, version, notes) {
   throw new Error(`${baseUrl}/${channel}/latest.json does not show the new notes after the upload.`);
 }
 
+// The command line, read strictly: a value is never taken as a flag, so notes like "--force" cannot turn on --force or --prune-only.
+// An unknown flag, or a value that looks like a flag without --name=value, stops the script.
+export function readArgs(argv) {
+  const strings = ['files', 'channel', 'notes', 'out', 'version', 'keep'], flags = ['upload', 'force', 'prune-only', 'notes-only'];
+  const { values } = parseArgs({ args: argv, strict: true, allowPositionals: false,
+    options: Object.fromEntries([...strings.map(name => [name, { type: 'string' }]), ...flags.map(name => [name, { type: 'boolean' }])]) });
+  return values;
+}
+
 async function main() {
-  const args = process.argv.slice(2), value = name => args.includes(name) ? args[args.indexOf(name) + 1] || '' : '';
+  const options = readArgs(process.argv.slice(2)), value = name => options[name.slice(2)] || '', args = { includes: name => options[name.slice(2)] === true };
   const keep = Number(value('--keep')) || 3, baseUrl = (process.env.RELEASE_BASE_URL || downloadsUrl).replace(/\/+$/, '');
   if (args.includes('--prune-only')) return prune(baseUrl, keep);
   if (args.includes('--notes-only')) return correctNotes(baseUrl, value('--channel') || 'stable', value('--version'), value('--notes'));
