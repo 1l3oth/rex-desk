@@ -802,7 +802,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         // Exactly what this agent is told it has (its instructions read the same list), not a general list for the computer.
         return json(response, 200, desk.toolsInventory(desk.toolsRunOf(url.searchParams.get('agent') || 'main')).items);
       }
-      if (url.pathname === '/api/agents/login' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.agents.login(aiProvider(input.provider || 'claude'), String(input.profile || ''))); }
+      if (url.pathname === '/api/agents/login' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.agents.login(aiProvider(input.provider || 'claude'), String(input.profile || ''), { background: input.background === true })); }
+      if (url.pathname === '/api/agents/login' && request.method === 'GET') return json(response, 200, desk.agents.loginJob(aiProvider(url.searchParams.get('provider') || 'claude')));
       if (url.pathname === '/api/agents/add' && request.method === 'POST') { const input = await body(request), provider = aiProvider(input.provider || 'claude'); const created = desk.agents.addProfile(provider, input.name); return json(response, 200, { ...created, ...desk.agents.login(provider, created.profile) }); }
       if (url.pathname === '/api/accounts/auto' && request.method === 'GET') return json(response, 200, { on: !store.get('accounts', 'auto')?.off });
       if (url.pathname === '/api/accounts/auto' && request.method === 'POST') { const on = (await body(request)).on !== false; store.put('accounts', 'auto', { id: 'auto', off: !on }); return json(response, 200, { on }); }

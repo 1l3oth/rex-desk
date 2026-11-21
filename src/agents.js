@@ -122,7 +122,7 @@ export function parseClaudeStatus(output) {
 }
 
 export class AgentProfiles {
-  constructor(store, { run = capture, ttl = 120000 } = {}) { this.store = store; this.run = run; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
+  constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn } = {}) { this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
   // Agents and settings travel between computers (the shared database, a restore from backup), but a profile folder is only on the
   // computer that made it. A folder that is not here counts as not chosen.
   here(profile) { return profile && directory(profile) ? profile : ''; }
@@ -203,7 +203,9 @@ export class AgentProfiles {
       : `${name} profile ${fresh.label} is not signed in. Open Setup and choose a signed-in ${name} profile, then continue this run. No agent turn was started.`);
   }
   // Signs a profile in to a Claude account: Claude Code opens the browser, the person signs in, and the profile is ready.
-  login(provider, profile) {
+  // background: no window at all. The install and the sign-in run hidden, the CLI opens the browser, and loginJob() tells the
+  // page how far it got (installing, waiting for the browser, failed with a plain reason). The first-run screen uses it.
+  login(provider, profile, { background = false } = {}) {
     const executable = cli(provider), env = profileEnvironment(provider, profile), found = cliFound(executable), name = providerTitle(provider);
     const install = (installCommands[process.platform === 'win32' ? 'win32' : 'other'] || {})[provider] || '';
     if (!found && !install) throw new Error(`${name} is not installed on this computer, and Rex Desk cannot install it here. Install it, then press Sign in again.`);
@@ -212,6 +214,7 @@ export class AgentProfiles {
     // The sign-in runs in a window the person can see: the CLI opens the browser, and anything it asks or any error shows there.
     // A missing CLI is installed first in the same window.
     const terminalEnv = terminalEnvironment(env, profileKey(aiProvider(provider))), args = loginArgs[provider];
+    if (background) return this.loginHidden({ provider, profile, executable, found, install, name, env: terminalEnv, args });
     let child;
     if (process.platform === 'win32') {
       const run = found ? `& ${[executable.command, ...executable.args, ...args].map(psQuote).join(' ')}` : `& ${psQuote(bareName[provider])} ${args.map(psQuote).join(' ')}`;
@@ -239,6 +242,59 @@ export class AgentProfiles {
     child.on('error', error => { this.loginError = { provider, message: `Rex Desk could not open the sign-in window: ${error.message}`, at: Date.now() }; this.invalidate(provider); });
     child.unref(); this.invalidate(provider);
     return { started: true, installing: !found, profile, label: profileLabel(provider, profile) };
+  }
+  loginHidden({ provider, profile, executable, found, install, name, env, args }) {
+    this.jobs ||= new Map();
+    const old = this.jobs.get(provider); if (old?.child && !old.done) { old.done = true; clearTimeout(old.timer); try { old.child.kill(); } catch {} }
+    const MARK = 'REXDESK-SIGNIN-STARTS';
+    let command, commandArgs;
+    if (process.platform === 'win32') {
+      const run = found ? `& ${[executable.command, ...executable.args, ...args].map(psQuote).join(' ')}` : `& ${psQuote(bareName[provider])} ${args.map(psQuote).join(' ')}`;
+      const script = ["$ErrorActionPreference = 'Continue'", "$ProgressPreference = 'SilentlyContinue'",
+        ...(found ? [] : [install,
+          "$env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + $env:Path",
+          "$env:Path = (Join-Path $HOME '.local\\bin') + ';' + (Join-Path $env:LOCALAPPDATA 'Programs\\OpenAI\\Codex\\bin') + ';' + (Join-Path $env:LOCALAPPDATA 'agy\\bin') + ';' + (Join-Path $env:APPDATA 'npm') + ';' + $env:Path",
+          `if (-not (Get-Command ${psQuote(bareName[provider])} -ErrorAction SilentlyContinue)) { Write-Output 'REXDESK-INSTALL-FAILED'; exit 3 }`]),
+        `Write-Output '${MARK}'`, run, 'exit $LASTEXITCODE'].join('\n');
+      [command, commandArgs] = ['powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')]];
+    } else {
+      const quote = value => `'${String(value).replace(/'/g, `'\\''`)}'`;
+      const run = found ? [executable.command, ...executable.args, ...args].map(quote).join(' ') : [bareName[provider], ...args].map(quote).join(' ');
+      const line = `${found ? '' : `${install} || { echo REXDESK-INSTALL-FAILED; exit 3; }; export PATH="$HOME/.local/bin:$PATH"; `}echo ${MARK}; ${run}`;
+      [command, commandArgs] = ['bash', ['-lc', line]];
+    }
+    const job = { provider, profile, state: found ? 'signing-in' : 'installing', url: '', error: '', at: Date.now(), output: '' };
+    this.jobs.set(provider, job);
+    const fail = message => { if (job.done) return; job.done = true; job.state = 'failed'; job.error = message; clearTimeout(job.timer); this.invalidate(provider); };
+    let child;
+    // stdin stays open: a CLI that cannot open the browser waits for a pasted code instead of quitting at once.
+    try { child = this.spawnHidden(command, commandArgs, { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); } catch (error) { fail(`Rex Desk could not start the ${name} sign-in: ${error.message}`); return { started: false, background: true, profile, ...this.loginJob(provider) }; }
+    job.child = child;
+    const read = chunk => {
+      job.output = (job.output + String(chunk)).slice(-6000);
+      if (job.state === 'installing' && job.output.includes(MARK)) job.state = 'signing-in';
+      // The sign-in page, for when the browser did not open by itself. Only what the CLI prints after the install.
+      const after = job.output.split(MARK)[1];
+      if (after !== undefined && !job.url) { const link = after.match(/https:\/\/[^\s"'<>]+/); if (link) job.url = link[0].replace(/[).,]+$/, ''); }
+    };
+    child.stdout?.on('data', read); child.stderr?.on('data', read);
+    child.on('error', error => fail(`Rex Desk could not start the ${name} sign-in: ${error.message}`));
+    child.on('exit', code => {
+      if (job.done) return;
+      if (code === 0) { job.done = true; job.state = 'finished'; clearTimeout(job.timer); this.invalidate(provider); return; }
+      if (job.output.includes('REXDESK-INSTALL-FAILED') || job.state === 'installing') fail(`${name} could not be installed. Check that this computer is online, then try again.`);
+      else fail(`The ${name} sign-in did not finish. Try again, and finish it in the browser page that opens.`);
+    });
+    // Nobody finished it in fifteen minutes: stop waiting.
+    job.timer = setTimeout(() => { if (!job.done) { try { child.kill(); } catch {} fail(`The ${name} sign-in waited too long. Try again when you are ready.`); } }, 15 * 60000);
+    job.timer.unref?.();
+    this.invalidate(provider);
+    return { started: true, installing: !found, background: true, profile, label: profileLabel(provider, profile) };
+  }
+  // How far the hidden sign-in of one AI got, without its output (it can hold an account name or a code).
+  loginJob(provider) {
+    const job = this.jobs?.get(provider);
+    return job ? { provider, state: job.state, url: job.url, error: job.error, at: job.at } : { provider, state: 'none' };
   }
   // A new profile folder for another Claude account. It shares the conversation history folder with the others when there is
   // one, so an agent keeps its conversation when it moves between accounts.

@@ -22,3 +22,22 @@ test("an account that hit its limit is skipped until Claude's reset time, and ch
     assert.ok(until('claude1'), 'the other marks stay');
   } finally { store.close(); }
 });
+
+test('the first-run sign-in runs hidden and reports how far it got, without the CLI output', async () => {
+  const { EventEmitter } = await import('node:events');
+  const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill() {} });
+  const store = new Store(mkdtempSync(path.join(os.tmpdir(), 'rex-desk-signin-'))), calls = [];
+  const agents = new AgentProfiles(store, { spawnHidden: (...args) => { calls.push(args); return child; } });
+  try {
+    const started = agents.loginHidden({ provider: 'claude', profile: '', executable: { command: 'claude', args: [] }, found: false, install: 'install-claude', name: 'Claude', env: {}, args: ['auth', 'login'] });
+    assert.deepEqual([started.started, started.installing, started.background], [true, true, true]);
+    assert.equal(calls[0][2].windowsHide, true, 'no window shows');
+    assert.equal(agents.loginJob('claude').state, 'installing');
+    child.stdout.emit('data', 'installed\nREXDESK-SIGNIN-STARTS\nOpen https://claude.ai/oauth?code=1. to sign in\n');
+    assert.deepEqual([agents.loginJob('claude').state, agents.loginJob('claude').url], ['signing-in', 'https://claude.ai/oauth?code=1']);
+    assert.equal(agents.loginJob('claude').output, undefined, 'the output can hold an account name, so the page never gets it');
+    child.emit('exit', 1);
+    assert.equal(agents.loginJob('claude').state, 'failed'); assert.match(agents.loginJob('claude').error, /did not finish/);
+    assert.equal(agents.loginJob('codex').state, 'none');
+  } finally { store.close(); }
+});

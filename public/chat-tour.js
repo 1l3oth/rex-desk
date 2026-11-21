@@ -1,6 +1,7 @@
 import { t, languagePicker } from './i18n.js';
 import { loadTourAi, tourAiHtml, tourAiClick } from '/chat-tour-ai.js';
 import { SOCIAL } from '/social-icons.js';
+import { firstRunHtml, firstRunClick } from '/chat-firstrun.js';
 // Where Rex Desk keeps things (shown in Settings, Folders and in the setup tour), and the setup tour a new person gets.
 const ROWS = [
   ['data', t('Rex Desk data'), t('Chats, tasks, settings and saved keys.'), 'restart'],
@@ -56,7 +57,10 @@ export async function folderClick(ctx, state, target, draw) {
 }
 
 // The setup tour. It opens by itself for a new person (no project yet, never finished), and from Settings, General.
-const STEPS = ['welcome', 'about', 'ai', 'folders', 'project', 'done'];
+const TOUR_STEPS = ['welcome', 'about', 'ai', 'folders', 'project', 'done'];
+// A new person gets the short one, which ends at "Connect your AI": it cannot be skipped, and once an AI is signed in Rex
+// Agent opens and sets up projects and agents through the chat.
+const FIRST_STEPS = ['welcome', 'about', 'connect'];
 // The two welcome questions (both can be skipped): an age range, and where the person heard about Rex Desk.
 const AGES = [t('Under 18'), '18 to 24', '25 to 34', '35 to 44', '45 to 54', '55 or older', t('Prefer not to say')];
 const HEARD = ['tiktok', 'youtube', 'facebook', 'instagram', 'x', 'linkedin', 'reddit', 'github', 'telegram', 'discord', 'threads', 'friend', 'search', 'other'];
@@ -69,10 +73,11 @@ const HEARD_NAME = { friend: t('A friend or colleague'), search: t('A search eng
 export function maybeStartTour(ctx) {
   const config = ctx.ui.snap?.config;
   if (!config || config.tourDismissed || (config.repositories || []).length || document.querySelector('.tour-back')) return;
-  startTour(ctx);
+  startTour(ctx, { firstRun: true });
 }
 
-export function startTour(ctx) {
+export function startTour(ctx, { firstRun = false } = {}) {
+  const STEPS = firstRun ? FIRST_STEPS : TOUR_STEPS;
   const { ui, esc, api, toast, refresh } = ctx;
   document.querySelector('.tour-back')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back tour-back'; document.body.append(back);
@@ -97,6 +102,7 @@ export function startTour(ctx) {
       <input class="tour-other" data-tour-other maxlength="120" placeholder="${t`Where? (optional)`}" value="${esc(state.survey.other)}" ${state.survey.heard.includes('other') ? '' : 'hidden'} aria-label="${t`Where you heard about Rex Desk`}"></fieldset>`;
     },
     ai: () => tourAiHtml(ctx, state),
+    connect: () => firstRunHtml(ctx, state),
     folders: () => `<h2>${t`Where things are kept`}</h2><p>${t`These are good places to start. You can change any of them now, or later in Settings, Folders.`}</p>${foldersHtml(ctx, state)}`,
     project: () => `<h2>${t`Add your first project`}</h2><p>${t`Pick the folder of some code you work on, or type owner/name to bring it from GitHub. Rex Desk never changes your own copy: agents work in their own.`}</p>
       <div class="st-add"><input data-tour-repo placeholder="${t`A folder, or owner/name on GitHub`}" spellcheck="false" aria-label="${t`Project folder or GitHub project`}"><button type="button" class="btn small" data-tour-browse>${t`Browse…`}</button><button type="button" class="btn small primary" data-tour-add>${t`Add`}</button></div>
@@ -105,9 +111,11 @@ export function startTour(ctx) {
   };
   const draw = () => {
     const step = STEPS[state.step];
-    back.innerHTML = `<div class="tour-card" role="dialog" aria-modal="true" aria-label="${t`Set up Rex Desk`}"><div class="tour-dots">${STEPS.map((id, index) => `<span class="${index === state.step ? 'on' : index < state.step ? 'done' : ''}"></span>`).join('')}</div>
-      ${picture(step)}<div class="tour-body">${body[step]()}</div>
-      <div class="tour-foot">${state.step && step !== 'done' ? `<button type="button" class="btn quiet" data-tour-back>${t`Back`}</button>` : `<button type="button" class="btn quiet" data-tour-skip>${t`Skip the tour`}</button>`}<span class="spacer"></span><button type="button" class="btn primary" data-tour-next>${step === 'done' ? t('Start') : step === 'project' && !(ui.snap.config?.repositories || []).length ? t('Skip for now') : t('Next')}</button></div></div>`;
+    const connecting = step === 'connect', locked = connecting && state.fr?.step === 'done';
+    const left = state.step && step !== 'done' ? (locked ? '' : `<button type="button" class="btn quiet" data-tour-back>${t`Back`}</button>`) : firstRun ? '' : `<button type="button" class="btn quiet" data-tour-skip>${t`Skip the tour`}</button>`;
+    back.innerHTML = `<div class="tour-card${connecting ? ' tour-connect' : ''}" role="dialog" aria-modal="true" aria-label="${t`Set up Rex Desk`}"><div class="tour-dots">${STEPS.map((id, index) => `<span class="${index === state.step ? 'on' : index < state.step ? 'done' : ''}"></span>`).join('')}</div>
+      ${connecting ? '' : picture(step)}<div class="tour-body">${body[step]()}</div>
+      <div class="tour-foot">${left}<span class="spacer"></span>${connecting ? '' : `<button type="button" class="btn primary" data-tour-next>${step === 'done' ? t('Start') : step === 'project' && !(ui.snap.config?.repositories || []).length ? t('Skip for now') : t('Next')}</button>`}</div></div>`;
   };
   const finish = async () => { back.remove(); try { ui.snap.config = await api('/config', { method: 'PUT', data: { ...ui.snap.config, tourDismissed: true } }); } catch (error) { toast(error.message, true); } void refresh(); };
   const saveName = async () => {
@@ -131,9 +139,11 @@ export function startTour(ctx) {
         if (STEPS[state.step] === 'about') { readSurvey(); if (state.survey.age || state.survey.heard.length) void api('/survey', { method: 'POST', data: state.survey }).catch(() => {}); }
         if (STEPS[state.step] === 'done') { await finish(); return; }
         state.step += 1; draw();
-        if (STEPS[state.step] === 'ai') void loadTourAi(ctx, state).then(() => { if (STEPS[state.step] === 'ai' && document.body.contains(back)) draw(); });
+        if (['ai', 'connect'].includes(STEPS[state.step])) void loadTourAi(ctx, state).then(() => { if (['ai', 'connect'].includes(STEPS[state.step]) && document.body.contains(back)) draw(); });
         return;
       }
+      if (STEPS[state.step] === 'connect' && await firstRunClick(ctx, state, target, () => { if (STEPS[state.step] === 'connect' && document.body.contains(back)) draw(); }, {
+        load: () => loadTourAi(ctx, state), alive: () => document.body.contains(back), finish: async () => { await finish(); ctx.open?.('main'); } })) return;
       if (STEPS[state.step] === 'ai' && await tourAiClick(ctx, state, target, () => { if (STEPS[state.step] === 'ai' && document.body.contains(back)) draw(); })) return;
       if (await folderClick(ctx, state, target, draw)) return;
       if (target.closest('[data-tour-browse]')) { const picked = await api('/repositories/pick', { method: 'POST', data: {} }).catch(() => null); if (picked?.path) back.querySelector('[data-tour-repo]').value = picked.path; return; }
