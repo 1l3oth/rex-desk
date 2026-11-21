@@ -89,4 +89,14 @@ export async function waitUnlocked(folders, { timeoutMs = STALE_LOCK_MS, everyMs
   const until = Date.now() + timeoutMs;
   while (folders.some(folder => folder && lockedFolder(folder)) && Date.now() < until) await new Promise(resolve => setTimeout(resolve, everyMs));
 }
+// The folders agents work in or worked in lately: every live run or chat, and any run touched in the last `idleMs`, keeps its
+// worktree, cwd and project folder. A worktree is a candidate for removal only once it has been idle that long.
+export const IDLE_MS = 10 * 60000;
+export function busyFolders(runs, { live = () => false, now = Date.now(), idleMs = IDLE_MS } = {}) {
+  const ended = ['done', 'failed', 'stopped', 'canceled'];
+  const recent = run => now - Math.max(...[run.updatedAt, run.endedAt, run.createdAt].map(at => Date.parse(at || '') || 0)) < idleMs;
+  return runs.filter(run => live(run) || !ended.includes(run.state) || recent(run))
+    .flatMap(run => [run.worktree, run.cwd, run.projectPath]).filter(Boolean).map(folder => path.resolve(folder).toLowerCase());
+}
+export const usedBy = (busy, item) => { const folder = path.resolve(item.path).toLowerCase(); return busy.some(other => other === folder || inside(folder, other)); };
 export const inside = (folder, item) => { const relative = path.relative(path.resolve(folder), path.resolve(item)); return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative); };

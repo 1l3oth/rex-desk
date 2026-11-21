@@ -109,6 +109,15 @@ test('removal holds a lock through its last live check, and an agent starting in
   other(); await start; assert.equal(waited, true);
 });
 
+test('a worktree is a cleanup candidate only after it has been idle for 10 minutes', async () => {
+  const { busyFolders, usedBy } = await import('../src/worktree-cleanup.js');
+  const tree = path.join(os.tmpdir(), 'app-work', 'worktrees', '501'), now = Date.parse('2026-11-22T10:00:00Z');
+  const ended = minutes => [{ id: 'r', state: 'done', worktree: tree, endedAt: new Date(now - minutes * 60000).toISOString() }];
+  assert.ok(usedBy(busyFolders(ended(3), { now }), { path: tree }), 'ended 3 minutes ago: kept');
+  assert.ok(!usedBy(busyFolders(ended(11), { now }), { path: tree }), 'ended 11 minutes ago: can go');
+  assert.ok(usedBy(busyFolders(ended(60), { now, live: () => true }), { path: tree }), 'live: kept');
+});
+
 test('the tidy script reads the project from any position and --apply keeps worktrees live runs use', async () => {
   const { parseArgs, liveFolders } = await import('../scripts/tidy-worktrees.mjs');
   const project = path.join(os.tmpdir(), 'app');
