@@ -6,6 +6,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
+import { workFolder } from './work-folder.js';
 import path from 'node:path';
 import { git as runGit, slug } from './processes.js';
 
@@ -94,5 +95,5 @@ export class Handover {
     throw new Error(`${peers.deviceName(agent.node)} did not answer in time, so ${agent.name}'s work was not saved and it stayed there.`);
   }
   pickUp(input) { return pickUp(input); }
-  directoryFor(agent, branch) { return path.join(this.store.directory, 'worktrees', `${slug(agent.slug || agent.name, 40)}-${slug(branch, 60)}`); }
+  directoryFor(agent, branch, project = '') { return path.join(workFolder(project, this.store.directory), 'worktrees', `${slug(agent.slug || agent.name, 40)}-${slug(branch, 60)}`); }
 }

@@ -124,7 +124,7 @@ export class ProjectRules {
         if (saved.committed) step('committed', `Uncommitted changes committed on ${saved.branch} (WIP).`, { branch: saved.branch, commit: saved.committed });
       } else step('saved', `${from} is off, so work not committed there stays on it until it is back.`, { skipped: true });
       // 3. The branch is unpacked here into a worktree of the agent's own before anything moves, so a failure leaves it where it was.
-      if (saved.branch) picked = await desk.handover.pickUp({ project: folder, branch: saved.branch, head: saved.head, bundle: saved.bundle, directory: desk.handover.directoryFor(agent, saved.branch) });
+      if (saved.branch) picked = await desk.handover.pickUp({ project: folder, branch: saved.branch, head: saved.head, bundle: saved.bundle, directory: desk.handover.directoryFor(agent, saved.branch, folder) });
     } catch (error) {
       const why = String(error.message || error).split('\n')[0];
       step('failed', `${agent.name} stayed on ${from}: ${why}`);

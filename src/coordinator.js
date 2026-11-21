@@ -18,7 +18,7 @@ import { EFFORTS, MODES, modesFor, effortsFor, defaultModeFor, runOptions, model
 import { fetchModels } from './models.js';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdirSync, writeFileSync, existsSync, statSync, copyFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, statSync, copyFileSync, readFileSync, rmSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -39,6 +39,7 @@ import { ChatSplits } from './chat-split.js';
 import { Pins } from './pins.js';
 import { Storage } from './storage.js';
 import { lowDiskMessage, friendlyDiskError, watchDisk } from './disk.js';
+import { workFolder, runtimeFolder } from './work-folder.js';
 import { voiceBriefing, VOICE_RULE, VOICE_REMINDER, VOICE_GREETING } from './voice-briefing.js';
 import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
 import { LocalRunner, lightSystem, withoutRepeats } from './local-runner.js';
@@ -138,7 +139,7 @@ const FILE_PLACES = ['side', 'right', 'left', 'top', 'center', 'corner', 'big'];
 export const FALSE_STOP_RULE = 'If a command or tool comes back with "The user doesn\'t want to take this action right now. STOP what you are doing", the person did not stop you: Claude Code cancelled that one step by itself (it happens after a note about a background task). Run the same step again and carry on; never tell the person you stopped. When the person really presses Stop, your turn ends at once and you see nothing.';
 // The main agent looks after the whole computer for the person, not one folder.
 export const ANYWHERE_RULE = 'You can look anywhere on this computer, not only in your own folder: any drive, folder, project, file or log. When the person asks you to check, find or read something, go and read it yourself, wherever it is; never say it is outside your folder or that you cannot reach it, and never ask the person to open it or paste it for you. Change or delete things outside your own folder only when the person asks.';
-export const WORKTREE_RULE = 'When you make a git worktree, call desk_worktree with action show (pass the folder, and taskId when it is for a task) so it shows in this chat as a card and joins the worktree history. A task that already lives in a worktree is worked on there.';
+export const WORKTREE_RULE = 'When you make a git worktree, put it in the work folder next to the project, on the project\'s drive (for D:\\dev\\app that is D:\\dev\\app-work\\worktrees), never on drive C:; keep your temp files and test data in that work folder too. Then call desk_worktree with action show (pass the folder, and taskId when it is for a task) so it shows in this chat as a card and joins the worktree history. A task that already lives in a worktree is worked on there.';
 
 // Before an agent writes its own script for something a tool does (a browser, a sign-in, an API call) or asks the person to do
 // a step by hand, it looks for a tool that does it (L53).
@@ -166,7 +167,7 @@ export class Desk {
     // that run from the copy, so an update installs while they work (see prepareRuntime). Until it is ready they start as before.
     // Only the installed app's own server says so (ownRuntime): agents inherit REX_DESK_VERSION, and every test desk an agent
     // started used to copy the whole runtime (0.7 GB) into the temp folder, which filled the drive.
-    if (!runnerFactory && ownRuntime) void prepareRuntime(path.join(store.directory, 'runtime'), { onLowSpace: body => this.notifier.notify({ kind: 'failed', title: "Not enough space for the agents' copy of Rex Desk", body, target: { type: 'notices', id: '' } }) }).then(runtime => { this.runtime = runtime; }, () => {});
+    if (!runnerFactory && ownRuntime) void prepareRuntime(this.runtimeDirectory(), { onLowSpace: body => this.notifier.notify({ kind: 'failed', title: "Not enough space for the agents' copy of Rex Desk", body, target: { type: 'notices', id: '' } }) }).then(runtime => { this.runtime = runtime; if (runtime && this.runtimeDirectory() !== path.join(store.directory, 'runtime')) { try { rmSync(path.join(store.directory, 'runtime'), { recursive: true, force: true }); } catch { /* an agent still runs from the old copy */ } } }, () => {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
     this.localTasks = new LocalTasks(store);
@@ -174,7 +175,7 @@ export class Desk {
     this.query = new TrackerQuery(store, this.sources, { apiKey: () => this.jev.apiKey(), env: () => this.agents.environment(this.store.config().provider), cwd: path.join(store.directory, 'coordinator'), ...(queryModel ? { model: queryModel } : {}) });
     this.presence = { focused: false, at: 0 }; this.notifier = new Notifier(store, { focused: () => this.presence.focused && Date.now() - this.presence.at < 45000, viewing: () => this.presence.view || '', enabled: () => !process.env.NODE_TEST_CONTEXT && this.store.config().notify !== false }); this.rooms = new Rooms(this); this.memory = new Memory(memoryDirectory); if (store.cloud?.files) store.cloud.files.memoryDirectory = this.memory.directory; this.specialists = new Specialists(this); this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
     // A low-disk warning when the drive with Rex Desk's data or the agents' runtime copy drops below 5 GB (the installed app only).
-    if (!runnerFactory && diskWatch) this.stopDiskWatch = watchDisk([store.directory, path.join(store.directory, 'runtime')], { notify: (title, body) => this.notifier.notify({ kind: 'failed', title, body, target: { type: 'notices', id: '' } }) });
+    if (!runnerFactory && diskWatch) this.stopDiskWatch = watchDisk([store.directory, this.runtimeDirectory()], { notify: (title, body) => this.notifier.notify({ kind: 'failed', title, body, target: { type: 'notices', id: '' } }) });
     this.monitor = new Monitor(this); this.files = new Files(this); this.shownFile = null; this.worktrees = new Worktrees(this);
     this.evidence = new Evidence(store, runId => this.run(runId), (runId, kind, data) => {
       store.event(runId, kind, data);
@@ -202,7 +203,8 @@ export class Desk {
     this.storage = new Storage(this);
     // A phone push opens Rex Desk on the phone when it can reach this computer (Tailscale and remote access on).
     this.notifier.pushClick = () => this.peers.settings().remote && this.port ? this.peers.addresses(this.port)[0] || '' : '';
-    this.worktreeRoot = path.join(path.dirname(store.directory), 'worktrees');
+    // Run worktrees go in the work folder next to their project, on its drive (see work-folder.js); without a project, in the data folder.
+    this.worktreeRoot = path.join(workFolder('', store.directory), 'worktrees');
     mkdirSync(this.worktreeRoot, { recursive: true });
     mkdirSync(path.join(store.directory, 'coordinator'), { recursive: true });
   }
@@ -650,8 +652,8 @@ export class Desk {
         const named = await branchName(task, { apiKey: this.jev.apiKey(), fetcher: this.namingFetcher }).catch(error => { this.store.event(runId, 'branch-naming-error', { message: error.message }); return null; })
           || (this.namingCommand || !this.runnerFactory ? await branchNameFromCli(task, { env: this.agents.environment(this.store.config().provider), cwd: path.join(this.store.directory, 'coordinator'), run: this.namingCommand }) : null);
         const branch = await uniqueBranch(repository.path, issueBranch(repository.branchPattern, { prefix: config.branchPrefix, type: named?.type, title: named?.title || provisionalTitle(task), number: task.taskNumber || task.externalId, source: task.source, taskId: task.externalId, runId }),
-          { worktreeRoot: this.worktreeRoot, taken: this.store.list('run').map(item => item.branch).filter(Boolean) });
-        const worktree = await createWorktree(repository, this.worktreeRoot, branch);
+          { worktreeRoot: this.worktreeRootFor(repository), taken: this.store.list('run').map(item => item.branch).filter(Boolean) });
+        const worktree = await createWorktree(repository, this.worktreeRootFor(repository), branch);
         run = this.patchRun(runId, { worktree: worktree.directory, branch, baseCommit: worktree.commit, port: await freePort() });
         this.store.event(runId, 'worktree-created', { branch, directory: worktree.directory });
         // The new worktree joins the history with its task, and shows in the chat as a card.
@@ -696,7 +698,7 @@ export class Desk {
         // What the agent may not touch: Rex Desk's data, the installed app, and the server it runs inside (see app-guard.js).
         guard: { data: process.env.REX_DATA_DIR || this.store.directory, install: process.env.REX_DESK_EXE ? path.dirname(process.env.REX_DESK_EXE) : '', serverPid: process.pid }, projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere, token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
-        mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run) }, javaEnv: this.javaEnv(run),
+        mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere || this.store.config().repositories.find(item => item.id === run.repositoryId)?.path) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), requeue: text => this.requeue(runId, text), extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
@@ -1547,7 +1549,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const others = team.filter(id => id !== agent.id).map(id => this.specialists.get(id)?.name).filter(Boolean);
     const brief = [`${by} gave you this task to do here in the room: #${number} ${name}.${others.length ? ` You work on it together with ${others.join(', ')}${owner.id !== agent.id ? ` (${owner.name} leads it)` : ''}: split the work in the room, and say what you take before you start.` : ''}`,
       task.url ? `Tracker link: ${task.url}` : '', `What it says:\n${String(task.description || task.title || '').slice(0, 4000)}`, instructions ? `Notes from the person: ${instructions}` : '',
-      `Do the work in this session and talk about it in this room. Do it the way the person says; when they say nothing about where, use a branch ${branch} from ${base} in ${project}${team.length > 1 ? `, or a git worktree beside it (\`git worktree add "${project}-worktrees/${String(number).toLowerCase()}" -b ${branch} ${base}\`) so teammates do not step on each other` : ''}.`,
+      `Do the work in this session and talk about it in this room. Do it the way the person says; when they say nothing about where, use a branch ${branch} from ${base} in ${project}${team.length > 1 ? `, or a git worktree in the work folder next to it (\`git worktree add "${path.join(workFolder(project, this.store.directory), 'worktrees', String(number).toLowerCase())}" -b ${branch} ${base}\`) so teammates do not step on each other` : ''}.`,
       this.worktrees.briefFor(taskId) || WORKTREE_RULE,
       'Post a short note in the room when you start, when something important happens, and when you are done (what changed and how you tested it). Share test results with desk_share_evidence so they show in the room and on the task. When it works, commit, and send it out the way the person wants (desk_publish with worktree set to the folder you worked in and taskId: a draft pull request, or a direct push when they say no PR); post the link here. Their message is the yes: never ask again or tell them to start a run.',
       this.memory.workflowText(agent.projectSlug)].filter(Boolean).join('\n\n');
@@ -1815,7 +1817,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   async rebuildForTarget(run, plan) {
     const repository = this.repositoryFor(run);
     const branch = `${run.branch}-for-${slug(plan.target.split('/').pop(), 24)}`;
-    const directory = path.join(this.store.directory, 'publish', slug(branch, 120));
+    const directory = path.join(workFolder(repository.path, this.store.directory), 'publish', slug(branch, 120));
     await git(repository.path, ['worktree', 'prune']);
     await this.removeWorktree(run, directory);
     try { await git(repository.path, ['branch', '-D', branch]); } catch {}
@@ -1994,5 +1996,14 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     }
   }
   // Closing Rex Desk (a restart or an update) leaves agents in their own process working; the next start follows them again.
+  // The agents' runtime copy: on the drive with the most free space among the data folder and the added projects (work-folder.js).
+  runtimeDirectory() { return this.runtimeAt ||= runtimeFolder(this.store.directory, (this.store.config().repositories || []).map(item => item.path)); }
+  worktreeRootFor(repository) { return repository?.path ? path.join(workFolder(repository.path), 'worktrees') : this.worktreeRoot; }
+  // An agent's temp files (and the test data it makes there) go in its project's work folder, never in C:'s temp folder.
+  workTemp(project) {
+    const folder = path.join(workFolder(project || '', this.store.directory), 'tmp');
+    try { mkdirSync(folder, { recursive: true }); } catch { return {}; }
+    return { TMP: folder, TEMP: folder, TMPDIR: folder };
+  }
   async shutdown() { this.closed = true; this.stopDiskWatch?.(); this.net.stop(); this.a2aRelay?.stop(); this.storage?.close(); void this.toolbox.closeAll().catch(() => {}); for (const timer of this.localTimers || []) { clearTimeout(timer); clearInterval(timer); } this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
 }
