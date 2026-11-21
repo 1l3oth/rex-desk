@@ -467,6 +467,9 @@ export class Store extends EventEmitter {
       // Where agents keep this project's worktrees, temp and test data; empty is the default, <project>-work beside it.
       const workFolder = String(repository.workFolder || '').trim();
       if (workFolder && !path.isAbsolute(workFolder)) throw new Error('Give the full path of the work folder, or leave it empty for the folder next to the project.');
+      // The work folder stays on the project's drive, so a project on D: never fills C: with worktrees and temp files.
+      const drive = folder => path.parse(path.resolve(folder)).root.toLowerCase();
+      if (workFolder && drive(workFolder) !== drive(repository.path)) throw new Error(`Put the work folder on the same drive as the project (${path.parse(path.resolve(repository.path)).root}).`);
       issueBranch(branchPattern, { prefix: String(input.branchPrefix || 'rex-desk').replace(/^\/+|\/+$/g, '') });
       return { id: repository.id || id(), name: repository.name || path.basename(repository.path), path: path.resolve(repository.path),
         baseBranch: repository.baseBranch || 'develop', targetBranch: repository.targetBranch || repository.baseBranch || 'develop',

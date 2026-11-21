@@ -94,6 +94,10 @@ test('a project\'s work folder is saved from Settings, Projects, and the agents\
   const desk = new Desk(store, { root: temporary('work-root'), runnerFactory: () => ({}), memoryDirectory: temporary('work-memory') });
   assert.equal(desk.worktreeRootFor(store.config().repositories[0]), path.join(own, 'worktrees'));
   assert.throws(() => save({ workFolder: 'relative\work' }), /full path of the work folder/);
+  if (process.platform === 'win32') {
+    const other = /^c:/i.test(project) ? 'D:\\site-work' : 'C:\\site-work';
+    assert.throws(() => save({ workFolder: other }), /same drive as the project/);
+  }
   save({ workFolder: '' });
   assert.equal(store.config().repositories[0].workFolder, undefined, 'empty goes back to the folder next to the project');
   assert.equal(desk.worktreeRootFor(store.config().repositories[0]), path.join(`${project}-work`, 'worktrees'));
