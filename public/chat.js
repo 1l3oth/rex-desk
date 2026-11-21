@@ -792,7 +792,7 @@ document.addEventListener('click', async event => {
     else if (action === 'sec-toggle') toggleSection(target.dataset.sec);
     else if (action === 'settings-open') openSettings(ctx);
     else if (action === 'about-open') openSettings(ctx, 'about');
-    else if (action === 'account-open') { openSettings(ctx, 'backup'); if (!(ui.snap?.database?.account || ui.snap?.account?.email)) setTimeout(() => document.querySelector('.dialog-back.settings [data-st-account]')?.click(), 400); }
+    else if (action === 'account-open') { if (ui.snap?.database?.account || ui.snap?.account?.email) openSettings(ctx, 'backup'); else await rexAccountSignIn(); }
     else if (action === 'settings-sources') { document.querySelector('.dialog-back:not(.settings)')?.remove(); openSettings(ctx, 'sources'); }
     else if (action === 'sync-source') { ui.syncing = target.dataset.source; renderAll(); try { const [result] = await api('/sync', { method: 'POST', data: { sourceId: target.dataset.source } }); toast(result?.error ? t`Sync failed: ${result.error}` : `${result?.name || t('Tracker')} synced.`, Boolean(result?.error)); } finally { ui.syncing = ''; await refresh(); } }
     else if (action === 'know-tab') { ui.knowTab = target.dataset.tab; renderAll(true); }
@@ -1329,6 +1329,15 @@ function accountChip() {
   const name = aiKey(ui.snap?.config?.provider), list = ui.accounts?.[name], current = list?.profiles?.find(item => item.profile === list.selected) || list?.profiles?.[0];
   const ai = { codex: t('Codex'), gemini: t('Gemini') }[name] || t('Claude');
   return `<span class="acct-dot ${current?.loggedIn ? 'good' : 'bad'}"></span><span class="acct-text">${current?.loggedIn ? t`${ai} connected` : t`${ai} not connected`}</span>`;
+}
+// Signed out: the same one-click Rex Desk sign-in as Settings, Backup and updates: the browser opens, then this computer connects.
+async function rexAccountSignIn() {
+  try {
+    const { url } = await api('/database/account-start', { method: 'POST' }); if (url) window.open(url, '_blank', 'noopener');
+    toast(url ? t('Waiting for you to sign in in the browser…') : t('Turning cloud backup on…'));
+    let status; for (let misses = 0; !status || status.waiting; ) { try { status = await api('/database/account-finish', { method: 'POST' }); misses = 0; } catch (error) { if (error.name !== 'TypeError' || ++misses > 6) throw error; await new Promise(resolve => setTimeout(resolve, 1000)); } }
+    await refresh();
+  } catch (error) { toast(error.message, true); }
 }
 async function loadAccounts(refreshStatus = false) { try { ui.accounts = await api(`/agents${refreshStatus ? '?refresh=1' : ''}`); ui.accountsAuto = (await api('/accounts/auto')).on; } catch {} }
 async function accountsDialog() {
