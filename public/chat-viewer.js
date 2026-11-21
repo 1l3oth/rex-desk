@@ -96,8 +96,9 @@ export function wireImageViewer() {
     else if (act === 'file') { const src = state.list[state.index].src; dialog.close(); window.rexOpenFile?.(src, { view: 'preview' }); }
   });
   document.addEventListener('dblclick', event => {
-    const dialog = document.getElementById('img-viewer'); if (!dialog?.open || !event.target.closest?.('[data-iv="image"]')) return;
-    const [px, py] = fromCentre(event.target.closest('.iv-stage'), event); zoomAt(state.view.k > 1.01 ? 1 : actualSize(), px, py);
+    // The stage holds the pointer while it is down, so the double-click lands on it, not on the picture: either one zooms.
+    const dialog = document.getElementById('img-viewer'), stage = event.target.closest?.('.iv-stage'); if (!dialog?.open || !stage || !dialog.contains(stage)) return;
+    const [px, py] = fromCentre(stage, event); zoomAt(state.view.k > 1.01 ? 1 : actualSize(), px, py);
   });
   document.addEventListener('keydown', event => {
     const dialog = document.getElementById('img-viewer'); if (!dialog?.open) return;
