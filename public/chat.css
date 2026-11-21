@@ -2253,6 +2253,12 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .file-gone{display:inline-flex;align-items:center;gap:7px;margin:6px 0;padding:8px 12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:13px;background:var(--raised)}
 /* Files attached with + in a message: a picture shows itself, any other file a card that opens it (and can be pinned). */
 .att-cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 2px}.att-cards .md-media{margin:0}
+/* Pictures in a message: small squares in a row above the text; a click opens the full picture. */
+.att-thumbs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+.att-thumb{display:block;width:72px;height:72px;flex:none;border-radius:8px;overflow:hidden;border:1px solid var(--line);background:var(--bg);cursor:zoom-in}
+.att-thumb img{display:block;width:100%;height:100%;object-fit:cover}
+.att-thumb:focus-visible{outline:2px solid var(--accent, #0a64d8);outline-offset:2px}
+@media (max-width:640px){.att-thumb{width:64px;height:64px}}
 .att-card{display:inline-flex;align-items:center;gap:10px;max-width:280px;padding:8px 12px 8px 10px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);text-align:left;cursor:pointer;font:inherit}
 .att-card:hover{border-color:var(--accent)}.att-card svg{flex:none;color:var(--accent)}
 .att-text{display:flex;flex-direction:column;min-width:0}.att-text b{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.att-text small{font-size:11px;color:var(--muted)}

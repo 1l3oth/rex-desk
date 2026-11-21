@@ -214,7 +214,7 @@ function renderItems(items, run, live) {
     if (item.role === 'tool') { group.push(item); continue; }
     flush(false);
     out.push(item.role === 'qa-ask' ? askHtml(item, run) : item.role === 'qa-answer' ? answerHtml(item)
-      : item.role === 'human' ? bubble({ mine: true, name: t('You'), time: hhmm(item.at), voice: item.voice, html: (attached => markdown(attached.text) + attached.html)(attachedFiles(item.text, esc)), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
+      : item.role === 'human' ? bubble({ mine: true, name: t('You'), time: hhmm(item.at), voice: item.voice, html: (attached => attached.top + markdown(attached.text) + attached.html)(attachedFiles(item.text, esc)), unsend: item.sequence ? `${run.id}:${item.sequence}` : '' })
       : item.role === 'agent' ? bubble({ name: provider(run.provider), uid: item.uid, time: hhmm(item.at), html: markdown(item.text) + (item.tokens ? `<div class="tok" title="${t`Tokens this reply used`}">${esc(tokenText(item.tokens))}</div>` : '') })
       : item.role === 'cleared' ? `<div class="cleared"><span>${t`Chat cleared · ${esc(item.text)}`}${item.tokens ? ` · <span class="tok">${esc(typeof item.tokens === 'object' ? tokenText(item.tokens) : typeof item.tokens === 'number' ? `${kilo(item.tokens)} ${t('tokens')}` : String(item.tokens))}</span>` : ''}</span>${item.earlier ? `<button type="button" class="btn small quiet" data-action="show-earlier">${t`Show earlier messages`}</button>` : ''}</div>`
       : item.role === 'subagent' ? subagentHtml(item, live)

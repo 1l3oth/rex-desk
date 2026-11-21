@@ -38,23 +38,24 @@ export function collectShared(entries, artifacts = []) {
 }
 
 // chat: the chat these belong to ("agent:<id>" or "room:<id>"), for the Pin buttons and the Pinned tab.
-// A message's "Attached files" list, as file cards under the text: a picture shows itself, any other file a card that opens
-// it. Both can be pinned from the message. Returns the text without the list, and the cards.
+// A message's "Attached files" list: pictures as small square thumbnails in a row above the text (top), a click opens the
+// full picture; videos and other files as cards under the text (html). Returns the text without the list, top and html.
 const FILE_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>';
 export function attachedFiles(text, esc) {
   const source = String(text || ''), lined = /\n*Attached files \(read them from these paths\):\n((?:- .+\n?)+)/.exec(source);
   // A message saved before L50 lost its line breaks: the list sits on one line ("...paths): - F:\a.png - F:\b.png").
   const flat = lined ? null : /\s*Attached files \(read them from these paths\):\s*-\s+(.+)$/s.exec(source), found = lined || flat;
-  if (!found) return { text: source, html: '' };
+  if (!found) return { text: source, top: '', html: '' };
   const files = (lined ? found[1].split('\n').map(line => line.replace(/^- /, '')) : found[1].split(/\s+-\s+(?=[A-Za-z]:[\\/]|\/)/)).map(line => line.trim()).filter(Boolean);
-  const cards = files.map(file => {
+  const picture = file => isUpload(file) && IMAGE.test(file);
+  const thumbs = files.filter(picture).map(file => { const name = baseName(file), url = uploadUrl(file); return `<a class="att-thumb" href="${esc(url)}" data-file-open="${esc(file)}" title="${esc(name)}"><img src="${esc(url)}" alt="${esc(name)}" loading="lazy"></a>`; }).join('');
+  const cards = files.filter(file => !picture(file)).map(file => {
     const name = baseName(file), url = isUpload(file) ? uploadUrl(file) : '';
-    if (url && IMAGE.test(file)) return `<a class="md-media-link" href="${esc(url)}" data-file-open="${esc(file)}"><img class="md-media" src="${esc(url)}" alt="${esc(name)}" loading="lazy"></a>`;
     if (url && VIDEO.test(file)) return `<video class="md-media" src="${esc(url)}" controls preload="metadata" aria-label="${esc(name)}"></video>`;
     const kind = (name.split('.').pop() || '').slice(0, 4).toUpperCase();
     return `<button type="button" class="att-card" data-file-open="${esc(file)}" title="${esc(file)}">${FILE_ICON}<span class="att-text"><b>${esc(name)}</b><small>${esc(kind)}</small></span></button>`;
   }).join('');
-  return { text: source.slice(0, found.index) + source.slice(found.index + found[0].length), html: `<div class="att-cards">${cards}</div>` };
+  return { text: source.slice(0, found.index) + source.slice(found.index + found[0].length), top: thumbs ? `<div class="att-thumbs">${thumbs}</div>` : '', html: cards ? `<div class="att-cards">${cards}</div>` : '' };
 }
 
 export function sharedTabsHtml(ctx, shared, tab, chat = '') {
