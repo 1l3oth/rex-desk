@@ -166,7 +166,7 @@ export async function openAgentChat(ctx, agent) {
   if (!runId) {
     if (starting.has(agent.id) || introduced.has(agent.id)) { open('specialist', agent.id); return; } starting.add(agent.id); introduced.add(agent.id);
     // When it cannot start, the card opens, so a screen left on the deleted chat does not try again on every redraw.
-    try { await api(`/specialists/${agent.id}/say`, { method: 'POST', data: { text: 'Introduce yourself in one or two lines: who you are and which project you look after.' } }); await refresh(); }
+    try { await api(`/specialists/${agent.id}/say`, { method: 'POST', data: { text: 'Introduce yourself in one or two lines: who you are and which project you look after.', greeting: true } }); await refresh(); }
     catch (error) { toast(t`${agent.name} could not start a chat: ${error.message}`, true); open('specialist', agent.id); return; }
     finally { starting.delete(agent.id); }
     runId = (ui.snap.specialists || []).find(item => item.id === agent.id)?.runId;

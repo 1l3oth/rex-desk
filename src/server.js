@@ -1144,7 +1144,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (request.method === 'POST' && part === 'loop') return json(response, 200, await desk.runLoop(specialistId));
         if (request.method === 'POST' && part === 'rename') return json(response, 200, desk.specialists.rename(specialistId, (await body(request)).name));
         if (request.method === 'POST' && part === 'duplicate') return json(response, 200, desk.specialists.duplicate(specialistId, (await body(request)).name));
-        if (request.method === 'POST' && part === 'say') return json(response, 200, await desk.specialistTurn(specialistId, { prompt: String((await body(request)).text || '').slice(0, 4000) }));
+        if (request.method === 'POST' && part === 'say') { const input = await body(request); return json(response, 200, await desk.specialistTurn(specialistId, { prompt: String(input.text || '').slice(0, 4000), greeting: input.greeting === true })); }
         if (request.method === 'DELETE' && !part) return json(response, 200, desk.specialists.remove(specialistId));
       }
       // A file someone attached in a chat, to show in the chat's Media and Files tabs. Only files under Rex Desk's uploads folder.

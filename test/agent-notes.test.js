@@ -106,12 +106,13 @@ test('after a turn with real work no hidden turn runs: the next real message car
 test('handoffs leave out the start greeting, so the new session answers instead of introducing itself again', async () => {
   const { store, desk, agent } = setup();
   store.put('run', 'chat', { id: 'chat', role: 'specialist', specialistId: agent.id, state: 'finished', createdAt: new Date().toISOString() });
-  store.event('chat', 'human-message', { text: 'Introduce yourself in one or two lines: who you are and which project you look after.' }, true);
+  store.event('chat', 'human-message', { text: 'Introduce yourself in one or two lines: who you are and which project you look after.', greeting: true }, true);
   store.event('chat', 'message', { text: 'I am Desky, I look after the shop.' }, true);
+  store.event('chat', 'human-message', { text: 'Introduce yourself in one or two lines to the new client, please.' }, true);
   store.event('chat', 'human-message', { text: 'Why is checkout slow?' }, true);
   const digest = desk.conversationDigest('chat', 'claude');
-  assert.doesNotMatch(digest, /Introduce yourself/); assert.match(digest, /Why is checkout slow\?/); assert.match(digest, /answer only the latest message/);
+  assert.doesNotMatch(digest, /which project you look after/); assert.match(digest, /to the new client/, 'a real message with the same words stays'); assert.match(digest, /Why is checkout slow\?/); assert.match(digest, /answer only the latest message/);
   desk.resume = async () => {};
   const handoff = readFileSync((await desk.freshStart('chat')).handoff, 'utf8');
-  assert.doesNotMatch(handoff, /Introduce yourself in one or two lines/); assert.match(handoff, /without introducing yourself again/);
+  assert.doesNotMatch(handoff, /which project you look after/); assert.match(handoff, /to the new client/); assert.match(handoff, /without introducing yourself again/);
 });
