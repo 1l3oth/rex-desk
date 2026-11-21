@@ -396,7 +396,7 @@ function stageModel() {
 // Until the second brain is set up, the main agent's screen and About you offer to do it.
 const brainBanner = () => ui.snap?.memory?.secondBrain === false ? `<div class="card brainbar"><div><b>${t`Your agents don't know your second brain yet.`}</b><span class="muted small">${t`${ui.snap.memory.brainCandidates?.length ? t` Found ${esc(ui.snap.memory.brainCandidates[0])}.` : ''} Rex Agent can set it up for all of them.`}</span></div><button class="btn primary small" data-action="brain-setup">${t`Set it up`}</button></div>` : '';
 const quick = (label, text) => `<button class="chip-btn" data-action="quick" data-text="${esc(text)}">${esc(label)}</button>`;
-const welcomeStage = () => ({ title: t('Rex'), meta: t('Rex Agent'),
+const welcomeStage = () => ({ title: t('Rex'), meta: t('Rex Agent'), start: true,
   feed: `${brainBanner()}<div class="welcome">${rexCore('xl', (ui.snap?.specialists || []).filter(agent => agent.kind !== 'main').length)}<h2>${t`Hi, I am Rex`}</h2><p>${t`I get to know your projects, set up an agent for each one, and help you work through your issues. Pick a start, or just type.`}</p><div class="chips">${quick(t('Meet my projects'), t('Meet my projects: go through them one by one, ask me what you are unsure about, and set up an agent for each.'))}${quick(t('Sort my issues'), t('Look at my assigned issues and tell me what to do first.'))}${quick(t('What can you do?'), t('What can you do for me here?'))}</div></div>`,
   composer: { placeholder: t('Message Rex…'), mentions: [] } });
 // The chat is not drawn again from nothing when something changes: only the messages that differ are swapped, and new
@@ -440,6 +440,8 @@ function renderStage(full) {
   // The hint in the message box follows the AI picked under it without redrawing what is typed.
   const draftBox = document.getElementById('draft'); if (draftBox && model.composer?.placeholder && draftBox.placeholder !== model.composer.placeholder) draftBox.placeholder = model.composer.placeholder;
   document.getElementById('feed').className = `feed ${model.feedClass || ''}`;
+  // A chat with nothing said yet (Rex's welcome): the message box sits under it in the middle, and drops to the bottom after the first message.
+  document.querySelector('#stage .stage-main')?.classList.toggle('start', Boolean(model.start));
   const banner = document.getElementById('banner'); if (banner && banner.innerHTML !== (model.banner || '')) banner.innerHTML = model.banner || '';
   drawSide(model.side || '', model.sideClass || '');
   const feed = document.getElementById('feed'), inner = document.getElementById('feed-inner');
