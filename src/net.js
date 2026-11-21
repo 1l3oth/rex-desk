@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { ACCOUNT_API } from './rexdesk-account.js';
+import { BackoffPoll } from './poll-backoff.js';
 
 const now = () => new Date().toISOString();
 const clip = (text, size) => { const value = String(text ?? '').trim(); return value.length > size ? `${value.slice(0, size)}…` : value; };
@@ -114,16 +115,19 @@ export class Net {
   }
 
   // ---------- the inbox ----------
-  start() { if (this.timer || this.desk.closed) return; this.timer = setInterval(() => void this.poll().catch(() => {}), this.pollMs || 5000); this.timer.unref?.(); }
-  stop() { clearInterval(this.timer); this.timer = null; }
+  // Asks only while an agent is online, every 5 s after a message and slower when quiet, up to a minute (poll-backoff.js).
+  start() { if (this.poller || this.desk.closed) return; this.poller = new BackoffPoll(() => this.poll(), { minMs: this.pollMs || 5000, maxMs: this.pollMaxMs || 60000 }); this.poller.start(); }
+  stop() { this.poller?.stop(); this.poller = null; }
+  wake() { this.poller?.wake(); }
   async poll() {
-    if (this.polling || !this.token() || !this.store.list('net-agent').some(item => item.enabled)) return;
+    if (this.polling || !this.token() || !this.store.list('net-agent').some(item => item.enabled)) return false;
     this.polling = true;
     try {
       const sending = this.got, data = await this.api('POST', '/v1/agent-inbox', { got: sending });
       this.got = this.got.filter(id => !sending.includes(id));
       if ((this.store.get('net-state', 'main')?.requests || 0) !== data.requests) { this.store.put('net-state', 'main', { requests: data.requests }); this.store.event('', 'net-thread', { requests: data.requests }); }
       for (const message of data.messages || []) { await this.receive(message).catch(error => this.store.event('', 'error', { message: `A message from another agent could not be read: ${error.message}` })); this.got.push(message.id); }
+      return Boolean(data.messages?.length || sending.length);
     } finally { this.polling = false; }
   }
   // One message from another agent, for one of this computer's agents.
@@ -216,7 +220,7 @@ export class Net {
   }
   async send(thread, text, from = 'us') {
     const settings = this.remote(thread.agentId), words = clip(text, NET_LIMITS.messageChars);
-    await this.api('POST', `/v1/agents/${settings.remoteId}/messages`, { link: thread.link, thread: thread.id, text: words });
+    await this.api('POST', `/v1/agents/${settings.remoteId}/messages`, { link: thread.link, thread: thread.id, text: words }); this.wake();
     this.count(thread.agentId, 1);
     return this.add(this.thread(thread.id), from, words);
   }
@@ -262,7 +266,7 @@ export class Net {
       thread = { id: crypto.randomUUID(), agentId, link: link.id, peer: { ...link.agent, sameOwner: link.sameOwner }, direction: 'out', state: 'active', messages: [], notes: [], createdAt: now(), askedBy: runId };
     }
     if (thread.state === 'ended') throw new Error('That conversation has ended. Start a new one.');
-    await this.api('POST', `/v1/agents/${settings.remoteId}/messages`, { link: thread.link, thread: thread.id, text: clip(words, NET_LIMITS.messageChars) });
+    await this.api('POST', `/v1/agents/${settings.remoteId}/messages`, { link: thread.link, thread: thread.id, text: clip(words, NET_LIMITS.messageChars) }); this.wake();
     this.count(agentId, 1); this.add({ ...thread, askedBy: runId }, 'us', words);
     return { sent: true, thread: thread.id.slice(0, 8), to: thread.peer.name, note: 'End your reply; the answer is handed to you when it comes. The other agent may be offline, so it can take a while.' };
   }

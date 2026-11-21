@@ -47,6 +47,7 @@ import { tursoSignIn, provisionDatabase } from './turso-setup.js';
 import { followDataMove, followMemoryMove, planDataMove, moveMedia, folderStatus, memoryFolder } from './folders.js';
 import { readdirSync } from 'node:fs';
 import { knowledgeGraph } from './knowledge.js';
+import { BackoffPoll } from './poll-backoff.js';
 import { accountSignIn, accountDatabase, accountMe, accountReachable, billingCheckout, billingPortal, billingPack, billingDetails } from './rexdesk-account.js';
 import { bridge } from './local-ai.js';
 
@@ -325,26 +326,25 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       return false;
     }
   })().finally(() => { surveySending = null; });
-  // After the payment page opens: look at the plan every 5 seconds for up to 20 minutes. Paid: join the account's cloud space
-  // (or, on a desk with its own database, just show the new plan) and tell the window.
-  let billingWatch = null;
+  // After the payment page opens: look at the plan every 5 seconds at first, slowing to every 30 s, for up to 20 minutes. Paid:
+  // join the account's cloud space (or, on a desk with its own database, just show the new plan) and tell the window.
+  let billingWatch = null, billingSeen = null;
   const watchPlan = token => {
-    clearInterval(billingWatch); const until = Date.now() + 20 * 60000;
-    billingWatch = setInterval(() => {
-      if (Date.now() > until || !session) { clearInterval(billingWatch); billingWatch = null; return; }
-      void accountMe(token, accountOptions).then(me => {
-        if (!me.space?.paid || !billingWatch) return;
-        clearInterval(billingWatch); billingWatch = null;
-        const store = session?.store; if (!store) return;
-        store.event('', 'billing-paid', { plan: me.plan }); joinAccount();
-        if (store.cloud.checkSpace) { store.cloud.spaceAt = 0; void store.cloud.checkSpace(); }
-        notify();
-      }, () => {});
-    }, 5000);
-    billingWatch.unref?.();
+    billingWatch?.stop(); const until = Date.now() + 20 * 60000;
+    const watch = billingWatch = new BackoffPoll(async () => {
+      if (Date.now() > until || !session) { watch.stop(); if (billingWatch === watch) billingWatch = null; return false; }
+      const me = await accountMe(token, accountOptions).catch(() => null);
+      if (!me?.space?.paid || billingWatch !== watch) return false;
+      watch.stop(); billingWatch = null; billingSeen = null;
+      const store = session?.store; if (!store) return false;
+      store.event('', 'billing-paid', { plan: me.plan }); joinAccount();
+      if (store.cloud.checkSpace) { store.cloud.spaceAt = 0; void store.cloud.checkSpace(); }
+      notify(); return false;
+    }, { minMs: 5000, maxMs: 30000 });
+    watch.start();
   };
   // A plan can also come without the payment page: the owner grants one in the admin dashboard. A signed-in desk that is not in
-  // the cloud yet looks at its plan every 5 minutes and whenever the Backup card opens, and joins by itself once it is paid,
+  // the cloud yet looks at its plan once an hour, and joins by itself once it is paid,
   // without signing in again (L39). A desk whose account already holds another desk is left as it is.
   let planChecking = null;
   const checkPlan = (known = null) => planChecking ||= (async () => {
@@ -631,13 +631,18 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const who = session.account?.user || store.cloud.account?.saved?.user || null;
         if (url.pathname === '/api/billing' && request.method === 'GET') {
           if (!token) return json(response, 200, { signedIn: false });
+          // Read-only (L71): opening Backup never joins the cloud by itself; a paid plan shows the "Turn on cloud backup" button.
+          // The answer is kept for a minute, so the window asking again (every few seconds while a payment is waited for) costs
+          // nothing extra; the plan watcher above clears it the moment the payment lands.
+          if (billingSeen?.token === token && Date.now() - billingSeen.at < 60000) return json(response, 200, { ...billingSeen.answer, watching: Boolean(billingWatch) });
           const me = await accountMe(token, accountOptions).catch(error => ({ error: error.message }));
-          if (me.space?.paid && !store.cloud.enabled) void checkPlan(me);
           const details = me.space?.paid ? await billingDetails(token, accountOptions).catch(() => null) : null;
-          return json(response, 200, { signedIn: true, email: who?.email || me.user?.email || '', plan: me.plan || '', space: me.space || null, card: details?.card || null, invoices: details?.invoices || [], error: me.error || '', watching: Boolean(billingWatch) });
+          const answer = { signedIn: true, email: who?.email || me.user?.email || '', plan: me.plan || '', space: me.space || null, card: details?.card || null, invoices: details?.invoices || [], error: me.error || '' };
+          if (!me.error) billingSeen = { token, at: Date.now(), answer };
+          return json(response, 200, { ...answer, watching: Boolean(billingWatch) });
         }
         if (!token) throw new Error('Sign in with your Rex Desk account first (Settings, Backup and updates).');
-        const input = await body(request);
+        const input = await body(request); billingSeen = null;
         if (url.pathname === '/api/billing/checkout') { const result = await billingCheckout(token, input.offer === 'year' ? 'year' : 'month', accountOptions); watchPlan(token); return json(response, 200, result); }
         if (url.pathname === '/api/billing/portal') return json(response, 200, await billingPortal(token, accountOptions));
         if (url.pathname === '/api/billing/pack') { const result = await billingPack(token, accountOptions); if (store.cloud.checkSpace) { store.cloud.spaceAt = 0; void store.cloud.checkSpace(); } return json(response, 200, result); }
@@ -1320,7 +1325,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (ticks % 4 === 0) remoteOpen(); // Tailscale may start after Rex Desk
     if (ticks % 4 === 0) void desk.worktrees.scan().catch(() => {});
     if (ticks % 20 === 3) void sendSurvey();
-    if (ticks % 20 === 7) void checkPlan();
+    if (ticks % 240 === 7) void checkPlan(); // a plan granted in the admin dashboard: once an hour is enough
     // Claude account usage, as /usage shows it, every 5 minutes (and whenever the accounts window opens).
     if (ticks % 20 === 1) void desk.refreshClaudeUsage().then(notify, () => {});
     // The computer stays awake (the screen may still lock) while an agent works or other devices may connect.
@@ -1336,7 +1341,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   const updateTimer = updates.state.supported ? setInterval(() => void checkForUpdate(), 10 * 60000) : null;
   const firstCheck = updates.state.supported ? setTimeout(() => void checkForUpdate(), 30000) : null;
   updateTimer?.unref(); firstCheck?.unref();
-  const handle = { server, address, accounts, updates, sendSurvey, get restartWanted() { return restartWanted; }, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
+  const handle = { server, address, accounts, updates, sendSurvey, checkPlan, get restartWanted() { return restartWanted; }, get store() { return session?.store; }, get desk() { return session?.desk; }, async close() {
     awake.set(false); computer.stop(); voice.stopAll(); clearInterval(timer); for (const item of remoteServers) item.close(); clearInterval(updateTimer); clearTimeout(firstCheck); await closeSession(); for (const client of clients) client.end();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); unlinkSync(lockPath);
   } };

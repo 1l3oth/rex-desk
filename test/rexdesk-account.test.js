@@ -321,9 +321,14 @@ test('a plan the owner grants in the admin is noticed by a signed-in desk, which
     // Opening the Backup card while there is still no plan changes nothing.
     assert.equal((await person('/api/billing')).body.space.paid, false);
     assert.equal(service.keys, 0);
-    // The owner grants a plan in the admin dashboard. The next look at the plan (the Backup card, or the 5-minute check) joins.
+    // The owner grants a plan in the admin dashboard. Opening the Backup card only shows it (L71); the hourly check joins.
     service.needsPlan = false;
+    await person('/api/billing/portal', { method: 'POST' }).catch(() => {}); // any billing action drops the minute-long cache
     assert.equal((await person('/api/billing')).body.space.paid, true);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(app.store.cloud.enabled, false, 'opening Backup did not turn cloud backup on');
+    assert.equal(service.keys, 0);
+    await app.checkPlan();
     assert.ok(await until(() => app.store.cloud.enabled), 'the desk joined the cloud by itself');
     assert.equal(service.keys, 1); assert.ok(turso.seen.includes('database-key-1'));
     assert.equal(app.store.get('meta', 'account-join')?.state, 'joined');

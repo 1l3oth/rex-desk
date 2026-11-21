@@ -6,6 +6,7 @@
 // It is off until the person turns it on in Settings, and every call needs the A2A key made there. A message from another agent
 // goes into the chosen agent's personal chat, marked as coming from that agent, so the person sees everything that was asked.
 import crypto from 'node:crypto';
+import { BackoffPoll } from './poll-backoff.js';
 
 export const A2A_VERSION = '0.3.0';
 const settingsKey = 'settings';
@@ -122,30 +123,32 @@ export async function handleA2aHttp(desk, request, response, url, readBody) {
 // and posts the answer back, the same way agents online get their messages (src/net.js).
 const sha = value => crypto.createHash('sha256').update(String(value)).digest('hex');
 export class A2aRelay {
-  constructor(desk, { everyMs = 3000, waitMs = 30000 } = {}) { this.desk = desk; this.everyMs = everyMs; this.waitMs = waitMs; this.replies = []; this.busy = false; this.timer = null; }
+  constructor(desk, { everyMs = 3000, maxMs = 60000, waitMs = 30000 } = {}) { this.desk = desk; this.everyMs = everyMs; this.maxMs = maxMs; this.waitMs = waitMs; this.replies = []; this.busy = false; this.poller = null; }
   get store() { return this.desk.store; }
-  start() { if (this.timer || this.desk.closed) return; this.timer = setInterval(() => void this.tick().catch(() => {}), this.everyMs); this.timer.unref?.(); }
-  stop() { clearInterval(this.timer); this.timer = null; }
+  // Every 3 s after a call, slower when quiet up to a minute (poll-backoff.js); nothing at all while A2A is off.
+  start() { if (this.poller || this.desk.closed) return; this.poller = new BackoffPoll(() => this.tick(), { minMs: this.everyMs, maxMs: this.maxMs }); this.poller.start(); }
+  stop() { this.poller?.stop(); this.poller = null; }
   save(patch) { this.store.put('a2a', settingsKey, { ...a2aSettings(this.store), ...patch }); }
   async tick() {
-    const net = this.desk.net; if (this.busy || this.desk.closed || !net?.token()) return;
+    const net = this.desk.net; if (this.busy || this.desk.closed || !net?.token()) return false;
     this.busy = true;
     try {
       const settings = a2aSettings(this.store);
-      if (!settings.enabled) { if (settings.publicId) { await net.api('POST', '/v1/a2a/desk', { enabled: false }); this.save({ publicId: '', publicUrl: '', publicCard: '', publicSig: '' }); } return; }
+      if (!settings.enabled) { if (settings.publicId) { await net.api('POST', '/v1/a2a/desk', { enabled: false }); this.save({ publicId: '', publicUrl: '', publicCard: '', publicSig: '' }); } return false; }
       // The card goes up again whenever it or the key changes (a new agent, a new key).
       const card = agentCard(this.desk, ''), sig = sha(JSON.stringify(card) + settings.token);
       if (sig !== settings.publicSig) { const done = await net.api('POST', '/v1/a2a/desk', { keyHash: sha(settings.token), card }); this.save({ publicId: done.id, publicUrl: done.url, publicCard: done.card, publicSig: sig }); }
       const replies = this.replies.splice(0);
       let data;
       try { data = await net.api('POST', '/v1/a2a/inbox', { replies }); } catch (error) { this.replies.unshift(...replies); throw error; }
-      if (!data.enabled) { this.save({ publicSig: '' }); return; }
+      if (!data.enabled) { this.save({ publicSig: '' }); return false; }
       for (const call of data.calls || []) void this.answer(call);
+      return Boolean(data.calls?.length || replies.length);
     } finally { this.busy = false; }
   }
   async answer(call) {
     const body = await handleA2aRpc(this.desk, call.body, { waitMs: this.waitMs }).catch(error => rpcError(call.body?.id, -32603, error.message));
     this.replies.push({ id: call.id, body });
-    void this.tick().catch(() => {});
+    if (this.poller) this.poller.wake(); else void this.tick().catch(() => {});
   }
 }
