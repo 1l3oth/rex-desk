@@ -1404,10 +1404,10 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
 .iv-count{font-size:12px;color:#9aa3b1;white-space:nowrap}.iv-sp{flex:1}
 .iv-btn{display:grid;place-items:center;width:34px;height:34px;border:0;border-radius:8px;background:none;color:#e6e8eb;text-decoration:none}
 .iv-btn:hover{background:rgba(255,255,255,.12);text-decoration:none}
-.iv-stage{display:grid;place-items:center;min-height:0;overflow:hidden;padding:16px 64px 24px}
-.iv-stage img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;cursor:zoom-in;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+.iv-stage{display:grid;grid-template:minmax(0,1fr)/minmax(0,1fr);place-items:center;min-height:0;min-width:0;overflow:hidden;padding:16px 64px 24px}
+.iv-stage img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border-radius:4px;cursor:zoom-in}
 .iv-stage{touch-action:none;-webkit-user-select:none;user-select:none}
-.iv-stage img{transform-origin:center center;transition:transform .12s ease-out;will-change:transform}.iv-stage img.zoomed{cursor:grab;box-shadow:none;border-radius:0}
+.iv-stage img{transform-origin:center center;transition:transform .12s ease-out;will-change:transform}.iv-stage img.zoomed{cursor:grab;border-radius:0}.iv-stage img.zoomed:active{cursor:grabbing}
 @media (max-width:700px){.iv-stage{padding:8px}.iv-head{padding:8px 10px;gap:4px}.iv-head strong{font-size:14px}.iv-nav{width:38px;height:38px;background:rgba(0,0,0,.45)}.iv-nav.prev{left:6px}.iv-nav.next{right:6px}}
 .iv-nav{position:fixed;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:44px;height:44px;border:0;border-radius:50%;background:rgba(255,255,255,.1);color:#fff}
 .iv-nav:hover{background:rgba(255,255,255,.22)}.iv-nav.prev{left:12px}.iv-nav.next{right:12px}
@@ -2508,3 +2508,7 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .acct-row .acct-main small{margin-top:1px}
 @media (max-width:560px){.acct-tab{padding:9px 4px;gap:4px;font-size:13px;min-width:0}.acct-default-badge{padding:0 5px;font-size:10px}}
 .acct-intro .acct-note{padding:0;background:none;border-radius:0;font-size:12px;color:var(--muted)}
+/* The whole body between the fixed header and footer scrolls. */
+.acct-dialog .acct-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding-right:2px}
+.acct-dialog .acct-list{flex:none;overflow:visible;min-height:0}
+.acct-dialog .acct-head,.acct-dialog .acct-tabs,.acct-dialog .acct-foot{flex:none}
