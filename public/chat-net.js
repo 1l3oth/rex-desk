@@ -197,9 +197,9 @@ export function wireNet(ctx) {
     const post = (pathname, data) => api(pathname, { method: 'POST', data });
     const agentPath = `/net/agents/${encodeURIComponent(agentId)}`;
     try {
-      if (act === 'refresh') await reload();
-      else if (act === 'sign-in') { const { url } = await post('/net/sign-in', {}); if (url) window.open(url, '_blank', 'noopener'); toast(t('Finish signing in in the browser, then come back.')); const until = Date.now() + 5 * 60000; const wait = setInterval(async () => { if (Date.now() > until) return clearInterval(wait); const next = await api('/net').catch(() => null); if (next?.signedIn) { clearInterval(wait); ui.net = next; ctx.render(); toast(t('Signed in.')); } }, 2500); }
-      else if (act === 'pick') { ui.netSel = { kind: target.dataset.kind, id: target.dataset.id }; ui.netVoice = ''; await reload(); }
+      if (act === 'refresh') { ui.netA2a = null; await reload(); }
+      else if (act === 'sign-in') { const { url } = await post('/net/sign-in', {}); if (url) window.open(url, '_blank', 'noopener'); toast(t('Finish signing in in the browser, then come back.')); const until = Date.now() + 5 * 60000; const wait = setInterval(async () => { if (Date.now() > until) return clearInterval(wait); const next = await api('/net').catch(() => null); if (next?.signedIn) { clearInterval(wait); ui.net = next; ui.netA2a = null; await reload(); toast(t('Signed in.')); } }, 2500); }
+      else if (act === 'pick') { ui.netSel = { kind: target.dataset.kind, id: target.dataset.id }; ui.netVoice = ''; if (target.dataset.kind === 'connect') ui.netA2a = null; await reload(); }
       else if (act === 'voice') { ui.netVoice = target.dataset.voice; ctx.render(); root?.querySelector('[name="compose"]')?.focus(); }
       else if (act === 'on') { await post(agentPath, { handle: value('handle') }); ui.netSel = { kind: 'agent', id: agentId || sel.id }; toast(t('It is online. Nobody can reach it until you pair or approve them.')); await reload(); }
       else if (act === 'off') { await post(agentPath, { on: false }); toast(t('Taken offline.')); await reload(); }
