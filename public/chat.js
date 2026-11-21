@@ -291,10 +291,13 @@ const UNSEND_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden
 const bubble = ({ mine, name, time, html, voice = false, unsend = '' }) => `<div class="msg ${mine ? 'mine' : ''}">${unsend ? `<button type="button" class="unsend" data-unsend="${unsend}" title="${t`Unsend`}" aria-label="${t`Unsend this message`}">${UNSEND_ICON}</button>` : ''}<div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}${voice ? ` ${micIcon()}` : ''}</span></div><div class="md">${html}</div>${mine ? '' : `<div class="msg-acts">${speakButton()}</div>`}</div></div>`;
 // The reply as it is written (L56): the server sends the text so far of the block the agent is writing ("partial"); it shows in
 // a bubble that grows under the chat, and goes away once the saved message is drawn, so it never shows twice.
-const live = { runId: '', text: '', doneAt: 0, timer: 0 };
+const live = { runId: '', text: '', doneAt: 0, timer: 0, base: 0 };
+const savedReplies = () => document.querySelectorAll('#feed-inner .msg:not(.mine):not(.live) .md');
 function showLive({ runId, text = '', done = false, tool = '' }) {
   if (tool || !runId || runId !== ctx.currentRunId()) return;
   if (live.runId !== runId) Object.assign(live, { runId, text: '', doneAt: 0 });
+  // A new block remembers how many replies the feed already holds, so an earlier reply with the same words never counts as its saved copy.
+  if (!done && (!live.text || live.doneAt)) live.base = savedReplies().length;
   if (done) { live.doneAt = Date.now(); live.text = String(text || live.text); }
   else { live.text = String(text || ''); live.doneAt = 0; }
   drawLive();
@@ -302,10 +305,10 @@ function showLive({ runId, text = '', done = false, tool = '' }) {
 // The live bubble is built once per run; each new chunk swaps only the words inside it and puts the caret back at the end,
 // so the bubble and its avatar never blink or change height for a frame.
 const flat = html => { const probe = document.createElement('div'); probe.innerHTML = html; return probe.textContent.replace(/\s+/g, ' ').trim(); };
-// True once the feed's newest agent message holds the same words as the finished live copy.
+// True once a reply newer than the block's start holds the same words as the finished live copy.
 function savedInFeed(text) {
-  const all = document.querySelectorAll('#feed-inner .msg:not(.mine):not(.live) .md'), last = all[all.length - 1];
-  return Boolean(last) && last.textContent.replace(/\s+/g, ' ').trim() === flat(markdown(text));
+  const all = savedReplies(), last = all[all.length - 1];
+  return all.length > live.base && last.textContent.replace(/\s+/g, ' ').trim() === flat(markdown(text));
 }
 function drawLive() {
   const box = document.getElementById('live-reply'); if (!box) return;
@@ -454,9 +457,10 @@ function patchFeed(inner, html, full) {
   return changed;
 }
 // Staying at the newest message: a new reply glides into view; a first draw or a switch of chat jumps there at once.
+// A reply that grew during the glide is caught up when it ends, if the reader is still following.
 function followFeed(feed, glide) {
   const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches, gap = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
-  if (glide && !calm && gap > 4 && gap < feed.clientHeight * 1.5) { ui.gliding = true; clearTimeout(ui.glideTimer); ui.glideTimer = setTimeout(() => { ui.gliding = false; }, 700); feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); }
+  if (glide && !calm && gap > 4 && gap < feed.clientHeight * 1.5) { ui.gliding = true; clearTimeout(ui.glideTimer); ui.glideTimer = setTimeout(() => { ui.gliding = false; if (ui.stick && feed.isConnected) feed.scrollTop = feed.scrollHeight; }, 700); feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' }); }
   else feed.scrollTop = feed.scrollHeight;
 }
 const emptyStage = text => ({ title: t('Rex Desk'), meta: '', feed: `<div class="empty"><h2>${t`Nothing here`}</h2><p>${text}</p></div>` });
