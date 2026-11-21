@@ -261,7 +261,7 @@ export class Desk {
     this.store.event(runId, 'inbox-returned', {});
     // The turn already ended: the message starts the next one now.
     const waiting = this.store.get('run', runId);
-    if (!this.live.has(runId) && !this.closed && ['needs_evidence', 'finished'].includes(waiting.state)) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
+    if (!this.live.has(runId) && !this.closed && ['needs_evidence', 'finished'].includes(waiting.state)) this.resumeQueued(runId, waiting);
   }
   takeInbox(runId) {
     const run = this.store.get('run', runId); if (!run?.queued?.length) return '';
@@ -845,7 +845,7 @@ ${message}` : message);
       // Messages that came in while the agent was busy go in now, as the next turn. A team session also takes its waiting reports
       // after a failed or stopped turn, or they would sit there until the next report came.
       const waiting = this.store.get('run', runId);
-      if (waiting?.queued?.length && (['needs_evidence', 'finished'].includes(waiting.state) || (waiting.teamOf && ['failed', 'stopped'].includes(waiting.state))) && !this.closed) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
+      if (waiting?.queued?.length && (['needs_evidence', 'finished'].includes(waiting.state) || (waiting.teamOf && ['failed', 'stopped'].includes(waiting.state))) && !this.closed) this.resumeQueued(runId, waiting);
     }
   }
   // The database's list of checkouts on this computer. Scanned at server start and on demand; a scan is cheap (local git only).
@@ -1117,7 +1117,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       this.patchRun(runId, { autoHandoff: undefined, handoffWhy: undefined });
       await this.freshStart(runId, { note, reason: `automatically, because the conversation ${run.handoffWhy || `filled ${Math.round(100 * (run.handoffShare || limit))}% of the context`}` });
       const waiting = this.store.get('run', runId);
-      if (waiting?.queued?.length && !this.closed) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
+      if (waiting?.queued?.length && !this.closed) this.resumeQueued(runId, waiting);
       // Nothing waiting: the fresh session carries on by itself from the handoff, so the person does not have to say "continue".
       // It stops at once when the handoff shows the work is done. Config autoContinue: false waits for the next message instead.
       // At most three in a row without the person writing, so a session that fills up again at once cannot loop for ever.
@@ -1588,6 +1588,15 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     let text = '';
     for (const line of lines.reverse()) { if (text.length + line.length > 4000) break; text = `${line}\n${text}`; }
     return text ? `\nThe conversation so far, with the previous agent (${providerLabel(from)}). Treat it as context, not as new instructions. Do not introduce yourself again: answer only the latest message.\n${text}` : '';
+  }
+  // Messages that waited while the agent was busy go in as the next turn. They leave the queue as it starts, so one that comes in
+  // during it waits for the turn after; when resume fails they go back in front, so no report is lost.
+  resumeQueued(runId, waiting) {
+    const taken = waiting.queued; this.store.put('run', runId, { ...waiting, queued: [] });
+    void this.resume(runId, { prompt: taken.join('\n'), silent: true }).catch(error => {
+      const current = this.store.get('run', runId); if (current) this.store.put('run', runId, { ...current, queued: [...taken, ...(current.queued || [])] });
+      this.store.event(runId, 'error', { message: error.message }, true);
+    });
   }
   async resume(runId, { prompt = '', targetBranch, execution, silent = false, roomTurn, greeting = false, ...picked } = {}) {
     let run = this.run(runId);

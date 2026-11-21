@@ -136,3 +136,15 @@ test('a team session takes its waiting reports after a failed turn too (L70)', a
     assert.deepEqual(store.get('run', runId).queued || [], []);
   } finally { await desk.shutdown?.(); store.close(); }
 });
+
+test('waiting reports stay queued when the resume fails (L70 review)', async () => {
+  const { store, desk } = setup(() => 'Noted.');
+  try {
+    store.put('run', 'team', { id: 'team', role: 'specialist', state: 'failed', createdAt: new Date().toISOString(), queued: ['first report'] });
+    desk.resume = async () => { throw new Error('Stop the active run before resuming.'); };
+    desk.resumeQueued('team', store.get('run', 'team'));
+    store.put('run', 'team', { ...store.get('run', 'team'), queued: ['later report'] });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(store.get('run', 'team').queued, ['first report', 'later report']);
+  } finally { await desk.shutdown?.(); store.close(); }
+});
