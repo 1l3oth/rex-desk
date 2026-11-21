@@ -4,19 +4,24 @@
 import path from 'node:path';
 import { freeBytes } from './disk.js';
 
-export function workFolder(project, dataDirectory) {
+// Inside it: worktrees<task>, runtime, runs, tmp and test-data. A project may name its own work folder (Settings, Projects).
+export const WORK_PARTS = ['worktrees', 'runtime', 'runs', 'tmp', 'test-data'];
+const same = (a, b) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+export function workFolder(project, dataDirectory, repositories = []) {
+  const chosen = project && repositories.find(item => item?.workFolder && item.path && same(path.resolve(item.path), path.resolve(project)));
+  if (chosen) return path.resolve(chosen.workFolder);
   if (project) { const resolved = path.resolve(project); return path.join(path.dirname(resolved), `${path.basename(resolved)}-work`); }
   return path.join(path.resolve(dataDirectory), 'work');
 }
 // The agents' runtime copy is shared by every agent, so it goes on the drive with the most free space among the data
 // folder's drive and the added projects' drives: next to that project, or in the data folder when its drive wins.
-export function runtimeFolder(dataDirectory, projects = [], { free = freeBytes } = {}) {
+export function runtimeFolder(dataDirectory, projects = [], { free = freeBytes, repositories = [] } = {}) {
   const root = folder => path.parse(path.resolve(folder)).root.toLowerCase();
   let best = { folder: path.join(path.resolve(dataDirectory), 'runtime'), left: free(dataDirectory) }, seen = new Set([root(dataDirectory)]);
   for (const project of projects.filter(Boolean)) {
     if (seen.has(root(project))) continue; seen.add(root(project));
     const left = free(project);
-    if (Number.isFinite(left) && left > (Number.isFinite(best.left) ? best.left : -1)) best = { folder: path.join(workFolder(project), 'runtime'), left };
+    if (Number.isFinite(left) && left > (Number.isFinite(best.left) ? best.left : -1)) best = { folder: path.join(workFolder(project, dataDirectory, repositories), 'runtime'), left };
   }
   return best.folder;
 }

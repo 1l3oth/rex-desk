@@ -95,5 +95,5 @@ export class Handover {
     throw new Error(`${peers.deviceName(agent.node)} did not answer in time, so ${agent.name}'s work was not saved and it stayed there.`);
   }
   pickUp(input) { return pickUp(input); }
-  directoryFor(agent, branch, project = '') { return path.join(workFolder(project, this.store.directory), 'worktrees', `${slug(agent.slug || agent.name, 40)}-${slug(branch, 60)}`); }
+  directoryFor(agent, branch, project = '') { return path.join(workFolder(project, this.store.directory, this.store.config?.().repositories || []), 'worktrees', `${slug(agent.slug || agent.name, 40)}-${slug(branch, 60)}`); }
 }

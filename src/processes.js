@@ -101,7 +101,8 @@ export async function fingerprint(directory) {
   }
   return hash.digest('hex');
 }
-export async function createWorktree(repository, root, branch) {
+// One folder per task: worktrees<task number>, or the branch name when there is no number; a second run of a task gets -2.
+export async function createWorktree(repository, root, branch, { name = '' } = {}) {
   await git(repository.path, ['rev-parse', '--show-toplevel']);
   await git(repository.path, ['check-ref-format', '--branch', branch]);
   let base = repository.baseBranch;
@@ -110,7 +111,8 @@ export async function createWorktree(repository, root, branch) {
     base = `origin/${repository.baseBranch}`;
     await git(repository.path, ['rev-parse', '--verify', `${base}^{commit}`]);
   }
-  const directory = path.resolve(root, slug(branch, 120));
+  let directory = path.resolve(root, slug(String(name || branch), 120));
+  for (let count = 2; name && existsSync(directory); count++) directory = path.resolve(root, `${slug(String(name), 100)}-${count}`);
   if (!directory.startsWith(path.resolve(root) + path.sep)) throw new Error('Worktree path must stay inside the configured worktree directory.');
   await git(repository.path, ['worktree', 'add', '-b', branch, directory, base]);
   return { directory, base, commit: await git(directory, ['rev-parse', 'HEAD']) };
