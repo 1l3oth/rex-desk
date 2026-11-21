@@ -2568,3 +2568,25 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .confirm-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}.confirm-foot .btn{min-width:76px}
 .btn.primary.danger-fill{background:var(--bad);border-color:var(--bad);color:#fff}
 @media (max-width:700px){.confirm-foot .btn{flex:1;padding:8px 12px}}
+/* Set up Rex Desk: a slim bar over Rex Agent's chat, opening into a plain settings-style list. */
+.su{margin:8px 16px 0;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:13px}
+.su-head{display:flex;align-items:center;gap:10px;padding:6px 6px 6px 12px}
+.su-toggle{display:flex;align-items:center;gap:10px;flex:1;min-width:0;padding:4px 0;border:0;background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.su-toggle b{font-weight:600;white-space:nowrap}
+.su-count{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.su-next{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.su-chev{display:inline-flex;margin-left:auto;color:var(--muted);transition:transform .15s}.su.open .su-chev{transform:rotate(180deg)}
+.su progress{width:72px;height:4px;flex:none;appearance:none;border:0;border-radius:2px;background:var(--raised);overflow:hidden}
+.su progress::-webkit-progress-bar{background:var(--raised)}.su progress::-webkit-progress-value{background:var(--accent)}.su progress::-moz-progress-bar{background:var(--accent)}
+.su-close{width:26px;height:26px;flex:none;color:var(--muted)}
+.su-list{margin:0;padding:0;list-style:none;border-top:1px solid var(--line);max-height:min(52vh,460px);overflow:auto}
+.su-row{display:flex;align-items:flex-start;gap:10px;padding:9px 12px}.su-row+.su-row{border-top:1px solid var(--line)}
+.su-row>.btn{flex:none;align-self:center}
+.su-text{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}.su-text>span{color:var(--muted)}
+.su-row.done .su-text b{color:var(--muted);font-weight:500}
+.su-mark{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex:none;margin-top:1px;border:1px solid var(--line);border-radius:50%;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.su-mark.done{border-color:var(--good);background:var(--good);color:#fff}
+.su-extras{margin:6px 0 0;padding:0;list-style:none}
+.su-extras li{display:flex;align-items:center;gap:8px;padding:4px 0;color:var(--muted)}.su-extras li>span:not(.su-mark){flex:1;min-width:0}.su-extras b{color:var(--ink);font-weight:500}
+.su-extras .su-mark{width:14px;height:14px;margin:0}.su-extras .btn{flex:none}
+@media (max-width:760px){.su{margin:6px 10px 0}.su-next,.su progress{display:none}.su-row>.btn,.su-extras .btn{min-height:32px}}

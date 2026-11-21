@@ -162,6 +162,7 @@ function commands(ctx) {
     ...(ui.view.type === 'main' || ui.view.type === 'run' ? [{ name: 'stop', hint: t('Stop the agent'), run: c.stop }, { name: 'clear', hint: t('Fresh start: the agent gets a summary of this chat and starts again'), run: c.clear }, { name: 'loop', hint: t('Check its own tasks now and start on one'), run: c.loop }] : []),
     { name: 'voice', hint: t('Voice engine and language: compare which one understands you'), run: () => voiceDialog(ctx) },
     { name: 'settings', hint: t('Open settings'), run: c.settings },
+    { name: 'setup', hint: t('Show the setup checklist: what is left to set up'), run: c.setup },
     // The agent's own skills and commands, like typing / in Claude Code: choosing one puts it in the box to send to the agent.
     ...agentSlash(ctx),
   ];
