@@ -290,7 +290,7 @@ const UNSEND_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden
 const bubble = ({ mine, name, time, html, voice = false, unsend = '' }) => `<div class="msg ${mine ? 'mine' : ''}">${unsend ? `<button type="button" class="unsend" data-unsend="${unsend}" title="${t`Unsend`}" aria-label="${t`Unsend this message`}">${UNSEND_ICON}</button>` : ''}<div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="who"><strong>${esc(name)}</strong><span>${esc(time)}${voice ? ` ${micIcon()}` : ''}</span></div><div class="md">${html}</div>${mine ? '' : `<div class="msg-acts">${speakButton()}</div>`}</div></div>`;
 // The reply as it is written (L56): the server sends the text so far of the block the agent is writing ("partial"); it shows in
 // a bubble that grows under the chat, and goes away once the saved message is drawn, so it never shows twice.
-const live = { runId: '', text: '', doneAt: 0 };
+const live = { runId: '', text: '', doneAt: 0, timer: 0 };
 function showLive({ runId, text = '', done = false, tool = '' }) {
   if (tool || !runId || runId !== ctx.currentRunId()) return;
   if (live.runId !== runId) Object.assign(live, { runId, text: '', doneAt: 0 });
@@ -298,22 +298,40 @@ function showLive({ runId, text = '', done = false, tool = '' }) {
   else { live.text = String(text || ''); live.doneAt = 0; }
   drawLive();
 }
+// The live bubble is built once per run; each new chunk swaps only the words inside it and puts the caret back at the end,
+// so the bubble and its avatar never blink or change height for a frame.
+const flat = html => { const probe = document.createElement('div'); probe.innerHTML = html; return probe.textContent.replace(/\s+/g, ' ').trim(); };
+// True once the feed's newest agent message holds the same words as the finished live copy.
+function savedInFeed(text) {
+  const all = document.querySelectorAll('#feed-inner .msg:not(.mine):not(.live) .md'), last = all[all.length - 1];
+  return Boolean(last) && last.textContent.replace(/\s+/g, ' ').trim() === flat(markdown(text));
+}
 function drawLive() {
   const box = document.getElementById('live-reply'); if (!box) return;
-  // Once a block is done, the next redraw carries the saved message: the live copy goes then (after a beat, so nothing blinks).
-  const stale = live.runId !== ctx.currentRunId() || !live.text.trim() || (live.doneAt && Date.now() - live.doneAt > 400);
+  clearTimeout(live.timer);
   const feed = document.getElementById('feed'), atEnd = feed && feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
-  if (stale) { if (box.innerHTML) { box.innerHTML = ''; document.body.classList.remove('live-replying'); } if (live.doneAt) Object.assign(live, { text: '', doneAt: 0 }); return; }
-  const run = runById(live.runId), name = run ? (personalAgent(run)?.name || provider(run.provider)) : t('Agent');
-  box.innerHTML = `<div class="msg live"><div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="md">${markdown(live.text)}</div></div></div>`;
-  // The caret sits right after the last word, inside the last paragraph or list item, not on a line of its own.
-  const md = box.querySelector('.md'), caret = document.createElement('span'); caret.className = 'live-caret'; caret.setAttribute('aria-hidden', 'true');
-  let last = md; while (last.lastElementChild && !['PRE', 'TABLE', 'IMG', 'BR', 'HR'].includes(last.lastElementChild.tagName)) last = last.lastElementChild;
-  (last.tagName === 'CODE' && last.parentElement?.tagName !== 'PRE' ? last.parentElement : last).append(caret);
+  const shown = live.runId === ctx.currentRunId() && live.text.trim();
+  // A finished block leaves in the same redraw that draws its saved message, so the feed never shrinks and grows back.
+  // If the saved message never comes (another chat was opened, the text was cut), it goes after 4 s anyway.
+  const gone = !shown || (live.doneAt && (savedInFeed(live.text) || Date.now() - live.doneAt > 4000));
+  if (gone) { if (box.firstChild) { box.replaceChildren(); delete box.dataset.run; document.body.classList.remove('live-replying'); } if (live.doneAt) Object.assign(live, { text: '', doneAt: 0 }); return; }
+  let md = box.querySelector('.msg.live .md');
+  if (!md || box.dataset.run !== live.runId) {
+    const run = runById(live.runId), name = run ? (personalAgent(run)?.name || provider(run.provider)) : t('Agent');
+    box.innerHTML = `<div class="msg live"><div class="avatar">${esc(initials(name))}</div><div class="bubble"><div class="md"></div></div></div>`;
+    box.dataset.run = live.runId; md = box.querySelector('.md'); md.dataset.src = '';
+  }
+  if (md.dataset.src !== live.text) {
+    md.innerHTML = markdown(live.text); md.dataset.src = live.text;
+    // The caret sits right after the last word, inside the last paragraph or list item, not on a line of its own.
+    const caret = document.createElement('span'); caret.className = 'live-caret'; caret.setAttribute('aria-hidden', 'true');
+    let last = md; while (last.lastElementChild && !['PRE', 'TABLE', 'IMG', 'BR', 'HR'].includes(last.lastElementChild.tagName)) last = last.lastElementChild;
+    (last.tagName === 'CODE' && last.parentElement?.tagName !== 'PRE' ? last.parentElement : last).append(caret);
+  }
   document.body.classList.add('live-replying');
-  // The same scroll rule as the feed (L55): follow the newest words only when the person is at the bottom.
-  if (feed && ui.stick && atEnd) feed.scrollTop = feed.scrollHeight;
-  if (live.doneAt) setTimeout(drawLive, 450);
+  // The same scroll rule as the feed (L55): follow the newest words only at the bottom, and never cut a glide short.
+  if (feed && ui.stick && atEnd && !ui.gliding) feed.scrollTop = feed.scrollHeight;
+  if (live.doneAt) live.timer = setTimeout(drawLive, 500);
 }
 const typing = (name, caption = '') => `<div class="msg" aria-live="polite" aria-label="${t`${esc(name)} is typing`}"><div class="avatar">${esc(initials(name))}</div><div class="bubble typing"><span class="dots"><i></i><i></i><i></i></span>${caption ? `<span class="cap">${esc(caption)}</span>` : ''}</div></div>`;
 const note = text => `<div class="note">${text}</div>`;
