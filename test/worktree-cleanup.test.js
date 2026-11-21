@@ -139,6 +139,30 @@ test('the tidy script reads the project from any position and --apply keeps work
   assert.throws(() => liveFolders(temporary('tidy-empty')), /No Rex Desk database/);
 });
 
+test('tidy --apply reads the databases fresh for each worktree and removes only idle, unused ones', async () => {
+  const { Store } = await import('../src/store.js');
+  const root = temporary('tidy-script'), project = path.join(root, 'app'), data = temporary('tidy-script-data');
+  git(root, 'init', '-q', '-b', 'master', project);
+  git(project, 'config', 'user.email', 't@t'); git(project, 'config', 'user.name', 't');
+  writeFileSync(path.join(project, 'a.txt'), 'a'); git(project, 'add', '.'); git(project, 'commit', '-qm', 'first');
+  const made = {};
+  for (const name of ['601', '602', '603']) {
+    made[name] = path.join(root, `app-${name}`); git(project, 'worktree', 'add', '-q', '-b', `fix/${name}`, made[name]);
+    writeFileSync(path.join(made[name], `${name}.txt`), 'b'); git(made[name], 'add', '.'); git(made[name], 'commit', '-qm', 'work');
+    git(project, 'merge', '-q', '--no-edit', `fix/${name}`);
+  }
+  git(project, 'commit', '-q', '--allow-empty', '-m', 'later');
+  const store = new Store(data);
+  store.put('run', 'chat', { id: 'chat', state: 'waiting', cwd: made['601'] });
+  store.put('run', 'ended', { id: 'ended', state: 'done', worktree: made['602'], endedAt: new Date().toISOString() });
+  store.close();
+  const script = path.resolve('scripts', 'tidy-worktrees.mjs');
+  const output = execFileSync(process.execPath, [script, project, '--base', 'master', '--apply', '--data', data], { encoding: 'utf8', env: { ...process.env, REX_DATA_DIR: '' } });
+  assert.match(output, /Removed 1, kept 2/);
+  assert.ok(existsSync(made['601']) && existsSync(made['602']) && !existsSync(made['603']), 'the live and the lately used worktree stay');
+  assert.throws(() => execFileSync(process.execPath, [script, project, '--apply', '--data', temporary('tidy-none')], { stdio: 'pipe' }), /No Rex Desk database/);
+});
+
 test('a project can name its own work folder', () => {
   const project = path.join(os.tmpdir(), 'site'), own = path.join(os.tmpdir(), 'elsewhere', 'site-work');
   assert.equal(workFolder(project, os.tmpdir(), [{ path: project, workFolder: own }]), own);
