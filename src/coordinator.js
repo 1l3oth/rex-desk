@@ -775,7 +775,8 @@ export class Desk {
       await runner.start(remoteOn ? '' : digest ? `${digest}
 
 ${message}` : message);
-      this.saveSeenMark(runId);
+      // In-app mode starts with no message, so the missed context was not sent: it stays unseen for the next turn.
+      if (remoteOn) this.seenMarks?.delete(runId); else this.saveSeenMark(runId);
       if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
       }
       if (await this.switchIfLimited(runId)) { handedOn = true; return; }

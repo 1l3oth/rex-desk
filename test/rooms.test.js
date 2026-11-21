@@ -442,6 +442,24 @@ test('replies the agent gave on the other computer while the two were apart reac
   assert.doesNotMatch(turns[3].prompt, /out of touch/);
 });
 
+test('a turn opened in the Claude app gets no message, so the missed context waits for the next turn (L25)', async () => {
+  const { store, desk, turns, dara } = setup({ replies: ['Hi', 'Ok', 'Sure'] });
+  await desk.specialistTurn(dara.id, { prompt: 'Hello' });
+  await waitFor(() => turns.length === 1 && !desk.live.size);
+  const runId = store.get('specialist', dara.id).runId, at = new Date().toISOString();
+  const add = store.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at,uid) VALUES(?,?,1,?,?,?)');
+  add.run(runId, 'human-message', JSON.stringify({ text: 'Asked on Work' }), at, 'far-node.4');
+  add.run(runId, 'agent-text', JSON.stringify({ text: 'Replied on Work' }), at, 'far-node.5');
+  store.put('run', runId, { ...store.get('run', runId), inApp: { on: true } });
+  await desk.say(runId, 'Second');
+  await waitFor(() => turns.length === 2 && !desk.live.size);
+  assert.doesNotMatch(turns[1].prompt, /out of touch/);
+  store.put('run', runId, { ...store.get('run', runId), inApp: undefined });
+  await desk.say(runId, 'Third');
+  await waitFor(() => turns.length === 3 && !desk.live.size);
+  assert.match(turns[2].prompt, /You \(on [^)]+\): Replied on Work/);
+});
+
 test('a question written there long ago that syncs only now still waits for its reply, and a turn that fails to start is told again (L25)', async () => {
   const { store, desk, turns, dara } = setup({ replies: ['Hi', 'Ok', 'Sure'] });
   await desk.specialistTurn(dara.id, { prompt: 'Hello' });
