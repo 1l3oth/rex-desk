@@ -294,8 +294,9 @@ const bubble = ({ mine, name, time, html, voice = false, unsend = '', uid = '' }
 const live = { runId: '', text: '', doneAt: 0, timer: 0, eventId: '' };
 // The saved message a finished block became, found by the id the server sends with the finished block (never by its words).
 const savedById = id => Boolean(id) && Boolean(document.querySelector(`#feed-inner .msg[data-event="${CSS.escape(id)}"]`));
-function showLive({ runId, text = '', done = false, tool = '', eventId = '' }) {
-  if (tool || !runId || runId !== ctx.currentRunId()) return;
+// Lines sent only for Voice mode to say (a question's title, a desk_message) are not the reply being written: they never touch it.
+function showLive({ runId, text = '', done = false, tool = '', eventId = '', voiceOnly = false }) {
+  if (tool || voiceOnly || !runId || runId !== ctx.currentRunId()) return;
   if (live.runId !== runId) Object.assign(live, { runId, text: '', doneAt: 0, eventId: '' });
   if (done) {
     // A reply that comes whole (no words streamed first, as Codex may send it) gets no live copy: the saved message shows it.
