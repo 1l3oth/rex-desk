@@ -2591,4 +2591,4 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .su-extras .su-mark{width:14px;height:14px;margin:0}.su-extras .btn{flex:none}
 @media (max-width:760px){.su{margin:6px 10px 0}.su-next,.su progress{display:none}.su-row>.btn,.su-extras .btn{min-height:32px}}
 /* Dialogs open below the desktop window bar (search, status), never under it. */
-@media (min-width:761px){html.has-win-bar .dialog-back{padding-top:40px;box-sizing:border-box}html.has-win-bar .dialog-back.settings{padding-top:46px}:where(html.has-win-bar .dialog-back>.dialog){max-height:calc(100dvh - 56px);overflow-y:auto}}
+@media (min-width:761px){html.has-win-bar .dialog-back{padding-top:40px;box-sizing:border-box}html.has-win-bar .dialog-back.settings{padding-top:46px}html.has-win-bar .settings-pop{height:min(760px,calc(100dvh - 70px))}:where(html.has-win-bar .dialog-back>.dialog){max-height:calc(100dvh - 56px);overflow-y:auto}}
