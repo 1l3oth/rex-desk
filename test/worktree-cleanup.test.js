@@ -92,6 +92,13 @@ test('the tidy script reads the project from any position and --apply keeps work
   store.put('run', 'old', { id: 'old', state: 'done', worktree: path.join(project, 'y') });
   store.close();
   assert.deepEqual(liveFolders(data), [path.resolve(project, 'x').toLowerCase()]);
+  // A signed-in account keeps its runs in its own database (workspaces\<id>); those count too.
+  const account = new Store(path.join(data, 'workspaces', 'acc1'));
+  account.put('run', 'chat', { id: 'chat', state: 'running', worktree: path.join(project, 'z') });
+  account.close();
+  writeFileSync(path.join(data, 'accounts.json'), JSON.stringify({ workspaces: [{ id: 'acc1', dir: path.join('workspaces', 'acc1') }] }));
+  assert.deepEqual(liveFolders(data).sort(), [path.resolve(project, 'x'), path.resolve(project, 'z')].map(folder => folder.toLowerCase()).sort());
+  assert.throws(() => liveFolders(temporary('tidy-empty')), /No Rex Desk database/);
 });
 
 test('a project can name its own work folder', () => {

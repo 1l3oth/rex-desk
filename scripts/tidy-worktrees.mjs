@@ -4,7 +4,7 @@
 // Without --apply it only lists what it would do. --apply reads the desk's runs (read-only) and keeps every worktree a live
 // run or chat uses; it refuses without the data folder (--data, or REX_DATA_DIR), so it never removes one blind.
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { worktreeList, removeMerged, inside } from '../src/worktree-cleanup.js';
@@ -22,16 +22,25 @@ export function parseArgs(args) {
   options.project = path.resolve(options.project || '.');
   return options;
 }
-// The folders that live runs and chats work in, from the desk's own database (opened read-only).
+// Every desk database under the data folder: the one at its root (no account) and each signed-in account's own
+// (accounts.json names their folders, normally workspaces\<id>).
+export function deskDatabases(data) {
+  const folders = [data, ...(() => { try { return readdirSync(path.join(data, 'workspaces')).map(name => path.join(data, 'workspaces', name)); } catch { return []; } })()];
+  try { for (const entry of JSON.parse(readFileSync(path.join(data, 'accounts.json'), 'utf8')).workspaces || []) if (entry?.dir) folders.push(path.resolve(data, entry.dir)); } catch { /* no accounts */ }
+  return [...new Set(folders.map(folder => path.resolve(folder, 'desk.sqlite')))].filter(file => existsSync(file));
+}
+// The folders that live runs and chats work in, from every desk database (opened read-only).
 export function liveFolders(data) {
-  const file = path.join(data, 'desk.sqlite');
-  if (!existsSync(file)) throw new Error(`No Rex Desk database in ${data}.`);
-  const db = new DatabaseSync(file, { readOnly: true });
-  try {
-    return db.prepare("SELECT value FROM records WHERE kind='run'").all().map(row => JSON.parse(row.value))
-      .filter(run => !['done', 'failed', 'stopped', 'canceled'].includes(run.state))
-      .flatMap(run => [run.worktree, run.cwd, run.projectPath]).filter(Boolean).map(folder => path.resolve(folder).toLowerCase());
-  } finally { db.close(); }
+  const files = deskDatabases(data);
+  if (!files.length) throw new Error(`No Rex Desk database in ${data}.`);
+  return files.flatMap(file => {
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      return db.prepare("SELECT value FROM records WHERE kind='run'").all().map(row => JSON.parse(row.value))
+        .filter(run => !['done', 'failed', 'stopped', 'canceled'].includes(run.state))
+        .flatMap(run => [run.worktree, run.cwd, run.projectPath]).filter(Boolean).map(folder => path.resolve(folder).toLowerCase());
+    } finally { db.close(); }
+  });
 }
 
 async function main() {
