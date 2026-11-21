@@ -345,3 +345,12 @@ test('a computer that went off does not stay "on" because the chat overlap reads
   await b.desk.peers.pullChats(); await b.desk.peers.pullChats();
   assert.equal(b.desk.peers.online(from), false, 'reading the same message again is not');
 });
+
+test('a days-old message read for the first time does not make its computer look on (L26)', async () => {
+  const { a, b } = computers();
+  const from = a.desk.store.nodeId, row = { v: `${(Date.now() - 3 * 86400000).toString(36).padStart(9, '0')}.0001.${from}` };
+  b.desk.store.cloud = { ready: true, record() {}, remove() {}, event() {}, schedule() {}, shared() {}, enqueue() {}, pullChat: async () => [row] };
+  b.desk.store.applyChatEvents = () => 0;
+  await b.desk.peers.pullChats();
+  assert.equal(b.desk.peers.online(from), false);
+});

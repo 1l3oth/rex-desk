@@ -297,8 +297,8 @@ export class Peers {
       if (!rows?.length) break;
       total += this.store.applyChatEvents(rows);
       // Only a message newer than the last one read is a sign of life: the overlap reads the same last rows on every pull,
-      // and counting those kept a computer that went off "online" forever (L26).
-      for (const row of rows) { if (String(row.v) <= read) continue; const [, , ...node] = String(row.v).split('.'); this.hear(node.join('.')); }
+      // and counting those kept a computer that went off "online" forever (L26). An old message read for the first time is not either.
+      for (const row of rows) { const [time, , ...node] = String(row.v).split('.'); if (String(row.v) <= read || Date.now() - (parseInt(time, 36) || 0) > CLOUD_MS) continue; this.hear(node.join('.')); }
       newest = String(rows.at(-1).v) > newest ? String(rows.at(-1).v) : newest; since = String(rows.at(-1).v);
       if (rows.length < 500) break;
     }
