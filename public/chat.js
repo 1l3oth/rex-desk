@@ -191,8 +191,8 @@ function renderRail() {
       ].join('')}</nav>
     </div>
     ${newComputerCard(snap)}
-    ${section('rooms', t('Meeting rooms'), snap.rooms.length, plus('new-room', t('New meeting room')), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: room.endedAt ? t('Ended') : room.members.length === 1 ? t`${room.members.length} agent` : t`${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })) : `<p class="rail-empty">${t`No meeting rooms yet.`}</p>`)}
-    ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: agentWhere(agent), live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : `<p class="rail-empty">${t`No agents yet. Press + to create one.`}</p>`)}
+    ${section('rooms', t('Meeting rooms'), snap.rooms.length, plus('new-room', t('New meeting room')), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: room.endedAt ? t('Ended') : room.members.length === 1 ? t`${room.members.length} agent` : t`${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })) : `<button type="button" class="rail-cta" data-action="new-room">${t`New meeting room`}</button>`)}
+    ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: agentWhere(agent), live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : `<button type="button" class="rail-cta" data-action="spec-new">${t`New agent`}</button>`)}
   </div>${phoneTabs(asks)}<div class="rail-tools" role="toolbar" aria-label="${t`Tools`}"><button type="button" class="tool" data-open="jev" title="${t`Jev: control this computer and websites`}" aria-label="${t`Jev`}">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? t`Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : t('Memory and what uses it'))}" aria-label="${t`Memory`}">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="${t`Devices: your other computers and phone`}" aria-label="${t`Devices`}">${iconAv('devices')}</button><button type="button" class="tool" data-open="net" data-id="" title="${t`Agents online: let other people's agents reach yours`}" aria-label="${t`Agents online`}"><span class="av sm icon">${NET_ICON}</span></button></div><div class="rail-foot"><button class="acct-btn" data-action="accounts" title="${t`Which Claude account the agents use`}">${accountChip()}</button><button class="btn small rail-settings" data-action="settings-open" title="${t`Settings`}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>${t`Settings`}</button><button class="btn small" data-action="theme">${t`Theme`}</button><button class="btn small" type="button" data-glass-open title="${t`How see-through Rex Desk is`}">${t`Glass`}</button><button type="button" class="rail-ver${ui.snap.update?.ready || ui.snap.update?.available ? ' new' : ''}" data-action="about-open" title="${t`About Rex Desk: version, storage and what it holds`}">${esc(ui.snap.update?.current ? `v${ui.snap.update.current}` : 'dev')}</button></div>`;
 }
 
@@ -710,11 +710,16 @@ function newRoomDialog() { openRoomDialog(ctx); }
 function drawProfile() {
   const back = document.querySelector('.agp-modal'), sheet = back?.querySelector('.agp-sheet'); if (!sheet) return;
   const active = document.activeElement, busy = sheet.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName);
-  if (busy || sheet.querySelector('.ag-save button:not([disabled])')) return;
+  // Unsaved rules are kept as a draft and put back when the Profile tab is drawn again, so a tab switch never loses them.
+  const rules = sheet.querySelector('#sp-rules'), dirty = Boolean(sheet.querySelector('.ag-save button:not([disabled])'));
+  if (dirty && rules) ui.rulesDraft = rules.value;
+  if ((busy || dirty) && !ui.profileForce) return;
+  ui.profileForce = false;
   const body = sheet.querySelector('.agp-scroll'), top = body.scrollTop, html = agentStage(ctx, ui.profileId).feed;
   if (body.dataset.html === html) return; body.dataset.html = html; body.innerHTML = html; body.scrollTop = top;
+  const box = body.querySelector('#sp-rules'); if (box && ui.rulesDraft !== undefined && ui.rulesDraft !== box.value) { box.value = ui.rulesDraft; const save = body.querySelector('.ag-save button'); if (save) save.disabled = false; }
 }
-function closeProfile() { document.querySelector('.agp-modal')?.remove(); ui.profileId = ''; }
+function closeProfile() { document.querySelector('.agp-modal')?.remove(); ui.profileId = ''; ui.rulesDraft = undefined; }
 function showProfile(id) {
   closeProfile(); ui.profileId = id; ui.agentTab = 'about';
   const back = document.createElement('div'); back.className = 'agp-modal';
@@ -739,7 +744,10 @@ document.addEventListener('click', async event => {
     return open(target.dataset.open, target.dataset.id);
   }
   const action = target.dataset.action;
-  if (['spec-chat', 'spec-remove', 'spec-duplicate'].includes(action) && document.querySelector('.agp-modal')) closeProfile();
+  // The popup closes for actions that leave it; the agent is named on the button first, since closing forgets it.
+  if (action === 'spec-tab' && ui.profileId) ui.profileForce = true;
+  if (action === 'spec-save') ui.rulesDraft = undefined;
+  if (['spec-chat', 'spec-remove', 'spec-duplicate'].includes(action) && document.querySelector('.agp-modal')) { if (!target.dataset.agentId) target.dataset.agentId = ui.profileId; closeProfile(); }
   try {
     if (action?.startsWith('spec-') || action === 'chat-pick') await agentAction(ctx, action, target);
     else if (action === 'send') await send();
