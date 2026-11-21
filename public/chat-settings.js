@@ -228,7 +228,7 @@ export function openSettings(ctx, section = 'general') {
     return false;
   };
   // Test sign-ins are edited as a working copy: a new empty row has no user name yet, which the server would drop if saved at once.
-  const signins = () => (state.signins ||= (config().testAccounts || []).map(account => ({ ...account, password: '' })));
+  const signins = () => (state.signins ||= (config().testAccounts || []).map(account => ({ ...account, password: account.password || '' })));
   const readSignins = () => signins().forEach((account, index) => { for (const key of ['site', 'username', 'password']) { const input = back.querySelector(`[name="ta.${index}.${key}"]`); if (input) account[key] = input.value; } });
   const panels = {
     about: () => aboutHtml(state.extra.about, ui.snap.update || {}, state.extra.checking),
@@ -287,7 +287,7 @@ export function openSettings(ctx, section = 'general') {
       ${tip('sources', t('Only connect a task app your team already uses, like Flow, Morningmate or Orbit. Pick just the projects you work on, so agents see your tasks and nothing else.'))}
       ${hasTracker() || hasOrbit() ? field(t('Check for new tasks every'), `<span class="st-unit">${input('syncMinutes', config().syncMinutes, 'type="number" min="0" max="1440"')}<em>${t`minutes`}</em></span>`, t('0 checks only when you press Sync.')) : ''}
       ${hasOrbit() ? `<ul class="st-list">${(config().sources || []).filter(source => source.type === 'orbit').map(source => `<li><b>${esc(source.name)}</b><span class="muted">${esc(source.type)}${source.hasKey ? '' : ' · no key'}</span></li>`).join('')}</ul>` : ''}
-      ${hasTracker() || (state.trackers || []).length ? trackersHtml(ctx, state) : `<p class="muted">${t`No task app is connected. Connect one from the task list in the main window.`}</p>`}`,
+      ${hasTracker() || (state.trackers || []).length ? trackersHtml(ctx, state, config()) : `<p class="muted">${t`No task app is connected. Connect one from the task list in the main window.`}</p>`}`,
     jev: () => `<h2>${t`Jev and voice`}</h2>
       ${tip('jev', t('Talk to Jev to run this computer by voice: open apps, change volume, read the screen. Keep "Ask me before shutting down" on.'))}
       ${field(t('OpenRouter key'), `<input type="password" name="jev.apiKey" autocomplete="off" spellcheck="false" placeholder="${config().jev?.hasKey ? t('Saved. Paste a new key to replace it.') : 'sk-or-…'}">`, t('Optional. For issue ranking and the Gemini voice engine. Kept locked on this computer and sent only to OpenRouter.'))}
@@ -406,7 +406,7 @@ export function openSettings(ctx, section = 'general') {
     if (has('jev')) { next.control = { enabled: checked('control.enabled'), confirm: checked('control.confirm'), agents: checked('control.agents'), language: v['control.language'] }; }
     const schedule0 = base.schedule || {};
     if (has('schedule') && back.querySelector('[name="schedule.enabled"]')) next.schedule = { enabled: checked('schedule.enabled'), time: v['schedule.time'], maxRuns: Number(v['schedule.maxRuns']), fix: back.querySelector('[name="schedule.fix"]') ? checked('schedule.fix') : schedule0.fix !== false, days: [...back.querySelectorAll('[name="schedule.days"]:checked')].map(box => Number(box.value)) };
-    if (has('sources')) { readTrackers(back, state); next.sources = trackerSources(ui, state); if (v.syncMinutes != null) next.syncMinutes = Number(v.syncMinutes); }
+    if (has('sources')) { readTrackers(back, state); next.sources = trackerSources(ui, state, config()); if (v.syncMinutes != null) next.syncMinutes = Number(v.syncMinutes); }
     if (has('signins')) { readSignins(); next.testAccounts = state.signins.filter(account => account.username.trim()); }
     const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(base[key])));
     Object.assign(local, JSON.parse(JSON.stringify(patch)));
@@ -419,7 +419,7 @@ export function openSettings(ctx, section = 'general') {
       ui.snap.config = await api('/config', { method: 'PUT', data: { ...(ui.snap.config || {}), ...sent } });
       for (const [key, value] of Object.entries(sent)) if (JSON.stringify(local[key]) === JSON.stringify(value)) delete local[key];
     }
-    await refresh(); if (quiet) return; if (sources) state.trackers = trackerDraft(ui); state.signins = null; toast(t('Saved.')); draw();
+    await refresh(); if (quiet) return; if (sources) state.trackers = trackerDraft(ui, config()); state.signins = null; toast(t('Saved.')); draw();
   }
   // Settings > About: asks the server for the version, counts and sizes, then draws them.
   async function loadAbout(fresh = false) {
@@ -431,7 +431,7 @@ export function openSettings(ctx, section = 'general') {
     const id = ALIAS[requested] || requested; if (!PARTS[id]) return;
     flushSave();
     state.section = id; state.list = false;
-    if (has('sources')) state.trackers = trackerDraft(ui);
+    if (has('sources')) state.trackers = trackerDraft(ui, config());
     if (has('projects')) void loadGithub();
     if (has('general')) state.extra.autostart = await api('/autostart').catch(() => null);
     draw();

@@ -169,3 +169,45 @@ test('an edit stays visible and stored after leaving and returning while its sav
     assert.equal((await config()).name, 'Pending Name', 'the name survives the theme change');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// Remove a task app while its save is held, leave Tasks and come back: it stays removed, and changing only the sync interval must not bring it back.
+test('a removed task app stays removed after leaving and returning while the save is pending', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const config = async () => (await (await fetch(`${base}/api/state`)).json()).config;
+    const current = await config();
+    const reply = await fetch(`${base}/api/config`, { method: 'PUT', headers: { 'content-type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ ...current, sources: [
+      { id: 'conn1', type: 'morningmate', name: 'MM one', baseUrl: 'https://mm.example.test', projectIds: [], userId: '' },
+      { id: 'conn2', type: 'morningmate', name: 'MM two', baseUrl: 'https://mm2.example.test', projectIds: [], userId: '' }] }) });
+    assert.ok(reply.ok, 'test setup: two connections saved');
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    let release = () => {}, held = false;
+    const gate = new Promise(done => { release = done; });
+    await page.goto(`${base}/`); await page.waitForTimeout(2500);
+    await page.route('**/api/config', async route => { if (route.request().method() === 'PUT') { held = true; await gate; } await route.continue(); });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    page.on('dialog', dialog => dialog.accept());
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => document.querySelector('[data-st-section="tasks"]').click()); await page.waitForTimeout(800);
+    assert.equal(await page.locator('.settings-pop [data-tr-remove]').count(), 2);
+    await page.locator('.settings-pop [data-tr-remove]').first().evaluate(button => button.click()); await page.waitForTimeout(500);
+    const confirmButton = page.locator('.dialog-back button.primary, .confirm-pop button.primary').last();
+    if (await confirmButton.count()) await confirmButton.click();
+    for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(100);
+    assert.ok(held, 'test setup: the removal save is waiting');
+    await page.evaluate(() => document.querySelector('[data-st-section="notify"]').click()); await page.waitForTimeout(500);
+    await page.evaluate(() => document.querySelector('[data-st-section="tasks"]').click()); await page.waitForTimeout(800);
+    assert.equal(await page.locator('.settings-pop [data-tr-remove]').count(), 1, 'the removed connection does not come back on screen');
+    await page.locator('.settings-pop [name="syncMinutes"]').fill('7');
+    await page.waitForTimeout(1200);
+    release();
+    for (let i = 0; i < 100 && (await config()).syncMinutes !== 7; i++) await page.waitForTimeout(100);
+    await page.waitForTimeout(1500);
+    const saved = await config();
+    assert.equal(saved.syncMinutes, 7, 'the interval was saved');
+    assert.equal(saved.sources.length, 1, 'the removal survives the interval change');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});

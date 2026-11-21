@@ -7,8 +7,8 @@ const FILTERS = [['active', t('Request and In progress')], ['unfinished', t('All
 const accounts = value => [...new Set(String(value || '').split(/[,;\n]/).map(item => item.trim()).filter(Boolean))];
 const isTracker = source => source.type === 'flow' || source.type === 'morningmate';
 
-export function trackerDraft(ui) {
-  return (ui.snap.config?.sources || []).filter(isTracker).map(source => ({ ...source, projectIds: [...(source.projectIds || [])], statusMap: { ...(source.statusMap || {}) }, apiKey: '' }));
+export function trackerDraft(ui, cfg = ui.snap.config) {
+  return (cfg?.sources || []).filter(isTracker).map(source => ({ ...source, projectIds: [...(source.projectIds || [])], statusMap: { ...(source.statusMap || {}) }, apiKey: source.apiKey || '' }));
 }
 
 // Copy what is typed in the cards into the working copy, so a redraw keeps it.
@@ -24,8 +24,8 @@ export function readTrackers(back, state) {
   }
 }
 
-export function trackersHtml({ ui, esc }, state) {
-  const repositories = ui.snap.config?.repositories || [];
+export function trackersHtml({ ui, esc }, state, cfg = ui.snap.config) {
+  const repositories = cfg?.repositories || [];
   const card = source => {
     const id = source.id, directory = (ui.snap.directories || []).find(item => item.sourceId === id), chosen = accounts(source.userId), busy = state.trackerBusy === id;
     const projects = directory?.projects || [], people = directory?.employees || [];
@@ -56,8 +56,8 @@ export function trackersHtml({ ui, esc }, state) {
 }
 
 // The sources list to save: Orbit sources as they are, plus the edited Flow and Morningmate cards.
-export function trackerSources(ui, state) {
-  return [...(ui.snap.config?.sources || []).filter(source => !isTracker(source)), ...(state.trackers || []).map(source => ({ ...source, projectIds: source.projectIds.map(String) }))];
+export function trackerSources(ui, state, cfg = ui.snap.config) {
+  return [...(cfg?.sources || []).filter(source => !isTracker(source)), ...(state.trackers || []).map(source => ({ ...source, projectIds: source.projectIds.map(String) }))];
 }
 
 // Clicks inside the cards. Returns true when it handled the click.
