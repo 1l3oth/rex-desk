@@ -110,3 +110,31 @@ test('a slow first save cannot overwrite a newer edit', async () => {
     assert.equal(saved.name, 'First Name', 'the first edit is kept too');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// Changing a value and changing it back while the first save is held: the last value the person set is the one that must be stored.
+test('an edit reverted while the first save waits ends as the reverted value', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    let release = () => {}, held = false;
+    const gate = new Promise(done => { release = done; });
+    await page.goto(`${base}/`); await page.waitForTimeout(2500);
+    await page.route('**/api/autostart', async route => { if (route.request().method() === 'POST') { held = true; await gate; } await route.continue(); });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    const config = async () => (await (await fetch(`${base}/api/state`)).json()).config;
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    const original = (await config()).name;
+    const field = page.locator('.settings-pop [name="name"]');
+    await field.fill('Changed Name');
+    for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(100);
+    assert.ok(held, 'test setup: the first save is waiting on /autostart');
+    await field.fill(original); // change it back while the first save is held
+    await page.waitForTimeout(1200);
+    release();
+    await page.waitForTimeout(3000);
+    assert.equal((await config()).name, original, 'the reverted value is the stored one');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});

@@ -384,14 +384,17 @@ export function openSettings(ctx, section = 'general') {
   const checked = name => Boolean(back.querySelector(`[name="${name}"]`)?.checked);
   let flushSave = () => {};
   // Saves run one at a time. Each one reads the fields at call time but sends only the top-level keys that edit changed, laid over the config as it is when the request goes out, so a slow earlier save can never put an older copy over a newer edit.
+  // Patches queued or in flight are laid over the config when the next save is compared, so changing a value back while the first save waits is still seen as a change.
   let saveChain = Promise.resolve();
+  const waiting = new Set();
   const save = (quiet = false) => {
-    const job = collectSave(), run = saveChain.then(() => sendSave(job, quiet));
+    const job = collectSave(); waiting.add(job);
+    const run = saveChain.then(() => sendSave(job, quiet)).finally(() => waiting.delete(job));
     saveChain = run.catch(() => {});
     return run;
   };
   function collectSave() {
-    const base = JSON.parse(JSON.stringify(config())), v = values(), next = { ...base };
+    const base = Object.assign(JSON.parse(JSON.stringify(config())), ...[...waiting].map(job => JSON.parse(JSON.stringify(job.patch)))), v = values(), next = { ...base };
     let autostart = null;
     if (has('general')) { next.name = v.name; window.rexTheme?.set(v.theme); autostart = checked('autostart'); }
     if (has('agents')) Object.assign(next, { defaultMode: v.defaultMode, reportToOrbit: back.querySelector('[name="reportToOrbit"]') ? checked('reportToOrbit') : Boolean(base.reportToOrbit), saver: checked('saver'), handoffTokens: Number(v.handoffTokens ?? base.handoffTokens ?? 200000), autonomy: checked('autonomy') });
