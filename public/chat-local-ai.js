@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { t } from './i18n.js';
 // Settings, Local AI: models that run on this computer instead of Claude. Ollama downloads and runs them (from its own
 // library or from Hugging Face); any other local server that speaks the OpenAI API can be added by its address.
@@ -85,7 +86,7 @@ export async function localAiClick(ctx, state, target, draw) {
   }
   const remove = target.closest('[data-la-remove]');
   if (remove) {
-    if (!confirm(t`Remove ${remove.dataset.laRemove} from this computer? Agents set to it go back to their usual model.`)) return true;
+    if (!await askConfirm(t`Remove ${remove.dataset.laRemove} from this computer? Agents set to it go back to their usual model.`)) return true;
     try { state.localAi = await api(`/local-ai/models?model=${encodeURIComponent(remove.dataset.laRemove)}`, { method: 'DELETE' }); } catch (error) { toast(error.message); }
     draw(); return true;
   }
@@ -107,7 +108,7 @@ export async function localAiClick(ctx, state, target, draw) {
   }
   const drop = target.closest('[data-la-drop]');
   if (drop) {
-    if (!confirm(t('Remove this server from Rex Desk? The app itself and its models stay on your computer.'))) return true;
+    if (!await askConfirm(t('Remove this server from Rex Desk? The app itself and its models stay on your computer.'))) return true;
     try { state.localAi = await api(`/local-ai/servers?id=${encodeURIComponent(drop.dataset.laDrop)}`, { method: 'DELETE' }); } catch (error) { toast(error.message); }
     draw(); return true;
   }

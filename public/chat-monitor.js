@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
 // Monitor: what uses this computer's memory, split into what is Rex Desk's own and what was opened outside it,
 // so the person can end the right thing without guessing. Rex Agent reads and uses the same list (desk_monitor).
@@ -56,7 +57,7 @@ export async function monitorAction(ctx, action, target) {
   if (action === 'mo-clean') { const result = await api('/monitor/clean', { method: 'POST', data: {} }); toast(result.cleaned.length ? result.cleaned.length === 1 ? t`Freed ${result.cleaned.length} item.` : t`Freed ${result.cleaned.length} items.` : t('Nothing to free: everything running is in use.')); }
   else if (action === 'mo-end') {
     const outside = target.dataset.side === 'outside', label = target.dataset.label || 'this process';
-    if (!confirm(outside ? t`End "${label}"? It was opened outside Rex Desk. Its conversation closes and anything it was doing stops.` : t`End "${label}"?`)) return;
+    if (!await askConfirm(outside ? t`End "${label}"? It was opened outside Rex Desk. Its conversation closes and anything it was doing stops.` : t`End "${label}"?`)) return;
     const result = await api('/monitor/end', { method: 'POST', data: { pid: Number(target.dataset.pid), outside } }); toast(t`Ended ${result.what || 'it'}.`);
   } else if (action === 'mo-stop') { await api(`/runs/${target.dataset.run}/stop`, { method: 'POST', data: {} }); toast(t('Stopped.')); }
   ui.monitor = await api('/monitor?fresh=1'); await ctx.refresh();

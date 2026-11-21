@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
 import { avatarHtml } from './chat-rooms.js';
 // Notifications: everything agents said or asked while you were elsewhere, newest first, with unread counts on each chat.
@@ -138,7 +139,7 @@ export async function noticesAction(ctx, action, target) {
   if (action === 'nt-hear') { playTone(prefs.tone, 'reply', prefs.volume ?? 0.6); return; }
   if (action === 'nt-push-test') { try { await api('/notices/push-test', { method: 'POST', data: {} }); ctx.toast(t('Test push sent. Check your phone.')); } catch (error) { ctx.toast(error.message, true); } await refresh(); return; }
   if (action === 'nt-copy-topic') { await navigator.clipboard.writeText(prefs.push?.topic || ''); ctx.toast(t('Topic copied.')); return; }
-  if (action === 'nt-new-topic') { if (!confirm(t('Make a new private topic? Your phone stops getting pushes until you subscribe to the new one.'))) return; await api('/notices/prefs', { method: 'POST', data: { push: { newTopic: true } } }); ui.pushQr = null; await refresh(); return; }
+  if (action === 'nt-new-topic') { if (!await askConfirm(t('Make a new private topic? Your phone stops getting pushes until you subscribe to the new one.'))) return; await api('/notices/prefs', { method: 'POST', data: { push: { newTopic: true } } }); ui.pushQr = null; await refresh(); return; }
   if (action === 'nt-test') { await api('/notices/test', { method: 'POST', data: {} }); await refresh(); return; }
   if (action === 'nt-read') { await api('/notices/read', { method: 'POST', data: { key: target.dataset.key } }).catch(() => {}); target.closest('.nt-pop')?.remove(); await refresh(); return; }
   if (action === 'nt-open') {

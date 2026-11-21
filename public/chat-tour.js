@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { t, languagePicker } from './i18n.js';
 import { loadTourAi, tourAiHtml, tourAiClick } from '/chat-tour-ai.js';
 import { SOCIAL } from '/social-icons.js';
@@ -47,7 +48,7 @@ export async function folderClick(ctx, state, target, draw) {
   if (!picked?.path) return true;
   if (kind === 'files') { state.folders = await api('/folders/files', { method: 'POST', data: { to: picked.path } }); toast(t`${label} moved to ${state.folders.files}.`); draw(); return true; }
   const note = kind === 'memory' ? ' Agents start their next chat fresh, with a summary of the old one.' : '';
-  if (!confirm(t`Move ${label.toLowerCase()} to ${picked.path}?\n\nRex Desk restarts, copies everything there, and opens again in a few seconds. The old folder stays as a backup you can delete later.${note}`)) return true;
+  if (!await askConfirm(t`Move ${label.toLowerCase()} to ${picked.path}?\n\nRex Desk restarts, copies everything there, and opens again in a few seconds. The old folder stays as a backup you can delete later.${note}`)) return true;
   await api('/folders/move', { method: 'POST', data: { kind, to: picked.path, restart: true } });
   document.body.insertAdjacentHTML('beforeend', `<div class="dialog-back tour-wait"><div class="tour-card"><h2>${t`Moving your folder`}</h2><p>${t`Rex Desk is restarting. This page opens again by itself.`}</p></div></div>`);
   // Wait for the old server to go away, then for the new one to answer.

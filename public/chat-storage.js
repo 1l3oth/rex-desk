@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
 // Settings › Storage: what Rex Desk keeps and how much room it takes, here and in the cloud; one-click clean-ups; and a
 // file browser like Explorer or Finder (folders on the left, files on the right) to look, preview, show in folder and delete.
@@ -135,7 +136,7 @@ export async function storageClick(ctx, state, target, draw) {
   if (action === 'delete') {
     const items = [...box.selected].map(key => { const [place, path] = key.split('\n'); return { place, path }; });
     const bytes = (box.list?.items || []).filter(item => box.selected.has(`${item.place || box.place}\n${item.path}`)).reduce((sum, item) => sum + item.size, 0);
-    if (!confirm(t`Delete ${items.length} items? ${size(bytes)} of space comes back. They are also deleted from the cloud backup, and chats show "file removed" where they were.`)) return true;
+    if (!await askConfirm(t`Delete ${items.length} items? ${size(bytes)} of space comes back. They are also deleted from the cloud backup, and chats show "file removed" where they were.`)) return true;
     try { const result = await ctx.api('/storage/delete', { method: 'POST', data: { items } }); ctx.toast(t`Deleted. ${size(result.freed)} freed.`); }
     catch (error) { ctx.toast(error.message, true); }
     await loadStorage(ctx, state); draw(); return true;
@@ -149,7 +150,7 @@ export async function storageClick(ctx, state, target, draw) {
   }
   if (action === 'clean') {
     const id = button.dataset.id, [label] = CLEAN_LABELS()[id] || [id];
-    if (id === 'raw-output' && !confirm(t`Delete raw agent output older than 30 days? Messages and the agents' memory of their chats stay. This can take a minute on a big desk.`)) return true;
+    if (id === 'raw-output' && !await askConfirm(t`Delete raw agent output older than 30 days? Messages and the agents' memory of their chats stay. This can take a minute on a big desk.`)) return true;
     box.busy = id; draw();
     try { const result = await ctx.api('/storage/clean', { method: 'POST', data: { id }, timeout: 600000 }); box.done = { ...(box.done || {}), [id]: result }; ctx.toast(t`${label}: ${size(result.freed)} freed.`); }
     catch (error) { ctx.toast(error.message, true); }

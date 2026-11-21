@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { t } from './i18n.js';
 // Flow and Morningmate connections, edited inside Settings → Task sources (they used to live on the old /classic page).
 // The cards are a working copy kept in state.trackers, so loading projects or adding a person never loses what was typed.
@@ -69,7 +70,7 @@ export async function trackerClick({ ui, api, toast, refresh }, state, target, b
   }
   if (hit('tr-remove')) {
     const id = hit('tr-remove').dataset.trRemove, source = state.trackers.find(item => item.id === id);
-    if (!confirm(t`Remove ${source?.name || 'this connection'}? Its tasks stop syncing. Press Save to make it final.`)) return true;
+    if (!await askConfirm(t`Remove ${source?.name || 'this connection'}? Its tasks stop syncing. Press Save to make it final.`)) return true;
     readTrackers(back, state); state.trackers = state.trackers.filter(item => item.id !== id); draw(); return true;
   }
   if (hit('tr-unperson')) {

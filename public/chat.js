@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
 import { splitStage } from '/chat-split.js';
 import { rexCore } from '/rex-core.js';
@@ -699,7 +700,7 @@ async function loopNow() {
 }
 async function clearAgent() {
   const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast(t('No agent conversation here.'), true);
-  if (!confirm(t('Clear this conversation? The agent starts fresh with your next message and reads a summary of what was said. The messages stay on screen.'))) return;
+  if (!await askConfirm(t('Clear this conversation? The agent starts fresh with your next message and reads a summary of what was said. The messages stay on screen.'))) return;
   const box = document.getElementById('draft'); if (box) { box.value = ''; ui.drafts.set(draftKey(), ''); }
   await api(`/runs/${run.id}/fresh`, { method: 'POST', data: {} }); toast(t('Cleared. Your next message starts a fresh session.')); await refresh();
 }
@@ -1181,7 +1182,7 @@ document.addEventListener('click', async event => {
   const button = event.target.closest?.('[data-unsend]'); if (!button) return;
   event.stopPropagation();
   const [runId, sequence] = button.dataset.unsend.split(':');
-  if (!event.shiftKey && !confirm(t('Unsend this message? (Shift+click unsends without asking.)'))) return;
+  if (!event.shiftKey && !await askConfirm(t('Unsend this message? (Shift+click unsends without asking.)'))) return;
   try { const result = await api(`/runs/${runId}/messages/${sequence}`, { method: 'DELETE' }); toast(result.seen ? t('Unsent. The agent had already read it.') : t('Unsent before the agent read it.')); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
 });
 // Unsend your own message in a group chat.
@@ -1189,7 +1190,7 @@ document.addEventListener('click', async event => {
   const button = event.target.closest?.('[data-msg-delete]'); if (!button) return;
   event.stopPropagation();
   const message = (ui.snap.messages || []).find(item => item.id === button.dataset.msgDelete); if (!message) return;
-  if (!event.shiftKey && !confirm(t('Unsend this message? (Shift+click unsends without asking.)'))) return;
+  if (!event.shiftKey && !await askConfirm(t('Unsend this message? (Shift+click unsends without asking.)'))) return;
   try { await api(`/rooms/${message.roomId}/messages/${message.id}`, { method: 'DELETE' }); if (ui.reply?.id === message.id) { ui.reply = null; drawReplyBar(); } await refresh(); } catch (error) { toast(error.message, true); }
 });
 

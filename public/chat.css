@@ -2560,3 +2560,11 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .acct-dialog .acct-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding-right:2px}
 .acct-dialog .acct-list{flex:none;overflow:visible;min-height:0}
 .acct-dialog .acct-head,.acct-dialog .acct-tabs,.acct-dialog .acct-foot{flex:none}
+/* The app's own confirm box (public/confirm.js): a small settings-style sheet above every other dialog. */
+.confirm-back{z-index:80}
+.dialog.confirm{box-sizing:border-box;width:min(380px,92vw);gap:8px;padding:16px 16px 14px;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.confirm-text{margin:0;font-size:14px;line-height:1.45;font-weight:600;white-space:pre-line}
+.confirm-more{margin:0;font-size:13px;line-height:1.45;color:var(--muted);white-space:pre-line}
+.confirm-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}.confirm-foot .btn{min-width:76px}
+.btn.primary.danger-fill{background:var(--bad);border-color:var(--bad);color:#fff}
+@media (max-width:700px){.confirm-foot .btn{flex:1;padding:8px 12px}}

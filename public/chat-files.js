@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { t } from './i18n.js';
 // The file window: any file opens here in a tab, from a path in a chat, a file an agent shows, or the Files list.
 // Code and text open in an editor (CodeMirror 5, served from the installed package) with save and Prettier; Markdown, HTML
@@ -80,9 +81,9 @@ function show(index) {
   if (index === state.second) { state.second = state.active; state.focusRight = !state.focusRight; }
   state.active = index;
 }
-function closeTab(index) {
+async function closeTab(index) {
   const tab = state.tabs[index]; if (!tab) return;
-  if (dirty(tab) && !confirm(t`${tab.name} has changes that are not saved. Close it anyway?`)) return;
+  if (dirty(tab) && !await askConfirm(t`${tab.name} has changes that are not saved. Close it anyway?`)) return;
   editors.get(tab.path)?.wrap.remove(); editors.delete(tab.path);
   state.tabs.splice(index, 1);
   // The two panes keep pointing at the same tabs; closing the tab of one pane closes that pane.
@@ -104,7 +105,7 @@ async function save(tab, force = false) {
     const result = await api('/files/save', { method: 'POST', data: { path: tab.path, text, mtime: tab.mtime, force } });
     tab.saved = text; tab.text = text; tab.mtime = result.mtime; toast(t`Saved ${tab.name}.`); drawChrome(); if (tab.view === 'preview') drawBody();
   } catch (error) {
-    if (/changed this file after you opened it/.test(error.message)) { if (confirm(t`${tab.name} changed on disk after you opened it. Save your version over it?`)) return save(tab, true); return; }
+    if (/changed this file after you opened it/.test(error.message)) { if (await askConfirm(t`${tab.name} changed on disk after you opened it. Save your version over it?`)) return save(tab, true); return; }
     toast(error.message, true);
   }
 }
@@ -119,7 +120,7 @@ async function format(tab) {
   } catch (error) { toast(error.message.split('\n')[0], true); }
 }
 async function reload(tab) {
-  if (dirty(tab) && !confirm(t`Throw away your changes to ${tab.name} and load it from disk?`)) return;
+  if (dirty(tab) && !await askConfirm(t`Throw away your changes to ${tab.name} and load it from disk?`)) return;
   const info = await state.ctx.api(`/files/open?path=${encodeURIComponent(tab.path)}`);
   Object.assign(tab, info, { saved: info.text }); const editor = editors.get(tab.path)?.cm; if (editor) editor.setValue(info.text ?? '');
   draw();
@@ -431,7 +432,7 @@ async function onClick(event) {
     else if (act === 'show') { if (state.dodged) undodge(); else { state.shown = true; remember(); draw(); } }
     else if (act === 'dodge') { try { localStorage.setItem('rex-desk-files-dodge', dodgeOn() ? 'off' : 'on'); } catch { /* private window */ } drawChrome(); state.ctx.toast(dodgeOn() ? t('The window moves out of the way while you type.') : t('The window stays where it is while you type.')); }
     else if (act === 'big') { state.dodged = null; state.big = !state.big; place(); drawChrome(); editors.get(tab?.path)?.cm?.refresh(); }
-    else if (act === 'close-all') { const unsaved = state.tabs.filter(dirty); if (unsaved.length && !confirm(t`${unsaved.map(item => item.name).join(', ')} not saved. Close all anyway?`)) return; if (state.standalone) { window.close(); return; } for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.shown = false; remember(); draw(); }
+    else if (act === 'close-all') { const unsaved = state.tabs.filter(dirty); if (unsaved.length && !await askConfirm(t`${unsaved.map(item => item.name).join(', ')} not saved. Close all anyway?`)) return; if (state.standalone) { window.close(); return; } for (const item of editors.values()) item.wrap.remove(); editors.clear(); state.tabs = []; state.active = -1; state.shown = false; remember(); draw(); }
     else if (act === 'view') { tab.view = target.dataset.view; drawChrome(); drawBody(); }
     else if (act === 'sheet') { tab.sheet = Number(target.dataset.index); drawBody(); }
     else if (act === 'save') await save(tab);

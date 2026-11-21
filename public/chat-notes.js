@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
 // The agent card's Soul and Memory tabs (L49). Soul: who the agent is; it only proposes changes, the person decides. Memory: the
 // agent's own notebook, 8 KB at most. Both keep their history (Restore) and can be exported as SOUL.md and MEMORY.md.
@@ -41,7 +42,7 @@ export async function notesAction(ctx, action, target, agent) {
   if (action === 'spec-notes-tab') { ui.notesTab = target.dataset.tab; ctx.renderAll(); return true; }
   if (action === 'spec-notes-export') { exportNotes(ctx, agent); return true; }
   if (action === 'spec-notes-save') { await api(base, { method: 'PUT', data: { kind: tab, text: document.getElementById('nt-text')?.value ?? '' } }); toast(t('Saved.')); await reload(); return true; }
-  if (action === 'spec-notes-clear') { if (!confirm(t`Clear ${agent.name}'s memory? The old text stays under Earlier versions.`)) return true; await api(base, { method: 'PUT', data: { kind: 'memory', text: '' } }); await reload(); return true; }
+  if (action === 'spec-notes-clear') { if (!await askConfirm(t`Clear ${agent.name}'s memory? The old text stays under Earlier versions.`)) return true; await api(base, { method: 'PUT', data: { kind: 'memory', text: '' } }); await reload(); return true; }
   if (action === 'spec-notes-restore') { await api(`${base}/restore`, { method: 'POST', data: { kind: tab, historyId: target.dataset.id } }); toast(t('Put back.')); await reload(); return true; }
   if (action === 'spec-notes-accept' || action === 'spec-notes-decline') { await api(`${base}/decide`, { method: 'POST', data: { accept: action === 'spec-notes-accept' } }); toast(action === 'spec-notes-accept' ? t('Soul updated.') : t('Declined.')); await reload(); return true; }
   return false;

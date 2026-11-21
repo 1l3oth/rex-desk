@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
 import { rexCore } from '/rex-core.js';
 import { chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
@@ -404,7 +405,7 @@ export async function roomAction(ctx, action, target) {
   if (action === 'room-image') { document.getElementById('room-image-input')?.click(); return; }
   if (action === 'room-delete') {
     const room = ui.snap.rooms.find(item => item.id === ui.view.id);
-    if (room && confirm(t`Delete the room "${room.name}" and its messages? The agents and their own chats stay.`)) { await api(`/rooms/${room.id}`, { method: 'DELETE' }); ctx.open('main'); }
+    if (room && await askConfirm(t`Delete the room "${room.name}" and its messages? The agents and their own chats stay.`)) { await api(`/rooms/${room.id}`, { method: 'DELETE' }); ctx.open('main'); }
     return;
   }
   if (action === 'room-stop') { await api(`/runs/${target.dataset.run}/stop`, { method: 'POST', data: {} }); toast(t('Stopped.')); await refresh(); return; }
@@ -492,7 +493,7 @@ export function initLocalTasks(ctx) {
     const task = current(); if (!task) return;
     if (action === 'lt-check-remove') { event.stopPropagation(); void save({ checklist: task.checklist.filter((_, index) => index !== Number(target.dataset.index)) }); }
     else if (action === 'lt-delete') {
-      event.stopPropagation(); if (!confirm(t`Delete #${task.taskNumber} "${task.title}"? Its comments go with it.`)) return;
+      event.stopPropagation(); if (!await askConfirm(t`Delete #${task.taskNumber} "${task.title}"? Its comments go with it.`)) return;
       try { await api(`/local-tasks/${encodeURIComponent(task.id)}`, { method: 'DELETE' }); ctx.open('tasks'); } catch (error) { toast(error.message, true); }
     } else if (action === 'lt-start') {
       event.stopPropagation();
@@ -536,7 +537,7 @@ function connectionsDialog(ctx, startWith = '') {
     const remove = target.closest('[data-src-remove]');
     if (remove) {
       const source = (ui.snap.config?.sources || []).find(item => item.id === remove.dataset.srcRemove);
-      if (!source || !confirm(t`Remove ${source.name}? Its tasks leave the list; nothing changes in ${SERVICE[source.type] || 'the task app'}.`)) return;
+      if (!source || !await askConfirm(t`Remove ${source.name}? Its tasks leave the list; nothing changes in ${SERVICE[source.type] || 'the task app'}.`)) return;
       try { await api(`/sources/${encodeURIComponent(source.id)}`, { method: 'DELETE' }); await refresh({ full: true }); draw(); } catch (error) { toast(error.message, true); }
     }
   });

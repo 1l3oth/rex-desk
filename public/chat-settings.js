@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { seeThroughHere, solidSlider } from './see-through.js';
 import { t, languagePicker } from './i18n.js';
 import { pickerHtml } from '/chat-pick.js';
@@ -449,7 +450,7 @@ export function openSettings(ctx, section = 'general') {
       if (target.closest('[data-st-save]')) { target.closest('[data-st-save]').disabled = true; await save(); return; }
       const open = target.closest('[data-st-open]'); if (open) { back.remove(); document.body.insertAdjacentHTML('beforeend', `<button hidden data-action="${open.dataset.stOpen === 'accounts' ? 'accounts' : open.dataset.stOpen === 'sources' ? 'task-connect' : 'st-voice'}" id="st-opener"></button>`); document.getElementById('st-opener').click(); document.getElementById('st-opener')?.remove(); return; }
       const go = target.closest('[data-st-go]'); if (go) { back.remove(); ctx.open(go.dataset.stGo); return; }
-      if (target.closest('[data-st-signout]')) { if (!confirm(t('Sign out of Rex Desk on this computer? Running agents of this account stop.'))) return; await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; return; }
+      if (target.closest('[data-st-signout]')) { if (!await askConfirm(t('Sign out of Rex Desk on this computer? Running agents of this account stop.'))) return; await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; return; }
       const allowOff = target.closest('[data-st-allow-off]'); if (allowOff) { await api('/computer/allow', { method: 'POST', data: { actions: [allowOff.dataset.stAllowOff], on: false } }); await refresh(); draw(); return; }
       if (target.closest('[data-st-account]')) {
         // One click: the Rex Desk sign-in opens in the browser; the account service then makes the person's database and this computer connects to it.
@@ -466,7 +467,7 @@ export function openSettings(ctx, section = 'general') {
         return;
       }
       if (target.closest('[data-st-account-out]')) {
-        if (!confirm(t('Sign this computer out of your Rex Desk account? The backup keeps working for up to 30 days, then stops until you sign in again.'))) return;
+        if (!await askConfirm(t('Sign this computer out of your Rex Desk account? The backup keeps working for up to 30 days, then stops until you sign in again.'))) return;
         await api('/database/account-signout', { method: 'POST' }); toast(t('Signed out of your Rex Desk account on this computer.')); await refresh(); draw(); return;
       }
       if (target.closest('[data-st-plan-signin]')) {
@@ -488,7 +489,7 @@ export function openSettings(ctx, section = 'general') {
         return;
       }
       if (target.closest('[data-st-pack]')) {
-        if (!confirm(t('Add 5 GB of cloud space for $1 a month ($10 a year on a yearly plan)? It is charged to the card your plan uses.'))) return;
+        if (!await askConfirm(t('Add 5 GB of cloud space for $1 a month ($10 a year on a yearly plan)? It is charged to the card your plan uses.'))) return;
         state.extra.billingBusy = true; draw();
         try { await api('/billing/pack', { method: 'POST' }); state.extra.billing = await api('/billing').catch(() => state.extra.billing); toast(t('5 GB more cloud space added.')); }
         catch (error) { toast(error.message, true); }
@@ -496,7 +497,7 @@ export function openSettings(ctx, section = 'general') {
         return;
       }
       if (target.closest('[data-st-db-off]')) {
-        if (!confirm(t('Stop copying to this cloud database? Everything stays on this computer and nothing is deleted in the cloud. You can then turn on the Rex Desk account backup.'))) return;
+        if (!await askConfirm(t('Stop copying to this cloud database? Everything stays on this computer and nothing is deleted in the cloud. You can then turn on the Rex Desk account backup.'))) return;
         try { await api('/database/disconnect', { method: 'POST' }); state.extra.billing = null; toast(t('This computer no longer copies to that database.')); } catch (error) { toast(error.message, true); }
         await refresh(); draw(); return;
       }
@@ -519,7 +520,7 @@ export function openSettings(ctx, section = 'general') {
       }
       if (tbAct) {
         const name = target.dataset.name;
-        if (!confirm(t`Remove ${name}?`)) return;
+        if (!await askConfirm(t`Remove ${name}?`)) return;
         state.extra.toolboxBusy = true; draw();
         try { state.extra.toolbox = await api('/toolbox', { method: 'POST', data: { what: tbAct, name } }); toast(t('Removed.')); }
         finally { state.extra.toolboxBusy = false; draw(); }
@@ -527,7 +528,7 @@ export function openSettings(ctx, section = 'general') {
       }
       if (target.closest('[data-st-signin-add]')) { readSignins(); state.signins.push({ id: crypto.randomUUID(), site: '', username: '', password: '' }); draw(); back.querySelector(`[name="ta.${state.signins.length - 1}.site"]`)?.focus(); return; }
       const dropSignin = target.closest('[data-st-signin-remove]'); if (dropSignin) { readSignins(); state.signins.splice(Number(dropSignin.dataset.stSigninRemove), 1); draw(); toast(t('Press Save to make it final.')); return; }
-      const dropRepo = target.closest('[data-st-repo-remove]'); if (dropRepo) { const repo = config().repositories[Number(dropRepo.dataset.stRepoRemove)]; if (!confirm(t`Remove ${repo.name} from Rex Desk? The folder on disk stays.`)) return; ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: config().repositories.filter((_, index) => index !== Number(dropRepo.dataset.stRepoRemove)) } }); await refresh(); draw(); return; }
+      const dropRepo = target.closest('[data-st-repo-remove]'); if (dropRepo) { const repo = config().repositories[Number(dropRepo.dataset.stRepoRemove)]; if (!await askConfirm(t`Remove ${repo.name} from Rex Desk? The folder on disk stays.`)) return; ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: config().repositories.filter((_, index) => index !== Number(dropRepo.dataset.stRepoRemove)) } }); await refresh(); draw(); return; }
       if (target.closest('[data-st-repo-pick]')) { const picked = await api('/repositories/pick', { method: 'POST', data: {} }).catch(() => null); if (picked?.path) back.querySelector('[data-st-repo-path]').value = picked.path; return; }
       if (target.closest('[data-st-repo-add]')) {
         let folder = back.querySelector('[data-st-repo-path]').value.trim(); if (!folder) return toast(t('Type or browse to a project folder first.'), true);
@@ -555,7 +556,7 @@ export function openSettings(ctx, section = 'general') {
   back.addEventListener('change', async event => {
     const part = event.target.dataset?.stPart; if (!part) return;
     const on = event.target.checked, name = event.target.closest('label').querySelector('b').textContent;
-    if (!on && !confirm(t`Stop backing up ${name.toLowerCase()}? It is deleted from the cloud and stays on this computer.`)) { event.target.checked = true; return; }
+    if (!on && !await askConfirm(t`Stop backing up ${name.toLowerCase()}? It is deleted from the cloud and stays on this computer.`)) { event.target.checked = true; return; }
     try { const reply = await api('/database/parts', { method: 'PUT', data: { [part]: on } }); ui.snap.database = reply.status; toast(on ? t`${name} is backed up again. Uploading it now.` : t`${name} stays on this computer only. Its cloud copy is being deleted.`); draw(); }
     catch (error) { event.target.checked = !on; toast(error.message, true); }
   });
@@ -563,7 +564,7 @@ export function openSettings(ctx, section = 'general') {
   back.addEventListener('change', async event => {
     const rule = event.target.dataset?.stRule; if (!rule) return;
     const slug = event.target.dataset.slug, on = event.target.checked;
-    if (rule === 'noCloud' && on && !confirm(t`Keep ${slug} out of the cloud? Its chats and files are deleted from the cloud database. They stay on your computers.`)) { event.target.checked = false; return; }
+    if (rule === 'noCloud' && on && !await askConfirm(t`Keep ${slug} out of the cloud? Its chats and files are deleted from the cloud database. They stay on your computers.`)) { event.target.checked = false; return; }
     try { await api(`/project-rules/${encodeURIComponent(slug)}`, { method: 'PUT', data: { [rule]: on } }); await refresh({ full: true }); toast(rule === 'pinned' ? (on ? t`${slug} now runs only on its computer.` : t`${slug}'s agents can be moved again.`) : (on ? t`${slug} is kept out of the cloud. Its cloud copy is being deleted.` : t`${slug} uses the cloud again. Its chats are being sent back.`)); draw(); }
     catch (error) { event.target.checked = !on; toast(error.message, true); }
   });

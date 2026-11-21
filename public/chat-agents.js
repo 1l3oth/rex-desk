@@ -1,3 +1,4 @@
+import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
 import { notesSection, notesAction, exportNotes } from './chat-notes.js';
 import { pickerHtml } from '/chat-pick.js';
@@ -228,7 +229,7 @@ export async function agentAction(ctx, action, target = null) {
     await api(`/specialists/${agent.id}/follow`, { method: 'POST', data: { on: agent.follows === false } });
     toast(agent.follows !== false ? t('It stays on its own computer now.') : t('It now works on whichever computer you write to it from.')); await refresh({ full: true });
   } else if (action === 'spec-move') {
-    if (!confirm(t`Move ${agent.name} to this computer?
+    if (!await askConfirm(t`Move ${agent.name} to this computer?
 
 Its chat comes along and it starts fresh from a summary of the chat. Code that was not pushed on ${agent.device || t('the other computer')} stays there, so push it first.`)) return;
     const moved = await api(`/specialists/${agent.id}/move`, { method: 'POST', data: {} }); await refresh({ full: true });
@@ -238,9 +239,9 @@ Its chat comes along and it starts fresh from a summary of the chat. Code that w
       const copy = await api(`/specialists/${agent.id}/duplicate`, { method: 'POST', data: { name: form.name } }); await refresh(); open('specialist', copy.id); toast(t('Duplicated. It has the same project and rules, and its own conversation.')); } });
   } else if (action.startsWith('spec-notes-')) { await notesAction(ctx, action, target, agent);
   } else if (action === 'spec-remove') {
-    if (!confirm(t`Remove ${agent.name}? Its card, soul and memory are deleted here and in the cloud. Past runs stay.`)) return;
+    if (!await askConfirm(t`Remove ${agent.name}? Its card, soul and memory are deleted here and in the cloud. Past runs stay.`)) return;
     // Its soul and memory go with it: offer to keep a copy first.
-    if (confirm(t`Export ${agent.name}'s soul and memory first (SOUL.md and MEMORY.md)?`)) { ui.notes ||= {}; ui.notes[agent.id] ||= await api(`/specialists/${agent.id}/notes`).catch(() => null); exportNotes(ctx, agent); await new Promise(resolve => setTimeout(resolve, 700)); }
+    if (await askConfirm(t`Export ${agent.name}'s soul and memory first (SOUL.md and MEMORY.md)?`)) { ui.notes ||= {}; ui.notes[agent.id] ||= await api(`/specialists/${agent.id}/notes`).catch(() => null); exportNotes(ctx, agent); await new Promise(resolve => setTimeout(resolve, 700)); }
     await api(`/specialists/${agent.id}`, { method: 'DELETE' }); await refresh(); open('main');
   }
 }
