@@ -22,6 +22,7 @@ import { mkdirSync, writeFileSync, existsSync, statSync, copyFileSync, readFileS
 import { randomBytes, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { promptHints } from './connectors.js';
 import { now, id, thisComputer, latestLocalMain, modelName, deskStatus, deskStatusLabels, keepLines } from './store.js';
 import { Sources } from './providers.js';
 import { AgentProfiles, conversationHere, canonical as canonicalProfile } from './agents.js';
@@ -888,7 +889,8 @@ ${message}` : message);
   prompt(run) {
     // An agent answering another person's agent over the internet gets only what that needs: none of Rex Desk's own tools or notes.
     if (run.role === 'net') return this.net.prompt(run);
-    const orbit = this.store.config().reportToOrbit ? 'After the investigation, send a concise report through the installed Orbit MCP if it is available. Include the source task reference and what you found. Never claim a local file URL is publicly accessible.' : 'Do not send Orbit reports; reporting is disabled in Settings.';
+    // Each connected app may add one line (connectors.js promptHint); nothing is said about apps that are not connected.
+    const orbit = promptHints(this.store.config()).join(' ');
     const lessons = this.lessons(run);
     // Rex Desk's own app help is for the main agent; every other agent reads it with desk_memory("app-help") when asked (L62).
     const appHelp = run.main || run.roomAgent === 'main' ? APP_GUIDE : APP_HELP_POINTER;

@@ -1,4 +1,5 @@
 import { aiProvider } from './codex.js';
+import { connector, defaultBase } from './connectors.js';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -450,14 +451,19 @@ export class Store extends EventEmitter {
     if (!Array.isArray(input.sources) || !Array.isArray(input.repositories)) throw new Error('Sources and repositories must be lists.');
     const sources = input.sources.map(source => {
       const sourceId = source.id || id();
-      const base = new URL(source.baseUrl || (source.type === 'orbit' ? 'https://orbitkh.vercel.app' : ''));
+      // Only connectors that bring tasks in and can be connected in this version keep a source row (connectors.js).
+      const kind = connector(source.type);
+      if (!kind?.ready || !kind.gives.includes('tasks')) throw new Error('Unknown source type.');
+      const base = new URL(source.baseUrl || defaultBase(source.type));
       if (base.protocol !== 'https:') throw new Error('Source APIs must use HTTPS.');
-      if (!['flow', 'morningmate', 'orbit'].includes(source.type)) throw new Error('Unknown source type.');
       if (source.apiKey?.trim()) secretUpdates.push({ id: sourceId, value: this.encrypt(source.apiKey.trim()) });
       if (source.clearKey) secretUpdates.push({ id: sourceId, remove: true });
       return { id: sourceId, name: source.name || source.type, type: source.type, baseUrl: base.origin,
         userId: [...new Set(String(source.userId || '').split(/[,;\n]/).map(value => value.trim()).filter(Boolean))].join(', '), projectIds: [...new Set((source.projectIds || []).map(String).filter(Boolean))],
-        repositoryId: source.repositoryId || (input.repositories.length === 1 ? input.repositories[0].id || '' : ''), statusFilter: ['active', 'unfinished', 'all'].includes(source.statusFilter) ? source.statusFilter : 'active', statuses: [...new Set((Array.isArray(source.statuses) ? source.statuses : String(source.statuses || '').split('\n')).map(name => String(name).trim()).filter(Boolean))].slice(0, 100), statusMap: source.statusMap || {} };
+        repositoryId: source.repositoryId || (input.repositories.length === 1 ? input.repositories[0].id || '' : ''), statusFilter: ['active', 'unfinished', 'all'].includes(source.statusFilter) ? source.statusFilter : 'active', statuses: [...new Set((Array.isArray(source.statuses) ? source.statuses : String(source.statuses || '').split('\n')).map(name => String(name).trim()).filter(Boolean))].slice(0, 100), statusMap: source.statusMap || {},
+        // The "send the final report" switch lives on the connection now; a row from before takes the old global switch.
+        ...(kind.gives.includes('report') ? { sendReport: source.sendReport === undefined ? Boolean(input.reportToOrbit) : Boolean(source.sendReport) } : {}),
+        ...(source.enabled === false ? { enabled: false } : {}) };
     });
     const repositories = input.repositories.map(repository => {
       if (!path.isAbsolute(repository.path || '')) throw new Error('Give the full path of the project folder.');
@@ -481,7 +487,7 @@ export class Store extends EventEmitter {
       username: String(account.username || '').trim().slice(0, 200) })).filter(account => account.username);
     const config = { ...defaults, name: String(input.name || 'Rex'), notify: input.notify !== false, autonomy: input.autonomy !== false, provider: aiProvider(input.provider || 'claude'),
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'rex-desk').replace(/^\/+|\/+$/g, ''),
-      syncMinutes: input.syncMinutes, reportToOrbit: Boolean(input.reportToOrbit), autoPrLowRisk: Boolean(input.autoPrLowRisk), saver: input.saver !== false, autoFree: input.autoFree !== false, models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex), gemini: modelName('gemini', input.models?.gemini) }, sources, repositories,
+      syncMinutes: input.syncMinutes, reportToOrbit: sources.some(source => source.sendReport && source.enabled !== false), autoPrLowRisk: Boolean(input.autoPrLowRisk), saver: input.saver !== false, autoFree: input.autoFree !== false, models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex), gemini: modelName('gemini', input.models?.gemini) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex'), gemini: agentProfile(input.agentProfiles?.gemini, 'Gemini') },
       tourDismissed: Boolean(input.tourDismissed), execution: 'headless', testAccounts: accounts,
       // The permission mode a new agent or chat starts in.

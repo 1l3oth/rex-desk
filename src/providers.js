@@ -1,4 +1,4 @@
-import { orbitTasks, orbitStatus, orbitCall } from './orbit.js';
+import { connectorModule } from './connectors.js';
 import { now } from './store.js';
 import { findTask } from './local-tasks.js';
 
@@ -203,7 +203,7 @@ export class Sources {
     this.syncing = true;
     const results = [];
     try {
-      for (const source of this.store.config().sources.filter(item => !only || item.id === only)) {
+      for (const source of this.store.config().sources.filter(item => (!only || item.id === only) && item.enabled !== false)) {
         try { results.push(await this.syncSource(source)); }
         catch (error) {
           const result = { sourceId: source.id, name: source.name, error: error.message, at: now() };
@@ -253,20 +253,20 @@ export class Sources {
       accountId: String(input.accountId || ''), errors: input.errors || {}, origin, at: now() };
     this.store.put('directory', sourceId, directory); return directory;
   }
-  // Orbit: one key is one goal, so the connection syncs that goal's tasks. Nothing to choose first.
-  async syncOrbit(source) {
-    const key = this.store.credential(source.id);
-    if (!key) throw new Error(`Add the Orbit project key for ${source.name}.`);
-    const fetched = await orbitTasks(source, key, this.fetcher);
+  // A connector with its own module (connectors.js), like Orbit: one key is one goal, so it syncs that goal's tasks.
+  get connectorContext() { return { store: this.store, sources: this, fetcher: this.fetcher }; }
+  async syncConnector(source, module) {
+    const fetched = await module.fetchTasks(this.connectorContext, source);
     saveTasks(this.store, source.id, fetched, (task, previous) => ({ ...task, category: previous?.category || '', runId: previous?.runId, deskStatus: previous?.deskStatus || '', deskNote: previous?.deskNote || '',
       ...(previous?.titleEn && previous.title === task.title ? { titleEn: previous.titleEn } : {}) }));
-    const result = { sourceId: source.id, name: source.name, count: fetched.length, account: 'Orbit project key', accounts: [], accountSource: 'the Orbit project key', verified: fetched.length, at: now() };
+    const result = { sourceId: source.id, name: source.name, count: fetched.length, account: 'project key', accounts: [], accountSource: 'the project key', verified: fetched.length, at: now() };
     this.store.put('sync', source.id, result); return result;
   }
-  // Checks an Orbit key before it is saved: one cheap list call.
-  async testOrbit(source, key) { const result = await orbitCall(source, key, 'tasks.list', { limit: 1 }, this.fetcher); return { ok: true, sample: (result.tasks || []).length }; }
+  // Checks a connector's key before it is saved: one cheap call.
+  async testConnector(source, key) { const module = connectorModule(source.type); if (!module?.test) throw new Error('This connector cannot be checked yet.'); return module.test(this.connectorContext, source, key); }
+  testOrbit(source, key) { return this.testConnector({ ...source, type: 'orbit' }, key); }
   async syncSource(source) {
-    if (source.type === 'orbit') return this.syncOrbit(source);
+    const module = connectorModule(source.type); if (module?.fetchTasks) return this.syncConnector(source, module);
     if (!source.projectIds.length) throw new Error('Select at least one project ID in Settings.');
     let account = source.userId;
     if (!account) {
@@ -387,7 +387,8 @@ export class Sources {
   }
   async updateStatus(task, phase) {
     const source = this.store.config().sources.find(item => item.id === task.sourceId);
-    if (source?.type === 'orbit') { const result = await orbitStatus(source, this.store.credential(source.id), task, phase, this.fetcher); if (result.status) this.store.put('task', task.id, { ...task, status: result.status }); return result; }
+    const module = connectorModule(source?.type);
+    if (module?.pushStatus) { const result = await module.pushStatus(this.connectorContext, source, task, phase); if (result.status) this.store.put('task', task.id, { ...task, status: result.status }); return result; }
     const status = source?.statusMap?.[phase];
     if (!status) return { skipped: true, reason: `No source status mapped for ${phase}.` };
     const data = await this.request(source, `/user/posts/projects/${encodeURIComponent(task.projectId)}/tasks/${encodeURIComponent(task.externalId)}/status`,

@@ -39,6 +39,7 @@ import { Computer } from './computer.js';
 import { Voice } from './voice.js';
 import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
 import { orbitDeviceStart, orbitDevicePoll } from './orbit.js';
+import { catalog as connectorCatalog, connections as connectionList, connector as connectorOf } from './connectors.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
 import { Awake, keepInMemory } from './awake.js';
@@ -902,16 +903,40 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const input = await body(request);
         return json(response, 200, { prompt: setupPrompt({ target: input.target, root, dataDirectory: store.directory, mcpUrl: desk.mcpUrl, profiles: { claude: desk.agents.selected('claude') } }) });
       }
-      if (url.pathname === '/api/orbit/account' && request.method === 'GET') { const account = desk.orbitAccount(); return json(response, 200, { connected: Boolean(account?.token), base: account?.base || 'https://orbitkh.vercel.app', since: account?.at || '' }); }
-      if (url.pathname === '/api/orbit/account' && request.method === 'DELETE') { store.delete('secret', 'orbit-account'); return json(response, 200, { connected: false }); }
-      if (url.pathname === '/api/orbit/account/start' && request.method === 'POST') {
+      // The old Orbit routes (before Connectors, 0.0.102) still answer for one release; drop them in 0.0.104.
+      if (url.pathname === '/api/sources/orbit') url.pathname = '/api/connectors/orbit';
+      else if (url.pathname.startsWith('/api/orbit/account')) url.pathname = url.pathname.replace('/api/orbit/account', '/api/connectors/orbit/account');
+      // Connectors (connectors.js): what can be connected, and what is.
+      if (url.pathname === '/api/connectors' && request.method === 'GET') {
+        const config = store.publicConfig(), account = desk.orbitAccount();
+        return json(response, 200, { ...connectorCatalog(), connections: connectionList(config).map(item => ({ ...item, hasKey: Boolean(config.sources.find(source => source.id === item.id)?.hasKey) })),
+          accounts: account?.token ? [{ connectorId: 'orbit', since: account.at || '' }] : [] });
+      }
+      const connectionMatch = url.pathname.match(/^\/api\/connectors\/([^/]+)(\/sync)?$/);
+      if (connectionMatch && !connectorOf(decodeURIComponent(connectionMatch[1]))) {
+        const connectionId = decodeURIComponent(connectionMatch[1]), config = store.publicConfig(), source = config.sources.find(item => item.id === connectionId);
+        if (!source) return json(response, 404, { error: 'That connection is gone.' });
+        if (connectionMatch[2] && request.method === 'POST') return json(response, 200, await desk.sources.sync({ only: connectionId }));
+        if (!connectionMatch[2] && request.method === 'PATCH') {
+          const input = await body(request), patch = {};
+          if (typeof input.enabled === 'boolean') patch.enabled = input.enabled;
+          if (typeof input.name === 'string' && input.name.trim()) patch.name = input.name.trim().slice(0, 80);
+          if (typeof input.options?.sendReport === 'boolean') patch.sendReport = input.options.sendReport;
+          store.saveConnection({ ...source, ...patch }); notify();
+          return json(response, 200, { connection: connectionList(store.publicConfig()).find(item => item.id === connectionId) });
+        }
+        if (!connectionMatch[2] && request.method === 'DELETE') { store.saveConfig({ ...config, sources: config.sources.filter(item => item.id !== connectionId) }); notify(); return json(response, 200, { removed: true }); }
+      }
+      if (url.pathname === '/api/connectors/orbit/account' && request.method === 'GET') { const account = desk.orbitAccount(); return json(response, 200, { connected: Boolean(account?.token), base: account?.base || 'https://orbitkh.vercel.app', since: account?.at || '' }); }
+      if (url.pathname === '/api/connectors/orbit/account' && request.method === 'DELETE') { store.delete('secret', 'orbit-account'); return json(response, 200, { connected: false }); }
+      if (url.pathname === '/api/connectors/orbit/account/start' && request.method === 'POST') {
         const base = String((await body(request)).base || 'https://orbitkh.vercel.app').replace(/\/$/, '');
         if (!/^https:\/\//.test(base)) return json(response, 400, { error: 'Orbit must be an https address.' });
         const login = await orbitDeviceStart(base);
         desk.orbitLogin = { ...login, base, until: Date.now() + login.expiresIn * 1000 };
         return json(response, 200, { userCode: login.userCode, url: login.url, expiresIn: login.expiresIn, interval: login.interval });
       }
-      if (url.pathname === '/api/orbit/account/poll' && request.method === 'POST') {
+      if (url.pathname === '/api/connectors/orbit/account/poll' && request.method === 'POST') {
         const login = desk.orbitLogin; if (!login || login.until < Date.now()) return json(response, 400, { error: 'The sign-in code expired. Start again.' });
         const result = await orbitDevicePoll(login.deviceCode, login.base);
         if (result.pending) return json(response, 200, { connected: false });
@@ -919,12 +944,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         return json(response, 200, { connected: true });
       }
       // Orbit: the key is checked first, then the goal's tasks are brought in at once. Flow and Morningmate continue below.
-      if (url.pathname === '/api/sources/orbit' && request.method === 'POST') {
+      if (url.pathname === '/api/connectors/orbit' && request.method === 'POST') {
         const input = await body(request), name = String(input.name || 'Orbit').trim().slice(0, 80) || 'Orbit', key = String(input.apiKey || '').trim();
         const existing = input.id ? store.config().sources.find(item => item.id === input.id && item.type === 'orbit') : null;
         if (!existing && !/^dgm_\S{8,}$/.test(key)) return json(response, 400, { error: 'Paste an Orbit project key. It starts with dgm_ (Orbit: Goal → Settings → API → Generate Project Key).' });
-        const draft = { ...(existing || {}), id: existing?.id, name, type: 'orbit', baseUrl: input.baseUrl || existing?.baseUrl || 'https://orbitkh.vercel.app', projectIds: [], userId: '', statusFilter: ['active', 'unfinished', 'all'].includes(input.statusFilter) ? input.statusFilter : existing?.statusFilter || 'active', statuses: [], statusMap: {} };
-        if (key) await desk.sources.testOrbit(draft, key);
+        const draft = { ...(existing || {}), id: existing?.id, name, type: 'orbit', baseUrl: input.baseUrl || existing?.baseUrl || 'https://orbitkh.vercel.app', projectIds: [], userId: '', statusFilter: ['active', 'unfinished', 'all'].includes(input.statusFilter) ? input.statusFilter : existing?.statusFilter || 'active', statuses: [], statusMap: {}, ...(typeof input.sendReport === 'boolean' ? { sendReport: input.sendReport } : {}) };
+        if (key) await desk.sources.testConnector(draft, key);
         const source = store.saveConnection({ ...draft, ...(key ? { apiKey: key } : {}) });
         return json(response, 200, { source: store.publicConfig().sources.find(item => item.id === source.id), sync: await desk.sources.syncSource(source).catch(error => ({ error: error.message })) });
       }
