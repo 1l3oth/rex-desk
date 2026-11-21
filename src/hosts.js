@@ -10,6 +10,25 @@ import { fileURLToPath } from 'node:url';
 // so after a restart it can attach to an agent that kept working, and nothing the agent did in between is lost.
 const HOST_SCRIPT = fileURLToPath(new URL('./agent-host.js', import.meta.url));
 
+// Only what an agent needs is copied: the app's code and its packages, never a checkout's .git, worktrees, .local logs or
+// build output (a copy run from a dev folder once took 7 GB and filled drive C:). Dev-only packages and caches stay behind too.
+const APP_PARTS = new Set(['src', 'public', 'node_modules', 'package.json']);
+const NEVER = new Set(['.git', '.cache', '.vite', '.parcel-cache', '.turbo', '.next', 'worktrees', '.local', 'dist', 'target', 'build', 'coverage']);
+export function runtimeSkip(appRoot) {
+  let dev = [];
+  try { dev = Object.keys(JSON.parse(readFileSync(path.join(appRoot, 'package.json'), 'utf8')).devDependencies || {}); } catch { /* no package.json */ }
+  const devModules = new Set(dev.map(name => path.join(appRoot, 'node_modules', name)));
+  return source => {
+    const relative = path.relative(appRoot, source), parts = relative.split(path.sep);
+    if (parts.length === 1) return !APP_PARTS.has(parts[0]);
+    // Inside node_modules a package may have its own build or dist folder it needs; only caches and .git are dropped there.
+    if (parts[0] === 'node_modules') return devModules.has(source) || ['.git', '.cache', '.vite'].includes(parts.at(-1));
+    return NEVER.has(parts.at(-1));
+  };
+}
+// The node folder: only its files (node.exe and its DLLs), not npm or other folders a system Node.js keeps beside it.
+const nodeSkip = from => source => path.dirname(source) !== from || statSync(source).isDirectory();
+
 // Agents keep working through an update. On Windows the installer closes everything that runs from the install folder (it
 // cannot replace a running program), so agents run from a private copy of this version (its Node.js and Rex Desk's code)
 // kept beside the data. The update leaves them running, and the new server attaches to them as after any restart.
@@ -18,12 +37,15 @@ export async function prepareRuntime(directory, { version = process.env.REX_DESK
   if (!version || platform !== 'win32' || !/^[\w.-]+$/.test(version)) return null;
   doing('agents: preparing their copy of Rex Desk');
   const { copyAll } = await import('./folders.js');
+  const { freeBytes, driveName } = await import('./disk.js');
   const target = path.join(directory, version), ready = path.join(target, 'ready');
   const paths = { node: path.join(target, 'node', path.basename(execPath)), script: path.join(target, 'app', 'src', 'agent-host.js'), cwd: path.join(target, 'app') };
   if (!existsSync(ready)) {
+    const nodeFrom = path.dirname(execPath), appSkip = runtimeSkip(appRoot), onlyNode = nodeSkip(nodeFrom);
     rmSync(target, { recursive: true, force: true });
-    await copyAll(path.dirname(execPath), path.join(target, 'node'));
-    await copyAll(appRoot, path.join(target, 'app'), source => path.basename(source) === '.local');
+    mkdirSync(directory, { recursive: true });
+    await copyAll(nodeFrom, path.join(target, 'node'), onlyNode);
+    await copyAll(appRoot, path.join(target, 'app'), appSkip);
     writeFileSync(ready, new Date().toISOString());
   }
   for (const name of existsSync(directory) ? readdirSync(directory) : []) if (name !== version) { try { rmSync(path.join(directory, name), { recursive: true }); } catch { /* an agent still runs from it */ } }

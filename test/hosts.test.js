@@ -17,7 +17,7 @@ test('on Windows, agents run from a private copy of the app, so an update instal
   mkdirSync(path.join(install, 'node')); writeFileSync(path.join(install, 'node', 'node.exe'), 'node');
   mkdirSync(path.join(install, 'app', 'src'), { recursive: true }); writeFileSync(path.join(install, 'app', 'src', 'agent-host.js'), 'host');
   mkdirSync(path.join(install, 'app', '.local')); writeFileSync(path.join(install, 'app', '.local', 'log.txt'), 'not copied');
-  const where = { execPath: path.join(install, 'node', 'node.exe'), appRoot: path.join(install, 'app'), platform: 'win32' };
+  const where = { execPath: path.join(install, 'node', 'node.exe'), appRoot: path.join(install, 'app'), platform: 'win32', free: () => Infinity };
   assert.equal(await prepareRuntime(runtime, { ...where, version: '' }), null, 'a checkout (no installed version) runs as before');
   assert.equal(await prepareRuntime(runtime, { ...where, version: '1.0.0', platform: 'darwin' }), null, 'only Windows needs it');
   const first = await prepareRuntime(runtime, { ...where, version: '1.0.0' });
@@ -34,6 +34,25 @@ test('on Windows, agents run from a private copy of the app, so an update instal
   assert.equal(spawned[0].node, second.node); assert.equal(spawned[0].args[0], second.script); assert.equal(spawned[0].options.cwd, second.cwd);
   assert.equal(saved.at(-1).outside, true);
 });
+
+test('the runtime copy takes only what agents need from a dev checkout, never .git, worktrees or build output', async () => {
+  const { prepareRuntime } = await import('../src/hosts.js');
+  const { mkdirSync } = await import('node:fs');
+  const install = temporary('dev-install'), runtime = path.join(temporary('dev-data'), 'runtime'), app = path.join(install, 'app'), node = path.join(install, 'node');
+  const put = (file, text = 'x') => { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, text); };
+  put(path.join(node, 'node.exe'), 'node'); put(path.join(node, 'node_modules', 'npm', 'index.js'));
+  put(path.join(app, 'package.json'), JSON.stringify({ type: 'module', devDependencies: { acorn: '1' } }));
+  put(path.join(app, 'src', 'agent-host.js'), 'host'); put(path.join(app, 'public', 'voice-phrases.js'));
+  put(path.join(app, 'node_modules', 'zod', 'index.js')); put(path.join(app, 'node_modules', 'zod', 'dist', 'z.js'));
+  put(path.join(app, 'node_modules', 'acorn', 'index.js')); put(path.join(app, 'node_modules', '.cache', 'big.bin'));
+  for (const junk of ['.git/HEAD', 'worktrees/a/file.js', '.local/log.txt', 'desktop/target/app.exe', 'dist/app.zip', 'docs/readme.md', 'src/.git/x']) put(path.join(app, junk));
+  const copy = await prepareRuntime(runtime, { execPath: path.join(node, 'node.exe'), appRoot: app, platform: 'win32', version: '2.0.0', free: () => Infinity });
+  const has = relative => existsSync(path.join(copy.cwd, relative));
+  for (const kept of ['package.json', 'src/agent-host.js', 'public/voice-phrases.js', 'node_modules/zod/index.js', 'node_modules/zod/dist/z.js']) assert.ok(has(kept), `${kept} is copied`);
+  for (const left of ['.git', 'worktrees', '.local', 'desktop', 'dist', 'docs', 'src/.git', 'node_modules/acorn', 'node_modules/.cache']) assert.ok(!has(left), `${left} stays behind`);
+  assert.ok(existsSync(copy.node)); assert.ok(!existsSync(path.join(path.dirname(copy.node), 'node_modules')), 'npm beside a system Node.js is not copied');
+});
+
 const sdkModule = fileURLToPath(new URL('./fixtures/fake-sdk.mjs', import.meta.url));
 const waitFor = async (check, what, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { const value = check(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 50)); } throw new Error(`Timed out waiting for ${what}`); };
 const said = (store, runId) => store.events(runId, { visible: true }).filter(event => event.kind === 'agent-text').map(event => event.text);
