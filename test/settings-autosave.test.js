@@ -47,3 +47,35 @@ test('Settings stays open while typing and closes on Escape', async () => {
     assert.equal(await page.locator('.settings-pop').count(), 0, 'Escape closes Settings');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// Removing a test sign-in or a task app connection must be stored, so it stays gone after Settings is opened again.
+test('removing a test sign-in or a connection is saved', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const config = async () => (await (await fetch(`${base}/api/state`)).json()).config;
+    const put = async data => fetch(`${base}/api/config`, { method: 'PUT', headers: { 'content-type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify(data) });
+    const current = await config();
+    const reply = await put({ ...current, testAccounts: [{ site: 'localhost', username: 'qa@example.com', password: 'x' }], sources: [{ id: 'conn1', type: 'morningmate', name: 'MM test', baseUrl: 'https://mm.example.test', projectIds: [], userId: '' }] });
+    assert.ok(reply.ok, 'test setup: the config accepted a sign-in and a connection: ' + await reply.clone().text());
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    await page.goto(`${base}/`); await page.waitForTimeout(2500);
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => document.querySelector('[data-st-section="projects"]').click()); await page.waitForTimeout(800);
+    assert.equal((await config()).testAccounts.length, 1);
+    await page.evaluate(() => document.querySelector('.settings-pop .st-adv:has([name="ta.0.site"]) > summary').click());
+    await page.locator('.settings-pop [data-st-signin-remove]').first().click(); await page.waitForTimeout(800);
+    assert.equal((await config()).testAccounts.length, 0, 'the removed sign-in is gone from the saved config');
+    await page.evaluate(() => document.querySelector('[data-st-section="tasks"]').click()); await page.waitForTimeout(800);
+    assert.equal((await config()).sources.length, 1);
+    page.on('dialog', dialog => dialog.accept());
+    await page.locator('.settings-pop [data-tr-remove]').first().evaluate(button => button.click()); await page.waitForTimeout(500);
+    const confirmButton = page.locator('.dialog-back button.primary, .confirm-pop button.primary').last();
+    if (await confirmButton.count()) await confirmButton.click();
+    await page.waitForTimeout(800);
+    assert.equal((await config()).sources.length, 0, 'the removed connection is gone from the saved config');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});

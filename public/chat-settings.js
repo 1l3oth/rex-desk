@@ -429,7 +429,7 @@ export function openSettings(ctx, section = 'general') {
       const section = target.closest('[data-st-section]'); if (section) { await goSection(section.dataset.stSection); return; }
       if (target.closest('[data-st-about-refresh]')) { state.extra.about = null; draw(); await loadAbout(true); return; }
       const copyPath = target.closest('[data-st-copy-path]'); if (copyPath) { await navigator.clipboard.writeText(copyPath.dataset.stCopyPath); toast(t('Copied.')); return; }
-      if (await trackerClick(ctx, state, target, back, draw)) return;
+      if (await trackerClick(ctx, state, target, back, draw)) { if (target.closest('[data-tr-remove]') && has('sources')) await save(true); return; }
       if (await folderClick(ctx, state, target, draw)) return;
       if (has('localai') && await localAiClick(ctx, state, target, draw)) return;
       if (has('storage') && await storageClick(ctx, state, target, draw)) return;
@@ -534,7 +534,7 @@ export function openSettings(ctx, section = 'general') {
         return;
       }
       if (target.closest('[data-st-signin-add]')) { readSignins(); state.signins.push({ id: crypto.randomUUID(), site: '', username: '', password: '' }); draw(); back.querySelector(`[name="ta.${state.signins.length - 1}.site"]`)?.focus(); return; }
-      const dropSignin = target.closest('[data-st-signin-remove]'); if (dropSignin) { readSignins(); state.signins.splice(Number(dropSignin.dataset.stSigninRemove), 1); draw(); return; }
+      const dropSignin = target.closest('[data-st-signin-remove]'); if (dropSignin) { readSignins(); state.signins.splice(Number(dropSignin.dataset.stSigninRemove), 1); draw(); await save(true); return; }
       const dropRepo = target.closest('[data-st-repo-remove]'); if (dropRepo) { const repo = config().repositories[Number(dropRepo.dataset.stRepoRemove)]; if (!await askConfirm(t`Remove ${repo.name} from Rex Desk? The folder on disk stays.`)) return; ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: config().repositories.filter((_, index) => index !== Number(dropRepo.dataset.stRepoRemove)) } }); await refresh(); draw(); return; }
       if (target.closest('[data-st-repo-pick]')) { const picked = await api('/repositories/pick', { method: 'POST', data: {} }).catch(() => null); if (picked?.path) back.querySelector('[data-st-repo-path]').value = picked.path; return; }
       if (target.closest('[data-st-repo-add]')) {
