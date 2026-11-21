@@ -97,7 +97,23 @@ export class Specialists {
     return '';
   }
   // A saved model that the current list does not have is set back to the default, so an agent never fails to start on it.
-  normalizeModels() { for (const agent of this.store.list('specialist')) { const model = this.cleanModel(agent.model, { provider: agent.provider }); if (model !== (agent.model || '')) this.store.put('specialist', agent.id, { ...agent, model }); } }
+  normalizeModels() {
+    for (const agent of this.store.list('specialist')) {
+      const model = this.cleanModel(agent.model, { provider: agent.provider }), fixed = model !== (agent.model || '') ? { ...agent, model } : agent;
+      if (fixed !== agent) this.store.put('specialist', agent.id, fixed);
+      // A chat made before its card's model was set kept the old one (L68): the card's model wins.
+      if (fixed.model) this.syncRuns(fixed);
+    }
+  }
+  // The agent's own chats (personal and group) run on the model on its card. A chat keeps the model it was made with and every
+  // turn uses it, so a model changed on the card later never reached a chat that already existed (L68: card Sonnet, chat Opus).
+  syncRuns(agent) {
+    for (const runId of [agent.runId, ...Object.values(agent.roomRuns || {})].filter(Boolean)) {
+      const run = this.store.get('run', runId);
+      if (!run || (run.provider || 'claude') !== (agent.provider || 'claude') || (run.model || '') === (agent.model || '')) continue;
+      this.store.put('run', runId, { ...run, model: agent.model || '', modelFallback: undefined });
+    }
+  }
   checkName(name, exceptId = '') {
     const text = String(name || '').trim().replace(/\s+/g, ' ');
     if (!text) throw new Error('Give the agent a name.');
@@ -162,7 +178,9 @@ export class Specialists {
     const selectedProvider = aiProvider(provider || item.provider || 'claude');
     const updated = { ...item, provider: selectedProvider, ...(selectedProvider !== item.provider ? { model: '', profile: '' } : {}), ...(rules !== undefined ? { rules: String(rules).slice(0, 4000) } : {}), ...(unsure !== undefined ? { unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12) } : {}),
       ...(model !== undefined ? { model: this.cleanModel(model, { strict: true, provider: selectedProvider }) } : {}), ...(effort !== undefined ? { effort: this.cleanEffort(effort, selectedProvider) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), ...(profile !== undefined ? { profile: String(profile || '').slice(0, 500) } : {}), ...(loop !== undefined ? { loop: { ...this.loopOf(item), ...cleanLoop(loop) } } : {}), ...(avatar !== undefined ? { avatar: this.cleanAvatar(avatar) || this.nextAvatar(id) } : {}), updatedAt: now() };
-    this.store.put('specialist', id, updated); this.writeCard(updated); return updated;
+    this.store.put('specialist', id, updated); this.writeCard(updated);
+    if ((updated.model || '') !== (item.model || '') || updated.provider !== item.provider) this.syncRuns(updated);
+    return updated;
   }
   // Renaming moves the card too; the run history and the project stay as they are.
   rename(id, name) {

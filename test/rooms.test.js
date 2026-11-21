@@ -381,6 +381,24 @@ test('a model the Claude account cannot use: the turn runs again on the default 
   assert.equal(store.get('specialist', dara.id).model, '', 'the agent no longer asks for that model');
 });
 
+test('the model on the agent card reaches a chat made before it was set (L68)', async () => {
+  const { store, desk, dara } = setup(); const seen = [];
+  desk.runnerFactory = options => ({ start: async () => { seen.push(options.model); options.event('session', { sessionId: SESSION }); options.event('agent-text', { text: 'Hello' }); }, interrupt() {}, close() {} });
+  await desk.specialistTurn(dara.id, { prompt: 'Hi' });
+  await waitFor(() => seen.length === 1 && !desk.live.size);
+  const runId = store.get('specialist', dara.id).runId;
+  // The chat kept Opus from before, and the card was changed to Sonnet on another computer (no update call here).
+  store.put('run', runId, { ...store.get('run', runId), model: 'opus' });
+  store.put('specialist', dara.id, { ...store.get('specialist', dara.id), model: 'sonnet' });
+  await desk.say(runId, 'Next');
+  await waitFor(() => seen.length === 2 && !desk.live.size);
+  assert.equal(seen[1], 'sonnet', 'the turn starts on the card model, not the old one on the chat');
+  // Changing the card here moves the chat over at once, so the model picker under the message box shows it too.
+  desk.specialists.update(dara.id, { model: 'haiku' });
+  assert.equal(store.get('run', runId).model, store.get('specialist', dara.id).model);
+  assert.match(store.get('run', runId).model, /haiku/);
+});
+
 test('an agent shows an explanation page of its changes in the chat, and only HTML counts as a page', async () => {
   const { store, desk, turns, dara } = setup({ replies: ['Done.'] });
   await desk.specialistTurn(dara.id, { prompt: 'Explain your changes' });

@@ -672,6 +672,8 @@ export class Desk {
       const owner = run.roomAgent || run.specialistId, ownHome = () => { const agent = owner && owner !== 'main' ? this.specialists.get(owner) : null; const folder = agent ? this.specialists.homeDirectory(agent) : path.join(this.store.directory, 'coordinator'); mkdirSync(folder, { recursive: true }); return folder; };
       // The same project on this computer (found by its name) comes first, so the agent keeps working on the project here.
       const ownAgent = owner && owner !== 'main' ? this.specialists.get(owner) : null, projectHere = ownAgent?.projectSlug ? this.projectRules.folderHere(ownAgent.projectSlug) : '';
+      // The model on the agent's card wins over the one its chat was made with, also for a card changed on another computer (L68).
+      if (ownAgent?.model && !run.modelFallback) { this.specialists.syncRuns(ownAgent); run = this.run(runId); }
       const cwd = [run.cwd, run.worktree].find(folder => folder && existsSync(folder)) || (run.cwd || run.worktree ? projectHere || ownHome() : path.join(this.store.directory, 'coordinator'));
       if (run.cwd && cwd !== run.cwd && !existsSync(run.cwd)) this.patchRun(run.id, { cwd, ...(projectHere && cwd === projectHere ? { projectPath: projectHere } : {}) });
       // A run nobody picked a mode for starts in the person's default mode from Settings.
