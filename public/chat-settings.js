@@ -368,12 +368,12 @@ export function openSettings(ctx, section = 'general') {
     const title = (SECTIONS.find(([id]) => id === state.section) || [])[1] || t('Settings');
     back.innerHTML = `<form class="settings-pop${state.list ? ' st-listing' : ' st-open'}" aria-label="${t`Settings`}"><nav class="st-nav"><div class="st-navhead"><h1>${t`Settings`}</h1><button type="button" class="st-done" data-st-close>${t`Done`}</button></div><button type="button" class="st-guide-btn" data-st-show-all><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>${t`Take the tour`}</button>${GROUPS.map(([group, ids]) => `<div class="st-group" role="group" aria-label="${group}"><span class="st-glabel" aria-hidden="true">${group}</span>${ids.map(id => SECTIONS.find(([key]) => key === id)).filter(Boolean).map(([id, label, hint]) => `<button type="button" class="${state.section === id && !state.list ? 'on' : ''}" data-st-section="${id}">${stIcon(id)}<span class="st-nl"><b>${label}</b><small>${hint}</small></span><svg class="st-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`).join('')}</div>`).join('')}</nav>
       <div class="st-body"><div class="st-mhead"><button type="button" class="st-back" data-st-back aria-label="${t`Back to Settings`}"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span>${t`Settings`}</span></button><b>${esc(title)}</b></div><div class="st-panel" data-st-panel>${sectionHtml()}</div>
-      <div class="st-foot">${PARTS[state.section].some(part => SAVE_PARTS.includes(part)) ? `<button type="button" class="btn primary" data-st-save>${t`Save`}</button>` : ''}<span class="spacer"></span><button type="button" class="btn" data-st-close>${t`Close`}</button></div></div>
+      </div>
       <button type="button" class="st-x" data-st-close aria-label="${t`Close settings`}">×</button></form>`;
   };
   const values = () => Object.fromEntries([...back.querySelectorAll('[name]')].filter(el => el.type !== 'checkbox' || el.name === 'schedule.days').map(el => [el.name, el.value]));
   const checked = name => Boolean(back.querySelector(`[name="${name}"]`)?.checked);
-  async function save() {
+  async function save(quiet = false) {
     const base = JSON.parse(JSON.stringify(config())), v = values(), next = { ...base };
     if (has('general')) { next.name = v.name; window.rexTheme?.set(v.theme); await api('/autostart', { method: 'POST', data: { enabled: checked('autostart') } }).catch(() => {}); }
     if (has('agents')) Object.assign(next, { defaultMode: v.defaultMode, concurrency: Number(v.concurrency), branchPrefix: v.branchPrefix, autoPrLowRisk: checked('autoPrLowRisk'), reportToOrbit: back.querySelector('[name="reportToOrbit"]') ? checked('reportToOrbit') : Boolean(base.reportToOrbit), saver: checked('saver'), handoffTokens: Number(v.handoffTokens ?? base.handoffTokens ?? 200000), autonomy: checked('autonomy') });
@@ -385,7 +385,7 @@ export function openSettings(ctx, section = 'general') {
     if (has('schedule')) next.schedule = { enabled: checked('schedule.enabled'), time: v['schedule.time'], maxRuns: Number(v['schedule.maxRuns']), fix: back.querySelector('[name="schedule.fix"]') ? checked('schedule.fix') : schedule0.fix !== false, days: [...back.querySelectorAll('[name="schedule.days"]:checked')].map(box => Number(box.value)) };
     if (has('sources')) { readTrackers(back, state); next.sources = trackerSources(ui, state); if (v.syncMinutes != null) next.syncMinutes = Number(v.syncMinutes); }
     if (has('signins')) { readSignins(); next.testAccounts = state.signins.filter(account => account.username.trim()); }
-    ui.snap.config = await api('/config', { method: 'PUT', data: next }); await refresh(); if (has('sources')) state.trackers = trackerDraft(ui); state.signins = null; toast(t('Saved.')); draw();
+    ui.snap.config = await api('/config', { method: 'PUT', data: next }); await refresh(); if (quiet) return; if (has('sources')) state.trackers = trackerDraft(ui); state.signins = null; toast(t('Saved.')); draw();
   }
   // Settings > About: asks the server for the version, counts and sizes, then draws them.
   async function loadAbout(fresh = false) {
@@ -443,7 +443,6 @@ export function openSettings(ctx, section = 'general') {
         try { const update = await api('/update/check', { method: 'POST' }); ui.snap.update = update; toast(update.error || (update.available ? t`Rex Desk ${update.available.version} is ${update.ready ? 'ready to install' : 'downloading'}.` : t('Rex Desk is up to date.')), Boolean(update.error)); }
         finally { state.extra.checking = false; draw(); } return;
       }
-      if (target.closest('[data-st-save]')) { target.closest('[data-st-save]').disabled = true; await save(); return; }
       const open = target.closest('[data-st-open]'); if (open) { back.remove(); document.body.insertAdjacentHTML('beforeend', `<button hidden data-action="${open.dataset.stOpen === 'accounts' ? 'accounts' : open.dataset.stOpen === 'sources' ? 'task-connect' : 'st-voice'}" id="st-opener"></button>`); document.getElementById('st-opener').click(); document.getElementById('st-opener')?.remove(); return; }
       const go = target.closest('[data-st-go]'); if (go) { back.remove(); ctx.open(go.dataset.stGo); return; }
       if (target.closest('[data-st-signout]')) { if (!await askConfirm(t('Sign out of Rex Desk on this computer? Running agents of this account stop.'))) return; await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; return; }
@@ -537,8 +536,19 @@ export function openSettings(ctx, section = 'general') {
         ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: [...config().repositories, { name: found.name, path: found.path, baseBranch: found.preferredBranch || 'develop', targetBranch: found.preferredBranch || 'develop' }] } });
         await refresh(); toast(t`Added ${found.name}.`); draw(); return;
       }
-    } catch (error) { toast(error.message, true); back.querySelector('[data-st-save]')?.removeAttribute('disabled'); }
+    } catch (error) { toast(error.message, true); }
   });
+  // Every field saves by itself: a change saves at once, typing saves a moment after the last key. There is no Save button.
+  let autoTimer = 0;
+  const ownSave = el => el.matches?.('[data-st-part],[data-st-rule],[data-st-tts],[data-st-voice],[data-st-fish-key],[name="tb-filter"]') || el.closest?.('[data-st-fish]');
+  const autoSave = event => {
+    const el = event.target;
+    if (!el.matches?.('input,select,textarea') || !el.closest('[data-st-panel]') || ownSave(el) || !PARTS[state.section].some(part => SAVE_PARTS.includes(part))) return;
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => { if (document.body.contains(back)) save(true).catch(error => toast(error.message, true)); }, event.type === 'input' ? 700 : 150);
+  };
+  back.addEventListener('input', event => { if (event.target.matches?.('input:not([type=checkbox],[type=radio],[type=range]),textarea')) autoSave(event); });
+  back.addEventListener('change', autoSave);
   back.addEventListener('keydown', event => { if (event.key === 'Escape' && !document.body.classList.contains('driver-active')) back.remove(); });
   back.addEventListener('input', event => {
     // Tools and skills: the search box narrows the skill list as you type, with no redraw.

@@ -137,7 +137,7 @@ try {
     const nav = { folders: 'storage', sources: 'tasks', signins: 'projects', schedule: 'tasks', accounts: 'ai', localai: 'ai', devices: 'backup', plan: 'backup' }[name] || name;
     await settings.locator(`[data-st-section="${nav}"]`).click();
   };
-  const save = async () => { await settings.locator('[data-st-save]').click(); await page.getByText('Saved.', { exact: true }).last().waitFor(); };
+  const save = async () => { await page.keyboard.press('Tab'); await page.waitForTimeout(1500); };
 
   // A new person gets the setup tour: name, AI sign-in, where things are kept, first project, done.
   const tour = page.getByRole('dialog', { name: 'Set up Rex Desk' });
