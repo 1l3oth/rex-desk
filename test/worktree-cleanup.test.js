@@ -126,6 +126,14 @@ test('an agent never starts in a folder being removed, saved or fallback, and it
   rmSync(fallback, { recursive: true, force: true }); release();
   assert.equal(await picking, own, 'once it is gone, the next safe folder is used');
   assert.equal(desk.startFolders.get('r1'), own);
+  // The agent's own folder is made only when it is the one picked: a usable worktree never fails on it.
+  const blocker = path.join(temporary('start-file'), 'file.txt'); writeFileSync(blocker, 'x');
+  const cannot = path.join(blocker, 'home');
+  assert.equal(await desk.startFolder('r2', () => [own, cannot]), own);
+  assert.ok(!existsSync(cannot));
+  await assert.rejects(desk.startFolder('r3', () => [path.join(own, 'gone'), cannot]), /could not make the agent's folder/);
+  const made = path.join(temporary('start-made'), 'home');
+  assert.equal(await desk.startFolder('r4', () => [path.join(own, 'gone'), made]), made); assert.ok(existsSync(made));
   await desk.shutdown(); store.close();
 });
 

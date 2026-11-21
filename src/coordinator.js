@@ -683,7 +683,7 @@ export class Desk {
       if (controller.signal.aborted) throw new Error('Run stopped.');
       if (!attach) token = this.scopeToken(runId);
       // A chat made on another computer names that computer's folders: here the agent works in its own folder on this computer.
-      const owner = run.roomAgent || run.specialistId, ownHome = () => { const agent = owner && owner !== 'main' ? this.specialists.get(owner) : null; const folder = agent ? this.specialists.homeDirectory(agent) : path.join(this.store.directory, 'coordinator'); mkdirSync(folder, { recursive: true }); return folder; };
+      const owner = run.roomAgent || run.specialistId, ownHome = () => { const agent = owner && owner !== 'main' ? this.specialists.get(owner) : null; return agent ? this.specialists.homeDirectory(agent) : path.join(this.store.directory, 'coordinator'); }; // made only when picked (startFolder)
       // The same project on this computer (found by its name) comes first, so the agent keeps working on the project here.
       const ownAgent = owner && owner !== 'main' ? this.specialists.get(owner) : null, projectHere = ownAgent?.projectSlug ? this.projectRules.folderHere(ownAgent.projectSlug) : '';
       // The model on the agent's card wins over the one its chat was made with, also for a card changed on another computer (L68).
@@ -2009,14 +2009,18 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // The folder an agent starts in: the first of `candidates()` that exists (the last one otherwise). It is claimed for the run
   // before the lock is checked, and tidyWorktrees reads the claims under its lock, so cleanup either sees the claim or the
   // agent sees the lock. A locked folder (being removed) is waited out and the choice is made again, saved folders and
-  // fallbacks alike; after three rounds the last candidate (the agent's own folder) is used.
+  // fallbacks alike; after three rounds the last candidate (the agent's own folder) is used. That last folder is made only
+  // when it is the one picked, so a turn with a usable worktree never fails on making a folder it does not need.
   async startFolder(runId, candidates) {
     this.startFolders ??= new Map();
+    const make = folder => {
+      try { mkdirSync(folder, { recursive: true }); return folder; } catch (error) { throw new Error(`Rex Desk could not make the agent's folder ${folder} (${error.code || error.message}), and none of its saved folders is there. Check that the drive is there and has space.`); }
+    };
     for (let round = 0; ; round += 1) {
-      const list = candidates().filter(Boolean), folder = list.find(item => existsSync(item)) || list.at(-1);
+      const list = candidates().filter(Boolean), found = list.find(item => existsSync(item)), folder = found || list.at(-1);
       this.startFolders.set(runId, folder);
-      if (!lockedFolder(folder)) return folder;
-      if (round >= 3) { this.startFolders.set(runId, list.at(-1)); return list.at(-1); }
+      if (!lockedFolder(folder)) return found ? folder : make(folder);
+      if (round >= 3) { this.startFolders.set(runId, list.at(-1)); return make(list.at(-1)); }
       await waitUnlocked([folder]);
     }
   }
