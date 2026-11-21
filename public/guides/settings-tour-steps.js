@@ -13,7 +13,6 @@ export const TOURS = {
   ],
   agents: [
     { km: 'Agents៖ របៀបដែលជំនួយការ AI របស់អ្នកធ្វើការ។', en: 'Agents: how your AI helpers work.' },
-    { target: '[name="concurrency"]', km: 'ពីរ agent ក្នុងពេលតែមួយ ល្អសម្រាប់ចាប់ផ្តើម។', en: 'Two agents at once is a good start. More uses your Claude limit faster.' },
     { target: '[name="defaultMode"]', km: 'Auto ធ្វើជំហានដែលមានសុវត្ថិភាព។ ជំហានប្រថុយ វាសួរអ្នកមុន។', en: 'Auto runs safe steps on its own and asks you before risky ones.' },
     { target: '[name="saver"]', km: 'Save my Claude usage ជួយសន្សំ limit របស់អ្នក។', en: '"Save my Claude usage" keeps light chats on a cheaper model.' },
   ],

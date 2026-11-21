@@ -2632,5 +2632,64 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .settings-pop .btn.primary,.settings-pop .btn.primary:hover{background:var(--accent);background-image:none;box-shadow:none;color:var(--accent-ink,#fff);border-color:transparent}
 .settings-pop .btn.primary:hover{filter:brightness(1.08)}
 
-/* Settings: two fields side by side (.st-row) stack the label above the box, so labels do not squeeze. */
-.settings-pop .st-row .st-field:has(>input:not([type=checkbox]),>select,>.st-unit){display:flex;flex-direction:column;align-items:stretch;gap:5px;padding:0;border-bottom:0}
+
+/* Settings, System Settings style: a quiet sidebar, then a title and rounded groups of rows (label left, control right, thin dividers). */
+.settings-pop{grid-template-columns:236px minmax(0,1fr)}
+.settings-pop .st-nav{padding:18px 10px;gap:0}
+.settings-pop .st-nav h1{font-size:15px;font-weight:600;margin:0 8px 0}
+.settings-pop .st-navhead{display:flex;align-items:center;margin-bottom:10px}
+.settings-pop .st-nl small,.settings-pop .st-chev,.settings-pop .st-glabel,.settings-pop .st-tip,.settings-pop .st-cloud-art{display:none!important}
+.settings-pop .st-guide-btn{padding:6px 8px;font-size:13px;margin-bottom:6px}
+.settings-pop .st-group{margin:0;padding:0;border:0}
+.settings-pop .st-group+.st-group{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+.settings-pop .st-nav button[data-st-section]{flex-direction:row;align-items:center;gap:9px;padding:5px 8px;border-radius:7px}
+.settings-pop .st-nav button[data-st-section] .st-nl b{font-size:13px;font-weight:500}
+.settings-pop .st-nav button[data-st-section] .st-ic{width:22px;height:22px;border-radius:6px;background:var(--raised);border:0;color:var(--muted)}
+.settings-pop .st-nav button[data-st-section] .st-ic svg{width:14px;height:14px}
+.settings-pop .st-nav button.on{background:var(--accent);box-shadow:none;color:var(--accent-ink,#fff)}
+.settings-pop .st-nav button.on .st-ic{background:rgba(255,255,255,.22);color:inherit}
+.settings-pop .st-body{background:var(--bg)}
+.settings-pop .st-panel{max-width:none;padding:24px 40px 40px;gap:10px;scrollbar-gutter:stable}
+.settings-pop .st-panel>*{max-width:680px;width:100%;box-sizing:border-box;flex:none}
+.settings-pop .st-panel h2{font-size:22px;font-weight:650;margin:0 0 6px}
+.settings-pop .st-panel h3{margin:18px 0 0;padding:0 4px;border:0;font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)}
+.settings-pop .st-panel h3.st-part{margin-top:22px}
+.settings-pop .st-panel>p{padding:0 4px;font-size:12px;color:var(--muted);line-height:1.5}
+.settings-pop .st-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+.settings-pop .st-box>*{margin:0;border:0;border-radius:0;background:none;box-shadow:none;padding:11px 14px;box-sizing:border-box;width:100%}
+.settings-pop .st-box>*+*{border-top:1px solid var(--line)}
+.settings-pop .st-box>.st-actions{padding:10px 14px;justify-content:flex-end}
+.settings-pop .st-box .st-field:has(>input:not([type=checkbox]),>select,>.st-unit){padding:10px 14px;border-bottom:0;column-gap:20px;grid-template-columns:minmax(0,1fr) minmax(150px,240px)}
+.settings-pop .st-box .st-field>span{font-size:13px;font-weight:400}
+.settings-pop .st-box .st-field small,.settings-pop .st-box .st-check small{font-size:11.5px;line-height:1.4}
+.settings-pop .st-box input:not([type=checkbox]):not([type=radio]),.settings-pop .st-box select{min-height:30px;padding:4px 10px;border-radius:7px;font-size:13px}
+.settings-pop .st-box select{padding-right:28px}
+.settings-pop .st-box .btn{min-height:28px;padding:3px 12px;border-radius:7px;font-size:12.5px;width:auto}
+.settings-pop .st-row{display:contents}
+.settings-pop .st-box .st-field:has(>.lang-pick){display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:20px}
+.settings-pop .st-box .st-field:has(>.lang-pick)>.lang-pick{grid-column:2;grid-row:1/span 2;width:auto}
+/* checkboxes are switches */
+.settings-pop .st-check{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:16px;padding:10px 14px}
+.settings-pop .st-check:has(input:checked){border-color:transparent}
+.settings-pop .st-check>span{order:1;flex:1;min-width:0}
+.settings-pop .st-check>span b{font-size:13px;font-weight:400}
+.settings-pop .st-check input[type=checkbox]{order:2;appearance:none;-webkit-appearance:none;margin:0;width:34px;height:20px;border-radius:999px;background:color-mix(in srgb,var(--muted) 38%,transparent);position:relative;flex:none;cursor:pointer;transition:background .15s}
+.settings-pop .st-check input[type=checkbox]::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);transition:transform .15s}
+.settings-pop .st-check input[type=checkbox]:checked{background:var(--accent)}
+.settings-pop .st-check input[type=checkbox]:checked::after{transform:translateX(14px)}
+.settings-pop .st-check input[type=checkbox]:disabled{opacity:.5}
+.settings-pop .st-check input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.settings-pop .st-days span{border-radius:7px}
+@media (max-width:760px){
+  .settings-pop .st-panel{padding:16px 16px 28px}
+  .settings-pop .st-nav button[data-st-section]{padding:10px 10px}
+  .settings-pop .st-box .st-field:has(>input:not([type=checkbox]),>select,>.st-unit){grid-template-columns:minmax(0,1fr) minmax(110px,45%)}
+}
+.settings-pop .st-box:has(>.btn:only-child){background:none;border:0;overflow:visible;align-items:flex-start}
+.settings-pop .st-box>.btn:only-child{width:auto;padding:3px 12px;border:1px solid var(--line);background:var(--panel)}
+.settings-pop .st-box>.st-list{padding:0;gap:0}
+.settings-pop .st-box>.st-list li{border:0;border-radius:0;padding:10px 14px;justify-content:space-between}
+.settings-pop .st-box>.st-list li+li{border-top:1px solid var(--line)}
+.settings-pop .st-box .st-days{display:block;padding:10px 14px;min-width:0}
+.settings-pop .st-box .st-days legend{float:left;margin:0 14px 0 0;padding:0;line-height:28px;font-size:13px;font-weight:400}
+.settings-pop .st-box .st-days label{display:inline-block;margin-right:4px}

@@ -50,7 +50,7 @@ export function trackersHtml({ ui, esc }, state) {
       <details><summary class="muted">${t`Status names in the task app`}</summary><p class="muted">${t`The status to set in the task app when work starts, goes to review and is done. Empty leaves the task app as it is.`}</p><div class="st-row">${['working', 'review', 'done'].map(phase => `<label class="st-field"><span>${phase[0].toUpperCase()}${phase.slice(1)}</span><input name="tr.${id}.status.${phase}" value="${esc(source.statusMap?.[phase] || '')}" spellcheck="false"></label>`).join('')}</div></details>
       <button type="button" class="btn small quiet danger" data-tr-remove="${id}">${t`Remove this connection`}</button></details>`;
   };
-  return `<h3>${t`Flow and Morningmate`}</h3><p class="muted">${t`Brings in the tasks assigned to the people you choose, from the projects you pick. Press Save when you are done.`}</p>
+  return `<h3>${t`Flow and Morningmate`}</h3><p class="muted">${t`Brings in the tasks assigned to the people you choose, from the projects you pick.`}</p>
     ${(state.trackers || []).map(card).join('') || `<p class="muted">${t`No Flow or Morningmate connection yet.`}</p>`}
     <div class="st-actions"><button type="button" class="btn small" data-tr-add="morningmate">${t`+ Add a connection`}</button></div>`;
 }
@@ -70,7 +70,7 @@ export async function trackerClick({ ui, api, toast, refresh }, state, target, b
   }
   if (hit('tr-remove')) {
     const id = hit('tr-remove').dataset.trRemove, source = state.trackers.find(item => item.id === id);
-    if (!await askConfirm(t`Remove ${source?.name || 'this connection'}? Its tasks stop syncing. Press Save to make it final.`)) return true;
+    if (!await askConfirm(t`Remove ${source?.name || 'this connection'}? Its tasks stop syncing.`)) return true;
     readTrackers(back, state); state.trackers = state.trackers.filter(item => item.id !== id); draw(); return true;
   }
   if (hit('tr-unperson')) {
@@ -87,7 +87,7 @@ export async function trackerClick({ ui, api, toast, refresh }, state, target, b
       await refresh();
       const directory = (ui.snap.directories || []).find(item => item.sourceId === id);
       if (!agent && !source.projectIds.length && directory?.projects?.length === 1) source.projectIds = [String(directory.projects[0].id)];
-      toast(agent ? t('An agent is looking them up. Its questions come to you in the chat.') : t('Connected. Pick the projects and people, then Save.'));
+      toast(agent ? t('An agent is looking them up. Its questions come to you in the chat.') : t('Connected. Pick the projects and people.'));
     } finally { state.trackerBusy = ''; draw(); }
     return true;
   }

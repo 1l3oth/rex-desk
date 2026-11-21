@@ -246,7 +246,6 @@ export function openSettings(ctx, section = 'general') {
     notify: () => `<h2>${t`Notifications`}</h2><p class="muted">${t`Changes save as you make them.`}</p>${tip('notify', t('Keep pop-ups for questions only, and set quiet hours for the night. Agents that need you then wait in Needs you.'))}${noticeSettingsHtml(ctx)}`,
     agents: () => `<h2>${t`Agents`}</h2>
       ${tip('agents', t('Start with Auto mode and 2 agents at once. Turn on "Save my Claude usage" if you hit your Claude limit. Leave the branch name as it is unless your team has a naming rule.'))}
-      ${field(t('Agents working at once'), input('concurrency', config().concurrency, 'type="number" min="1" max="6"'), t('1 to 6. Each works in its own copy of the project. More at once uses your Claude limit faster.'))}
       ${field(t('Branch names start with'), input('branchPrefix', config().branchPrefix, 'spellcheck="false"'), t`New branches look like ${esc(String(config().branchPrefix || 'rex-desk').replace(/\/+$/, ''))}/fix-login-button. Change it only if your team has a rule for branch names.`)}
       ${field(t('New agents and chats start in'), `<select name="defaultMode">${[['bypassPermissions', t('Dangerous: run everything without asking')], ['auto', t('Auto: safe steps run, risky ones ask')], ['acceptEdits', t('Accept edits: edit files freely, ask before commands')], ['manual', t('Ask first: ask before each step')], ['plan', t('Plan: plan only, change nothing')]].map(([value, label]) => `<option value="${value}" ${(config().defaultMode || 'bypassPermissions') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`, t('Used when you have not picked a mode for a chat. An AI without that mode asks first instead. You can still change the mode under the message box.'))}
       ${check('autonomy', config().autonomy !== false, t('Let agents act on their own'), t('They start work and open draft pull requests without asking you each time. Nothing is ever merged. Off: they ask first.'))}
@@ -370,13 +369,26 @@ export function openSettings(ctx, section = 'general') {
       <div class="st-body"><div class="st-mhead"><button type="button" class="st-back" data-st-back aria-label="${t`Back to Settings`}"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span>${t`Settings`}</span></button><b>${esc(title)}</b></div><div class="st-panel" data-st-panel>${sectionHtml()}</div>
       </div>
       <button type="button" class="st-x" data-st-close aria-label="${t`Close settings`}">×</button></form>`;
+    groupPanel(back.querySelector('[data-st-panel]'));
+  };
+  // System Settings style: after each draw, the rows under a heading are wrapped in one rounded group, so rows read as a list with thin dividers.
+  const groupPanel = panel => {
+    if (!panel) return;
+    let box = null;
+    for (const node of [...panel.children]) {
+      if (node.matches('.st-tip')) continue;
+      if (node.matches('h2,h3,p,.error-text,small') || node.classList.contains('muted')) { box = null; continue; }
+      if (node.classList.contains('st-box')) { box = null; continue; }
+      if (!box) { box = document.createElement('div'); box.className = 'st-box'; panel.insertBefore(box, node); }
+      box.append(node);
+    }
   };
   const values = () => Object.fromEntries([...back.querySelectorAll('[name]')].filter(el => el.type !== 'checkbox' || el.name === 'schedule.days').map(el => [el.name, el.value]));
   const checked = name => Boolean(back.querySelector(`[name="${name}"]`)?.checked);
   async function save(quiet = false) {
     const base = JSON.parse(JSON.stringify(config())), v = values(), next = { ...base };
     if (has('general')) { next.name = v.name; window.rexTheme?.set(v.theme); await api('/autostart', { method: 'POST', data: { enabled: checked('autostart') } }).catch(() => {}); }
-    if (has('agents')) Object.assign(next, { defaultMode: v.defaultMode, concurrency: Number(v.concurrency), branchPrefix: v.branchPrefix, autoPrLowRisk: checked('autoPrLowRisk'), reportToOrbit: back.querySelector('[name="reportToOrbit"]') ? checked('reportToOrbit') : Boolean(base.reportToOrbit), saver: checked('saver'), handoffTokens: Number(v.handoffTokens ?? base.handoffTokens ?? 200000), autonomy: checked('autonomy') });
+    if (has('agents')) Object.assign(next, { defaultMode: v.defaultMode, branchPrefix: v.branchPrefix, autoPrLowRisk: checked('autoPrLowRisk'), reportToOrbit: back.querySelector('[name="reportToOrbit"]') ? checked('reportToOrbit') : Boolean(base.reportToOrbit), saver: checked('saver'), handoffTokens: Number(v.handoffTokens ?? base.handoffTokens ?? 200000), autonomy: checked('autonomy') });
     if (has('accounts') && back.querySelector('#st-model')) next.models = { ...base.models, claude: back.querySelector('#st-model').value };
     if (has('projects')) next.repositories = base.repositories.map((repo, index) => ({ ...repo, ...Object.fromEntries(['baseBranch', 'targetBranch', 'setupCommand', 'devCommand', 'testCommand', 'workFolder', 'push'].map(key => [key, v[`repo.${index}.${key}`] ?? repo[key]])) }));
     if (has('jev')) next.jev = { ...base.jev, apiKey: v['jev.apiKey'] || '', clearKey: checked('jev.clearKey'), ...(back.querySelector('[name="jev.model"]') ? { model: v['jev.model'], versions: v['jev.versions'], auto: checked('jev.auto') } : {}) };
@@ -522,7 +534,7 @@ export function openSettings(ctx, section = 'general') {
         return;
       }
       if (target.closest('[data-st-signin-add]')) { readSignins(); state.signins.push({ id: crypto.randomUUID(), site: '', username: '', password: '' }); draw(); back.querySelector(`[name="ta.${state.signins.length - 1}.site"]`)?.focus(); return; }
-      const dropSignin = target.closest('[data-st-signin-remove]'); if (dropSignin) { readSignins(); state.signins.splice(Number(dropSignin.dataset.stSigninRemove), 1); draw(); toast(t('Press Save to make it final.')); return; }
+      const dropSignin = target.closest('[data-st-signin-remove]'); if (dropSignin) { readSignins(); state.signins.splice(Number(dropSignin.dataset.stSigninRemove), 1); draw(); return; }
       const dropRepo = target.closest('[data-st-repo-remove]'); if (dropRepo) { const repo = config().repositories[Number(dropRepo.dataset.stRepoRemove)]; if (!await askConfirm(t`Remove ${repo.name} from Rex Desk? The folder on disk stays.`)) return; ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: config().repositories.filter((_, index) => index !== Number(dropRepo.dataset.stRepoRemove)) } }); await refresh(); draw(); return; }
       if (target.closest('[data-st-repo-pick]')) { const picked = await api('/repositories/pick', { method: 'POST', data: {} }).catch(() => null); if (picked?.path) back.querySelector('[data-st-repo-path]').value = picked.path; return; }
       if (target.closest('[data-st-repo-add]')) {

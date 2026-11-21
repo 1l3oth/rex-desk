@@ -294,7 +294,6 @@
  "Bring back from backup": "ស្ដារពីការបម្រុងទុក",
  "Bring back my desk": "ស្ដារ Desk របស់ខ្ញុំ",
  "Bring in": "នាំចូល",
- "Brings in the tasks assigned to the people you choose, from the projects you pick. Press Save when you are done.": "នាំចូលកិច្ចការដែលបានប្រគល់ឱ្យមនុស្សដែលអ្នកជ្រើសរើស ពីគម្រោងដែលអ្នកជ្រើស។ ចុចរក្សាទុកនៅពេលអ្នករួចរាល់។",
  "Brings one goal's tasks into Tasks. For your goals, notes and knowledge in every agent, use the Orbit account sign-in instead. One Orbit goal per connection. In Orbit open the goal, then Settings → API → Generate Project Key, and paste the key (it starts with dgm_).": "នាំចូលកិច្ចការរបស់គោលដៅមួយទៅក្នុងកិច្ចការ។ សម្រាប់គោលដៅ កំណត់ចំណាំ និងចំណេះដឹងរបស់អ្នកក្នុងភ្នាក់ងារនីមួយៗ សូមប្រើការចូលគណនី Orbit ជំនួស។ គោលដៅ Orbit មួយក្នុងមួយការតភ្ជាប់។ ក្នុង Orbit បើកគោលដៅ រួចការកំណត់ → API → Generate Project Key ហើយដាក់សោ (វាចាប់ផ្ដើមដោយ dgm_)។",
  "Browse…": "រកមើល…",
  "Built in · {0}": "មានស្រាប់ · {0}",
@@ -406,7 +405,6 @@
  "Connected since {0}. Every agent can search and read your Orbit goals, notes and knowledge.": "បានតភ្ជាប់តាំងពី {0}។ ភ្នាក់ងារនីមួយៗអាចស្វែងរក និងអានគោលដៅ កំណត់ចំណាំ និងចំណេះដឹង Orbit របស់អ្នក។",
  "Connected, but the sync failed: {0}": "បានតភ្ជាប់ ប៉ុន្តែសមកាលកម្មបរាជ័យ: {0}",
  "Connected.": "បានភ្ជាប់។",
- "Connected. Pick the projects and people, then Save.": "បានតភ្ជាប់។ ជ្រើសរើសគម្រោង និងមនុស្ស រួចរក្សាទុក។",
  "Connecting to Turso…": "កំពុងតភ្ជាប់ទៅ Turso…",
  "Connecting to your backup…": "កំពុងតភ្ជាប់ទៅការបម្រុងទុករបស់អ្នក…",
  "Connecting…": "កំពុងតភ្ជាប់…",
@@ -1162,7 +1160,6 @@
  "Press {0}.": "ចុច {0}។",
  "Press × to have Jev ask you again first. \"Yes, always\" on a Jev question adds one here.": "ចុច × ដើម្បីឱ្យ Jev សួរអ្នកម្ដងទៀតជាមុន។ \"បាទ/ចាស ជានិច្ច\" លើសំណួររបស់ Jev បន្ថែមមួយនៅទីនេះ។",
  "Press Record, say one sentence, then Stop. It goes through every engine that is ready, so you can pick the best. Online engines receive this recording.": "ចុចថត និយាយមួយប្រយោគ រួចចុចបញ្ឈប់។ វាឆ្លងកាត់ម៉ាស៊ីនទាំងអស់ដែលរួចរាល់ ដូច្នេះអ្នកអាចជ្រើសរើសមួយល្អបំផុត។ ម៉ាស៊ីនអនឡាញទទួលការថតនេះ។",
- "Press Save to make it final.": "ចុចរក្សាទុកដើម្បីបញ្ជាក់។",
  "Press the microphone or type a command.": "ចុចមីក្រូហ្វូន ឬវាយពាក្យបញ្ជា។",
  "Prettier does not format this kind of file.": "Prettier មិនតម្រឹមឯកសារប្រភេទនេះទេ។",
  "Preview": "មើលជាមុន",
@@ -1241,7 +1238,6 @@
  "Remove {0} from Rex Desk? The folder on disk stays.": "ដក {0} ចេញពី Rex Desk ឬ? ថតលើថាសនៅតែមាន។",
  "Remove {0} from this computer? Agents set to it go back to their usual model.": "ដក {0} ចេញពីកុំព្យូទ័រនេះឬ? ភ្នាក់ងារដែលបានកំណត់ទៅវានឹងត្រឡប់ទៅម៉ូដែលធម្មតារបស់ពួកគេ។",
  "Remove {0}? Its tasks leave the list; nothing changes in {1}.": "ដក {0} ចេញឬ? កិច្ចការរបស់វាចាកចេញពីបញ្ជី។ គ្មានអ្វីផ្លាស់ប្ដូរក្នុង {1} ទេ។",
- "Remove {0}? Its tasks stop syncing. Press Save to make it final.": "ដក {0} ចេញឬ? កិច្ចការរបស់វាឈប់ធ្វើសមកាលកម្ម។ ចុចរក្សាទុកដើម្បីបញ្ជាក់។",
  "Remove from the room": "ដកចេញពីបន្ទប់",
  "Remove the saved key": "ដកសោដែលបានរក្សាទុកចេញ",
  "Remove this": "ដកនេះចេញ",
@@ -2468,5 +2464,8 @@
  "Account and backup": "គណនី និងការបម្រុងទុក",
  "Plan, cloud copy, devices": "គម្រោង ច្បាប់ចម្លងលើ cloud ឧបករណ៍",
  "Space used and folders": "ទំហំដែលបានប្រើ និងថត",
- "Version and updates": "កំណែ និងការអាប់ដេត"
+ "Version and updates": "កំណែ និងការអាប់ដេត",
+ "Brings in the tasks assigned to the people you choose, from the projects you pick.": "នាំចូលកិច្ចការដែលបានប្រគល់ឱ្យមនុស្សដែលអ្នកជ្រើសរើស ពីគម្រោងដែលអ្នកជ្រើស។",
+ "Connected. Pick the projects and people.": "បានតភ្ជាប់។ ជ្រើសរើសគម្រោង និងមនុស្ស។",
+ "Remove {0}? Its tasks stop syncing.": "ដក {0} ចេញឬ? កិច្ចការរបស់វាឈប់ធ្វើសមកាលកម្ម។"
 }
