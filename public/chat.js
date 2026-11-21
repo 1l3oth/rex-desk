@@ -1330,13 +1330,13 @@ function accountChip() {
   const ai = { codex: t('Codex'), gemini: t('Gemini') }[name] || t('Claude');
   return `<span class="acct-dot ${current?.loggedIn ? 'good' : 'bad'}"></span><span class="acct-text">${current?.loggedIn ? t`${ai} connected` : t`${ai} not connected`}</span>`;
 }
-// Signed out: the same one-click Rex Desk sign-in as Settings, Backup and updates: the browser opens, then this computer connects.
+// Signed out: the account-only Rex Desk sign-in (the one Agents online uses). It never touches the backup settings.
 async function rexAccountSignIn() {
   try {
-    const { url } = await api('/database/account-start', { method: 'POST' }); if (url) window.open(url, '_blank', 'noopener');
-    toast(url ? t('Waiting for you to sign in in the browser…') : t('Turning cloud backup on…'));
-    let status; for (let misses = 0; !status || status.waiting; ) { try { status = await api('/database/account-finish', { method: 'POST' }); misses = 0; } catch (error) { if (error.name !== 'TypeError' || ++misses > 6) throw error; await new Promise(resolve => setTimeout(resolve, 1000)); } }
-    await refresh();
+    const { url } = await api('/net/sign-in', { method: 'POST' }); if (url) window.open(url, '_blank', 'noopener');
+    toast(t('Finish signing in in the browser. Your plan shows here by itself.'));
+    const until = Date.now() + 5 * 60000;
+    while (Date.now() < until) { await new Promise(resolve => setTimeout(resolve, 3000)); if ((await api('/billing').catch(() => null))?.signedIn) { await refresh(); return; } }
   } catch (error) { toast(error.message, true); }
 }
 async function loadAccounts(refreshStatus = false) { try { ui.accounts = await api(`/agents${refreshStatus ? '?refresh=1' : ''}`); ui.accountsAuto = (await api('/accounts/auto')).on; } catch {} }
