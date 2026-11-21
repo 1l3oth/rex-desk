@@ -296,8 +296,8 @@ const savedReplies = () => document.querySelectorAll('#feed-inner .msg:not(.mine
 function showLive({ runId, text = '', done = false, tool = '' }) {
   if (tool || !runId || runId !== ctx.currentRunId()) return;
   if (live.runId !== runId) Object.assign(live, { runId, text: '', doneAt: 0 });
-  // A new block remembers how many replies the feed already holds, so an earlier reply with the same words never counts as its saved copy.
-  if (!done && (!live.text || live.doneAt)) live.base = savedReplies().length;
+  // A reply that comes whole (no chunks first, as Codex may send it) and is already drawn in the feed needs no live copy.
+  if (done && !live.text && savedInFeed(text, -1)) return;
   if (done) { live.doneAt = Date.now(); live.text = String(text || live.text); }
   else { live.text = String(text || ''); live.doneAt = 0; }
   drawLive();
@@ -305,10 +305,10 @@ function showLive({ runId, text = '', done = false, tool = '' }) {
 // The live bubble is built once per run; each new chunk swaps only the words inside it and puts the caret back at the end,
 // so the bubble and its avatar never blink or change height for a frame.
 const flat = html => { const probe = document.createElement('div'); probe.innerHTML = html; return probe.textContent.replace(/\s+/g, ' ').trim(); };
-// True once a reply newer than the block's start holds the same words as the finished live copy.
-function savedInFeed(text) {
+// True once a reply newer than the block's start (live.base) holds the same words as the finished live copy.
+function savedInFeed(text, base = live.base) {
   const all = savedReplies(), last = all[all.length - 1];
-  return all.length > live.base && last.textContent.replace(/\s+/g, ' ').trim() === flat(markdown(text));
+  return Boolean(last) && all.length > base && last.textContent.replace(/\s+/g, ' ').trim() === flat(markdown(text));
 }
 function drawLive() {
   const box = document.getElementById('live-reply'); if (!box) return;
@@ -318,7 +318,11 @@ function drawLive() {
   // A finished block leaves in the same redraw that draws its saved message, so the feed never shrinks and grows back.
   // If the saved message never comes (another chat was opened, the text was cut), it goes after 4 s anyway.
   const gone = !shown || (live.doneAt && (savedInFeed(live.text) || Date.now() - live.doneAt > 4000));
-  if (gone) { if (box.firstChild) { box.replaceChildren(); delete box.dataset.run; document.body.classList.remove('live-replying'); } if (live.doneAt) Object.assign(live, { text: '', doneAt: 0 }); return; }
+  if (gone) { if (box.firstChild) { box.replaceChildren(); delete box.dataset.run; document.body.classList.remove('live-replying'); } if (live.doneAt) Object.assign(live, { text: '', doneAt: 0 });
+    // While no live copy shows, the count of replies keeps up with the feed; a block (chunked or whole) starts from it, so an
+    // earlier reply with the same words never counts as its saved copy.
+    if (!live.text) live.base = savedReplies().length;
+    return; }
   let md = box.querySelector('.msg.live .md');
   if (!md || box.dataset.run !== live.runId) {
     const run = runById(live.runId), name = run ? (personalAgent(run)?.name || provider(run.provider)) : t('Agent');
