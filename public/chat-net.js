@@ -3,7 +3,9 @@ import { t } from './i18n.js';
 // first. Right: the one thing picked, either a conversation (read it, decide, step in, take over, stop) or an agent
 // (who can reach it, when it asks, pairing, linked agents, its rules).
 const icon = (paths, size = 18) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
-export const NET_ICON = icon('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.8 5.6 3.8 9S14.6 18.4 12 21c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3z"/>');
+// A2A: two agents with a message going each way between them.
+export const NET_ICON = icon('<rect x="2" y="8" width="6" height="8" rx="2"/><rect x="16" y="8" width="6" height="8" rx="2"/><path d="M10 12h4M11.6 10.2 10 12l1.6 1.8M12.4 10.2 14 12l-1.6 1.8"/>');
+const PLUG = icon('<rect x="2" y="8" width="6" height="8" rx="2"/><rect x="16" y="8" width="6" height="8" rx="2"/><path d="M10 12h4M11.6 10.2 10 12l1.6 1.8M12.4 10.2 14 12l-1.6 1.8"/>', 15);
 const LOCK = icon('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', 15);
 const USERS = icon('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.8c1.5.6 2.6 1.9 3 4.2"/>', 15);
 const WORLD = icon('<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.3 2.4 3.4 5.2 3.4 8.5s-1.1 6.1-3.4 8.5c-2.3-2.4-3.4-5.2-3.4-8.5S9.7 5.9 12 3.5z"/>', 15);
@@ -28,6 +30,7 @@ function picked(ui, net) {
   if (sel?.kind === 'thread' && net.threads.some(item => item.id === sel.id)) return sel;
   if (sel?.kind === 'agent' && net.agents.some(item => item.agentId === sel.id)) return sel;
   if (sel?.kind === 'find' && net.signedIn) return sel;
+  if (sel?.kind === 'connect') return sel;
   const owed = net.threads.find(item => item.state === 'waiting-owner') || net.threads.find(item => item.state !== 'ended');
   return owed ? { kind: 'thread', id: owed.id } : net.agents[0] ? { kind: 'agent', id: net.agents[0].agentId } : null;
 }
@@ -45,6 +48,7 @@ function rail(ctx, net, sel) {
     ${group(t('Needs you'), owed, 'owed')}${group(t('Talking'), open)}
     ${net.threads.length ? '' : `<p class="na-quiet">${t`No conversation yet. When another agent writes to yours, it shows here and you decide what happens.`}</p>`}
     ${net.signedIn ? `<div class="na-group"><button type="button" class="na-row${sel?.kind === 'find' ? ' on' : ''}" data-net-act="pick" data-kind="find" data-id="find"><span class="na-find-icon">${SEARCH}</span><b>${t`Find agents`}</b></button></div>` : ''}
+    <div class="na-group"><button type="button" class="na-row${sel?.kind === 'connect' ? ' on' : ''}" data-net-act="pick" data-kind="connect" data-id="connect"><span class="na-find-icon">${PLUG}</span><b>${t`Connect another AI`}</b>${ctx.ui.netA2a?.enabled ? `<span class="na-handle">A2A</span>` : ''}</button></div>
     <div class="na-group"><h3 class="na-label">${t`Your agents`}${net.requests ? `<span class="na-count owed" title="${t`Agents waiting for your yes`}">${net.requests}</span>` : ''}</h3>${net.agents.map(agent).join('')}</div>
     ${done.length ? `<details class="na-group na-past"${ui_open(ctx) ? ' open' : ''}><summary class="na-label">${t`Ended`}<span class="na-count">${done.length}</span></summary>${done.map(thread).join('')}</details>` : ''}
   </aside>`;
@@ -104,6 +108,25 @@ function agentPanel(ctx, agent) {
 // How to use a linked agent: the person asks their own agent, in its chat, and it talks to the other one.
 const useHint = (ctx, agent, link) => link ? `<p class="na-hint na-use">${t`To use a linked agent, in ${ctx.esc(agent.name)}'s chat say:`} <code>${t`ask @${ctx.esc(link.agent.handle)} to ...`}</code></p>` : '';
 
+// Connect another AI: agents from other apps reach the person's agents over A2A (public address and key), and a Claude Code
+// window already open can be given the setup text so it sees the tasks here. Both used to sit in Settings.
+function connectPanel(ctx) {
+  const { esc, ui } = ctx, a2a = ui.netA2a, prompt = ui.netPrompt;
+  const status = !a2a ? `<p class="na-quiet">${t`Loading…`}</p>` : a2a.enabled ? `
+      <label class="na-field"><span>${t`Public address`}</span></label>${a2a.public ? `<p class="na-code na-addr"><span>${esc(a2a.public)}</span><button type="button" class="na-icon-btn" data-net-act="a2a" data-do="copy-url" aria-label="${t`Copy address`}">${COPY}</button></p>`
+        : `<p class="na-hint">${!a2a.signedIn ? t`Sign in to your Rex Desk account (Agents online) to get an address that works from anywhere.` : a2a.relayError ? esc(a2a.relayError) : t`Getting the address…`}</p>`}
+      <details class="na-more-addr"><summary class="na-hint">${t`On this network`}</summary><pre class="na-pre">${esc((a2a.addresses || []).join('\n'))}</pre></details>
+      <div class="na-actions"><button type="button" class="btn small" data-net-act="a2a" data-do="copy">${t`Copy key`}</button><button type="button" class="btn small" data-net-act="a2a" data-do="newkey">${t`Make a new key`}</button></div>`
+    : `<p class="na-hint">${t`Off. No other agent can reach yours this way.`}</p>`;
+  return `<section class="na-detail na-connect" aria-label="${t`Connect another AI`}">
+    <header class="na-head"><span class="na-mark" aria-hidden="true">${PLUG}</span><div class="na-title"><h2>${t`Connect another AI`}</h2><p>${t`Let another assistant use Rex Desk`}</p></div>
+      ${a2a?.enabled ? tag(t('On'), 'done') : ''}<div class="na-head-actions">${a2a ? `<button type="button" class="btn small${a2a.enabled ? '' : ' primary'}" data-net-act="a2a" data-do="${a2a.enabled ? 'off' : 'on'}">${a2a.enabled ? t`Turn off` : t`Turn on`}</button>` : ''}</div></header>
+    <div class="na-sec"><h3>${t`Let other agents reach yours (A2A)`}</h3><p class="na-hint">${t`Agents from other apps and other computers can send a task to one of your agents with this address and key. Every message shows in that agent's chat.`}</p>${status}</div>
+    <div class="na-sec"><h3>${t`A Claude Code window`}</h3><p class="na-hint">${t`Give this to another Claude Code window (or another assistant) so it can read your tasks and ask you questions through Rex Desk. No key is needed on this computer.`}</p>
+      ${prompt ? `<pre class="na-pre">${esc(prompt)}</pre><div class="na-actions"><button type="button" class="btn small" data-net-act="copy-prompt">${t`Copy`}</button></div>` : `<div class="na-actions"><button type="button" class="btn small" data-net-act="setup-prompt">${t`Show the setup text`}</button></div>`}</div>
+  </section>`;
+}
+
 // Find agents: search the public list on the Rex Desk account and ask one to link with one of the person's online agents.
 function findPanel(ctx, net) {
   const { esc, ui } = ctx, find = ui.netFind || {}, mine = net.agents.filter(item => item.on), as = mine.find(item => item.agentId === find.as) || mine[0];
@@ -127,13 +150,14 @@ export function netStage(ctx) {
   const thread = sel?.kind === 'thread' ? (ui.netThread?.id === sel.id ? ui.netThread : net.threads.find(item => item.id === sel.id)) : null;
   const agent = sel?.kind === 'agent' ? net.agents.find(item => item.agentId === sel.id) : null;
   const owed = net.threads.filter(item => item.state === 'waiting-owner').length;
-  const feed = `<div class="page na">${rail(ctx, net, sel)}${sel?.kind === 'find' ? findPanel(ctx, net) : thread ? conversation(ctx, thread) : agent ? agentPanel(ctx, agent) : `<section class="na-detail na-empty">${NET_ICON}<p>${t`Pick an agent to put it online, or a conversation to read it.`}</p></section>`}</div>`;
+  const feed = `<div class="page na">${rail(ctx, net, sel)}${sel?.kind === 'find' ? findPanel(ctx, net) : sel?.kind === 'connect' ? connectPanel(ctx) : thread ? conversation(ctx, thread) : agent ? agentPanel(ctx, agent) : `<section class="na-detail na-empty">${NET_ICON}<p>${t`Pick an agent to put it online, or a conversation to read it.`}</p></section>`}</div>`;
   return { title: t('Agents online'), meta: owed ? t`${owed} need you` : t`${net.agents.filter(item => item.on).length} online`, feed, top: true, actions: `<button class="btn small" data-net-act="refresh">${t`Refresh`}</button>` };
 }
 
 export async function loadNet(ctx) {
   const { ui, api } = ctx;
   ui.net = await api('/net');
+  if (!ui.netA2a) ui.netA2a = await api('/a2a').catch(() => ({ enabled: false, addresses: [] }));
   const sel = picked(ui, ui.net);
   if (sel?.kind === 'find' && !ui.netFind?.agents && !ui.netFind?.loading) await search(ctx, ui.netFind?.q || '').catch(() => { ui.netFind = { ...(ui.netFind || {}), agents: [] }; });
   if (sel?.kind === 'thread') ui.netThread = await api(`/net/threads/${encodeURIComponent(sel.id)}`).catch(() => null);
@@ -193,6 +217,14 @@ export function wireNet(ctx) {
         toast(done.link.status === 'active' ? t`Linked. In ${as.name}'s chat, say: ask @${target.dataset.handle} to ...` : t('Asked. It works once their owner says yes.'));
         await search(ctx, ui.netFind?.q || ''); ctx.render();
       }
+      else if (act === 'a2a') {
+        const how = target.dataset.do;
+        if (how === 'copy-url') { await navigator.clipboard.writeText(ui.netA2a?.public || ''); toast(t('Copied.')); }
+        else if (how === 'copy') { await navigator.clipboard.writeText(ui.netA2a?.token || ''); toast(t('Copied.')); }
+        else { ui.netA2a = await post('/a2a', how === 'newkey' ? { enabled: true, newKey: true } : { enabled: how === 'on' }); ctx.render(); }
+      }
+      else if (act === 'setup-prompt') { ui.netPrompt = (await post('/setup-prompt', { target: 'claude' })).prompt; ctx.render(); }
+      else if (act === 'copy-prompt') { await navigator.clipboard.writeText(ui.netPrompt || ''); toast(t('Copied.')); }
       else if (act === 'link') { await post(`${agentPath}/links`, { link: target.dataset.link, action: target.dataset.do }); await links(); await reload(); }
       else if (act === 'do') {
         const view = target.closest('[data-net-thread]'), text = target.dataset.from ? view.querySelector(`[name="${target.dataset.from}"]`)?.value || '' : '';

@@ -73,14 +73,13 @@ const SECTIONS = [
   ['plan', t('Plan and billing'), t('Your plan, space, payments')],
   ['storage', t('Storage'), t('What uses space, clean up')],
   ['backup', t('Backup and updates'), t('Cloud copy, app updates')],
-  ['connect', t('Connect another AI'), t('Let another assistant use Rex Desk')],
   ['about', t('About'), t('Version, storage and what it holds')],
 ];
 // The sections in groups by what they are about, so the list reads in a few chunks instead of thirteen rows.
 const GROUPS = [
   [t('You'), ['general', 'notify', 'jev', 'plan']],
   [t('Agents'), ['agents', 'accounts', 'localai', 'tools', 'schedule', 'signins']],
-  [t('Work'), ['projects', 'sources', 'connect']],
+  [t('Work'), ['projects', 'sources']],
   [t('Data and devices'), ['folders', 'storage', 'backup', 'devices', 'about']],
 ];
 // An icon for each section, shown in the phone's list of sections.
@@ -364,23 +363,11 @@ export function openSettings(ctx, section = 'general') {
       ${list(box.hooks.map(item => row(item.event + (item.matcher ? ` · ${item.matcher}` : ''), item.command, '', '')), t`No hook yet.`)}
       <p class="muted small">${t`Hooks are changed in Claude Code's own settings file.`}</p>`;
     },
-    connect: () => `<h2>${t`Connect another AI`}</h2><p class="muted">${t`Give this to another Claude Code window (or another assistant) so it can read your tasks and ask you questions through Rex Desk. No key is needed on this computer.`}</p>
-      ${tip('connect', t('Use this when you already have a Claude Code window open and want it to see your tasks and ask you things here.'))}
-      <button type="button" class="btn" data-st-prompt>${t`Show the setup text`}</button>${state.extra.prompt ? `<pre class="st-prompt">${esc(state.extra.prompt)}</pre><button type="button" class="btn small" data-st-copy-prompt>${t`Copy`}</button>` : ''}
-      <h3 class="st-sub">${t`Let other agents reach yours (A2A)`}</h3><p class="muted">${t`Agents from other apps and other computers can send a task to one of your agents with this address and key. Every message shows in that agent's chat.`}</p>
-      ${!state.extra.a2a ? `<p class="muted small">${t`Loading…`}</p>` : state.extra.a2a.enabled ? `<div class="prow"><b>${t`On`}</b><button type="button" class="btn small" data-st-a2a="off">${t`Turn off`}</button></div>
-        <label class="small muted">${t`Public address`}</label>${state.extra.a2a.public ? `<pre class="st-prompt">${esc(state.extra.a2a.public)}</pre>`
-          : `<p class="muted small">${!state.extra.a2a.signedIn ? t`Sign in to your Rex Desk account (Agents online) to get an address that works from anywhere.` : state.extra.a2a.relayError ? esc(state.extra.a2a.relayError) : t`Getting the address…`}</p>`}
-        <label class="small muted">${t`On this network`}</label><pre class="st-prompt">${esc(state.extra.a2a.addresses.join('\n'))}</pre>
-        <div class="prow">${state.extra.a2a.public ? `<button type="button" class="btn small" data-st-a2a="copy-url">${t`Copy address`}</button>` : ''}<button type="button" class="btn small" data-st-a2a="copy">${t`Copy key`}</button><button type="button" class="btn small" data-st-a2a="newkey">${t`Make a new key`}</button></div>`
-      : `<div class="prow"><span class="muted">${t`Off. No other agent can reach yours this way.`}</span><button type="button" class="btn small" data-st-a2a="on">${t`Turn on`}</button></div>`}`,
   };
   const saves = new Set(['general', 'agents', 'projects', 'sources', 'jev', 'schedule', 'signins']);
   const draw = () => {
-    // Connect another AI shows whether A2A is on: read once when the section opens.
     if ((state.section === 'backup' || state.section === 'plan') && !state.extra.billing && !state.extra.billingLoading) { state.extra.billingLoading = true; void api('/billing').then(data => { state.extra.billing = data; state.extra.billingLoading = false; draw(); }).catch(() => { state.extra.billing = { signedIn: false }; state.extra.billingLoading = false; draw(); }); }
     if (state.section === 'tools' && !state.extra.toolbox && !state.extra.toolboxLoading) { state.extra.toolboxLoading = true; void api('/toolbox').then(data => { state.extra.toolbox = data; draw(); }).catch(error => { state.extra.toolbox = { servers: [], skills: [], commands: [], hooks: [] }; toast(error.message, true); draw(); }); }
-    if (state.section === 'connect' && !state.extra.a2a && !state.extra.a2aLoading) { state.extra.a2aLoading = true; void api('/a2a').then(data => { state.extra.a2a = data; draw(); }).catch(() => { state.extra.a2a = { enabled: false, addresses: [] }; draw(); }); }
     // A redraw of the same section keeps the place the person scrolled to (ticking a box used to jump back to the top).
     // The list of sections on the left always keeps its place: picking one lower down used to jump the list back to the top.
     const keep = back.dataset.section === state.section ? back.querySelector('.st-panel')?.scrollTop || 0 : 0, keepNav = back.querySelector('.st-nav')?.scrollTop || 0;
@@ -538,12 +525,6 @@ export function openSettings(ctx, section = 'general') {
         finally { state.extra.toolboxBusy = false; draw(); }
         return;
       }
-      const a2aAct = target.closest('[data-st-a2a]')?.dataset.stA2a;
-      if (a2aAct === 'copy-url') { await navigator.clipboard.writeText(state.extra.a2a?.public || ''); toast(t('Copied.')); return; }
-      if (a2aAct === 'copy') { await navigator.clipboard.writeText(state.extra.a2a?.token || ''); toast(t('Copied.')); return; }
-      if (a2aAct) { state.extra.a2a = await api('/a2a', { method: 'POST', data: a2aAct === 'newkey' ? { enabled: true, newKey: true } : { enabled: a2aAct === 'on' } }); draw(); return; }
-      if (target.closest('[data-st-prompt]')) { state.extra.prompt = (await api('/setup-prompt', { method: 'POST', data: { target: 'claude' } })).prompt; draw(); return; }
-      if (target.closest('[data-st-copy-prompt]')) { await navigator.clipboard.writeText(state.extra.prompt); toast(t('Copied.')); return; }
       if (target.closest('[data-st-signin-add]')) { readSignins(); state.signins.push({ id: crypto.randomUUID(), site: '', username: '', password: '' }); draw(); back.querySelector(`[name="ta.${state.signins.length - 1}.site"]`)?.focus(); return; }
       const dropSignin = target.closest('[data-st-signin-remove]'); if (dropSignin) { readSignins(); state.signins.splice(Number(dropSignin.dataset.stSigninRemove), 1); draw(); toast(t('Press Save to make it final.')); return; }
       const dropRepo = target.closest('[data-st-repo-remove]'); if (dropRepo) { const repo = config().repositories[Number(dropRepo.dataset.stRepoRemove)]; if (!confirm(t`Remove ${repo.name} from Rex Desk? The folder on disk stays.`)) return; ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: config().repositories.filter((_, index) => index !== Number(dropRepo.dataset.stRepoRemove)) } }); await refresh(); draw(); return; }

@@ -53,11 +53,8 @@ export const TOURS = {
   devices: [
     { km: 'Devices៖ scan QR code ម្តង ដើម្បីឆ្លើយ agent ពីទូរស័ព្ទ។', en: 'Devices: scan the QR code once to answer your agents from your phone.' },
   ],
-  connect: [
-    { km: 'Connect another AI៖ ឲ្យ Claude Code ដែលបើកស្រាប់ ឃើញ task របស់អ្នក។', en: 'Connect another AI: let a Claude Code window you already have see your tasks.' },
-  ],
 };
 // Every step gets an id (section-number), which names its voice file.
 for (const [section, steps] of Object.entries(TOURS)) steps.forEach((step, index) => { step.id = `${section}-${index + 1}`; });
-export const ORDER = ['general', 'agents', 'accounts', 'schedule', 'signins', 'projects', 'sources', 'jev', 'notify', 'folders', 'backup', 'devices', 'connect'];
+export const ORDER = ['general', 'agents', 'accounts', 'schedule', 'signins', 'projects', 'sources', 'jev', 'notify', 'folders', 'backup', 'devices'];
 export const ALL_STEPS = [INTRO, ...ORDER.flatMap(section => TOURS[section]), OUTRO];
