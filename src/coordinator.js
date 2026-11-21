@@ -2005,14 +2005,17 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   worktreeRootFor(repository) { return repository?.path ? path.join(this.workFolderOf(repository.path), 'worktrees') : this.worktreeRoot; }
   // Worktrees in a project's work folder go once their branch is merged and nothing in them is unsaved (worktree-cleanup.js).
   async tidyWorktrees() {
-    const busy = new Set(this.store.list('run').filter(run => run.worktree && !['done', 'failed', 'stopped', 'canceled'].includes(run.state)).map(run => path.resolve(run.worktree).toLowerCase()));
+    // Any live run or chat keeps the worktree it works in, whether it points at it as its worktree, cwd or project folder.
+    const busy = this.store.list('run').filter(run => this.live.has(run.id) || !['done', 'failed', 'stopped', 'canceled'].includes(run.state))
+      .flatMap(run => [run.worktree, run.cwd, run.projectPath]).filter(Boolean).map(folder => path.resolve(folder).toLowerCase());
+    const used = item => { const folder = item.path.toLowerCase(); return busy.some(other => other === folder || inside(folder, other)); };
     const results = [];
     for (const repository of this.store.config().repositories || []) {
       if (!repository.path || !existsSync(repository.path)) continue;
       const root = this.worktreeRootFor(repository);
       try {
         const items = (await worktreeList(repository.path)).filter(item => inside(root, item.path));
-        results.push({ repository: repository.name, ...await removeMerged(repository.path, items, { base: `origin/${repository.targetBranch || repository.baseBranch || 'master'}`, keep: item => busy.has(item.path.toLowerCase()) }) });
+        results.push({ repository: repository.name, ...await removeMerged(repository.path, items, { base: `origin/${repository.targetBranch || repository.baseBranch || 'master'}`, keep: used }) });
       } catch { /* not a git folder now */ }
     }
     if (results.some(result => result.removed.length)) void this.worktrees.scan({ force: true }).catch(() => {});

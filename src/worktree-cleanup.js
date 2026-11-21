@@ -19,12 +19,13 @@ export async function worktreeList(repository) {
   return items.slice(1); // the first is the project folder itself
 }
 // Whether a worktree can go: its branch is merged into base (and has moved past where it started, so a fresh worktree with
-// no work yet stays) and nothing is uncommitted or untracked.
+// no work yet stays) and nothing is uncommitted, untracked or ignored: ignored files (.env, local data, build output) are
+// never in git, so removing the folder would lose them for good.
 export async function canRemove(directory, base) {
   if (!existsSync(directory)) return { ok: false, reason: 'the folder is missing' };
-  const dirty = await git(directory, ['status', '--porcelain']).catch(() => null);
+  const dirty = await git(directory, ['status', '--porcelain', '--ignored', '--untracked-files=all']).catch(() => null);
   if (dirty === null) return { ok: false, reason: 'not a readable git worktree' };
-  if (dirty) return { ok: false, reason: 'has uncommitted changes' };
+  if (dirty) return { ok: false, reason: dirty.split(/\r?\n/).every(line => line.startsWith('!!')) ? 'has ignored local files' : 'has uncommitted or untracked files' };
   const head = await git(directory, ['rev-parse', 'HEAD']), tip = await git(directory, ['rev-parse', base]).catch(() => '');
   if (!tip) return { ok: false, reason: `${base} not found` };
   if (head === tip) return { ok: false, reason: `same commit as ${base}, no work merged yet` };

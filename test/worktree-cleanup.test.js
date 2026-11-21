@@ -36,6 +36,34 @@ test('each task gets one worktree folder inside the project\'s work folder, and 
   assert.match(why['102'], /uncommitted/); assert.match(why['103'], /not merged/); assert.ok(why['104'], 'a fresh worktree with no work stays'); assert.match(why['101-2'], /still working/);
 });
 
+test('a merged worktree stays while it holds ignored files or a live chat works in it', async () => {
+  const { Store } = await import('../src/store.js');
+  const { Desk } = await import('../src/coordinator.js');
+  const root = temporary('tidy-keep'), project = path.join(root, 'app');
+  git(root, 'init', '-q', '-b', 'master', project);
+  git(project, 'config', 'user.email', 't@t'); git(project, 'config', 'user.name', 't');
+  writeFileSync(path.join(project, '.gitignore'), '.env\n'); git(project, 'add', '.'); git(project, 'commit', '-qm', 'first');
+  const trees = path.join(workFolder(project), 'worktrees'), repository = { path: project, baseBranch: 'master' };
+  const made = {};
+  for (const name of ['201', '202', '203']) {
+    made[name] = (await createWorktree(repository, trees, `fix/${name}`, { name })).directory;
+    writeFileSync(path.join(made[name], `${name}.txt`), 'x'); git(made[name], 'add', '.'); git(made[name], 'commit', '-qm', 'work');
+    git(project, 'merge', '-q', '--no-edit', `fix/${name}`);
+  }
+  git(project, 'commit', '-q', '--allow-empty', '-m', 'later'); git(project, 'update-ref', 'refs/remotes/origin/master', 'master');
+  writeFileSync(path.join(made['201'], '.env'), 'KEY=local');
+  const store = new Store(temporary('tidy-keep-store'));
+  store.saveConfig({ ...store.publicConfig(), repositories: [{ name: 'app', path: project, baseBranch: 'master' }] });
+  store.put('run', 'chat', { id: 'chat', role: 'specialist', state: 'waiting', cwd: path.join(made['202'], 'src'), projectPath: project });
+  const desk = new Desk(store, { root: temporary('tidy-keep-root'), runnerFactory: () => ({}), memoryDirectory: temporary('tidy-keep-memory') });
+  const [result] = await desk.tidyWorktrees();
+  assert.deepEqual(result.removed.map(item => path.basename(item.path)), ['203']);
+  const why = Object.fromEntries(result.kept.map(item => [path.basename(item.path), item.reason]));
+  assert.match(why['201'], /ignored/); assert.match(why['202'], /still working/);
+  assert.ok(existsSync(path.join(made['201'], '.env')), 'the ignored file is still there');
+  await desk.shutdown(); store.close();
+});
+
 test('a project can name its own work folder', () => {
   const project = path.join(os.tmpdir(), 'site'), own = path.join(os.tmpdir(), 'elsewhere', 'site-work');
   assert.equal(workFolder(project, os.tmpdir(), [{ path: project, workFolder: own }]), own);
