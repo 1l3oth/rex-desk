@@ -423,19 +423,23 @@ test('replies the agent gave on the other computer while the two were apart reac
   await waitFor(() => turns.length === 1 && !desk.live.size);
   const runId = store.get('specialist', dara.id).runId;
   const add = store.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at,uid) VALUES(?,?,1,?,?,?)'), at = new Date().toISOString();
-  // A message typed on the other computer and answered here: not repeated.
-  add.run(runId, 'human-message', JSON.stringify({ text: 'Typed over there, answered here' }), at, 'far-node.1');
+  // While apart, the person wrote on the other computer and the agent answered there. The question syncs first:
+  // the turn here starts before the reply comes in, so nothing is told yet and the question stays pending.
+  add.run(runId, 'human-message', JSON.stringify({ text: 'WORK chat while OFF' }), at, 'far-node.2');
   await desk.say(runId, 'Second');
   await waitFor(() => turns.length === 2 && !desk.live.size);
   assert.doesNotMatch(turns[1].prompt, /out of touch/);
-  // While apart, the agent answered on the other computer too; those rows arrive now.
-  add.run(runId, 'human-message', JSON.stringify({ text: 'WORK chat while OFF' }), at, 'far-node.2');
+  // The reply arrives later: the next turn gets it together with its question.
   add.run(runId, 'agent-text', JSON.stringify({ text: 'Answered on Work' }), at, 'far-node.3');
   await desk.say(runId, 'Third');
   await waitFor(() => turns.length === 3 && !desk.live.size);
   assert.match(turns[2].prompt, /out of touch with the other one/);
   assert.match(turns[2].prompt, /The person \(on [^)]+\): WORK chat while OFF/);
   assert.match(turns[2].prompt, /You \(on [^)]+\): Answered on Work/);
+  // Told once: the turn after that does not repeat them.
+  await desk.say(runId, 'Fourth');
+  await waitFor(() => turns.length === 4 && !desk.live.size);
+  assert.doesNotMatch(turns[3].prompt, /out of touch/);
 });
 
 test('an agent shows an explanation page of its changes in the chat, and only HTML counts as a page', async () => {

@@ -1371,17 +1371,26 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   // While the two computers were apart, the agent answered on both, each in its own session (L25). Replies the agent wrote on
   // the other computer that came in since this session's last turn, with the messages they answered, were never seen by this
-  // session: the next turn gets them, so both stories go on as one. A message typed there and answered here is not repeated
-  // (no reply of the other computer follows it).
+  // session: the next turn gets them, so both stories go on as one. A message from there whose reply has not come in yet stays
+  // pending (the mark stops before it), so a question and its reply that sync apart still reach a later turn together.
+  // A pending message older than an hour is let go, so one that was never answered there does not hold the mark forever.
   missedElsewhere(run, clip) {
     const top = Number(this.store.db.prepare('SELECT max(sequence) AS top FROM events WHERE run_id=?').get(run.id)?.top || 0);
     const mark = run.seenMark, at = now();
-    this.patchRun(run.id, { seenMark: { sequence: top, at } });
-    if (!mark || !run.sessionId) return '';
-    const self = this.store.nodeId, rows = this.store.db.prepare("SELECT kind, value, created_at, uid FROM events WHERE run_id=? AND sequence>? AND visible=1 AND kind IN ('human-message','agent-text') AND uid NOT LIKE ? || '.%' ORDER BY created_at, sequence")
-      .all(run.id, Number(mark.sequence) || 0, self);
-    const last = rows.findLastIndex(row => row.kind === 'agent-text'); if (last < 0) return '';
-    const picked = rows.slice(0, last + 1).slice(-12);
+    if (!mark) { this.patchRun(run.id, { seenMark: { sequence: top, at } }); return ''; }
+    const self = this.store.nodeId, shown = new Set(mark.shown || []);
+    const rows = this.store.db.prepare("SELECT sequence, kind, value, created_at, uid FROM events WHERE run_id=? AND sequence>? AND visible=1 AND kind IN ('human-message','agent-text') AND uid NOT LIKE ? || '.%' ORDER BY created_at, sequence")
+      .all(run.id, Number(mark.sequence) || 0, self).filter(row => !shown.has(row.uid));
+    const last = rows.findLastIndex(row => row.kind === 'agent-text');
+    const stale = Date.now() - 60 * 60 * 1000;
+    const pending = rows.slice(last + 1).filter(row => Date.parse(row.created_at) > stale);
+    const used = rows.slice(0, last + 1);
+    // The mark moves past everything but the pending messages; rows already used above it are remembered so they are not repeated.
+    const hold = pending.length ? Math.min(...pending.map(row => Number(row.sequence))) - 1 : top;
+    const keep = [...shown, ...used.map(row => row.uid)].filter(uid => uid && pending.length);
+    this.patchRun(run.id, { seenMark: { sequence: Math.max(hold, Number(mark.sequence) || 0), at, ...(keep.length ? { shown: [...new Set(keep)] } : {}) } });
+    if (!run.sessionId || last < 0) return '';
+    const picked = used.slice(-12);
     const said = picked.map(row => { let text = ''; try { text = JSON.parse(row.value).text || ''; } catch { text = ''; } const node = String(row.uid || '').split('.').slice(0, -1).join('.');
       return `- ${row.kind === 'human-message' ? 'The person' : 'You'} (on ${this.peers.deviceName(node) || 'the other computer'}): ${clip(text)}`; });
     return `While this computer was out of touch with the other one, this was said in this chat there, and you have not seen it yet. Carry it on as part of this conversation:\n${said.join('\n')}`;
