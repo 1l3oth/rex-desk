@@ -121,8 +121,8 @@ export function parseClaudeStatus(output) {
   } catch { return null; }
 }
 
-// Where the AI programs send people to sign in.
-const SIGN_IN_HOSTS = ['openai.com', 'chatgpt.com', 'anthropic.com', 'claude.ai', 'claude.com', 'google.com'];
+// Where each AI program sends people to sign in.
+const SIGN_IN_HOSTS = { codex: ['openai.com', 'chatgpt.com'], claude: ['anthropic.com', 'claude.ai', 'claude.com'], gemini: ['google.com'] };
 
 export class AgentProfiles {
   constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn } = {}) { this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
@@ -278,12 +278,12 @@ export class AgentProfiles {
       if (job.state === 'installing' && job.output.includes(MARK)) job.state = 'signing-in';
       // The sign-in page, for when the browser did not open by itself. Only what the CLI prints after the install.
       const after = job.output.split(MARK)[1];
-      // Only a page on the AI's own sign-in hosts, never any other link the output holds.
+      // Only a page on this AI's own sign-in hosts, never any other link the output holds.
       if (after !== undefined && !job.url) {
         for (const [found] of after.matchAll(/https:\/\/[^\s"'<>]+/g)) {
           const link = found.replace(/[).,]+$/, '');
           let host = ''; try { host = new URL(link).hostname.toLowerCase(); } catch {}
-          if (SIGN_IN_HOSTS.some(known => host === known || host.endsWith(`.${known}`))) { job.url = link; break; }
+          if ((SIGN_IN_HOSTS[provider] || []).some(known => host === known || host.endsWith(`.${known}`))) { job.url = link; break; }
         }
       }
     };

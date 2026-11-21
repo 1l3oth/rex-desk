@@ -35,6 +35,8 @@ test('the first-run sign-in runs hidden and reports how far it got, without the 
     assert.equal(agents.loginJob('claude').state, 'installing');
     child.stdout.emit('data', 'installed\nREXDESK-SIGNIN-STARTS\nSee https://evil.example.com/claude.ai/oauth for help\n');
     assert.equal(agents.loginJob('claude').url, '', 'a link on an unknown host is never offered as the sign-in page');
+    child.stdout.emit('data', 'See https://chatgpt.com/auth for ChatGPT\n');
+    assert.equal(agents.loginJob('claude').url, '', "another AI's sign-in page is not offered for Claude");
     child.stdout.emit('data', 'Open https://claude.ai/oauth?code=1. to sign in\n');
     assert.deepEqual([agents.loginJob('claude').state, agents.loginJob('claude').url], ['signing-in', 'https://claude.ai/oauth?code=1']);
     assert.equal(agents.loginJob('claude').output, undefined, 'the output can hold an account name, so the page never gets it');
