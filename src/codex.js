@@ -92,6 +92,15 @@ export async function codexModels({ env, cwd, clientFactory = options => new Cod
   } finally { client.close(); }
 }
 
+// Codex tends to end a turn with "I'll do it now" and no tool call, then sits idle. The rule asks it not to; the nudge
+// catches the turns where it still does, once per message from the person, so it can never loop.
+export const CODEX_RULE = 'Never promise later work. Do it now, finish, then reply. Reply only with the result or a question.';
+export const CODEX_NUDGE = "You said you'd do it. Do it now, don't reply until it's done.";
+export const CODEX_NUDGE_LIMIT = 1;
+const PROMISE = /\b(I'll|I’ll|I will|I'm going to|I am going to|working on it|continue|next,? I'll|as soon as)\b/i;
+export function isPromise(text) { const value = String(text || '').trim(); return Boolean(value) && !value.includes('?') && PROMISE.test(value); }
+const TOOL_ITEMS = ['commandExecution', 'fileChange', 'mcpToolCall'];
+
 export class CodexRunner {
   constructor(options) { Object.assign(this, options); this.event ||= () => {}; }
   async approve(method, params) {
@@ -115,14 +124,15 @@ export class CodexRunner {
   }
   notification(method, params) {
     if (params.threadId && this.threadId && params.threadId !== this.threadId) return;
-    if (method === 'turn/started') this.turnId = params.turn.id;
-    if (method === 'item/started' && ['commandExecution', 'fileChange', 'mcpToolCall'].includes(params.item?.type)) {
+    if (method === 'turn/started') { this.turnId = params.turn.id; this.turnTools = 0; this.lastMessage = ''; }
+    if (method === 'item/started' && TOOL_ITEMS.includes(params.item?.type)) {
+      this.turnTools = (this.turnTools || 0) + 1;
       const item = params.item;
       this.event('agent-tool', { id: item.id, tool: item.tool || item.type, input: item.command ? { command: item.command } : {} });
     }
     if (method === 'item/completed') {
       const item = params.item || {};
-      if (item.type === 'agentMessage' && item.text) { this.text = `${this.text || ''}${item.text}\n`; this.event('agent-text', { text: item.text }); }
+      if (item.type === 'agentMessage' && item.text) { this.text = `${this.text || ''}${item.text}\n`; this.lastMessage = item.text; this.event('agent-text', { text: item.text }); }
       if (item.type === 'commandExecution') this.event('agent-tool-result', { id: item.id, text: String(item.aggregatedOutput || '').slice(-6000), failed: item.status === 'failed' || Boolean(item.exitCode) });
       if (item.type === 'mcpToolCall' && item.status === 'failed') this.event('agent-tool-result', { id: item.id, text: item.error?.message || 'MCP tool failed.', failed: true });
       const news = this.inbox?.();
@@ -136,12 +146,21 @@ export class CodexRunner {
     }
     if (method === 'turn/completed') {
       const turn = params.turn;
+      if (turn.status === 'completed' && this.shouldNudge()) return void this.nudge();
       if (turn.status === 'completed') { this.event('agent-result', { result: this.text || '', tokens: this.tokens, billedToApiKey: false }); this.resolveTurn({ status: 'completed' }); }
       else this.rejectTurn(new Error(turn.error?.message || `Codex turn ${turn.status}.`));
     }
     if (method === 'error' && !params.willRetry) this.rejectTurn?.(new Error(params.error?.message || 'Codex failed.'));
   }
+  // The turn ended on a promise with no tool used: one more turn on the same thread instead of going idle.
+  shouldNudge() { return !this.turnTools && (this.nudges || 0) < CODEX_NUDGE_LIMIT && isPromise(this.lastMessage) && !this.signal?.aborted; }
+  nudge() {
+    this.nudges = (this.nudges || 0) + 1;
+    void this.client.request('turn/start', { ...this.turnOptions, threadId: this.threadId, input: [{ type: 'text', text: CODEX_NUDGE }] })
+      .then(started => { this.turnId = started.turn.id; }, error => this.rejectTurn(error));
+  }
   async start(prompt) {
+    this.nudges = 0; this.turnTools = 0; this.lastMessage = '';
     if (this.signal?.aborted) throw new Error('Codex was stopped.');
     const env = { ...codexEnvironment(this.agentEnv), REX_DESK_TOKEN: this.token || '', REX_AGENT_TOKEN: this.token || '', REX_DESK_URL: this.mcpUrl || '' };
     const servers = {};
@@ -164,12 +183,14 @@ export class CodexRunner {
       const auth = await this.client.request('account/read', { refreshToken: false });
       if (auth.account?.type !== 'chatgpt') throw new Error('Codex needs you to sign in with your ChatGPT plan. Connect Codex in Settings.');
       const config = { model_provider: 'openai', forced_login_method: 'chatgpt', mcp_servers: servers };
-      const common = { cwd: this.cwd, approvalPolicy: permissions.approvalPolicy, approvalsReviewer: 'user', sandbox: permissions.sandbox, config, ...(this.model ? { model: this.model } : {}) };
+      const common = { cwd: this.cwd, approvalPolicy: permissions.approvalPolicy, approvalsReviewer: 'user', sandbox: permissions.sandbox, config, developerInstructions: CODEX_RULE, ...(this.model ? { model: this.model } : {}) };
       const session = this.run.sessionId;
       const result = await this.client.request(session ? 'thread/resume' : 'thread/start', { ...common, ...(session ? { threadId: session, excludeTurns: true } : {}) });
       this.threadId = result.thread.id; this.event('session', { sessionId: this.threadId, apiKeySource: 'subscription' });
-      const started = await this.client.request('turn/start', { threadId: this.threadId, input: [{ type: 'text', text: prompt }], approvalPolicy: permissions.approvalPolicy, sandboxPolicy: permissions.sandboxPolicy,
-        ...(this.model ? { model: this.model } : {}), ...(this.run.effort ? { effort: this.run.effort === 'max' ? 'xhigh' : this.run.effort } : {}) });
+      this.turnOptions = { approvalPolicy: permissions.approvalPolicy, sandboxPolicy: permissions.sandboxPolicy, ...(this.model ? { model: this.model } : {}), ...(this.run.effort ? { effort: this.run.effort === 'max' ? 'xhigh' : this.run.effort } : {}) };
+      // A new thread also gets the rule at the top of its first message, in case this Codex version ignores developerInstructions.
+      const text = session ? prompt : `${CODEX_RULE}\n\n${prompt}`;
+      const started = await this.client.request('turn/start', { ...this.turnOptions, threadId: this.threadId, input: [{ type: 'text', text }] });
       this.turnId = started.turn.id;
       return await completed;
     } finally { this.signal?.removeEventListener('abort', abort); this.client.close(); }
