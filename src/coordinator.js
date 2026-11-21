@@ -426,7 +426,7 @@ export class Desk {
       return { sent: true };
     }
     if (this.live.has(runId)) {
-      this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
+      this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), ...(picked.model ? { modelPicked: true } : {}), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
       // A message typed on another computer is already in the shared chat: the agent gets it, the chat does not show it twice.
       if (!picked.echoed) this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
       return { queued: true };
@@ -1550,13 +1550,13 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: keepLines(prompt), via: 'rex' }, true);
     // After /clear the next message starts a fresh session that reads the handoff; the message itself goes in as it is.
     if (run.handoffFile && !run.sessionId) {
-      this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), execution: 'headless' });
+      this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), execution: 'headless' });
       void this.drain(); return this.run(runId);
     }
-    this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', cardModel: undefined, profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}),
+    this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', cardModel: undefined, modelPicked: undefined, profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}),
       ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}),
       instructions: run.role === 'specialist' ? `${run.instructions || ''}${carried}` : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
-      ...runOptions({ ...picked, provider }, this.store), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
+      ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
     void this.drain(); return this.run(runId);
   }
   async verify(runId, { command: proposed = '' } = {}) {

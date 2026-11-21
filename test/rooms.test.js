@@ -410,6 +410,11 @@ test('the model on the agent card reaches a chat made before it was set (L68)', 
   await desk.say(runId, 'Still Opus?');
   await waitFor(() => seen.length === 5 && !desk.live.size);
   assert.equal(seen[3], 'claude-opus-5-5'); assert.equal(seen[4], 'claude-opus-5-5', 'the pick made in this chat is kept');
+  // A chat from before cardModel existed: a model picked there now is kept too.
+  store.put('run', runId, { ...store.get('run', runId), cardModel: undefined, modelPicked: undefined });
+  await desk.say(runId, 'Haiku here', { model: 'claude-haiku-5-5' });
+  await waitFor(() => seen.length === 6 && !desk.live.size);
+  assert.equal(seen[5], 'claude-haiku-5-5', 'recorded as picked before the card is applied');
 });
 
 test('an agent shows an explanation page of its changes in the chat, and only HTML counts as a page', async () => {

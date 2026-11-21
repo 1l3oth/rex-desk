@@ -52,7 +52,8 @@ export function pickedOptions(ctx) {
   // In a chat that already exists the model goes out only when the person picked one there: the one shown by itself (the
   // agent card's, or the default) is not a choice, and sending it pinned the chat to it for good (L68).
   const run = ctx.ui.view.type === 'main' ? ctx.mainRun() : ctx.ui.view.type === 'run' ? ctx.runById(ctx.ui.view.id) : null, shown = read('opt-model');
-  const model = !run || ctx.ui.modelPick?.[ctx.draftKey()] === shown ? shown : '';
+  // Switching the AI (Local AI included: it goes out as Claude with a local model) is a pick of the model it shows.
+  const key = ctx.draftKey(), model = !run || ctx.ui.modelPick?.[key] === shown || ctx.ui.providerPick?.[key] || isLocalId(shown) ? shown : '';
   return { provider: sentProvider(read('opt-provider')) || undefined, model: model || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
 }
 
