@@ -49,7 +49,11 @@ export function currentOptions(ctx) {
 }
 export function pickedOptions(ctx) {
   const read = id => document.getElementById(id)?.value || '';
-  return { provider: sentProvider(read('opt-provider')) || undefined, model: read('opt-model') || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
+  // In a chat that already exists the model goes out only when the person picked one there: the one shown by itself (the
+  // agent card's, or the default) is not a choice, and sending it pinned the chat to it for good (L68).
+  const run = ctx.ui.view.type === 'main' ? ctx.mainRun() : ctx.ui.view.type === 'run' ? ctx.runById(ctx.ui.view.id) : null, shown = read('opt-model');
+  const model = !run || ctx.ui.modelPick?.[ctx.draftKey()] === shown ? shown : '';
+  return { provider: sentProvider(read('opt-provider')) || undefined, model: model || undefined, effort: read('opt-effort') || undefined, permissionMode: read('opt-mode') || undefined };
 }
 
 // The AI, model, effort and mode pickers under the message box, for the AI picked now.
@@ -460,7 +464,7 @@ export function initComposer(ctx) {
     if (event.target.id === 'file-input') { for (const file of event.target.files) void upload(ctx, file); event.target.value = ''; return; }
     // Switching the AI shows that AI's models and modes; the next message goes to it, with the chat so far handed over.
     if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(t`Your next message goes to ${event.target.value === 'codex' ? t('Codex') : event.target.value === 'gemini' ? t('Gemini') : event.target.value === LOCAL ? t('Local AI, on this computer') : t('Claude Code')}.`); return; }
-    if (event.target.id === 'opt-model') remember({ model: event.target.value });
+    if (event.target.id === 'opt-model') { remember({ model: event.target.value }); ctx.ui.modelPick = { ...(ctx.ui.modelPick || {}), [ctx.draftKey()]: event.target.value }; }
     if (event.target.id === 'opt-effort') remember({ effort: event.target.value });
     if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast(t('Dangerous: the agent runs tools without asking.')); }
   });
