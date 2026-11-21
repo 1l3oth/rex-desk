@@ -166,7 +166,7 @@ export class Desk {
     // that run from the copy, so an update installs while they work (see prepareRuntime). Until it is ready they start as before.
     // Only the installed app's own server says so (ownRuntime): agents inherit REX_DESK_VERSION, and every test desk an agent
     // started used to copy the whole runtime (0.7 GB) into the temp folder, which filled the drive.
-    if (!runnerFactory && ownRuntime) void prepareRuntime(path.join(store.directory, 'runtime')).then(runtime => { this.runtime = runtime; }, () => {});
+    if (!runnerFactory && ownRuntime) void prepareRuntime(path.join(store.directory, 'runtime'), { onLowSpace: body => this.notifier.notify({ kind: 'failed', title: "Not enough space for the agents' copy of Rex Desk", body, target: { type: 'notices', id: '' } }) }).then(runtime => { this.runtime = runtime; }, () => {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
     this.localTasks = new LocalTasks(store);

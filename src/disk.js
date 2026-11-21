@@ -5,12 +5,12 @@ import path from 'node:path';
 export const MIN_FREE_BYTES = 500 * 2 ** 20;
 export const freeBytes = folder => { try { const disk = statfsSync(folder); return Number(disk.bavail) * Number(disk.bsize); } catch { return Infinity; } };
 // "Drive C:" on Windows, "The disk" elsewhere.
-const drive = folder => { const letter = path.parse(path.resolve(folder)).root.match(/^([a-z]):/i); return letter ? `Drive ${letter[1].toUpperCase()}:` : 'The disk'; };
+export const driveName = folder => { const letter = path.parse(path.resolve(folder)).root.match(/^([a-z]):/i); return letter ? `Drive ${letter[1].toUpperCase()}:` : 'The disk'; };
 // Returns '' when there is room, otherwise what to tell the person.
 export function lowDiskMessage(folders, { min = MIN_FREE_BYTES, free = freeBytes } = {}) {
   for (const folder of folders.filter(Boolean)) {
     const left = free(folder);
-    if (left < min) return `${drive(folder)} is almost full (${Math.max(0, Math.round(left / 2 ** 20))} MB free), so the agent cannot save its work. Free some space (empty the Recycle Bin, delete old downloads, or remove old copies of your projects), or move Rex Desk's files to another drive in Settings, Folders. Then send your message again.`;
+    if (left < min) return `${driveName(folder)} is almost full (${Math.max(0, Math.round(left / 2 ** 20))} MB free), so the agent cannot save its work. Free some space (empty the Recycle Bin, delete old downloads, or remove old copies of your projects), or move Rex Desk's files to another drive in Settings, Folders. Then send your message again.`;
   }
   return '';
 }

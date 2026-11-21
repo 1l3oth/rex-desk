@@ -53,6 +53,19 @@ test('the runtime copy takes only what agents need from a dev checkout, never .g
   assert.ok(existsSync(copy.node)); assert.ok(!existsSync(path.join(path.dirname(copy.node), 'node_modules')), 'npm beside a system Node.js is not copied');
 });
 
+test('the runtime copy is skipped when it would leave under 5 GB free, and the person is told why', async () => {
+  const { prepareRuntime } = await import('../src/hosts.js');
+  const { mkdirSync } = await import('node:fs');
+  const install = temporary('full-install'), runtime = path.join(temporary('full-data'), 'runtime');
+  mkdirSync(path.join(install, 'node')); writeFileSync(path.join(install, 'node', 'node.exe'), 'node');
+  mkdirSync(path.join(install, 'app', 'src'), { recursive: true }); writeFileSync(path.join(install, 'app', 'src', 'agent-host.js'), 'host');
+  const where = { execPath: path.join(install, 'node', 'node.exe'), appRoot: path.join(install, 'app'), platform: 'win32', version: '3.0.0' }, told = [];
+  assert.equal(await prepareRuntime(runtime, { ...where, free: () => 4.9 * 2 ** 30, onLowSpace: text => told.push(text) }), null, 'agents keep running from the app folder');
+  assert.ok(!existsSync(path.join(runtime, '3.0.0')), 'nothing is copied');
+  assert.match(told[0], /has only 4\.9 GB free/); assert.match(told[0], /Settings, Folders/);
+  assert.ok(await prepareRuntime(runtime, { ...where, free: () => 6 * 2 ** 30, onLowSpace: text => told.push(text) }), 'with room the copy is made');
+  assert.equal(told.length, 1);
+});
 const sdkModule = fileURLToPath(new URL('./fixtures/fake-sdk.mjs', import.meta.url));
 const waitFor = async (check, what, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { const value = check(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 50)); } throw new Error(`Timed out waiting for ${what}`); };
 const said = (store, runId) => store.events(runId, { visible: true }).filter(event => event.kind === 'agent-text').map(event => event.text);

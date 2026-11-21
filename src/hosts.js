@@ -28,12 +28,24 @@ export function runtimeSkip(appRoot) {
 }
 // The node folder: only its files (node.exe and its DLLs), not npm or other folders a system Node.js keeps beside it.
 const nodeSkip = from => source => path.dirname(source) !== from || statSync(source).isDirectory();
+const sizeOf = (folder, skip) => {
+  let bytes = 0;
+  for (const entry of readdirSync(folder, { withFileTypes: true })) {
+    const source = path.join(folder, entry.name);
+    if (skip(source)) continue;
+    if (entry.isDirectory()) bytes += sizeOf(source, skip); else if (entry.isFile()) bytes += statSync(source).size;
+  }
+  return bytes;
+};
+export const RUNTIME_RESERVE = 5 * 2 ** 30;
 
 // Agents keep working through an update. On Windows the installer closes everything that runs from the install folder (it
 // cannot replace a running program), so agents run from a private copy of this version (its Node.js and Rex Desk's code)
 // kept beside the data. The update leaves them running, and the new server attaches to them as after any restart.
 // One copy per version; older ones are removed once no agent uses them. Returns { node, script, cwd } once the copy is ready.
-export async function prepareRuntime(directory, { version = process.env.REX_DESK_VERSION, execPath = process.execPath, appRoot = path.resolve(path.dirname(HOST_SCRIPT), '..'), platform = process.platform } = {}) {
+// When the copy would leave less than 5 GB free on that drive it is not made: agents keep running from the app's own
+// folder, and onLowSpace gets a plain message for the person.
+export async function prepareRuntime(directory, { version = process.env.REX_DESK_VERSION, execPath = process.execPath, appRoot = path.resolve(path.dirname(HOST_SCRIPT), '..'), platform = process.platform, free, reserve = RUNTIME_RESERVE, onLowSpace = () => {} } = {}) {
   if (!version || platform !== 'win32' || !/^[\w.-]+$/.test(version)) return null;
   doing('agents: preparing their copy of Rex Desk');
   const { copyAll } = await import('./folders.js');
@@ -44,6 +56,12 @@ export async function prepareRuntime(directory, { version = process.env.REX_DESK
     const nodeFrom = path.dirname(execPath), appSkip = runtimeSkip(appRoot), onlyNode = nodeSkip(nodeFrom);
     rmSync(target, { recursive: true, force: true });
     mkdirSync(directory, { recursive: true });
+    const size = sizeOf(nodeFrom, onlyNode) + sizeOf(appRoot, appSkip), left = (free || freeBytes)(directory);
+    if (left - size < reserve) {
+      const gb = bytes => (Math.max(0, bytes) / 2 ** 30).toFixed(1);
+      onLowSpace(`${driveName(directory)} has only ${gb(left)} GB free, so Rex Desk did not make its private copy for agents (${gb(size)} GB); it keeps at least ${gb(reserve)} GB free. Agents still work, but an update will stop them while it installs. Free some space or move Rex Desk's files to another drive in Settings, Folders.`);
+      return null;
+    }
     await copyAll(nodeFrom, path.join(target, 'node'), onlyNode);
     await copyAll(appRoot, path.join(target, 'app'), appSkip);
     writeFileSync(ready, new Date().toISOString());
