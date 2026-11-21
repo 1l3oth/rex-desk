@@ -2649,8 +2649,8 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .settings-pop .st-nav button.on{background:var(--accent);box-shadow:none;color:var(--accent-ink,#fff)}
 .settings-pop .st-nav button.on .st-ic{background:rgba(255,255,255,.22);color:inherit}
 .settings-pop .st-body{background:var(--bg)}
-.settings-pop .st-panel{max-width:none;padding:24px 40px 40px;gap:10px;scrollbar-gutter:stable}
-.settings-pop .st-panel>*{max-width:680px;width:100%;box-sizing:border-box;flex:none}
+.settings-pop .st-panel{max-width:none;padding:24px 32px 40px;gap:10px;scrollbar-gutter:stable}
+.settings-pop .st-panel>*{max-width:none;width:100%;box-sizing:border-box;flex:none}
 .settings-pop .st-panel h2{font-size:22px;font-weight:650;margin:0 0 6px}
 .settings-pop .st-panel h3{margin:18px 0 0;padding:0 4px;border:0;font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)}
 .settings-pop .st-panel h3.st-part{margin-top:22px}
