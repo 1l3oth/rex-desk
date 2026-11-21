@@ -1,7 +1,7 @@
 // Worktrees are removed once their branch is merged and nothing in them is unsaved. Used by the desk on a timer (only the
 // work folder's own worktrees) and by scripts/tidy-worktrees.mjs (the loose sibling folders made before the work folder).
 import { execFile } from 'node:child_process';
-import { lstatSync, readdirSync, rmdirSync, unlinkSync, existsSync, statSync, rmSync, openSync, closeSync } from 'node:fs';
+import { lstatSync, readdirSync, rmdirSync, unlinkSync, existsSync, statSync, rmSync, openSync, closeSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -96,7 +96,17 @@ export function busyFolders(runs, { live = () => false, now = Date.now(), idleMs
   const ended = ['done', 'failed', 'stopped', 'canceled'];
   const recent = run => now - Math.max(...[run.updatedAt, run.endedAt, run.createdAt].map(at => Date.parse(at || '') || 0)) < idleMs;
   return runs.filter(run => live(run) || !ended.includes(run.state) || recent(run))
-    .flatMap(run => [run.worktree, run.cwd, run.projectPath]).filter(Boolean).map(folder => path.resolve(folder).toLowerCase());
+    .flatMap(run => [run.worktree, run.cwd, run.projectPath]).filter(Boolean).map(folder => realPath(folder).toLowerCase());
 }
-export const usedBy = (busy, item) => { const folder = path.resolve(item.path).toLowerCase(); return busy.some(other => other === folder || inside(folder, other)); };
-export const inside = (folder, item) => { const relative = path.relative(path.resolve(folder), path.resolve(item)); return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative); };
+export const usedBy = (busy, item) => { const folder = realPath(item.path).toLowerCase(); return busy.some(other => other === folder || inside(folder, other)); };
+// The same folder can be written two ways on Windows (a short 8.3 name like RUNNER~1, or the long one git prints), so paths
+// are compared in their real long form; the part that does not exist yet is kept as it is.
+export function realPath(folder) {
+  const full = path.resolve(folder);
+  for (let base = full, rest = ''; ;) {
+    try { return path.join(realpathSync.native(base), rest); } catch { /* not there yet: try its parent */ }
+    const parent = path.dirname(base); if (parent === base) return full;
+    rest = path.join(path.basename(base), rest); base = parent;
+  }
+}
+export const inside = (folder, item) => { const relative = path.relative(realPath(folder), realPath(item)); return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative); };

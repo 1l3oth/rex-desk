@@ -33,5 +33,5 @@ test('every agent knows how to restart Rex Desk, how updates work, and every sec
   const sections = [...settings.match(/const SECTIONS = \[([\s\S]*?)\];/)[1].matchAll(/\['[a-z]+', (?:t\()?'([^']+)'/g)].map(match => match[1]);
   assert.ok(sections.length >= 10);
   for (const name of sections) assert.ok(APP_GUIDE.includes(name), `the guide names the "${name}" section`);
-  assert.match(APP_GUIDE, /Restart Rex Desk server/); assert.match(APP_GUIDE, /Update when it finishes/); assert.match(APP_GUIDE, /Check now/);
+  assert.match(APP_GUIDE, /Restart Rex Desk server/); assert.match(APP_GUIDE, /Update when it finishes/); assert.match(APP_GUIDE, /Check for updates/);
 });
