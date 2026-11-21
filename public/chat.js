@@ -123,10 +123,10 @@ const roomById = id => ui.snap.rooms.find(room => room.id === id);
 const TILE_NAMES = { notices: t('Alerts'), inbox: t('Needs'), tasks: t('Tasks'), jev: t('Jev'), person: t('You'), monitor: 'RAM', devices: 'PCs', worktrees: t('Trees') };
 // A small square button for a place (Notifications, Tasks, Monitor…), with its name and state in the tooltip and a badge when something waits.
 // A place in the rail: an icon, a name, and a count on the right (amber when it needs you).
-function place(type, icon, name, count = 0, warn = false, hint = '') {
+function place(type, icon, name, count = 0, warn = false, hint = '', sub = '') {
   // The bell opens a dropdown instead of a screen; it keeps the "tile" class the dropdown places itself by.
   const bell = type === 'notices', active = bell ? Boolean(document.querySelector('.nt-pane')) : ui.view.type === type;
-  return `<button type="button" class="place${bell ? ' tile' : ''}${active ? ' active' : ''}" ${bell ? 'data-action="nt-panel"' : `data-open="${type}" data-id=""`} ${active ? 'aria-current="page"' : ''} title="${esc(hint || name)}">${iconAv(icon, warn && count ? 'warn' : '')}<span>${esc(name)}</span>${count ? `<b class="${warn ? 'warn' : ''}">${count > 99 ? '99+' : count}</b>` : ''}</button>`;
+  return `<button type="button" class="place${bell ? ' tile' : ''}${active ? ' active' : ''}" ${bell ? 'data-action="nt-panel"' : `data-open="${type}" data-id=""`} ${active ? 'aria-current="page"' : ''} title="${esc(hint || name)}">${iconAv(icon, warn && count ? 'warn' : '')}<span>${esc(name)}${sub ? `<small class="place-sub">${esc(sub)}</small>` : ''}</span>${count ? `<b class="${warn ? 'warn' : ''}">${count > 99 ? '99+' : count}</b>` : ''}</button>`;
 }
 function tile(type, avatar, name, sub, badge = 0, warn = false) {
   // The bell opens a dropdown list instead of a screen.
@@ -174,6 +174,11 @@ function section(key, title, count, extra, body) {
 function toggleSection(key) { if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key); try { localStorage.setItem('rex-desk-collapsed', JSON.stringify([...collapsed])); } catch { /* private window */ } renderAll(); }
 const agentDot = state => ({ busy: 'working', replying: 'working', waiting: 'warn', idle: 'good', offline: 'off' })[state] || '';
 
+// The Tasks row says how they stand without opening it: open, waiting on someone, done.
+function taskSummary(counts) {
+  if (!counts || !(counts.open + counts.waiting + counts.done)) return '';
+  return t`${counts.open} open · ${counts.waiting} waiting · ${counts.done} done`;
+}
 function renderRail() {
   // No Runs list: agents work in their own chats and rooms, the way the person tells them. An old run still opens from its task.
   const snap = ui.snap, asks = pending().length;
@@ -185,7 +190,7 @@ function renderRail() {
       <nav class="places" aria-label="${t`Places`}">${[
         place('notices', 'bell', t('Notifications'), snap.notices?.unread || 0, true),
         place('inbox', 'inbox', t('Needs you'), asks, true),
-        place('tasks', 'tasks', t('Tasks'), busy || tasks.length, false, busy ? t`${busy} being worked on` : ''),
+        place('tasks', 'tasks', t('Tasks'), busy || tasks.length, false, busy ? t`${busy} being worked on` : '', taskSummary(snap.taskCounts)),
         place('person', 'person', t('Knowledge'), 0),
         place('split', 'split', t('Split view'), 0),
       ].join('')}</nav>

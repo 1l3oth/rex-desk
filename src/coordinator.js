@@ -208,9 +208,15 @@ export class Desk {
   detection() {
     return Object.fromEntries(this.store.config().repositories.map(repository => { const { detected } = effectiveRepository(repository); return [repository.id, { setupCommand: detected.setupCommand, testCommand: detected.testCommand, devCommand: detected.devCommand, from: detected.from, flow: Boolean(detected.flowRuntime), electron: Boolean(detected.electronRuntime) }]; }));
   }
+  // How the tasks stand, done ones included (a finished Orbit task is no longer active, so the sidebar list cannot count it).
+  taskCounts() {
+    const counts = { open: 0, waiting: 0, done: 0 };
+    for (const task of this.store.list('task')) { if (task.demo) continue; if (task.status === 'done') counts.done += 1; else if (task.active) counts[task.status === 'in_review' || task.status === 'blocked' ? 'waiting' : 'open'] += 1; }
+    return counts;
+  }
   snapshot() {
     // sidebar: the person's own order and pins for agents and group chats (dragged in the sidebar), on every computer.
-    return { computer: thisComputer(), sidebar: this.store.get('sidebar', 'main') || {}, config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active),
+    return { computer: thisComputer(), sidebar: this.store.get('sidebar', 'main') || {}, config: this.store.publicConfig(), detection: this.detection(), jev: this.jev.status(), priorities: this.jev.ranking(), tasks: this.store.list('task').filter(task => task.active), taskCounts: this.taskCounts(),
       notices: this.notifier.summary(), usage: this.store.list('usage'), schedules: this.schedules.list(), shownFile: this.shownFile, fileWindow: this.fileWindow || null, worktrees: this.worktrees.all(),
       // A local run for a chat whose agent now lives on another computer is hidden: that computer's live copy (in cloudRuns) shows instead, so the chat is not stuck on a stale local version.
       runs: [...this.store.list('run').filter(run => !this.peers.copyWins(this.store.get('chatcopy', run.id))), ...this.peers.remoteRuns(), ...this.peers.cloudRuns()].sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt))),

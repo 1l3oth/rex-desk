@@ -237,6 +237,7 @@ html.has-win-bar .chat-shell{height:100dvh;padding-top:34px}
 .place{display:flex;align-items:center;gap:10px;width:100%;padding:6px 8px;border:0;border-radius:10px;background:none;color:var(--ink);font-size:13.5px;text-align:left}
 .place .av{flex:none;width:26px;height:26px;margin:0}
 .place>span:not(.av){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.place .place-sub{display:block;margin-top:1px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
 /* The bell keeps the old tile class the dropdown places itself by; it must not look like a tile. */
 .places .place.tile{flex-direction:row;align-items:center;gap:10px;padding:6px 8px;color:var(--ink)}
 .places .place.tile.active{background:color-mix(in srgb,var(--accent) 14%,transparent)}
