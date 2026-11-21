@@ -57,6 +57,8 @@ function wireGestures(dialog) {
   dialog.addEventListener('pointerdown', event => {
     const stage = event.target.closest('.iv-stage'); if (!stage) return;
     state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); state.moved = false;
+    // The stage captures the pointer, so the click lands on the stage even when it started on the picture: remember where it began.
+    state.onImage = Boolean(event.target.closest('[data-iv="image"]'));
     if (state.pointers.size === 2) { const [a, b] = [...state.pointers.values()]; state.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: state.view.k, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, x: state.view.x, y: state.view.y }; }
     stage.setPointerCapture?.(event.pointerId);
   });
@@ -87,7 +89,8 @@ export function wireImageViewer() {
   }, true);
   document.addEventListener('click', event => {
     const dialog = document.getElementById('img-viewer'); if (!dialog?.open || !dialog.contains(event.target)) return;
-    const act = event.target.closest('[data-iv]')?.dataset.iv;
+    let act = event.target.closest('[data-iv]')?.dataset.iv;
+    if (act === 'backdrop' && state.onImage) act = 'image';
     // The end of a drag or a pinch is not a click: it neither closes the viewer nor zooms.
     if (state.moved && (act === 'backdrop' || act === 'image')) { state.moved = false; return; }
     if (act === 'close' || act === 'backdrop' || event.target === dialog) dialog.close();
