@@ -105,8 +105,8 @@ const ASKS = /\?|\b(?:let me know|tell me|please (?:confirm|choose|pick|tell|sen
 // ("I'll fix it once you send the file", "I'll continue after you confirm").
 const OFFER = /\b(?:if you need|if you want|if you(?:'|’)d like|whenever you(?:'|’)re ready|anything else|any(?:thing| other) (?:questions?|help)|i(?:'|’)ll be (?:here|around|happy|glad))\b/i;
 const WAITS = /\b(?:once|after|when|as soon as|if|until)\s+(?:you|you(?:'|’)ve|you(?:'|’)re|your|i (?:get|have|hear|receive))\b/i;
-// Waiting on the person is not a promise either: "I'll wait for your approval", "I'll hold until I hear from you".
-const WAITS_ON = /\b(?:wait(?:ing)?|hold(?:ing)?(?: off)?|stand(?:ing)? by|pause)\b.*\b(?:you|your)\b/i;
+// Waiting on the person is not a promise either: "I'll wait for approval", "I'll hold until I hear from you".
+const WAITS_ON = /\b(?:wait(?:ing)?|hold(?:ing)?(?: off)?|stand(?:ing)? by|pause)\b.*\b(?:you|your|approval|approve|input|confirm(?:ation)?|reply|answer|response|go-ahead|ok(?:ay)?)\b/i;
 export function isPromise(text) {
   const value = String(text || '').trim();
   if (!value || ASKS.test(value)) return false;
