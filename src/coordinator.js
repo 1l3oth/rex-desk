@@ -420,7 +420,7 @@ export class Desk {
     // In Voice mode the agent gets the briefing and how to talk; the chat shows only what the person said.
     const spoken = picked.voice ? this.spoken(runId, line) : '';
     if (spoken) {
-      if (this.live.has(runId)) { const current = this.store.get('run', runId); this.store.put('run', runId, { ...current, queued: [...(current.queued || []), spoken], updatedAt: now() }); this.store.event(runId, 'human-message', { text: line, via: 'voice', queued: true }, true); return { queued: true }; }
+      if (this.live.has(runId)) { const current = this.store.get('run', runId); this.store.put('run', runId, { ...current, ...runOptions({ provider: current.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), ...(picked.model ? { modelPicked: true } : {}), queued: [...(current.queued || []), spoken], updatedAt: now() }); this.store.event(runId, 'human-message', { text: line, via: 'voice', queued: true }, true); return { queued: true }; }
       this.store.event(runId, 'human-message', { text: line, via: 'voice' }, true);
       await this.resume(runId, { provider: picked.provider || run.provider, prompt: spoken, silent: true, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });
       return { sent: true };

@@ -631,6 +631,8 @@ async function send() {
   // Dictated words may be misheard: the agent is told, quietly, so it reads them against the conversation.
   const spoken = ui.voiceDrafts?.has(draftKey()) ? VOICE_NOTE : '';
   const text = `${typed || t('See the attached files.')}${attachmentText(ctx)}${spoken}`, picked = pickedOptions(ctx);
+  // Local AI with no model on this computer yet: the message would go to Claude instead, so it waits for the setup.
+  if (document.getElementById('opt-provider')?.value === 'local' && !picked.model) return toast(t('Open Settings, Local AI, and press Set up: it installs Ollama and a starter model.'), true);
   const { type, id } = ui.view; box.disabled = true; ui.voiceDrafts?.delete(draftKey());
   try {
     if (type === 'jev') { box.value = ''; ui.drafts.set(draftKey(), ''); void jevDo(typed); }
