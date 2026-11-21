@@ -58,30 +58,27 @@ function planCard(database, state) {
     ${(billing.invoices || []).length ? `<ul class="pl-bills">${billing.invoices.map(item => `<li><span>${new Date(item.date).toLocaleDateString(document.documentElement.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' })}</span><span>${'$' + Number(item.amount).toFixed(2)}</span><span class="pl-badge pl-${item.status === 'paid' ? 'good' : item.status === 'open' ? 'warn' : 'bad'}">${item.status === 'paid' ? t('Paid') : item.status === 'open' ? t('Due') : t('Not paid')}</span>${item.url ? `<a href="${item.url.replace(/"/g, '')}" target="_blank" rel="noopener">${t`Receipt`}</a>` : '<span></span>'}</li>`).join('')}</ul>` : `<p class="pl-sub">${t`No payments yet.`}</p>`}</div>`;
 }
 const SECTIONS = [
-  ['general', t('General'), t('Your name, theme, start with Windows')],
-  ['folders', t('Folders'), t('Where data, AI memory and files are kept')],
-  ['notify', t('Notifications'), t('Pop-ups, sound, phone, quiet hours')],
-  ['agents', t('Agents'), t('Workers, model, branches, pull requests')],
-  ['accounts', t('AI accounts'), t('Claude Code, Codex, Gemini, Local AI')],
-  ['localai', t('Local AI'), t('Models that run on this computer')],
-  ['projects', t('Projects'), t('Repositories, branches and commands')],
-  ['sources', t('Task sources'), t('Rex Desk, Orbit, Flow, Morningmate')],
-  ['jev', t('Jev and voice'), t('Ranking, computer control, speech')],
-  ['schedule', t('Schedule'), t('Start work on its own')],
-  ['signins', t('Test sign-ins'), t('Accounts agents use in previews')],
-  ['tools', t('Tools and skills'), t('MCP servers, skills, commands, hooks')],
-  ['devices', t('Devices and phone'), t('Your other computers, your phone')],
-  ['plan', t('Plan and billing'), t('Your plan, space, payments')],
-  ['storage', t('Storage'), t('What uses space, clean up')],
-  ['backup', t('Backup and updates'), t('Cloud copy, app updates')],
-  ['about', t('About'), t('Version, storage and what it holds')],
+  ['general', t('General'), t('Name, language, look')],
+  ['notify', t('Notifications'), t('Pop-ups, sound, quiet hours')],
+  ['jev', t('Jev and voice'), t('Voice, computer control, speech')],
+  ['ai', t('AI'), t('Accounts, models, local AI')],
+  ['agents', t('Agents'), t('How many, mode, branches')],
+  ['tools', t('Tools and skills'), t('MCP servers, skills, commands')],
+  ['projects', t('Projects'), t('Repositories and test sign-ins')],
+  ['tasks', t('Tasks'), t('Task sources and schedule')],
+  ['backup', t('Account and backup'), t('Plan, cloud copy, devices')],
+  ['storage', t('Storage'), t('Space used and folders')],
+  ['about', t('About'), t('Version and updates')],
 ];
-// The sections in groups by what they are about, so the list reads in a few chunks instead of thirteen rows.
+// Each section is one or more panels. The old section names still open the right page.
+const PARTS = { general: ['general'], notify: ['notify'], jev: ['jev'], ai: ['accounts', 'localai'], agents: ['agents'], tools: ['tools'], projects: ['projects', 'signins'], tasks: ['sources', 'schedule'], backup: ['backup', 'devices'], storage: ['storage', 'folders'], about: ['about'] };
+const ALIAS = { accounts: 'ai', localai: 'ai', signins: 'projects', sources: 'tasks', schedule: 'tasks', plan: 'backup', devices: 'backup', folders: 'storage' };
+const SAVE_PARTS = ['general', 'agents', 'accounts', 'projects', 'sources', 'jev', 'schedule', 'signins'];
 const GROUPS = [
-  [t('You'), ['general', 'notify', 'jev', 'plan']],
-  [t('Agents'), ['agents', 'accounts', 'localai', 'tools', 'schedule', 'signins']],
-  [t('Work'), ['projects', 'sources']],
-  [t('Data and devices'), ['folders', 'storage', 'backup', 'devices', 'about']],
+  [t('You'), ['general', 'notify', 'jev']],
+  [t('Agents'), ['ai', 'agents', 'tools']],
+  [t('Work'), ['projects', 'tasks']],
+  [t('This computer'), ['backup', 'storage', 'about']],
 ];
 // An icon for each section, shown in the phone's list of sections.
 const ST_ICON = {
@@ -92,6 +89,8 @@ const ST_ICON = {
   folders: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5 12 16l2.5-2.5"/>',
   notify: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
   agents: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 14.5a5 5 0 0 1 5.5 5"/>',
+  ai: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+  tasks: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/>',
   accounts: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2.2"/><path d="M5.5 16a3.6 3.6 0 0 1 7 0M14 10h4M14 13.5h3"/>',
   localai: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
   projects: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
@@ -138,7 +137,7 @@ const DAYS = [t('Sun'), t('Mon'), t('Tue'), t('Wed'), t('Thu'), t('Fri'), t('Sat
 
 // Settings > About, drawn like a product's About page: the mark and version first, then what this Rex Desk holds and
 // how much room it takes on this computer. No inline styles (the page rules forbid them): bar widths come from classes.
-const ABOUT_MARK = '<svg viewBox="0 0 64 64" width="72" height="72" aria-hidden="true"><defs><linearGradient id="ab-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#78a8ff"/><stop offset="1" stop-color="#3170e6"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="14" fill="url(#ab-g)"/><g fill="#fff"><rect x="16" y="16" width="14" height="14" rx="3"/><rect x="34" y="16" width="14" height="14" rx="3"/><rect x="16" y="34" width="14" height="14" rx="3"/><rect x="34" y="34" width="14" height="14" rx="3" opacity=".47"/></g></svg>';
+const ABOUT_MARK = '<svg viewBox="0 0 64 64" width="72" height="72" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="14" fill="#4b5563"/><g fill="#fff"><rect x="16" y="16" width="14" height="14" rx="3"/><rect x="34" y="16" width="14" height="14" rx="3"/><rect x="16" y="34" width="14" height="14" rx="3"/><rect x="34" y="34" width="14" height="14" rx="3" opacity=".47"/></g></svg>';
 const sizeText = value => { if (value == null) return 'unknown'; const units = ['B', 'KB', 'MB', 'GB', 'TB']; let size = value, at = 0; while (size >= 1024 && at < units.length - 1) { size /= 1024; at++; } return `${size >= 100 || at === 0 ? Math.round(size) : size.toFixed(1)} ${units[at]}`; };
 const countText = value => Number(value || 0).toLocaleString();
 // A bar part's width as one of 50 classes (ab-w0 to ab-w50, 2% each), set in chat.css.
@@ -151,22 +150,10 @@ export function aboutHtml(about, update, checking) {
     <div class="ab-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${checking ? 'disabled' : ''}>${checking ? t('Checking…') : t('Check for updates')}</button>` : ''}${update.ready ? `<button type="button" class="btn small primary" data-action="update-install">${t`Install and restart`}</button>` : ''}</div></div></div>`;
   if (!about) return `${head}<h3>${t`What it holds`}</h3><div class="ab-tiles ab-loading">${'<div class="ab-tile"><b>&nbsp;</b><span>&nbsp;</span></div>'.repeat(5)}</div><p class="muted small">${t`Counting what Rex Desk holds…`}</p>`;
   if (about.error) return `${head}<p class="error-text">${e(t(about.error))}</p>`;
-  const c = about.counts || {}, st = about.storage || {}, disk = st.disk;
+  const c = about.counts || {};
   const tiles = [[t('Agents'), c.agents], [t('Chats'), c.chats], [t('Group chats'), c.rooms], [t('Tasks'), c.tasks], [t('Files from agents'), c.files]]
     .map(([label, value]) => `<div class="ab-tile"><b>${countText(value)}</b><span>${label}</span></div>`).join('');
-  const used = (st.data || 0) + (st.files || 0);
-  const bar = disk ? (() => {
-    const total = disk.total || 1, other = Math.max(0, total - disk.free - used);
-    return `<div class="ab-bar" role="img" aria-label="${e(t`${sizeText(used)} used by Rex Desk, ${sizeText(disk.free)} free of ${sizeText(disk.total)}`)}"><i class="ab-desk ${widthClass(used / total)}"></i><i class="ab-other ${widthClass(other / total)}"></i></div>
-      <div class="ab-legend"><span><i class="ab-desk"></i>${t`Rex Desk ${sizeText(used)}`}</span><span><i class="ab-other"></i>${t`Other apps and files ${sizeText(other)}`}</span><span><i class="ab-free"></i>${t`Free ${sizeText(disk.free)} of ${sizeText(disk.total)}`}</span></div>`;
-  })() : '';
-  const places = [[t('Your data'), about.places?.data], [t('Files from agents'), about.places?.files], [t('Rex Desk is installed in'), about.places?.install]]
-    .filter(([, where], index, all) => where && (index !== 1 || where !== all[0][1]))
-    .map(([label, where]) => `<div class="ab-place"><span><small>${label}</small><code>${e(where)}</code></span><button type="button" class="btn small" data-st-copy-path="${e(where)}">${t`Copy`}</button></div>`).join('');
   return `${head}<h3>${t`What it holds`}</h3><div class="ab-tiles">${tiles}</div>
-    <h3>${t`Storage`}</h3><p class="ab-big"><b>${sizeText(used)}</b> ${t`used by Rex Desk${disk ? t` · ${sizeText(disk.free)} free on this drive` : ''}`}</p>${bar}
-    <p class="muted small">${t`${countText(st.dataFiles)} files of chats, tasks and settings${st.fileCount != null ? t`, and ${countText(st.fileCount)} files from agents in their own folder` : ''}.`}</p>
-    <h3>${t`Where it lives`}</h3><div class="ab-places">${places}</div>
     <div class="ab-foot"><button type="button" class="btn small" data-st-about-refresh>${t`Count again`}</button></div>`;
 }
 
@@ -175,7 +162,9 @@ export function openSettings(ctx, section = 'general') {
   document.querySelector('.dialog-back.settings')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back settings'; document.body.append(back);
   const phone = window.matchMedia('(max-width:760px)').matches;
+  section = ALIAS[section] || section; if (!PARTS[section]) section = 'general';
   const state = { section, extra: {}, list: phone && section === 'general', trackers: trackerDraft(ui) };
+  const has = part => (PARTS[state.section] || []).includes(part);
   const config = () => ui.snap.config || {};
   const field = (label, control, help = '') => `<label class="st-field"><span>${label}</span>${control}${help ? `<small>${help}</small>` : ''}</label>`;
   // Spoken replies: which voice says Rex Desk's English lines. Microsoft's natural voices (free), or Fish Audio (online).
@@ -224,7 +213,7 @@ export function openSettings(ctx, section = 'general') {
     const before = state.extra.github?.login?.state;
     try { state.extra.github = await api('/github'); } catch (error) { state.extra.github = { installed: true, accounts: [], login: { state: 'failed', error: error.message } }; }
     if (!document.body.contains(back)) return;
-    if (state.section === 'projects') draw();
+    if (has('projects')) draw();
     const now = state.extra.github.login?.state;
     clearTimeout(githubTimer); if (['waiting', 'starting'].includes(now)) githubTimer = setTimeout(loadGithub, 2000);
     else if (now === 'done' && before && before !== 'done') toast((state.extra.github.login.account ? t`Signed in to GitHub as ${state.extra.github.login.account}.` : t('Signed in to GitHub.')));
@@ -250,7 +239,6 @@ export function openSettings(ctx, section = 'general') {
       ${field(t('Text size'), `<div class="st-size" role="radiogroup" aria-label="${t`Text size`}">${[['compact', t('Compact'), t('More fits on screen')], ['normal', t('Normal'), t('As before')], ['large', t('Large'), t('Easier to read')]].map(([key, label, hint]) => `<button type="button" role="radio" class="${(window.rexSize?.value || 'compact') === key ? 'on' : ''}" aria-checked="${(window.rexSize?.value || 'compact') === key}" data-st-size="${key}"><b>${label}</b><small>${hint}</small></button>`).join('')}</div>`)}
       ${seeThroughHere() ? field(t('See-through window'), `<div class="st-solid">${solidSlider()}<button type="button" class="btn small" data-solid-reset>${t`Make solid`}</button></div>`, t('Drag left to see what is behind Rex Desk, right for solid. It never goes below 20%. Ctrl+Shift+0 or the tray icon makes it solid again.')) : ''}
       ${field(t('Light or dark'), `<select name="theme">${[['system', t('Follow Windows')], ['dark', t('Dark')], ['light', t('Light')]].map(([value, label]) => `<option value="${value}" ${(window.rexTheme?.preference || 'system') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
-      ${['en', 'ko', 'km'].map(lang => field(t`Reading voice, ${{ en: t('English'), ko: t('Korean'), km: t('Khmer') }[lang]}`, `<select data-st-voice="${lang}"><option value="">${t`Natural voice (recommended)`}</option><optgroup label="${t`Natural voices`}">${(state.extra.neural?.[lang] || []).map(([id, label]) => `<option value="${esc(id)}" ${chosenVoice(lang) === id ? 'selected' : ''}>${esc(label)}</option>`).join('')}</optgroup>${(state.extra.voices?.[lang] || []).length ? `<optgroup label="${t`This computer's voices`}">${state.extra.voices[lang].map(voice => `<option value="${esc(voice.name)}" ${chosenVoice(lang) === voice.name ? 'selected' : ''}>${esc(voice.name)}</option>`).join('')}</optgroup>` : ''}</select>`, lang === 'en' ? t("For the speaker button on agent messages. Natural voices are Microsoft's Edge voices (the same studybook uses): the text is sent to Microsoft to be read. This computer's voices stay on this computer.") : '')).join('')}
       <div class="st-actions"><button type="button" class="btn small" data-st-tour>${t`Show the setup tour again`}</button></div>
       ${check('autostart', state.extra.autostart?.enabled, t('Start Rex Desk when I sign in to Windows'), t('So schedules, away mode and your phone keep working without opening the app.'))}`,
     folders: () => `<h2>${t`Folders`}</h2><p class="muted">${t`Where Rex Desk keeps things on this computer. Move copies everything to the folder you pick and keeps the old folder as a backup. Moving the data restarts Rex Desk.`}</p>
@@ -259,7 +247,6 @@ export function openSettings(ctx, section = 'general') {
     agents: () => `<h2>${t`Agents`}</h2>
       ${tip('agents', t('Start with Auto mode and 2 agents at once. Turn on "Save my Claude usage" if you hit your Claude limit. Leave the branch name as it is unless your team has a naming rule.'))}
       ${field(t('Agents working at once'), input('concurrency', config().concurrency, 'type="number" min="1" max="6"'), t('1 to 6. Each works in its own copy of the project. More at once uses your Claude limit faster.'))}
-      ${field(t('Default model'), pickerHtml(ctx, { id: 'st-model', name: 'model', label: t('Default model'), value: config().models?.claude || '', items: [{ value: '', label: t('Claude Code default') }, ...(ui.snap.choices?.models || []).map(model => ({ value: model.id, label: model.label }))] }), t('An agent can have its own model on its card.'))}
       ${field(t('Branch names start with'), input('branchPrefix', config().branchPrefix, 'spellcheck="false"'), t`New branches look like ${esc(String(config().branchPrefix || 'rex-desk').replace(/\/+$/, ''))}/fix-login-button. Change it only if your team has a rule for branch names.`)}
       ${field(t('New agents and chats start in'), `<select name="defaultMode">${[['bypassPermissions', t('Dangerous: run everything without asking')], ['auto', t('Auto: safe steps run, risky ones ask')], ['acceptEdits', t('Accept edits: edit files freely, ask before commands')], ['manual', t('Ask first: ask before each step')], ['plan', t('Plan: plan only, change nothing')]].map(([value, label]) => `<option value="${value}" ${(config().defaultMode || 'bypassPermissions') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`, t('Used when you have not picked a mode for a chat. An AI without that mode asks first instead. You can still change the mode under the message box.'))}
       ${check('autonomy', config().autonomy !== false, t('Let agents act on their own'), t('They start work and open draft pull requests without asking you each time. Nothing is ever merged. Off: they ask first.'))}
@@ -267,7 +254,7 @@ export function openSettings(ctx, section = 'general') {
       ${field(t('Start a fresh chat at'), `<select name="handoffTokens">${[[150000, '150k'], [200000, '200k'], [300000, '300k'], [0, t('Off')]].map(([value, label]) => `<option value="${value}"${Number(config().handoffTokens ?? 200000) === value ? ' selected' : ''}>${label}</option>`).join('')}</select>`, t('When a chat holds this many tokens, the agent writes a short handoff and carries on in a fresh chat. Every step re-sends the whole chat, so smaller uses much less of your plan.'))}
       ${check('autoPrLowRisk', config().autoPrLowRisk, t('Open draft pull requests for small, safe fixes on their own'), t('Only style, text, docs or test changes with passing tests. Nothing is ever merged on its own.'))}
       ${hasOrbit() ? check('reportToOrbit', config().reportToOrbit, t('Let agents send their final report to Orbit'), t('Through your Orbit connection.')) : ''}`,
-    accounts: () => `<h2>${t`AI accounts`}</h2><p class="muted">${t`The AI your agents think with. Press Set up or Sign in on one: Rex Desk installs what is missing, then opens the sign-in in your browser. Use this picks the one new agents use.`}</p>${aiListHtml(ctx, state)}
+    accounts: () => `<h2>${t`AI accounts`}</h2>${field(t('Default model'), pickerHtml(ctx, { id: 'st-model', name: 'model', label: t('Default model'), value: config().models?.claude || '', items: [{ value: '', label: t('Claude Code default') }, ...(ui.snap.choices?.models || []).map(model => ({ value: model.id, label: model.label }))] }), t('An agent can have its own model on its card.'))}<p class="muted">${t`The AI your agents think with. Press Set up or Sign in on one: Rex Desk installs what is missing, then opens the sign-in in your browser. Use this picks the one new agents use.`}</p>${aiListHtml(ctx, state)}
       <h3>${t`More accounts`}</h3><p class="muted">${t`Add a second account of the same AI, switch between them, and see how much of each plan is used.`}</p>${tip('accounts', t('One account is enough to start. Add a second only if you often hit the usage limit.'))}<button type="button" class="btn" data-st-open="accounts">${t`Manage accounts`}</button>`,
     localai: () => `<h2>${t`Local AI`}</h2>${localAiHtml(ctx, state)}`,
     storage: () => storageHtml(ctx, state),
@@ -316,6 +303,7 @@ export function openSettings(ctx, section = 'general') {
       ${(config().control?.allow || []).length ? `<div class="st-field"><span>${t`Done without asking`}</span><div class="st-chips">${config().control.allow.map(action => `<span class="st-chip">${esc(ASKS[action] || action.replaceAll('_', ' '))}<button type="button" class="ag-x" data-st-allow-off="${esc(action)}" aria-label="${t`Ask again before this`}">×</button></span>`).join('')}</div><small>${t`Press × to have Jev ask you again first. "Yes, always" on a Jev question adds one here.`}</small></div>` : ''}
       ${field(t('Voice language'), `<select name="control.language">${LANGS.map(([value, label]) => `<option value="${value}" ${(config().control?.language || 'en') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
       ${speechBlock()}
+      ${['en', 'ko', 'km'].map(lang => field(t`Reading voice, ${{ en: t('English'), ko: t('Korean'), km: t('Khmer') }[lang]}`, `<select data-st-voice="${lang}"><option value="">${t`Natural voice (recommended)`}</option><optgroup label="${t`Natural voices`}">${(state.extra.neural?.[lang] || []).map(([id, label]) => `<option value="${esc(id)}" ${chosenVoice(lang) === id ? 'selected' : ''}>${esc(label)}</option>`).join('')}</optgroup>${(state.extra.voices?.[lang] || []).length ? `<optgroup label="${t`This computer's voices`}">${state.extra.voices[lang].map(voice => `<option value="${esc(voice.name)}" ${chosenVoice(lang) === voice.name ? 'selected' : ''}>${esc(voice.name)}</option>`).join('')}</optgroup>` : ''}</select>`, lang === 'en' ? t("For the speaker button on agent messages. Natural voices are Microsoft's Edge voices (the same studybook uses): the text is sent to Microsoft to be read. This computer's voices stay on this computer.") : '')).join('')}
       <div class="st-actions"><button type="button" class="btn" data-st-open="voice">${t`Voice engine and compare`}</button></div>`,
     schedule: () => { const schedule = config().schedule || {}; const days = schedule.days || [1, 2, 3, 4, 5]; return `<h2>${t`Schedule`}</h2><p class="muted">${t`At the set time Rex Desk looks for new tasks, Rex Agent sorts them, and agents start work up to your daily limit. Questions wait in Needs you.`}</p>
       ${tip('schedule', t('Set it for when you start your day, with a small limit like 3 runs. You come back to finished work and a short list of questions.'))}
@@ -329,15 +317,13 @@ export function openSettings(ctx, section = 'general') {
       ${signins().map((account, index) => `<div class="st-signin"><input name="ta.${index}.site" value="${esc(account.site || '')}" placeholder="${t`Site, like localhost or staging.example.com`}" aria-label="${t`Site`}"><input name="ta.${index}.username" value="${esc(account.username || '')}" placeholder="${t`User name or email`}" aria-label="${t`User name`}"><input type="password" name="ta.${index}.password" value="${esc(account.password || '')}" placeholder="${account.hasPassword ? t('Saved') : t('Password')}" aria-label="${t`Password`}" autocomplete="new-password"><button type="button" class="ag-x" data-st-signin-remove="${index}" aria-label="${t`Remove this sign-in`}">×</button></div>`).join('')}
       <button type="button" class="btn small" data-st-signin-add>${t`+ Add a sign-in`}</button>`,
     devices: () => `<h2>${t`Devices and phone`}</h2><p class="muted">${t`Use Rex Desk on your phone and your other computers over Tailscale. The Devices page has the QR code for your phone.`}</p>${tip('devices', t('Scan the QR code once with your phone, so you can answer agents from anywhere.'))}<button type="button" class="btn primary" data-st-go="devices">${t`Open Devices`}</button>`,
-    plan: () => `<h2>${t`Plan and billing`}</h2>${planCard(ui.snap.database || {}, state) || `<p class="muted">${t`Loading…`}</p>`}`,
-    backup: () => { const database = ui.snap.database || {}, update = ui.snap.update || {}, account = database.account, hosted = Boolean(account && account.url === database.url); return `<h2>${t`Backup and updates`}</h2>
+    backup: () => { const database = ui.snap.database || {}, update = ui.snap.update || {}, account = database.account, hosted = Boolean(account && account.url === database.url); return `<h2>${t`Cloud backup`}</h2>
       ${tip('backup', t('Sign in with your Rex Desk account to back up, and your agents and chats follow you to your other computers.'))}
-      <h3>${t`Cloud backup`}</h3>${planCard(database, state)}<p>${esc((hosted ? { connected: t('Backed up with your Rex Desk account.'), syncing: t('Uploading your backup…'), connecting: t('Connecting to your backup…'), offline: t('Your backup is offline; changes wait and upload later.'), error: t('Your backup needs attention.') } : { connected: t('Copied to your Turso database.'), syncing: t('Uploading to Turso…'), connecting: t('Connecting to Turso…'), offline: t('Turso is offline; changes wait and upload later.'), error: t('Turso needs attention.') })[database.state] || t('Kept on this computer only.'))}${database.pending ? t` ${Number(database.pending)} changes waiting.` : ''}</p>
+      ${state.extra.billing?.signedIn ? planCard(database, state) : ''}<p>${esc((hosted ? { connected: t('Backed up with your Rex Desk account.'), syncing: t('Uploading your backup…'), connecting: t('Connecting to your backup…'), offline: t('Your backup is offline; changes wait and upload later.'), error: t('Your backup needs attention.') } : { connected: t('Copied to your Turso database.'), syncing: t('Uploading to Turso…'), connecting: t('Connecting to Turso…'), offline: t('Turso is offline; changes wait and upload later.'), error: t('Turso needs attention.') })[database.state] || t('Kept on this computer only.'))}${database.pending ? t` ${Number(database.pending)} changes waiting.` : ''}</p>
       ${account ? `<div class="st-account st-cloud-account"><span class="si-avatar">${esc((account.name || account.email || '?')[0].toUpperCase())}</span><span><b>${esc(account.name || account.email)}</b><small>${esc(hosted ? t`Rex Desk account${account.name ? ` · ${account.email}` : ''}. This computer renews its backup key by itself.` : t`Rex Desk account${account.name ? ` · ${account.email}` : ''}. Signed in, but the backup uses another database.`)}</small></span><button type="button" class="btn small" data-st-account-out>${t`Sign out`}</button></div>` : ''}
       ${database.configured ? '' : `<div class="st-cloud">${CLOUD_ART}<div class="st-cloud-head"><b>${t`Back up with your Rex Desk account`}</b><small>${t`Your whole desk, kept safe in the cloud and ready on every computer you sign in on.`}</small></div><ul class="st-cloud-why">${CLOUD_WHY.map(([icon, title, text]) => `<li><span class="st-cloud-why-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span><span><b>${title}</b><small>${text}</small></span></li>`).join('')}</ul>${state.extra.billing?.signedIn ? (state.extra.billing.space?.paid ? `<button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || t('Turn on cloud backup'))}</button>` : `<button type="button" class="btn primary" data-st-section="plan">${t`See plans`}</button><p class="st-cloud-fine">${t`Cloud backup comes with the Cloud backup plan, from $2.99 a month.`}</p>`) : `<button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || t('Sign in with Rex Desk'))}</button><p class="st-cloud-fine">${t`New here? Signing in also makes your account.`}</p>`}</div>`}${database.accountNote ? `<p class="error-text" role="alert">${esc(database.accountNote)}</p>` : ''}${database.configured ? `<div class="st-actions"><button type="button" class="btn" data-st-db-sync>${t`Upload now and check`}</button><button type="button" class="btn" data-st-db-off>${t`Stop using this database`}</button></div>${backupPartsHtml(database.parts || {})}` : ''}
 
-      ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay on this computer: only a Rex Desk account backup keeps them in the cloud.`}</p>` : ''}${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}
-      <h3>${t`App updates`}</h3><p>${esc(update.supported ? t`This is Rex Desk ${[update.current, update.stage].filter(Boolean).join(' ')}. ` : '')}${esc(update.ready ? t`Version ${update.available?.version} is downloaded and checked.` : update.available ? t`Version ${update.available.version} is available.` : update.supported ? (update.checkedAt ? t('Rex Desk is up to date.') : t('Not checked yet.')) : t('This copy runs from source code and updates with Git.'))}</p>${update.error ? `<p class="error-text">${esc(update.error)}</p>` : ''}<div class="st-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${state.extra.checking ? 'disabled' : ''}>${state.extra.checking ? t('Checking…') : t('Check now')}</button>` : ''}${update.ready ? `<button type="button" class="btn primary" data-action="update-install">${t`Install and restart`}</button>` : ''}</div>`; },
+      ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay on this computer: only a Rex Desk account backup keeps them in the cloud.`}</p>` : ''}${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}`; },
     tools: () => {
       const box = state.extra.toolbox, busy = state.extra.toolboxBusy;
       if (!box) return `<h2>${t`Tools and skills`}</h2><p class="muted">${t`Loading…`}</p>`;
@@ -365,52 +351,61 @@ export function openSettings(ctx, section = 'general') {
       <p class="muted small">${t`Hooks are changed in Claude Code's own settings file.`}</p>`;
     },
   };
-  const saves = new Set(['general', 'agents', 'projects', 'sources', 'jev', 'schedule', 'signins']);
+    // One section: its panels one after the other. A panel's own title becomes a plain heading under the section's title.
+  const sectionHtml = () => {
+    const parts = PARTS[state.section], label = (SECTIONS.find(([id]) => id === state.section) || [])[1] || '';
+    if (parts.length === 1) return panels[parts[0]]();
+    return `<h2>${label}</h2>` + parts.map(part => panels[part]().replace(/<h2>([^]*?)<\/h2>/, (_, heading) => `<h3 class="st-part" data-st-part-${part}>${heading}</h3>`)).join('');
+  };
   const draw = () => {
-    if ((state.section === 'backup' || state.section === 'plan') && !state.extra.billing && !state.extra.billingLoading) { state.extra.billingLoading = true; void api('/billing').then(data => { state.extra.billing = data; state.extra.billingLoading = false; draw(); }).catch(() => { state.extra.billing = { signedIn: false }; state.extra.billingLoading = false; draw(); }); }
-    if (state.section === 'tools' && !state.extra.toolbox && !state.extra.toolboxLoading) { state.extra.toolboxLoading = true; void api('/toolbox').then(data => { state.extra.toolbox = data; draw(); }).catch(error => { state.extra.toolbox = { servers: [], skills: [], commands: [], hooks: [] }; toast(error.message, true); draw(); }); }
+    if (has('backup') && !state.extra.billing && !state.extra.billingLoading) { state.extra.billingLoading = true; void api('/billing').then(data => { state.extra.billing = data; state.extra.billingLoading = false; draw(); }).catch(() => { state.extra.billing = { signedIn: false }; state.extra.billingLoading = false; draw(); }); }
+    if (has('tools') && !state.extra.toolbox && !state.extra.toolboxLoading) { state.extra.toolboxLoading = true; void api('/toolbox').then(data => { state.extra.toolbox = data; draw(); }).catch(error => { state.extra.toolbox = { servers: [], skills: [], commands: [], hooks: [] }; toast(error.message, true); draw(); }); }
     // A redraw of the same section keeps the place the person scrolled to (ticking a box used to jump back to the top).
     // The list of sections on the left always keeps its place: picking one lower down used to jump the list back to the top.
     const keep = back.dataset.section === state.section ? back.querySelector('.st-panel')?.scrollTop || 0 : 0, keepNav = back.querySelector('.st-nav')?.scrollTop || 0;
     queueMicrotask(() => { back.dataset.section = state.section; const panel = back.querySelector('.st-panel'); if (panel && keep) panel.scrollTop = keep; const nav = back.querySelector('.st-nav'); if (nav && keepNav) nav.scrollTop = keepNav; });
     const title = (SECTIONS.find(([id]) => id === state.section) || [])[1] || t('Settings');
     back.innerHTML = `<form class="settings-pop${state.list ? ' st-listing' : ' st-open'}" aria-label="${t`Settings`}"><nav class="st-nav"><div class="st-navhead"><h1>${t`Settings`}</h1><button type="button" class="st-done" data-st-close>${t`Done`}</button></div><button type="button" class="st-guide-btn" data-st-show-all><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>${t`Take the tour`}</button>${GROUPS.map(([group, ids]) => `<div class="st-group" role="group" aria-label="${group}"><span class="st-glabel" aria-hidden="true">${group}</span>${ids.map(id => SECTIONS.find(([key]) => key === id)).filter(Boolean).map(([id, label, hint]) => `<button type="button" class="${state.section === id && !state.list ? 'on' : ''}" data-st-section="${id}">${stIcon(id)}<span class="st-nl"><b>${label}</b><small>${hint}</small></span><svg class="st-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`).join('')}</div>`).join('')}</nav>
-      <div class="st-body"><div class="st-mhead"><button type="button" class="st-back" data-st-back aria-label="${t`Back to Settings`}"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span>${t`Settings`}</span></button><b>${esc(title)}</b></div><div class="st-panel" data-st-panel>${panels[state.section]()}</div>
-      <div class="st-foot">${saves.has(state.section) ? `<button type="button" class="btn primary" data-st-save>${t`Save`}</button>` : ''}<span class="spacer"></span><button type="button" class="btn" data-st-close>${t`Close`}</button></div></div>
+      <div class="st-body"><div class="st-mhead"><button type="button" class="st-back" data-st-back aria-label="${t`Back to Settings`}"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span>${t`Settings`}</span></button><b>${esc(title)}</b></div><div class="st-panel" data-st-panel>${sectionHtml()}</div>
+      <div class="st-foot">${PARTS[state.section].some(part => SAVE_PARTS.includes(part)) ? `<button type="button" class="btn primary" data-st-save>${t`Save`}</button>` : ''}<span class="spacer"></span><button type="button" class="btn" data-st-close>${t`Close`}</button></div></div>
       <button type="button" class="st-x" data-st-close aria-label="${t`Close settings`}">×</button></form>`;
   };
   const values = () => Object.fromEntries([...back.querySelectorAll('[name]')].filter(el => el.type !== 'checkbox' || el.name === 'schedule.days').map(el => [el.name, el.value]));
   const checked = name => Boolean(back.querySelector(`[name="${name}"]`)?.checked);
   async function save() {
     const base = JSON.parse(JSON.stringify(config())), v = values(), next = { ...base };
-    if (state.section === 'general') { next.name = v.name; window.rexTheme?.set(v.theme); await api('/autostart', { method: 'POST', data: { enabled: checked('autostart') } }).catch(() => {}); }
-    if (state.section === 'agents') Object.assign(next, { defaultMode: v.defaultMode, concurrency: Number(v.concurrency), branchPrefix: v.branchPrefix, autoPrLowRisk: checked('autoPrLowRisk'), reportToOrbit: back.querySelector('[name="reportToOrbit"]') ? checked('reportToOrbit') : Boolean(base.reportToOrbit), saver: checked('saver'), handoffTokens: Number(v.handoffTokens ?? base.handoffTokens ?? 200000), autonomy: checked('autonomy'), models: { ...base.models, claude: back.querySelector('#st-model')?.value ?? base.models?.claude } });
-    if (state.section === 'projects') next.repositories = base.repositories.map((repo, index) => ({ ...repo, ...Object.fromEntries(['baseBranch', 'targetBranch', 'setupCommand', 'devCommand', 'testCommand', 'push'].map(key => [key, v[`repo.${index}.${key}`] ?? repo[key]])) }));
-    if (state.section === 'jev') next.jev = { ...base.jev, apiKey: v['jev.apiKey'] || '', clearKey: checked('jev.clearKey'), ...(back.querySelector('[name="jev.model"]') ? { model: v['jev.model'], versions: v['jev.versions'], auto: checked('jev.auto') } : {}) };
-    if (state.section === 'jev') { next.control = { enabled: checked('control.enabled'), confirm: checked('control.confirm'), agents: checked('control.agents'), language: v['control.language'] }; }
+    if (has('general')) { next.name = v.name; window.rexTheme?.set(v.theme); await api('/autostart', { method: 'POST', data: { enabled: checked('autostart') } }).catch(() => {}); }
+    if (has('agents')) Object.assign(next, { defaultMode: v.defaultMode, concurrency: Number(v.concurrency), branchPrefix: v.branchPrefix, autoPrLowRisk: checked('autoPrLowRisk'), reportToOrbit: back.querySelector('[name="reportToOrbit"]') ? checked('reportToOrbit') : Boolean(base.reportToOrbit), saver: checked('saver'), handoffTokens: Number(v.handoffTokens ?? base.handoffTokens ?? 200000), autonomy: checked('autonomy') });
+    if (has('accounts') && back.querySelector('#st-model')) next.models = { ...base.models, claude: back.querySelector('#st-model').value };
+    if (has('projects')) next.repositories = base.repositories.map((repo, index) => ({ ...repo, ...Object.fromEntries(['baseBranch', 'targetBranch', 'setupCommand', 'devCommand', 'testCommand', 'push'].map(key => [key, v[`repo.${index}.${key}`] ?? repo[key]])) }));
+    if (has('jev')) next.jev = { ...base.jev, apiKey: v['jev.apiKey'] || '', clearKey: checked('jev.clearKey'), ...(back.querySelector('[name="jev.model"]') ? { model: v['jev.model'], versions: v['jev.versions'], auto: checked('jev.auto') } : {}) };
+    if (has('jev')) { next.control = { enabled: checked('control.enabled'), confirm: checked('control.confirm'), agents: checked('control.agents'), language: v['control.language'] }; }
     const schedule0 = base.schedule || {};
-    if (state.section === 'schedule') next.schedule = { enabled: checked('schedule.enabled'), time: v['schedule.time'], maxRuns: Number(v['schedule.maxRuns']), fix: back.querySelector('[name="schedule.fix"]') ? checked('schedule.fix') : schedule0.fix !== false, days: [...back.querySelectorAll('[name="schedule.days"]:checked')].map(box => Number(box.value)) };
-    if (state.section === 'sources') { readTrackers(back, state); next.sources = trackerSources(ui, state); if (v.syncMinutes != null) next.syncMinutes = Number(v.syncMinutes); }
-    if (state.section === 'signins') { readSignins(); next.testAccounts = state.signins.filter(account => account.username.trim()); }
-    ui.snap.config = await api('/config', { method: 'PUT', data: next }); await refresh(); if (state.section === 'sources') state.trackers = trackerDraft(ui); state.signins = null; toast(t('Saved.')); draw();
+    if (has('schedule')) next.schedule = { enabled: checked('schedule.enabled'), time: v['schedule.time'], maxRuns: Number(v['schedule.maxRuns']), fix: back.querySelector('[name="schedule.fix"]') ? checked('schedule.fix') : schedule0.fix !== false, days: [...back.querySelectorAll('[name="schedule.days"]:checked')].map(box => Number(box.value)) };
+    if (has('sources')) { readTrackers(back, state); next.sources = trackerSources(ui, state); if (v.syncMinutes != null) next.syncMinutes = Number(v.syncMinutes); }
+    if (has('signins')) { readSignins(); next.testAccounts = state.signins.filter(account => account.username.trim()); }
+    ui.snap.config = await api('/config', { method: 'PUT', data: next }); await refresh(); if (has('sources')) state.trackers = trackerDraft(ui); state.signins = null; toast(t('Saved.')); draw();
   }
   // Settings > About: asks the server for the version, counts and sizes, then draws them.
   async function loadAbout(fresh = false) {
     try { state.extra.about = await api(`/about${fresh ? '?fresh=1' : ''}`); } catch (error) { state.extra.about = { error: error.message }; }
-    if (state.section === 'about' && document.body.contains(back)) draw();
+    if (has('about') && document.body.contains(back)) draw();
   }
   // Open one section and resolve once what it shows is loaded (the tours wait for it before circling its controls).
-  async function goSection(id) {
+  async function goSection(requested) {
+    const id = ALIAS[requested] || requested; if (!PARTS[id]) return;
     state.section = id; state.list = false;
-    if (id === 'sources') state.trackers = trackerDraft(ui);
-    if (id === 'projects') void loadGithub();
-    if (id === 'general') state.extra.autostart = await api('/autostart').catch(() => null);
+    if (has('sources')) state.trackers = trackerDraft(ui);
+    if (has('projects')) void loadGithub();
+    if (has('general')) state.extra.autostart = await api('/autostart').catch(() => null);
     draw();
-    if (id === 'about') await loadAbout();
-    if (id === 'folders') { await loadFolders(ctx, state); if (state.section === 'folders') draw(); }
-    if (id === 'localai') { await loadLocalAi(ctx, state); if (state.section === 'localai') draw(); }
-    if (id === 'storage') { await loadStorage(ctx, state, { onUpdate: () => state.section === 'storage' && draw() }); if (state.section === 'storage') draw(); }
-    if (id === 'accounts') { await loadTourAi(ctx, state); if (state.section === 'accounts') draw(); }
+    if (has('about')) await loadAbout();
+    if (has('folders')) { await loadFolders(ctx, state); if (has('folders')) draw(); }
+    if (has('localai')) { await loadLocalAi(ctx, state); if (has('localai')) draw(); }
+    if (has('storage')) { await loadStorage(ctx, state, { onUpdate: () => has('storage') && draw() }); if (has('storage')) draw(); }
+    if (has('accounts')) { await loadTourAi(ctx, state); if (has('accounts')) draw(); }
+    const mark = ['signins', 'schedule', 'localai', 'devices', 'folders'].includes(requested) ? back.querySelector(`[data-st-part-${requested}]`) : null;
+    if (mark) { mark.scrollIntoView({ block: 'start' }); return; }
     back.querySelector('[data-st-panel]')?.scrollTo({ top: 0 });
   }
   back.addEventListener('click', async event => {
@@ -423,10 +418,10 @@ export function openSettings(ctx, section = 'general') {
       const copyPath = target.closest('[data-st-copy-path]'); if (copyPath) { await navigator.clipboard.writeText(copyPath.dataset.stCopyPath); toast(t('Copied.')); return; }
       if (await trackerClick(ctx, state, target, back, draw)) return;
       if (await folderClick(ctx, state, target, draw)) return;
-      if (state.section === 'localai' && await localAiClick(ctx, state, target, draw)) return;
-      if (state.section === 'storage' && await storageClick(ctx, state, target, draw)) return;
-      if (state.section === 'accounts' && target.closest('[data-tai-local]')) { await goSection('localai'); return; }
-      if (state.section === 'accounts' && await tourAiClick(ctx, state, target, () => { if (state.section === 'accounts' && document.body.contains(back)) draw(); }, () => state.section === 'accounts' && document.body.contains(back))) return;
+      if (has('localai') && await localAiClick(ctx, state, target, draw)) return;
+      if (has('storage') && await storageClick(ctx, state, target, draw)) return;
+      if (has('accounts') && target.closest('[data-tai-local]')) { back.querySelector('[data-st-part-localai]')?.scrollIntoView({ block: 'start' }); return; }
+      if (has('accounts') && await tourAiClick(ctx, state, target, () => { if (has('accounts') && document.body.contains(back)) draw(); }, () => has('accounts') && document.body.contains(back))) return;
       // A feature tour circles the real controls of a section; "Take the tour" goes through every section.
       const show = target.closest('[data-st-show]'); if (show) { await runSettingsTour(goSection, { section: show.dataset.stShow }); return; }
       if (target.closest('[data-st-show-all]')) { await runSettingsTour(goSection, { all: true }); return; }
@@ -547,7 +542,7 @@ export function openSettings(ctx, section = 'general') {
   back.addEventListener('input', event => {
     // Tools and skills: the search box narrows the skill list as you type, with no redraw.
     if (event.target.matches?.('[name="tb-filter"]')) { const words = event.target.value.trim().toLowerCase(); for (const row of event.target.nextElementSibling?.querySelectorAll('.tb-row') || []) row.hidden = Boolean(words) && !row.textContent.toLowerCase().includes(words); return; }
-    if (state.section === 'storage' && storageInput(ctx, state, event, draw)) return;
+    if (has('storage') && storageInput(ctx, state, event, draw)) return;
     trackerInput(back, state, event, draw);
   });
   back.addEventListener('change', event => { trackerInput(back, state, event, draw); });
@@ -569,9 +564,9 @@ export function openSettings(ctx, section = 'general') {
     catch (error) { event.target.checked = !on; toast(error.message, true); }
   });
   // The voices on this computer, for the reading voice choices.
-  void api('/speak/engine').then(status => { state.extra.tts = status; setSpeechEngine(status); if (state.section === 'jev' && document.body.contains(back)) draw(); }).catch(() => {});
-  void api('/speak/voices').then(neural => { state.extra.neural = neural; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
-  if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); if (state.section === 'general' && document.body.contains(back)) draw(); });
+  void api('/speak/engine').then(status => { state.extra.tts = status; setSpeechEngine(status); if (has('jev') && document.body.contains(back)) draw(); }).catch(() => {});
+  void api('/speak/voices').then(neural => { state.extra.neural = neural; if (has('jev') && document.body.contains(back)) draw(); }).catch(() => {});
+  if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); if (has('jev') && document.body.contains(back)) draw(); });
   // Spoken replies: each control saves at once.
   back.addEventListener('change', async event => {
     const name = event.target.dataset?.stTts; if (!name) return;
@@ -598,18 +593,18 @@ export function openSettings(ctx, section = 'general') {
     state.extra.ttsTesting = false; draw();
   });
   back.addEventListener('change', event => { const lang = event.target.dataset?.stVoice; if (!lang) return; try { if (event.target.value) localStorage.setItem(`rex-desk-voice-${lang}`, event.target.value); else localStorage.removeItem(`rex-desk-voice-${lang}`); } catch { /* private window */ } toast(t('Reading voice saved.')); });
-  if (section === 'projects') void loadGithub();
-  if (section === 'about') void loadAbout();
-  if (section === 'folders') void loadFolders(ctx, state).then(() => state.section === 'folders' && draw());
-  if (section === 'localai') void loadLocalAi(ctx, state).then(() => state.section === 'localai' && draw());
-  if (section === 'storage') void loadStorage(ctx, state, { onUpdate: () => state.section === 'storage' && draw() }).then(() => state.section === 'storage' && draw());
-  if (section === 'accounts') void loadTourAi(ctx, state).then(() => state.section === 'accounts' && draw());
-  if (section === 'general') void api('/autostart').then(result => { state.extra.autostart = result; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
+  if (has('projects')) void loadGithub();
+  if (has('about')) void loadAbout();
+  if (has('folders')) void loadFolders(ctx, state).then(() => has('folders') && draw());
+  if (has('localai')) void loadLocalAi(ctx, state).then(() => has('localai') && draw());
+  if (has('storage')) void loadStorage(ctx, state, { onUpdate: () => has('storage') && draw() }).then(() => has('storage') && draw());
+  if (has('accounts')) void loadTourAi(ctx, state).then(() => has('accounts') && draw());
+  if (has('general')) void api('/autostart').then(result => { state.extra.autostart = result; if (has('general') && document.body.contains(back)) draw(); }).catch(() => {});
   // The Notifications tab saves on change; redraw it when its settings come back changed, keeping the scroll.
   let noticeHtml = '';
   window.__rexNoticeSettingsRedraw = () => {
     if (!document.body.contains(back)) { window.__rexNoticeSettingsRedraw = null; return; }
-    if (state.section !== 'notify') return;
+    if (!has('notify')) return;
     const html = panels.notify(); if (html === noticeHtml) return; noticeHtml = html;
     const panel = back.querySelector('[data-st-panel]'), top = panel?.scrollTop || 0; if (panel) { panel.innerHTML = html; panel.scrollTop = top; }
   };

@@ -12,7 +12,7 @@ const ICON = {
 };
 const KIND_LABEL = { chat: t('Chat'), agent: t('Agent'), room: t('Group chat'), task: t('Task'), place: t('Place'), setting: t('Settings') };
 const PLACES = [['inbox', t('Needs you')], ['tasks', t('Tasks')], ['person', t('Knowledge')], ['jev', t('Jev')], ['monitor', t('Memory')], ['devices', t('Devices')], ['worktrees', t('Worktrees')], ['net', t('Agents online')]];
-const SETTINGS = [['general', t('General, look and theme')], ['notify', t('Notifications')], ['agents', t('Agents')], ['accounts', t('AI accounts')], ['localai', t('Local AI')], ['projects', t('Projects')], ['sources', t('Task sources')], ['jev', t('Jev and voice')], ['schedule', t('Schedule')], ['devices', t('Devices and phone')], ['backup', t('Backup and updates')], ['folders', t('Folders')]];
+const SETTINGS = [['general', t('General, look and theme')], ['notify', t('Notifications')], ['agents', t('Agents')], ['ai', t('AI accounts and Local AI')], ['projects', t('Projects')], ['tasks', t('Task sources and schedule')], ['jev', t('Jev and voice')], ['backup', t('Account, backup and devices')], ['storage', t('Storage and folders')]];
 
 function everything() {
   const ui = window.__rexCtx?.ui, snap = ui?.snap || {};

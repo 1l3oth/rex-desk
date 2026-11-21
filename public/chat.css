@@ -2592,3 +2592,41 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 @media (max-width:760px){.su{margin:6px 10px 0}.su-next,.su progress{display:none}.su-row>.btn,.su-extras .btn{min-height:32px}}
 /* Dialogs open below the desktop window bar (search, status), never under it. */
 @media (min-width:761px){html.has-win-bar .dialog-back{padding-top:40px;box-sizing:border-box}html.has-win-bar .dialog-back.settings{padding-top:46px}html.has-win-bar .settings-pop{height:min(760px,calc(100dvh - 70px))}:where(html.has-win-bar .dialog-back>.dialog){max-height:calc(100dvh - 56px);overflow-y:auto}}
+
+/* Settings, calm: neutral grey, the accent only for the main button, toggles and focus. No colored icons, tags, tints or gradients. */
+.settings-pop .st-ic,.settings-pop .st-ic[class]{background:var(--raised);color:var(--muted);border:1px solid var(--line)}
+.settings-pop .st-nav button.on{background:var(--raised);box-shadow:none}
+.settings-pop .st-nav button.on .st-ic{color:var(--ink)}
+.settings-pop .st-nav{gap:1px}
+.settings-pop .st-group{margin-top:14px}
+.settings-pop .st-glabel{padding:0 10px 6px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.settings-pop .st-tip{background:var(--raised);border-color:var(--line)}
+.settings-pop .st-tip svg{color:var(--muted)}
+.settings-pop .st-panel{gap:14px}
+.settings-pop .st-panel h2{font-size:20px;font-weight:650;margin-bottom:4px}
+.settings-pop .st-panel h3{margin:22px 0 0;padding-top:16px;border-top:1px solid var(--line);font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.settings-pop .st-panel h3.st-part{margin-top:30px}
+.settings-pop .st-panel h2+h3,.settings-pop .st-panel h2+.st-tip+h3{border-top:0;padding-top:0;margin-top:6px}
+.settings-pop .pl-badge,.settings-pop .pl-badge-accent,.settings-pop .pl-good,.settings-pop .pl-warn,.settings-pop .pl-bad{background:none;border:0;padding:0;border-radius:0;color:var(--muted);font-weight:500}
+.settings-pop .pl-pick{border-color:var(--line);box-shadow:none}
+.settings-pop .pl-card{border-radius:10px;background:var(--panel)}
+.settings-pop .st-cloud{background:var(--panel);border-radius:10px}
+.settings-pop .st-cloud-art{display:none}
+.settings-pop .st-cloud-why-ic{background:var(--raised);color:var(--muted);border-radius:8px}
+.settings-pop .tb-status.ok{color:var(--muted)}.settings-pop .tb-status.ok i{background:var(--muted)}
+.settings-pop .tb-alert{background:var(--raised)}
+.settings-pop .tb-computer{color:var(--muted);font-weight:500}
+.settings-pop .ab-hero svg{filter:none}
+.settings-pop .ab-status.new{color:var(--ink)}
+.settings-pop .st-account .si-avatar{background:var(--raised);color:var(--muted);border:1px solid var(--line)}
+@media (min-width:761px){
+  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit){display:grid;grid-template-columns:minmax(0,1fr) minmax(200px,300px);column-gap:24px;row-gap:2px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit)>span{grid-column:1;grid-row:1}
+  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit)>small{grid-column:1;grid-row:2}
+  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit)>:not(span):not(small){grid-column:2;grid-row:1/span 2}
+}
+.settings-pop .lang-pick{border-radius:8px;padding:2px;background:var(--raised);gap:0}
+.settings-pop .lang-pick button{border-radius:6px;padding:5px 16px}
+.settings-pop .lang-pick button.on{background:var(--panel);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.settings-pop .btn.primary,.settings-pop .btn.primary:hover{background:var(--accent);background-image:none;box-shadow:none;color:var(--accent-ink,#fff);border-color:transparent}
+.settings-pop .btn.primary:hover{filter:brightness(1.08)}

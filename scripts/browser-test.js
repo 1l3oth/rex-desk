@@ -134,7 +134,8 @@ try {
   const settings = page.getByRole('form', { name: 'Settings' });
   const openSection = async name => {
     if (!(await settings.count())) await page.locator('.rail-settings').click();
-    await settings.locator(`[data-st-section="${name}"]`).click();
+    const nav = { folders: 'storage', sources: 'tasks', signins: 'projects', schedule: 'tasks', accounts: 'ai', localai: 'ai', devices: 'backup', plan: 'backup' }[name] || name;
+    await settings.locator(`[data-st-section="${nav}"]`).click();
   };
   const save = async () => { await settings.locator('[data-st-save]').click(); await page.getByText('Saved.', { exact: true }).last().waitFor(); };
 

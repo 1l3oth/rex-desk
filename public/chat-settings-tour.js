@@ -27,7 +27,7 @@ export async function runSettingsTour(goSection, { section, all = false } = {}) 
   let index = 0, next = false;
   const start = async () => {
     const id = sections[index]; await goSection(id);
-    const nav = document.querySelector(`.settings-pop [data-st-section="${id}"]`);
+    const nav = document.querySelector(".settings-pop .st-nav .on");
     const steps = TOURS[id].map((step, number) => ({ ...step, element: number === 0 ? (nav && nav.offsetParent ? nav : around('h2')) : around(step.target) }));
     if (all && index === 0) steps.unshift({ ...INTRO, element: undefined });
     if (all && index === sections.length - 1) steps.push({ ...OUTRO, element: around(OUTRO.target) });
