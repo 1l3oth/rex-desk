@@ -2630,3 +2630,6 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .settings-pop .lang-pick button.on{background:var(--panel);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
 .settings-pop .btn.primary,.settings-pop .btn.primary:hover{background:var(--accent);background-image:none;box-shadow:none;color:var(--accent-ink,#fff);border-color:transparent}
 .settings-pop .btn.primary:hover{filter:brightness(1.08)}
+
+/* Settings: two fields side by side (.st-row) stack the label above the box, so labels do not squeeze. */
+.settings-pop .st-row .st-field:has(>input:not([type=checkbox]),>select,>.st-unit){display:flex;flex-direction:column;align-items:stretch;gap:5px;padding:0;border-bottom:0}
