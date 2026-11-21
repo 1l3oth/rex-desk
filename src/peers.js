@@ -22,7 +22,13 @@ const STEP_MS = 30000, ONLINE_MS = 15000, CLOUD_MS = 90000, PAGE = 400, QUEUE_DA
 const isPageArtifact = item => Boolean(item.page) || /\.html?$/i.test(item.file);
 const PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
 // A picture is known by its path on the computer that has it.
-export const chatFileId = file => createHash('sha1').update(path.resolve(String(file)).toLowerCase()).digest('hex');
+// An attached file is known by its upload folder and name (uploads/<id>/<name>), the same on Windows and macOS: hashing the
+// whole path gave each computer its own id for one file (L27). legacyFileId is the id files shared before had.
+const legacyFileId = file => createHash('sha1').update(path.resolve(String(file)).toLowerCase()).digest('hex');
+export const chatFileId = file => {
+  const upload = /[\\/]uploads[\\/]([^\\/]+)[\\/]([^\\/]+)$/.exec(String(file || ''));
+  return upload ? createHash('sha1').update(`upload:${upload[1].toLowerCase()}/${upload[2].toLowerCase()}`).digest('hex') : legacyFileId(file);
+};
 export const evidenceId = (runId, file) => createHash('sha1').update(`evidence:${runId}/${path.basename(String(file))}`).digest('hex');
 // Tailscale gives every device an address in 100.64.0.0/10.
 export const tailscaleAddresses = (interfaces = os.networkInterfaces()) => Object.values(interfaces).flat().filter(item => item && item.family === 'IPv4' && !item.internal)
@@ -440,8 +446,12 @@ export class Peers {
       // find in their own uploads (L27: the sender's own picture turned into this computer's path and broke there).
       const sent = /[\\/]uploads[\\/]([0-9a-f-]{36})[\\/][^\\/]+$/i.exec(String(file.path || ''));
       const folder = path.join(this.store.media('uploads'), sent ? sent[1] : randomUUID()), target = path.join(folder, path.basename(file.name).replace(/[^\p{L}\p{N}._ -]+/gu, '_') || 'file');
-      mkdirSync(folder, { recursive: true }); writeFileSync(target, Buffer.from(item.data, 'base64'));
-      text = text.split(file.path).join(target);
+      // The same file already here (sent before, or it came back) is used as it is; a different one under that name is never
+      // overwritten: the incoming one gets a folder of its own.
+      const data = Buffer.from(item.data, 'base64'); let saved = target;
+      if (existsSync(target) && !readFileSync(target).equals(data)) saved = path.join(this.store.media('uploads'), randomUUID(), path.basename(target));
+      if (!existsSync(saved)) { mkdirSync(path.dirname(saved), { recursive: true }); writeFileSync(saved, data, { flag: 'wx' }); }
+      text = text.split(file.path).join(saved);
     }
     return text;
   }
@@ -467,7 +477,7 @@ export class Peers {
   }
   // One picture or file from another computer's chat or room, when it is not on this one.
   chatPicture(file) {
-    const item = this.store.get('chatfile', chatFileId(file));
+    const item = [chatFileId(file), legacyFileId(file)].map(id => this.store.get('chatfile', id)).find(found => found?.data);
     return item?.data ? { name: item.name, data: Buffer.from(item.data, 'base64'), picture: PICTURE.test(item.name) } : null;
   }
   watchChats() {

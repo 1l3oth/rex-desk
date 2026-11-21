@@ -378,3 +378,19 @@ test('a file attached in a room travels with it, and one that is not a picture c
   assert.equal(shared?.data.toString(), 'hello');
   assert.equal(shared.picture, false);
 });
+
+test('an attached file has one id on Windows and macOS, and an incoming file never overwrites a different one (L27)', async () => {
+  const { chatFileId } = await import('../src/peers.js');
+  const id = '2f6aa13b-910c-4871-a64a-af4c48269fff';
+  assert.equal(chatFileId(['C:', 'Users', 'rex', 'Rex Desk data', 'uploads', id, 'shot.png'].join('\\')), chatFileId(`/Users/rex/Library/Rex Desk/uploads/${id}/shot.png`));
+  const { b } = computers();
+  const here = path.join(path.resolve(b.desk.store.media('uploads')), id, 'shot.png');
+  mkdirSync(path.dirname(here), { recursive: true }); writeFileSync(here, 'mine');
+  const sent = `/Users/rex/Library/Rex Desk/uploads/${id}/shot.png`, fileId = chatFileId(sent);
+  b.desk.store.put('chatfile', fileId, { id: fileId, name: 'shot.png', size: 6, data: Buffer.from('theirs').toString('base64') });
+  const text = await b.desk.peers.unpackFiles({ text: `- ${sent}`, files: [{ id: fileId, path: sent, name: 'shot.png' }] });
+  assert.equal(readFileSync(here, 'utf8'), 'mine', 'the file already here stays');
+  const other = text.slice(2);
+  assert.notEqual(path.resolve(other), path.resolve(here));
+  assert.equal(readFileSync(other, 'utf8'), 'theirs');
+});
