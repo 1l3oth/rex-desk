@@ -2006,9 +2006,10 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // Worktrees in a project's work folder go once their branch is merged and nothing in them is unsaved (worktree-cleanup.js).
   async tidyWorktrees() {
     // Any live run or chat keeps the worktree it works in, whether it points at it as its worktree, cwd or project folder.
-    const busy = this.store.list('run').filter(run => this.live.has(run.id) || !['done', 'failed', 'stopped', 'canceled'].includes(run.state))
+    // Read fresh on every call, never a snapshot: a chat that resumes during the Git checks still keeps its worktree.
+    const busy = () => this.store.list('run').filter(run => this.live.has(run.id) || !['done', 'failed', 'stopped', 'canceled'].includes(run.state))
       .flatMap(run => [run.worktree, run.cwd, run.projectPath]).filter(Boolean).map(folder => path.resolve(folder).toLowerCase());
-    const used = item => { const folder = item.path.toLowerCase(); return busy.some(other => other === folder || inside(folder, other)); };
+    const used = item => { const folder = item.path.toLowerCase(); return busy().some(other => other === folder || inside(folder, other)); };
     const results = [];
     for (const repository of this.store.config().repositories || []) {
       if (!repository.path || !existsSync(repository.path)) continue;

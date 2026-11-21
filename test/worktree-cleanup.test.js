@@ -64,6 +64,22 @@ test('a merged worktree stays while it holds ignored files or a live chat works 
   await desk.shutdown(); store.close();
 });
 
+test('a chat that resumes in a worktree during the Git checks keeps it', async () => {
+  const root = temporary('tidy-race'), project = path.join(root, 'app');
+  git(root, 'init', '-q', '-b', 'master', project);
+  git(project, 'config', 'user.email', 't@t'); git(project, 'config', 'user.name', 't');
+  writeFileSync(path.join(project, 'a.txt'), 'a'); git(project, 'add', '.'); git(project, 'commit', '-qm', 'first');
+  const trees = path.join(workFolder(project), 'worktrees');
+  const tree = (await createWorktree({ path: project, baseBranch: 'master' }, trees, 'fix/race', { name: '301' })).directory;
+  writeFileSync(path.join(tree, 'b.txt'), 'b'); git(tree, 'add', '.'); git(tree, 'commit', '-qm', 'work');
+  git(project, 'merge', '-q', '--no-edit', 'fix/race'); git(project, 'commit', '-q', '--allow-empty', '-m', 'later');
+  let asked = 0;
+  const result = await removeMerged(project, await worktreeList(project), { base: 'master', keep: () => asked++ > 0 });
+  assert.equal(asked, 2, 'asked again right before removing');
+  assert.equal(result.removed.length, 0); assert.match(result.kept[0].reason, /still working/);
+  assert.ok(existsSync(tree));
+});
+
 test('the tidy script reads the project from any position and --apply keeps worktrees live runs use', async () => {
   const { parseArgs, liveFolders } = await import('../scripts/tidy-worktrees.mjs');
   const project = path.join(os.tmpdir(), 'app');

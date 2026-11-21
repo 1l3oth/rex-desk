@@ -48,12 +48,15 @@ export async function removeWorktree(repository, directory) {
   await git(repository, ['worktree', 'remove', directory]);
 }
 // Removes the merged, clean worktrees among `candidates` (worktreeList items); returns what went and what stayed, with why.
+// `keep` is asked before the Git checks and again right before each removal, so it must read the live state each time.
 export async function removeMerged(repository, candidates, { base = 'origin/master', keep = () => false, dryRun = false } = {}) {
   const removed = [], kept = [];
   for (const item of candidates) {
     if (keep(item)) { kept.push({ ...item, reason: 'an agent is still working in it' }); continue; }
     const check = await canRemove(item.path, base);
     if (!check.ok) { kept.push({ ...item, reason: check.reason }); continue; }
+    // Asked again after the Git checks: a chat may have resumed in it meanwhile.
+    if (keep(item)) { kept.push({ ...item, reason: 'an agent is still working in it' }); continue; }
     if (dryRun) { removed.push(item); continue; }
     try { await removeWorktree(repository, item.path); removed.push(item); } catch (error) { kept.push({ ...item, reason: String(error.message).split('\n')[0] }); }
   }
