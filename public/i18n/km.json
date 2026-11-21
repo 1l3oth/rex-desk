@@ -2424,5 +2424,9 @@
  "Where and how it works": "កន្លែង និងរបៀបធ្វើការ",
  "Not set": "មិនទាន់កំណត់",
  "A Claude Code window": "ផ្ទាំង Claude Code",
- "Agent profile": "ទម្រង់ភ្នាក់ងារ"
+ "Agent profile": "ទម្រង់ភ្នាក់ងារ",
+ "Sign in to Rex Desk": "ចូលគណនី Rex Desk",
+ "Your Rex Desk account": "គណនី Rex Desk របស់អ្នក",
+ "{0} connected": "{0} បានភ្ជាប់",
+ "{0} not connected": "{0} មិនទាន់ភ្ជាប់"
 }

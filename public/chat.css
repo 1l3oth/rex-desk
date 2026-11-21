@@ -2469,3 +2469,17 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .stage-main.start>.feed{flex:0 1 auto;min-height:0;margin-top:auto;overflow-y:auto;padding-bottom:0}
 .stage-main.start>.composer{flex:none;margin-bottom:auto;width:min(760px,100%);align-self:center;border-top:0;background:none}
 .stage-main.start>.composer .composer-inner{max-width:none}
+/* Sidebar footer: the Rex Desk account first, the connected AI as a quiet line, and one row for buttons and version. */
+.acct-btn{padding:7px 9px;gap:9px}
+.acct-btn .acct-text{display:flex;flex-direction:column;gap:1px;line-height:1.25}
+.acct-btn .acct-text b{margin:0;overflow:hidden;text-overflow:ellipsis}
+.acct-btn .acct-text small{font-size:11px;color:var(--muted)}
+.acct-av{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:#fff;font:600 12px/1 system-ui,sans-serif}
+.acct-av.none{background:var(--raised);color:var(--muted)}
+.acct-ai{display:flex;align-items:center;gap:6px;width:100%;padding:0 4px;border:0;background:transparent;color:var(--muted);font-size:11px;text-align:left;cursor:pointer}
+.acct-ai:hover{color:var(--ink)}
+.acct-ai .acct-dot{width:6px;height:6px}
+.rail-row{display:flex;align-items:center;gap:8px;width:100%;min-width:0;flex-wrap:nowrap}
+.rail-row .btn{flex:none}
+.rail-row .rail-ver{flex:1 1 0;min-width:0;margin-left:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rail-row .rail-ver.new::after{right:2px}
