@@ -97,3 +97,12 @@ test('a UI instruction with Continue in it gets no nudge', async () => {
   await runner(fake).start('How do I finish?');
   assert.equal(fake.turnInputs().length, 1);
 });
+
+test('promise detection: a closing offer is not nudged', () => {
+  for (const text of ["Done, all tests pass. I'll be here if you need anything else.", "The fix is in. I'll help with anything else.", "That's it. I'll be happy to look at more whenever you're ready."])
+    assert.ok(!isPromise(text), text);
+});
+test('promise detection: a promise that waits on the person is not nudged', () => {
+  for (const text of ["I'll fix it once you send the file.", "I'll continue after you confirm.", "I'll deploy it when you give the go-ahead.", "I will start as soon as you share the log."])
+    assert.ok(!isPromise(text), text);
+});

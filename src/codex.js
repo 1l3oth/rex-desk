@@ -101,11 +101,15 @@ export const CODEX_NUDGE_LIMIT = 1;
 // UI label ("Click Continue to finish") is not one. A question or a request for the person's choice is never nudged.
 const PROMISE = /^(?:(?:ok(?:ay)?|sure|great|got it|alright|right)[,.!]?\s+)?(?:i(?:'|’)ll|i will|i(?:'|’)m going to|i am going to|i(?:'|’)m (?:now |still )?(?:working on it|on it)|i am (?:now |still )?working on it|(?:still |now )?working on it|next,? i(?:'|’)ll|next,? i will)\b/i;
 const ASKS = /\?|\b(?:let me know|tell me|please (?:confirm|choose|pick|tell|send|share|say)|do you want|would you like|can you|could you|which (?:one|file|option|of)|confirm (?:which|whether|if))\b/i;
+// Not work the agent can do now: a closing offer ("I'll be here if you need anything else"), or work that waits on the person
+// ("I'll fix it once you send the file", "I'll continue after you confirm").
+const OFFER = /\b(?:if you need|if you want|if you(?:'|’)d like|whenever you(?:'|’)re ready|anything else|any(?:thing| other) (?:questions?|help)|i(?:'|’)ll be (?:here|around|happy|glad))\b/i;
+const WAITS = /\b(?:once|after|when|as soon as|if|until)\s+(?:you|you(?:'|’)ve|you(?:'|’)re|your|i (?:get|have|hear|receive))\b/i;
 export function isPromise(text) {
   const value = String(text || '').trim();
   if (!value || ASKS.test(value)) return false;
   const last = value.split(/\n+|(?<=[.!])\s+/).map(part => part.trim().replace(/^[-*>\s]+/, '')).filter(Boolean).at(-1) || '';
-  return PROMISE.test(last);
+  return PROMISE.test(last) && !OFFER.test(last) && !WAITS.test(last);
 }
 const TOOL_ITEMS = ['commandExecution', 'fileChange', 'mcpToolCall'];
 
