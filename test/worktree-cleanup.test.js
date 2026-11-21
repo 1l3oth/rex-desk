@@ -41,3 +41,19 @@ test('a project can name its own work folder', () => {
   assert.equal(workFolder(project, os.tmpdir(), [{ path: project, workFolder: own }]), own);
   assert.equal(workFolder(project, os.tmpdir(), [{ path: path.join(os.tmpdir(), 'other'), workFolder: own }]), path.join(os.tmpdir(), 'site-work'));
 });
+
+test('a project\'s work folder is saved from Settings, Projects, and the agents\' worktrees follow it', async () => {
+  const { Store } = await import('../src/store.js');
+  const { Desk } = await import('../src/coordinator.js');
+  const store = new Store(temporary('work-config')), project = temporary('work-project'), own = path.join(temporary('own-work'), 'site-work');
+  const save = repository => store.saveConfig({ ...store.publicConfig(), repositories: [{ name: 'site', path: project, baseBranch: 'master', ...repository }] });
+  save({ workFolder: own });
+  assert.equal(store.config().repositories[0].workFolder, own);
+  const desk = new Desk(store, { root: temporary('work-root'), runnerFactory: () => ({}), memoryDirectory: temporary('work-memory') });
+  assert.equal(desk.worktreeRootFor(store.config().repositories[0]), path.join(own, 'worktrees'));
+  assert.throws(() => save({ workFolder: 'relative\work' }), /full path of the work folder/);
+  save({ workFolder: '' });
+  assert.equal(store.config().repositories[0].workFolder, undefined, 'empty goes back to the folder next to the project');
+  assert.equal(desk.worktreeRootFor(store.config().repositories[0]), path.join(`${project}-work`, 'worktrees'));
+  await desk.shutdown(); store.close();
+});

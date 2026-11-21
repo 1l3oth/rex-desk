@@ -2484,5 +2484,7 @@
  "{0} of {1} done": "រួច {0} ក្នុងចំណោម {1}",
  "Next:": "បន្ទាប់៖",
  "Hide the setup list": "លាក់បញ្ជីរៀបចំ",
- "Hide. Type /setup to open it again.": "លាក់។ វាយ /setup ដើម្បីបើកវាម្ដងទៀត។"
+ "Hide. Type /setup to open it again.": "លាក់។ វាយ /setup ដើម្បីបើកវាម្ដងទៀត។",
+ "Work folder": "ថតការងារ",
+ "Where agents keep the worktrees of this project (one folder per task), temp files and test data. Empty uses the folder next to the project, on its drive.": "កន្លែងដែលភ្នាក់ងាររក្សាទុក worktree របស់គម្រោងនេះ (មួយថតក្នុងមួយកិច្ចការ) ឯកសារបណ្ដោះអាសន្ន និងទិន្នន័យសាកល្បង។ ទុកទទេ ដើម្បីប្រើថតនៅជាប់គម្រោង នៅលើដ្រាយរបស់វា។"
 }

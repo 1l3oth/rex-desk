@@ -464,10 +464,13 @@ export class Store extends EventEmitter {
       const commands = ['setupCommand', 'devCommand', 'testCommand'].reduce((result, key) => ({ ...result, [key]: String(repository[key] || '') }), {});
       if (repository.devCommand && !repository.devCommand.includes('{port}')) throw new Error('Dev command must contain {port}, so concurrent runs use separate ports.');
       const branchPattern = String(repository.branchPattern || '').trim();
+      // Where agents keep this project's worktrees, temp and test data; empty is the default, <project>-work beside it.
+      const workFolder = String(repository.workFolder || '').trim();
+      if (workFolder && !path.isAbsolute(workFolder)) throw new Error('Give the full path of the work folder, or leave it empty for the folder next to the project.');
       issueBranch(branchPattern, { prefix: String(input.branchPrefix || 'rex-desk').replace(/^\/+|\/+$/g, '') });
       return { id: repository.id || id(), name: repository.name || path.basename(repository.path), path: path.resolve(repository.path),
         baseBranch: repository.baseBranch || 'develop', targetBranch: repository.targetBranch || repository.baseBranch || 'develop',
-        branchPattern, flowRuntime: validateFlowRuntime(repository.flowRuntime), electronRuntime: validateElectronRuntime(repository.electronRuntime), ...commands, browserPath: repository.browserPath || '/', push: repository.push === 'direct' ? 'direct' : 'pr' };
+        branchPattern, flowRuntime: validateFlowRuntime(repository.flowRuntime), electronRuntime: validateElectronRuntime(repository.electronRuntime), ...commands, browserPath: repository.browserPath || '/', push: repository.push === 'direct' ? 'direct' : 'pr', ...(workFolder ? { workFolder: path.resolve(workFolder) } : {}) };
     });
     // One sign-in per site. A blank site is the fallback used wherever no site matches.
     const accounts = (Array.isArray(input.testAccounts) ? input.testAccounts : []).map(account => ({
