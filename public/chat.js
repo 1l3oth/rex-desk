@@ -1,4 +1,5 @@
 import { askConfirm } from './confirm.js';
+import './layers.js';
 import { t, locale } from './i18n.js';
 import { splitStage } from '/chat-split.js';
 import { rexCore } from '/rex-core.js';
