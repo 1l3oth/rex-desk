@@ -2483,3 +2483,28 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .rail-row .btn{flex:none}
 .rail-row .rail-ver{flex:1 1 0;min-width:0;margin-left:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rail-row .rail-ver.new::after{right:2px}
+/* AI accounts: a settings-style list. Fixed usage columns so every row lines up, a list that scrolls inside a dialog that fits the window. */
+.acct-dialog{width:min(620px,94vw);max-width:620px;max-height:calc(100dvh - 88px);overflow:hidden}
+.acct-dialog .acct-list{flex:1 1 auto;min-height:96px;overflow-y:auto;gap:0;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.dialog .acct-list label.acct-row{border:0;border-radius:0;padding:10px 14px;gap:12px;align-items:flex-start;background:transparent}
+.dialog .acct-list label.acct-row+label.acct-row{border-top:1px solid var(--line)}
+.dialog .acct-list label.acct-row:hover{background:var(--raised)}
+.dialog .acct-list label.acct-row.on{background:color-mix(in srgb,var(--good) 7%,transparent)}
+.acct-row .acct-pic{margin-top:2px}.acct-row .acct-badge,.acct-row .acct-use{align-self:flex-start;margin-top:3px}
+.acct-list .acct-usage{gap:4px;margin-top:8px}
+.acct-list .acct-limit{grid-template-columns:92px minmax(60px,1fr) 38px 148px;gap:10px}
+.acct-lreset{text-align:left;overflow:hidden;text-overflow:ellipsis}
+.acct-limit meter{height:6px}
+@media (max-width:560px){
+  .acct-list .acct-limit{grid-template-columns:78px minmax(40px,1fr) 38px;row-gap:1px}
+  .acct-lreset{grid-column:2 / 4}
+}
+/* No letter avatars: the email leads. "In use" is a small check next to it, not a pill. */
+.acct-name{gap:6px}
+.acct-list .acct-name .acct-badge{display:inline-flex;align-items:center;gap:3px;padding:0;background:none;border-radius:0;font-size:11.5px;font-weight:600;color:var(--good);margin:0 0 0 auto}
+.acct-list .acct-name .acct-use{margin:0 0 0 auto}
+.acct-row .acct-badge,.acct-row .acct-use{margin-top:0}
+.acct-list .acct-plan{font-size:10px;padding:0 5px;border-radius:4px}
+.acct-row .acct-main small{margin-top:1px}
+@media (max-width:560px){.acct-tab{padding:9px 4px;gap:4px;font-size:13px;min-width:0}.acct-default-badge{padding:0 5px;font-size:10px}}
+.acct-intro .acct-note{padding:0;background:none;border-radius:0;font-size:12px;color:var(--muted)}
