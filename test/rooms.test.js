@@ -388,7 +388,7 @@ test('the model on the agent card reaches a chat made before it was set (L68)', 
   await waitFor(() => seen.length === 1 && !desk.live.size);
   const runId = store.get('specialist', dara.id).runId;
   // The chat kept Opus from before, and the card was changed to Sonnet on another computer (no update call here).
-  store.put('run', runId, { ...store.get('run', runId), model: 'opus' });
+  store.put('run', runId, { ...store.get('run', runId), model: 'opus', cardModel: undefined });
   store.put('specialist', dara.id, { ...store.get('specialist', dara.id), model: 'sonnet' });
   await desk.say(runId, 'Next');
   await waitFor(() => seen.length === 2 && !desk.live.size);
@@ -397,6 +397,19 @@ test('the model on the agent card reaches a chat made before it was set (L68)', 
   desk.specialists.update(dara.id, { model: 'haiku' });
   assert.equal(store.get('run', runId).model, store.get('specialist', dara.id).model);
   assert.match(store.get('run', runId).model, /haiku/);
+  // The card set back to Default on another computer: the chat goes back to the default model too.
+  store.put('specialist', dara.id, { ...store.get('specialist', dara.id), model: '' });
+  await desk.say(runId, 'Default now');
+  await waitFor(() => seen.length === 3 && !desk.live.size);
+  assert.doesNotMatch(String(seen[2] || ''), /haiku/, 'Default on the card is followed');
+  assert.equal(store.get('run', runId).model, '');
+  // A model picked in the chat itself stays, even when the card changes later.
+  await desk.say(runId, 'Use Opus here', { model: 'claude-opus-5-5' });
+  await waitFor(() => seen.length === 4 && !desk.live.size);
+  store.put('specialist', dara.id, { ...store.get('specialist', dara.id), model: 'sonnet' });
+  await desk.say(runId, 'Still Opus?');
+  await waitFor(() => seen.length === 5 && !desk.live.size);
+  assert.equal(seen[3], 'claude-opus-5-5'); assert.equal(seen[4], 'claude-opus-5-5', 'the pick made in this chat is kept');
 });
 
 test('an agent shows an explanation page of its changes in the chat, and only HTML counts as a page', async () => {

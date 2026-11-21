@@ -673,7 +673,7 @@ export class Desk {
       // The same project on this computer (found by its name) comes first, so the agent keeps working on the project here.
       const ownAgent = owner && owner !== 'main' ? this.specialists.get(owner) : null, projectHere = ownAgent?.projectSlug ? this.projectRules.folderHere(ownAgent.projectSlug) : '';
       // The model on the agent's card wins over the one its chat was made with, also for a card changed on another computer (L68).
-      if (ownAgent?.model && !run.modelFallback) { this.specialists.syncRuns(ownAgent); run = this.run(runId); }
+      if (ownAgent && !run.modelFallback) { this.specialists.syncRuns(ownAgent); run = this.run(runId); }
       const cwd = [run.cwd, run.worktree].find(folder => folder && existsSync(folder)) || (run.cwd || run.worktree ? projectHere || ownHome() : path.join(this.store.directory, 'coordinator'));
       if (run.cwd && cwd !== run.cwd && !existsSync(run.cwd)) this.patchRun(run.id, { cwd, ...(projectHere && cwd === projectHere ? { projectPath: projectHere } : {}) });
       // A run nobody picked a mode for starts in the person's default mode from Settings.
@@ -1322,13 +1322,14 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       const model = this.specialists.cleanModel(agent.model, { provider: agent.provider });
       const created = { id: id(), role: agent.kind === 'main' ? 'coordinator' : 'specialist', ...(agent.kind === 'main' ? {} : { specialistId: agent.id }), ...(roomId ? { roomAgent: agent.id, roomOf: roomId } : {}),
         title: roomId ? `${agent.name} · ${this.rooms.room(roomId)?.name || 'group chat'}` : agent.name, provider: aiProvider(agent.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home,
-        projectPath: this.specialists.folder(agent), repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}) };
+        projectPath: this.specialists.folder(agent), repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}), cardModel: model };
       this.store.put('run', created.id, created); const fresh = this.specialists.get(agentId); this.store.put('specialist', agent.id, roomId ? { ...fresh, roomRuns: { ...(fresh.roomRuns || {}), [roomId]: created.id } } : { ...fresh, runId: created.id });
       if (!roomId && !quiet) this.store.event(created.id, 'human-message', { text: String(prompt).trim(), via: 'rex' }, true);
       void this.drain(); return created;
     }
     if (this.live.has(run.id)) { this.store.put('run', run.id, { ...run, roomTurn: turn || run.roomTurn, ...(turn ? { roomPosted: false } : {}) }); await this.say(run.id, prompt, {}, { raw: true }); return run; }
-    await this.resume(run.id, { provider: agent.provider, model: agent.model || undefined, prompt, silent: Boolean(roomId) || quiet, roomTurn: turn }); return this.run(run.id);
+    // The card's model reaches the chat at the turn start (Specialists.syncRuns), so a model picked in the chat itself stays.
+    await this.resume(run.id, { provider: agent.provider, prompt, silent: Boolean(roomId) || quiet, roomTurn: turn }); return this.run(run.id);
   }
   // In a group chat, a sub-agent an agent starts (a QA reviewer, a researcher) is said in one line when it starts and when it is done.
   subagentNote(runId, kind, data) {
@@ -1552,7 +1553,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), execution: 'headless' });
       void this.drain(); return this.run(runId);
     }
-    this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}),
+    this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', cardModel: undefined, profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}),
       ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}),
       instructions: run.role === 'specialist' ? `${run.instructions || ''}${carried}` : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
       ...runOptions({ ...picked, provider }, this.store), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });

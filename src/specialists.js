@@ -102,16 +102,22 @@ export class Specialists {
       const model = this.cleanModel(agent.model, { provider: agent.provider }), fixed = model !== (agent.model || '') ? { ...agent, model } : agent;
       if (fixed !== agent) this.store.put('specialist', agent.id, fixed);
       // A chat made before its card's model was set kept the old one (L68): the card's model wins.
-      if (fixed.model) this.syncRuns(fixed);
+      this.syncRuns(fixed);
     }
   }
   // The agent's own chats (personal and group) run on the model on its card. A chat keeps the model it was made with and every
   // turn uses it, so a model changed on the card later never reached a chat that already existed (L68: card Sonnet, chat Opus).
+  // cardModel is the card's model the chat last followed: a chat whose model is still that one follows the card, Default
+  // included; a model the person picked in the chat itself (it differs) stays. A chat from before cardModel existed takes the
+  // card's model once, when the card has one.
   syncRuns(agent) {
+    const card = agent.model || '';
     for (const runId of [agent.runId, ...Object.values(agent.roomRuns || {})].filter(Boolean)) {
       const run = this.store.get('run', runId);
-      if (!run || (run.provider || 'claude') !== (agent.provider || 'claude') || (run.model || '') === (agent.model || '')) continue;
-      this.store.put('run', runId, { ...run, model: agent.model || '', modelFallback: undefined });
+      if (!run || (run.provider || 'claude') !== (agent.provider || 'claude')) continue;
+      const follows = run.cardModel === undefined ? Boolean(card) : (run.model || '') === run.cardModel;
+      if (!follows || ((run.model || '') === card && run.cardModel === card)) continue;
+      this.store.put('run', runId, { ...run, model: card, cardModel: card, modelFallback: undefined });
     }
   }
   checkName(name, exceptId = '') {
