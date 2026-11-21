@@ -36,10 +36,13 @@ export function watchDisk(folders, { notify, min = WARN_FREE_BYTES, free = freeB
   const timer = setInterval(check, everyMs); timer.unref?.();
   return Object.assign(() => clearInterval(timer), { check });
 }
-// Only the installed app's own server watches the disk: it runs from the app's payload beside its program (REX_DESK_EXE) with
+// Only the installed app's own server makes the agents' runtime copy and watches the disk: it runs from the app's payload beside its program (REX_DESK_EXE) with
 // its version set. A test copy or an agent's copy runs from a checkout or a temp folder, even when it inherits those settings.
 export function installedServer(appRoot, dataDirectory, env = process.env) {
   if (dataDirectory || !env.REX_DESK_VERSION || !env.REX_DESK_EXE) return false;
-  const inside = path.relative(path.resolve(path.dirname(env.REX_DESK_EXE)), path.resolve(appRoot));
+  // On a Mac the program is in X.app/Contents/MacOS and the payload in X.app/Contents/Resources: the install folder is the bundle.
+  let install = path.dirname(path.resolve(env.REX_DESK_EXE));
+  if (path.basename(install) === 'MacOS' && path.basename(path.dirname(install)) === 'Contents') install = path.dirname(path.dirname(install));
+  const inside = path.relative(install, path.resolve(appRoot));
   return Boolean(inside) && !inside.startsWith('..') && !path.isAbsolute(inside);
 }

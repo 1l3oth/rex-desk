@@ -38,3 +38,9 @@ test('only the installed app\'s own server watches the disk, not a test or agent
   assert.equal(installedServer(app, path.join(os.tmpdir(), 'test-data'), env), false, 'a test passes its own data folder');
   assert.equal(installedServer(app, undefined, { REX_DESK_EXE: exe }), false, 'no version: a development run');
 });
+
+test('the installed Mac server counts too: its payload is in Contents/Resources beside the program in Contents/MacOS', () => {
+  const bundle = path.join(os.tmpdir(), 'Rex Desk.app'), env = { REX_DESK_VERSION: '1.0.0', REX_DESK_EXE: path.join(bundle, 'Contents', 'MacOS', 'rex-desk') };
+  assert.equal(installedServer(path.join(bundle, 'Contents', 'Resources', 'payload', 'app'), undefined, env), true);
+  assert.equal(installedServer(path.join(os.tmpdir(), 'checkout'), undefined, env), false, 'a checkout next to it does not');
+});
