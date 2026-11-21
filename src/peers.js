@@ -290,13 +290,15 @@ export class Peers {
     doing('sync: reading chat messages');
     // chatRead 2: read everything once more, so messages dropped by an id clash (see Store.applyChatEvents) come in.
     const settings = this.settings(), again = settings.chatNode !== this.self.id || settings.chatRead !== 2;
-    let since = again ? '' : String(settings.chatAt || ''), newest = since, total = 0;
+    let since = again ? '' : String(settings.chatAt || ''), newest = since, total = 0; const read = String(settings.chatAt || '');
     if (since) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - 120000).toString(36).padStart(9, '0'); }
     for (let page = 0; page < 40; page++) {
       const rows = await this.store.cloud.pullChat(since);
       if (!rows?.length) break;
       total += this.store.applyChatEvents(rows);
-      for (const row of rows) { const [, , ...node] = String(row.v).split('.'); this.hear(node.join('.')); }
+      // Only a message newer than the last one read is a sign of life: the overlap reads the same last rows on every pull,
+      // and counting those kept a computer that went off "online" forever (L26).
+      for (const row of rows) { if (String(row.v) <= read) continue; const [, , ...node] = String(row.v).split('.'); this.hear(node.join('.')); }
       newest = String(rows.at(-1).v) > newest ? String(rows.at(-1).v) : newest; since = String(rows.at(-1).v);
       if (rows.length < 500) break;
     }

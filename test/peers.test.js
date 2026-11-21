@@ -332,3 +332,16 @@ test('without Tailscale, an agent replying on one computer shows as replying on 
     await within(3500, () => state() === 'idle');
   } finally { a.desk.peers.stop(); b.desk.peers.stop(); }
 });
+
+test('a computer that went off does not stay "on" because the chat overlap reads its last message again (L26)', async () => {
+  const { a, b } = computers();
+  const from = a.desk.store.nodeId, row = { v: `${(Date.now() - 30000).toString(36).padStart(9, '0')}.0001.${from}` };
+  b.desk.store.cloud = { ready: true, record() {}, remove() {}, event() {}, schedule() {}, shared() {}, enqueue() {}, pullChat: async () => [row] };
+  b.desk.store.applyChatEvents = () => 0;
+  await b.desk.peers.pullChats();
+  assert.equal(b.desk.peers.online(from), true, 'a message it had not read yet is a sign of life');
+  b.desk.peers.heard.clear();
+  // It went off: every pull still starts two minutes back and gets the same last message.
+  await b.desk.peers.pullChats(); await b.desk.peers.pullChats();
+  assert.equal(b.desk.peers.online(from), false, 'reading the same message again is not');
+});
