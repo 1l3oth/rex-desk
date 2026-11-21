@@ -25,7 +25,7 @@ import { wireImageViewer } from '/chat-viewer.js';
 import { wireSpeak, speakButton, readAloudButton, toggleReadAloud, readNewReplies, speakLive, voiceModeButton, toggleVoiceMode, voiceModeOn, speechIdle, speechPlaying, stopLive, outputLevel, welcome } from '/chat-speak.js';
 import { mountOrb } from '/voice-orb.js';
 import { welcomeLine, STILL_THERE, GOODBYE } from '/voice-phrases.js';
-import { openAvatarPicker } from '/chat-avatar.js';
+import { openAvatarPicker, saveCover } from '/chat-avatar.js';
 import { watchForStar } from '/chat-star.js';
 import { showUpdateCard, updateLater, updateShow, installUpdate, updateWhenIdle, watchForUpdates, showSyncNote } from '/chat-update.js';
 import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments, voiceTurn, voiceBusy, cancelVoiceTurn, voiceListening } from '/chat-composer.js';
@@ -555,6 +555,7 @@ function renderAll(full = false) {
     applyFilter(rail, ui.agentFilter);
     if (ui.filterFocused) { const box = rail.querySelector('[data-rail-filter]'); if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); } } }
   renderStage(full);
+  if (ui.profileId) { if ((ui.snap.specialists || []).some(item => item.id === ui.profileId)) drawProfile(); else closeProfile(); }
   fillWorktreeEmbeds(ctx);
   if (ui.view.type === 'worktrees' && ui.view.id && ui.wtFocused !== ui.view.id) { const card = document.querySelector(`.wt-page [data-wt-id="${CSS.escape(ui.view.id)}"]`); if (card) { ui.wtFocused = ui.view.id; card.classList.add('focus'); card.scrollIntoView({ block: 'center' }); } }
 }
@@ -704,6 +705,25 @@ document.addEventListener('keydown', event => {
   void stopAgent().catch(error => toast(error.message, true));
 });
 function newRoomDialog() { openRoomDialog(ctx); }
+// The full profile as a popup (wide screens): the same page, drawn inside a sheet over the chat, redrawn when the data changes
+// unless the person is typing or has unsaved rules in it.
+function drawProfile() {
+  const back = document.querySelector('.agp-modal'), sheet = back?.querySelector('.agp-sheet'); if (!sheet) return;
+  const active = document.activeElement, busy = sheet.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName);
+  if (busy || sheet.querySelector('.ag-save button:not([disabled])')) return;
+  const body = sheet.querySelector('.agp-scroll'), top = body.scrollTop, html = agentStage(ctx, ui.profileId).feed;
+  if (body.dataset.html === html) return; body.dataset.html = html; body.innerHTML = html; body.scrollTop = top;
+}
+function closeProfile() { document.querySelector('.agp-modal')?.remove(); ui.profileId = ''; }
+function showProfile(id) {
+  closeProfile(); ui.profileId = id; ui.agentTab = 'about';
+  const back = document.createElement('div'); back.className = 'agp-modal';
+  back.innerHTML = `<div class="agp-sheet" role="dialog" aria-modal="true" aria-label="${t`Agent profile`}"><button type="button" class="agp-close" aria-label="${t`Close`}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button><div class="agp-scroll"></div></div>`;
+  back.addEventListener('mousedown', event => { if (event.target === back) closeProfile(); });
+  back.querySelector('.agp-close').addEventListener('click', closeProfile);
+  document.body.append(back); drawProfile(); back.querySelector('.agp-close').focus();
+}
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && document.querySelector('.agp-modal') && !document.querySelector('.dialog-back')) closeProfile(); });
 document.addEventListener('click', async event => {
   const target = event.target.closest('[data-open],[data-action]'); if (!target) return;
   if (target.dataset.open) {
@@ -714,9 +734,12 @@ document.addEventListener('click', async event => {
       if (agent?.runId && runById(agent.runId)) return open('run', agent.runId);
       if (savedChatGone(ctx, agent) && !agent.remote) return openAgentChat(ctx, agent);
     }
+    // On a wide screen the full profile is a popup over the chat; the chat stays as it was.
+    if (target.dataset.open === 'specialist' && target.dataset.profile && !phone() && ui.view.type !== 'specialist' && (ui.snap.specialists || []).some(item => item.id === target.dataset.id)) return showProfile(target.dataset.id);
     return open(target.dataset.open, target.dataset.id);
   }
   const action = target.dataset.action;
+  if (['spec-chat', 'spec-remove', 'spec-duplicate'].includes(action) && document.querySelector('.agp-modal')) closeProfile();
   try {
     if (action?.startsWith('spec-') || action === 'chat-pick') await agentAction(ctx, action, target);
     else if (action === 'send') await send();
@@ -726,7 +749,8 @@ document.addEventListener('click', async event => {
     else if (action === 'voice-mode') { const on = toggleVoiceMode(draftKey()); if (!on) { cancelVoiceTurn(); stopLive(); } voiceRest = 0; toast(on ? t('Voice mode is on. Talk when the mic lights up; the reply is spoken as it is written.') : t('Voice mode is off.')); renderAll(); }
     else if (action === 'read-aloud') { const on = toggleReadAloud(draftKey()); toast(on ? t('New replies in this chat are read aloud.') : t('Replies are no longer read aloud.')); renderAll(); }
     else if (action === 'update-show') updateShow(ui.snap.update);
-    else if (action === 'avatar-pick') { const agent = (ui.snap.specialists || []).find(item => item.id === target.closest('[data-agent-id]')?.dataset.agentId); if (agent) openAvatarPicker(ctx, agent); }
+    else if (action === 'cover-reset') { const agent = (ui.snap.specialists || []).find(item => item.id === target.closest('[data-agent]')?.dataset.agent); if (agent) void saveCover(ctx, agent, null);
+    } else if (action === 'avatar-pick') { const agent = (ui.snap.specialists || []).find(item => item.id === target.closest('[data-agent-id]')?.dataset.agentId); if (agent) openAvatarPicker(ctx, agent); }
     else if (action === 'pin-toggle') togglePin(ctx, target.dataset.kind, target.dataset.id);
     else if (action === 'app-on' || action === 'app-off') {
       const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return;
@@ -1420,6 +1444,11 @@ document.addEventListener('change', async event => {
   if (event.target.id !== 'pp-profile') return;
   const run = runById(ui.view.id), agent = run && personalAgent(run); if (!agent || agent.main) return;
   try { await api(`/specialists/${agent.id}`, { method: 'PUT', data: { profile: event.target.value } }); toast(event.target.value ? t`${agent.name} now uses that Claude account.` : t`${agent.name} uses the same account as everyone.`); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
+});
+document.addEventListener('change', event => {
+  const input = event.target.closest?.('[data-cover-upload]'); if (!input) return;
+  const agent = (ui.snap.specialists || []).find(item => item.id === input.closest('[data-agent]')?.dataset.agent), file = input.files?.[0]; input.value = '';
+  if (agent && file) void saveCover(ctx, agent, file);
 });
 // Forms inside popups are handled by their buttons; pressing Enter never reloads the page.
 document.addEventListener('submit', event => { if (event.target.closest?.('.settings-pop,.acct-dialog,.vdialog,.src-dialog')) event.preventDefault(); });

@@ -2300,7 +2300,6 @@
  "Not checked": "មិនទាន់ពិនិត្យ",
  "Looking…": "កំពុងរក…",
  "Find duplicates": "រកឯកសារស្ទួន",
- "Updating…": "កំពុងធ្វើបច្ចុប្បន្នភាព…",
  "This can take a minute on a big desk.": "វាអាចចំណាយពេលមួយនាទីលើតុធំ។",
  "Search: {0}": "ស្វែងរក៖ {0}",
  "Open its chat": "បើកការជជែករបស់វា",
@@ -2416,5 +2415,16 @@
  "On this network": "នៅលើបណ្ដាញនេះ",
  "Getting the address…": "កំពុងយកអាសយដ្ឋាន…",
  "Sign in to your Rex Desk account (Agents online) to get an address that works from anywhere.": "ចូលគណនី Rex Desk របស់អ្នក (Agents online) ដើម្បីទទួលបានអាសយដ្ឋានដែលប្រើបានពីគ្រប់ទីកន្លែង។",
- "Copy address": "ចម្លងអាសយដ្ឋាន"
+ "Copy address": "ចម្លងអាសយដ្ឋាន",
+ "Remove cover": "ដករូបខាងលើចេញ",
+ "Change cover": "ប្តូររូបខាងលើ",
+ "question for you": "សំណួរសម្រាប់អ្នក",
+ "questions for you": "សំណួរសម្រាប់អ្នក",
+ "lesson learned": "មេរៀនដែលបានរៀន",
+ "lessons learned": "មេរៀនដែលបានរៀន",
+ "own loop": "ការពិនិត្យដោយខ្លួនឯង",
+ "Where and how it works": "កន្លែង និងរបៀបធ្វើការ",
+ "Not set": "មិនទាន់កំណត់",
+ "A Claude Code window": "ផ្ទាំង Claude Code",
+ "Agent profile": "ទម្រង់ភ្នាក់ងារ"
 }

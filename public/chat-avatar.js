@@ -46,3 +46,22 @@ export function openAvatarPicker(ctx, agent) {
   });
   back.querySelector('.ap-item.on, .ap-item')?.focus();
 }
+
+// A cover picture for the profile page: cropped from the middle to a wide strip (900 x 190) and saved as a small JPEG.
+const coverOf = file => new Promise((resolve, reject) => {
+  if (!/^image\//.test(file.type)) return reject(new Error(t('Pick a picture file (PNG, JPEG, WebP or GIF).')));
+  const image = new Image(), url = URL.createObjectURL(file);
+  image.onload = () => {
+    const width = 900, height = 190, canvas = Object.assign(document.createElement('canvas'), { width, height }), context = canvas.getContext('2d');
+    const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight), w = width / scale, h = height / scale;
+    context.drawImage(image, (image.naturalWidth - w) / 2, (image.naturalHeight - h) / 2, w, h, 0, 0, width, height); URL.revokeObjectURL(url);
+    resolve(canvas.toDataURL('image/jpeg', 0.8));
+  };
+  image.onerror = () => { URL.revokeObjectURL(url); reject(new Error(t('That picture could not be read.'))); };
+  image.src = url;
+});
+export async function saveCover(ctx, agent, file) {
+  const { api, toast, refresh } = ctx;
+  try { await api(`/specialists/${encodeURIComponent(agent.id)}`, { method: 'PUT', data: { cover: file ? await coverOf(file) : '' } }); await refresh(); }
+  catch (error) { toast(error.message, true); }
+}

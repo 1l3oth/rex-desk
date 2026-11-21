@@ -141,6 +141,13 @@ export class Specialists {
     if (/^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(text) && text.length <= 82000) return text;
     throw new Error('Pick one of the avatars, or a PNG, JPEG or WebP picture under 60 KB.');
   }
+  // A cover picture for the profile page: a small JPEG, PNG or WebP data URL, or empty for the generated cover.
+  cleanCover(value) {
+    const text = String(value || '');
+    if (!text) return '';
+    if (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(text) && text.length <= 260000) return text;
+    throw new Error('Pick a PNG, JPEG or WebP picture under 190 KB.');
+  }
   // The lowest avatar no agent of this person has yet, so no two agents look the same (after 128, they repeat).
   nextAvatar(except = '') {
     const used = new Set(this.list().filter(item => item.id !== except).map(item => item.avatar).filter(Boolean));
@@ -179,11 +186,11 @@ export class Specialists {
     if (!path.isAbsolute(text) || !existsSync(text)) throw new Error('Give the full path of a folder that is on this computer, or leave it out.');
     return path.resolve(text);
   }
-  update(id, { rules, unsure, provider, model, effort, taskSources, profile, loop, avatar }) {
+  update(id, { rules, unsure, provider, model, effort, taskSources, profile, loop, avatar, cover }) {
     const item = this.get(id);
     const selectedProvider = aiProvider(provider || item.provider || 'claude');
     const updated = { ...item, provider: selectedProvider, ...(selectedProvider !== item.provider ? { model: '', profile: '' } : {}), ...(rules !== undefined ? { rules: String(rules).slice(0, 4000) } : {}), ...(unsure !== undefined ? { unsure: [].concat(unsure).map(text => String(text).trim().slice(0, 300)).filter(Boolean).slice(0, 12) } : {}),
-      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true, provider: selectedProvider }) } : {}), ...(effort !== undefined ? { effort: this.cleanEffort(effort, selectedProvider) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), ...(profile !== undefined ? { profile: String(profile || '').slice(0, 500) } : {}), ...(loop !== undefined ? { loop: { ...this.loopOf(item), ...cleanLoop(loop) } } : {}), ...(avatar !== undefined ? { avatar: this.cleanAvatar(avatar) || this.nextAvatar(id) } : {}), updatedAt: now() };
+      ...(model !== undefined ? { model: this.cleanModel(model, { strict: true, provider: selectedProvider }) } : {}), ...(effort !== undefined ? { effort: this.cleanEffort(effort, selectedProvider) } : {}), ...(taskSources !== undefined ? { taskSources: this.cleanSources(taskSources) } : {}), ...(profile !== undefined ? { profile: String(profile || '').slice(0, 500) } : {}), ...(loop !== undefined ? { loop: { ...this.loopOf(item), ...cleanLoop(loop) } } : {}), ...(cover !== undefined ? { cover: this.cleanCover(cover) } : {}), ...(avatar !== undefined ? { avatar: this.cleanAvatar(avatar) || this.nextAvatar(id) } : {}), updatedAt: now() };
     this.store.put('specialist', id, updated); this.writeCard(updated);
     if ((updated.model || '') !== (item.model || '') || updated.provider !== item.provider) this.syncRuns(updated);
     return updated;

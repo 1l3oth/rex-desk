@@ -21,8 +21,8 @@ export function agentGroups(ctx, agents, item) {
   }).join('');
 }
 
-export function agentStage(ctx) {
-  const { ui, esc } = ctx, agent = (ui.snap.specialists || []).find(item => item.id === ui.view.id);
+export function agentStage(ctx, id = (ctx.ui.profileId || ctx.ui.view.id)) {
+  const { ui, esc } = ctx, agent = (ui.snap.specialists || []).find(item => item.id === id);
   if (!agent) return { title: t('Agent'), meta: '', feed: `<div class="empty"><h2>${t`That agent is gone.`}</h2></div>` };
   delete ui.picks['sp-model']; delete ui.picks['sp-provider'];
   const origin = agent.cloneOf ? (ui.snap.specialists || []).find(item => item.id === agent.cloneOf) : null;
@@ -61,19 +61,26 @@ export function agentStage(ctx) {
   const tabId = ['about', 'notes', 'work', 'setup'].includes(ui.agentTab) ? ui.agentTab : 'about';
   const where = [agent.projectSlug ? `<a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>` : esc(t('No project')), agent.device ? `${esc(agent.device)}${agent.remote ? '' : ` <span class="agp-faint">${t`(this computer)`}</span>`}` : ''].filter(Boolean).join('<span class="agp-sep" aria-hidden="true">·</span>');
   const avatar = agent.remote ? ctx.avatar({ name: agent.name, agent, size: 'xl' }) : `<button type="button" class="av-edit agp-av" data-action="avatar-pick" data-agent-id="${esc(agent.id)}" title="${t`Change ${esc(agent.name)}'s avatar`}" aria-label="${t`Change ${esc(agent.name)}'s avatar`}">${ctx.avatar({ name: agent.name, agent, size: 'xl' })}</button>`;
-  const head = `<header class="agp-head">${avatar}
+  // A social-profile header: a cover (the person's picture, or one drawn from the agent's own colour), a big avatar over its
+  // edge, name, one line on where it works, what it is for, three numbers, and the two main buttons.
+  const hue = [...String(agent.id)].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) % 360, 7);
+  const cover = `<div class="agp-cover agp-h${hue % 12}${agent.cover ? ' has' : ''}">${agent.cover ? `<img src="${esc(agent.cover)}" alt="">` : '<svg viewBox="0 0 900 190" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><circle cx="760" cy="30" r="170"/><circle cx="560" cy="215" r="140"/><circle cx="130" cy="15" r="110" class="dk"/><path class="dk" d="M0 150C220 90 380 190 640 120S860 110 900 130V190H0Z"/></svg>'}`
+    + (agent.remote ? '' : `<span class="agp-cover-acts">${agent.cover ? `<button type="button" class="agp-cbtn" data-action="cover-reset">${t`Remove cover`}</button>` : ''}<label class="agp-cbtn">${t`Change cover`}<input type="file" accept="image/*" data-cover-upload hidden></label></span>`) + '</div>';
+  const stats = [[unsure.length, unsure.length === 1 ? t('question for you') : t('questions for you')], [lessons.length, lessons.length === 1 ? t('lesson learned') : t('lessons learned')], [loop.on ? STEP[loop.every] || `${loop.every}m` : t('Off'), t('own loop')]];
+  const head = `${cover}<header class="agp-head">${avatar}
     <div class="agp-who">
       <form class="ag-name agp-name" data-agent-rename><input id="sp-name" type="text" maxlength="40" value="${esc(agent.name)}" aria-label="${t`Agent name`}" spellcheck="false"><button class="btn small" type="submit" hidden>${t`Rename`}</button></form>
       <p class="agp-line"><span class="agp-state"><span class="dot ${tone}"></span>${esc(agent.status?.label || t('Idle'))}</span><span class="agp-sep" aria-hidden="true">·</span>${where}</p>
     </div>
-    <div class="agp-actions"><button class="btn small" data-action="spec-duplicate">${t`Duplicate`}</button><button class="btn small primary" data-action="spec-chat">${t`Chat`}</button></div>
+    <div class="agp-actions"><button class="btn small" data-action="spec-duplicate">${t`Duplicate`}</button><button class="btn small primary" data-action="spec-chat">${t`Message`}</button></div>
+    ${agent.purpose ? `<p class="agp-bio">${esc(agent.purpose)}</p>` : ''}
+    <p class="agp-stats">${stats.map(([value, label]) => `<span><b>${esc(String(value))}</b> ${esc(label)}</span>`).join('')}</p>
   </header>`;
   const questions = unsure.length ? group(t`${esc(agent.name)} is not sure about`, unsure.map((text, index) => row(`<i class="agp-dot warn" aria-hidden="true"></i>${esc(text)}`, `<button class="btn small quiet" data-action="spec-settled" data-index="${index}" title="${t`Mark as settled`}">${t`Settled`}</button><button class="btn small" data-action="spec-answer" data-index="${index}">${t`Answer`}</button>`)).join(''), '', ' agp-ask') : '';
   const tabs = `<nav class="agp-tabs" role="tablist" aria-label="${t`Profile sections`}">${[['about', t('Profile')], ['notes', t('Soul and memory')], ['work', t('Work')], ['setup', t('Setup')]].map(([id, label]) => `<button type="button" role="tab" aria-selected="${tabId === id}" class="${tabId === id ? 'on' : ''}" data-action="spec-tab" data-tab="${id}">${label}${id === 'work' && loop.on ? '<span class="agp-live" title="' + t('Own loop is on') + '"></span>' : ''}</button>`).join('')}</nav>`;
   const lessonRows = lessons.length ? lessons.map((lesson, index) => row(`<span class="agp-wrap">${esc(lesson.text)}</span>`, `<button type="button" class="ag-x agp-x" data-action="spec-forget" data-index="${index}" title="${t`Forget this lesson`}" aria-label="${t`Forget this lesson`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>`, '', ' agp-lesson')).join('')
     : block(`<p class="agp-empty">${t`None yet. When you correct ${esc(agent.name)}, it keeps the lesson here.`}</p>`);
-  const about = group(t('About'), block(`<p class="agp-about">${esc(agent.purpose || t('Not recorded yet.'))}</p>`) + (agent.projectPath ? row(t('Main folder'), `<code class="agp-code" title="${esc(agent.projectPath)}">${esc(agent.projectPath)}</code>`) : ''))
-    + group(t('Rules'), block(`<textarea id="sp-rules" class="agp-text agp-rules" rows="${Math.min(16, Math.max(4, Math.ceil(String(agent.rules || '').length / 70) + String(agent.rules || '').split(/\n/).length))}" spellcheck="false" placeholder="${t`How ${esc(agent.name)} should work here. For example: ask before changing the database.`}" aria-label="${t`Rules from you`}">${esc(agent.rules)}</textarea>`)
+  const about = group(t('Rules'), block(`<textarea id="sp-rules" class="agp-text agp-rules" rows="${Math.min(16, Math.max(4, Math.ceil(String(agent.rules || '').length / 70) + String(agent.rules || '').split(/\n/).length))}" spellcheck="false" placeholder="${t`How ${esc(agent.name)} should work here. For example: ask before changing the database.`}" aria-label="${t`Rules from you`}">${esc(agent.rules)}</textarea>`)
       + `<div class="agp-r agp-actrow ag-save"><button class="btn primary small" data-action="spec-save" disabled>${t`Save rules`}</button></div>`)
     + group(`${t`Lessons learned`}${lessons.length ? ` <span class="agp-count">${lessons.length}</span>` : ''}`, lessonRows);
   // Where it works (L57): stays on one computer or follows you, the map of the person's computers, and the move steps.
@@ -85,7 +92,10 @@ export function agentStage(ctx) {
     + group('', row(t`Remove ${esc(agent.name)}`, `<button class="btn small danger" data-action="spec-remove">${t`Remove`}</button>`, t`Created by ${esc(agent.createdBy || t('you'))}${origin ? t`, copied from ${esc(origin.name)}` : ''}.`));
   const work = taskSources + loopBox + scheduleBox(ctx, agent, { row, block, group, toggle });
   const body = tabId === 'notes' ? notesSection(ctx, agent) : tabId === 'work' ? work : tabId === 'setup' ? setup : about;
-  const feed = `<div class="page ag agp" data-agent="${esc(agent.id)}">${head}${questions}${tabs}<div class="agp-body" role="tabpanel">${body}</div></div>`;
+  // The side card: where and how it works, at a glance (the controls are in the Setup and Work tabs).
+  const fact = (label, value) => `<div class="agp-fact"><span>${label}</span><b>${value}</b></div>`;
+  const aside = `<aside class="agp-aside"><section class="agp-grp"><h2 class="agp-gh">${t`Where and how it works`}</h2><div class="agp-list agp-facts">${fact(t('Where it works'), agent.pinned || agent.follows === false ? t('Stays here') : t('Follows you'))}${fact(t('Computer'), esc(agent.device || t('This computer')))}${fact('AI', esc(`${providerName(agent.provider)}${agent.model ? ` · ${agent.model}` : ''}`))}${agent.projectPath ? fact(t('Main folder'), `<code class="agp-code" title="${esc(agent.projectPath)}">${esc(agent.projectPath)}</code>`) : ''}${fact(t('Check tasks by itself'), loop.on ? esc(everyLabel(loop.every)) : t('Off'))}${fact(t('Tasks come from'), esc(options.filter(([id]) => chosen.has(id)).map(([, label]) => label).join(', ') || t('Not set')))}</div></section></aside>`;
+  const feed = `<div class="page ag agp" data-agent="${esc(agent.id)}">${head}${questions}${tabs}<div class="agp-cols"><div class="agp-body" role="tabpanel">${body}</div>${aside}</div></div>`;
   return { title: agent.name, meta: [providerName(agent.provider), agent.projectSlug].filter(Boolean).join(' · '), feed, top: true };
 }
 
@@ -124,7 +134,7 @@ function scheduleBox(ctx, agent, { row, block, group, toggle }) {
 let loopWired = false;
 export function wireLoop(ctx) {
   if (loopWired) return; loopWired = true;
-  const save = async data => { const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return; try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { loop: data } }); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); } };
+  const save = async data => { const agent = (ctx.ui.snap.specialists || []).find(item => item.id === (ctx.ui.profileId || ctx.ui.view.id)); if (!agent) return; try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { loop: data } }); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); } };
   document.addEventListener('change', event => {
     if (event.target.matches?.('[data-loop-on]')) void save({ on: event.target.checked });
     else if (event.target.matches?.('[data-loop-every]')) void save({ every: Number(event.target.value) });
@@ -136,11 +146,11 @@ export function wireLoop(ctx) {
   });
   document.addEventListener('submit', async event => {
     const form = event.target.closest?.('[data-sched-form]'); if (!form) return;
-    event.preventDefault(); const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
+    event.preventDefault(); const agent = (ctx.ui.snap.specialists || []).find(item => item.id === (ctx.ui.profileId || ctx.ui.view.id)); if (!agent) return;
     const data = Object.fromEntries(new FormData(form));
     try { await ctx.api(`/specialists/${agent.id}/schedules`, { method: 'POST', data }); form.reset(); ctx.toast(t('Scheduled.')); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); }
   });
-  document.addEventListener('focusout', event => { if (event.target.matches?.('[data-loop-prompt]')) { const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (agent && event.target.value !== (agent.loop?.prompt || '')) void save({ prompt: event.target.value }); } });
+  document.addEventListener('focusout', event => { if (event.target.matches?.('[data-loop-prompt]')) { const agent = (ctx.ui.snap.specialists || []).find(item => item.id === (ctx.ui.profileId || ctx.ui.view.id)); if (agent && event.target.value !== (agent.loop?.prompt || '')) void save({ prompt: event.target.value }); } });
 }
 // An agent whose saved chat was deleted still names it; a new chat starts then, once even when the screen draws again meanwhile.
 const starting = new Set(), introduced = new Set();
@@ -183,7 +193,7 @@ export function moveRunDialog(ctx, run) {
 export async function agentAction(ctx, action, target = null) {
   const { ui, api, toast, refresh, open } = ctx, value = id => document.getElementById(id)?.value ?? '';
   // The agent is the one being viewed, or the one a button names (so the same actions work from a chat's Profile panel).
-  const agent = (ui.snap.specialists || []).find(item => item.id === (target?.dataset?.agentId || ui.view.id));
+  const agent = (ui.snap.specialists || []).find(item => item.id === (target?.dataset?.agentId || ui.profileId || ui.view.id));
   if (action === 'spec-new') {
     let projects = ui.memory?.projects || [];
     if (!projects.length) { toast(t('Looking for your projects…')); await api('/memory/scan', { method: 'POST', data: {} }).catch(() => {}); await refresh(); projects = ui.memory?.projects || []; }
@@ -239,7 +249,7 @@ Its chat comes along and it starts fresh from a summary of the chat. Code that w
 export function initAgentCard(ctx) {
   document.addEventListener('submit', async event => {
     if (!event.target.matches?.('[data-agent-rename]')) return; event.preventDefault(); event.stopPropagation();
-    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id), name = document.getElementById('sp-name').value.trim();
+    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === (ctx.ui.profileId || ctx.ui.view.id)), name = document.getElementById('sp-name').value.trim();
     if (!agent || !name || name === agent.name) return;
     try { await agentAction(ctx, 'spec-rename'); } catch (error) { ctx.toast(error.message, true); }
   }, true);
@@ -247,31 +257,31 @@ export function initAgentCard(ctx) {
   // Ticking where tasks come from saves at once.
   document.addEventListener('change', async event => {
     if (event.target.dataset?.taskSource === undefined) return;
-    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
+    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === (ctx.ui.profileId || ctx.ui.view.id)); if (!agent) return;
     const taskSources = [...document.querySelectorAll('[data-task-source]:checked')].map(box => box.dataset.taskSource);
     try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { taskSources } }); document.activeElement?.blur?.(); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   // The AI picked for this agent is saved at once; its model and account go back to the defaults of that AI.
   document.addEventListener('change', async event => {
     if (event.target.id !== 'sp-provider') return;
-    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent || agent.provider === event.target.value) return;
+    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === (ctx.ui.profileId || ctx.ui.view.id)); if (!agent || agent.provider === event.target.value) return;
     try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { provider: event.target.value } }); ctx.toast(t`${agent.name} now runs on ${event.target.value === 'codex' ? t('Codex') : event.target.value === 'gemini' ? t('Gemini') : t('Claude Code')}.`); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   // An account picked for this agent is saved at once.
   document.addEventListener('change', async event => {
     if (event.target.id !== 'sp-profile') return;
-    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
+    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === (ctx.ui.profileId || ctx.ui.view.id)); if (!agent) return;
     try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { profile: event.target.value } }); ctx.toast(event.target.value ? t('This agent now uses that Claude account.') : t('This agent uses the same account as everyone.')); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   // A model picked from the list is saved at once.
   document.addEventListener('change', async event => {
     if (event.target.id !== 'sp-model') return;
-    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id); if (!agent) return;
+    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === (ctx.ui.profileId || ctx.ui.view.id)); if (!agent) return;
     try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { rules: agent.rules, unsure: agent.unsure || [], model: event.target.value } }); ctx.toast(t('Model saved.')); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   document.addEventListener('input', event => {
     if (event.target.id !== 'sp-rules') return;
-    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === ctx.ui.view.id), save = document.querySelector('[data-action="spec-save"]');
+    const agent = (ctx.ui.snap.specialists || []).find(item => item.id === (ctx.ui.profileId || ctx.ui.view.id)), save = document.querySelector('[data-action="spec-save"]');
     if (save) save.disabled = event.target.value === (agent?.rules || '');
   });
 }

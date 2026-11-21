@@ -2001,6 +2001,11 @@ html:lang(km) :is(.btn,button,.chip,.tab,label,small){line-height:1.6}
 .na-field :is(input,textarea){width:100%;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:13.5px;line-height:1.45;resize:vertical;caret-color:var(--accent)}
 .na-field :is(input,textarea):focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
 .na-find-icon{display:grid;place-items:center;width:14px;flex:none;color:var(--muted)}.na-find-icon svg{width:14px;height:14px}
+/* Connect another AI, on the Agents online page: the public A2A address wraps instead of spacing out like a pairing code. */
+.na-code.na-addr{margin:6px 0 2px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--field,rgba(127,127,127,.06))}.na-code.na-addr span{font:500 12.5px var(--mono);letter-spacing:0;word-break:break-all;flex:1;min-width:0}
+.na-pre{margin:6px 0 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:12px/1.5 var(--mono);white-space:pre-wrap;word-break:break-all;max-height:220px;overflow:auto}
+.na-more-addr{margin-top:6px}.na-more-addr summary{cursor:pointer;list-style:revert}
+.na-connect .na-sec .na-actions{margin-top:10px}
 .na-search{align-items:center;max-width:560px}.na-search>svg{flex:none;color:var(--muted)}
 .na-as{margin-top:12px;max-width:280px}.na-as select{padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:13.5px}
 .na-found{align-items:flex-start}.na-found .btn,.na-found .na-tag{margin-top:2px}
@@ -2400,3 +2405,61 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 /* Where it works inside the Setup group: full width, quiet radii like the rest of the list. */
 .agp-tabs button{white-space:nowrap}
 @media (max-width:760px){.agp-tabs button{padding-inline:6px;font-size:12.5px}}
+
+/* ---- Agent profile, social layout: cover, big avatar over its edge, name, bio, numbers, underline tabs, a body and a side card. ---- */
+.page.agp{max-width:1040px;padding:0 0 56px}
+.agp-cover{margin-bottom:0}
+.agp-cover{position:relative;height:190px;overflow:hidden;background:linear-gradient(135deg,hsl(var(--ch) 62% 46%),hsl(var(--ch) 58% 26%));border-radius:12px}
+.agp-h0{--ch:215}
+.agp-h1{--ch:245}
+.agp-h2{--ch:275}
+.agp-h3{--ch:305}
+.agp-h4{--ch:335}
+.agp-h5{--ch:365}
+.agp-h6{--ch:395}
+.agp-h7{--ch:425}
+.agp-h8{--ch:455}
+.agp-h9{--ch:485}
+.agp-h10{--ch:515}
+.agp-h11{--ch:545}
+.agp-cover svg{position:absolute;inset:0;width:100%;height:100%}.agp-cover svg circle{fill:#fff;opacity:.1}.agp-cover svg .dk{fill:#000;opacity:.14}
+.agp-cover img{width:100%;height:100%;object-fit:cover;display:block}
+.agp-cover-acts{position:absolute;right:12px;bottom:10px;display:flex;gap:6px}
+.agp-cbtn{display:inline-flex;align-items:center;height:26px;padding:0 12px;border:1px solid rgb(255 255 255 / .3);border-radius:999px;background:rgb(0 0 0 / .45);color:#fff;font:inherit;font-size:12px;cursor:pointer}
+.agp-cbtn:hover{background:rgb(0 0 0 / .6)}.agp-cbtn:focus-within,.agp-cbtn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.agp-head{grid-template-columns:minmax(0,1fr) auto;gap:6px 14px;align-items:start;padding:0 clamp(18px,3vw,36px) 14px}
+.agp-head>.agp-av,.agp-head>.av{grid-row:1/3;grid-column:1;margin-top:-44px;width:92px;height:92px}
+.agp-head{grid-template-columns:92px minmax(0,1fr) auto}
+.agp-head .av.xl{width:92px;height:92px;font-size:30px;border:4px solid var(--bg);box-sizing:content-box;margin:-4px}
+.agp-av{width:92px;height:92px;margin-top:-44px;position:relative}
+.agp-who{padding-top:10px;grid-row:1;grid-column:2}
+.agp-name input{font-size:22px;font-weight:700}
+.agp-actions{grid-row:1;grid-column:3;padding-top:12px}
+.agp-head .agp-actions .btn.small{height:34px;padding:0 18px;font-size:13.5px;border-radius:999px}
+.agp-head .agp-actions .btn.small.primary{padding:0 26px}
+.agp-bio{grid-column:1/-1;margin:6px 0 0;font-size:14px;line-height:1.5;color:var(--ink);max-width:68ch}
+.agp-stats{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 20px;margin:2px 0 0;color:var(--muted);font-size:13px}.agp-stats b{color:var(--ink);font-weight:600}
+.agp-tabs{display:flex;align-self:stretch;gap:4px;margin:6px clamp(18px,3vw,36px) 20px;padding:0;border-radius:0;background:none;border-bottom:1px solid var(--g-line);overflow-x:auto;scrollbar-width:none}
+.agp-tabs button{height:42px;padding:0 14px;border-radius:0;font-size:13.5px}
+.agp-tabs button.on{background:none;box-shadow:inset 0 -2px 0 var(--accent)}
+.agp-ask{margin:0 clamp(18px,3vw,36px) 20px}
+.agp-cols{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start;padding:0 clamp(18px,3vw,36px)}
+.agp-aside{position:sticky;top:16px}.agp-aside .agp-grp{margin:0}
+.agp-fact{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:9px 14px;border-top:1px solid var(--g-line);font-size:13px}.agp-fact:first-child{border-top:0}
+.agp-fact span{color:var(--muted);flex:none}.agp-fact b{font-weight:500;color:var(--ink);text-align:right;min-width:0;overflow-wrap:anywhere}
+.agp-fact .agp-code{max-width:170px}
+@media (max-width:900px){.agp-cols{grid-template-columns:minmax(0,1fr)}.agp-aside{position:static;order:-1}}
+@media (max-width:760px){
+  .page.agp{padding:0 0 40px}.agp-cover{height:120px;border-radius:10px}
+  .agp-head{grid-template-columns:72px minmax(0,1fr);padding:0 14px 12px}
+  .agp-head .av.xl{width:72px;height:72px;font-size:24px}.agp-av{width:72px;height:72px;margin-top:-36px}.agp-head>.agp-av,.agp-head>.av{grid-row:1;margin-top:-36px;width:72px;height:72px}
+  .agp-actions{grid-row:2;grid-column:1/-1;padding-top:6px}.agp-actions .btn{flex:1}
+  .agp-name input{font-size:19px}
+  .agp-tabs{margin:4px 14px 16px}.agp-ask{margin:0 14px 16px}.agp-cols{padding:0 14px}
+}
+.feed-inner:has(>.page.agp){max-width:none;padding:0 20px}.feed-inner>.page.agp{max-width:1120px;margin:0 auto;width:100%}
+.agp-modal{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:3vh 3vw;background:rgb(0 0 0 / .55);backdrop-filter:blur(3px)}
+.agp-sheet{position:relative;width:min(1040px,100%);max-height:100%;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 24px 70px rgb(0 0 0 / .45);overflow:hidden}
+.agp-scroll{overflow-y:auto;overscroll-behavior:contain;padding:12px 12px 0}
+.agp-sheet .page.agp{max-width:none;padding:0 0 28px}
+.agp-close{position:absolute;top:20px;right:20px;z-index:2;display:grid;place-items:center;width:30px;height:30px;border:1px solid rgb(255 255 255 / .3);border-radius:50%;background:rgb(0 0 0 / .45);color:#fff;cursor:pointer}.agp-close:hover{background:rgb(0 0 0 / .65)}.agp-close:focus-visible{outline:2px solid #fff;outline-offset:2px}
