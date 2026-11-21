@@ -29,3 +29,21 @@ test('Settings saves a waiting edit at once when it is closed or the section cha
     assert.equal(await saver(), true, 'closing saves the waiting edit');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// Only Escape closes Settings: typing in a field must leave it open.
+test('Settings stays open while typing and closes on Escape', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false });
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    await page.goto(`http://127.0.0.1:${app.server.address().port}/`); await page.waitForTimeout(2500);
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.locator('.settings-pop [name="name"]').click();
+    await page.keyboard.type('abc'); await page.waitForTimeout(300);
+    assert.equal(await page.locator('.settings-pop').count(), 1, 'typing keeps Settings open');
+    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+    assert.equal(await page.locator('.settings-pop').count(), 0, 'Escape closes Settings');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});

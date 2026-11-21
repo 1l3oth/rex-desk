@@ -563,7 +563,7 @@ export function openSettings(ctx, section = 'general') {
   };
   back.addEventListener('input', event => { if (event.target.matches?.('input:not([type=checkbox],[type=radio],[type=range]),textarea')) autoSave(event); });
   back.addEventListener('change', autoSave);
-  back.addEventListener('keydown', event => { if (event.key === 'Escape' && !document.body.classList.contains('driver-active')) flushSave(); back.remove(); });
+  back.addEventListener('keydown', event => { if (event.key === 'Escape' && !document.body.classList.contains('driver-active')) { flushSave(); back.remove(); } });
   back.addEventListener('input', event => {
     // Tools and skills: the search box narrows the skill list as you type, with no redraw.
     if (event.target.matches?.('[name="tb-filter"]')) { const words = event.target.value.trim().toLowerCase(); for (const row of event.target.nextElementSibling?.querySelectorAll('.tb-row') || []) row.hidden = Boolean(words) && !row.textContent.toLowerCase().includes(words); return; }
