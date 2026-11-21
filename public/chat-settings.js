@@ -385,6 +385,7 @@ export function openSettings(ctx, section = 'general') {
   };
   const values = () => Object.fromEntries([...back.querySelectorAll('[name]')].filter(el => el.type !== 'checkbox' || el.name === 'schedule.days').map(el => [el.name, el.value]));
   const checked = name => Boolean(back.querySelector(`[name="${name}"]`)?.checked);
+  let flushSave = () => {};
   async function save(quiet = false) {
     const base = JSON.parse(JSON.stringify(config())), v = values(), next = { ...base };
     if (has('general')) { next.name = v.name; window.rexTheme?.set(v.theme); await api('/autostart', { method: 'POST', data: { enabled: checked('autostart') } }).catch(() => {}); }
@@ -407,6 +408,7 @@ export function openSettings(ctx, section = 'general') {
   // Open one section and resolve once what it shows is loaded (the tours wait for it before circling its controls).
   async function goSection(requested) {
     const id = ALIAS[requested] || requested; if (!PARTS[id]) return;
+    flushSave();
     state.section = id; state.list = false;
     if (has('sources')) state.trackers = trackerDraft(ui);
     if (has('projects')) void loadGithub();
@@ -424,8 +426,8 @@ export function openSettings(ctx, section = 'general') {
   back.addEventListener('click', async event => {
     const target = event.target;
     try {
-      if (target === back || target.closest('[data-st-close]')) { back.remove(); return; }
-      if (target.closest('[data-st-back]')) { state.list = true; draw(); return; }
+      if (target === back || target.closest('[data-st-close]')) { flushSave(); back.remove(); return; }
+      if (target.closest('[data-st-back]')) { flushSave(); state.list = true; draw(); return; }
       const section = target.closest('[data-st-section]'); if (section) { await goSection(section.dataset.stSection); return; }
       if (target.closest('[data-st-about-refresh]')) { state.extra.about = null; draw(); await loadAbout(true); return; }
       const copyPath = target.closest('[data-st-copy-path]'); if (copyPath) { await navigator.clipboard.writeText(copyPath.dataset.stCopyPath); toast(t('Copied.')); return; }
@@ -438,7 +440,7 @@ export function openSettings(ctx, section = 'general') {
       // A feature tour circles the real controls of a section; "Take the tour" goes through every section.
       const show = target.closest('[data-st-show]'); if (show) { await runSettingsTour(goSection, { section: show.dataset.stShow }); return; }
       if (target.closest('[data-st-show-all]')) { await runSettingsTour(goSection, { all: true }); return; }
-      if (target.closest('[data-st-tour]')) { back.remove(); startTour(ctx); return; }
+      if (target.closest('[data-st-tour]')) { flushSave(); back.remove(); startTour(ctx); return; }
       if (await githubClick(target)) return;
       if (target.closest('[data-st-rank]')) {
         state.extra.ranking = true; draw();
@@ -455,8 +457,8 @@ export function openSettings(ctx, section = 'general') {
         try { const update = await api('/update/check', { method: 'POST' }); ui.snap.update = update; toast(update.error || (update.available ? t`Rex Desk ${update.available.version} is ${update.ready ? 'ready to install' : 'downloading'}.` : t('Rex Desk is up to date.')), Boolean(update.error)); }
         finally { state.extra.checking = false; draw(); } return;
       }
-      const open = target.closest('[data-st-open]'); if (open) { back.remove(); document.body.insertAdjacentHTML('beforeend', `<button hidden data-action="${open.dataset.stOpen === 'accounts' ? 'accounts' : open.dataset.stOpen === 'sources' ? 'task-connect' : 'st-voice'}" id="st-opener"></button>`); document.getElementById('st-opener').click(); document.getElementById('st-opener')?.remove(); return; }
-      const go = target.closest('[data-st-go]'); if (go) { back.remove(); ctx.open(go.dataset.stGo); return; }
+      const open = target.closest('[data-st-open]'); if (open) { flushSave(); back.remove(); document.body.insertAdjacentHTML('beforeend', `<button hidden data-action="${open.dataset.stOpen === 'accounts' ? 'accounts' : open.dataset.stOpen === 'sources' ? 'task-connect' : 'st-voice'}" id="st-opener"></button>`); document.getElementById('st-opener').click(); document.getElementById('st-opener')?.remove(); return; }
+      const go = target.closest('[data-st-go]'); if (go) { flushSave(); back.remove(); ctx.open(go.dataset.stGo); return; }
       if (target.closest('[data-st-signout]')) { if (!await askConfirm(t('Sign out of Rex Desk on this computer? Running agents of this account stop.'))) return; await api('/auth/logout', { method: 'POST', data: {} }); location.href = '/signin'; return; }
       const allowOff = target.closest('[data-st-allow-off]'); if (allowOff) { await api('/computer/allow', { method: 'POST', data: { actions: [allowOff.dataset.stAllowOff], on: false } }); await refresh(); draw(); return; }
       if (target.closest('[data-st-account]')) {
@@ -551,17 +553,19 @@ export function openSettings(ctx, section = 'general') {
     } catch (error) { toast(error.message, true); }
   });
   // Every field saves by itself: a change saves at once, typing saves a moment after the last key. There is no Save button.
-  let autoTimer = 0;
+  let autoTimer = 0, pendingSave = false;
+  // Save a waiting edit now, before the page it belongs to is redrawn or closed (it reads the fields synchronously).
+  flushSave = () => { if (!pendingSave) return; clearTimeout(autoTimer); pendingSave = false; save(true).catch(error => toast(error.message, true)); };
   const ownSave = el => el.matches?.('[data-st-part],[data-st-rule],[data-st-tts],[data-st-voice],[data-st-fish-key],[name="tb-filter"]') || el.closest?.('[data-st-fish]');
   const autoSave = event => {
     const el = event.target;
     if (!el.matches?.('input,select,textarea') || !el.closest('[data-st-panel]') || ownSave(el) || !PARTS[state.section].some(part => SAVE_PARTS.includes(part))) return;
-    clearTimeout(autoTimer);
-    autoTimer = setTimeout(() => { if (document.body.contains(back)) save(true).catch(error => toast(error.message, true)); }, event.type === 'input' ? 700 : 150);
+    clearTimeout(autoTimer); pendingSave = true;
+    autoTimer = setTimeout(() => { pendingSave = false; if (document.body.contains(back)) save(true).catch(error => toast(error.message, true)); }, event.type === 'input' ? 700 : 150);
   };
   back.addEventListener('input', event => { if (event.target.matches?.('input:not([type=checkbox],[type=radio],[type=range]),textarea')) autoSave(event); });
   back.addEventListener('change', autoSave);
-  back.addEventListener('keydown', event => { if (event.key === 'Escape' && !document.body.classList.contains('driver-active')) back.remove(); });
+  back.addEventListener('keydown', event => { if (event.key === 'Escape' && !document.body.classList.contains('driver-active')) flushSave(); back.remove(); });
   back.addEventListener('input', event => {
     // Tools and skills: the search box narrows the skill list as you type, with no redraw.
     if (event.target.matches?.('[name="tb-filter"]')) { const words = event.target.value.trim().toLowerCase(); for (const row of event.target.nextElementSibling?.querySelectorAll('.tb-row') || []) row.hidden = Boolean(words) && !row.textContent.toLowerCase().includes(words); return; }
