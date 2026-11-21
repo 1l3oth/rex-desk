@@ -80,6 +80,35 @@ test('a chat that resumes in a worktree during the Git checks keeps it', async (
   assert.ok(existsSync(tree));
 });
 
+test('removal holds a lock through its last live check, and an agent starting in the worktree waits for it', async () => {
+  const { lockFile, lockedFolder, takeLock, waitUnlocked } = await import('../src/worktree-cleanup.js');
+  const root = temporary('tidy-lock'), project = path.join(root, 'app');
+  git(root, 'init', '-q', '-b', 'master', project);
+  git(project, 'config', 'user.email', 't@t'); git(project, 'config', 'user.name', 't');
+  writeFileSync(path.join(project, 'a.txt'), 'a'); git(project, 'add', '.'); git(project, 'commit', '-qm', 'first');
+  const trees = path.join(workFolder(project), 'worktrees'), made = [];
+  for (const name of ['401', '402']) {
+    const tree = (await createWorktree({ path: project, baseBranch: 'master' }, trees, `fix/${name}`, { name })).directory; made.push(tree);
+    writeFileSync(path.join(tree, `${name}.txt`), 'b'); git(tree, 'add', '.'); git(tree, 'commit', '-qm', 'work');
+    git(project, 'merge', '-q', '--no-edit', `fix/${name}`);
+  }
+  git(project, 'commit', '-q', '--allow-empty', '-m', 'later');
+  const other = takeLock(made[1]);
+  assert.equal(takeLock(made[1]), null, 'one cleanup at a time');
+  const lockedAtLastCheck = [];
+  const result = await removeMerged(project, await worktreeList(project), { base: 'master', keep: item => { lockedAtLastCheck.push(existsSync(lockFile(item.path))); return false; } });
+  assert.deepEqual(result.removed.map(item => path.basename(item.path)), ['401']);
+  assert.match(result.kept[0].reason, /another cleanup/);
+  assert.deepEqual(lockedAtLastCheck.slice(0, 2), [false, true], 'the last live check runs under the lock');
+  assert.ok(!existsSync(lockFile(made[0])), 'the lock is gone after removal');
+  assert.equal(lockedFolder(path.join(made[1], 'src')), made[1], 'a folder inside a locked worktree is locked');
+  let waited = false;
+  const start = waitUnlocked([path.join(made[1], 'src')], { everyMs: 20 }).then(() => { waited = true; });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(waited, false, 'an agent does not start while the worktree is being removed');
+  other(); await start; assert.equal(waited, true);
+});
+
 test('the tidy script reads the project from any position and --apply keeps worktrees live runs use', async () => {
   const { parseArgs, liveFolders } = await import('../scripts/tidy-worktrees.mjs');
   const project = path.join(os.tmpdir(), 'app');

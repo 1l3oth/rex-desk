@@ -40,7 +40,7 @@ import { Pins } from './pins.js';
 import { Storage } from './storage.js';
 import { lowDiskMessage, friendlyDiskError, watchDisk } from './disk.js';
 import { workFolder, runtimeFolder } from './work-folder.js';
-import { worktreeList, removeMerged, inside } from './worktree-cleanup.js';
+import { worktreeList, removeMerged, inside, lockedFolder, waitUnlocked } from './worktree-cleanup.js';
 import { voiceBriefing, VOICE_RULE, VOICE_REMINDER, VOICE_GREETING } from './voice-briefing.js';
 import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
 import { LocalRunner, lightSystem, withoutRepeats } from './local-runner.js';
@@ -688,6 +688,9 @@ export class Desk {
       const ownAgent = owner && owner !== 'main' ? this.specialists.get(owner) : null, projectHere = ownAgent?.projectSlug ? this.projectRules.folderHere(ownAgent.projectSlug) : '';
       // The model on the agent's card wins over the one its chat was made with, also for a card changed on another computer (L68).
       if (ownAgent && !run.modelFallback) { this.specialists.syncRuns(ownAgent); run = this.run(runId); }
+      // The run is already live here: a worktree being removed right now is waited out, then it is gone and the line below
+      // picks another folder (worktree-cleanup.js, removeMerged).
+      if ([run.cwd, run.worktree].some(folder => folder && lockedFolder(folder))) { await waitUnlocked([run.cwd, run.worktree]); run = this.run(runId); }
       const cwd = [run.cwd, run.worktree].find(folder => folder && existsSync(folder)) || (run.cwd || run.worktree ? projectHere || ownHome() : path.join(this.store.directory, 'coordinator'));
       if (run.cwd && cwd !== run.cwd && !existsSync(run.cwd)) this.patchRun(run.id, { cwd, ...(projectHere && cwd === projectHere ? { projectPath: projectHere } : {}) });
       // A run nobody picked a mode for starts in the person's default mode from Settings.

@@ -1,7 +1,7 @@
 // Worktrees are removed once their branch is merged and nothing in them is unsaved. Used by the desk on a timer (only the
 // work folder's own worktrees) and by scripts/tidy-worktrees.mjs (the loose sibling folders made before the work folder).
 import { execFile } from 'node:child_process';
-import { lstatSync, readdirSync, rmdirSync, unlinkSync, existsSync } from 'node:fs';
+import { lstatSync, readdirSync, rmdirSync, unlinkSync, existsSync, statSync, rmSync, openSync, closeSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -48,18 +48,45 @@ export async function removeWorktree(repository, directory) {
   await git(repository, ['worktree', 'remove', directory]);
 }
 // Removes the merged, clean worktrees among `candidates` (worktreeList items); returns what went and what stayed, with why.
-// `keep` is asked before the Git checks and again right before each removal, so it must read the live state each time.
+// `keep` is asked before the Git checks and again under the lock right before removal, so it must read the live state each time.
+// The lock closes the race with an agent starting: the desk marks a run live before it waits for the lock (see waitUnlocked),
+// and cleanup takes the lock before its last live check, so one of the two always sees the other.
 export async function removeMerged(repository, candidates, { base = 'origin/master', keep = () => false, dryRun = false } = {}) {
-  const removed = [], kept = [];
+  const removed = [], kept = [], busy = 'an agent is still working in it';
   for (const item of candidates) {
-    if (keep(item)) { kept.push({ ...item, reason: 'an agent is still working in it' }); continue; }
+    if (await keep(item)) { kept.push({ ...item, reason: busy }); continue; }
     const check = await canRemove(item.path, base);
     if (!check.ok) { kept.push({ ...item, reason: check.reason }); continue; }
-    // Asked again after the Git checks: a chat may have resumed in it meanwhile.
-    if (keep(item)) { kept.push({ ...item, reason: 'an agent is still working in it' }); continue; }
-    if (dryRun) { removed.push(item); continue; }
-    try { await removeWorktree(repository, item.path); removed.push(item); } catch (error) { kept.push({ ...item, reason: String(error.message).split('\n')[0] }); }
+    if (dryRun) { if (await keep(item)) kept.push({ ...item, reason: busy }); else removed.push(item); continue; }
+    const release = takeLock(item.path);
+    if (!release) { kept.push({ ...item, reason: 'another cleanup is removing it' }); continue; }
+    try {
+      if (await keep(item)) { kept.push({ ...item, reason: busy }); continue; }
+      await removeWorktree(repository, item.path); removed.push(item);
+    } catch (error) { kept.push({ ...item, reason: String(error.message).split('\n')[0] }); } finally { release(); }
   }
   return { removed, kept };
+}
+// While a worktree is being removed a marker sits beside it (<folder>.removing, outside the worktree so Git never sees it).
+// A marker older than 15 minutes is left from a crash and is cleared.
+export const lockFile = directory => `${path.resolve(directory)}.removing`;
+const STALE_LOCK_MS = 15 * 60000;
+export function takeLock(directory) {
+  const file = lockFile(directory);
+  try { if (Date.now() - statSync(file).mtimeMs > STALE_LOCK_MS) rmSync(file, { force: true }); } catch { /* no marker */ }
+  try { closeSync(openSync(file, 'wx')); return () => rmSync(file, { force: true }); } catch { return null; }
+}
+// The locked worktree that holds `folder` (the folder itself or one above it), or ''.
+export function lockedFolder(folder) {
+  for (let current = path.resolve(folder); ;) {
+    if (existsSync(lockFile(current))) return current;
+    const parent = path.dirname(current); if (parent === current) return ''; current = parent;
+  }
+}
+// An agent about to start in these folders waits while one is being removed; afterwards the folder is either still there
+// or gone, and the caller falls back to another folder.
+export async function waitUnlocked(folders, { timeoutMs = STALE_LOCK_MS, everyMs = 250 } = {}) {
+  const until = Date.now() + timeoutMs;
+  while (folders.some(folder => folder && lockedFolder(folder)) && Date.now() < until) await new Promise(resolve => setTimeout(resolve, everyMs));
 }
 export const inside = (folder, item) => { const relative = path.relative(path.resolve(folder), path.resolve(item)); return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative); };
