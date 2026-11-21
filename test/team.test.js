@@ -32,8 +32,12 @@ test('a manager gives a task to another agent, stays free, and is handed the res
     assert.ok(!desk.live.has(rex.id), 'the manager is free at once');
     await waitFor(() => desk.team.tasks()[0].state === 'done', 'the task to finish');
     assert.match(turns.find(turn => turn.run.specialistId === dev.id).prompt, /Task \w+ from Rex Agent[\s\S]*Build the login page/);
-    await waitFor(() => turns.some(turn => turn.run.id === rex.id && /that you gave Dev \(Login page\) ended: done[\s\S]*Tests pass/.test(turn.prompt)), 'the result handed to the manager');
-    assert.ok(store.events(rex.id, { visible: true }).some(event => event.kind === 'message' && /Dev · Login page · done/.test(event.text)), 'the result is in the manager chat for the person');
+    await waitFor(() => turns.some(turn => turn.run.teamOf === 'main' && /that you gave Dev \(Login page\) ended: done[\s\S]*Tests pass/.test(turn.prompt)), 'the result handed to the manager');
+    assert.ok(!turns.some(turn => turn.run.id === rex.id && /ended: done/.test(turn.prompt)), 'the person\'s chat with the manager is not used for the report');
+    assert.ok(!store.events(rex.id, { visible: true }).some(event => /Login page|Tests pass/.test(event.text || '')), 'nothing about the report shows in the person\'s chat');
+    const session = store.list('run').find(run => run.teamOf === 'main');
+    assert.equal(session.roomAgent, 'main'); assert.ok(!session.main, 'the team session is not the personal chat');
+    assert.equal(desk.snapshot().teamTasks[0].answer, 'Built the login page. Tests pass.', 'the Team tab has the report');
     const seen = desk.team.overview(rex.id);
     assert.equal(seen.agents[0].name, 'Dev'); assert.equal(seen.tasks[0].state, 'done'); assert.match(seen.tasks[0].result, /Tests pass/);
     await assert.rejects(desk.team.delegate(rex.id, { agent: 'Nobody', task: 'x y z' }), /No agent "Nobody"/);
@@ -58,7 +62,7 @@ test('a worker that needs an answer asks its manager, carries on when answered, 
     assert.equal(second.state, 'queued', 'one task at a time for each agent');
     await waitFor(() => desk.team.tasks()[0].state === 'needs-manager', 'the question');
     assert.match(desk.team.tasks()[0].question, /before or after tax/);
-    await waitFor(() => turns.some(turn => turn.run.id === rex.id && /cannot go on with task[\s\S]*before or after tax/.test(turn.prompt)), 'the question handed to the manager');
+    await waitFor(() => turns.some(turn => turn.run.teamOf === 'main' && /cannot go on with task[\s\S]*before or after tax/.test(turn.prompt)), 'the question handed to the manager');
     assert.equal(desk.team.tasks()[1].state, 'queued', 'the next task waits while the first is open');
     await waitFor(() => idle(store, desk), 'the manager turn');
     await desk.team.answer(rex.id, { id: first.id, text: 'Before tax.' });
@@ -93,7 +97,28 @@ test('a task for an agent on the other computer travels there, runs, and its res
     await carry(work, home);
     await waitFor(() => home.desk.team.tasks()[0].state === 'done', 'the result back home');
     assert.match(home.desk.team.tasks()[0].answer, /3 tests pass/);
-    await waitFor(() => home.turns.some(turn => turn.run.id === rex.id && /that you gave QA \(Check login\) ended: done[\s\S]*3 tests pass/.test(turn.prompt)), 'the result handed to the manager');
+    await waitFor(() => home.turns.some(turn => turn.run.teamOf === 'main' && /that you gave QA \(Check login\) ended: done[\s\S]*3 tests pass/.test(turn.prompt)), 'the result handed to the manager');
     await waitFor(() => idle(home.store, home.desk) && idle(work.store, work.desk), 'everything to settle');
   } finally { await home.desk.shutdown?.(); home.store.close(); await work.desk.shutdown?.(); work.store.close(); }
+});
+
+test('the team session reuses one session per manager, and its desk_message goes to the person\'s chat with that manager', async () => {
+  const { store, desk, turns } = setup(prompt => /Task \w+ from Lead/.test(prompt) ? 'Done.' : 'Noted.');
+  try {
+    const lead = desk.specialists.create({ name: 'Lead', purpose: 'Manages the team' });
+    desk.specialists.create({ name: 'Dev', purpose: 'Builds features' });
+    const chat = await desk.specialistTurn(lead.id, { prompt: 'hi' });
+    await waitFor(() => idle(store, desk), 'the first turn');
+    await desk.team.delegate(chat.id, { agent: 'Dev', task: 'Build one thing.', title: 'One' });
+    await waitFor(() => turns.some(turn => turn.run.teamOf === lead.id && /One\) ended: done/.test(turn.prompt)), 'the first report');
+    await waitFor(() => idle(store, desk), 'settle');
+    await desk.team.delegate(chat.id, { agent: 'Dev', task: 'Build another thing.', title: 'Two' });
+    await waitFor(() => turns.some(turn => turn.run.teamOf === lead.id && /Two\) ended: done/.test(turn.prompt)), 'the second report');
+    await waitFor(() => idle(store, desk), 'settle again');
+    const sessions = store.list('run').filter(run => run.teamOf === lead.id);
+    assert.equal(sessions.length, 1, 'one team session for the manager');
+    assert.equal(sessions[0].specialistId, lead.id);
+    desk.message(sessions[0].id, 'Rex, pick a colour for the button.');
+    assert.ok(store.events(chat.id, { visible: true }).some(event => event.kind === 'message' && /pick a colour/.test(event.text)), 'it lands in the personal chat');
+  } finally { await desk.shutdown?.(); store.close(); }
 });

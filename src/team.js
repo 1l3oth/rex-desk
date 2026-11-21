@@ -6,7 +6,9 @@
 //   needs-manager   the worker asked a question; the manager answers it (or asks the person)
 //   done / failed / canceled
 //
-// The manager never waits: the result is put in its chat and handed to it when the worker's turn ends.
+// The manager never waits: the result is handed to its team session when the worker's turn ends. That is a second session of
+// the manager, apart from its personal chat, so reports never fill the person's chat and never interrupt it. The person sees
+// each report and question under its task in the Team tab.
 import crypto from 'node:crypto';
 
 const now = () => new Date().toISOString();
@@ -126,17 +128,18 @@ export class Team {
     if (state !== 'needs-manager') void this.startNext(task.workerId).catch(() => {});
   }
 
-  // The result goes in the manager's chat for the person to read, and is handed to the manager: now if it is idle, else with its next step.
+  // The result is handed to the manager's team session: now if it is idle, else with its next step. Nothing goes in the person's chat.
   tell(task) {
-    const desk = this.desk, manager = this.store.get('run', task.managerRunId) || (task.managerId !== 'main' && this.store.get('run', this.store.get('specialist', task.managerId)?.runId)); if (!manager) return;
+    const desk = this.desk;
+    if (!task.managerId || (task.managerId !== 'main' && !this.store.get('specialist', task.managerId))) return;
     const head = task.state === 'done' ? 'done' : task.state === 'needs-manager' ? 'needs an answer' : task.state === 'canceled' ? 'canceled' : 'failed';
-    this.store.event(manager.id, 'message', { text: `**${task.workerName} · ${task.title} · ${head}**\n\n${clip(task.question || task.answer, 6000)}`, team: short(task.id) }, true);
     const prompt = task.state === 'needs-manager'
       ? `${task.workerName} cannot go on with task ${short(task.id)} (${task.title}) and asks:\n${task.question}\n\nAnswer with desk_team_answer if you know. If only the person can decide, ask them, then pass the answer on.`
       : `Task ${short(task.id)} that you gave ${task.workerName} (${task.title}) ended: ${head}.\n${clip(task.answer, 6000)}\n\nCarry on: use the result, give the next task if there is one, and tell the person the outcome in a line or two when it matters to them.`;
-    const current = this.store.get('run', manager.id);
-    if (desk.live.has(manager.id) || desk.closed) { this.store.put('run', manager.id, { ...current, queued: [...(current.queued || []), prompt] }); return; }
-    void desk.resume(manager.id, { prompt, silent: true }).catch(error => this.store.event(manager.id, 'error', { message: error.message }, true));
+    const saved = this.store.get('team-session', task.managerId)?.runId, session = saved ? this.store.get('run', saved) : null;
+    if (!session) { if (!desk.closed) desk.teamSession(task.managerId, prompt); return; }
+    if (desk.live.has(session.id) || desk.closed) { this.store.put('run', session.id, { ...session, queued: [...(session.queued || []), prompt] }); return; }
+    void desk.resume(session.id, { prompt, silent: true }).catch(error => this.store.event(session.id, 'error', { message: error.message }, true));
   }
 
   async answer(runId, { id, text }) {
