@@ -25,9 +25,14 @@ on:
         required: false
         type: string
       notes:
-        description: "What changed, shown to people in Settings → Updates"
-        required: false
+        description: "What changed, shown to people in Settings → Updates. Required for beta and stable"
+        required: true
         type: string
+      republish:
+        description: "Publish again over the same version (to fix its notes); installed apps do not update twice"
+        required: false
+        type: boolean
+        default: false
   push:
     tags: ['desktop-v*']
 
@@ -146,7 +151,10 @@ jobs:
           RELEASE_S3_ENDPOINT: ${{ vars.RELEASE_S3_ENDPOINT }}
           RELEASE_S3_REGION: ${{ vars.RELEASE_S3_REGION }}
           RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
-        run: node scripts/release-desktop.mjs --files dist --channel "$CHANNEL" --notes "$NOTES" --upload
+          REPUBLISH: ${{ inputs.republish }}
+        run: |
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then echo "::error::Release notes are empty. Write what changed in the notes input."; exit 1; fi
+          node scripts/release-desktop.mjs --files dist --channel "$CHANNEL" --notes "$NOTES" --upload $([ "$REPUBLISH" = "true" ] && echo --force)
 
   release:
     needs: build
