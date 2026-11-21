@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store, shared } from '../src/store.js';
@@ -101,4 +101,17 @@ test('after a turn with real work no hidden turn runs: the next real message car
   assert.equal(store.get('run', 'chat').memoryDue, true, 'the reminder waits for the next real message');
   store.put('run', 'chat', { ...store.get('run', 'chat'), memoryDue: undefined });
   assert.equal(await desk.nudgeMemory('chat'), false, 'at most every 20 minutes');
+});
+
+test('handoffs leave out the start greeting, so the new session answers instead of introducing itself again', async () => {
+  const { store, desk, agent } = setup();
+  store.put('run', 'chat', { id: 'chat', role: 'specialist', specialistId: agent.id, state: 'finished', createdAt: new Date().toISOString() });
+  store.event('chat', 'human-message', { text: 'Introduce yourself in one or two lines: who you are and which project you look after.' }, true);
+  store.event('chat', 'message', { text: 'I am Desky, I look after the shop.' }, true);
+  store.event('chat', 'human-message', { text: 'Why is checkout slow?' }, true);
+  const digest = desk.conversationDigest('chat', 'claude');
+  assert.doesNotMatch(digest, /Introduce yourself/); assert.match(digest, /Why is checkout slow\?/); assert.match(digest, /answer only the latest message/);
+  desk.resume = async () => {};
+  const handoff = readFileSync((await desk.freshStart('chat')).handoff, 'utf8');
+  assert.doesNotMatch(handoff, /Introduce yourself in one or two lines/); assert.match(handoff, /without introducing yourself again/);
 });
