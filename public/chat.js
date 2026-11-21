@@ -712,7 +712,7 @@ function drawProfile() {
   const active = document.activeElement, busy = sheet.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName);
   // Unsaved rules are kept as a draft and put back when the Profile tab is drawn again, so a tab switch never loses them.
   const rules = sheet.querySelector('#sp-rules'), dirty = Boolean(sheet.querySelector('.ag-save button:not([disabled])'));
-  if (dirty && rules) ui.rulesDraft = rules.value;
+  if (rules) ui.rulesDraft = dirty ? rules.value : undefined;
   if ((busy || dirty) && !ui.profileForce) return;
   ui.profileForce = false;
   const body = sheet.querySelector('.agp-scroll'), top = body.scrollTop, html = agentStage(ctx, ui.profileId).feed;
