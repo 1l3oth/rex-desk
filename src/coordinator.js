@@ -842,9 +842,10 @@ ${message}` : message);
       { const ended = this.store.get('run', runId); if (!this.closed && ended && !ended.roomAgent && ['specialist', 'coordinator'].includes(ended.role)) this.team.turnEnded(runId, ended.state === 'failed' ? ended.error || 'it failed' : ended.state === 'stopped' ? 'it was stopped' : ''); }
       // A chat whose context is nearly full hands over to a fresh session by itself (and waits with queued messages until then).
       if (!this.closed && await this.autoHandoff(runId).catch(error => { this.store.event(runId, 'error', { message: `Automatic handoff failed: ${error.message}` }, true); return false; })) return;
-      // Messages that came in while the agent was busy go in now, as the next turn.
+      // Messages that came in while the agent was busy go in now, as the next turn. A team session also takes its waiting reports
+      // after a failed or stopped turn, or they would sit there until the next report came.
       const waiting = this.store.get('run', runId);
-      if (waiting?.queued?.length && ['needs_evidence', 'finished'].includes(waiting.state) && !this.closed) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
+      if (waiting?.queued?.length && (['needs_evidence', 'finished'].includes(waiting.state) || (waiting.teamOf && ['failed', 'stopped'].includes(waiting.state))) && !this.closed) { this.store.put('run', runId, { ...waiting, queued: [] }); void this.resume(runId, { prompt: waiting.queued.join('\n'), silent: true }).catch(error => this.store.event(runId, 'error', { message: error.message }, true)); }
     }
   }
   // The database's list of checkouts on this computer. Scanned at server start and on demand; a scan is cheap (local git only).

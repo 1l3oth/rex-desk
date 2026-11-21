@@ -122,3 +122,17 @@ test('the team session reuses one session per manager, and its desk_message goes
     assert.ok(store.events(chat.id, { visible: true }).some(event => event.kind === 'message' && /pick a colour/.test(event.text)), 'it lands in the personal chat');
   } finally { await desk.shutdown?.(); store.close(); }
 });
+
+test('a team session takes its waiting reports after a failed turn too (L70)', async () => {
+  const { store, desk, turns } = setup(prompt => { if (/first report/.test(prompt)) throw new Error('the AI broke'); return 'Noted.'; });
+  try {
+    const lead = desk.specialists.create({ name: 'Lead', purpose: 'Manages the team' });
+    const session = desk.teamSession(lead.id, 'first report');
+    const runId = session?.id || store.list('run').find(run => run.teamOf === lead.id).id;
+    const run = store.get('run', runId);
+    store.put('run', runId, { ...run, queued: [...(run.queued || []), 'second report'] });
+    await waitFor(() => turns.some(turn => turn.run.teamOf === lead.id && /second report/.test(turn.prompt)), 'the waiting report after the failed turn');
+    await waitFor(() => idle(store, desk), 'settle');
+    assert.deepEqual(store.get('run', runId).queued || [], []);
+  } finally { await desk.shutdown?.(); store.close(); }
+});
