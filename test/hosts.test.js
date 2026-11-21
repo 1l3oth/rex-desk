@@ -94,7 +94,7 @@ test('an agent in its own process keeps working through a Rex Desk restart, and 
   assert.deepEqual(said(store, run.id).filter(text => text.startsWith('step')), ['step one', 'step two']);
   assert.equal(store.get('run', run.id).host, undefined);
   await waitFor(() => !hostAlive(pid), 'the agent process to end');
-  assert.deepEqual(readdirSync(path.join(directory, 'hosts')), [], 'the journal is cleaned up');
+  assert.deepEqual(readdirSync(path.join(directory, 'work', 'runs')), [], 'the journal (in the work folder, never C:) is cleaned up');
   await desk.shutdown(); store.close();
 });
 

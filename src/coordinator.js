@@ -162,13 +162,13 @@ export class Desk {
     // so a model the person adds shows in the AI picker by itself, without opening Settings.
     if (!runnerFactory) {
       const look = () => { if (!this.closed) void this.localAi.status().catch(() => {}); };
-      this.localTimers = [setTimeout(look, 5000), setInterval(look, 120000)]; if (!process.env.NODE_TEST_CONTEXT) { const tidy = () => { if (!this.closed) void this.tidyWorktrees().catch(() => {}); }; this.localTimers.push(setTimeout(tidy, 60000), setInterval(tidy, 30 * 60000)); }; for (const timer of this.localTimers) timer.unref?.();
+      this.localTimers = [setTimeout(look, 5000), setInterval(look, 120000)]; if (!process.env.NODE_TEST_CONTEXT) { const tidy = () => { if (!this.closed) { this.dropOldRuntime(); void this.tidyWorktrees().catch(() => {}); } }; this.localTimers.push(setTimeout(tidy, 60000), setInterval(tidy, 30 * 60000)); }; for (const timer of this.localTimers) timer.unref?.();
     }
     // The installed app on Windows copies itself beside the data once per version, in the background; agents started after
     // that run from the copy, so an update installs while they work (see prepareRuntime). Until it is ready they start as before.
     // Only the installed app's own server says so (ownRuntime): agents inherit REX_DESK_VERSION, and every test desk an agent
     // started used to copy the whole runtime (0.7 GB) into the temp folder, which filled the drive.
-    if (!runnerFactory && ownRuntime) void prepareRuntime(this.runtimeDirectory(), { onLowSpace: body => this.notifier.notify({ kind: 'failed', title: "Not enough space for the agents' copy of Rex Desk", body, target: { type: 'notices', id: '' } }) }).then(runtime => { this.runtime = runtime; if (runtime && this.runtimeDirectory() !== path.join(store.directory, 'runtime')) { try { rmSync(path.join(store.directory, 'runtime'), { recursive: true, force: true }); } catch { /* an agent still runs from the old copy */ } } }, () => {});
+    if (!runnerFactory && ownRuntime) void prepareRuntime(this.runtimeDirectory(), { onLowSpace: body => this.notifier.notify({ kind: 'failed', title: "Not enough space for the agents' copy of Rex Desk", body, target: { type: 'notices', id: '' } }) }).then(runtime => { this.runtime = runtime; this.dropOldRuntime(); }, () => {});
     // Jev ranks assigned issues after every sync; the human decides which to run.
     this.jev = new Jev(store, { fetcher: jevFetcher, emit: () => store.emit('change', { kind: 'jev' }) });
     this.localTasks = new LocalTasks(store);
@@ -694,12 +694,14 @@ export class Desk {
       const remoteOn = Boolean(this.store.get('run', runId)?.inApp?.on) && (run.provider || 'claude') === 'claude';
       // An agent's own effort (its card) is used when nobody picked one for this chat (L64).
       const ownEffort = !run.effort && this.store.get('specialist', run.roomAgent || run.specialistId || '')?.effort, ran = ownEffort && effortsFor(run.provider || 'claude').includes(ownEffort) ? { ...run, effort: ownEffort } : run;
+      // The project folder whose work folder holds this agent's temp files and host files (never C:'s temp folder).
+      const workProject = run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere || this.store.config().repositories.find(item => item.id === run.repositoryId)?.path;
       const options = { run: ran.permissionMode ? ran : { ...ran, permissionMode: defaultModeFor(run.provider || 'claude', this.store.config().defaultMode) }, cwd,
         ...(remoteOn ? { remote: this.remoteName(runId) } : {}),
         // What the agent may not touch: Rex Desk's data, the installed app, and the server it runs inside (see app-guard.js).
         guard: { data: process.env.REX_DATA_DIR || this.store.directory, install: process.env.REX_DESK_EXE ? path.dirname(process.env.REX_DESK_EXE) : '', serverPid: process.pid }, projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere, token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
-        mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere || this.store.config().repositories.find(item => item.id === run.repositoryId)?.path) }, javaEnv: this.javaEnv(run),
+        mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), requeue: text => this.requeue(runId, text), extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
@@ -746,7 +748,7 @@ export class Desk {
       // A headless agent works in a process of its own, so a Rex Desk restart (an update) does not cut it off.
       const hosted = !light && (attach || (!this.runnerFactory && this.store.config().agentHost !== false));
       const runner = light ? new LocalRunner({ ...options, ...this.lightTurn(run, localModel) })
-        : hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.store.directory, 'hosts'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.runtime ? { runtime: this.runtime } : {}), ...(this.hostOptions || {}) })
+        : hosted ? new HostRunner({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) }, { directory: path.join(this.workFolderOf(workProject), 'runs'), onState: state => { if (!this.closed) this.patchRun(runId, { host: state }); }, ...(this.runtime ? { runtime: this.runtime } : {}), ...(this.hostOptions || {}) })
         : this.runnerFactory ? this.runnerFactory(options)
         : new (run.provider === 'codex' ? CodexRunner : run.provider === 'gemini' ? AntigravityRunner : ClaudeRunner)({ ...options, uploadsDirectory: path.join(this.store.media('uploads')) });
       const entry = this.live.get(runId);
@@ -2017,9 +2019,18 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     return results;
   }
   // An agent's temp files (and the test data it makes there) go in its project's work folder, never in C:'s temp folder.
+  // The runtime copy that used to sit in the data folder is deleted only once no agent runs from a runtime copy: a live
+  // agent's program and code are never pulled from under it. Tried again on the tidy timer until it can go.
+  dropOldRuntime() {
+    const old = path.join(this.store.directory, 'runtime');
+    if (!this.runtime || !existsSync(old) || path.resolve(this.runtimeDirectory()) === path.resolve(old)) return false;
+    if (this.store.list('run').some(run => run.host?.outside && run.host.pid && hostAlive(run.host.pid))) return false;
+    try { rmSync(old, { recursive: true, force: true }); return true; } catch { return false; }
+  }
   workTemp(project) {
     const folder = path.join(this.workFolderOf(project), 'tmp');
-    try { mkdirSync(folder, { recursive: true }); } catch { return {}; }
+    // No fallback to the system temp folder (drive C:): the run stops with a plain reason instead.
+    try { mkdirSync(folder, { recursive: true }); } catch (error) { throw new Error(`Rex Desk could not make the agent's work folder ${folder} (${error.code || error.message}). Check that the drive is there and has space, or pick another Work folder in Settings, Projects.`); }
     return { TMP: folder, TEMP: folder, TMPDIR: folder };
   }
   async shutdown() { this.closed = true; this.stopDiskWatch?.(); this.net.stop(); this.a2aRelay?.stop(); this.storage?.close(); void this.toolbox.closeAll().catch(() => {}); for (const timer of this.localTimers || []) { clearTimeout(timer); clearInterval(timer); } this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
