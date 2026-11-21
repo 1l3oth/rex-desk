@@ -138,3 +138,34 @@ test('an edit reverted while the first save waits ends as the reverted value', a
     assert.equal((await config()).name, original, 'the reverted value is the stored one');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// Leave General and come back while the first save is held: the form must still show the new name, and a later change (the theme) must not bring the old name back.
+test('an edit stays visible and stored after leaving and returning while its save is pending', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    let release = () => {}, held = false;
+    const gate = new Promise(done => { release = done; });
+    await page.goto(`${base}/`); await page.waitForTimeout(2500);
+    await page.route('**/api/autostart', async route => { if (route.request().method() === 'POST') { held = true; await gate; } await route.continue(); });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    const config = async () => (await (await fetch(`${base}/api/state`)).json()).config;
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.locator('.settings-pop [name="name"]').fill('Pending Name');
+    for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(100);
+    assert.ok(held, 'test setup: the first save is waiting on /autostart');
+    await page.evaluate(() => document.querySelector('[data-st-section="notify"]').click()); await page.waitForTimeout(500);
+    await page.evaluate(() => document.querySelector('[data-st-section="general"]').click()); await page.waitForTimeout(800);
+    assert.equal(await page.locator('.settings-pop [name="name"]').inputValue(), 'Pending Name', 'the form shows the new name, not the old confirmed one');
+    const theme = page.locator('.settings-pop select[name="theme"]');
+    const options = await theme.locator('option').evaluateAll(list => list.map(o => o.value));
+    await theme.selectOption(options.find(value => value !== options[0]) || options[0]); await page.waitForTimeout(800);
+    release();
+    for (let i = 0; i < 100 && (await config()).name !== 'Pending Name'; i++) await page.waitForTimeout(100);
+    await page.waitForTimeout(2000);
+    assert.equal((await config()).name, 'Pending Name', 'the name survives the theme change');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});

@@ -165,7 +165,8 @@ export function openSettings(ctx, section = 'general') {
   section = ALIAS[section] || section; if (!PARTS[section]) section = 'general';
   const state = { section, extra: {}, list: phone && section === 'general', trackers: trackerDraft(ui) };
   const has = part => (PARTS[state.section] || []).includes(part);
-  const config = () => ui.snap.config || {};
+  const local = {};
+  const config = () => ({ ...(ui.snap.config || {}), ...local });
   const field = (label, control, help = '') => `<label class="st-field"><span>${label}</span>${control}${help ? `<small>${help}</small>` : ''}</label>`;
   // Spoken replies: which voice says Rex Desk's English lines. Microsoft's natural voices (free), or Fish Audio (online).
   const speechBlock = () => {
@@ -383,18 +384,18 @@ export function openSettings(ctx, section = 'general') {
   const values = () => Object.fromEntries([...back.querySelectorAll('[name]')].filter(el => el.type !== 'checkbox' || el.name === 'schedule.days').map(el => [el.name, el.value]));
   const checked = name => Boolean(back.querySelector(`[name="${name}"]`)?.checked);
   let flushSave = () => {};
-  // Saves run one at a time. Each one reads the fields at call time but sends only the top-level keys that edit changed, laid over the config as it is when the request goes out, so a slow earlier save can never put an older copy over a newer edit.
-  // Patches queued or in flight are laid over the config when the next save is compared, so changing a value back while the first save waits is still seen as a change.
+  // One source of truth: `local` holds every edit that the server has not confirmed yet, and config() is the confirmed config with it laid on top.
+  // Every page renders from config(), every edit is written into `local` at once, and saves run one at a time, sending the keys still in `local` at send time.
+  // A key leaves `local` only when the server confirmed that same value, so a failed save leaves its keys dirty for the next one.
   let saveChain = Promise.resolve();
-  const waiting = new Set();
   const save = (quiet = false) => {
-    const job = collectSave(); waiting.add(job);
-    const run = saveChain.then(() => sendSave(job, quiet)).finally(() => waiting.delete(job));
+    const job = collectSave();
+    const run = saveChain.then(() => sendSave(job, quiet));
     saveChain = run.catch(() => {});
     return run;
   };
   function collectSave() {
-    const base = Object.assign(JSON.parse(JSON.stringify(config())), ...[...waiting].map(job => JSON.parse(JSON.stringify(job.patch)))), v = values(), next = { ...base };
+    const base = JSON.parse(JSON.stringify(config())), v = values(), next = { ...base };
     let autostart = null;
     if (has('general')) { next.name = v.name; window.rexTheme?.set(v.theme); autostart = checked('autostart'); }
     if (has('agents')) Object.assign(next, { defaultMode: v.defaultMode, reportToOrbit: back.querySelector('[name="reportToOrbit"]') ? checked('reportToOrbit') : Boolean(base.reportToOrbit), saver: checked('saver'), handoffTokens: Number(v.handoffTokens ?? base.handoffTokens ?? 200000), autonomy: checked('autonomy') });
@@ -408,11 +409,17 @@ export function openSettings(ctx, section = 'general') {
     if (has('sources')) { readTrackers(back, state); next.sources = trackerSources(ui, state); if (v.syncMinutes != null) next.syncMinutes = Number(v.syncMinutes); }
     if (has('signins')) { readSignins(); next.testAccounts = state.signins.filter(account => account.username.trim()); }
     const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(base[key])));
-    return { patch, autostart, sources: has('sources'), signins: has('signins') };
+    Object.assign(local, JSON.parse(JSON.stringify(patch)));
+    return { autostart, sources: has('sources') };
   }
-  async function sendSave({ patch, autostart, sources, signins }, quiet) {
+  async function sendSave({ autostart, sources }, quiet) {
     if (autostart !== null) await api('/autostart', { method: 'POST', data: { enabled: autostart } }).catch(() => {});
-    ui.snap.config = await api('/config', { method: 'PUT', data: { ...JSON.parse(JSON.stringify(config())), ...patch } }); await refresh(); if (quiet) return; if (sources) state.trackers = trackerDraft(ui); state.signins = null; toast(t('Saved.')); draw();
+    const sent = JSON.parse(JSON.stringify(local));
+    if (Object.keys(sent).length) {
+      ui.snap.config = await api('/config', { method: 'PUT', data: { ...(ui.snap.config || {}), ...sent } });
+      for (const [key, value] of Object.entries(sent)) if (JSON.stringify(local[key]) === JSON.stringify(value)) delete local[key];
+    }
+    await refresh(); if (quiet) return; if (sources) state.trackers = trackerDraft(ui); state.signins = null; toast(t('Saved.')); draw();
   }
   // Settings > About: asks the server for the version, counts and sizes, then draws them.
   async function loadAbout(fresh = false) {
