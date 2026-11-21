@@ -38,7 +38,7 @@ import { ProjectRules } from './project-rules.js';
 import { ChatSplits } from './chat-split.js';
 import { Pins } from './pins.js';
 import { Storage } from './storage.js';
-import { lowDiskMessage, friendlyDiskError } from './disk.js';
+import { lowDiskMessage, friendlyDiskError, watchDisk } from './disk.js';
 import { voiceBriefing, VOICE_RULE, VOICE_REMINDER, VOICE_GREETING } from './voice-briefing.js';
 import { HostRunner, hostAlive, prepareRuntime } from './hosts.js';
 import { LocalRunner, lightSystem, withoutRepeats } from './local-runner.js';
@@ -173,6 +173,8 @@ export class Desk {
     this.sources = new Sources(store, { fetcher, onSynced: () => { void this.fillEnglishNames(); if (this.store.config().jev?.auto !== false && this.jev.apiKey()) void this.jev.prioritize().catch(error => store.event('', 'jev-error', { message: error.message })); } }); this.live = new Map(); this.waiters = new Map(); this.tokens = new Map();
     this.query = new TrackerQuery(store, this.sources, { apiKey: () => this.jev.apiKey(), env: () => this.agents.environment(this.store.config().provider), cwd: path.join(store.directory, 'coordinator'), ...(queryModel ? { model: queryModel } : {}) });
     this.presence = { focused: false, at: 0 }; this.notifier = new Notifier(store, { focused: () => this.presence.focused && Date.now() - this.presence.at < 45000, viewing: () => this.presence.view || '', enabled: () => !process.env.NODE_TEST_CONTEXT && this.store.config().notify !== false }); this.rooms = new Rooms(this); this.memory = new Memory(memoryDirectory); if (store.cloud?.files) store.cloud.files.memoryDirectory = this.memory.directory; this.specialists = new Specialists(this); this.draining = false; this.mcpUrl = ''; this.closed = false; this.mcpSessions = new Map();
+    // A low-disk warning when the drive with Rex Desk's data or the agents' runtime copy drops below 5 GB (the installed app only).
+    if (!runnerFactory && ownRuntime) this.stopDiskWatch = watchDisk([store.directory, path.join(store.directory, 'runtime')], { notify: (title, body) => this.notifier.notify({ kind: 'failed', title, body, target: { type: 'notices', id: '' } }) });
     this.monitor = new Monitor(this); this.files = new Files(this); this.shownFile = null; this.worktrees = new Worktrees(this);
     this.evidence = new Evidence(store, runId => this.run(runId), (runId, kind, data) => {
       store.event(runId, kind, data);
@@ -1992,5 +1994,5 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     }
   }
   // Closing Rex Desk (a restart or an update) leaves agents in their own process working; the next start follows them again.
-  async shutdown() { this.closed = true; this.net.stop(); this.a2aRelay?.stop(); this.storage?.close(); void this.toolbox.closeAll().catch(() => {}); for (const timer of this.localTimers || []) { clearTimeout(timer); clearInterval(timer); } this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
+  async shutdown() { this.closed = true; this.stopDiskWatch?.(); this.net.stop(); this.a2aRelay?.stop(); this.storage?.close(); void this.toolbox.closeAll().catch(() => {}); for (const timer of this.localTimers || []) { clearTimeout(timer); clearInterval(timer); } this.peers.stop(); await Promise.allSettled([...this.live.entries()].map(([runId, active]) => active.runner instanceof HostRunner ? active.runner.detach() : this.stop(runId))); await this.evidence.stopAll(); await this.closeMcpSessions(); }
 }
