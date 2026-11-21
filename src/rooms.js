@@ -191,6 +191,8 @@ export class Rooms {
     const message = { id: randomUUID(), roomId, seq, threadId: parent ? (parent.threadId || parent.id) : '', replyTo, from, text: body, to: paused ? targets.filter(target => target === HUMAN) : (targets.length ? targets : [HUMAN]),
       tasks: this.tasksIn(body), hops, paused, at: now(), ...(instruction ? { instruction: String(instruction).slice(0, 4000) } : {}) };
     this.store.put('room', roomId, { ...this.room(roomId), seq }); this.store.put('roommsg', message.id, message);
+    // Files attached in a room travel with it, so they open on the person's other computers too (L27).
+    if (from.type === 'human') try { this.desk.peers?.sharePictures([{ text: body }]); } catch { /* a file that cannot be read stays here */ }
     // The person naming agents and a task in one message gives them that task: the first one named leads, the rest work on it with them.
     const named = !fromAgentId && !system ? message.to.filter(target => target !== HUMAN && target !== 'main' && this.desk.store.get('specialist', target)) : [];
     if (named.length && message.tasks.length && this.desk.shareTask) for (const taskId of message.tasks) await this.desk.shareTask({ taskId, add: named, roomId, quiet: true }).catch(() => {});

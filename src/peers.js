@@ -398,13 +398,14 @@ export class Peers {
     if ((this.copied ||= new Map()).get(runId) !== body) { this.copied.set(runId, body); this.store.put('chatcopy', runId, { id: runId, agentId: run.specialistId, run: slim, events, asks, at: now() }); }
     this.sharePictures(events, run.specialistId); this.shareEvidence(runId, run.specialistId, artifacts);
   }
-  // Pictures the person attached in a shared chat travel with it (up to 2 MB each), so they show on the other computers too.
+  // Pictures and files the person attached in a shared chat or a room travel with it (up to 2 MB each), so they open on the
+  // other computers too (L27: room files did not).
   sharePictures(events, agentId = '') {
     const uploads = path.resolve(this.store.media('uploads')).toLowerCase();
     for (const event of events) {
       for (const match of String(event.text || '').matchAll(/^- (.+)$/gm)) {
         const file = path.resolve(match[1].trim());
-        if (!PICTURE.test(file) || !file.toLowerCase().startsWith(uploads + path.sep) || !existsSync(file)) continue;
+        if (!file.toLowerCase().startsWith(uploads + path.sep) || !existsSync(file)) continue;
         const id = chatFileId(file), size = statSync(file).size;
         if (size > PICTURE_BYTES || this.store.field('chatfile', id, 'size') === size) continue;
         this.store.put('chatfile', id, { id, path: file, name: path.basename(file), size, data: readFileSync(file).toString('base64'), agentId, at: now() });
@@ -435,7 +436,10 @@ export class Peers {
       let item;
       for (let attempt = 0; attempt < 40 && !(item = this.store.get('chatfile', file.id))?.data; attempt++) await new Promise(resolve => setTimeout(resolve, 750));
       if (!item?.data) { text = text.split(file.path).join(`${file.path} (this file did not arrive from the other computer)`); continue; }
-      const folder = path.join(this.store.media('uploads'), randomUUID()), target = path.join(folder, path.basename(file.name).replace(/[^\p{L}\p{N}._ -]+/gu, '_') || 'file');
+      // Saved under the same upload folder name as on the sending computer: the shared chat then names one file that both computers
+      // find in their own uploads (L27: the sender's own picture turned into this computer's path and broke there).
+      const sent = /[\\/]uploads[\\/]([0-9a-f-]{36})[\\/][^\\/]+$/i.exec(String(file.path || ''));
+      const folder = path.join(this.store.media('uploads'), sent ? sent[1] : randomUUID()), target = path.join(folder, path.basename(file.name).replace(/[^\p{L}\p{N}._ -]+/gu, '_') || 'file');
       mkdirSync(folder, { recursive: true }); writeFileSync(target, Buffer.from(item.data, 'base64'));
       text = text.split(file.path).join(target);
     }
@@ -461,10 +465,10 @@ export class Peers {
     const item = this.store.get('chatfile', evidenceId(runId, file));
     return item?.data && PICTURE.test(item.name) ? { name: item.name, data: Buffer.from(item.data, 'base64') } : null;
   }
-  // One picture from another computer's chat, when it is not on this one.
+  // One picture or file from another computer's chat or room, when it is not on this one.
   chatPicture(file) {
     const item = this.store.get('chatfile', chatFileId(file));
-    return item?.data && PICTURE.test(item.name) ? { name: item.name, data: Buffer.from(item.data, 'base64') } : null;
+    return item?.data ? { name: item.name, data: Buffer.from(item.data, 'base64'), picture: PICTURE.test(item.name) } : null;
   }
   watchChats() {
     if (this.watching) return; this.watching = true;

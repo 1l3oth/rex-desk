@@ -354,3 +354,27 @@ test('a days-old message read for the first time does not make its computer look
   await b.desk.peers.pullChats();
   assert.equal(b.desk.peers.online(from), false);
 });
+
+test('a file sent to the other computer keeps its upload folder name there, so the shared chat path opens on both (L27)', async () => {
+  const { a, b } = computers();
+  const folder = '0f6aa13b-910c-4871-a64a-af4c48269fff', sent = path.join(path.resolve(a.desk.store.media('uploads')), folder, 'from-work.png');
+  mkdirSync(path.dirname(sent), { recursive: true }); writeFileSync(sent, 'png');
+  const packed = a.desk.peers.packFiles(`Look\n\nAttached files (read them from these paths):\n- ${sent}`, b.desk.store.nodeId);
+  b.desk.store.put('chatfile', packed.files[0].id, a.desk.store.get('chatfile', packed.files[0].id));
+  const text = await b.desk.peers.unpackFiles({ text: packed.text, files: packed.files });
+  const here = path.join(path.resolve(b.desk.store.media('uploads')), folder, 'from-work.png');
+  assert.ok(text.includes(here), 'saved under the same folder name');
+  assert.equal(readFileSync(here, 'utf8'), 'png');
+});
+
+test('a file attached in a room travels with it, and one that is not a picture comes back as a download (L27)', async () => {
+  const { a } = computers();
+  const file = path.join(path.resolve(a.desk.store.media('uploads')), '1f6aa13b-910c-4871-a64a-af4c48269fff', 'notes.txt');
+  mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, 'hello');
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' }), room = a.desk.rooms.create('Files', [dara.id]);
+  a.desk.runnerFactory = () => ({ start: async () => {}, interrupt: async () => {} });
+  await a.desk.rooms.post(room.id, { text: `See this\n\nAttached files (read them from these paths):\n- ${file}` });
+  const shared = a.desk.peers.chatPicture(file);
+  assert.equal(shared?.data.toString(), 'hello');
+  assert.equal(shared.picture, false);
+});
