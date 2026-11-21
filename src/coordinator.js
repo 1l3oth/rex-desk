@@ -775,6 +775,7 @@ export class Desk {
       await runner.start(remoteOn ? '' : digest ? `${digest}
 
 ${message}` : message);
+      this.saveSeenMark(runId);
       if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
       }
       if (await this.switchIfLimited(runId)) { handedOn = true; return; }
@@ -1373,28 +1374,36 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // the other computer that came in since this session's last turn, with the messages they answered, were never seen by this
   // session: the next turn gets them, so both stories go on as one. A message from there whose reply has not come in yet stays
   // pending (the mark stops before it), so a question and its reply that sync apart still reach a later turn together.
-  // A pending message older than an hour is let go, so one that was never answered there does not hold the mark forever.
+  // A pending message this computer first saw over an hour ago is let go, so one never answered there does not hold the mark
+  // forever. The new mark is kept aside and saved only once the turn has really started (saveSeenMark), so a turn that fails
+  // to start gets the same context again next time.
   missedElsewhere(run, clip) {
     const top = Number(this.store.db.prepare('SELECT max(sequence) AS top FROM events WHERE run_id=?').get(run.id)?.top || 0);
-    const mark = run.seenMark, at = now();
-    if (!mark) { this.patchRun(run.id, { seenMark: { sequence: top, at } }); return ''; }
+    const mark = run.seenMark, at = now(), marks = (this.seenMarks ||= new Map());
+    marks.delete(run.id);
+    if (!mark) { marks.set(run.id, { sequence: top, at }); return ''; }
     const self = this.store.nodeId, shown = new Set(mark.shown || []);
     const rows = this.store.db.prepare("SELECT sequence, kind, value, created_at, uid FROM events WHERE run_id=? AND sequence>? AND visible=1 AND kind IN ('human-message','agent-text') AND uid NOT LIKE ? || '.%' ORDER BY created_at, sequence")
       .all(run.id, Number(mark.sequence) || 0, self).filter(row => !shown.has(row.uid));
     const last = rows.findLastIndex(row => row.kind === 'agent-text');
-    const stale = Date.now() - 60 * 60 * 1000;
-    const pending = rows.slice(last + 1).filter(row => Date.parse(row.created_at) > stale);
+    // When this computer first saw each waiting message: written at once, since it is not the cursor.
+    const firstSeen = {}, stale = Date.now() - 60 * 60 * 1000;
+    for (const row of rows.slice(last + 1)) firstSeen[row.uid] = (run.farSeen || {})[row.uid] || at;
+    if (JSON.stringify(firstSeen) !== JSON.stringify(run.farSeen || {})) this.patchRun(run.id, { farSeen: Object.keys(firstSeen).length ? firstSeen : undefined });
+    const pending = rows.slice(last + 1).filter(row => Date.parse(firstSeen[row.uid]) > stale);
     const used = rows.slice(0, last + 1);
     // The mark moves past everything but the pending messages; rows already used above it are remembered so they are not repeated.
     const hold = pending.length ? Math.min(...pending.map(row => Number(row.sequence))) - 1 : top;
     const keep = [...shown, ...used.map(row => row.uid)].filter(uid => uid && pending.length);
-    this.patchRun(run.id, { seenMark: { sequence: Math.max(hold, Number(mark.sequence) || 0), at, ...(keep.length ? { shown: [...new Set(keep)] } : {}) } });
+    marks.set(run.id, { sequence: Math.max(hold, Number(mark.sequence) || 0), at, ...(keep.length ? { shown: [...new Set(keep)] } : {}) });
     if (!run.sessionId || last < 0) return '';
     const picked = used.slice(-12);
     const said = picked.map(row => { let text = ''; try { text = JSON.parse(row.value).text || ''; } catch { text = ''; } const node = String(row.uid || '').split('.').slice(0, -1).join('.');
       return `- ${row.kind === 'human-message' ? 'The person' : 'You'} (on ${this.peers.deviceName(node) || 'the other computer'}): ${clip(text)}`; });
     return `While this computer was out of touch with the other one, this was said in this chat there, and you have not seen it yet. Carry it on as part of this conversation:\n${said.join('\n')}`;
   }
+  // The turn that got missedElsewhere's context has started: from now on that context counts as seen.
+  saveSeenMark(runId) { const mark = this.seenMarks?.get(runId); if (!mark) return; this.seenMarks.delete(runId); this.patchRun(runId, { seenMark: mark }); }
   // A task run an agent took into its personal chat: it is talked to like that chat from then on.
   personalRun(run) { return Boolean(run?.specialistId) && !run.roomAgent && this.store.get('specialist', run.specialistId)?.runId === run.id; }
   // What the person and the agent said in the agent's personal chat, for its room session to read when it needs to.

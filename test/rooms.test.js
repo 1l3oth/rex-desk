@@ -442,6 +442,31 @@ test('replies the agent gave on the other computer while the two were apart reac
   assert.doesNotMatch(turns[3].prompt, /out of touch/);
 });
 
+test('a question written there long ago that syncs only now still waits for its reply, and a turn that fails to start is told again (L25)', async () => {
+  const { store, desk, turns, dara } = setup({ replies: ['Hi', 'Ok', 'Sure'] });
+  await desk.specialistTurn(dara.id, { prompt: 'Hello' });
+  await waitFor(() => turns.length === 1 && !desk.live.size);
+  const runId = store.get('specialist', dara.id).runId;
+  const add = store.db.prepare('INSERT INTO events(run_id,kind,visible,value,created_at,uid) VALUES(?,?,1,?,?,?)');
+  const old = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  // Written three hours ago on the other computer, seen here only now: the hour starts from now.
+  add.run(runId, 'human-message', JSON.stringify({ text: 'Old question from Work' }), old, 'far-node.7');
+  await desk.say(runId, 'Second');
+  await waitFor(() => turns.length === 2 && !desk.live.size);
+  assert.doesNotMatch(turns[1].prompt, /out of touch/);
+  add.run(runId, 'agent-text', JSON.stringify({ text: 'Old answer on Work' }), old, 'far-node.8');
+  // The next turn fails before it starts: the context is not used up.
+  const real = desk.runnerFactory;
+  desk.runnerFactory = () => ({ start: async () => { throw new Error('could not start'); }, interrupt() {}, close() {} });
+  await desk.say(runId, 'Third').catch(() => {});
+  await waitFor(() => !desk.live.size);
+  desk.runnerFactory = real;
+  await desk.say(runId, 'Fourth');
+  await waitFor(() => turns.length === 3 && !desk.live.size);
+  assert.match(turns[2].prompt, /The person \(on [^)]+\): Old question from Work/);
+  assert.match(turns[2].prompt, /You \(on [^)]+\): Old answer on Work/);
+});
+
 test('an agent shows an explanation page of its changes in the chat, and only HTML counts as a page', async () => {
   const { store, desk, turns, dara } = setup({ replies: ['Done.'] });
   await desk.specialistTurn(dara.id, { prompt: 'Explain your changes' });
