@@ -2693,3 +2693,32 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .settings-pop .st-box .st-days{display:block;padding:10px 14px;min-width:0}
 .settings-pop .st-box .st-days legend{float:left;margin:0 14px 0 0;padding:0;line-height:28px;font-size:13px;font-weight:400}
 .settings-pop .st-box .st-days label{display:inline-block;margin-right:4px}
+
+/* Settings polish: hidden Local AI repeat, Devices link, advanced blocks, compact Look and Text size. */
+.settings-pop .tai-row:has([data-tai-local],[data-tai-setup]){display:none}
+.settings-pop .st-nav button[data-st-go]{display:flex;flex-direction:row;align-items:center;gap:9px;padding:5px 8px;border-radius:7px;width:100%}
+.settings-pop .st-nav button[data-st-go] .st-nl b{font-size:13px;font-weight:500}
+.settings-pop .st-nav button[data-st-go] .st-ic{width:22px;height:22px;border-radius:6px;background:var(--raised);border:0;color:var(--muted)}
+.settings-pop .st-nav button[data-st-go] .st-ic svg{width:14px;height:14px}
+.settings-pop .st-adv{border:0;padding:0;margin:0}
+.settings-pop .st-adv>summary{cursor:pointer;color:var(--muted);font-size:13px;padding:2px 0;list-style:none}
+.settings-pop .st-adv>summary::-webkit-details-marker{display:none}
+.settings-pop .st-adv>summary::before{content:"\203A";display:inline-block;width:14px;transition:transform .15s}
+.settings-pop .st-adv[open]>summary::before{transform:rotate(90deg)}
+.settings-pop .st-adv[open]>summary{margin-bottom:8px}
+.settings-pop .st-repo>.st-adv{margin-top:10px}
+.settings-pop .st-box>.st-adv{padding:11px 14px}
+.settings-pop .st-skins{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:2px}
+.settings-pop .st-skin{flex-direction:row;align-items:center;gap:8px;padding:5px 8px;border:0;border-radius:7px;background:none;box-shadow:none;transform:none!important;font-size:13px}
+.settings-pop .st-skin:hover{background:var(--raised)}
+.settings-pop .st-skin.on{background:var(--raised);box-shadow:inset 0 0 0 1px var(--accent)}
+.settings-pop .st-skin-swatch{width:26px;height:16px;flex:none;border-radius:5px}
+.settings-pop .st-skin-swatch i:first-child{left:10%;top:20%;width:46%;height:60%;border-radius:3px}
+.settings-pop .st-skin-swatch i:last-child{right:10%;top:20%;width:26%;height:60%;border-radius:3px}
+.settings-pop .st-size{display:inline-flex;gap:0;padding:2px;border-radius:8px;background:var(--raised);width:fit-content}
+.settings-pop .st-size button{padding:4px 14px;border:0;border-radius:6px;background:none;box-shadow:none;flex-direction:row;align-items:center}
+.settings-pop .st-size button small{display:none}
+.settings-pop .st-size button b{font-size:13px!important;font-weight:500}
+.settings-pop .st-size button.on{background:var(--panel);box-shadow:0 0 0 1px var(--line)}
+.settings-pop .st-box .st-field:has(>.st-size){display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:20px}
+.settings-pop .st-box .st-field:has(>.st-size)>.st-size{grid-column:2;grid-row:1/span 2}
