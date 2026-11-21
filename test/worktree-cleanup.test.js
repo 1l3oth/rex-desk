@@ -64,6 +64,20 @@ test('a merged worktree stays while it holds ignored files or a live chat works 
   await desk.shutdown(); store.close();
 });
 
+test('the tidy script reads the project from any position and --apply keeps worktrees live runs use', async () => {
+  const { parseArgs, liveFolders } = await import('../scripts/tidy-worktrees.mjs');
+  const project = path.join(os.tmpdir(), 'app');
+  assert.equal(parseArgs([project]).project, project, 'without --base the first argument is the project');
+  assert.deepEqual(parseArgs(['--base', 'origin/main', project, '--apply']), { apply: true, base: 'origin/main', data: '', project });
+  assert.equal(parseArgs(['--apply', '--data', 'D:\\data', project]).project, project);
+  const { Store } = await import('../src/store.js');
+  const data = temporary('tidy-data'), store = new Store(data);
+  store.put('run', 'live', { id: 'live', state: 'waiting', cwd: path.join(project, 'x') });
+  store.put('run', 'old', { id: 'old', state: 'done', worktree: path.join(project, 'y') });
+  store.close();
+  assert.deepEqual(liveFolders(data), [path.resolve(project, 'x').toLowerCase()]);
+});
+
 test('a project can name its own work folder', () => {
   const project = path.join(os.tmpdir(), 'site'), own = path.join(os.tmpdir(), 'elsewhere', 'site-work');
   assert.equal(workFolder(project, os.tmpdir(), [{ path: project, workFolder: own }]), own);
