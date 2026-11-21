@@ -4,13 +4,16 @@
 // Only Rex Desk's own data is shown or touched: a fixed list of its folders ("places"). The person's project folders, the
 // vault, the database file, keys and the installed app are never listed for deletion. A file deleted here is also taken out
 // of the cloud backup, so the cloud copy shrinks with it.
-import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync, rmSync } from 'node:fs';
+//
+// The counting (folder walks, database sizes, duplicate hashing) runs in a worker thread (src/storage-worker.js): on a big
+// desk it took 50 s, and on the desk's own thread every other page froze meanwhile.
+import { existsSync, readFileSync, statSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { Worker } from 'node:worker_threads';
+import * as scan from './storage-scan.js';
+import { sizeOf, inside } from './storage-scan.js';
 
-const DAY = 86400000;
-const MEDIA = /\.(png|jpe?g|gif|webp|bmp|mp4|webm|mov|mp3|wav|ogg|m4a)$/i;
 // The files folder holds the installed app on Windows too (D:\Rex Desk\rex-desk.exe): only these folders of it are Rex Desk data.
 const FILE_PLACES = [
   ['uploads', 'Files you attached', 'uploads'],
@@ -23,21 +26,11 @@ const DATA_PLACES = [
   ['handoffs', 'Chat handoffs', 'handoffs'],
   ['runtime', 'Agent copies of the app', 'runtime'],
 ];
-
-const walk = (folder, visit, depth = 0) => {
-  if (depth > 12) return;
-  let entries = []; try { entries = readdirSync(folder, { withFileTypes: true }); } catch { return; }
-  for (const entry of entries) {
-    const full = path.join(folder, entry.name);
-    if (entry.isDirectory()) walk(full, visit, depth + 1);
-    else if (entry.isFile()) { try { const info = statSync(full); visit(full, info); } catch { /* gone meanwhile */ } }
-  }
-};
-const sizeOf = folder => { let bytes = 0, files = 0; walk(folder, (_, info) => { bytes += info.size; files += 1; }); return { bytes, files }; };
-const inside = (root, file) => { const full = path.resolve(root, file); return full === path.resolve(root) || full.startsWith(path.resolve(root) + path.sep) ? full : ''; };
+// A count this recent is shown as it is; an older one is still shown at once and counted again behind it.
+const FRESH_MS = 30000;
 
 export class Storage {
-  constructor(desk) { this.desk = desk; this.store = desk.store; }
+  constructor(desk) { this.desk = desk; this.store = desk.store; this.calls = new Map(); this.nextCall = 0; this.cache = null; this.twins = null; }
   get version() { return process.env.REX_DESK_VERSION || ''; }
 
   // The folders this page shows, with their real place on disk. A place that is the same folder as another is shown once.
@@ -60,26 +53,80 @@ export class Storage {
   // A protected thing cannot be deleted: the app copy agents run from now.
   protectedPath(place, relative) { return place.id === 'runtime' && this.version && relative.split(/[\\/]/)[0] === this.version; }
 
+  // ---------- counting in the worker thread ----------
+  // What the counting needs, as plain data a worker thread can take.
+  scope() {
+    return { places: this.places().map(({ id, label, directory }) => ({ id, label, directory })), databaseDirectory: this.store.directory, voiceDirectory: process.env.REX_VOICE_DIR || path.join(this.store.directory, 'voice'), version: this.version };
+  }
+  // Runs one counting job in the worker. If no worker can start, the same job runs here instead.
+  run(op, args = {}) {
+    args = { scope: this.scope(), ...args };
+    if (!this.worker && !this.noWorker) {
+      try {
+        const worker = new Worker(new URL('./storage-worker.js', import.meta.url));
+        worker.unref();
+        worker.on('message', ({ id, result, error }) => { const call = this.calls.get(id); if (!call) return; this.calls.delete(id); if (error) call.reject(new Error(error)); else call.resolve(result); });
+        const fail = error => { if (this.worker === worker) this.worker = null; for (const call of this.calls.values()) call.reject(error instanceof Error ? error : new Error('Storage counting stopped.')); this.calls.clear(); };
+        worker.on('error', fail); worker.on('exit', fail);
+        this.worker = worker;
+      } catch { this.noWorker = true; }
+    }
+    if (!this.worker) return this.runHere(op, args);
+    const id = ++this.nextCall;
+    return new Promise((resolve, reject) => { this.calls.set(id, { resolve, reject }); this.worker.postMessage({ id, op, args }); });
+  }
+  async runHere(op, args) {
+    if (op === 'summary') return { usage: scan.usage(args.scope), suggestions: await scan.suggestions(args.scope, args.now, { findDuplicates: args.findDuplicates }) };
+    if (op === 'usage') return scan.usage(args.scope);
+    if (op === 'duplicates') return scan.duplicates(args.scope);
+    if (op === 'list') return scan.list(args.scope, args.place, args.folder);
+    if (op === 'search') return scan.search(args.scope, args.query);
+    if (op === 'oldMedia') return scan.oldMedia(args.scope, args.now);
+    if (op === 'oldBackups') return scan.oldBackups(args.scope, args.now);
+    if (op === 'oldCopies') return scan.oldCopies(args.scope);
+    throw new Error('No such storage job.');
+  }
+  close() { const worker = this.worker; this.worker = null; this.noWorker = true; void worker?.terminate().catch(() => {}); }
+
+  // The page's numbers. Duplicates are only searched when the person asks (findDuplicates); that answer is kept until files change.
+  // The last count is kept in a small file too, so after a restart the page still opens with numbers at once.
+  // wait: false (the page) answers at once: the last count if there is one, else counting: true and no numbers yet; the
+  // page asks again until counting is false. Reading a big database from disk can take a minute.
+  async summary({ findDuplicates = false, fresh = false, wait = true } = {}) {
+    const kept = path.join(this.store.directory, 'storage-count.json');
+    if (!this.cache) { try { const saved = JSON.parse(readFileSync(kept, 'utf8')); if (saved?.data?.usage) this.cache = { at: 0, data: saved.data }; } catch { /* first look */ } }
+    const count = () => {
+      if (this.counting) return this.counting;
+      this.counting = this.run('summary', { now: Date.now() }).then(data => {
+        this.cache = { at: Date.now(), data };
+        try { writeFileSync(kept, JSON.stringify({ at: new Date().toISOString(), data })); } catch { /* shown, just not kept */ }
+        return data;
+      }).finally(() => { this.counting = null; });
+      return this.counting;
+    };
+    let data = null;
+    if (this.cache && !fresh) { data = this.cache.data; if (Date.now() - this.cache.at > FRESH_MS) count().catch(() => {}); }
+    else if (wait) data = await count();
+    else count().catch(() => {});
+    if (findDuplicates) { const twins = await this.run('duplicates'); this.twins = { bytes: twins.reduce((sum, item) => sum + item.size, 0), count: twins.length }; }
+    const suggestions = (data?.suggestions || []).map(item => item.id === 'duplicates' && this.twins ? { ...item, ...this.twins } : item);
+    return { usage: data?.usage || null, suggestions, places: this.places().map(({ id, label, directory }) => ({ id, label, directory })), counting: Boolean(this.counting) };
+  }
+  // Files changed: the numbers shown are counted again behind the page, and duplicates need a new look.
+  forget() { if (this.cache) this.cache.at = 0; this.twins = null; }
+  async usage() { return this.run('usage'); }
+  async suggestions({ findDuplicates = true } = {}) { return (await this.run('summary', { now: Date.now(), findDuplicates })).suggestions; }
+
   // One folder's contents: its folders (with their total size) and files, like a file manager's list.
-  list(placeId, folder = '') {
+  async list(placeId, folder = '') {
     const place = this.place(placeId), directory = inside(place.directory, folder);
     if (!directory || !existsSync(directory)) throw new Error('That folder is gone.');
-    const items = [];
-    // Each file you attach sits in a folder of its own with a code name: the files are listed by their own names instead.
-    const entries = readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
-      if (place.id !== 'uploads' || folder || !entry.isDirectory()) return [{ entry, directory }];
-      let inner = []; try { inner = readdirSync(path.join(directory, entry.name), { withFileTypes: true }); } catch { return [{ entry, directory }]; }
-      return inner.length && inner.every(item => item.isFile()) ? inner.map(item => ({ entry: item, directory: path.join(directory, entry.name) })) : [{ entry, directory }];
-    });
-    for (const { entry, directory } of entries) {
-      const full = path.join(directory, entry.name), relative = path.relative(place.directory, full);
-      try {
-        if (entry.isDirectory()) { const { bytes, files } = sizeOf(full); items.push({ name: entry.name, path: relative, folder: true, size: bytes, files, modified: statSync(full).mtime.toISOString(), owner: this.owner(placeId, relative), locked: this.protectedPath(place, relative) }); }
-        else if (entry.isFile()) { const info = statSync(full); items.push({ name: entry.name, path: relative, folder: false, size: info.size, modified: info.mtime.toISOString(), owner: this.owner(placeId, relative), locked: this.protectedPath(place, relative) }); }
-      } catch { /* gone meanwhile */ }
-    }
+    const items = (await this.run('list', { place: placeId, folder })).map(item => ({ ...item, owner: this.owner(placeId, item.path), locked: this.protectedPath(place, item.path) }));
     return { place: { id: place.id, label: place.label, directory: place.directory }, folder, items };
   }
+  // Search every place by file name.
+  async search(query) { return (await this.run('search', { query })).map(item => ({ ...item, owner: this.owner(item.place, item.path) })); }
+
   file(placeId, relative) {
     const place = this.place(placeId), full = inside(place.directory, relative);
     if (!full || full === path.resolve(place.directory) || !existsSync(full) || !statSync(full).isFile()) throw new Error('That file is gone.');
@@ -92,41 +139,6 @@ export class Storage {
     const [command, args] = process.platform === 'win32' ? ['explorer.exe', [`/select,${full}`]] : process.platform === 'darwin' ? ['open', ['-R', full]] : ['xdg-open', [path.dirname(full)]];
     spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
     return { opened: true };
-  }
-  // Search every place by file name.
-  search(query, limit = 200) {
-    const want = String(query || '').trim().toLowerCase(); if (!want) return [];
-    const found = [];
-    for (const place of this.places()) walk(place.directory, (full, info) => {
-      if (found.length >= limit || !path.basename(full).toLowerCase().includes(want)) return;
-      const relative = path.relative(place.directory, full);
-      found.push({ place: place.id, name: path.basename(full), path: relative, folder: false, size: info.size, modified: info.mtime.toISOString(), owner: this.owner(place.id, relative) });
-    });
-    return found.sort((left, right) => right.size - left.size);
-  }
-
-  // What takes the space on this computer, by kind, and the database split into chat history and raw agent output.
-  usage() {
-    const db = this.store.db, file = name => { try { return statSync(path.join(this.store.directory, name)).size; } catch { return 0; } };
-    const database = file('desk.sqlite') + file('desk.sqlite-wal');
-    const rows = db.prepare('SELECT visible, SUM(LENGTH(value)) AS bytes, COUNT(*) AS n FROM events GROUP BY visible').all();
-    const chat = Number(rows.find(row => Number(row.visible) === 1)?.bytes || 0), raw = Number(rows.find(row => Number(row.visible) !== 1)?.bytes || 0);
-    const places = this.places().map(place => ({ id: place.id, label: place.label, ...sizeOf(place.directory) }));
-    const voiceDirectory = process.env.REX_VOICE_DIR || path.join(this.store.directory, 'voice');
-    const models = existsSync(voiceDirectory) ? sizeOf(voiceDirectory).bytes : 0;
-    const files = places.filter(place => ['uploads', 'artifacts', 'room-images', 'old-artifacts', 'handoffs'].includes(place.id)).reduce((sum, place) => sum + place.bytes, 0);
-    const backups = places.filter(place => ['backups', 'runtime'].includes(place.id)).reduce((sum, place) => sum + place.bytes, 0);
-    // The database file holds more than the events (records, free pages): what is not chat or raw output is "other records".
-    const other = Math.max(0, database - chat - raw);
-    const kinds = [
-      { id: 'chat', label: 'Chat history', bytes: chat },
-      { id: 'raw', label: 'Raw agent output', bytes: raw },
-      { id: 'records', label: 'Other records', bytes: other },
-      { id: 'files', label: 'Files', bytes: files },
-      { id: 'backups', label: 'Backups and app copies', bytes: backups },
-      { id: 'models', label: 'Voice models', bytes: models },
-    ];
-    return { total: kinds.reduce((sum, kind) => sum + kind.bytes, 0), kinds, places, database };
   }
 
   // Deletes files and folders (each as { place, path }). Returns the space that came back.
@@ -151,6 +163,7 @@ export class Storage {
       }
     }
     this.dropFromCloud(keys);
+    if (removed) this.forget();
     return { freed, removed };
   }
   // Whether a file (by its backup key, like data/uploads/<id>/photo.png) was deleted here, itself or with its folder.
@@ -164,72 +177,23 @@ export class Storage {
   }
 
   // ---------- one-click clean-ups ----------
-  // Each suggestion says what it removes, how much space it frees, and whether chats lose anything.
-  suggestions(now = Date.now()) {
-    const list = [];
-    const raw = this.rawOutput(now);
-    list.push({ id: 'raw-output', label: 'Raw agent output older than 30 days', note: 'What agents printed while working (tool results, logs). Messages and the agent\'s memory of the chat stay; old runs show fewer details in Activity.', bytes: raw.bytes, count: raw.count });
-    const media = this.oldMedia(now);
-    list.push({ id: 'old-media', label: 'Screenshots and recordings older than 60 days', note: 'Agents\' evidence pictures and videos. The chat shows "file removed" where they were.', bytes: media.reduce((sum, item) => sum + item.size, 0), count: media.length });
-    const twins = this.duplicates();
-    list.push({ id: 'duplicates', label: 'Duplicate files', note: 'The same file kept more than once. The oldest copy stays.', bytes: twins.reduce((sum, item) => sum + item.size, 0), count: twins.length });
-    const backups = this.oldBackups(now);
-    list.push({ id: 'old-backups', label: 'Database backups older than 30 days', note: 'Copies Rex Desk made before big changes. The newest stays.', bytes: backups.reduce((sum, item) => sum + item.size, 0), count: backups.length });
-    const copies = this.oldCopies();
-    list.push({ id: 'old-copies', label: 'Old copies of the app for agents', note: 'Agents run from a copy of the current version; older ones are left over from updates.', bytes: copies.reduce((sum, item) => sum + item.size, 0), count: copies.length });
-    return list;
-  }
-  rawOutput(now = Date.now()) {
-    const before = new Date(now - 30 * DAY).toISOString();
-    const row = this.store.db.prepare('SELECT COUNT(*) AS n, SUM(LENGTH(value)) AS bytes FROM events WHERE visible = 0 AND created_at < ?').get(before);
-    return { before, count: Number(row?.n || 0), bytes: Number(row?.bytes || 0) };
-  }
-  filesIn(ids, keep = () => true) {
-    const found = [];
-    for (const place of this.places().filter(item => ids.includes(item.id))) walk(place.directory, (full, info) => { const relative = path.relative(place.directory, full); if (keep(full, info) && !this.protectedPath(place, relative)) found.push({ place: place.id, path: relative, size: info.size, modified: info.mtimeMs }); });
-    return found;
-  }
-  oldMedia(now = Date.now()) { return this.filesIn(['artifacts', 'old-artifacts'], (full, info) => MEDIA.test(full) && now - info.mtimeMs > 60 * DAY); }
-  oldBackups(now = Date.now()) {
-    const all = this.filesIn(['backups']).sort((left, right) => right.modified - left.modified);
-    return all.slice(1).filter(item => now - item.modified > 30 * DAY);
-  }
-  oldCopies() {
-    const place = this.places().find(item => item.id === 'runtime'); if (!place || !this.version) return [];
-    return readdirSync(place.directory, { withFileTypes: true }).filter(entry => entry.isDirectory() && entry.name !== this.version).map(entry => ({ place: 'runtime', path: entry.name, size: sizeOf(path.join(place.directory, entry.name)).bytes }));
-  }
-  // Same size first, then the same contents; the oldest of each set stays.
-  duplicates() {
-    const bySize = new Map();
-    for (const item of this.filesIn(['uploads', 'artifacts', 'old-artifacts', 'room-images'], (_, info) => info.size >= 1024)) { const list = bySize.get(item.size) || []; list.push(item); bySize.set(item.size, list); }
-    const extra = [];
-    for (const group of bySize.values()) {
-      if (group.length < 2) continue;
-      const byHash = new Map();
-      for (const item of group) {
-        const full = path.join(this.place(item.place).directory, item.path);
-        let digest = ''; try { digest = createHash('sha256').update(readFileSync(full)).digest('hex'); } catch { continue; }
-        const list = byHash.get(digest) || []; list.push(item); byHash.set(digest, list);
-      }
-      for (const twins of byHash.values()) if (twins.length > 1) extra.push(...twins.sort((left, right) => left.modified - right.modified).slice(1));
-    }
-    return extra;
-  }
-  // Runs one clean-up. Returns the space that came back, measured on disk before and after.
   // Runs one clean-up. Files freed are counted as they are deleted; raw agent output by how much the database file shrank.
-  clean(id, now = Date.now()) {
-    const before = this.usage().total, database = () => this.usage().database;
+  async clean(id, now = Date.now()) {
+    if (!['raw-output', 'old-media', 'duplicates', 'old-backups', 'old-copies'].includes(id)) throw new Error('No such clean-up.');
+    // The total from the last count when there is one: counting a big desk again first took a minute.
+    const before = this.cache?.data?.usage?.total ?? (await this.usage()).total;
+    const database = () => { const file = name => { try { return statSync(path.join(this.store.directory, name)).size; } catch { return 0; } }; return file('desk.sqlite') + file('desk.sqlite-wal'); };
     let freed = 0;
     if (id === 'raw-output') { const start = database(); this.dropRawOutput(now); freed = Math.max(0, start - database()); }
-    else if (id === 'old-media') freed = this.remove(this.oldMedia(now)).freed;
-    else if (id === 'duplicates') freed = this.remove(this.duplicates()).freed;
-    else if (id === 'old-backups') freed = this.remove(this.oldBackups(now)).freed;
-    else if (id === 'old-copies') { for (const item of this.oldCopies()) { try { freed += this.remove([item]).freed; } catch { /* an agent still runs from it */ } } }
-    else throw new Error('No such clean-up.');
+    else if (id === 'old-media') freed = this.remove(await this.run('oldMedia', { now })).freed;
+    else if (id === 'duplicates') freed = this.remove(await this.run('duplicates')).freed;
+    else if (id === 'old-backups') freed = this.remove(await this.run('oldBackups', { now })).freed;
+    else if (id === 'old-copies') { for (const item of await this.run('oldCopies')) { try { freed += this.remove([item]).freed; } catch { /* an agent still runs from it */ } } }
+    this.forget();
     return { id, before, after: Math.max(0, before - freed), freed };
   }
   dropRawOutput(now = Date.now()) {
-    const { before } = this.rawOutput(now), cloud = this.store.cloud;
+    const before = new Date(now - 30 * scan.DAY).toISOString(), cloud = this.store.cloud;
     this.store.transaction(() => {
       this.store.db.prepare('DELETE FROM events WHERE visible = 0 AND created_at < ?').run(before);
       if (cloud?.enabled) cloud.enqueue('DELETE FROM rex_events WHERE workspace=? AND visible=0 AND created_at < ?', [cloud.workspace, before]);

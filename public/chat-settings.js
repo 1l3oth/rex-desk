@@ -421,7 +421,7 @@ export function openSettings(ctx, section = 'general') {
     if (id === 'about') await loadAbout();
     if (id === 'folders') { await loadFolders(ctx, state); if (state.section === 'folders') draw(); }
     if (id === 'localai') { await loadLocalAi(ctx, state); if (state.section === 'localai') draw(); }
-    if (id === 'storage') { await loadStorage(ctx, state); if (state.section === 'storage') draw(); }
+    if (id === 'storage') { await loadStorage(ctx, state, { onUpdate: () => state.section === 'storage' && draw() }); if (state.section === 'storage') draw(); }
     if (id === 'accounts') { await loadTourAi(ctx, state); if (state.section === 'accounts') draw(); }
     back.querySelector('[data-st-panel]')?.scrollTo({ top: 0 });
   }
@@ -620,7 +620,7 @@ export function openSettings(ctx, section = 'general') {
   if (section === 'about') void loadAbout();
   if (section === 'folders') void loadFolders(ctx, state).then(() => state.section === 'folders' && draw());
   if (section === 'localai') void loadLocalAi(ctx, state).then(() => state.section === 'localai' && draw());
-  if (section === 'storage') void loadStorage(ctx, state).then(() => state.section === 'storage' && draw());
+  if (section === 'storage') void loadStorage(ctx, state, { onUpdate: () => state.section === 'storage' && draw() }).then(() => state.section === 'storage' && draw());
   if (section === 'accounts') void loadTourAi(ctx, state).then(() => state.section === 'accounts' && draw());
   if (section === 'general') void api('/autostart').then(result => { state.extra.autostart = result; if (state.section === 'general' && document.body.contains(back)) draw(); }).catch(() => {});
   // The Notifications tab saves on change; redraw it when its settings come back changed, keeping the scroll.

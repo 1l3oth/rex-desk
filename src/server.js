@@ -967,13 +967,15 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (fileMatch && request.method === 'POST') return json(response, 200, desk.saveFileForPerson(fileMatch[1], (await body(request)).content));
       const interactionMatch = url.pathname.match(/^\/api\/interactions\/([^/]+)\/answer$/);
       // Settings › Storage: Rex Desk's own folders, what takes the space, deleting files and one-click clean-ups.
-      if (url.pathname === '/api/storage' && request.method === 'GET') return json(response, 200, { usage: desk.storage.usage(), places: desk.storage.places().map(({ id, label, directory }) => ({ id, label, directory })), suggestions: desk.storage.suggestions() });
-      if (url.pathname === '/api/storage/list' && request.method === 'GET') return json(response, 200, desk.storage.list(url.searchParams.get('place') || '', url.searchParams.get('folder') || ''));
-      if (url.pathname === '/api/storage/search' && request.method === 'GET') return json(response, 200, { items: desk.storage.search(url.searchParams.get('q') || '') });
+      if (url.pathname === '/api/storage' && request.method === 'GET') return json(response, 200, await desk.storage.summary({ fresh: url.searchParams.get('fresh') === '1', wait: false }));
+      // Duplicates are searched only when the person presses Find duplicates: it reads every same-size file.
+      if (url.pathname === '/api/storage/duplicates' && request.method === 'POST') return json(response, 200, await desk.storage.summary({ findDuplicates: true }));
+      if (url.pathname === '/api/storage/list' && request.method === 'GET') return json(response, 200, await desk.storage.list(url.searchParams.get('place') || '', url.searchParams.get('folder') || ''));
+      if (url.pathname === '/api/storage/search' && request.method === 'GET') return json(response, 200, { items: await desk.storage.search(url.searchParams.get('q') || '') });
       if (url.pathname === '/api/storage/file' && request.method === 'GET') return serveFile(request, response, desk.storage.file(url.searchParams.get('place') || '', url.searchParams.get('path') || ''), { sandbox: true });
       if (url.pathname === '/api/storage/reveal' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.storage.reveal(String(input.place || ''), String(input.path || ''))); }
       if (url.pathname === '/api/storage/delete' && request.method === 'POST') return json(response, 200, desk.storage.remove((await body(request)).items || []));
-      if (url.pathname === '/api/storage/clean' && request.method === 'POST') return json(response, 200, desk.storage.clean(String((await body(request)).id || '')));
+      if (url.pathname === '/api/storage/clean' && request.method === 'POST') return json(response, 200, await desk.storage.clean(String((await body(request)).id || '')));
       // Pins: a file, picture or link pinned in a chat, for its Pinned tab.
       if (url.pathname === '/api/pins' && request.method === 'POST') return json(response, 200, desk.pins.add(await body(request), { by: 'you' }));
       const pinMatch = url.pathname.match(/^\/api\/pins\/([^/]+)$/);

@@ -22,15 +22,29 @@ const ICON = {
   up: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>',
 };
 
-export async function loadStorage(ctx, state, { keepPlace = true } = {}) {
+// The server answers at once with its last count (or none yet) and counts again behind it; while it counts, the page
+// asks again every few seconds and redraws (onUpdate) when the new numbers are in.
+let countTimer = 0;
+export async function loadStorage(ctx, state, { keepPlace = true, onUpdate } = {}) {
   const box = state.storage || (state.storage = { place: '', folder: '', sort: 'size', selected: new Set(), query: '' });
   try {
     box.data = await ctx.api('/storage');
     if (!keepPlace || !box.data.places.some(place => place.id === box.place)) { box.place = box.data.places[0]?.id || ''; box.folder = ''; }
     await listFolder(ctx, state);
   } catch (error) { box.error = error.message; }
+  if (onUpdate) box.onUpdate = onUpdate;
+  waitForCount(ctx, state);
   // The cloud side: the account's database and file space, from its plan.
   box.billing = await ctx.api('/billing', { timeout: 8000 }).catch(() => null);
+}
+function waitForCount(ctx, state, tries = 0) {
+  clearTimeout(countTimer);
+  const box = state.storage; if (!box?.data?.counting || tries > 200) return;
+  countTimer = setTimeout(async () => {
+    if (state.section !== 'storage' || !document.querySelector('[data-sg-page]')) return;
+    try { const data = await ctx.api('/storage'); box.data = data; if (!data.counting) box.onUpdate?.(); } catch { /* asked again below */ }
+    waitForCount(ctx, state, tries + 1);
+  }, 3000);
 }
 async function listFolder(ctx, state) {
   const box = state.storage; box.selected = new Set();
@@ -39,18 +53,18 @@ async function listFolder(ctx, state) {
 }
 
 function usageHtml(ctx, box) {
-  const usage = box.data.usage, labels = KIND_LABELS(), total = usage.total || 1;
+  const usage = box.data.usage, labels = KIND_LABELS(), total = usage?.total || 1;
   // Drawn with SVG attributes: the app's security rules do not allow style="" on elements.
   let x = 0;
-  const bar = usage.kinds.filter(kind => kind.bytes > 0).map(kind => { const width = Math.max(kind.bytes / total * 1000, 4), rect = `<rect x="${x.toFixed(1)}" y="0" width="${Math.max(width - 3, 1).toFixed(1)}" height="14" fill="${KIND_COLORS[kind.id]}"><title>${ctx.esc(labels[kind.id])} · ${size(kind.bytes)}</title></rect>`; x += width; return rect; }).join('');
-  const legend = usage.kinds.map(kind => `<li><svg width="10" height="10" aria-hidden="true"><rect width="10" height="10" rx="3" fill="${KIND_COLORS[kind.id]}"/></svg><span>${ctx.esc(labels[kind.id])}</span><b>${size(kind.bytes)}</b></li>`).join('');
+  const bar = (usage?.kinds || []).filter(kind => kind.bytes > 0).map(kind => { const width = Math.max(kind.bytes / total * 1000, 4), rect = `<rect x="${x.toFixed(1)}" y="0" width="${Math.max(width - 3, 1).toFixed(1)}" height="14" fill="${KIND_COLORS[kind.id]}"><title>${ctx.esc(labels[kind.id])} · ${size(kind.bytes)}</title></rect>`; x += width; return rect; }).join('');
+  const legend = (usage?.kinds || []).map(kind => `<li><svg width="10" height="10" aria-hidden="true"><rect width="10" height="10" rx="3" fill="${KIND_COLORS[kind.id]}"/></svg><span>${ctx.esc(labels[kind.id])}</span><b>${size(kind.bytes)}</b></li>`).join('');
   const space = box.billing?.space, db = space?.database, files = space?.files;
   const cloudRow = (label, used, limit) => used == null ? '' : `<div class="sg-cloud-row"><span>${label}</span><svg class="sg-meter" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="${ctx.esc(`${label}: ${size(used)}${limit ? ` / ${size(limit)}` : ''}`)}"><rect width="100" height="8" rx="4" class="sg-meter-back"/><rect width="${limit ? Math.max(1, Math.min(100, used / limit * 100)).toFixed(1) : 0}" height="8" rx="4" class="sg-meter-fill"/></svg><b>${size(used)}${limit ? ` <small>/ ${size(limit)}</small>` : ''}</b></div>`;
   const cloud = !box.billing ? '' : !box.billing.signedIn ? `<p class="muted small">${t`Sign in with your Rex Desk account to see your cloud space.`}</p>`
     : (db || files) ? `${cloudRow(t('Cloud database'), db?.used, db?.limit)}${cloudRow(t('Cloud files'), files?.used, files?.limit)}<p class="muted small">${t`Cleaning up here also deletes the cloud copy. The cloud number updates within a few minutes.`}</p>`
     : `<p class="muted small">${t`Cloud backup is off, so nothing is kept in the cloud.`}</p>`;
-  return `<section class="sg-card" aria-labelledby="sg-use"><div class="sg-head"><h3 id="sg-use">${t`On this computer`}</h3><b class="sg-total">${size(usage.total)}</b></div>
-    <svg class="sg-bar" viewBox="0 0 ${Math.max(x, 1).toFixed(1)} 14" preserveAspectRatio="none" role="img" aria-label="${t`What takes the space`}">${bar}</svg><ul class="sg-legend">${legend}</ul>
+  return `<section class="sg-card" aria-labelledby="sg-use"><div class="sg-head"><h3 id="sg-use">${t`On this computer`}</h3>${box.data.counting && usage ? `<small class="muted">${t`Updating…`}</small>` : ''}<b class="sg-total">${usage ? size(usage.total) : ''}</b></div>
+    ${!usage ? `<p class="muted">${t`Counting what Rex Desk keeps…`} ${t`This can take a minute on a big desk.`}</p>` : `<svg class="sg-bar" viewBox="0 0 ${Math.max(x, 1).toFixed(1)} 14" preserveAspectRatio="none" role="img" aria-label="${t`What takes the space`}">${bar}</svg><ul class="sg-legend">${legend}</ul>`}
     <div class="sg-head sg-cloudhead"><h3>${t`In the cloud`}</h3></div>${cloud}</section>`;
 }
 
@@ -59,15 +73,16 @@ function cleanHtml(ctx, box) {
   const rows = box.data.suggestions.map(item => {
     const [label, note] = labels[item.id] || [item.label, item.note], done = box.done?.[item.id];
     return `<li class="sg-clean"><div class="sg-clean-text"><b>${ctx.esc(label)}</b><small>${ctx.esc(note)}</small>${done ? `<span class="sg-done">${t`Freed ${size(done.freed)}: ${size(done.before)} before, ${size(done.after)} now.`}</span>` : ''}</div>
-      <span class="sg-clean-size">${item.bytes ? size(item.bytes) : t('Nothing')}</span><button type="button" class="btn small${item.bytes ? ' primary' : ''}" data-sg="clean" data-id="${ctx.esc(item.id)}"${!item.bytes || busy ? ' disabled' : ''}>${busy === item.id ? t('Cleaning…') : t('Clean up')}</button></li>`;
+      ${item.bytes == null ? `<span class="sg-clean-size muted">${t`Not checked`}</span><button type="button" class="btn small" data-sg="twins"${busy ? ' disabled' : ''}>${busy === 'twins' ? t('Looking…') : t('Find duplicates')}</button>`
+        : `<span class="sg-clean-size">${item.bytes ? size(item.bytes) : t('Nothing')}</span><button type="button" class="btn small${item.bytes ? ' primary' : ''}" data-sg="clean" data-id="${ctx.esc(item.id)}"${!item.bytes || busy ? ' disabled' : ''}>${busy === item.id ? t('Cleaning…') : t('Clean up')}</button>`}</li>`;
   }).join('');
-  return `<section class="sg-card" aria-labelledby="sg-clean"><div class="sg-head"><h3 id="sg-clean">${t`Clean up`}</h3></div><ul class="sg-cleans">${rows}</ul></section>`;
+  return `<section class="sg-card" aria-labelledby="sg-clean"><div class="sg-head"><h3 id="sg-clean">${t`Clean up`}</h3></div>${rows ? `<ul class="sg-cleans">${rows}</ul>` : `<p class="muted">${t`Counting what Rex Desk keeps…`}</p>`}</section>`;
 }
 
 function browserHtml(ctx, box) {
   const { esc } = ctx, labels = PLACE_LABELS(), list = box.list || { items: [] };
-  const usage = Object.fromEntries(box.data.usage.places.map(place => [place.id, place.bytes]));
-  const tree = box.data.places.map(place => `<button type="button" class="sg-place${place.id === box.place && !box.query ? ' on' : ''}" data-sg="place" data-id="${esc(place.id)}" title="${esc(place.directory)}">${ICON.folder}<span>${esc(labels[place.id] || place.label)}</span><small>${size(usage[place.id] || 0)}</small></button>`).join('');
+  const usage = Object.fromEntries((box.data.usage?.places || []).map(place => [place.id, place.bytes]));
+  const tree = box.data.places.map(place => `<button type="button" class="sg-place${place.id === box.place && !box.query ? ' on' : ''}" data-sg="place" data-id="${esc(place.id)}" title="${esc(place.directory)}">${ICON.folder}<span>${esc(labels[place.id] || place.label)}</span><small>${place.id in usage ? size(usage[place.id]) : ''}</small></button>`).join('');
   const items = [...list.items].sort((left, right) => box.sort === 'name' ? left.name.localeCompare(right.name) : box.sort === 'date' ? String(right.modified).localeCompare(String(left.modified)) : right.size - left.size || Number(right.folder) - Number(left.folder));
   const selected = items.filter(item => box.selected.has(`${item.place || box.place}\n${item.path}`)), freed = selected.reduce((sum, item) => sum + item.size, 0);
   const crumbs = box.query ? `<span>${t`Search: ${esc(box.query)}`}</span>` : `<button type="button" class="sg-crumb" data-sg="crumb" data-path="">${esc(labels[box.place] || '')}</button>${box.folder.split(/[\\/]/).filter(Boolean).map((part, index, parts) => `<span aria-hidden="true">›</span><button type="button" class="sg-crumb" data-sg="crumb" data-path="${esc(parts.slice(0, index + 1).join('/'))}">${esc(part)}</button>`).join('')}`;
@@ -93,7 +108,7 @@ function browserHtml(ctx, box) {
 export function storageHtml(ctx, state) {
   const box = state.storage;
   if (!box?.data) return `<h2>${t`Storage`}</h2><p class="muted">${box?.error ? ctx.esc(box.error) : t('Counting what Rex Desk keeps…')}</p>`;
-  return `<h2>${t`Storage`}</h2><p class="muted">${t`Only Rex Desk's own data is here. Your project folders and notes are never touched.`}</p>${usageHtml(ctx, box)}${cleanHtml(ctx, box)}${browserHtml(ctx, box)}`;
+  return `<h2 data-sg-page>${t`Storage`}</h2><p class="muted">${t`Only Rex Desk's own data is here. Your project folders and notes are never touched.`}</p>${usageHtml(ctx, box)}${cleanHtml(ctx, box)}${browserHtml(ctx, box)}`;
 }
 
 let searchTimer = 0;
@@ -124,6 +139,13 @@ export async function storageClick(ctx, state, target, draw) {
     try { const result = await ctx.api('/storage/delete', { method: 'POST', data: { items } }); ctx.toast(t`Deleted. ${size(result.freed)} freed.`); }
     catch (error) { ctx.toast(error.message, true); }
     await loadStorage(ctx, state); draw(); return true;
+  }
+  // Duplicates are looked for only on request: it reads every file of the same size, which takes a while on a big desk.
+  if (action === 'twins') {
+    box.busy = 'twins'; draw();
+    try { box.data = { ...box.data, ...(await ctx.api('/storage/duplicates', { method: 'POST', data: {}, timeout: 600000 })) }; }
+    catch (error) { ctx.toast(error.message, true); }
+    box.busy = ''; draw(); return true;
   }
   if (action === 'clean') {
     const id = button.dataset.id, [label] = CLEAN_LABELS()[id] || [id];
