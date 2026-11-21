@@ -34,9 +34,11 @@ export function openImage(src, scope = document) {
 }
 function step(by) { if (state.list.length > 1) { state.index = (state.index + by + state.list.length) % state.list.length; state.actual = false; state.view = { k: 1, x: 0, y: 0 }; draw(); } }
 
-// Zoom and pan: pinch with two fingers, drag with one when zoomed in, the mouse wheel, or a tap or click on the picture
-// (2.5x at that spot, and back to fit). The picture moves by transform, so the page never scrolls under the finger.
+// Zoom and pan: pinch with two fingers, drag with one when zoomed in, the mouse wheel (with or without Ctrl), + and - keys,
+// or a double-click on the picture (100% at that spot, and back to fit). The picture moves by transform, so the page never scrolls under the finger.
 const MAX = 8;
+// The zoom that shows the picture at its real size (100%); a picture smaller than the window gets 2x instead.
+function actualSize() { const image = document.querySelector('#img-viewer .iv-stage img'); const k = image?.naturalWidth && image.clientWidth ? image.naturalWidth / image.clientWidth : 0; return k > 1.01 ? k : 2; }
 function apply(smooth = true) {
   const image = document.querySelector('#img-viewer .iv-stage img'); if (!image) return;
   image.style.transition = smooth ? '' : 'none'; // a finger moves it at once; a tap or the wheel eases
@@ -46,7 +48,7 @@ function apply(smooth = true) {
 }
 // Zoom to k keeping the point (px, py) of the stage (from its centre) still.
 function zoomAt(k, px = 0, py = 0) {
-  const view = state.view, next = Math.min(MAX, Math.max(1, k));
+  const view = state.view, next = Math.min(Math.max(MAX, actualSize()), Math.max(1, k));
   if (next === 1) { state.view = { k: 1, x: 0, y: 0 }; apply(); return; }
   state.view = { k: next, x: px - (px - view.x) * next / view.k, y: py - (py - view.y) * next / view.k }; apply();
 }
@@ -90,12 +92,17 @@ export function wireImageViewer() {
     if (state.moved && (act === 'backdrop' || act === 'image')) { state.moved = false; return; }
     if (act === 'close' || act === 'backdrop' || event.target === dialog) dialog.close();
     else if (act === 'prev') step(-1); else if (act === 'next') step(1);
-    else if (act === 'zoom') zoomAt(state.view.k > 1.01 ? 1 : 2.5);
-    else if (act === 'image') { const stage = event.target.closest('.iv-stage'), [px, py] = fromCentre(stage, event); zoomAt(state.view.k > 1.01 ? 1 : 2.5, px, py); }
+    else if (act === 'zoom') zoomAt(state.view.k > 1.01 ? 1 : actualSize());
     else if (act === 'file') { const src = state.list[state.index].src; dialog.close(); window.rexOpenFile?.(src, { view: 'preview' }); }
+  });
+  document.addEventListener('dblclick', event => {
+    const dialog = document.getElementById('img-viewer'); if (!dialog?.open || !event.target.closest?.('[data-iv="image"]')) return;
+    const [px, py] = fromCentre(event.target.closest('.iv-stage'), event); zoomAt(state.view.k > 1.01 ? 1 : actualSize(), px, py);
   });
   document.addEventListener('keydown', event => {
     const dialog = document.getElementById('img-viewer'); if (!dialog?.open) return;
     if (event.key === 'ArrowLeft') { event.preventDefault(); step(-1); } else if (event.key === 'ArrowRight') { event.preventDefault(); step(1); }
+    else if (['+', '='].includes(event.key)) { event.preventDefault(); zoomAt(state.view.k * 1.25); } else if (['-', '_'].includes(event.key)) { event.preventDefault(); zoomAt(state.view.k / 1.25); }
+    else if (event.key === '0') { event.preventDefault(); zoomAt(1); }
   });
 }
