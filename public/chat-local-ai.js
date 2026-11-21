@@ -1,5 +1,6 @@
 import { askConfirm } from './confirm.js';
 import { t } from './i18n.js';
+import { skeletonHtml } from './chat-skeleton.js';
 // Settings, Local AI: models that run on this computer instead of Claude. Ollama downloads and runs them (from its own
 // library or from Hugging Face); any other local server that speaks the OpenAI API can be added by its address.
 // An agent uses one by picking it in its model list, where it shows as "on this computer".
@@ -25,7 +26,7 @@ export async function loadLocalAi({ api }, state) {
 
 export function localAiHtml({ esc }, state) {
   const data = state.localAi;
-  if (!data) return `<p class="muted">${t`Looking for AI on this computer…`}</p>`;
+  if (!data) return skeletonHtml(3);
   if (data.error) return `<p class="error-text">${esc(t(data.error))}</p>`;
   const ollama = data.servers.find(item => item.id === 'ollama'), others = data.servers.filter(item => item.id !== 'ollama');
   const pulls = (data.pulls || []).filter(item => item.state !== 'done');

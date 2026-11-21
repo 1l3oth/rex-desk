@@ -1,5 +1,6 @@
 import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
+import { skeletonHtml } from './chat-skeleton.js';
 // Settings › Storage: what Rex Desk keeps and how much room it takes, here and in the cloud; one-click clean-ups; and a
 // file browser like Explorer or Finder (folders on the left, files on the right) to look, preview, show in folder and delete.
 
@@ -65,7 +66,7 @@ function usageHtml(ctx, box) {
     : (db || files) ? `${cloudRow(t('Cloud database'), db?.used, db?.limit)}${cloudRow(t('Cloud files'), files?.used, files?.limit)}<p class="muted small">${t`Cleaning up here also deletes the cloud copy. The cloud number updates within a few minutes.`}</p>`
     : `<p class="muted small">${t`Cloud backup is off, so nothing is kept in the cloud.`}</p>`;
   return `<section class="sg-card" aria-labelledby="sg-use"><div class="sg-head"><h3 id="sg-use">${t`On this computer`}</h3>${box.data.counting && usage ? `<small class="muted">${t`Updating…`}</small>` : ''}<b class="sg-total">${usage ? size(usage.total) : ''}</b></div>
-    ${!usage ? `<p class="muted">${t`Counting what Rex Desk keeps…`} ${t`This can take a minute on a big desk.`}</p>` : `<svg class="sg-bar" viewBox="0 0 ${Math.max(x, 1).toFixed(1)} 14" preserveAspectRatio="none" role="img" aria-label="${t`What takes the space`}">${bar}</svg><ul class="sg-legend">${legend}</ul>`}
+    ${!usage ? skeletonHtml(3) : `<svg class="sg-bar" viewBox="0 0 ${Math.max(x, 1).toFixed(1)} 14" preserveAspectRatio="none" role="img" aria-label="${t`What takes the space`}">${bar}</svg><ul class="sg-legend">${legend}</ul>`}
     <div class="sg-head sg-cloudhead"><h3>${t`In the cloud`}</h3></div>${cloud}</section>`;
 }
 

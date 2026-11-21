@@ -2722,3 +2722,10 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .settings-pop .st-size button.on{background:var(--panel);box-shadow:0 0 0 1px var(--line)}
 .settings-pop .st-box .st-field:has(>.st-size){display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:20px}
 .settings-pop .st-box .st-field:has(>.st-size)>.st-size{grid-column:2;grid-row:1/span 2}
+
+/* Settings loading skeleton: grey rows in the grouped box, a slow soft pulse, no spinner. */
+.settings-pop .st-skel-row{display:flex;flex-direction:column;gap:7px;min-height:48px;justify-content:center}
+.settings-pop .st-skel i{display:block;height:10px;border-radius:5px;background:var(--line);opacity:.7;animation:st-skel-pulse 1.8s ease-in-out infinite}
+.settings-pop .st-skel .st-skel-b{height:8px;opacity:.45;animation-delay:.15s}
+@keyframes st-skel-pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.settings-pop .st-skel i{animation:none}}

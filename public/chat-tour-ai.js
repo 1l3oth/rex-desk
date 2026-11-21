@@ -1,4 +1,5 @@
 import { t } from './i18n.js';
+import { skeletonHtml } from './chat-skeleton.js';
 // "Choose your AI", in the welcome tour and in Settings, AI accounts: every AI Rex Desk can run agents on, as one list. Each row says in plain
 // words what it needs, whether it is ready on this computer, and has one button to get it ready. Picking a ready row
 // makes it the AI for new agents.
@@ -43,7 +44,7 @@ export function tourAiHtml(ctx, state) {
 }
 // The list itself: one row per AI.
 export function aiListHtml({ ui, esc }, state) {
-  if (!state.ai?.loaded) return `<p class="muted">${t`Checking which AI is ready on this computer…`}</p>`;
+  if (!state.ai?.loaded) return skeletonHtml(3);
   const chosen = ui.snap.config?.provider || 'claude', anyReady = AIS.some(ai => statusOf(ui, state, ai).ready);
   const row = ai => {
     const status = statusOf(ui, state, ai), picked = ai.id === chosen && status.ready, waiting = state.aiWaiting === ai.id;

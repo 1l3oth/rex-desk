@@ -5,6 +5,7 @@ import { pickerHtml } from '/chat-pick.js';
 import { noticeSettingsHtml } from '/chat-notices.js';
 import { voicesFor, chosenVoice, setSpeechEngine } from '/chat-speak.js';
 import { loadFolders, foldersHtml, folderClick, startTour } from '/chat-tour.js';
+import { skeletonHtml } from '/chat-skeleton.js';
 import { trackerDraft, readTrackers, trackersHtml, trackerSources, trackerClick, trackerInput } from '/chat-trackers.js';
 import { runSettingsTour } from '/chat-settings-tour.js';
 import { loadLocalAi, localAiHtml, localAiClick } from '/chat-local-ai.js';
@@ -148,7 +149,7 @@ export function aboutHtml(about, update, checking) {
   const status = !update.supported ? t('Runs from source code and updates with Git.') : update.ready ? t`Version ${e(update.available?.version)} is downloaded and ready.` : update.available ? t`Version ${e(update.available.version)} is on its way.` : update.checkedAt ? t('Up to date.') : t('Not checked yet.');
   const head = `<div class="ab-hero">${ABOUT_MARK}<div><h2>${t`Rex Desk`}</h2><p class="ab-ver">${version ? t`Version ${e(version)}${update.stage ? ` · ${e(update.stage)}` : ''}` : t('Development copy')}</p><p class="ab-status${update.ready || update.available ? ' new' : ''}">${status}</p>
     <div class="ab-actions">${update.supported ? `<button type="button" class="btn small" data-st-update-check ${checking ? 'disabled' : ''}>${checking ? t('Checking…') : t('Check for updates')}</button>` : ''}${update.ready ? `<button type="button" class="btn small primary" data-action="update-install">${t`Install and restart`}</button>` : ''}</div></div></div>`;
-  if (!about) return `${head}<h3>${t`What it holds`}</h3><div class="ab-tiles ab-loading">${'<div class="ab-tile"><b>&nbsp;</b><span>&nbsp;</span></div>'.repeat(5)}</div><p class="muted small">${t`Counting what Rex Desk holds…`}</p>`;
+  if (!about) return `${head}<h3>${t`What it holds`}</h3><div class="ab-tiles ab-loading">${'<div class="ab-tile"><b>&nbsp;</b><span>&nbsp;</span></div>'.repeat(5)}</div>`;
   if (about.error) return `${head}<p class="error-text">${e(t(about.error))}</p>`;
   const c = about.counts || {};
   const tiles = [[t('Agents'), c.agents], [t('Chats'), c.chats], [t('Group chats'), c.rooms], [t('Tasks'), c.tasks], [t('Files from agents'), c.files]]
@@ -201,7 +202,7 @@ export function openSettings(ctx, section = 'general') {
   const githubHtml = () => {
     const github = state.extra.github;
     const head = `<h3>${t`GitHub`}</h3><p class="muted">${t`Pushes, pull requests and clones use the active account. Rex Desk uses the GitHub CLI sign-in and never keeps a GitHub token.`}</p>`;
-    if (!github) return `${head}<p class="muted">${t`Checking GitHub sign-in…`}</p>`;
+    if (!github) return `${head}${skeletonHtml(2)}`;
     if (!github.installed) return `${head}<p class="error-text">${t`The GitHub CLI (gh) is not installed on this computer.`}</p>`;
     const login = github.login, waiting = ['waiting', 'starting'].includes(login?.state);
     const list = github.accounts.map(account => `<li><b>${esc(account.login)}</b>${account.active ? `<span class="muted">${t`Active`}</span>` : account.valid ? `<button type="button" class="btn small quiet" data-st-gh-use="${esc(account.login)}">${t`Use`}</button>` : `<span class="error-text">${t`Sign in again`}</span>`}</li>`).join('');
@@ -324,7 +325,7 @@ export function openSettings(ctx, section = 'general') {
       ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay on this computer: only a Rex Desk account backup keeps them in the cloud.`}</p>` : ''}${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}`; },
     tools: () => {
       const box = state.extra.toolbox, busy = state.extra.toolboxBusy;
-      if (!box) return `<h2>${t`Tools and skills`}</h2><p class="muted">${t`Loading…`}</p>`;
+      if (!box) return `<h2>${t`Tools and skills`}</h2>${skeletonHtml(6)}`;
       const status = (bad, text) => `<span class="tb-status ${bad ? 'bad' : 'ok'}"><i aria-hidden="true"></i>${esc(text)}</span>`;
       const broken = box.servers.filter(item => item.error).length + box.skills.filter(item => item.error).length;
       const row = (title, sub, act, name, extra = '') => `<li class="tb-row"><div class="tb-text"><b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}${extra}</div>${act ? `<button type="button" class="btn small" data-st-tb="${act}" data-name="${esc(name)}"${busy ? ' disabled' : ''}>${t`Remove`}</button>` : ''}</li>`;

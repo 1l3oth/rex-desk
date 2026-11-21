@@ -211,3 +211,20 @@ test('a removed task app stays removed after leaving and returning while the sav
     assert.equal(saved.sources.length, 1, 'the removal survives the interval change');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// While a Settings page waits on the server it shows grey skeleton rows, not a Loading text.
+test('Tools and skills shows a skeleton while it loads', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false });
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    await page.route('**/api/toolbox', () => {}); // never answers
+    await page.goto(`http://127.0.0.1:${app.server.address().port}/`); await page.waitForTimeout(2500);
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => document.querySelector('[data-st-section="tools"]').click()); await page.waitForTimeout(800);
+    assert.ok(await page.locator('.settings-pop .st-skel .st-skel-row').count() >= 3, 'skeleton rows are shown');
+    assert.ok(!/Loading/.test(await page.locator('.settings-pop [data-st-panel]').innerText()), 'no Loading text');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});
