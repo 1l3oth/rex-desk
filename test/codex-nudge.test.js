@@ -71,10 +71,29 @@ test('the rule goes to Codex as developer instructions and at the top of a new t
   assert.equal(resumed.turnInputs()[0], 'Hello again');
 });
 
-test('promise detection', () => {
-  assert.ok(isPromise("I'll get started on that now."));
-  assert.ok(isPromise('Working on it now.'));
-  assert.ok(!isPromise('Shall I continue?'));
-  assert.ok(!isPromise('Here is the summary of the change.'));
-  assert.ok(!isPromise(''));
+test('promise detection: first-person promises about later work', () => {
+  for (const text of ["I'll continue.", "I'm working on it now.", "I'll send it as soon as it's ready.", 'Working on it now.', 'Sure. I will fix the test next.', 'Found the cause in cart.js.\nNext, I’ll patch it.'])
+    assert.ok(isPromise(text), text);
+});
+
+test('promise detection: words inside instructions, UI labels and real answers are not promises', () => {
+  for (const text of ['Click Continue to finish setup.', 'Press "I\'ll do it later" to skip the tour.', 'The bug was a missing await. It is fixed in cart.js and the tests pass.', 'The page shows Working on it while it loads.', "I'll explain: the build failed because Node 22 was used. Switching to Node 24 fixed it.", 'Here is the summary of the change.', ''])
+    assert.ok(!isPromise(text), text);
+});
+
+test('promise detection: questions and requests for the person\'s choice are never nudged', () => {
+  for (const text of ['Shall I continue?', 'Tell me which file you mean', 'Let me know which option you want', "I'll wait. Please confirm the branch", "I'll continue once you choose. Which one should I use"])
+    assert.ok(!isPromise(text), text);
+});
+
+test('a clarification without a question mark gets no nudge', async () => {
+  const fake = fakeCodex([{ say: 'Let me know which option you want' }]);
+  await runner(fake).start('Set it up');
+  assert.equal(fake.turnInputs().length, 1);
+});
+
+test('a UI instruction with Continue in it gets no nudge', async () => {
+  const fake = fakeCodex([{ say: 'Click Continue to finish setup.' }]);
+  await runner(fake).start('How do I finish?');
+  assert.equal(fake.turnInputs().length, 1);
 });
