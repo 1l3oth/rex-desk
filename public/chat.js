@@ -1631,7 +1631,7 @@ function outboxHtml(run, shown) {
     const state = item.local
       ? (old ? t('Not picked up yet. Kept here; send again if needed.') : t('Starting the agent…'))
       : (!item.sent ? t('Sending…') : off ? t`Waiting for ${where} to turn on` : Date.now() - Date.parse(item.at) > 45000 ? t`Still on its way to ${where}…` : t`Sending to ${where}…`);
-    return `<div class="msg mine sending${item.local && old ? ' stuck' : ''}"><div class="bubble"><div class="md">${markdown(spokenText(item.text).text)}</div><div class="send-state">${item.local && old ? '' : '<span class="spin" aria-hidden="true"></span>'}${esc(state)}</div></div></div>`;
+    return `<div class="msg mine sending${item.local && old ? ' stuck' : ''}"><div class="bubble">${(sent => sent.top + `<div class="md">${markdown(spokenText(sent.text).text)}</div>` + sent.html)(attachedFiles(item.text, esc))}<div class="send-state">${item.local && old ? '' : '<span class="spin" aria-hidden="true"></span>'}${esc(state)}</div></div></div>`;
   }).join('');
 }
 // While a message is on its way, the screen looks again every few seconds, so "Still on its way" shows even with no news.

@@ -2828,3 +2828,7 @@ html[data-theme=dark] .ctx-panel{background:linear-gradient(var(--panel),var(--p
 }
 .acct-dialog .acct-body>.or-group,.acct-dialog .acct-body>.or-title,.acct-dialog .acct-body>.or-note,.acct-dialog .acct-body>.or-intro{flex:none}
 .acct-dialog .or-group .or-field input[type=password]{border:0;border-radius:0;background:none;box-shadow:none;padding:0}
+/* Picture viewer on a phone: the whole picture fills the screen and nothing scrolls sideways. */
+.iv{overflow:hidden;overscroll-behavior:none;touch-action:none}
+html:has(.iv[open]){overflow:hidden}
+@media (max-width:700px){.iv-stage{padding:0}.iv-stage img{border-radius:0}}

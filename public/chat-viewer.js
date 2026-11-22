@@ -26,8 +26,10 @@ function draw() {
     <div class="iv-stage" data-iv="backdrop"><img src="${esc(item.src)}" alt="${esc(name)}" data-iv="image" draggable="false"></div>
     ${many ? `<button type="button" class="iv-nav prev" data-iv="prev" aria-label="${t`Previous picture`}">${svg('prev')}</button><button type="button" class="iv-nav next" data-iv="next" aria-label="${t`Next picture`}">${svg('next')}</button>` : ''}`;
 }
+// The pictures a tap can open: in a message, and the thumbnails of attachments and shared media.
+const PICS = 'img.md-media, a.att-thumb img, a.sh-thumb img';
 export function openImage(src, scope = document) {
-  const all = [...scope.querySelectorAll('img.md-media')].map(img => ({ src: img.getAttribute('src'), alt: img.getAttribute('alt') || '' }));
+  const all = [...scope.querySelectorAll(PICS)].map(img => ({ src: img.getAttribute('src'), alt: img.getAttribute('alt') || '' }));
   const list = all.some(item => item.src === src) ? all : [{ src, alt: '' }];
   Object.assign(state, { list, index: Math.max(0, list.findIndex(item => item.src === src)), actual: false });
   state.view = { k: 1, x: 0, y: 0 }; draw(); const dialog = box(); if (!dialog.dataset.gestures) { dialog.dataset.gestures = '1'; wireGestures(dialog); } if (!dialog.open) dialog.showModal();
@@ -82,6 +84,12 @@ function wireGestures(dialog) {
 }
 
 export function wireImageViewer() {
+  // A picture thumbnail opens here, full size, not in the file window. Runs on window so it comes before the file window's own click.
+  window.addEventListener('click', event => {
+    const image = event.target.closest?.('a.att-thumb, a.sh-thumb')?.querySelector('img'); if (!image || image.closest('#img-viewer')) return;
+    event.preventDefault(); event.stopPropagation();
+    openImage(image.getAttribute('src'), image.closest('#feed-inner, .side-body') || document);
+  }, true);
   document.addEventListener('click', event => {
     const image = event.target.closest?.('img.md-media'); if (!image || image.closest('#img-viewer')) return;
     event.preventDefault(); event.stopPropagation();
