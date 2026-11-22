@@ -2764,3 +2764,29 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .cx-logo[data-icon="notion"]{-webkit-mask-image:url(/connectors/notion.svg);mask-image:url(/connectors/notion.svg)}
 .cx-logo[data-icon="telegram"]{-webkit-mask-image:url(/connectors/telegram.svg);mask-image:url(/connectors/telegram.svg)}
 .cx-logo[data-icon="trello"]{-webkit-mask-image:url(/connectors/trello.svg);mask-image:url(/connectors/trello.svg)}
+
+/* Settings on a phone: like the system Settings app. A full-width grouped list; a tap opens one section full screen with a back arrow and title; the close X floats top right. */
+@media (max-width:760px){
+  .settings-pop .st-x{display:grid;place-items:center;position:absolute;z-index:5;top:calc(8px + env(safe-area-inset-top));right:10px;width:34px;height:34px;padding:0;border-radius:50%;background:var(--raised);color:var(--muted);font-size:20px}
+  .settings-pop .st-nav{padding:calc(8px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom))!important;gap:0}
+  .settings-pop .st-nav .st-done{display:none}
+  .settings-pop .st-navhead{margin:0;padding:6px 44px 12px 2px}
+  .settings-pop .st-nav h1{font-size:28px!important;font-weight:700;margin:0!important}
+  .settings-pop .st-guide-btn{align-self:flex-start;margin:0 0 14px;padding:6px 2px;border:0;font-size:15px;color:var(--accent)}
+  .settings-pop .st-group,.settings-pop .st-group+.st-group{margin:0 0 18px;padding:0;border:0;border-radius:12px;background:var(--panel);overflow:hidden;gap:0}
+  .settings-pop .st-nav button[data-st-section],.settings-pop .st-nav button[data-st-go]{min-height:48px;padding:6px 12px!important;border-radius:0!important;background:transparent!important;gap:12px!important}
+  .settings-pop .st-nav button[data-st-section]:active,.settings-pop .st-nav button[data-st-go]:active{background:var(--raised)!important}
+  .settings-pop .st-nav button[data-st-section]:not(:last-child)::after{left:52px;opacity:1}
+  .settings-pop .st-nav button[data-st-section] .st-ic,.settings-pop .st-nav button[data-st-go] .st-ic{width:28px;height:28px;border-radius:7px}
+  .settings-pop .st-nav button[data-st-section] .st-ic svg,.settings-pop .st-nav button[data-st-go] .st-ic svg{width:16px;height:16px}
+  .settings-pop .st-nav button b,.settings-pop .st-nav button[data-st-section] .st-nl b,.settings-pop .st-nav button[data-st-go] .st-nl b{font-size:16px!important;font-weight:400!important}
+  .settings-pop .st-nl small{display:none!important}
+  .settings-pop .st-chev{display:block!important;width:12px;height:12px;opacity:.7}
+  .settings-pop .st-nav button[data-st-go]::after{content:none}
+  .settings-pop .st-nav button[data-st-go]{width:100%}
+  .settings-pop .st-mhead{display:flex;gap:2px;min-height:52px;padding:calc(4px + env(safe-area-inset-top)) 52px 4px 6px}
+  .settings-pop .st-mhead b{flex:1;min-width:0;text-align:left;font-size:18px;font-weight:600}
+  .settings-pop .st-back{padding:8px}
+  .settings-pop .st-back span{display:none}
+  .settings-pop .st-panel{padding:16px 16px calc(24px + env(safe-area-inset-bottom))!important}
+}
