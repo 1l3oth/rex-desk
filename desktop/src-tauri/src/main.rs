@@ -130,6 +130,9 @@ fn badge_dot() -> &'static [u8] {
     })
 }
 
+// Windows (WebView2): the microphone is allowed for Rex Desk's own pages without a prompt that the window never showed,
+// so voice failed with NotAllowedError. Wry's default flags stay. Pop-ups share the main window's browser, so they get the same flags.
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --use-fake-ui-for-media-stream";
 fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::NewWindowFeatures) -> tauri::webview::NewWindowResponse<tauri::Wry> {
     // Rex Desk draws its own window buttons: a button opens https://rexdesk.window/<action>, which never becomes a
     // window; the action is done to the main window instead.
@@ -173,6 +176,7 @@ fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::
     let label = format!("page-{}", OPENED.fetch_add(1, Ordering::Relaxed));
     let built = WebviewWindowBuilder::new(app, label, WebviewUrl::External("about:blank".parse().unwrap()))
         .disable_drag_drop_handler()
+        .additional_browser_args(BROWSER_ARGS)
         .window_features(features)
         .title("Rex Desk")
         .background_color(tauri::window::Color(10, 14, 25, 255))
@@ -538,6 +542,7 @@ fn main() {
             let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 // Dropped files go to the page (attach to a message, open in the file window), not to Tauri (L52).
                 .disable_drag_drop_handler()
+                .additional_browser_args(BROWSER_ARGS)
                 .on_new_window(move |url, features| open_link(&handle, url, features))
                 .initialization_script(if cfg!(target_os = "macos") { "window.__REX_SHELL = 'macos';" } else { "window.__REX_SHELL = 'windows';" })
                 // Dark before the first page paints, so the window never flashes white while Rex Desk starts.

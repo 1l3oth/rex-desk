@@ -708,7 +708,6 @@
  "Jev": "Jev",
  "Jev and voice": "Jev និងសំឡេង",
  "Jev can also rank the issues from Flow or Morningmate by what to fix first. That shows here once you connect one in Task sources.": "Jev ក៏អាចដាក់ចំណាត់ថ្នាក់បញ្ហាពី Flow ឬ Morningmate តាមអ្វីដែលត្រូវជួសជុលមុន។ វាបង្ហាញនៅទីនេះនៅពេលអ្នកតភ្ជាប់មួយក្នុងប្រភពកិច្ចការ។",
- "Jev could not use the microphone. Allow it for this window, then press the microphone again.": "Jev មិនអាចប្រើមីក្រូហ្វូនបានទេ។ អនុញ្ញាតវាសម្រាប់បង្អួចនេះ រួចចុចមីក្រូហ្វូនម្ដងទៀត។",
  "Jev did not find a computer action for that. Try other words.": "Jev រកមិនឃើញសកម្មភាពកុំព្យូទ័រសម្រាប់រឿងនោះទេ។ សាកល្បងពាក្យផ្សេង។",
  "Jev did not find something to do for that. Try other words.": "Jev រកមិនឃើញអ្វីត្រូវធ្វើសម្រាប់រឿងនោះទេ។ សាកល្បងពាក្យផ្សេង។",
  "Jev is working out what to do…": "Jev កំពុងគិតថាត្រូវធ្វើអ្វី…",
@@ -1255,10 +1254,6 @@
  "Rex Desk could not reach its account service to back up files.": "Rex Desk មិនអាចភ្ជាប់ទៅសេវាគណនីរបស់វាដើម្បីបម្រុងទុកឯកសារបានទេ។",
  "Rex Desk could not reach its account service. Check the internet connection and try again.": "Rex Desk មិនអាចភ្ជាប់ទៅសេវាគណនីរបស់វាបានទេ។ ពិនិត្យការតភ្ជាប់អ៊ីនធឺណិត ហើយព្យាយាមម្ដងទៀត។",
  "Rex Desk could not tell which project this issue belongs to. Choose one and start it again.": "Rex Desk មិនអាចប្រាប់ថាបញ្ហានេះជារបស់គម្រោងណាទេ។ ជ្រើសរើសមួយ ហើយចាប់ផ្ដើមម្ដងទៀត។",
- "Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.": "Rex Desk មិនអាចប្រើមីក្រូហ្វូនបានទេ ដូច្នេះរបៀបសំឡេងបានឈប់។ អនុញ្ញាតវា រួចបើករបៀបសំឡេងម្ដងទៀត។",
- "Rex Desk could not use the microphone.": "Rex Desk មិនអាចប្រើមីក្រូហ្វូនបានទេ។",
- "Rex Desk could not use the microphone. Allow it, then press the mic again.": "Rex Desk មិនអាចប្រើមីក្រូហ្វូនបានទេ។ អនុញ្ញាតវា រួចចុចមីក្រូម្ដងទៀត។",
- "Rex Desk could not use the microphone. Allow it, then try again.": "Rex Desk មិនអាចប្រើមីក្រូហ្វូនបានទេ។ អនុញ្ញាតវា រួចព្យាយាមម្ដងទៀត។",
  "Rex Desk data": "ទិន្នន័យ Rex Desk",
  "Rex Desk found your cloud backup. Enter its password and your agents, chats, pictures and settings come back.": "Rex Desk បានរកឃើញការបម្រុងទុកលើពពករបស់អ្នក។ បញ្ចូលពាក្យសម្ងាត់របស់វា នោះភ្នាក់ងារ ការជជែក រូបភាព និងការកំណត់របស់អ្នកនឹងត្រឡប់មកវិញ។",
  "Rex Desk frees memory by itself when it runs low.": "Rex Desk ដោះលែងអង្គចងចាំដោយខ្លួនឯងនៅពេលវាជិតអស់។",
@@ -2524,5 +2519,11 @@
  "Add a skill, command or MCP server": "បន្ថែមជំនាញ ពាក្យបញ្ជា ឬម៉ាស៊ីនមេ MCP",
  "Paste the install line from its page": "បិទភ្ជាប់បន្ទាត់ដំឡើងពីទំព័ររបស់វា",
  "Search the market": "ស្វែងរកក្នុងផ្សារ",
- "Market: skills, commands and MCP servers": "ផ្សារ៖ ជំនាញ ពាក្យបញ្ជា និងម៉ាស៊ីនមេ MCP"
+ "Market: skills, commands and MCP servers": "ផ្សារ៖ ជំនាញ ពាក្យបញ្ជា និងម៉ាស៊ីនមេ MCP",
+ "Microphone blocked (NotAllowedError). Allow it for Rex Desk, and in Windows Settings > Privacy > Microphone turn on \"Let desktop apps access your microphone\".": "មីក្រូហ្វូនត្រូវបានបិទ (NotAllowedError)។ អនុញ្ញាតវាសម្រាប់ Rex Desk ហើយនៅក្នុង Windows Settings > Privacy > Microphone បើក \"Let desktop apps access your microphone\"។",
+ "Microphone blocked (NotAllowedError). Allow it for Rex Desk in your browser or system settings, then try again.": "មីក្រូហ្វូនត្រូវបានបិទ (NotAllowedError)។ អនុញ្ញាតវាសម្រាប់ Rex Desk នៅក្នុងការកំណត់កម្មវិធីរុករក ឬប្រព័ន្ធ រួចសាកម្តងទៀត។",
+ "No microphone found (NotFoundError). Plug one in or pick one in your sound settings, then try again.": "រកមិនឃើញមីក្រូហ្វូន (NotFoundError)។ ដោតមួយ ឬជ្រើសមួយនៅក្នុងការកំណត់សំឡេង រួចសាកម្តងទៀត។",
+ "The microphone is busy (NotReadableError). Close other apps using it, like Zoom or Teams, then try again.": "មីក្រូហ្វូនកំពុងជាប់រវល់ (NotReadableError)។ បិទកម្មវិធីផ្សេងដែលកំពុងប្រើវា ដូចជា Zoom ឬ Teams រួចសាកម្តងទៀត។",
+ "Rex Desk could not use the microphone ({0}). Try again.": "Rex Desk មិនអាចប្រើមីក្រូហ្វូនបានទេ ({0})។ សាកម្តងទៀត។",
+ "Starting the voice engine ({0}s). Voice messages use another engine until it is ready.": "កំពុងចាប់ផ្តើមម៉ាស៊ីនសំឡេង ({0}s)។ សារជាសំឡេងប្រើម៉ាស៊ីនផ្សេងរហូតដល់វារួចរាល់។"
 }

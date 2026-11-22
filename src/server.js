@@ -38,6 +38,8 @@ import { weeklyReport } from './report.js';
 import { Computer } from './computer.js';
 import { Voice } from './voice.js';
 import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
+// How long a voice message waits for the on-computer model to load before another engine answers.
+export const LOCAL_VOICE_WAIT_MS = 20000;
 import { orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { catalog as connectorCatalog, connections as connectionList, connector as connectorOf } from './connectors.js';
 import { loadCatalog, catalogItem, probe as probeConnector, saveConnector, catalogConnections, removeCatalogConnection } from './connector-catalog.js';
@@ -700,7 +702,15 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           if (switched && engine !== 'local') { const started = Date.now(); return json(response, 200, { ...await run(engine, audio), ms: Date.now() - started, fallback: switched }); }
           // An online engine that fails falls back to the on-computer model, and the answer says so.
           if (engine !== 'local') try { const started = Date.now(); return json(response, 200, { ...await run(engine, audio), ms: Date.now() - started }); } catch (error) { if (!engines().local) throw error; return json(response, 200, { ...await voice.transcribe(audio, language), fallback: `${error.message} Used the voice model on this computer instead.` }); }
-          return json(response, 200, await voice.transcribe(audio, language));
+          // The on-computer model gets about 20 seconds. Still loading after that: an online engine that is set up answers at
+          // once while the model keeps loading for next time; with none, a plain "still starting" instead of the engine's log.
+          try { return json(response, 200, await voice.transcribe(audio, language, { waitMs: LOCAL_VOICE_WAIT_MS })); } catch (error) {
+            if (!error.starting) throw error;
+            const other = ['gemini', 'elevenlabs'].find(name => engines()[name]);
+            if (!other) return json(response, 503, { error: 'The voice engine on this computer is still starting. Try again in a moment.', starting: true });
+            const started = Date.now();
+            return json(response, 200, { ...await run(other, audio), ms: Date.now() - started, fallback: `The on-computer voice model is still starting, so ${other === 'gemini' ? 'Gemini' : 'ElevenLabs'} was used.` });
+          }
         }
         // One recording through every engine that is ready, side by side, so the person can hear which one understands them.
         if (url.pathname === '/api/voice/compare' && request.method === 'POST') {
@@ -728,7 +738,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         }
         if (url.pathname === '/api/voice/install' && request.method === 'POST') { void voice.install().then(notify, notify); return json(response, 202, voice.status()); }
         if (url.pathname === '/api/voice/prepare' && request.method === 'POST') return json(response, 200, { ready: await voice.prepare(url.searchParams.get('language') || control.language || 'en') });
-        if (url.pathname === '/api/voice/transcribe' && request.method === 'POST') return json(response, 200, await voice.transcribe(await rawBody(request), url.searchParams.get('language') || control.language || 'en'));
+        if (url.pathname === '/api/voice/transcribe' && request.method === 'POST') { try { return json(response, 200, await voice.transcribe(await rawBody(request), url.searchParams.get('language') || control.language || 'en', { waitMs: LOCAL_VOICE_WAIT_MS })); } catch (error) { if (!error.starting) throw error; return json(response, 503, { error: error.message, starting: true }); } }
         return json(response, 404, { error: 'Unknown computer request.' });
       }
       if (url.pathname === '/api/query' && request.method === 'POST') return json(response, 200, await desk.query.ask((await body(request)).text));

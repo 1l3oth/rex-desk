@@ -1,5 +1,5 @@
 import { t } from './i18n.js';
-import { openMicrophone, startRecorder, transcribe } from './recorder.js';
+import { micProblem, openMicrophone, startRecorder, transcribe } from './recorder.js';
 
 // The Jev bar: a small window that opens over any app (Ctrl+Alt+J), listens, does the command, and closes itself.
 const $ = selector => document.querySelector(selector);
@@ -32,7 +32,7 @@ async function listen() {
   void api(`/voice/prepare?language=${language()}`, { method: 'POST' }).catch(() => {});
   let stream;
   try { stream = await openMicrophone(); }
-  catch { status(t('Jev could not use the microphone. Allow it for this window, then press the microphone again.'), 'error'); return; }
+  catch (error) { status(micProblem(error), 'error'); return; }
   result.innerHTML = '';
   state.recording = startRecorder(stream, { onQuiet: () => void stopListening(), onLevel: level => { meter.style.width = `${Math.min(100, level * 900)}%`; } });
   phase('listening'); status(t('Listening… speak now. Jev sends when you stop talking.'));

@@ -45,7 +45,7 @@ export class Voice {
     const supported = Boolean(engineAsset(this.platform));
     const languages = Object.fromEntries(Object.keys(voiceLanguages).map(language => [language, Boolean(this.serverPath()) && this.modelsReady(modelFor(language))]));
     return { supported, installed: Object.values(languages).every(Boolean), languages, installing: Boolean(this.installing), progress: this.progress, error: this.error,
-      running: [...this.servers.keys()], directory: this.directory, downloadMB: 1900 };
+      running: [...this.servers.keys()], starting: [...this.servers].filter(([, entry]) => !entry.up).map(([key, entry]) => ({ key, seconds: Math.round((Date.now() - entry.since) / 1000) })), directory: this.directory, downloadMB: 1900 };
   }
   // About 1.9 GB: the 24 MB engine, the Khmer model, and the English and Korean model, each with its audio encoder.
   install() {
@@ -87,8 +87,9 @@ export class Voice {
     // One model in memory at a time: each holds about 1 GB.
     for (const other of [...this.servers.keys()]) if (other !== key) this.stop(other);
     // The entry is registered before anything waits, so a second request for the same model shares this start.
-    const entry = { child: null, url: '', log: '' };
-    const tail = lines => entry.log.trim().split('\n').slice(-lines).join(' ').slice(-300);
+    const entry = { child: null, url: '', log: '', since: Date.now(), up: false };
+    // The engine's own log (colour codes and all) goes to the server log only, never into a message for the person.
+    const tail = lines => { const text = entry.log.replace(/\x1b\[[0-9;]*m/g, '').trim().split('\n').slice(-lines).join(' ').slice(-300); if (text) console.warn(`[voice] ${key}: ${text}`); };
     entry.ready = (async () => {
       const files = voiceModels[key], port = await freePort();
       entry.url = `http://127.0.0.1:${port}`;
@@ -102,11 +103,11 @@ export class Voice {
       const deadline = Date.now() + 240000;
       while (Date.now() < deadline) {
         if (entry.stopped) throw new Error('The voice engine was stopped.');
-        if (child.exitCode !== null) throw new Error(`The voice engine stopped: ${tail(2)}`);
-        try { if ((await this.fetcher(`${entry.url}/health`, { signal: AbortSignal.timeout(1000) })).ok) return entry; } catch {}
+        if (child.exitCode !== null) { tail(4); throw new Error('The voice engine on this computer stopped while starting.'); }
+        try { if ((await this.fetcher(`${entry.url}/health`, { signal: AbortSignal.timeout(1000) })).ok) { entry.up = true; return entry; } } catch {}
         await new Promise(resolve => setTimeout(resolve, 300));
       }
-      throw new Error(`The voice engine did not load its model within 4 minutes. ${tail(1)}`.trim());
+      tail(4); throw new Error('The voice engine on this computer did not start.');
     })();
     this.servers.set(key, entry); this.rest(key);
     entry.ready.catch(() => this.stop(key));
@@ -121,13 +122,20 @@ export class Voice {
   stopAll() { for (const key of [...this.servers.keys()]) this.stop(key); }
   // Warm the right model as soon as the person presses the microphone, so the words come back quickly.
   prepare(language = 'en') { return this.server(modelFor(language)).then(() => true); }
-  async transcribe(audio, language = 'en') {
+  // Waits at most waitMs for a model that is still loading. Past that the answer is an error with starting set, so the
+  // server uses another engine at once while this one keeps loading for next time.
+  ready(key, waitMs) {
+    const pending = this.server(key); if (!waitMs) return pending;
+    let timer; const late = new Promise((resolve, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('The voice engine on this computer is still starting.'), { starting: true })), waitMs); timer.unref?.(); });
+    return Promise.race([pending, late]).finally(() => clearTimeout(timer));
+  }
+  async transcribe(audio, language = 'en', { waitMs = 0 } = {}) {
     if (!voiceLanguages[language]) throw new Error('Voice understands Khmer (km), English (en), and Korean (ko).');
     if (!audio?.length) throw new Error('No sound was recorded.');
     // If the Khmer model cannot start on this computer, the base model still tries, and the answer says so.
     let key = modelFor(language), fallback = '';
-    let server = await this.server(key).catch(error => { if (key === 'base') throw error; fallback = error.message; return null; });
-    if (!server) { key = 'base'; server = await this.server(key); }
+    let server = await this.ready(key, waitMs).catch(error => { if (key === 'base' || error.starting) throw error; fallback = error.message; return null; });
+    if (!server) { key = 'base'; server = await this.ready(key, waitMs); }
     const { url } = server;
     const form = new FormData();
     form.append('file', new Blob([audio], { type: 'audio/wav' }), 'command.wav');

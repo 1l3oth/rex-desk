@@ -9,7 +9,7 @@ const ICON = {
   help: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 2.2-2.6 4"/><path d="M12 17h.01"/></svg>',
 };
 import { pickerHtml } from '/chat-pick.js';
-import { openMicrophone, startRecorder, transcribe } from '/recorder.js';
+import { micProblem, openMicrophone, startRecorder, transcribe } from '/recorder.js';
 const KEY = 'rex-desk-input';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
@@ -288,7 +288,7 @@ async function toggleMic(ctx) {
   if (await browserDictate(ctx)) return;
   void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
   let stream;
-  try { stream = await openMicrophone(); } catch { ctx.toast(t('Rex Desk could not use the microphone. Allow it, then press the mic again.'), true); return; }
+  try { stream = await openMicrophone(); } catch (error) { ctx.toast(micProblem(error), true); return; }
   listening = startRecorder(stream, { onQuiet: () => void finishMic(ctx) });
   micButton()?.classList.add('rec');
 }
@@ -324,7 +324,7 @@ function listenLevel(stream) {
   return () => { cancelAnimationFrame(timer); micLevel = 0; stream.getTracks().forEach(track => track.stop()); void context.close(); };
 }
 async function browserTurn(ctx, onState) {
-  let stream; try { stream = await openMicrophone(); } catch { return 'blocked'; }
+  let stream; try { stream = await openMicrophone(); } catch (error) { return { blocked: error }; }
   const stopLevel = listenLevel(stream), recognition = new Recognition();
   // Continuous: on its own the recognition ends a turn at the first breath, cutting the person off mid-sentence. Rex Desk
   // decides the end itself: once something was said, a pause of PAUSE_MS with no new words and a quiet microphone.
@@ -357,11 +357,11 @@ export async function voiceTurn(ctx, { onState = () => {} } = {}) {
   if (browserSpeech !== 'no') {
     const started = await browserTurn(ctx, onState);
     if (started === 'started') return true;
-    if (started === 'blocked') { ctx.toast(t('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.'), true); return false; }
+    if (started?.blocked) { ctx.toast(micProblem(started.blocked), true); return false; }
   }
   void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
   let stream;
-  try { stream = await openMicrophone(); } catch { ctx.toast(t('Rex Desk could not use the microphone, so Voice mode stopped. Allow it, then turn Voice mode on again.'), true); return false; }
+  try { stream = await openMicrophone(); } catch (error) { ctx.toast(micProblem(error), true); return false; }
   onState('listening');
   const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => hearLevel(Math.min(1, level * 6)), longest: 90000, pause: 1800 });
   listening = recording; micButton()?.classList.add('rec');
@@ -397,7 +397,7 @@ async function startHold(ctx) {
   }
   void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
   let stream;
-  try { stream = await openMicrophone(); } catch { hold.active = hold.pending = false; ctx.toast(t('Rex Desk could not use the microphone. Allow it, then try again.'), true); return; }
+  try { stream = await openMicrophone(); } catch (error) { hold.active = hold.pending = false; ctx.toast(micProblem(error), true); return; }
   // While Space is held, quiet does not end the recording; only letting go does (or a minute at most).
   const recording = startRecorder(stream, { onQuiet: () => { if (performance.now() - recording.started > 60000) void finishMic(ctx); } });
   listening = recording; hold.pending = false;
@@ -544,6 +544,7 @@ async function voiceDialog(ctx) {
     const local = info.local || {};
     if (local.supported === false) return t('Not available on this computer.');
     if (local.installing) { const p = local.progress; return !p ? t`Downloading… You can keep working.` : p.sizeMB ? t`Downloading ${p.index} of ${p.total}: ${Math.round(p.receivedMB)} of ${Math.round(p.sizeMB)} MB… You can keep working.` : t`Downloading ${p.index} of ${p.total}… You can keep working.`; }
+    if (local.starting?.length) return t`Starting the voice engine (${local.starting[0].seconds}s). Voice messages use another engine until it is ready.`;
     return `${local.error ? t`Install failed: ${esc(local.error)}. ` : t('Not installed yet. ')}<button type="button" class="btn small" data-v-install>${t`Install (${local.downloadMB || 1900} MB download)`}</button>`;
   };
   let watching = null;
@@ -561,7 +562,7 @@ async function voiceDialog(ctx) {
     const language = voiceLanguage(ctx);
     back.innerHTML = `<form class="dialog vdialog"><h2>${t`Voice`}</h2>
       <label>${t`I speak`}<select data-v-language>${LANG.map(([value, label]) => `<option value="${value}" ${value === language ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
-      <fieldset class="vengines"><legend>${t`Turn speech into text with`}</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] ? hint : key === 'local' ? localHint() : key === 'gemini' ? t('Needs your OpenRouter key: Settings → Jev and voice.') : t('Paste a key below to use it.')}</small></span></label>`).join('')}</fieldset>
+      <fieldset class="vengines"><legend>${t`Turn speech into text with`}</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] && !(key === 'local' && info.local?.starting?.length) ? hint : key === 'local' ? localHint() : key === 'gemini' ? t('Needs your OpenRouter key: Settings → Jev and voice.') : t('Paste a key below to use it.')}</small></span></label>`).join('')}</fieldset>
       <label>${t`ElevenLabs API key`}<span class="vkey"><input type="password" data-v-key autocomplete="off" spellcheck="false" placeholder="${info.available.elevenlabs ? t('Saved. Paste a new key to replace it.') : t('From elevenlabs.io → Profile → API keys')}"><button type="button" class="btn small" data-v-savekey>${t`Save key`}</button>${info.available.elevenlabs ? `<button type="button" class="btn small quiet danger" data-v-dropkey>${t`Remove`}</button>` : ''}</span></label>
       <section class="vcompare"><h3>${t`Which one understands you?`}</h3><p class="muted small">${t`Press Record, say one sentence, then Stop. It goes through every engine that is ready, so you can pick the best. Online engines receive this recording.`}</p>
         <button type="button" class="btn ${recording ? 'danger' : 'primary'}" data-v-record ${busy ? 'disabled' : ''}>${recording ? t('Stop') : busy ? t('Comparing…') : t('Record a sentence')}</button>
@@ -598,6 +599,6 @@ async function voiceDialog(ctx) {
       busy = false; draw(); return;
     }
     try { recording = startRecorder(await openMicrophone(), { onQuiet: () => {} }); results = null; draw(); }
-    catch { toast(t('Rex Desk could not use the microphone.'), true); }
+    catch (error) { toast(micProblem(error), true); }
   });
 }

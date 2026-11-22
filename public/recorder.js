@@ -79,3 +79,14 @@ export async function transcribe(wav, language) {
   if (!result.text) throw new Error(t('No words were recognized. Try again a little closer to the microphone.'));
   return result;
 }
+// Why the microphone did not open, in plain words, from the browser's own error name. The name is also logged, so a
+// report says NotAllowedError or NotFoundError instead of "could not use the microphone".
+export function micProblem(error) {
+  const name = String(error?.name || 'Error');
+  console.warn(`Microphone: ${name}${error?.message ? `: ${error.message}` : ''}`);
+  const windows = /Windows/i.test(navigator.userAgent || '');
+  if (name === 'NotAllowedError' || name === 'SecurityError') return windows ? t('Microphone blocked (NotAllowedError). Allow it for Rex Desk, and in Windows Settings > Privacy > Microphone turn on "Let desktop apps access your microphone".') : t('Microphone blocked (NotAllowedError). Allow it for Rex Desk in your browser or system settings, then try again.');
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return t('No microphone found (NotFoundError). Plug one in or pick one in your sound settings, then try again.');
+  if (name === 'NotReadableError' || name === 'AbortError') return t('The microphone is busy (NotReadableError). Close other apps using it, like Zoom or Teams, then try again.');
+  return t`Rex Desk could not use the microphone (${name}). Try again.`;
+}
