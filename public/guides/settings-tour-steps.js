@@ -32,8 +32,8 @@ export const TOURS = {
     { target: '.st-repo, .st-add', km: 'កំណត់ branch ចាប់ផ្តើម និងកន្លែងផ្ញើ pull request។', en: 'Set where new work starts and where pull requests go. Commands are found for you.' },
   ],
   sources: [
-    { km: 'Task sources៖ កន្លែងដែល task មកពី។', en: 'Task sources: where tasks come from.' },
-    { target: '.st-tracker, [data-tr-add], .st-tip', km: 'Rex Desk មាន task ស្រាប់។ ភ្ជាប់ Flow ឬ Morningmate តែបើក្រុមអ្នកប្រើ។', en: 'Rex Desk tasks are built in. Connect Flow or Morningmate only if your team uses them.' },
+    { km: 'Connectors៖ app ដែលក្រុមអ្នកប្រើរួចហើយ។', en: 'Connectors: the apps your team already uses.' },
+    { target: '[data-cn-add]', km: 'Rex Desk មាន task ស្រាប់។ បន្ថែម app តែបើក្រុមអ្នកប្រើវា។', en: 'Rex Desk tasks are built in. Add an app only if your team uses it.' },
   ],
   jev: [
     { km: 'Jev៖ បញ្ជាកុំព្យូទ័រនេះ ដោយការនិយាយ។', en: 'Jev: control this computer by talking.' },

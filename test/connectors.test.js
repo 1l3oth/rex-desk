@@ -56,7 +56,7 @@ test('the Connectors API lists the picker and what is connected; the old Orbit r
   try {
     const empty = await call('/api/connectors');
     assert.equal(empty.status, 200); assert.deepEqual(empty.body.connections, []); assert.deepEqual(empty.body.accounts, []);
-    assert.ok(empty.body.connectors.some(item => item.id === 'linear' && item.icon === 'linear.svg'));
+    assert.ok(empty.body.connectors.some(item => item.id === 'orbit'));
     assert.equal((await call('/api/orbit/account')).body.connected, false, 'the old account route forwards');
     assert.equal((await call('/api/sources/orbit', 'POST', { apiKey: 'nope' })).status, 400, 'the old key route forwards and checks the key');
     const source = app.store.saveConnection({ type: 'orbit', name: 'Launch', baseUrl: 'https://orbitkh.vercel.app', projectIds: [] });

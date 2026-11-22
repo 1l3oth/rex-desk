@@ -40,6 +40,7 @@ import { Voice } from './voice.js';
 import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
 import { orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { catalog as connectorCatalog, connections as connectionList, connector as connectorOf } from './connectors.js';
+import { loadCatalog, catalogItem, probe as probeConnector, saveConnector, catalogConnections, removeCatalogConnection } from './connector-catalog.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
 import { Awake, keepInMemory } from './awake.js';
@@ -910,8 +911,20 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/connectors' && request.method === 'GET') {
         const config = store.publicConfig(), account = desk.orbitAccount();
         return json(response, 200, { ...connectorCatalog(), connections: connectionList(config).map(item => ({ ...item, hasKey: Boolean(config.sources.find(source => source.id === item.id)?.hasKey) })),
-          accounts: account?.token ? [{ connectorId: 'orbit', since: account.at || '' }] : [] });
+          accounts: account?.token ? [{ connectorId: 'orbit', since: account.at || '' }] : [], catalog: loadCatalog(), links: catalogConnections({ toolbox: desk.toolbox, store }) });
       }
+      // The catalog (connector-catalog.js): check connects for real and saves nothing; add checks again and saves only when it passes.
+      const catalogMatch = url.pathname.match(/^\/api\/connectors\/catalog\/([a-z0-9-]+)(\/probe)?$/);
+      if (catalogMatch && request.method === 'POST') {
+        const item = catalogItem(catalogMatch[1]), input = await body(request).catch(() => ({}));
+        const probed = await probeConnector(item, input);
+        if (catalogMatch[2]) return json(response, 200, probed);
+        if (!probed.ok) return json(response, 400, { error: probed.error || 'It did not connect, so nothing was saved.', probe: probed });
+        const saved = await saveConnector(item, input, { toolbox: desk.toolbox, store, probed }); notify();
+        return json(response, 200, { saved, probe: probed });
+      }
+      const linkMatch = url.pathname.match(/^\/api\/connectors\/links\/([a-z0-9-]+)$/);
+      if (linkMatch && request.method === 'DELETE') { const removed = await removeCatalogConnection(linkMatch[1], { toolbox: desk.toolbox, store }); notify(); return json(response, 200, removed); }
       const connectionMatch = url.pathname.match(/^\/api\/connectors\/([^/]+)(\/sync)?$/);
       if (connectionMatch && !connectorOf(decodeURIComponent(connectionMatch[1]))) {
         const connectionId = decodeURIComponent(connectionMatch[1]), config = store.publicConfig(), source = config.sources.find(item => item.id === connectionId);
@@ -1305,6 +1318,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (/^\/fonts\/[a-z0-9-]+\.woff2$/.test(url.pathname) && existsSync(path.join(root, 'public', url.pathname.slice(1)))) return serveFile(request, response, path.join(root, 'public', url.pathname.slice(1)), { cache: 'public, max-age=604800' });
       // One file per language, { "English text": "Translation" } (see public/i18n.js). Always checked again, so a fix to a word shows at once.
       if (/^\/i18n\/[a-z]{2,3}\.json$/.test(url.pathname) && existsSync(path.join(root, 'public', url.pathname.slice(1)))) return serveFile(request, response, path.join(root, 'public', url.pathname.slice(1)), { cache: 'no-cache' });
+      // Connector brand marks (Simple Icons, CC0) and the connector catalog.
+      if (/^\/connectors\/[a-z0-9-]+\.(?:svg|json)$/.test(url.pathname) && existsSync(path.join(root, 'public', url.pathname.slice(1)))) return serveFile(request, response, path.join(root, 'public', url.pathname.slice(1)), { cache: 'public, max-age=86400' });
       // A page script or style added after this server started is served by its name too, so a server still waiting for
       // agents to finish before it restarts does not leave the page stuck on a missing file.
       // The Settings tours: their steps in public/guides, and the voice of each step in public/guides/voice.

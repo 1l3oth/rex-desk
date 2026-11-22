@@ -69,7 +69,7 @@ test('removing a test sign-in or a connection is saved', async () => {
     await page.evaluate(() => document.querySelector('.settings-pop .st-adv:has([name="ta.0.site"]) > summary').click());
     await page.locator('.settings-pop [data-st-signin-remove]').first().click(); await page.waitForTimeout(800);
     assert.equal((await config()).testAccounts.length, 0, 'the removed sign-in is gone from the saved config');
-    await page.evaluate(() => document.querySelector('[data-st-section="tasks"]').click()); await page.waitForTimeout(800);
+    await page.evaluate(() => document.querySelector('[data-st-section="connectors"]').click()); await page.waitForTimeout(800);
     assert.equal((await config()).sources.length, 1);
     page.on('dialog', dialog => dialog.accept());
     await page.locator('.settings-pop [data-tr-remove]').first().evaluate(button => button.click()); await page.waitForTimeout(500);
@@ -191,7 +191,7 @@ test('a removed task app stays removed after leaving and returning while the sav
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     page.on('dialog', dialog => dialog.accept());
     await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
-    await page.evaluate(() => document.querySelector('[data-st-section="tasks"]').click()); await page.waitForTimeout(800);
+    await page.evaluate(() => document.querySelector('[data-st-section="connectors"]').click()); await page.waitForTimeout(800);
     assert.equal(await page.locator('.settings-pop [data-tr-remove]').count(), 2);
     await page.locator('.settings-pop [data-tr-remove]').first().evaluate(button => button.click()); await page.waitForTimeout(500);
     const confirmButton = page.locator('.dialog-back button.primary, .confirm-pop button.primary').last();
@@ -199,7 +199,7 @@ test('a removed task app stays removed after leaving and returning while the sav
     for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(100);
     assert.ok(held, 'test setup: the removal save is waiting');
     await page.evaluate(() => document.querySelector('[data-st-section="notify"]').click()); await page.waitForTimeout(500);
-    await page.evaluate(() => document.querySelector('[data-st-section="tasks"]').click()); await page.waitForTimeout(800);
+    await page.evaluate(() => document.querySelector('[data-st-section="connectors"]').click()); await page.waitForTimeout(800);
     assert.equal(await page.locator('.settings-pop [data-tr-remove]').count(), 1, 'the removed connection does not come back on screen');
     await page.locator('.settings-pop [name="syncMinutes"]').fill('7');
     await page.waitForTimeout(1200);

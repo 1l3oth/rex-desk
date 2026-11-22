@@ -1,6 +1,6 @@
 import { askConfirm } from './confirm.js';
 import { t } from './i18n.js';
-// Flow and Morningmate connections, edited inside Settings → Task sources (they used to live on the old /classic page).
+// Flow and Morningmate connections, edited inside Settings → Connectors (they used to live on the old /classic page).
 // The cards are a working copy kept in state.trackers, so loading projects or adding a person never loses what was typed.
 const TYPES = { morningmate: [t('Morningmate')], flow: [t('Flow')] };
 const FILTERS = [['active', t('Request and In progress')], ['unfinished', t('All unfinished (includes review and hold)')], ['all', t('All statuses')]];
@@ -50,9 +50,8 @@ export function trackersHtml({ ui, esc }, state, cfg = ui.snap.config) {
       <details><summary class="muted">${t`Status names in the task app`}</summary><p class="muted">${t`The status to set in the task app when work starts, goes to review and is done. Empty leaves the task app as it is.`}</p><div class="st-row">${['working', 'review', 'done'].map(phase => `<label class="st-field"><span>${phase[0].toUpperCase()}${phase.slice(1)}</span><input name="tr.${id}.status.${phase}" value="${esc(source.statusMap?.[phase] || '')}" spellcheck="false"></label>`).join('')}</div></details>
       <button type="button" class="btn small quiet danger" data-tr-remove="${id}">${t`Remove this connection`}</button></details>`;
   };
-  return `<h3>${t`Flow and Morningmate`}</h3><p class="muted">${t`Brings in the tasks assigned to the people you choose, from the projects you pick.`}</p>
-    ${(state.trackers || []).map(card).join('') || `<p class="muted">${t`No Flow or Morningmate connection yet.`}</p>`}
-    <div class="st-actions"><button type="button" class="btn small" data-tr-add="morningmate">${t`+ Add a connection`}</button></div>`;
+  // The cards only; Settings, Connectors adds a new one from its picker (data-tr-add) and puts these under Task trackers.
+  return (state.trackers || []).map(card).join('');
 }
 
 // The sources list to save: Orbit sources as they are, plus the edited Flow and Morningmate cards.

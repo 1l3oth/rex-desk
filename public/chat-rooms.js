@@ -291,10 +291,8 @@ export function tasksStage(ctx) {
   // Each tracker syncs on its own: the arrows beside it, with when it last synced.
   const ago = at => { const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60000); return !at ? 'never synced' : minutes < 1 ? 'synced just now' : minutes < 60 ? t`synced ${minutes} min ago` : minutes < 1440 ? t`synced ${Math.round(minutes / 60)} h ago` : t`synced ${Math.round(minutes / 1440)} d ago`; };
   const connected = sources.map(source => { const sync = syncs.get(source.id), busy = ui.syncing === source.id; return `<div class="tk-srow">${item(source.id, source.type, source.name, count(task => task.sourceId === source.id), sync?.error ? `<span class="dot bad" title="${esc(sync.error)}"></span>` : '')}<button type="button" class="tk-sync${busy ? ' busy' : ''}" data-action="sync-source" data-source="${esc(source.id)}" title="${t`Sync ${esc(source.name)} now · ${esc(sync?.error ? t`last sync failed: ${sync.error}` : ago(sync?.at))}`}" aria-label="${t`Sync ${esc(source.name)}`}" ${busy ? 'disabled' : ''}><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/></svg></button></div>`; }).join('');
-  const missing = [['flow', t('Flow')], ['morningmate', t('Morningmate')], ['orbit', t('Orbit')]].filter(([type]) => !sources.some(source => source.type === type))
-    .map(([type, name]) => type === 'orbit' ? `<button class="tk-connect" data-action="task-connect" data-service="orbit"><span class="src-mark mini orbit" aria-hidden="true">O</span>${t`Connect ${name}`}</button>` : `<button type="button" class="tk-connect" data-action="settings-sources"><span class="src-mark mini ${type}" aria-hidden="true">${name[0]}</span>${t`Connect ${name}`}</button>`).join('');
   const side = `<aside class="tk-side"><h3>${t`Sources`}</h3>${item('all', 'all', t('All tasks'), count(() => true))}${item('local', 'local', t('Rex Desk tasks'), count(task => task.local))}${connected}
-    ${missing ? `<h3>${t`Connect`}</h3>${missing}` : ''}<button class="btn small tk-manage" data-action="task-connect">${t`Manage sources`}</button>
+    <button class="btn small tk-manage" data-action="task-connect">${sources.length ? t('Manage connectors') : t('Add connector')}</button>
     <label class="tk-donebox"><input type="checkbox" data-task-done ${showDone ? 'checked' : ''}> ${t`Show done tasks`}</label></aside>`;
   // Right: add, then the tasks, Rex Desk ones by status and tracker ones by source.
   const projects = ui.memory?.projects || [];
@@ -502,57 +500,9 @@ export function initLocalTasks(ctx) {
   }, true);
 }
 
-// ---------- where tasks come from: Rex Desk (built in), Orbit, Flow, Morningmate ----------
-const SERVICE = { orbit: t('Orbit'), flow: t('Flow'), morningmate: t('Morningmate') };
-function connectionsDialog(ctx, startWith = '') {
-  const { ui, esc, api, toast, refresh } = ctx;
-  document.querySelector('.dialog-back.sources')?.remove();
-  const back = document.createElement('div'); back.className = 'dialog-back sources';
-  const draw = (mode = 'list', editing = null) => {
-    const sources = ui.snap.config?.sources || [], syncs = new Map((ui.snap.sync || []).map(item => [item.sourceId, item]));
-    const row = source => { const sync = syncs.get(source.id); return `<li><span class="src-mark ${esc(source.type)}" aria-hidden="true">${esc((SERVICE[source.type] || '?')[0])}</span><span class="src-text"><b>${esc(source.name)}</b><small>${esc(SERVICE[source.type] || source.type)} · ${sync?.error ? `<span class="bad">${esc(sync.error)}</span>` : sync ? t`${sync.count} tasks` : 'not synced yet'}${source.hasKey ? '' : ' · no key'}</small></span>${source.type === 'orbit' ? `<button type="button" class="btn small" data-src-edit="${esc(source.id)}">${t`Change`}</button>` : ''}<button type="button" class="btn small quiet danger" data-src-remove="${esc(source.id)}">${t`Remove`}</button></li>`; };
-    const list = `<h2>${t`Task sources`}</h2><p class="muted">${t`Agents read tasks from these. Each agent uses only the sources you tick on its card.`}</p>
-      <ul class="src-list"><li><span class="src-mark local" aria-hidden="true">R</span><span class="src-text"><b>${t`Rex Desk tasks`}</b><small>${t`Built in · kept on this computer · ${(ui.snap.tasks || []).filter(task => task.local).length} tasks`}</small></span></li>${sources.map(row).join('')}</ul>
-      <div class="src-add"><span class="muted">${t`Connect another:`}</span><button type="button" class="btn small primary" data-src-new="orbit">${t`Orbit goal (tasks)`}</button><button type="button" class="btn small" data-action="settings-sources">${t`Flow or Morningmate`}</button></div>
-      <h3 class="src-h">${t`Orbit account`}</h3><div class="src-account" data-orbit-account><p class="muted">${t`Checking…`}</p></div>
-      <div class="row"><button type="button" class="btn" data-close>${t`Done`}</button></div>`;
-    const form = `<h2>${editing ? t`Change ${esc(editing.name)}` : t('Connect an Orbit goal')}</h2><p class="muted">${t`Brings one goal's tasks into Tasks. For your goals, notes and knowledge in every agent, use the Orbit account sign-in instead. One Orbit goal per connection. In Orbit open the goal, then Settings → API → Generate Project Key, and paste the key (it starts with dgm_).`}</p>
-      <label>${t`Name`}<input name="name" type="text" maxlength="80" value="${esc(editing?.name || t('Orbit'))}" required></label>
-      <label>${t`Project key`}<input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${editing?.hasKey ? t('Saved. Paste a new key to replace it.') : 'dgm_…'}" ${editing ? '' : 'required'}></label>
-      <label>${t`Bring in`}<select name="statusFilter">${[['active', t('Work that is on: To do, In progress, In review, Blocked')], ['unfinished', t('Everything not done, with the backlog')], ['all', t('Everything, done too')]].map(([value, label]) => `<option value="${value}" ${(editing?.statusFilter || 'active') === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
-      <details><summary>${t`Orbit address`}</summary><label>${t`Address`}<input name="baseUrl" type="url" value="${esc(editing?.baseUrl || 'https://orbitkh.vercel.app')}"></label></details>
-      <div class="row"><button class="btn primary">${editing ? t('Save and sync') : t('Connect and sync')}</button><button type="button" class="btn" data-src-back>${t`Back`}</button></div>`;
-    back.innerHTML = `<form class="dialog src-dialog" data-mode="${mode}" ${editing ? `data-id="${esc(editing.id)}"` : ''}>${mode === 'list' ? list : form}</form>`;
-    (back.querySelector('input[name=apiKey]') || back.querySelector('button'))?.focus();
-  };
-  draw(startWith ? 'form' : 'list'); document.body.append(back); void drawOrbitAccount(ctx, back);
-  back.addEventListener('click', async event => {
-    const target = event.target;
-    if (target === back || target.closest('[data-close]')) { back.remove(); return; }
-    if (target.closest('[data-src-back]')) { draw(); void drawOrbitAccount(ctx, back); return; }
-    if (target.closest('[data-orbit-signin]')) { void orbitSignIn(ctx, back); return; }
-    if (target.closest('[data-orbit-signout]')) { await api('/orbit/account', { method: 'DELETE' }); void drawOrbitAccount(ctx, back); return; }
-    const create = target.closest('[data-src-new]'); if (create) { draw('form'); return; }
-    const edit = target.closest('[data-src-edit]'); if (edit) { draw('form', (ui.snap.config?.sources || []).find(item => item.id === edit.dataset.srcEdit)); return; }
-    const remove = target.closest('[data-src-remove]');
-    if (remove) {
-      const source = (ui.snap.config?.sources || []).find(item => item.id === remove.dataset.srcRemove);
-      if (!source || !await askConfirm(t`Remove ${source.name}? Its tasks leave the list; nothing changes in ${SERVICE[source.type] || 'the task app'}.`)) return;
-      try { await api(`/sources/${encodeURIComponent(source.id)}`, { method: 'DELETE' }); await refresh({ full: true }); draw(); } catch (error) { toast(error.message, true); }
-    }
-  });
-  back.addEventListener('submit', async event => {
-    event.preventDefault(); const form = event.target; if (form.dataset.mode !== 'form') return;
-    const data = Object.fromEntries(new FormData(form)), button = form.querySelector('.btn.primary');
-    button.disabled = true; button.textContent = t('Checking the key…');
-    try {
-      const result = await api('/sources/orbit', { method: 'POST', data: { ...data, id: form.dataset.id || '' } });
-      toast(result.sync?.error ? t`Connected, but the sync failed: ${result.sync.error}` : t`${result.source.name}: ${result.sync?.count ?? 0} tasks brought in.`, Boolean(result.sync?.error));
-      await refresh({ full: true }); draw();
-    } catch (error) { toast(error.message, true); button.disabled = false; button.textContent = form.dataset.id ? t('Save and sync') : t('Connect and sync'); }
-  });
-}
-document.addEventListener('click', event => { const button = event.target.closest?.('[data-action="task-connect"]'); if (!button) return; event.stopPropagation(); const ctx = window.__rexCtx; if (ctx) connectionsDialog(ctx, button.dataset.service || ''); }, true);
+// ---------- where tasks come from: Rex Desk (built in), and the connected apps (Settings, Connectors) ----------
+const SERVICE = { orbit: 'Orbit', flow: 'Flow', morningmate: 'Morningmate' };
+document.addEventListener('click', event => { const button = event.target.closest?.('[data-action="task-connect"]'); if (!button) return; event.stopPropagation(); const ctx = window.__rexCtx; if (ctx) ctx.openSettings('connectors'); }, true);
 
 // Media, Files and Links tabs, each with how many there are.
 export function sharedTabButtons(shared, tab, action = 'side-tab', pinned = 0) {
@@ -571,12 +521,9 @@ function connectorsHtml(ctx, tasks) {
     const sync = syncs.get(source.id);
     cards.push(card({ id: source.id, mark: source.type, name: source.name, kind: SERVICE[source.type] || source.type,
       detail: sync?.error ? t(sync.error) : `${SERVICE[source.type] || source.type} · ${many(source.id)}${sync?.at ? '' : ' · not synced yet'}`, bad: Boolean(sync?.error),
-      action: source.type === 'orbit' ? `<button type="button" class="btn small quiet" data-action="task-connect">${t`Manage`}</button>` : `<button type="button" class="btn small quiet" data-action="settings-sources">${t`Manage`}</button>` }));
+      action: `<button type="button" class="btn small quiet" data-action="task-connect">${t`Manage`}</button>` }));
   }
-  for (const [type, hint] of [['flow', t('Issues assigned to you in Flow')], ['morningmate', t('Issues assigned to you in Morningmate')], ['orbit', t('Tasks of an Orbit goal')]])
-    if (!sources.some(source => source.type === type)) cards.push(card({ id: '', mark: type, name: SERVICE[type], kind: SERVICE[type], detail: hint,
-      action: type === 'orbit' ? `<button type="button" class="btn small primary" data-action="task-connect" data-service="orbit">${t`Connect`}</button>` : `<button type="button" class="btn small primary" data-action="settings-sources">${t`Connect`}</button>` }));
-  return `<section class="cn"><div class="cn-head"><h2>${t`Connectors`}</h2><button type="button" class="btn small" data-action="task-connect">${t`Manage sources`}</button></div><div class="cn-grid">${cards.join('')}</div></section>`;
+  return `<section class="cn"><div class="cn-head"><h2>${t`Connectors`}</h2><button type="button" class="btn small" data-action="task-connect">${sources.length ? t('Manage connectors') : t('Add connector')}</button></div><div class="cn-grid">${cards.join('')}</div></section>`;
 }
 
 // ---------- away mode: the agents keep going while you are away ----------
@@ -608,26 +555,3 @@ document.addEventListener('click', async event => {
 
 document.addEventListener('change', event => { if (!event.target.matches?.('[data-task-done]')) return; const ctx = window.__rexCtx; if (!ctx) return; ctx.ui.taskDone = event.target.checked; ctx.render(); });
 
-// The Orbit account (goals, notes, knowledge for every agent): sign in once with a short code approved on Orbit.
-async function drawOrbitAccount(ctx, back) {
-  const box = back.querySelector('[data-orbit-account]'); if (!box) return;
-  const account = await ctx.api('/orbit/account').catch(() => ({ connected: false }));
-  box.innerHTML = account.connected
-    ? `<p><span class="dot good"></span> ${t`Connected since ${ctx.esc(new Date(account.since).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }))}. Every agent can search and read your Orbit goals, notes and knowledge.`}</p><button type="button" class="btn small quiet danger" data-orbit-signout>${t`Disconnect`}</button>`
-    : `<p class="muted">${t`Give every agent your Orbit goals, notes and knowledge (search, read, add notes). You approve it once in Orbit; no key to copy.`}</p><button type="button" class="btn small primary" data-orbit-signin>${t`Sign in to Orbit`}</button>`;
-}
-async function orbitSignIn(ctx, back) {
-  const box = back.querySelector('[data-orbit-account]'); if (!box) return;
-  try {
-    const login = await ctx.api('/orbit/account/start', { method: 'POST', data: {} });
-    box.innerHTML = `<p>${t`Open Orbit and approve this code:`}</p><p class="orbit-code">${ctx.esc(login.userCode)}</p><p><a class="btn small primary" href="${ctx.esc(login.url)}" target="_blank" rel="noopener noreferrer">${t`Open Orbit to approve`}</a> <span class="muted small">${t`Waiting for you to approve…`}</span></p>`;
-    window.open(login.url, '_blank', 'noopener');
-    const until = Date.now() + login.expiresIn * 1000;
-    while (Date.now() < until && document.body.contains(box)) {
-      await new Promise(resolve => setTimeout(resolve, login.interval * 1000));
-      const result = await ctx.api('/orbit/account/poll', { method: 'POST', data: {} });
-      if (result.connected) { ctx.toast(t('Orbit connected. Agents can use your goals and notes from their next reply.')); return drawOrbitAccount(ctx, back); }
-    }
-    if (document.body.contains(box)) box.innerHTML = `<p class="bad">${t`The code expired before it was approved.`}</p><button type="button" class="btn small" data-orbit-signin>${t`Try again`}</button>`;
-  } catch (error) { ctx.toast(error.message, true); void drawOrbitAccount(ctx, back); }
-}

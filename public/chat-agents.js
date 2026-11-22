@@ -3,6 +3,7 @@ import { t, locale } from './i18n.js';
 import { notesSection, notesAction, exportNotes } from './chat-notes.js';
 import { pickerHtml } from '/chat-pick.js';
 import { whereHtml } from '/chat-where.js';
+import { connectorName } from '/chat-connectors.js';
 // Specialist agents: one identity per project. The card shows who the agent is and what it was told; the person can rename, edit or duplicate it.
 const providerName = name => name === 'codex' ? t('Codex') : name === 'gemini' ? t('Gemini (Antigravity)') : t('Claude Code');
 
@@ -37,7 +38,7 @@ export function agentStage(ctx, id = (ctx.ui.profileId || ctx.ui.view.id)) {
   const block = (body, extra = '') => `<div class="agp-r agp-block${extra}">${body}</div>`;
   const group = (title, rows, note = '', extra = '') => `<section class="agp-grp${extra}">${title ? `<h2 class="agp-gh">${title}</h2>` : ''}<div class="agp-list">${rows}</div>${note ? `<p class="agp-note">${note}</p>` : ''}</section>`;
   const toggle = (attrs, on, label) => `<label class="switch agp-switch"><input type="checkbox" role="switch" ${attrs} ${on ? 'checked' : ''} aria-label="${label}"><span></span></label>`;
-  const chosen = new Set(agent.taskSources || []), options = [['local', t('Rex Desk tasks'), t('Kept here, made by you or the agents')], ...(ui.snap.config?.sources || []).map(source => [source.id, source.name, source.type === 'flow' ? t('Flow tasks') : t('Morningmate tasks')])];
+  const chosen = new Set(agent.taskSources || []), options = [['local', t('Rex Desk tasks'), t('Kept here, made by you or the agents')], ...(ui.snap.config?.sources || []).map(source => [source.id, source.name, t`${connectorName(source.type)} tasks`])];
   const taskSources = group(t('Tasks come from'), options.map(([id, label, hint]) => row(esc(label), toggle(`data-task-source="${esc(id)}"`, chosen.has(id), esc(label)), esc(hint))).join(''),
     chosen.size ? '' : t`Not set. ${esc(agent.name)} asks you before it looks for tasks.`);
   // The agent's own loop: how often it looks at its tasks by itself, and what it does on each look.

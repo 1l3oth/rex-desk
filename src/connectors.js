@@ -1,6 +1,7 @@
-// Connectors: every outside app Rex Desk can link to (task trackers, chat, code hosts, docs) is one entry in CONNECTORS,
+// Connectors: the task trackers Rex Desk syncs natively (Orbit, Flow, Morningmate) are the entries in CONNECTORS,
 // with the same shape, so the Settings page, sync, status pushes and run prompts loop over what is connected and never
-// name an app themselves. A person who connects nothing sees none of them.
+// name an app themselves. Every other app (MCP servers, tokens, webhooks) is in public/connectors/catalog.json and
+// connector-catalog.js, checked by a real connect before it is saved. A person who connects nothing sees none of them.
 //
 // One connection is saved as { id, connectorId, name, enabled, secretRef, options }. The task trackers still keep their rows
 // in config.sources (that is what sync, the task list and every agent's task-source picks read), so a connection is a view
@@ -23,18 +24,6 @@ export const CONNECTORS = [
   entry('orbit', 'Orbit', 'tasks', 'letter:O', 'key', ['tasks', 'statuses', 'comments', 'report', 'mcpTools'], { ready: true, fields: ['apiKey', 'baseUrl', 'statusFilter', 'sendReport'], keyHint: 'Orbit: open the goal, then Settings, API, Generate Project Key.', account: 'device' }),
   entry('flow', 'Flow', 'tasks', 'letter:F', 'key', ['tasks', 'statuses', 'runPresets'], { ready: true, fields: ['apiKey', 'baseUrl', 'projectIds', 'userId', 'statusFilter', 'statusMap'] }),
   entry('morningmate', 'Morningmate', 'tasks', 'letter:M', 'key', ['tasks', 'statuses', 'runPresets'], { ready: true, fields: ['apiKey', 'baseUrl', 'projectIds', 'userId', 'statusFilter', 'statusMap'] }),
-  entry('linear', 'Linear', 'tasks', 'linear.svg', 'mcp', ['mcpTools'], { url: 'https://linear.app' }),
-  entry('jira', 'Jira', 'tasks', 'jira.svg', 'mcp', ['mcpTools'], { url: 'https://www.atlassian.com/software/jira' }),
-  entry('asana', 'Asana', 'tasks', 'asana.svg', 'mcp', ['mcpTools'], { url: 'https://asana.com' }),
-  entry('trello', 'Trello', 'tasks', 'trello.svg', 'key', ['mcpTools'], { keyUrl: 'https://trello.com/app-key' }),
-  entry('clickup', 'ClickUp', 'tasks', 'clickup.svg', 'key', ['mcpTools'], { keyUrl: 'https://app.clickup.com/settings/apps' }),
-  entry('slack', 'Slack', 'chat', 'letter:S', 'mcp', ['mcpTools']),
-  entry('discord', 'Discord', 'chat', 'discord.svg', 'key', ['notify'], { keyHint: 'A webhook URL from the channel settings, Integrations.' }),
-  entry('telegram', 'Telegram', 'chat', 'telegram.svg', 'key', ['notify'], { keyUrl: 'https://t.me/BotFather' }),
-  entry('github', 'GitHub', 'code', 'github.svg', 'device', ['mcpTools']),
-  entry('gitlab', 'GitLab', 'code', 'gitlab.svg', 'key', ['mcpTools'], { keyUrl: 'https://gitlab.com/-/user_settings/personal_access_tokens' }),
-  entry('notion', 'Notion', 'docs', 'notion.svg', 'mcp', ['mcpTools'], { url: 'https://www.notion.so' }),
-  entry('confluence', 'Confluence', 'docs', 'confluence.svg', 'mcp', ['mcpTools'], { url: 'https://www.atlassian.com/software/confluence' }),
 ];
 export const connector = id => CONNECTORS.find(item => item.id === id) || null;
 // What the window needs to draw the picker: no code, no secrets.

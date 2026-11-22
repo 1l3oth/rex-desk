@@ -7,6 +7,7 @@ import { voicesFor, chosenVoice, setSpeechEngine } from '/chat-speak.js';
 import { loadFolders, foldersHtml, folderClick, startTour } from '/chat-tour.js';
 import { skeletonHtml } from '/chat-skeleton.js';
 import { trackerDraft, readTrackers, trackersHtml, trackerSources, trackerClick, trackerInput } from '/chat-trackers.js';
+import { connectorsHtml, connectorsClick, connectorsChange, loadConnectors } from '/chat-connectors.js';
 import { runSettingsTour } from '/chat-settings-tour.js';
 import { loadLocalAi, localAiHtml, localAiClick } from '/chat-local-ai.js';
 import { loadTourAi, aiListHtml, tourAiClick } from '/chat-tour-ai.js';
@@ -66,19 +67,19 @@ const SECTIONS = [
   ['agents', t('Agents'), t('How many, mode, branches')],
   ['tools', t('Tools and skills'), t('MCP servers, skills, commands')],
   ['projects', t('Projects'), t('Repositories and test sign-ins')],
-  ['tasks', t('Tasks'), t('Task sources and schedule')],
+  ['connectors', t('Connectors'), t('Task apps, chat, code and docs')],
   ['backup', t('Account and backup'), t('Plan, cloud copy, devices')],
   ['storage', t('Storage'), t('Space used and folders')],
   ['about', t('About'), t('Version and updates')],
 ];
 // Each section is one or more panels. The old section names still open the right page.
-const PARTS = { general: ['general'], notify: ['notify'], jev: ['jev'], ai: ['accounts', 'localai'], agents: ['agents'], tools: ['tools'], projects: ['projects', 'signins'], tasks: ['sources', 'schedule'], backup: ['backup'], storage: ['storage', 'folders'], about: ['about'] };
-const ALIAS = { accounts: 'ai', localai: 'ai', signins: 'projects', sources: 'tasks', schedule: 'tasks', plan: 'backup', devices: 'backup', folders: 'storage' };
+const PARTS = { general: ['general'], notify: ['notify'], jev: ['jev'], ai: ['accounts', 'localai'], agents: ['agents'], tools: ['tools'], projects: ['projects', 'signins'], connectors: ['sources', 'schedule'], backup: ['backup'], storage: ['storage', 'folders'], about: ['about'] };
+const ALIAS = { accounts: 'ai', localai: 'ai', signins: 'projects', tasks: 'connectors', sources: 'connectors', schedule: 'connectors', plan: 'backup', devices: 'backup', folders: 'storage' };
 const SAVE_PARTS = ['general', 'agents', 'accounts', 'projects', 'sources', 'jev', 'schedule', 'signins'];
 const GROUPS = [
   [t('You'), ['general', 'notify', 'jev']],
   [t('Agents'), ['ai', 'agents', 'tools']],
-  [t('Work'), ['projects', 'tasks']],
+  [t('Work'), ['projects', 'connectors']],
   [t('This computer'), ['backup', 'storage', 'about']],
 ];
 // An icon for each section, shown in the phone's list of sections.
@@ -91,6 +92,7 @@ const ST_ICON = {
   notify: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
   agents: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 14.5a5 5 0 0 1 5.5 5"/>',
   ai: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+  connectors: '<path d="M9 7V4M15 7V4M7 7h10v4a5 5 0 0 1-10 0zM12 16v4"/>',
   tasks: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/>',
   accounts: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2.2"/><path d="M5.5 16a3.6 3.6 0 0 1 7 0M14 10h4M14 13.5h3"/>',
   localai: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
@@ -251,8 +253,7 @@ export function openSettings(ctx, section = 'general') {
       ${field(t('New agents and chats start in'), `<select name="defaultMode">${[['bypassPermissions', t('Dangerous: run everything without asking')], ['auto', t('Auto: safe steps run, risky ones ask')], ['acceptEdits', t('Accept edits: edit files freely, ask before commands')], ['manual', t('Ask first: ask before each step')], ['plan', t('Plan: plan only, change nothing')]].map(([value, label]) => `<option value="${value}" ${(config().defaultMode || 'bypassPermissions') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`, t('Used when you have not picked a mode for a chat. An AI without that mode asks first instead. You can still change the mode under the message box.'))}
       ${check('autonomy', config().autonomy !== false, t('Let agents act on their own'), t('They start work and open draft pull requests without asking you each time. Nothing is ever merged. Off: they ask first.'))}
       ${check('saver', config().saver !== false, t('Save my Claude usage'), t('Room chat and Away mode check-ins run on Sonnet, which uses much less of your Claude plan. Code changes, personal chats and Rex Agent keep the model you chose. An agent with its own model always uses it.'))}
-      ${field(t('Start a fresh chat at'), `<select name="handoffTokens">${[[150000, '150k'], [200000, '200k'], [300000, '300k'], [0, t('Off')]].map(([value, label]) => `<option value="${value}"${Number(config().handoffTokens ?? 200000) === value ? ' selected' : ''}>${label}</option>`).join('')}</select>`, t('When a chat holds this many tokens, the agent writes a short handoff and carries on in a fresh chat. Every step re-sends the whole chat, so smaller uses much less of your plan.'))}
-      ${hasOrbit() ? check('reportToOrbit', config().reportToOrbit, t('Let agents send their final report to Orbit'), t('Through your Orbit connection.')) : ''}`,
+      ${field(t('Start a fresh chat at'), `<select name="handoffTokens">${[[150000, '150k'], [200000, '200k'], [300000, '300k'], [0, t('Off')]].map(([value, label]) => `<option value="${value}"${Number(config().handoffTokens ?? 200000) === value ? ' selected' : ''}>${label}</option>`).join('')}</select>`, t('When a chat holds this many tokens, the agent writes a short handoff and carries on in a fresh chat. Every step re-sends the whole chat, so smaller uses much less of your plan.'))}`,
     accounts: () => `<h2>${t`AI accounts`}</h2>${field(t('Default model'), pickerHtml(ctx, { id: 'st-model', name: 'model', label: t('Default model'), value: config().models?.claude || '', items: [{ value: '', label: t('Claude Code default') }, ...(ui.snap.choices?.models || []).map(model => ({ value: model.id, label: model.label }))] }), t('An agent can have its own model on its card.'))}<p class="muted">${t`The AI your agents think with. Press Set up or Sign in on one: Rex Desk installs what is missing, then opens the sign-in in your browser. Use this picks the one new agents use.`}</p>${aiListHtml(ctx, state)}
       <h3>${t`More accounts`}</h3><p class="muted">${t`Add a second account of the same AI, switch between them, and see how much of each plan is used.`}</p>${tip('accounts', t('One account is enough to start. Add a second only if you often hit the usage limit.'))}<button type="button" class="btn" data-st-open="accounts">${t`Manage accounts`}</button>`,
     localai: () => `<h2>${t`Local AI`}</h2>${localAiHtml(ctx, state)}`,
@@ -284,11 +285,10 @@ export function openSettings(ctx, section = 'general') {
         <div class="st-add"><input data-st-repo-path placeholder="${t`A folder, like D:\\dev\\my-app, or owner/name on GitHub to clone`}" spellcheck="false" aria-label="${t`Folder of a project, or a GitHub project to copy here`}"><button type="button" class="btn small" data-st-repo-pick>${t`Browse…`}</button><button type="button" class="btn small primary" data-st-repo-add>${t`Add`}</button></div>
         ${githubHtml()}`;
     },
-    sources: () => `<h2>${t`Task sources`}</h2><p class="muted">${t`Where tasks come from. Rex Desk tasks are built in, so you need nothing here to start.`}</p>
-      ${tip('sources', t('Only connect a task app your team already uses, like Flow, Morningmate or Orbit. Pick just the projects you work on, so agents see your tasks and nothing else.'))}
-      ${hasTracker() || hasOrbit() ? field(t('Check for new tasks every'), `<span class="st-unit">${input('syncMinutes', config().syncMinutes, 'type="number" min="0" max="1440"')}<em>${t`minutes`}</em></span>`, t('0 checks only when you press Sync.')) : ''}
-      ${hasOrbit() ? `<ul class="st-list">${(config().sources || []).filter(source => source.type === 'orbit').map(source => `<li><b>${esc(source.name)}</b><span class="muted">${esc(source.type)}${source.hasKey ? '' : ' · no key'}</span></li>`).join('')}</ul>` : ''}
-      ${hasTracker() || (state.trackers || []).length ? trackersHtml(ctx, state, config()) : `<p class="muted">${t`No task app is connected. Connect one from the task list in the main window.`}</p>`}`,
+    // Connectors (chat-connectors.js): empty until the person adds one; Flow and Morningmate keep their own cards under Task trackers.
+    sources: () => connectorsHtml(ctx, state, config(), {
+      trackers: (state.trackers || []).length ? trackersHtml(ctx, state, config()) : '',
+      syncField: (config().sources || []).length ? field(t('Check for new tasks every'), `<span class="st-unit">${input('syncMinutes', config().syncMinutes, 'type="number" min="0" max="1440"')}<em>${t`minutes`}</em></span>`, t('0 checks only when you press Sync.')) : '' }),
     jev: () => `<h2>${t`Jev and voice`}</h2>
       ${tip('jev', t('Talk to Jev to run this computer by voice: open apps, change volume, read the screen. Keep "Ask me before shutting down" on.'))}
       ${field(t('OpenRouter key'), `<input type="password" name="jev.apiKey" autocomplete="off" spellcheck="false" placeholder="${config().jev?.hasKey ? t('Saved. Paste a new key to replace it.') : 'sk-or-…'}">`, t('Optional. For issue ranking and the Gemini voice engine. Kept locked on this computer and sent only to OpenRouter.'))}
@@ -305,7 +305,7 @@ export function openSettings(ctx, section = 'general') {
       ${field(t('Voice language'), `<select name="control.language">${LANGS.map(([value, label]) => `<option value="${value}" ${(config().control?.language || 'en') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
       ${speechBlock()}
       <div class="st-actions"><button type="button" class="btn" data-st-open="voice">${t`Voice engine and compare`}</button></div>`,
-    schedule: () => { const schedule = config().schedule || {}; const days = schedule.days || [1, 2, 3, 4, 5]; if (!hasTracker() && !hasOrbit()) return ''; return `<h2>${t`Schedule`}</h2><p class="muted">${t`At the set time Rex Desk looks for new tasks, Rex Agent sorts them, and agents start work up to your daily limit. Questions wait in Needs you.`}</p>
+    schedule: () => { if (state.extra.connectorPick) return ''; const schedule = config().schedule || {}; const days = schedule.days || [1, 2, 3, 4, 5]; if (!hasTracker() && !hasOrbit()) return ''; return `<h2>${t`Schedule`}</h2><p class="muted">${t`At the set time Rex Desk looks for new tasks, Rex Agent sorts them, and agents start work up to your daily limit. Questions wait in Needs you.`}</p>
       ${tip('schedule', t('Set it for when you start your day, with a small limit like 3 runs. You come back to finished work and a short list of questions.'))}
       ${check('schedule.enabled', schedule.enabled, t('Start work on its own on a schedule'))}
       <div class="st-row">${field(t('Time'), input('schedule.time', schedule.time || '09:00', 'type="time"'))}${field(t('Most runs a day'), input('schedule.maxRuns', schedule.maxRuns || 6, 'type="number" min="1" max="20"'), t('Runs use your Claude plan.'))}</div>
@@ -354,10 +354,11 @@ export function openSettings(ctx, section = 'general') {
   const sectionHtml = () => {
     const parts = PARTS[state.section], label = (SECTIONS.find(([id]) => id === state.section) || [])[1] || '';
     if (parts.length === 1) return panels[parts[0]]();
-    return `<h2>${label}</h2>` + parts.map(part => panels[part]().replace(/<h2>([^]*?)<\/h2>/, (_, heading) => `<h3 class="st-part" data-st-part-${part}>${heading}</h3>`)).join('');
+    return `<h2>${label}</h2>` + parts.map(part => panels[part]().replace(/<h2>([^]*?)<\/h2>/, (_, heading) => heading === label ? '' : `<h3 class="st-part" data-st-part-${part}>${heading}</h3>`)).join('');
   };
   const draw = () => {
     if (has('backup') && !state.extra.billing && !state.extra.billingLoading) { state.extra.billingLoading = true; void api('/billing').then(data => { state.extra.billing = data; state.extra.billingLoading = false; draw(); }).catch(() => { state.extra.billing = { signedIn: false }; state.extra.billingLoading = false; draw(); }); }
+    if (has('sources') && !state.extra.connectors) void loadConnectors(ctx, state, draw);
     if (has('tools') && !state.extra.toolbox && !state.extra.toolboxLoading) { state.extra.toolboxLoading = true; void api('/toolbox').then(data => { state.extra.toolbox = data; draw(); }).catch(error => { state.extra.toolbox = { servers: [], skills: [], commands: [], hooks: [] }; toast(error.message, true); draw(); }); }
     // A redraw of the same section keeps the place the person scrolled to (ticking a box used to jump back to the top).
     // The list of sections on the left always keeps its place: picking one lower down used to jump the list back to the top.
@@ -453,6 +454,7 @@ export function openSettings(ctx, section = 'general') {
       const section = target.closest('[data-st-section]'); if (section) { await goSection(section.dataset.stSection); return; }
       if (target.closest('[data-st-about-refresh]')) { state.extra.about = null; draw(); await loadAbout(true); return; }
       const copyPath = target.closest('[data-st-copy-path]'); if (copyPath) { await navigator.clipboard.writeText(copyPath.dataset.stCopyPath); toast(t('Copied.')); return; }
+      if (await connectorsClick(ctx, state, target, back, draw)) return;
       if (await trackerClick(ctx, state, target, back, draw)) { if (target.closest('[data-tr-remove]') && has('sources')) await save(true); return; }
       if (await folderClick(ctx, state, target, draw)) return;
       if (has('localai') && await localAiClick(ctx, state, target, draw)) return;
@@ -594,7 +596,7 @@ export function openSettings(ctx, section = 'general') {
     if (has('storage') && storageInput(ctx, state, event, draw)) return;
     trackerInput(back, state, event, draw);
   });
-  back.addEventListener('change', event => { trackerInput(back, state, event, draw); });
+  back.addEventListener('change', event => { if (event.target.closest?.('[data-cn-report], [data-cn-field]')) { void connectorsChange(ctx, state, event.target, draw); return; } trackerInput(back, state, event, draw); });
   back.addEventListener('toggle', event => { const card = event.target.dataset?.trCard; if (card && event.target.open) state.openTracker = card; }, true);
   // A backup part saves at once; turning one off asks first, because it deletes that part from the cloud.
   back.addEventListener('change', async event => {
