@@ -19,7 +19,7 @@ import { monitorStage, monitorAction } from '/chat-monitor.js';
 import { netStage, loadNet, wireNet, NET_ICON } from '/chat-net.js';
 import { worktreesStage, fillWorktreeEmbeds, wireWorktrees, wireChatSwitch, WORKTREE_ICON, chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
-import { openSettings } from '/chat-settings.js';
+import { openSettings, SETTINGS_GEAR } from '/chat-settings.js';
 import { maybeStartTour } from '/chat-tour.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
 import { wireAgentCards } from '/chat-card.js';
@@ -1563,7 +1563,7 @@ function phoneTabs(asks) {
     ${tab('data-open="inbox" data-id=""', t('Needs you'), ic('<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'), false, asks)}
     ${tab('data-open="tasks" data-id=""', t('Tasks'), ic('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>'))}
     ${tab('data-open="jev" data-id=""', t('Jev'), ic('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>'))}
-    ${tab('data-action="settings-open"', t('Settings'), ic('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>'))}
+    ${tab('data-action="settings-open"', t('Settings'), ic(SETTINGS_GEAR))}
   </nav>`;
 }
 document.addEventListener('click', event => { if (!event.target.closest?.('[data-action="m-top"]')) return; event.stopPropagation(); document.querySelector('.rail-scroll')?.scrollTo({ top: 0, behavior: 'smooth' }); }, true);
