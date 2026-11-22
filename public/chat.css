@@ -816,6 +816,10 @@ button.cn-main{cursor:pointer}
 .dv-peers{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 .dv-peer{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
 .dv-line{display:flex;gap:8px;align-items:center}.dv-line input{flex:1;min-width:0;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:13.5px}.dv-line input:focus{border-color:var(--accent);outline:0}
+.dv-ask{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
+.dv-ask-text{flex:1;min-width:180px;display:flex;flex-direction:column;gap:2px;font-size:13.5px}.dv-ask-text small{color:var(--muted);font-size:12px}
+.dv-code{font:600 18px/1 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.08em;white-space:nowrap}
+.dv-ask-act{display:flex;gap:8px}
 .dv-adv summary{cursor:pointer;font-weight:600;font-size:14px}.dv-adv[open] summary{margin-bottom:4px}
 @media (max-width:980px){.page.dv{grid-template-columns:1fr}.dv-phone{position:static;order:-1}.dv-col:last-child{order:-1}}
 

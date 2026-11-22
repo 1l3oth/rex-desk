@@ -2,6 +2,7 @@
 // with its answer box. On a phone the list fills the screen and a tap opens the question, with a way back.
 import { t } from './i18n.js';
 import { avatarHtml } from '/chat-rooms.js';
+import { phoneAskHtml } from '/chat-devices.js';
 
 const GROUPS = () => [['time', t('Newest')], ['agent', t('Agent')], ['project', t('Project')]];
 const saved = () => { try { return localStorage.getItem('rex-ny-group') || 'time'; } catch { return 'time'; } };
@@ -35,6 +36,7 @@ function detail(ctx, helpers, entry) {
   const { esc, ui } = ctx, { who, item } = entry;
   const head = `<header class="ny-dhead"><button type="button" class="ny-back" data-ny-back aria-label="${t`Back to the list`}"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>${avatarHtml(ctx, { name: who.name, agent: who.agent || null })}<div class="ny-dwho"><b>${esc(who.name)}</b><span>${esc([entry.sub, ago(entry.at)].filter(Boolean).join(' · '))}</span></div></header>`;
   const question = `<div class="ny-dq">${esc(entry.text)}</div>`;
+  if (entry.phone) return `<div class="ny-detail">${head}<div class="ny-dcard">${phoneAskHtml(ctx, entry.phone)}</div></div>`;
   if (entry.wake) {
     return `<div class="ny-detail">${head}${question}<div class="ny-dact"><button class="btn" data-action="wake-dismiss" data-id="${esc(item.id)}">${t`Dismiss`}</button><button class="btn primary" data-action="wake-approve" data-id="${esc(item.id)}">${t`Wake it up`}</button></div></div>`;
   }
@@ -64,14 +66,16 @@ function review(ctx, item, head, question) {
 }
 
 export function inboxStage(ctx, helpers) {
-  const { esc, ui } = ctx, asks = ctx.pending(), wakes = ui.snap.wakes || [], count = asks.length + wakes.length;
+  const { esc, ui } = ctx, asks = ctx.pending(), wakes = ui.snap.wakes || [], phones = ui.snap.phones?.pending || [], count = asks.length + wakes.length + phones.length;
   if (!count) return { title: t('Needs you'), meta: '', feed: `<div class="empty"><h2>${t`All clear`}</h2><p>${t`Questions, approvals and wake-ups from your agents show up here.`}</p></div>` };
   const group = saved(), entries = [
     ...asks.map(item => { const who = asker(ctx, helpers, item.runId); return { item, who, at: item.createdAt || '', text: plain(item.title), sub: who.project }; }),
     ...wakes.map(wake => {
       const who = asker(ctx, helpers, wake.runId), room = (ui.snap.rooms || []).find(item => item.id === wake.roomId);
       return { item: wake, wake: true, who: { ...who, name: wake.from || who.name, agent: null }, at: wake.at || wake.createdAt || '', text: wake.text || '', sub: t`mentioned ${who.name} in ${room?.name || 'a room'}` };
-    })
+    }),
+    // A new phone asking to open the desk through the relay.
+    ...phones.map(phone => ({ item: { id: `phone:${phone.id}` }, phone, who: { name: t('Rex Desk'), project: '', agent: (ui.snap.specialists || []).find(agent => agent.id === 'main') || null }, at: phone.createdAt || '', text: t`${phone.name} wants to open your desk`, sub: t('Phone') }))
   ].sort((left, right) => String(right.at).localeCompare(String(left.at)));
   // The open question stays open until it is answered; then the newest one opens.
   let current = entries.find(entry => entry.item.id === ui.nySelected);

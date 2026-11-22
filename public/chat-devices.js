@@ -24,6 +24,7 @@ export function devicesStage(ctx) {
         <p class="muted small">${t`Opening the link instead of scanning? Sign in with the key under Advanced.`}</p></div>
       <img class="dv-qr" src="/api/devices/qr?v=${encodeURIComponent(address)}" alt="${t`QR code that opens Rex Desk on your phone`}" width="220" height="220">
     </section>` : `<section class="dv-card dv-phone off"><span class="dv-icon">${ICON.phone}</span><div><h2>${t`Use Rex Desk on your phone`}</h2><p class="muted">${devices.remote ? t('Waiting for Tailscale on this computer.') : t('Turn on "Let my phone and other computers connect", then scan the code that appears here.')}</p></div></section>`;
+  const relay = phoneRelayCard(ctx);
   const row = peer => `<li class="dv-peer"><span class="dv-icon small">${ICON.laptop}</span><div class="dv-who"><b>${esc(peer.name || t('Computer'))}</b><span class="dv-state"><span class="dot ${peer.online ? 'good' : 'off'}"></span>${peer.online ? t('On') : peer.lastSeen ? t`Off · seen ${esc(new Date(peer.lastSeen).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}` : t('Off')}</span>${agentsOn(peer.id).length ? `<span class="dv-agents small">${agentsOn(peer.id).map(name => `<span class="dv-chip">${esc(name)}</span>`).join('')}</span>` : ''}${peer.error && !peer.online ? `<span class="dv-warn small">${esc(peer.error)}</span>` : ''}</div><button class="ag-x" data-action="dev-remove" data-id="${esc(peer.id)}" title="${t`Forget this computer`}" aria-label="${t`Forget ${esc(peer.name || 'this computer')}`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`;
   const others = `<section class="dv-card"><h2>${t`My other computers`}</h2>
       ${devices.join?.state === 'other-desk' ? `<p class="dv-warn">${t`Your account already holds another desk, so this computer kept its own and is not linked to your other computers. To link it, sign in on this computer to the desk from your account (Settings, Backup and updates).`}</p>` : devices.join?.state === 'no-plan' ? `<p class="dv-warn">${t`Linking your computers and cloud backup are part of a paid plan. Buy it on rexdesk.app, then sign in again here.`}</p>` : devices.join?.state === 'failed' ? `<p class="dv-warn">${t`This computer could not join your account's shared space: ${esc(devices.join.error || '')}`}</p>` : ''}
@@ -35,7 +36,24 @@ export function devicesStage(ctx) {
       <div class="dv-line"><input id="dev-key" type="password" value="${esc(devices.key || '')}" aria-label="${t`Device key`}" readonly><button class="btn small" data-action="dev-show">${t`Show`}</button><button class="btn small" data-action="dev-copy">${t`Copy`}</button></div>
       <div class="dv-line"><input id="dev-join" type="text" placeholder="${t`Paste the key from your other computer`}" aria-label="${t`Key from another computer`}"><button class="btn small" data-action="dev-join">${t`Join`}</button></div></details>`;
   return { title: t('Devices'), meta: devices.peers.length ? t`${on} of ${devices.peers.length + 1} computers on` : t`${on} of ${devices.peers.length + 1} computer on`, top: true,
-    feed: `<div class="page dv"><div class="dv-col">${here}${others}${advanced}</div><div class="dv-col">${phone}</div></div>` };
+    feed: `<div class="page dv"><div class="dv-col">${here}${others}${advanced}</div><div class="dv-col">${relay}${phone}</div></div>` };
+}
+// A phone that asks to come in through the relay: its code, to check against the one the phone shows, with Deny and Approve.
+// Used here and in Needs you.
+export function phoneAskHtml(ctx, item) {
+  const { esc } = ctx, code = String(item.code || '');
+  return `<div class="dv-ask"><div class="dv-ask-text"><b>${t`${esc(item.name)} wants to open your desk`}</b><small>${t`Approve only if the phone shows this same code.`}</small></div><span class="dv-code" aria-label="${t`Code`}">${esc(code.slice(0, 3))} ${esc(code.slice(3))}</span><div class="dv-ask-act"><button class="btn small" data-action="dev-phone-deny" data-device="${esc(item.id)}">${t`Deny`}</button><button class="btn small primary" data-action="dev-phone-approve" data-device="${esc(item.id)}" data-code="${esc(code)}">${t`Approve`}</button></div></div>`;
+}
+// Through your Rex Desk account: the phone opens the desk from anywhere, with no Tailscale. A new phone needs your OK here.
+function phoneRelayCard(ctx) {
+  const { esc, ui } = ctx, relay = ui.snap.phones; if (!relay) return '';
+  const state = { online: ['good', t('Connected')], connecting: ['warn', t('Connecting')], offline: ['warn', t('Not reachable, trying again')], 'signed-out': ['off', t('Sign in to your Rex Desk account first')], 'not-paid': ['off', t('Your plan does not include this. Upgrade on rexdesk.app.')], replaced: ['off', t('Rex Desk on another computer took over this connection')] }[relay.state];
+  const toggle = `<label class="dv-switch"><input type="checkbox" data-action="dev-phone-relay" ${relay.enabled ? 'checked' : ''}><span class="dv-track" aria-hidden="true"></span><span><b>${t`Open my desk from anywhere with my account`}</b><small>${t`Your phone signs in on web.rexdesk.app, no Tailscale needed. Part of a paid plan.`}</small></span></label>`;
+  const status = relay.enabled && state ? `<span class="dv-state"><span class="dot ${state[0]}"></span>${esc(state[1])}</span>` : '';
+  const asks = relay.pending.map(item => phoneAskHtml(ctx, item)).join('');
+  const when = value => new Date(value).toLocaleDateString(locale(), { month: 'short', day: 'numeric' });
+  const phones = relay.devices.length ? `<ul class="dv-peers">${relay.devices.map(item => `<li class="dv-peer"><span class="dv-icon small">${ICON.phone}</span><div class="dv-who"><b>${esc(item.name)}</b><span class="dv-state">${t`Approved ${esc(when(item.at))}`}</span></div><button class="ag-x" data-action="dev-phone-forget" data-device="${esc(item.id)}" title="${t`Remove this phone`}" aria-label="${t`Remove ${esc(item.name)}`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>` : '';
+  return `<section class="dv-card dv-relay"><h2>${t`Phone through your account`}</h2>${toggle}${status}${asks}${phones}</section>`;
 }
 export async function devicesAction(ctx, action, target) {
   const { api, toast, refresh } = ctx, value = id => document.getElementById(id)?.value || '';
@@ -48,6 +66,13 @@ export async function devicesAction(ctx, action, target) {
   else if (action === 'dev-join') { await post({ action: 'join', key: value('dev-join') }); toast(t('Joined. This computer now uses that key.')); }
   else if (action === 'dev-add') { await post({ action: 'add', url: value('dev-url') }); toast(t('Connected.')); }
   else if (action === 'dev-remove') await post({ action: 'remove', id: target.dataset.id });
+  else if (action.startsWith('dev-phone-')) {
+    const phone = data => api('/phone-relay', { method: 'POST', data });
+    if (action === 'dev-phone-relay') await phone({ action: 'enable', on: target.checked });
+    else if (action === 'dev-phone-approve') { await phone({ action: 'approve', device: target.dataset.device, code: target.dataset.code }); toast(t('Phone approved.')); }
+    else if (action === 'dev-phone-deny') await phone({ action: 'deny', device: target.dataset.device });
+    else if (action === 'dev-phone-forget') await phone({ action: 'forget', device: target.dataset.device });
+  }
   await refresh();
 }
 // The name saves when you leave the field or press Enter.
