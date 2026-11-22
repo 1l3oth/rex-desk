@@ -24,6 +24,14 @@ const installCommands = {
   win32: { claude: 'irm https://claude.ai/install.ps1 | iex', codex: CODEX_WINDOWS_INSTALL, gemini: 'irm https://antigravity.google/cli/install.ps1 | iex' },
   other: { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh', gemini: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' }
 };
+// `codex login status`: a ChatGPT account ("Logged in using ChatGPT") or an API key ("API key configured - sk-…", older
+// versions "Logged in using an API key"). The key itself is never kept or shown.
+export function codexStatus({ code = 0, stdout = '', stderr = '' } = {}) {
+  const text = `${stdout}
+${stderr}`, out = /not logged in/i.test(text);
+  const chatgpt = !out && /Logged in using ChatGPT/i.test(text), apiKey = !out && /API key configured|Logged in using an API key/i.test(text);
+  return { loggedIn: code === 0 && (chatgpt || apiKey), method: chatgpt ? 'ChatGPT' : apiKey ? 'API key' : '', account: '', plan: '' };
+}
 const bareName = { claude: 'claude', codex: 'codex', gemini: 'agy' };
 const cliFound = ({ command }) => {
   if (path.isAbsolute(command)) return existsSync(command);
@@ -183,7 +191,7 @@ export class AgentProfiles {
       const executable = cli(provider), env = profileEnvironment(provider, profile);
       const args = [...executable.args, ...statusArgs[provider]];
       const result = await this.run(executable.command, args, env, 30000);
-      const parsed = provider === 'gemini' ? { loggedIn: result.code === 0 && parseAgyModels(result.stdout).length > 0, method: 'Google', account: '', plan: '' } : provider === 'codex' ? { loggedIn: result.code === 0 && /Logged in using ChatGPT/i.test(result.stdout + result.stderr), method: /ChatGPT/i.test(result.stdout + result.stderr) ? 'ChatGPT' : '', account: '', plan: '' } : parseClaudeStatus(result.stdout);
+      const parsed = provider === 'gemini' ? { loggedIn: result.code === 0 && parseAgyModels(result.stdout).length > 0, method: 'Google', account: '', plan: '' } : provider === 'codex' ? codexStatus(result) : parseClaudeStatus(result.stdout);
       const status = { provider, profile, label: profileLabel(provider, profile), checkedAt: new Date().toISOString(), checkedAtMs: Date.now(),
         installed: !(result.error?.code === 'ENOENT'), loggedIn: Boolean(parsed?.loggedIn), method: parsed?.method || '', account: parsed?.account || '',
         organization: parsed?.organization || '', plan: parsed?.plan || '',
