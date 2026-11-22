@@ -676,8 +676,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const control = store.config().control || {}, language = url.searchParams.get('language') || control.language || 'en';
         const elevenKey = () => { const saved = store.get('secret', 'elevenlabs'); return saved ? store.decrypt(saved) : ''; };
         const engines = () => ({ local: voice.status().installed, gemini: Boolean(desk.jev.apiKey()), elevenlabs: Boolean(elevenKey()) });
-        // Nothing chosen yet: the easiest engine that works, an online one already set up, else the on-computer model.
-        const chosen = () => store.get('voice', 'engine')?.engine || (desk.jev.apiKey() ? 'gemini' : elevenKey() ? 'elevenlabs' : 'local');
+        // Recordings stay on this computer unless the person picked an online engine themselves: a saved key alone never sends audio.
+        const chosen = () => store.get('voice', 'engine')?.engine || 'local';
         const run = (engine, audio) => engine === 'gemini' ? transcribeGemini(audio, language, desk.jev.apiKey()) : engine === 'elevenlabs' ? transcribeElevenLabs(audio, language, elevenKey()) : voice.transcribe(audio, language);
         if (url.pathname === '/api/voice/engines' && request.method === 'GET') return json(response, 200, { engine: chosen(), available: engines(), local: voice.status() });
         if (url.pathname === '/api/voice/engine' && request.method === 'POST') {
@@ -696,21 +696,18 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (url.pathname === '/api/voice/prepare' && request.method === 'POST') return json(response, 200, { ready: chosen() === 'local' ? await voice.prepare(language) : true });
         if (url.pathname === '/api/voice/transcribe' && request.method === 'POST') {
           const audio = await rawBody(request), wanted = url.searchParams.get('engine') || chosen(), ready = engines();
-          // The chosen engine is not ready (like "On this computer" before its model is installed): use one that is, and say so.
-          const engine = ready[wanted] ? wanted : ['gemini', 'elevenlabs', 'local'].find(name => ready[name]) || wanted;
-          const switched = engine !== wanted ? `${wanted === 'local' ? 'The on-computer voice model is not installed' : 'The chosen voice engine is not set up'}, so ${engine === 'gemini' ? 'Gemini' : engine === 'elevenlabs' ? 'ElevenLabs' : 'the on-computer model'} was used.` : '';
-          if (!ready[engine]) return json(response, 400, { error: 'No voice engine is ready. Install the on-computer model, or add an OpenRouter key, in Settings → Jev and voice.' });
-          if (switched && engine !== 'local') { const started = Date.now(); return json(response, 200, { ...await run(engine, audio), ms: Date.now() - started, fallback: switched }); }
+          // Audio only goes online to the engine the person chose. "On this computer" not installed yet: say so, never upload.
+          if (wanted === 'local' && !ready.local) return json(response, 400, { error: 'The voice model on this computer is not installed. Install it, or choose an online voice, in the Voice dialog.' });
+          // A chosen online engine that lost its key falls back to the on-computer model, which never uploads.
+          const engine = ready[wanted] ? wanted : 'local', switched = engine !== wanted ? 'The chosen voice engine is not set up, so the on-computer model was used.' : '';
+          if (!ready[engine]) return json(response, 400, { error: 'No voice engine is ready. Install the on-computer model, or add an online voice key, in the Voice dialog.' });
           // An online engine that fails falls back to the on-computer model, and the answer says so.
           if (engine !== 'local') try { const started = Date.now(); return json(response, 200, { ...await run(engine, audio), ms: Date.now() - started }); } catch (error) { if (!engines().local) throw error; return json(response, 200, { ...await voice.transcribe(audio, language), fallback: `${error.message} Used the voice model on this computer instead.` }); }
-          // The on-computer model gets about 20 seconds. Still loading after that: an online engine that is set up answers at
-          // once while the model keeps loading for next time; with none, a plain "still starting" instead of the engine's log.
-          try { return json(response, 200, await voice.transcribe(audio, language, { waitMs: LOCAL_VOICE_WAIT_MS })); } catch (error) {
+          // The on-computer model gets about 20 seconds. Still loading after that: a plain "still starting" instead of the
+          // engine's log, while it keeps loading for next time. The recording is never sent online in its place.
+          try { return json(response, 200, { ...await voice.transcribe(audio, language, { waitMs: LOCAL_VOICE_WAIT_MS }), ...(switched ? { fallback: switched } : {}) }); } catch (error) {
             if (!error.starting) throw error;
-            const other = ['gemini', 'elevenlabs'].find(name => engines()[name]);
-            if (!other) return json(response, 503, { error: 'The voice engine on this computer is still starting. Try again in a moment.', starting: true });
-            const started = Date.now();
-            return json(response, 200, { ...await run(other, audio), ms: Date.now() - started, fallback: `The on-computer voice model is still starting, so ${other === 'gemini' ? 'Gemini' : 'ElevenLabs'} was used.` });
+            return json(response, 503, { error: 'The voice engine on this computer is still starting. Try again in a moment.', starting: true });
           }
         }
         // One recording through every engine that is ready, side by side, so the person can hear which one understands them.

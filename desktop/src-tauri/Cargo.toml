@@ -16,3 +16,6 @@ tauri-plugin-single-instance = "2"
 # The see-through window (Settings, General): Windows makes the whole window layered and sets how solid it is.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+# The microphone permission for Rex Desk's own page (allow_own_microphone): the same versions Wry uses.
+webview2-com = "0.39"
+windows = "0.62"

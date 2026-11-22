@@ -130,9 +130,32 @@ fn badge_dot() -> &'static [u8] {
     })
 }
 
-// Windows (WebView2): the microphone is allowed for Rex Desk's own pages without a prompt that the window never showed,
-// so voice failed with NotAllowedError. Wry's default flags stay. Pop-ups share the main window's browser, so they get the same flags.
-const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --use-fake-ui-for-media-stream";
+// Wry's default flags stay. Pop-ups share the main window's browser, so they get the same flags.
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+
+// Windows (WebView2): the window never showed the microphone prompt, so voice failed with NotAllowedError. Only the
+// microphone, only for Rex Desk's own page (127.0.0.1:4317) in the main window, is allowed; the person still starts every
+// recording with the mic button, and Windows' own microphone privacy switch still applies. Camera, other sites and pop-ups
+// keep WebView2's normal handling.
+#[cfg(windows)]
+fn allow_own_microphone(window: &tauri::WebviewWindow) {
+    let _ = window.with_webview(|webview| unsafe {
+        use webview2_com::Microsoft::Web::WebView2::Win32::{COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW};
+        let Ok(core) = webview.controller().CoreWebView2() else { return };
+        let handler = webview2_com::PermissionRequestedEventHandler::create(Box::new(|_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+            args.PermissionKind(&mut kind)?;
+            let mut uri = windows::core::PWSTR::null();
+            args.Uri(&mut uri)?;
+            let own = tauri::Url::parse(&webview2_com::take_pwstr(uri)).map(|url| url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port() == Some(4317)).unwrap_or(false);
+            if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE && own { args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?; }
+            Ok(())
+        }));
+        let mut token = 0i64;
+        let _ = core.add_PermissionRequested(&handler, &mut token);
+    });
+}
 fn open_link(app: &tauri::AppHandle, url: tauri::Url, features: tauri::webview::NewWindowFeatures) -> tauri::webview::NewWindowResponse<tauri::Wry> {
     // Rex Desk draws its own window buttons: a button opens https://rexdesk.window/<action>, which never becomes a
     // window; the action is done to the main window instead.
@@ -557,6 +580,8 @@ fn main() {
             #[cfg(target_os = "macos")]
             let builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
             let window = builder.build()?;
+            #[cfg(windows)]
+            allow_own_microphone(&window);
             // Rex Desk lives in the system tray: closing the window hides it while the server keeps running agents.
             let open = MenuItem::with_id(app, "open", "Open Rex Desk", true, None::<&str>)?;
             let again = MenuItem::with_id(app, "restart", "Restart Rex Desk server", true, None::<&str>)?;
