@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
 import { agyCommand, antigravityMcpInstalled, parseAgyModels } from './antigravity.js';
+import { checkOpenRouterKey, openrouterEnvironment, openrouterHome } from './openrouter.js';
 
 // The command and arguments that check, and start, a provider's sign-in. Antigravity has no status command: listing the
 // account's models only works when it is signed in. Its sign-in is `agy acp --login`, which opens Google sign-in and exits.
@@ -125,7 +126,10 @@ export function parseClaudeStatus(output) {
 const SIGN_IN_HOSTS = { codex: ['openai.com', 'chatgpt.com'], claude: ['anthropic.com', 'claude.ai', 'claude.com'], gemini: ['google.com'] };
 
 export class AgentProfiles {
-  constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn } = {}) { this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
+  constructor(store, { run = capture, ttl = 120000, spawnHidden = spawn, checkKey = checkOpenRouterKey } = {}) { this.store = store; this.run = run; this.spawnHidden = spawnHidden; this.checkKey = checkKey; this.ttl = ttl; this.cache = new Map(); this.pending = new Map(); this.standIn = new Map(); }
+  // The OpenRouter key: the one saved in Settings (encrypted, shared with Jev), else OPENROUTER_API_KEY from the launch environment.
+  openrouterKey() { const saved = this.store.get?.('secret', 'openrouter'); try { return saved ? this.store.decrypt(saved) : process.env.OPENROUTER_API_KEY || ''; } catch { return ''; } }
+  withKey(provider, env) { return provider === 'openrouter' ? openrouterEnvironment(env, this.openrouterKey(), this.store.directory ? openrouterHome(this.store.directory) : '') : env; }
   // Agents and settings travel between computers (the shared database, a restore from backup), but a profile folder is only on the
   // computer that made it. A folder that is not here counts as not chosen.
   here(profile) { return profile && directory(profile) ? profile : ''; }
@@ -136,11 +140,12 @@ export class AgentProfiles {
   }
   // The profile a turn really uses: the chosen one, or the signed-in one standing in for it (see ensureSignedIn).
   use(provider, profile) { const chosen = this.here(profile) || this.selected(provider); return this.standIn.get(`${provider}:${canonical(chosen || '')}`) ?? chosen; }
-  environment(provider, env = process.env) { return profileEnvironment(provider, this.use(provider), env); }
+  environment(provider, env = process.env) { return this.withKey(provider, profileEnvironment(provider, this.use(provider), env)); }
   // An agent can be pinned to one Claude account; otherwise it uses the one chosen for everyone.
-  environmentFor(provider, profile, env = process.env) { return profileEnvironment(provider, this.use(provider, profile), env); }
+  environmentFor(provider, profile, env = process.env) { return this.withKey(provider, profileEnvironment(provider, this.use(provider, profile), env)); }
   // Another signed-in account to move to when this one hits its usage limit. Accounts that hit theirs recently are skipped.
   async alternative(provider, current) {
+    if (provider === 'openrouter') return null;
     const limited = this.store.get('accounts', 'limited')?.until || {}, key = value => canonical(value || '');
     for (const item of discoverProfiles(provider, { configured: current })) {
       if (key(item.profile) === key(current) || (limited[key(item.profile)] || 0) > Date.now()) continue;
@@ -164,6 +169,12 @@ export class AgentProfiles {
     if (!refresh && cached && Date.now() - cached.checkedAtMs < this.ttl) return cached;
     if (this.pending.has(key)) return this.pending.get(key);
     const check = (async () => {
+      if (provider === 'openrouter') {
+        const key = this.openrouterKey(), result = key ? await this.checkKey(key) : { ok: false, error: '' };
+        const status = { provider, profile: '', label: 'OpenRouter key', checkedAt: new Date().toISOString(), checkedAtMs: Date.now(), installed: true, hasKey: Boolean(key), loggedIn: Boolean(result.ok),
+          method: 'API key', account: result.label || '', organization: '', plan: result.ok ? (result.freeTier ? 'Free tier' : 'Pay as you go') : '', error: key && !result.ok ? result.error : '' };
+        this.cache.set(`${provider}:`, status); return status;
+      }
       const executable = cli(provider), env = profileEnvironment(provider, profile);
       const args = [...executable.args, ...statusArgs[provider]];
       const result = await this.run(executable.command, args, env, 30000);
@@ -202,6 +213,7 @@ export class AgentProfiles {
     const other = await this.alternative(provider, profile).catch(() => null);
     if (other) { this.standIn.set(key, other.profile); return this.status(provider, other.profile); }
     const name = providerTitle(provider);
+    if (provider === 'openrouter') throw new Error(fresh.error || 'Add your OpenRouter key in Setup (AI accounts) first. No agent turn was started.');
     throw new Error(fresh.error && !fresh.installed ? fresh.error
       : `${name} profile ${fresh.label} is not signed in. Open Setup and choose a signed-in ${name} profile, then continue this run. No agent turn was started.`);
   }
@@ -209,6 +221,7 @@ export class AgentProfiles {
   // background: no window at all. The install and the sign-in run hidden, the CLI opens the browser, and loginJob() tells the
   // page how far it got (installing, waiting for the browser, failed with a plain reason). The first-run screen uses it.
   login(provider, profile, { background = false } = {}) {
+    if (provider === 'openrouter') throw new Error('OpenRouter has no sign-in: add your OpenRouter key instead.');
     const executable = cli(provider), env = profileEnvironment(provider, profile), found = cliFound(executable), name = providerTitle(provider);
     const install = (installCommands[process.platform === 'win32' ? 'win32' : 'other'] || {})[provider] || '';
     if (!found && !install) throw new Error(`${name} is not installed on this computer, and Rex Desk cannot install it here. Install it, then press Sign in again.`);
@@ -322,6 +335,7 @@ export class AgentProfiles {
   mcpInstalled(provider, profile = this.selected(provider)) {
     try {
       if (provider === 'gemini') return antigravityMcpInstalled();
+      if (provider === 'openrouter') return true;
       if (provider === 'codex') { const config = path.join(profile || path.join(home, '.codex'), 'config.toml'); return existsSync(config) && /\[mcp_servers\.rex_desk\]/.test(readFileSync(config, 'utf8')); }
       const file = profile ? path.join(profile, '.claude.json') : path.join(home, '.claude.json');
       return existsSync(file) && Boolean(JSON.parse(readFileSync(file, 'utf8')).mcpServers?.rex_desk);

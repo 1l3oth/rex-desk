@@ -1163,6 +1163,9 @@ button.cn-main{cursor:pointer}
 .acct-main{flex:1;display:flex;flex-direction:column;min-width:0}.acct-main b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.acct-main small{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acct-badge{flex:none;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;color:var(--accent-ink);background:var(--accent)}
 .acct-empty{margin:0;padding:12px;border:1px dashed var(--line);border-radius:12px;color:var(--muted);font-size:13px}
+.acct-or-state{margin:0;font-size:13px;color:var(--muted)}.acct-or-state.good{color:var(--good,#1f8f4e)}.acct-or-state.bad{color:var(--bad,#c0392b)}
+.acct-or-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.acct-or-row input,.acct-or-row select{flex:1;min-width:180px;height:30px;box-sizing:border-box;padding:0 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}.acct-dialog label.acct-or-row{display:flex;flex-direction:row;align-items:center;text-align:left;margin:0}.acct-or-row>span{font-size:13px;flex:none}.acct-or-row .btn{height:30px}
+.acct-or-note{margin:0;font-size:12px;color:var(--muted)}
 .acct-out summary{cursor:pointer;font-size:13px;color:var(--muted);padding:4px 0}.acct-out summary span{font-size:12px;padding:0 6px;border-radius:999px;background:var(--raised)}
 .acct-out ul{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
 .acct-out li{display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:10px}.acct-out li:hover{background:var(--raised)}
@@ -1839,7 +1842,8 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 @keyframes fr-press{0%,10%{transform:translate(104px,30px)}45%,60%{transform:translate(70px,57px)}65%{transform:translate(70px,59px)}75%,100%{transform:translate(70px,57px)}}
 @keyframes fr-tick{0%{stroke-dashoffset:40}35%,100%{stroke-dashoffset:0}}
 @media (prefers-reduced-motion:reduce){.fr-clip *{animation:none!important}.fr-clip .fr-tick{stroke-dashoffset:0}.fr-clip .fr-cursor{transform:translate(66px,44px)}.fr-clip .fr-cursor2{transform:translate(70px,57px)}}
-.fr-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.fr-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.fr-key{display:flex;gap:8px;margin:4px 0 10px}.fr-key input{flex:1;min-width:0;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}.fr-key input:focus-visible{outline:2px solid var(--accent);outline-offset:0}
 .fr-card{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);text-align:left;cursor:pointer;font:inherit}
 .fr-card:hover{border-color:color-mix(in srgb,var(--accent) 60%,var(--line))}.fr-card:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .fr-card b{font-size:14px}.fr-card small{font-size:12px;color:var(--muted);line-height:1.35}
@@ -2556,6 +2560,8 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .acct-list .acct-plan{font-size:10px;padding:0 5px;border-radius:4px}
 .acct-row .acct-main small{margin-top:1px}
 @media (max-width:560px){.acct-tab{padding:9px 4px;gap:4px;font-size:13px;min-width:0}.acct-default-badge{padding:0 5px;font-size:10px}}
+/* Four AIs do not fit one row on a phone: two rows of two. */
+@media (max-width:560px){.acct-dialog .acct-tabs{grid-auto-flow:row;grid-template-columns:1fr 1fr}.acct-or-row .btn{height:auto}}
 .acct-intro .acct-note{padding:0;background:none;border-radius:0;font-size:12px;color:var(--muted)}
 /* The whole body between the fixed header and footer scrolls. */
 .acct-dialog .acct-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding-right:2px}

@@ -27,7 +27,7 @@ export function setupSteps(snap = {}, ui = {}) {
   ];
   return [
     { id: 'account', title: t('Sign in to your Rex Desk account'), done: Boolean(snap.account?.email || snap.database?.account), how: t('Use an email code, Google or GitHub.'), action: 'account-open' },
-    { id: 'ai', title: t('Connect your AI'), done: ['codex', 'claude', 'gemini'].some(id => ui.accounts?.[id]?.profiles?.some(item => item.loggedIn)), how: t('Sign in to the AI plan you already pay for: ChatGPT, Claude or Gemini.'), action: 'accounts' },
+    { id: 'ai', title: t('Connect your AI'), done: ['codex', 'claude', 'gemini', 'openrouter'].some(id => ui.accounts?.[id]?.profiles?.some(item => item.loggedIn)), how: t('Sign in to the AI plan you already pay for (ChatGPT, Claude or Gemini), or add an OpenRouter key.'), action: 'accounts' },
     { id: 'hello', title: t('Send Rex Agent a first message'), done: main, how: t('Say what you work on. Rex Agent sets things up from there.'), focus: true },
     { id: 'work', title: t('Add your work'), done: (snap.config?.repositories || []).length > 0 || agents.some(agent => !agent.project), how: t('A project folder, or a named workspace for work that is not code.'), ask: ASK.work },
     { id: 'agent', title: t('Create your first agent'), done: agents.length > 0, how: t('An agent with its own name and job, for one project or workspace.'), ask: ASK.agent },

@@ -1,4 +1,5 @@
 import { t } from './i18n.js';
+import { aiId, aiName, aiChoices, confirmAiSwitch } from './ai-names.js';
 // The chat input: a rounded box with a + menu, slash commands, @ mentions, voice, attachments, and the model, effort and mode pickers underneath.
 const ICON = {
   plus: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
@@ -62,7 +63,7 @@ function optionPickers(ctx) {
   const now = currentOptions(ctx), choices = choicesFor(ctx, now.provider);
   const select = (id, label, items, value) => pickerHtml(ctx, { id, label, compact: true, value, items: items.map(item => ({ value: item.id, label: item.label, hint: item.hint, disabled: item.disabled })) });
   const modes = choices.modes.map(item => ({ ...item, label: item.id === 'bypassPermissions' ? t('Dangerous') : item.label, hint: item.hint || MODE_HINT[item.id] }));
-  return `${select('opt-provider', 'AI', [{ id: 'claude', label: t('Claude Code'), hint: t('Your Claude plan') }, { id: 'codex', label: t('Codex'), hint: t('Your ChatGPT plan') }, { id: 'gemini', label: t('Gemini'), hint: t('Your Google account, through Antigravity') }, { id: LOCAL, label: t('Local AI'), hint: t('A model on this computer: free and private, no account needed') }], now.provider)}${select('opt-model', t('Model'), choices.models, now.model)}${select('opt-effort', t('Effort'), choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', t('Mode'), modes, now.permissionMode)}`;
+  return `${select('opt-provider', 'AI', [{ id: 'claude', label: t('Claude Code'), hint: t('Your Claude plan') }, { id: 'codex', label: t('Codex'), hint: t('Your ChatGPT plan') }, { id: 'gemini', label: t('Gemini'), hint: t('Your Google account, through Antigravity') }, { id: 'openrouter', label: t('OpenRouter'), hint: t('Your OpenRouter key, any model it offers') }, { id: LOCAL, label: t('Local AI'), hint: t('A model on this computer: free and private, no account needed') }], now.provider)}${select('opt-model', t('Model'), choices.models, now.model)}${select('opt-effort', t('Effort'), choices.efforts.map(id => ({ id, label: EFFORT_LABEL[id] || id, hint: EFFORT_HINT[id] })), now.effort)}${select('opt-mode', t('Mode'), modes, now.permissionMode)}`;
 }
 // The message box is not redrawn while the chat updates (it would lose what is typed), so a new AI redraws only its pickers.
 function redrawOptionPickers(ctx) {
@@ -465,7 +466,13 @@ export function initComposer(ctx) {
   document.addEventListener('change', event => {
     if (event.target.id === 'file-input') { for (const file of event.target.files) void upload(ctx, file); event.target.value = ''; return; }
     // Switching the AI shows that AI's models and modes; the next message goes to it, with the chat so far handed over.
-    if (event.target.id === 'opt-provider') { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: event.target.value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(t`Your next message goes to ${event.target.value === 'codex' ? t('Codex') : event.target.value === 'gemini' ? t('Gemini') : event.target.value === LOCAL ? t('Local AI, on this computer') : t('Claude Code')}.`); return; }
+    if (event.target.id === 'opt-provider') {
+      const value = event.target.value, run = ctx.ui.view.type === 'main' ? ctx.mainRun() : ctx.ui.view.type === 'run' ? ctx.runById(ctx.ui.view.id) : null;
+      const pick = () => { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: value }; redrawOptionPickers(ctx); ctx.render(); ctx.toast(t`Your next message goes to ${value === LOCAL ? t('Local AI, on this computer') : aiName(value)}.`); };
+      // A chat that already talked on another AI is handed over: warn first, since the new AI rereads all of it.
+      if (run?.sessionId && sentProvider(value) !== (run.provider || 'claude')) { void confirmAiSwitch(run.title || t('This chat'), sentProvider(value)).then(yes => yes ? pick() : redrawOptionPickers(ctx)); return; }
+      pick(); return;
+    }
     if (event.target.id === 'opt-model') { remember({ model: event.target.value }); ctx.ui.modelPick = { ...(ctx.ui.modelPick || {}), [ctx.draftKey()]: event.target.value }; }
     if (event.target.id === 'opt-effort') remember({ effort: event.target.value });
     if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast(t('Dangerous: the agent runs tools without asking.')); }

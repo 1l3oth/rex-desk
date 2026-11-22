@@ -2,14 +2,15 @@
 import { createInterface } from 'node:readline';
 import { resolveCommand, stopTree } from './processes.js';
 
-export const AI_PROVIDERS = ['claude', 'codex', 'gemini'];
+export const AI_PROVIDERS = ['claude', 'codex', 'gemini', 'openrouter'];
 export function aiProvider(value = 'claude') {
-  if (!AI_PROVIDERS.includes(value)) throw new Error('Choose Claude Code, Codex or Gemini.');
+  if (!AI_PROVIDERS.includes(value)) throw new Error('Choose Claude Code, Codex, Gemini or OpenRouter.');
   return value;
 }
-export const providerTitle = value => value === 'codex' ? 'Codex' : value === 'gemini' ? 'Gemini (Antigravity)' : 'Claude Code';
+export const providerTitle = value => value === 'codex' ? 'Codex' : value === 'gemini' ? 'Gemini (Antigravity)' : value === 'openrouter' ? 'OpenRouter' : 'Claude Code';
 // Antigravity keeps one Google sign-in per computer for now, so its "profile" variable is only Rex Desk's own marker.
-export const profileKey = value => value === 'codex' ? 'CODEX_HOME' : value === 'gemini' ? 'REX_GEMINI_HOME' : 'CLAUDE_CONFIG_DIR';
+// OpenRouter runs through Claude Code with an OpenRouter key (see openrouter.js); it has no profile folders of its own.
+export const profileKey = value => value === 'codex' ? 'CODEX_HOME' : value === 'gemini' ? 'REX_GEMINI_HOME' : value === 'openrouter' ? 'REX_OPENROUTER_HOME' : 'CLAUDE_CONFIG_DIR';
 
 export function codexEnvironment(env = process.env) {
   const clean = { ...env };

@@ -1,11 +1,12 @@
 import { askConfirm } from './confirm.js';
+import { aiId, aiName, aiChoices, confirmAiSwitch } from './ai-names.js';
 import { t, locale } from './i18n.js';
 import { notesSection, notesAction, exportNotes } from './chat-notes.js';
 import { pickerHtml } from '/chat-pick.js';
 import { whereHtml } from '/chat-where.js';
 import { connectorName } from '/chat-connectors.js';
 // Specialist agents: one identity per project. The card shows who the agent is and what it was told; the person can rename, edit or duplicate it.
-const providerName = name => name === 'codex' ? t('Codex') : name === 'gemini' ? t('Gemini (Antigravity)') : t('Claude Code');
+const providerName = name => name === 'gemini' ? t('Gemini (Antigravity)') : aiName(name);
 
 // Agents are grouped under their project; a project with several agents folds away. Folded groups are remembered on this computer.
 const FOLDED = 'rex-agent-groups-folded';
@@ -30,8 +31,8 @@ export function agentStage(ctx, id = (ctx.ui.profileId || ctx.ui.view.id)) {
   const origin = agent.cloneOf ? (ui.snap.specialists || []).find(item => item.id === agent.cloneOf) : null;
   const state = agent.status?.state || 'idle', tone = { busy: 'working', replying: 'working', waiting: 'warn', idle: 'good' }[state] || '';
   const unsure = (agent.unsure || []).filter(Boolean), lessons = agent.lessons || [];
-  const ai = ['codex', 'gemini'].includes(agent.provider) ? agent.provider : 'claude', aiChoices = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
-  const models = [{ value: '', label: t('Default'), hint: t('The model set in Settings') }, ...(aiChoices.models || []).map(model => ({ value: model.id, label: model.label }))];
+  const ai = aiId(agent.provider), choicesOfAi = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
+  const models = [{ value: '', label: t('Default'), hint: t('The model set in Settings') }, ...(choicesOfAi.models || []).map(model => ({ value: model.id, label: model.label }))];
   // The page reads like a system Settings app: grouped lists of rows on hairlines, the label on the left, the control on the
   // right; a heading above each group and a note under it. One tab at a time.
   const row = (label, control, sub = '', extra = '') => `<div class="agp-r${extra}"><div class="agp-rl"><span>${label}</span>${sub ? `<small>${sub}</small>` : ''}</div><div class="agp-rc">${control}</div></div>`;
@@ -87,7 +88,7 @@ export function agentStage(ctx, id = (ctx.ui.profileId || ctx.ui.view.id)) {
     + group(`${t`Lessons learned`}${lessons.length ? ` <span class="agp-count">${lessons.length}</span>` : ''}`, lessonRows);
   // Where it works (L57): stays on one computer or follows you, the map of the person's computers, and the move steps.
   const followRows = agent.kind !== 'main' ? whereHtml(ctx, agent, { row }) : '';
-  const setup = group(t('AI'), row('AI', pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: [{ value: 'claude', label: t('Claude Code'), hint: t('Your Claude plan') }, { value: 'codex', label: t('Codex'), hint: t('Your ChatGPT plan') }, { value: 'gemini', label: t('Gemini'), hint: t('Google account, through Antigravity') }] }))
+  const setup = group(t('AI'), row('AI', pickerHtml(ctx, { id: 'sp-provider', label: 'AI', value: ai, items: aiChoices().map(item => ({ value: item.id, label: item.label, hint: item.hint })) }))
       + row(t('Account'), pickerHtml(ctx, { id: 'sp-profile', label: t('Account'), value: agent.profile || '', items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[ai]?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] }))
       + row(t('Model'), pickerHtml(ctx, { id: 'sp-model', label: t('Model'), value: agent.model || '', items: models })), t('Switching starts fresh with a summary of the chat.'))
     + (followRows || agent.remote || agent.noCloud ? group(t('Where it works'), `${followRows}${agent.remote && !agent.pinned ? row(t('Move'), `<button class="btn small" data-action="spec-move">${t`Move to this computer`}</button>`) : ''}${agent.noCloud ? row(t('Cloud'), `<span class="agp-value">${t`Kept out of the cloud`}</span>`) : ''}`, agent.pinned ? t('Set in Settings, Projects.') : '') : '')
@@ -267,7 +268,8 @@ export function initAgentCard(ctx) {
   document.addEventListener('change', async event => {
     if (event.target.id !== 'sp-provider') return;
     const agent = (ctx.ui.snap.specialists || []).find(item => item.id === (ctx.ui.profileId || ctx.ui.view.id)); if (!agent || agent.provider === event.target.value) return;
-    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { provider: event.target.value } }); ctx.toast(t`${agent.name} now runs on ${event.target.value === 'codex' ? t('Codex') : event.target.value === 'gemini' ? t('Gemini') : t('Claude Code')}.`); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
+    if (!await confirmAiSwitch(agent.name, event.target.value)) { ctx.render(); return; }
+    try { await ctx.api(`/specialists/${agent.id}`, { method: 'PUT', data: { provider: event.target.value } }); ctx.toast(t`${agent.name} now runs on ${aiName(event.target.value)}.`); await ctx.refresh({ full: true }); } catch (error) { ctx.toast(error.message, true); }
   });
   // An account picked for this agent is saved at once.
   document.addEventListener('change', async event => {

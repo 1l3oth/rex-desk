@@ -1,5 +1,6 @@
 import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
+import { aiId, aiName, aiChoices, confirmAiSwitch } from './ai-names.js';
 import { rexCore } from '/rex-core.js';
 import { chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { subagentsFromEvents, subagentsPanel } from '/chat-subagents.js';
@@ -175,12 +176,12 @@ function roomSideHtml(ctx, room) {
   return `${tabs}${tab === 'info' ? roomInfoHtml(ctx, room) : tab === 'worktrees' ? worktreeSideHtml(ctx, trees) : tab === 'team' ? subagentsPanel(subs, ctx, { live: item => room.members.some(member => member.name === item.who && ['busy', 'replying', 'waiting'].includes(member.state)) }) : tab === 'terminal' ? roomTerminalHtml(ctx, room) : activityHtml(ctx, room)}`;
 }
 // The Agents tab: each member's AI and model, changed right here. Saved at once on the agent itself, so it holds in every chat.
-const AIS = [{ value: 'claude', label: t('Claude Code'), hint: t('Your Claude plan') }, { value: 'codex', label: t('Codex'), hint: t('Your ChatGPT plan') }, { value: 'gemini', label: t('Gemini'), hint: t('Google account, through Antigravity') }];
+const AIS = aiChoices().map(item => ({ value: item.id, label: item.label, hint: item.hint }));
 function roomAgentsHtml(ctx, room) {
   const { esc, ui } = ctx, agents = room.members.map(member => member.id === 'main' ? ui.snap.mainAgent : (ui.snap.specialists || []).find(item => item.id === member.id)).filter(Boolean);
   if (!agents.length) return `<p class="muted">${t`No agents in this room yet.`}</p>`;
   return `<div class="room-agents">${agents.map(agent => {
-    const ai = ['codex', 'gemini'].includes(agent.provider) ? agent.provider : 'claude', choices = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
+    const ai = aiId(agent.provider), choices = ui.snap.choices?.providers?.[ai] || ui.snap.choices || {};
     const models = [{ value: '', label: t('Default'), hint: t('The model set in Settings') }, ...(choices.models || []).map(model => ({ value: model.id, label: model.label, hint: model.hint, disabled: model.disabled }))];
     const seat = room.members.find(member => member.id === agent.id) || {};
     return `<section class="ag-sec room-agent" data-agent="${esc(agent.id)}"><div class="rperson-main ra-head">${avatarHtml(ctx, { name: agent.name, agent: agent.id === 'main' ? null : agent, size: 'sm' })}<span class="rperson-text"><b>${esc(agent.name)}</b><small>${esc(seat.project || '')}${seat.label ? ` · <span class="st ${esc(seat.state)}">${esc(seat.label)}</span>` : ''}</small></span></div>
@@ -378,10 +379,11 @@ export function initRoomInfo(ctx) {
     const match = /^ra-(provider|model)-(.+)$/.exec(event.target.id || ''); if (!match) return;
     const [, field, id] = match, agent = id === 'main' ? ctx.ui.snap.mainAgent : (ctx.ui.snap.specialists || []).find(item => item.id === id); if (!agent) return;
     if (field === 'provider' && (agent.provider || 'claude') === event.target.value) return;
+    if (field === 'provider' && !await confirmAiSwitch(agent.name, event.target.value)) { delete ctx.ui.picks?.[`ra-provider-${id}`]; fillAgentsPop(ctx); return; }
     try {
       await ctx.api(`/specialists/${id}`, { method: 'PUT', data: field === 'provider' ? { provider: event.target.value } : { model: event.target.value } });
       delete ctx.ui.picks?.[`ra-provider-${id}`]; delete ctx.ui.picks?.[`ra-model-${id}`];
-      ctx.toast(field === 'provider' ? t`${agent.name} now runs on ${event.target.value === 'codex' ? t('Codex') : event.target.value === 'gemini' ? t('Gemini') : t('Claude Code')}.` : t`${agent.name}'s model saved.`);
+      ctx.toast(field === 'provider' ? t`${agent.name} now runs on ${aiName(event.target.value)}.` : t`${agent.name}'s model saved.`);
       await ctx.refresh({ full: true }); fillAgentsPop(ctx);
     } catch (error) { ctx.toast(error.message, true); }
   });

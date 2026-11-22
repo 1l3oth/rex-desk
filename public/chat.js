@@ -52,8 +52,8 @@ export const tokenText = tokens => tokens ? [`${kilo((tokens.input || 0) + (toke
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const hhmm = value => { const date = new Date(value); return Number.isNaN(+date) ? '' : date.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }); };
 const ago = value => { const minutes = Math.max(0, Math.round((Date.now() - new Date(value)) / 60000)); return minutes < 1 ? t('now') : minutes < 60 ? t`${minutes}m` : minutes < 1440 ? t`${Math.round(minutes / 60)}h` : t`${Math.round(minutes / 1440)}d`; };
-const provider = name => name === 'codex' ? t('Codex') : name === 'gemini' ? t('Gemini') : name === 'claude' ? t('Claude Code') : t('Agent');
-const aiKey = value => ['codex', 'gemini'].includes(value) ? value : 'claude';
+const provider = name => name === 'codex' ? t('Codex') : name === 'gemini' ? t('Gemini') : name === 'openrouter' ? t('OpenRouter') : name === 'claude' ? t('Claude Code') : t('Agent');
+const aiKey = value => ['codex', 'gemini', 'openrouter'].includes(value) ? value : 'claude';
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value), tokenText,
   render: () => renderAll(), renderAll: () => renderAll(), isCollapsed: key => collapsed.has(key), currentRunId: () => (ui.view.type === 'main' ? mainRun()?.id : ui.view.type === 'run' ? ui.view.id : '') || '', openSettings: section => openSettings(ctx, section), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
@@ -1291,7 +1291,7 @@ function personalSide(run, agent, items, shells) {
   const sources = (agent.taskSources || []).map(id => id === 'local' ? t('Rex Desk tasks') : (ui.snap.config?.sources || []).find(source => source.id === id)?.name).filter(Boolean);
   const rooms = (ui.snap.rooms || []).filter(room => room.members.some(member => member.id === agent.id));
   // The Profile tab: who this is and what it is doing, what was shared, and the few things worth changing from a chat.
-  const ai = agent.provider === 'codex' ? 'codex' : agent.provider === 'gemini' ? 'gemini' : 'claude';
+  const ai = aiKey(agent.provider);
   const model = agent.model ? ((ui.snap.choices?.providers?.[ai] || ui.snap.choices || {}).models || []).find(item => item.id === agent.model)?.label || agent.model : t('Default');
   const avatar = agent.remote ? avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }) : `<button type="button" class="av-edit" data-action="avatar-pick" data-agent-id="${esc(agent.id)}" title="${t`Change ${esc(agent.name)}'s avatar`}" aria-label="${t`Change ${esc(agent.name)}'s avatar`}">${avatarHtml(ctx, { name: agent.name, agent, size: 'sm' })}</button>`;
   const openFull = agent.main ? '' : `<button type="button" class="aps-open" data-open="specialist" data-id="${esc(agent.id)}" data-profile="1" title="${t`Open the full profile`}" aria-label="${t`Open the full profile`}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-8.5 8.5M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button>`;
@@ -1299,7 +1299,7 @@ function personalSide(run, agent, items, shells) {
   const sec = (title, body, count = 0) => `<section class="aps-sec"><h3>${title}${count ? ` <span class="aps-count">${count}</span>` : ''}</h3>${body}</section>`;
   const row = (label, value) => `<div class="aps-row"><span>${label}</span><div>${value}</div></div>`;
   const setup = agent.main ? '' : sec(t('Setup'), [
-    row('AI', esc(agent.provider === 'codex' ? t('Codex') : agent.provider === 'gemini' ? t('Gemini') : t('Claude Code'))),
+    row('AI', esc(provider(agent.provider || 'claude'))),
     row(t('Model'), esc(model)),
     row(t('Account'), pickerHtml(ctx, { id: 'pp-profile', label: t('Account'), value: agent.profile || '', compact: true, items: [{ value: '', label: t('Same as everyone'), hint: t('The account chosen at the bottom left') }, ...((ui.accounts?.[ai === 'codex' ? 'codex' : 'claude']?.profiles) || []).filter(item => item.loggedIn).map(item => ({ value: item.profile, label: item.account || item.label, hint: [item.label, item.plan].filter(Boolean).join(' · ') }))] })),
     whereLine(ctx, agent),
@@ -1371,7 +1371,7 @@ async function loadAccounts(refreshStatus = false) { try { ui.accounts = await a
 async function accountsDialog() {
   document.querySelector('.dialog-back.accounts')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back accounts'; document.body.append(back);
-  const NAMES = { claude: [t('Claude'), t('Claude Code'), t('Claude')], codex: [t('Codex'), t('Codex'), 'ChatGPT'], gemini: [t('Gemini'), t('Gemini'), t('Google')] };
+  const NAMES = { claude: [t('Claude'), t('Claude Code'), t('Claude')], codex: [t('Codex'), t('Codex'), 'ChatGPT'], gemini: [t('Gemini'), t('Gemini'), t('Google')], openrouter: [t('OpenRouter'), t('OpenRouter'), 'OpenRouter'] };
   const tab = () => NAMES[ui.acctTab] ? ui.acctTab : aiKey(ui.snap?.config?.provider);
   const draw = () => {
     const name = tab(), [short, product, service] = NAMES[name], list = ui.accounts?.[name] || { profiles: [] }, defaultAi = aiKey(ui.snap?.config?.provider);
@@ -1394,14 +1394,26 @@ async function accountsDialog() {
     };
     const row = item => { const who = item.account || item.label; return `<label class="acct-row${item.profile === list.selected ? ' on' : ''}" title="${esc(item.label)}"><input type="radio" name="profile" value="${esc(item.profile)}" ${item.profile === list.selected ? 'checked' : ''}><span class="acct-main"><span class="acct-name"><b>${esc(who)}</b>${plan(item)}${item.profile === list.selected ? `<span class="acct-badge"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>${t`In use`}</span>` : `<span class="acct-use">${t`Use`}</span>`}</span><small>${esc([item.account ? where(item) : '', item.method, savedUsage(name, item.profile)?.at ? t`as of ${new Date(savedUsage(name, item.profile).at).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}` : ''].filter(Boolean).join(' · '))}</small>${usageHtml(name, item.profile)}</span></label>`; };
     const out = item => `<li><span class="acct-main"><b>${esc(item.account || item.label)}</b><small>${esc(item.label !== (item.account || item.label) ? item.label : t('Not signed in'))}</small></span><button type="button" class="btn small" data-acct-login="${esc(item.profile)}">${t`Sign in`}</button></li>`;
+    // OpenRouter has no accounts to sign in to: one API key (typed here, checked, kept encrypted, never shown again) and the model agents use.
+    const orBody = () => {
+      const key = list.profiles[0] || {}, models = ui.snap.choices?.providers?.openrouter?.models || [], chosen = ui.snap.config?.models?.openrouter || '';
+      const state = key.loggedIn ? `<p class="acct-or-state good">${t`Key works`}${key.plan ? ` · ${esc(key.plan)}` : ''}${key.account ? ` · ${esc(key.account)}` : ''}</p>`
+        : key.hasKey ? `<p class="acct-or-state bad">${esc(key.error || t('OpenRouter did not accept the saved key.'))}</p>` : `<p class="acct-or-state">${t`No key yet.`}</p>`;
+      return `<div class="acct-intro"><p>${t`Agents on OpenRouter run through Claude Code with your OpenRouter key. You pay OpenRouter for what they use.`}</p>${defaultAi === name ? `<span class="acct-note">${t`New agents and chats use OpenRouter`}</span>` : `<button type="button" class="btn small" data-acct-default="${name}" ${key.loggedIn ? '' : 'disabled'}>${t`Use OpenRouter for new agents`}</button>`}</div>
+      ${state}
+      <div class="acct-or-row"><input type="password" data-acct-orkey autocomplete="off" spellcheck="false" placeholder="${key.hasKey ? t('Paste a new key to replace it') : 'sk-or-v1-…'}" aria-label="${t`OpenRouter API key`}"><button type="button" class="btn small primary" data-acct-orsave>${t`Check and save`}</button>${key.hasKey ? `<button type="button" class="btn small" data-acct-ordel>${t`Remove key`}</button>` : ''}</div>
+      <p class="acct-or-note">${t`The key stays encrypted on this computer and is never shown in a chat. Jev uses the same key.`} <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">${t`Get a key`}</a></p>
+      ${key.loggedIn ? `<label class="acct-or-row"><span>${t`Model for agents`}</span><select data-acct-ormodel>${[['', t('Claude Sonnet, latest')], ...models.map(model => [model.id, model.label])].map(([id, label]) => `<option value="${esc(id)}" ${id === chosen ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+      <p class="acct-or-note">${t`Claude models work best. Other models may not handle every tool.`}</p>` : ''}`;
+    };
     back.innerHTML = `<form class="dialog acct-dialog"><div class="acct-head"><h2>${t`AI accounts`}</h2><button type="button" class="side-x" data-close aria-label="${t`Close`}" title="${t`Close`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>
       <div class="acct-tabs" role="tablist">${Object.entries(NAMES).map(([key, [, title]]) => `<button type="button" role="tab" aria-selected="${name === key}" class="acct-tab${name === key ? ' on' : ''}" data-acct-tab="${key}"><b>${title}</b>${defaultAi === key ? `<span class="acct-default-badge">${t`Default`}</span>` : ''}</button>`).join('')}</div>
-      <div class="acct-body"><div class="acct-intro"><p>${t`Agents on ${product} run on the account marked ${`<b>${t`In use`}</b>`}. Click another account to switch.`}</p>${defaultAi === name ? `<span class="acct-note">${t`New agents and chats use ${product}`}</span>` : `<button type="button" class="btn small" data-acct-default="${name}">${t`Use ${product} for new agents`}</button>`}</div>
+      <div class="acct-body">${name === 'openrouter' ? orBody() : `<div class="acct-intro"><p>${t`Agents on ${product} run on the account marked ${`<b>${t`In use`}</b>`}. Click another account to switch.`}</p>${defaultAi === name ? `<span class="acct-note">${t`New agents and chats use ${product}`}</span>` : `<button type="button" class="btn small" data-acct-default="${name}">${t`Use ${product} for new agents`}</button>`}</div>
       ${signedIn.length ? `<div class="acct-list">${signedIn.map(row).join('')}</div>` : `<p class="acct-empty">${t`No ${service} account is signed in yet. Press Sign in: a window opens, installs ${name === 'codex' ? 'the Codex CLI' : name === 'gemini' ? 'the Antigravity CLI' : t('Claude Code')} if this computer does not have it yet, and opens the sign-in in your browser.`}</p>`}
       ${signedOut.length ? `<details class="acct-out"${signedIn.length ? '' : ' open'}><summary>${t`Not signed in`} <span>${signedOut.length}</span></summary><ul>${signedOut.map(out).join('')}</ul></details>` : ''}
       ${name === 'gemini' ? '' : `<div class="acct-add" data-acct-addbox>${ui.acctAdding ? `<input type="text" data-acct-name maxlength="30" placeholder="${t`Name for the new account, like work or personal`}" aria-label="${t`Name for the new account`}"><button type="button" class="btn small primary" data-acct-create>${t`Create and sign in`}</button><button type="button" class="btn small" data-acct-cancel>${t`Cancel`}</button>` : `<button type="button" class="btn small" data-acct-new>${t`+ Add a ${short} account`}</button>`}</div>`}
       ${ui.acctWaiting ? `<p class="acct-wait"><span class="dot working"></span> ${t`Finish signing in to ${service} in the window that opened. This list updates by itself.`}</p>` : ''}
-      <label class="acct-auto"><input type="checkbox" data-acct-auto ${ui.accountsAuto !== false ? 'checked' : ''}><span>${t`When an account hits its usage limit, switch to another signed-in one and continue`}</span></label></div></div>
+      <label class="acct-auto"><input type="checkbox" data-acct-auto ${ui.accountsAuto !== false ? 'checked' : ''}><span>${t`When an account hits its usage limit, switch to another signed-in one and continue`}</span></label>`}</div></div>
       <div class="acct-foot"><button type="button" class="btn quiet" data-acct-refresh>${t`Check again`}</button><button type="button" class="btn primary" data-close>${t`Done`}</button></div></form>`;
   };
   if (!ui.accounts) { back.innerHTML = `<div class="dialog"><p class="muted">${t`Checking your AI accounts…`}</p></div>`; await loadAccounts(true); }
@@ -1411,6 +1423,18 @@ async function accountsDialog() {
     const switchTab = event.target.closest('[data-acct-tab]'); if (switchTab) { ui.acctTab = switchTab.dataset.acctTab; ui.acctAdding = false; draw(); return; }
     const pickDefault = event.target.closest('[data-acct-default]');
     if (pickDefault) { try { await api('/config', { method: 'PUT', data: { ...ui.snap.config, provider: pickDefault.dataset.acctDefault } }); await refresh(); ui.acctTab = pickDefault.dataset.acctDefault; toast(t`New agents and chats use ${{ codex: t('Codex'), gemini: t('Gemini') }[pickDefault.dataset.acctDefault] || t('Claude Code')}.`); draw(); } catch (error) { toast(error.message, true); } return; }
+    if (event.target.closest('[data-acct-orsave]')) {
+      const input = back.querySelector('[data-acct-orkey]'), key = input.value.trim(); input.value = '';
+      if (!key) { toast(t('Paste your OpenRouter key first.'), true); return; }
+      const button = back.querySelector('[data-acct-orsave]'); button.disabled = true; button.textContent = t('Checking…');
+      try { await api('/agents/openrouter-key', { method: 'POST', data: { key } }); toast(t('OpenRouter key saved. It works.')); } catch (error) { toast(error.message, true); }
+      await loadAccounts(true); await refresh(); draw(); return;
+    }
+    if (event.target.closest('[data-acct-ordel]')) {
+      if (!await askConfirm(t`Remove the OpenRouter key? Agents on OpenRouter and Jev stop working until a new one is added.`)) return;
+      try { await api('/agents/openrouter-key', { method: 'DELETE' }); } catch (error) { toast(error.message, true); }
+      await loadAccounts(true); draw(); return;
+    }
     if (event.target.closest('[data-acct-refresh]')) { back.querySelector('[data-acct-refresh]').textContent = t('Checking…'); await loadAccounts(true); draw(); }
     if (event.target.closest('[data-acct-new]')) { ui.acctAdding = true; draw(); back.querySelector('[data-acct-name]')?.focus(); }
     if (event.target.closest('[data-acct-cancel]')) { ui.acctAdding = false; draw(); }
@@ -1438,6 +1462,7 @@ async function accountsDialog() {
   back.addEventListener('change', async event => {
     try {
       if (event.target.name === 'profile') { const name = tab(); await api('/agents/profile', { method: 'POST', data: { provider: name, profile: event.target.value } }); await loadAccounts(); toast(t`Agents on ${NAMES[name][1]} now use this account from their next reply.`); draw(); }
+      if (event.target.matches('[data-acct-ormodel]')) { const config = ui.snap.config; ui.snap.config = await api('/config', { method: 'PUT', data: { ...config, models: { ...config.models, openrouter: event.target.value } } }); toast(t('Model saved. Agents on OpenRouter use it from their next reply.')); }
       if (event.target.matches('[data-acct-auto]')) { ui.accountsAuto = (await api('/accounts/auto', { method: 'POST', data: { on: event.target.checked } })).on; }
     } catch (error) { toast(error.message, true); }
   });

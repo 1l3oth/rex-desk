@@ -245,6 +245,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (!process.env.NODE_TEST_CONTEXT) void desk.refreshModels().catch(error => store.event('', 'models-error', { message: error.message }));
     // Antigravity's models fill its pickers when it is installed and signed in; otherwise this fails quietly.
     if (!process.env.NODE_TEST_CONTEXT && store.config().provider !== 'gemini') void desk.refreshModels({ provider: 'gemini' }).catch(() => {});
+    // OpenRouter's models (public list), for its pickers. Only once a key is saved.
+    if (!process.env.NODE_TEST_CONTEXT && store.config().provider !== 'openrouter' && desk.agents.openrouterKey()) void desk.refreshModels({ provider: 'openrouter' }).catch(() => {});
     // The models on this computer (Local AI), for the Claude Code model pickers.
     if (!process.env.NODE_TEST_CONTEXT) void desk.localAi.status().catch(() => {});
   }
@@ -812,6 +814,16 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       }
       if (url.pathname === '/api/agents/login' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.agents.login(aiProvider(input.provider || 'claude'), String(input.profile || ''), { background: input.background === true })); }
       if (url.pathname === '/api/agents/login' && request.method === 'GET') return json(response, 200, desk.agents.loginJob(aiProvider(url.searchParams.get('provider') || 'claude')));
+      // OpenRouter key for agents (and Jev): checked with OpenRouter first, saved encrypted only when it works. Never echoed back.
+      if (url.pathname === '/api/agents/openrouter-key' && request.method === 'POST') {
+        const key = String((await body(request)).key || '').trim();
+        const checked = await desk.agents.checkKey(key);
+        if (!checked.ok) return json(response, 400, { error: checked.error });
+        store.put('secret', 'openrouter', store.encrypt(key)); desk.agents.invalidate('openrouter');
+        void desk.refreshModels({ provider: 'openrouter' }).then(notify, () => {});
+        return json(response, 200, { ok: true, label: checked.label, freeTier: checked.freeTier });
+      }
+      if (url.pathname === '/api/agents/openrouter-key' && request.method === 'DELETE') { store.delete('secret', 'openrouter'); desk.agents.invalidate('openrouter'); return json(response, 200, { ok: true }); }
       if (url.pathname === '/api/agents/add' && request.method === 'POST') { const input = await body(request), provider = aiProvider(input.provider || 'claude'); const created = desk.agents.addProfile(provider, input.name); return json(response, 200, { ...created, ...desk.agents.login(provider, created.profile) }); }
       if (url.pathname === '/api/accounts/auto' && request.method === 'GET') return json(response, 200, { on: !store.get('accounts', 'auto')?.off });
       if (url.pathname === '/api/accounts/auto' && request.method === 'POST') { const on = (await body(request)).on !== false; store.put('accounts', 'auto', { id: 'auto', off: !on }); return json(response, 200, { on }); }

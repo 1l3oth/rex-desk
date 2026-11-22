@@ -2,7 +2,7 @@ import { askConfirm } from './confirm.js';
 import { t, languagePicker } from './i18n.js';
 import { loadTourAi, tourAiHtml, tourAiClick } from '/chat-tour-ai.js';
 import { SOCIAL } from '/social-icons.js';
-import { firstRunHtml, firstRunClick } from '/chat-firstrun.js';
+import { firstRunHtml, firstRunClick, firstRunSubmit } from '/chat-firstrun.js';
 // Where Rex Desk keeps things (shown in Settings, Folders and in the setup tour), and the setup tour a new person gets.
 const ROWS = [
   ['data', t('Rex Desk data'), t('Chats, tasks, settings and saved keys.'), 'restart'],
@@ -160,6 +160,12 @@ export function startTour(ctx, { firstRun = false } = {}) {
         } finally { draw(); }
       }
     } catch (error) { toast(error.message, true); }
+  });
+  back.addEventListener('submit', async event => {
+    if (STEPS[state.step] !== 'connect') return;
+    event.preventDefault();
+    await firstRunSubmit(ctx, state, event.target, () => { if (STEPS[state.step] === 'connect' && document.body.contains(back)) draw(); }, {
+      load: () => loadTourAi(ctx, state), finish: async () => { await finish(); ctx.open?.('main'); } }).catch(error => toast(error.message, true));
   });
   back.addEventListener('keydown', event => { if (event.key === 'Enter' && event.target.matches('[data-tour-repo]')) back.querySelector('[data-tour-add]')?.click(); });
   draw(); back.querySelector('[data-tour-next]')?.focus();

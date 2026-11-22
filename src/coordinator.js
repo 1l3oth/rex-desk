@@ -1,4 +1,5 @@
 import { aiProvider, AI_PROVIDERS, CodexRunner, codexModels, profileKey, providerTitle } from './codex.js';
+import { openrouterModels } from './openrouter.js';
 import { AntigravityRunner, antigravityModels } from './antigravity.js';
 import { LocalAi, isLocalModel, parseLocalModel } from './local-ai.js';
 import { Rooms } from './rooms.js';
@@ -704,7 +705,7 @@ export class Desk {
         // What the agent may not touch: Rex Desk's data, the installed app, and the server it runs inside (see app-guard.js).
         guard: { data: process.env.REX_DATA_DIR || this.store.directory, install: process.env.REX_DESK_EXE ? path.dirname(process.env.REX_DESK_EXE) : '', serverPid: process.pid }, projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere, token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
-        mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) }, javaEnv: this.javaEnv(run),
+        mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' || run.provider === 'openrouter' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), requeue: text => this.requeue(runId, text), extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
@@ -1317,7 +1318,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // Asks the signed-in Claude Code which models it offers, keeps the list, and fixes any agent whose saved model is not on it.
   async refreshModels({ sdk, provider } = {}) {
     const selected = provider || this.store.config().provider;
-    const items = selected === 'codex' ? await codexModels({ env: this.agents.environment(selected) }) : selected === 'gemini' ? await antigravityModels({ env: this.agents.environment(selected) }) : await fetchModels({ env: this.agents.environment(selected), sdk });
+    const items = selected === 'openrouter' ? await openrouterModels() : selected === 'codex' ? await codexModels({ env: this.agents.environment(selected) }) : selected === 'gemini' ? await antigravityModels({ env: this.agents.environment(selected) }) : await fetchModels({ env: this.agents.environment(selected), sdk });
     if (!items.length) return modelList(this.store, selected);
     const key = selected === 'claude' ? 'list' : selected, refused = this.store.get('models', key)?.refused || [];
     const usable = items.filter(item => !refused.includes(item.id));

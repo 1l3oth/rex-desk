@@ -7,6 +7,8 @@ const AIS = [
   { id: 'codex', label: t('I use ChatGPT'), service: 'ChatGPT', plan: t('ChatGPT Plus or Pro'), plans: 'https://chatgpt.com/pricing' },
   { id: 'claude', label: t('I use Claude'), service: 'Claude', plan: t('Claude Pro or Max'), plans: 'https://claude.com/pricing' },
   { id: 'gemini', label: t('I use Gemini'), service: 'Gemini', plan: t('A Google account'), plans: 'https://gemini.google/subscriptions/' },
+  // OpenRouter has no sign-in: its API key is typed here, checked with OpenRouter, and kept encrypted on this computer.
+  { id: 'openrouter', label: t('I use OpenRouter'), service: 'OpenRouter', plan: t('An OpenRouter API key'), plans: 'https://openrouter.ai/settings/keys', key: true },
 ];
 const TICK = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3L13 4.5"/></svg>';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -46,6 +48,12 @@ export function firstRunHtml({ ui, esc }, state) {
     };
     body = `<p>${t`Your agents think with the AI plan you already pay for. Which one do you use?`}</p><div class="fr-cards">${AIS.map(card).join('')}</div>
       <p class="fr-plans"><button type="button" class="linkish" data-fr-plans>${t`Don't have one? See plans`}</button>${fr.plans ? `<span>${AIS.map(item => `<a href="${item.plans}" target="_blank" rel="noopener">${esc(item.service)}</a>`).join('')}</span>` : ''}</p>`;
+  } else if (fr.step === 'signin' && ai.key) {
+    body = `<p class="fr-lead">${t`Add your OpenRouter key`}</p><p class="muted">${t`Rex Desk checks the key with OpenRouter and keeps it encrypted on this computer. It is never shown in a chat.`}</p>
+      <form class="fr-key" data-fr-keyform><input type="password" name="key" autocomplete="off" spellcheck="false" placeholder="sk-or-v1-…" aria-label="${t`OpenRouter API key`}" required>
+      <button type="submit" class="btn primary" ${fr.job?.state === 'starting' ? 'disabled' : ''}>${fr.job?.state === 'starting' ? t`Checking…` : t`Check and save`}</button></form>
+      ${fr.job?.state === 'failed' ? `<div class="fr-error" role="alert"><b>${t`That did not work`}</b><span>${esc(fr.job.error || '')}</span></div>` : ''}
+      <p class="fr-plans"><button type="button" class="linkish" data-fr-back>${t`Pick another AI`}</button><a href="${ai.plans}" target="_blank" rel="noopener">${t`Get a key on OpenRouter`}</a></p>`;
   } else if (fr.step === 'signin') {
     const job = fr.job, busy = job && ['starting', 'installing', 'signing-in', 'finished'].includes(job.state);
     const status = !job ? `<p class="muted">${t`Rex Desk sets it up for you. Your browser opens the ${ai.service} sign-in; sign in with the account that has your plan, then come back here.`}</p>`
@@ -57,11 +65,22 @@ export function firstRunHtml({ ui, esc }, state) {
     body = `<p class="fr-lead">${t`Sign in to ${ai.service}`}</p>${status}<div class="fr-actions">${action}</div>
       <p class="fr-plans"><button type="button" class="linkish" data-fr-back>${t`Pick another AI`}</button><a href="${ai.plans}" target="_blank" rel="noopener">${t`See ${ai.service} plans`}</a></p>`;
   } else {
-    const who = aiReady(ui, ai.id)?.account;
+    const who = ai.key ? '' : aiReady(ui, ai.id)?.account;
     body = `<p class="fr-lead fr-good">${TICK}${t`${ai.service} is connected`}</p><p class="muted">${who ? t`Signed in as ${esc(who)}. ` : ''}${t`Opening Rex Agent…`}</p>
       <div class="fr-actions"><button type="button" class="btn primary" data-fr-finish>${t`Open Rex Agent`}</button></div>`;
   }
   return `<div class="fr"><h2>${t`Connect your AI`}</h2>${bar}<div class="fr-pane">${clip(fr.step, ai)}<div class="fr-main">${body}</div></div></div>`;
+}
+
+// The OpenRouter key form: checked by the server with OpenRouter, saved only when it works. The key never stays in the page.
+export async function firstRunSubmit(ctx, state, form, draw, { load, finish }) {
+  const fr = state.fr; if (!fr || !form.matches('[data-fr-keyform]')) return false;
+  const input = form.querySelector('input[name=key]'), key = input.value.trim(); input.value = '';
+  if (!key) return true;
+  fr.job = { state: 'starting' }; draw();
+  try { await ctx.api('/agents/openrouter-key', { method: 'POST', data: { key } }); await load(); fr.job = null; fr.step = 'done'; draw(); await connected(ctx, state, draw, finish); }
+  catch (error) { fr.job = { state: 'failed', error: error.message }; draw(); }
+  return true;
 }
 
 // Clicks on the connect screen. Returns true when the click was its own. finish() closes the tour and opens Rex Agent.
