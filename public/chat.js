@@ -1407,9 +1407,9 @@ async function accountsDialog() {
         ${key.account ? `<div class="or-row"><span>${t`Key`}</span><span class="or-val mono">${esc(key.account)}</span></div>` : ''}
         <div class="or-row"><span>${t`Use for new agents`}</span>${use}</div>
       </div>
-      <h3 class="or-title">${key.hasKey ? t('Replace key') : t('API key')}</h3>
+      <div class="or-title or-title-act"><h3>${key.hasKey ? t('Replace key') : t('API key')}</h3><button type="button" class="or-link" data-acct-orsave>${t`Check and save`}</button></div>
       <div class="or-group">
-        <div class="or-row or-field"><input type="password" data-acct-orkey autocomplete="off" spellcheck="false" placeholder="${key.hasKey ? t('Paste a new key') : 'sk-or-v1-…'}" aria-label="${t`OpenRouter API key`}"><button type="button" class="or-link" data-acct-orsave>${t`Check and save`}</button></div>
+        <div class="or-row or-field"><input type="password" data-acct-orkey autocomplete="off" spellcheck="false" placeholder="${key.hasKey ? t('Paste a new key') : 'sk-or-v1-…'}" aria-label="${t`OpenRouter API key`}"></div>
         ${key.hasKey ? `<div class="or-row"><button type="button" class="or-link bad" data-acct-ordel>${t`Remove key`}</button></div>` : ''}
       </div>
       <p class="or-note">${t`The key stays encrypted on this computer and is never shown in a chat. Jev uses the same key.`} <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">${t`Get a key`}</a></p>

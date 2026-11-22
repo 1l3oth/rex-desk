@@ -2832,3 +2832,8 @@ html[data-theme=dark] .ctx-panel{background:linear-gradient(var(--panel),var(--p
 .iv{overflow:hidden;overscroll-behavior:none;touch-action:none}
 html:has(.iv[open]){overflow:hidden}
 @media (max-width:700px){.iv-stage{padding:0}.iv-stage img{border-radius:0}}
+/* The key box fills its row; Check and save sits at the right of the section title, above the box. */
+.acct-dialog .or-title-act{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-right:12px;text-transform:none;letter-spacing:0}
+.acct-dialog .or-title-act h3{margin:0;font:inherit;font-size:11.5px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
+.acct-dialog .or-title-act .or-link{padding:0;font-size:13px}
+.acct-dialog .or-field input{width:100%}
