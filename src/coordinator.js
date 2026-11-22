@@ -640,8 +640,10 @@ export class Desk {
         const workers = [...this.live.keys()].map(runId => this.run(runId)).filter(item => item.role === 'worker' && !item.inApp).length; // a chat open in the Claude app waits for the person
         if (run.role === 'worker' && workers >= this.store.config().concurrency) continue;
         // Two workers never edit the same plain folder at once: the second waits for the first.
-        const plainFolder = run.role === 'worker' && this.store.config().repositories.find(item => item.id === run.repositoryId)?.plain ? run.repositoryId : '';
-        if (plainFolder && [...this.live.keys()].some(runId => { const other = this.run(runId); return other.id !== run.id && other.role === 'worker' && other.repositoryId === plainFolder; })) continue;
+        // Matched by the folder itself, not the Settings entry, so the same folder added twice still has one worker at a time.
+        const repositories = this.store.config().repositories, folderOf = item => item ? path.resolve(item.path || '').toLowerCase() : '';
+        const plainEntry = run.role === 'worker' && repositories.find(item => item.id === run.repositoryId), plainFolder = plainEntry?.plain ? folderOf(plainEntry) : '';
+        if (plainFolder && [...this.live.keys()].some(runId => { const other = this.run(runId); return other.id !== run.id && other.role === 'worker' && (folderOf(repositories.find(item => item.id === other.repositoryId)) === plainFolder || (other.worktree && path.resolve(other.worktree).toLowerCase() === plainFolder)); })) continue;
         const controller = new AbortController(); this.live.set(run.id, { controller });
         this.patchRun(run.id, { state: 'starting' });
         void this.execute(run.id, controller).catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
@@ -666,7 +668,8 @@ export class Desk {
       // A project that is not a Git folder has no branches or worktrees: the agent works straight in the folder.
       // The folder may have become a Git repository since it was added (git init): then it is a normal project again.
       const plainRepository = run.role === 'worker' && !run.worktree && this.store.config().repositories.find(item => item.id === run.repositoryId);
-      if (plainRepository?.plain && (await inspectRepository(plainRepository.path).catch(() => ({ git: false }))).git !== false) {
+      // When Git cannot say (Git missing, access refused), the run stops instead of editing what may be a real checkout.
+      if (plainRepository?.plain && (await inspectRepository(plainRepository.path).catch(error => { throw new Error(`Could not check whether ${plainRepository.path} is a Git folder, so no agent works in it: ${error.message}`); })).git !== false) {
         const current = this.store.config();
         this.store.saveConfig({ ...this.store.publicConfig(), repositories: current.repositories.map(item => item.id === plainRepository.id ? { ...item, plain: false, baseBranch: item.baseBranch || 'develop', targetBranch: item.targetBranch || item.baseBranch || 'develop' } : item) });
       }

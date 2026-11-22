@@ -40,3 +40,18 @@ test('the desk adds a plain folder as a project and refuses to publish from it',
     store.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+test('one worker at a time in a plain folder, even when the folder is added twice', async () => {
+  const { Desk } = await import('../src/coordinator.js');
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-plain-'));
+  try {
+    const store = new Store(path.join(dir, 'data')); const desk = new Desk(store, { root: path.join(dir, 'root') });
+    const folder = path.join(dir, 'Captures'); mkdirSync(folder);
+    const saved = store.saveConfig({ ...store.publicConfig(), concurrency: 5, repositories: [{ name: 'One', path: folder, plain: true }, { name: 'Two', path: `${folder}${path.sep}`, plain: true }] });
+    const [first, second] = saved.repositories; assert.ok(second && first.id !== second.id, 'two entries for one folder');
+    store.put('run', 'a', { id: 'a', role: 'worker', repositoryId: first.id, state: 'running', worktree: folder }); desk.live.set('a', { controller: new AbortController() });
+    store.put('run', 'b', { id: 'b', role: 'worker', repositoryId: second.id, state: 'queued' });
+    await desk.drain();
+    assert.equal(store.get('run', 'b').state, 'queued', 'the second worker waits for the first');
+    desk.live.clear(); store.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

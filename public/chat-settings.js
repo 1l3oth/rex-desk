@@ -280,7 +280,7 @@ export function openSettings(ctx, section = 'general') {
         ${repo.plain ? '' : field(t('How changes go out'), `<select name="repo.${index}.push"><option value="pr" ${repo.push !== 'direct' ? 'selected' : ''}>${t`Draft pull request`}</option><option value="direct" ${repo.push === 'direct' ? 'selected' : ''}>${t`Push straight to the branch`}</option></select>`, t('Push straight: agents push their commits onto the target branch, with no pull request. Saying "no PR" in a chat does the same for one change.'))}
         </details>
         <button type="button" class="btn small quiet danger" data-st-repo-remove="${index}">${t`Remove this project`}</button></details>`;
-      return `<h2>${t`Projects`}</h2><p class="muted">${t`The code your agents work on. Each run gets its own copy, so your own copy of the project is never touched. Rex Agent can also add a project when you name it in chat.`}</p>
+      return `<h2>${t`Projects`}</h2><p class="muted">${t`The code your agents work on. In a Git project each run gets its own copy, so your own copy is never touched; in a folder without Git, agents work straight in the folder, one at a time. Rex Agent can also add a project when you name it in chat.`}</p>
         ${repositories.length ? repositories.map(row).join('') : `<p class="muted">${t`No projects yet.`}</p>`}
         ${projectRulesHtml()}
         <details class="st-adv"><summary>${t`Advanced`}</summary>${field(t('Branch names start with'), input('branchPrefix', config().branchPrefix, 'spellcheck="false"'), t`New branches look like ${esc(String(config().branchPrefix || 'rex-desk').replace(/\/+$/, ''))}/fix-login-button. Change it only if your team has a rule for branch names.`)}</details>
