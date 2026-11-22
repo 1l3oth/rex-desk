@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
+import { spawn, execFile } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { resolveCommand } from './processes.js';
@@ -127,9 +128,24 @@ export function lockedDenial(name, input = {}, cwd = '') {
   return '';
 }
 
+// Several steps in a row cancelled by Claude Code itself means a job the agent left running (a dev server, a test, a screenshot
+// script) cancels every next step: the agent is stuck. Rex Desk stops that turn's own processes and starts a fresh chat.
+export const STUCK_AFTER = 3;
+// Ends a process and everything it started, by its process id: only the Claude Code process of this turn and its children.
+export async function endProcessTree(pid, { platform = process.platform, run = execFile } = {}) {
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
+  const call = (command, args) => new Promise(resolve => run(command, args, { windowsHide: true }, (error, stdout) => resolve(error ? '' : String(stdout || ''))));
+  if (platform === 'win32') { await call('taskkill', ['/PID', String(pid), '/T', '/F']); return true; }
+  const table = (await call('ps', ['-A', '-o', 'pid=,ppid='])).split('\n').map(line => line.trim().split(/\s+/).map(Number)).filter(pair => pair.length === 2);
+  const tree = [pid];
+  for (let index = 0; index < tree.length; index++) for (const [child, parent] of table) if (parent === tree[index] && !tree.includes(child) && child !== process.pid) tree.push(child);
+  for (const each of tree.reverse()) { try { process.kill(each, 'SIGKILL'); } catch { /* already gone */ } }
+  return true;
+}
+
 export class ClaudeRunner {
   constructor(options) { Object.assign(this, options); }
-  noteCancelled() { this.cancelCount = (this.cancelCount || 0) + 1; this.cancelPending = true; }
+  noteCancelled() { this.cancelCount = (this.cancelCount || 0) + 1; this.cancelStreak = (this.cancelStreak || 0) + 1; this.cancelPending = true; }
   // Given once, right after the cancel, so the agent never has to work out for itself that the person did not stop it.
   takeCancelNote() { if (!this.cancelPending) return ''; this.cancelPending = false; return cancelNote(this.cancelCount); }
   async start(prompt) {
@@ -150,7 +166,12 @@ export class ClaudeRunner {
     if (resume) { try { carrySession(resume, this.cwd, env.CLAUDE_CONFIG_DIR || ''); } catch { /* the resume reports it if the conversation is really gone */ } }
     // Rex Desk refuses nothing here: every team works its own way, so the agent decides from what the person says, and asks them when unsure.
     // includePartialMessages: the reply arrives word by word as it is written, so read-aloud can speak it while it is written.
-    const options = { cwd: this.cwd, env, abortController: this.controller, includePartialMessages: true,
+    // Claude Code is started here (as the Agent SDK would) so its process id is known: a stuck turn ends that process tree only.
+    const ownSpawn = this.sdk ? {} : { spawnClaudeCodeProcess: ({ command, args, cwd, env: childEnv, signal }) => {
+      const child = spawn(command, args, { cwd, env: childEnv, signal, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+      this.childPid = child.pid; return child;
+    } };
+    const options = { cwd: this.cwd, env, abortController: this.controller, includePartialMessages: true, ...ownSpawn,
       permissionMode: mode, ...(mode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
       ...(this.run.effort ? { effort: this.run.effort } : {}),
       // Claude Code's own question prompt would not reach the dashboard; the agent asks through desk_ask instead.
@@ -251,10 +272,17 @@ export class ClaudeRunner {
           if (this.subagents?.has(block.tool_use_id)) { const said = Array.isArray(block.content) ? block.content.map(part => part.text || '').join('\n') : String(block.content || ''); this.event('subagent-done', { id: block.tool_use_id, failed: Boolean(block.is_error), text: said.slice(0, 3000) }); continue; }
           // A step Claude Code cancelled by itself: not shown as a failure, and the agent is told at once to run it again.
           if (block.is_error && cancelledByItself(block.content)) { this.noteCancelled(); continue; }
+          this.cancelStreak = 0;
           if (this.terminals?.has(block.tool_use_id)) this.event('agent-tool-result', { id: block.tool_use_id, text: terminalText(block.content), failed: Boolean(block.is_error) });
           else if (block.is_error) this.event('agent-tool', { tool: 'result', failed: true, text: (Array.isArray(block.content) ? block.content.map(part => part.text || '').join(' ') : String(block.content || '')).slice(0, 300) });
         }
         this.event('agent-operation', { type: 'tool-result', content: message.message?.content });
+      }
+      if (this.cancelStreak >= STUCK_AFTER) {
+        this.stuck = true; this.cancelPending = false;
+        this.event('steps-stuck', { count: this.cancelStreak });
+        await (this.endTree || endProcessTree)(this.childPid);
+        break;
       }
       if (message.type === 'assistant' && !message.parent_tool_use_id) answered = true;
       // A background task the last turn left running is reported first when the conversation reopens ("it stopped"), as a turn
@@ -283,7 +311,7 @@ export class ClaudeRunner {
     // A step was cancelled and the agent ended its turn without another step, so the note never reached it: it gets the note
     // at once in a quiet follow-up, instead of having guessed.
     if (this.cancelPending && !this.signal?.aborted) this.requeue?.(this.takeCancelNote());
-    return { status: 'completed' };
+    return { status: 'completed', ...(this.stuck ? { stuck: true } : {}) };
   }
   // The messages of an open Claude-app session: the first one (if any), then whatever arrives in Rex Desk, until Stop.
   async *remoteMessages(first) {
