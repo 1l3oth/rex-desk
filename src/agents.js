@@ -13,10 +13,15 @@ const cli = provider => provider === 'gemini' ? { command: agyCommand(), args: [
 const statusArgs = { claude: ['auth', 'status', '--json'], codex: ['login', 'status'], gemini: ['models'] };
 const loginArgs = { claude: ['auth', 'login'], codex: ['login'], gemini: ['acp', '--login'] };
 // What the sign-in window runs first when the CLI is not on this computer yet.
+export const CODEX_WINDOWS_INSTALL = "$rexArch = if (($env:PROCESSOR_ARCHITEW6432, $env:PROCESSOR_ARCHITECTURE) -contains 'ARM64') { 'Arm64' } else { 'X64' }; "
+  + "iex ([string](irm https://chatgpt.com/codex/install.ps1)).Replace('[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture', \"'$rexArch'\")";
 const installCommands = {
   // Each tool's own installer, using only what Windows (PowerShell) and macOS (curl, bash) already have: no Node, npm, winget
   // or Homebrew, so a computer never set up for coding can install them too. On a Mac all three go to ~/.local/bin.
-  win32: { claude: 'irm https://claude.ai/install.ps1 | iex', codex: 'irm https://chatgpt.com/codex/install.ps1 | iex', gemini: 'irm https://antigravity.google/cli/install.ps1 | iex' },
+  // OpenAI's Codex script reads RuntimeInformation.OSArchitecture under strict mode, which Windows PowerShell 5.1 on an older
+  // .NET Framework does not have ("property 'OSArchitecture' cannot be found"). The script is fetched and that one read is
+  // replaced by the architecture from the environment, as the Claude and Antigravity scripts already do.
+  win32: { claude: 'irm https://claude.ai/install.ps1 | iex', codex: CODEX_WINDOWS_INSTALL, gemini: 'irm https://antigravity.google/cli/install.ps1 | iex' },
   other: { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh', gemini: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' }
 };
 const bareName = { claude: 'claude', codex: 'codex', gemini: 'agy' };
