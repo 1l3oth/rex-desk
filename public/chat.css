@@ -2866,39 +2866,49 @@ html:has(.iv[open]){overflow:hidden}
 @media (max-width:640px){.cx-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:360px){.cx-grid{grid-template-columns:1fr}}
 
-/* Needs you: one grouped list like a settings page (chat-inbox.js). */
-.ny{max-width:760px;margin:0 auto;padding:14px 16px 40px;display:flex;flex-direction:column;gap:18px}
-.ny-sec h3{margin:0 0 6px 12px;font-size:12px;font-weight:600;color:var(--muted)}
-.ny-sec h3 span{font-weight:400;margin-left:4px}
-.ny-list{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
-.ny-row{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;margin:0}
-.ny-row+.ny-row{border-top:1px solid var(--line)}
-.ny-row>.av{flex:none;margin-top:1px}
-.ny-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
-.ny-top{display:flex;align-items:baseline;gap:8px;font-size:13px;min-width:0}
-.ny-top b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ny-proj{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ny-top time{margin-left:auto;flex:none;color:var(--muted);font-size:12px}
-.ny-q{font-size:13.5px;line-height:1.4;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.ny-more>summary{cursor:pointer;color:var(--accent);font-size:12.5px;width:max-content;list-style:none}
-.ny-more>summary::-webkit-details-marker{display:none}
-.ny-more>summary::after{content:'';display:inline-block;width:6px;height:6px;margin-left:6px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:translateY(-2px) rotate(45deg)}
-.ny-more[open]>summary::after{transform:translateY(1px) rotate(-135deg)}
-.ny-more>.md,.ny-more>pre{margin-top:6px;font-size:13px}
-.ny-more>pre{max-height:220px;overflow:auto;padding:8px;border-radius:6px;background:var(--bg);font-family:var(--mono);font-size:12px}
-.ny-more>.qcard{margin:8px 0 0;box-shadow:none}
-.ny-act{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:2px}
-.ny-reply{display:flex;gap:6px;flex:1 1 220px;min-width:0}
-.ny-reply .qinput{flex:1;min-width:0;height:28px;padding:0 9px;font-size:13px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
-.ny-skip{color:var(--muted)}
+/* Needs you: a split view like Mail (chat-inbox.js). List on the left, the open question on the right. */
+.feed.ny-feed{padding:0;overflow:hidden;display:flex}
+.feed.ny-feed>#feed-inner{max-width:none;margin:0;padding:0;flex:1;display:flex;min-height:0}
+.feed.ny-feed>.live-reply{display:none}
+.ny{flex:1;display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr);min-height:0;border-top:1px solid var(--line)}
+.ny-list{overflow-y:auto;border-right:1px solid var(--line);background:color-mix(in srgb,var(--raised) 50%,transparent);padding:6px}
+.ny-sec{display:flex;gap:6px;margin:10px 8px 4px;font-size:11.5px;font-weight:600;color:var(--muted)}
+.ny-sec:first-child{margin-top:4px}
+.ny-sec span{font-weight:400}
+.ny-item{display:flex;gap:10px;align-items:flex-start;width:100%;padding:8px 10px;border:0;border-radius:6px;background:none;color:var(--ink);text-align:left;font:inherit;cursor:default}
+.ny-item+.ny-item{margin-top:1px}
+.ny-item:hover{background:var(--raised)}
+.ny-item.on{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.ny-item>.av{margin-top:1px}
+.ny-item-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.ny-item-top{display:flex;align-items:baseline;gap:8px;font-size:13px}
+.ny-item-top b{font-weight:600;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ny-item-top time{margin-left:auto;flex:none;color:var(--muted);font-size:11.5px}
+.ny-item-sub{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ny-item-q{font-size:12.5px;line-height:1.35;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px}
+.ny-item.on .ny-item-q{color:var(--ink)}
+.ny-pane{overflow-y:auto;min-width:0;background:var(--panel)}
+.ny-detail{max-width:680px;margin:0;padding:20px 28px 32px;display:flex;flex-direction:column;gap:14px}
+.ny-dhead{display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.ny-dwho{display:flex;flex-direction:column;min-width:0}
+.ny-dwho b{font-size:14px;font-weight:600}
+.ny-dwho span{font-size:12px;color:var(--muted)}
+.ny-back{display:none}
+.ny-dq{font-size:14px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.ny-cmd{margin:0;max-height:320px;overflow:auto;padding:10px;border:1px solid var(--line);border-radius:6px;background:color-mix(in srgb,var(--raised) 50%,transparent);font-family:var(--mono);font-size:12px}
+.ny-opts{display:flex;flex-wrap:wrap;gap:6px}
+.ny-answer{width:100%;min-height:72px;resize:vertical;padding:8px 10px;font:inherit;font-size:13.5px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.ny-answer:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 16%,transparent)}
+.ny-dact{display:flex;justify-content:flex-end;gap:8px}
+.ny-dcard>.qcard{margin:0;box-shadow:none}
 @media (max-width:640px){
-  .ny{padding:10px 10px 32px;gap:14px}
-  .ny-row{padding:10px}
-  .ny-reply{flex-basis:100%}
-  .ny-act .btn{min-height:32px}
-  .ny-reply .qinput{height:34px;font-size:15px}
+  .ny{grid-template-columns:1fr;border-top:0}
+  .ny-list{border-right:0;background:var(--panel);padding:4px 6px}
+  .ny-item{padding:10px}
+  .ny.open .ny-list,.ny:not(.open) .ny-pane{display:none}
+  #stage:has(.ny.open) .stage-head .m-menu{display:none}
+  .ny-detail{padding:12px 14px 24px}
+  .ny-back{display:grid;place-items:center;width:32px;height:32px;margin-left:-6px;border:0;background:none;color:var(--accent)}
+  .ny-answer{font-size:15px}
+  .ny-dact .btn,.ny-opts .btn{min-height:34px}
 }
-.ny-qd>summary{list-style:none;cursor:pointer}
-.ny-qd>summary::-webkit-details-marker{display:none}
-.ny-qd[open]>.ny-q{-webkit-line-clamp:unset;display:block;white-space:pre-wrap}
-.ny-qd>pre{margin-top:6px;max-height:220px;overflow:auto;padding:8px;border-radius:6px;background:var(--bg);font-family:var(--mono);font-size:12px}
