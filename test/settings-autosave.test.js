@@ -64,7 +64,8 @@ test('removing a test sign-in or a connection is saved', async () => {
     await page.goto(`${base}/`); await page.waitForTimeout(2500);
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
-    await page.evaluate(() => document.querySelector('[data-st-section="projects"]').click()); await page.waitForTimeout(800);
+    const github = page.waitForResponse(response => response.url().includes('/api/github'));
+    await page.evaluate(() => document.querySelector('[data-st-section="projects"]').click()); await github; await page.waitForTimeout(300);
     assert.equal((await config()).testAccounts.length, 1);
     await page.evaluate(() => document.querySelector('.settings-pop .st-adv:has([name="ta.0.site"]) > summary').click());
     await page.locator('.settings-pop [data-st-signin-remove]').first().click(); await page.waitForTimeout(800);
