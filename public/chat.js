@@ -724,8 +724,10 @@ async function loopNow() {
 }
 async function clearAgent() {
   const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast(t('No agent conversation here.'), true);
+  // The chat may change while the box is up, so clear only the draft of the chat that asked.
+  const key = draftKey();
   if (!await askConfirm(t('Clear this conversation? The agent starts fresh with your next message and reads a summary of what was said. The messages stay on screen.'))) return;
-  const box = document.getElementById('draft'); if (box) { box.value = ''; ui.drafts.set(draftKey(), ''); }
+  ui.drafts.set(key, ''); const box = document.getElementById('draft'); if (box && draftKey() === key) box.value = '';
   await api(`/runs/${run.id}/fresh`, { method: 'POST', data: {} }); toast(t('Cleared. Your next message starts a fresh session.')); await refresh();
 }
 async function stopAgent() { const run = ui.view.type === 'main' ? mainRun() : runById(ui.view.id); if (!run) return toast(t('No agent to stop here.'), true); await api(`/runs/${run.id}/stop`, { method: 'POST', data: {} }); await refresh(); }
