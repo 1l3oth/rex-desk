@@ -19,6 +19,7 @@ import { monitorStage, monitorAction } from '/chat-monitor.js';
 import { netStage, loadNet, wireNet, NET_ICON } from '/chat-net.js';
 import { worktreesStage, fillWorktreeEmbeds, wireWorktrees, wireChatSwitch, WORKTREE_ICON, chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
 import { noticesAction, noticeKey, unreadFor, watchNotices } from '/chat-notices.js';
+import { inboxStage, wireInbox } from '/chat-inbox.js';
 import { openSettings, SETTINGS_GEAR } from '/chat-settings.js';
 import { maybeStartTour } from '/chat-tour.js';
 import { wireFiles, watchShownFile, watchFileWindow } from '/chat-files.js';
@@ -362,10 +363,6 @@ function decisionCard(item) {
   return `<form class="card ask qcard${slides ? ' sliding' : ''}" data-interaction="${esc(item.id)}" data-count="${many}" data-step="${step}" ${slides ? 'novalidate' : ''}><div class="qhead"><span class="qdot"></span>${ask ? (slides ? progress : t('Question')) : t('Needs your OK')} · ${esc(runTitle(run))}</div><div class="qtext md">${markdown(String(item.title).replace(/mcp__[a-z0-9_]+?__/gi, ''))}</div>${detail ? `<pre>${esc(typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2).slice(0, 1500))}</pre>` : ''}${fields}
     <div class="row">${slides ? `<button type="button" class="btn small qback" data-qmove="-1" ${step ? '' : 'hidden'}>${t`Back`}</button><button type="button" class="send-btn wide qnext" data-qmove="1" ${step < many - 1 ? '' : 'hidden'}>${t`Next`}</button>` : ''}<button class="send-btn wide qsend" name="decision" value="accept" ${slides && step < many - 1 ? 'hidden' : ''}>${ask ? (many > 1 ? t('Send answers') : t('Send')) : t('Approve once')}</button>${request.allowAlways ? `<button class="btn small" name="decision" value="always" formnovalidate>${t`Always allow for this run`}</button>` : ''}<button class="btn small" name="decision" value="decline" formnovalidate>${ask ? t('Skip') : t('Decline')}</button>${slides ? `<small class="qhint">${t`Pick an answer or type one · Enter for next`}</small>` : ''}</div></form>`;
 }
-function wakeCard(wake) {
-  const run = runById(wake.runId), room = roomById(wake.roomId);
-  return `<div class="card ask"><h4>${t`${esc(wake.from)} mentioned ${esc(runTitle(run))} in ${esc(room?.name || 'a room')}`}</h4><div class="md">${esc(wake.text)}</div><div class="row"><button class="btn primary small" data-action="wake-approve" data-id="${esc(wake.id)}">${t`Wake it up`}</button><button class="btn small" data-action="wake-dismiss" data-id="${esc(wake.id)}">${t`Dismiss`}</button></div></div>`;
-}
 
 // ---------- stage ----------
 function stageModel() {
@@ -373,10 +370,7 @@ function stageModel() {
   if (type === 'room') return roomStage(ctx);
   if (type === 'tasks') return tasksStage(ctx);
   if (type === 'task') return taskStage(ctx);
-  if (type === 'inbox') {
-    const asks = pending(), wakes = snap.wakes || [];
-    return { title: t('Needs you'), meta: t`${asks.length + wakes.length} waiting`, feed: asks.length + wakes.length ? asks.map(decisionCard).join('') + wakes.map(wakeCard).join('') : `<div class="empty"><h2>${t`All clear`}</h2><p>${t`Questions, approvals and wake-ups from your agents show up here.`}</p></div>` };
-  }
+  if (type === 'inbox') return inboxStage(ctx, { decisionCard, personalAgent, runTitle });
   if (type === 'specialist') return agentStage(ctx);
   if (type === 'devices') return devicesStage(ctx);
   if (type === 'monitor') return monitorStage(ctx);
@@ -871,7 +865,7 @@ document.addEventListener('pointerdown', event => { const feed = event.target.cl
 document.addEventListener('keydown', event => { if (['PageUp', 'ArrowUp', 'Home'].includes(event.key) && document.activeElement?.closest?.('#feed')) letGo(); });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') { if (ui.gliding) return; ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; if (ui.stick) ui.freshBelow = false; syncToEnd(); } }, true);
 
-initPickers(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx); wireAgentCards(ctx); wireSpeak(toast); wireWorktrees(ctx); wireNet(ctx); wireChatSwitch(); wireImageViewer();
+initPickers(ctx); wireInbox(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx); wireAgentCards(ctx); wireSpeak(toast); wireWorktrees(ctx); wireNet(ctx); wireChatSwitch(); wireImageViewer();
 // On a phone the side panels start closed, and the menu button opens the list of chats.
 if (window.matchMedia('(max-width: 760px)').matches) { ui.infoOpen = false; ui.chatInfo = false; ui.termOpen = false; }
 // A page an agent made (an explanation of its changes) opens full screen over the chat, in a sandbox with no access to Rex Desk.

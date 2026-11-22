@@ -2865,3 +2865,40 @@ html:has(.iv[open]){overflow:hidden}
 .cx-pick small{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media (max-width:640px){.cx-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:360px){.cx-grid{grid-template-columns:1fr}}
+
+/* Needs you: one grouped list like a settings page (chat-inbox.js). */
+.ny{max-width:760px;margin:0 auto;padding:14px 16px 40px;display:flex;flex-direction:column;gap:18px}
+.ny-sec h3{margin:0 0 6px 12px;font-size:12px;font-weight:600;color:var(--muted)}
+.ny-sec h3 span{font-weight:400;margin-left:4px}
+.ny-list{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+.ny-row{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;margin:0}
+.ny-row+.ny-row{border-top:1px solid var(--line)}
+.ny-row>.av{flex:none;margin-top:1px}
+.ny-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.ny-top{display:flex;align-items:baseline;gap:8px;font-size:13px;min-width:0}
+.ny-top b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ny-proj{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ny-top time{margin-left:auto;flex:none;color:var(--muted);font-size:12px}
+.ny-q{font-size:13.5px;line-height:1.4;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ny-more>summary{cursor:pointer;color:var(--accent);font-size:12.5px;width:max-content;list-style:none}
+.ny-more>summary::-webkit-details-marker{display:none}
+.ny-more>summary::after{content:'';display:inline-block;width:6px;height:6px;margin-left:6px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:translateY(-2px) rotate(45deg)}
+.ny-more[open]>summary::after{transform:translateY(1px) rotate(-135deg)}
+.ny-more>.md,.ny-more>pre{margin-top:6px;font-size:13px}
+.ny-more>pre{max-height:220px;overflow:auto;padding:8px;border-radius:6px;background:var(--bg);font-family:var(--mono);font-size:12px}
+.ny-more>.qcard{margin:8px 0 0;box-shadow:none}
+.ny-act{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:2px}
+.ny-reply{display:flex;gap:6px;flex:1 1 220px;min-width:0}
+.ny-reply .qinput{flex:1;min-width:0;height:28px;padding:0 9px;font-size:13px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.ny-skip{color:var(--muted)}
+@media (max-width:640px){
+  .ny{padding:10px 10px 32px;gap:14px}
+  .ny-row{padding:10px}
+  .ny-reply{flex-basis:100%}
+  .ny-act .btn{min-height:32px}
+  .ny-reply .qinput{height:34px;font-size:15px}
+}
+.ny-qd>summary{list-style:none;cursor:pointer}
+.ny-qd>summary::-webkit-details-marker{display:none}
+.ny-qd[open]>.ny-q{-webkit-line-clamp:unset;display:block;white-space:pre-wrap}
+.ny-qd>pre{margin-top:6px;max-height:220px;overflow:auto;padding:8px;border-radius:6px;background:var(--bg);font-family:var(--mono);font-size:12px}

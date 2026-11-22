@@ -58,7 +58,6 @@
  "{0} is working. Updating restarts Rex Desk and would cut it off.": "{0} កំពុងធ្វើការ។ ការធ្វើបច្ចុប្បន្នភាពនឹងចាប់ផ្ដើម Rex Desk ឡើងវិញ ហើយនឹងកាត់ផ្ដាច់វា។",
  "{0} lights, {1} links": "{0} ពន្លឺ {1} តំណ",
  "{0} MB so far": "{0} MB រហូតមកដល់ពេលនេះ",
- "{0} mentioned {1} in {2}": "{0} បានលើកឈ្មោះ {1} ក្នុង {2}",
  "{0} min": "{0} នាទី",
  "{0} min ago": "{0} នាទីមុន",
  "{0} model ready": "ម៉ូដែល {0} រួចរាល់",
@@ -2514,5 +2513,14 @@
  "Key": "Key",
  "Use for new agents": "ប្រើសម្រាប់ភ្នាក់ងារថ្មី",
  "Replace key": "ប្ដូរ key",
- "Paste a new key": "បិទភ្ជាប់ key ថ្មី"
+ "Paste a new key": "បិទភ្ជាប់ key ថ្មី",
+ "Newest": "ថ្មីបំផុត",
+ "Group by": "ដាក់ជាក្រុមតាម",
+ "Fill in": "បំពេញ",
+ "Always allow": "អនុញ្ញាតជានិច្ច",
+ "Deny": "បដិសេធ",
+ "Or type an answer": "ឬវាយចម្លើយ",
+ "Type an answer": "វាយចម្លើយ",
+ "Your answer": "ចម្លើយរបស់អ្នក",
+ "mentioned {0} in {1}": "បានលើកឡើងពី {0} ក្នុង {1}"
 }
