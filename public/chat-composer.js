@@ -226,6 +226,8 @@ function menuItems(ctx, box) {
 // Dictation uses Rex Desk's own speech model on this computer (the same one as Jev), not the browser's online service,
 // which does not work inside the desktop app. Recording stops by itself when you stop talking; press the mic again to stop sooner.
 let listening = null, transcribing = false;
+// Counts Sends: a mic that was still opening when Send ended the dictation stops as soon as it opens, and never starts.
+let micStarts = 0;
 const micButton = () => document.querySelector('[data-action="mic"]');
 const voiceLanguage = ctx => { try { return localStorage.getItem('jev-language') || ctx.ui.snap?.config?.control?.language || 'en'; } catch { return ctx.ui.snap?.config?.control?.language || 'en'; } };
 // Dictation with the browser's own speech recognition (Chrome, Edge; see Voice mode below): it works the words out while
@@ -329,8 +331,10 @@ function startOn(recognition, stream) {
 async function browserDictate(ctx, { untilRelease = false } = {}) {
   if (browserSpeech === 'no') return false;
   let recognition; try { recognition = new Recognition(); } catch { browserSpeech = 'no'; return false; }
+  const start = micStarts;
   let stream = null; try { stream = await openMicrophone(); } catch { /* the browser asks for the microphone itself */ }
   const release = () => stream?.getTracks().forEach(track => track.stop());
+  if (start !== micStarts) { release(); return true; } // Send came while the mic opened
   // Always continuous (on its own it stops at the first breath). Held Space ends when it is let go; the mic button ends after
   // a pause of two seconds with no new words, or when it is pressed again.
   recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = true;
@@ -396,8 +400,9 @@ async function toggleMic(ctx) {
   if (listening) return finishMic(ctx);
   if (await browserDictate(ctx)) return;
   warmVoice(ctx);
-  let stream;
-  try { stream = await openMicrophone(); } catch (error) { ctx.toast(micProblem(error), true); return; }
+  let stream; const start = micStarts;
+  try { stream = await openMicrophone(); } catch (error) { if (start === micStarts) ctx.toast(micProblem(error), true); return; }
+  if (start !== micStarts) { stream.getTracks().forEach(track => track.stop()); return; }
   listening = startRecorder(stream, { onQuiet: () => void finishMic(ctx) });
   liveLocal(ctx, listening);
   micButton()?.classList.add('rec');
@@ -450,7 +455,7 @@ async function browserTurn(ctx, onState, alive) {
     if (said && now - lastWords > PAUSE_MS && micLevel < 0.08) finish();
     else if (now - started > LONGEST_MS) finish();
   }, 150);
-  const turn = { stop: () => { ended = true; clearInterval(watch); try { recognition.abort(); } catch { /* already over */ } } };
+  const turn = { voiceTurn: true, stop: () => { ended = true; clearInterval(watch); try { recognition.abort(); } catch { /* already over */ } } };
   recognition.onend = async () => {
     clearInterval(watch); stopLevel(); if (listening !== turn) return;
     listening = null; micButton()?.classList.remove('rec');
@@ -496,6 +501,7 @@ let voiceTurns = 0;
 // Send ends the dictation in the box: the mic stops, and words still on their way (live or the final ones) are dropped,
 // so they never write the sent message back into the cleared box.
 export function endDictation() {
+  micStarts++;
   const turn = listening, live = turn?.live || liveNow?.live;
   if (live) live.ended = true; liveNow = null;
   if (turn && !turn.voiceTurn) { listening = null; clearInterval(turn.liveTimer); turn.stop(); micButton()?.classList.remove('rec'); document.body.classList.remove('ptt'); hold.active = false; }
@@ -510,10 +516,10 @@ const hold = { timer: 0, active: false, pending: false, releasedEarly: false };
 const holdable = target => target?.id === 'draft' || !(target?.closest?.('input,textarea,select,[contenteditable="true"],.dialog,.dialog-back'));
 async function startHold(ctx) {
   if (listening || transcribing) return;
-  hold.active = true; hold.pending = true;
+  hold.active = true; hold.pending = true; const start = micStarts;
   // The browser's own recognition, until Space is let go: the words are ready the moment it is.
   if (await browserDictate(ctx, { untilRelease: true })) {
-    hold.pending = false;
+    hold.pending = false; if (start !== micStarts) { hold.active = false; return; }
     const box = document.getElementById('composer')?.getBoundingClientRect(); if (box) document.body.style.setProperty('--ptt-bottom', `${Math.max(16, Math.round(innerHeight - box.top + 12))}px`);
     document.body.classList.add('ptt');
     if (hold.releasedEarly) { hold.releasedEarly = false; hold.active = false; document.body.classList.remove('ptt'); void finishMic(ctx); }
@@ -521,7 +527,8 @@ async function startHold(ctx) {
   }
   warmVoice(ctx);
   let stream;
-  try { stream = await openMicrophone(); } catch (error) { hold.active = hold.pending = false; ctx.toast(micProblem(error), true); return; }
+  try { stream = await openMicrophone(); } catch (error) { hold.active = hold.pending = false; if (start === micStarts) ctx.toast(micProblem(error), true); return; }
+  if (start !== micStarts) { hold.active = hold.pending = false; stream.getTracks().forEach(track => track.stop()); return; }
   // While Space is held, quiet does not end the recording; only letting go does (or a minute at most).
   const recording = startRecorder(stream, { onQuiet: () => { if (performance.now() - recording.started > 60000) void finishMic(ctx); } });
   listening = recording; hold.pending = false;

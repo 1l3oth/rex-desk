@@ -45,7 +45,7 @@ test('the voice guide has the same steps in English, Khmer and Korean, and recor
 function liveHarness() {
   const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
   const block = start => { const at = composer.indexOf(start); return composer.slice(at, composer.indexOf(start.startsWith('const') ? '\n' : '\n}', at) + (start.startsWith('const') ? 0 : 2)); };
-  const code = ['let liveNow = null, liveTyping = null, listening = null; const micButton = () => null, hold = {}, t = text => text;', ...['function liveStart', 'function liveWatch', 'function liveEdit', 'function liveShow', 'function liveWaiting', 'export function endDictation'].map(block)].join('\n').replace('export function', 'function');
+  const code = ['let liveNow = null, liveTyping = null, listening = null, micStarts = 0; const micButton = () => null, hold = {}, t = text => text;', ...['function liveStart', 'function liveWatch', 'function liveEdit', 'function liveShow', 'function liveWaiting', 'export function endDictation'].map(block)].join('\n').replace('export function', 'function');
   const box = { value: '', getAttribute: () => '', setAttribute() {}, classList: { toggle() {} }, focus() {}, dispatchEvent() {} }; let key = 'a';
   const ctx = { draftKey: () => key, ui: { drafts: new Map() } };
   const run = new Function('document', 'Event', `${code}; return { liveStart, liveShow, liveEdit, endDictation, listen: turn => { listening = turn; }, listening: () => listening };`)({ getElementById: () => box, body: { classList: { remove() {} } } }, class {});
@@ -110,4 +110,9 @@ test('Send ends a dictation, so its later words never bring the sent message bac
   assert.equal(stopped, 1, 'the mic stops'); assert.equal(listening(), null);
   const chat = readFileSync(new URL('../public/chat.js', import.meta.url), 'utf8'), at = chat.indexOf('endDictation();');
   assert.ok(at > chat.indexOf('async function send()') && at < chat.indexOf("box.value = ''; box.style.height = ''"), 'send() ends the dictation before clearing the box');
+  // A Voice mode turn is not a dictation: Send leaves it listening. A mic still opening when Send came never starts.
+  const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
+  assert.match(composer, /const turn = \{ voiceTurn: true, stop:/, 'browser Voice mode is marked like the desktop one');
+  assert.match(composer, /export function endDictation\(\) \{\n  micStarts\+\+;/);
+  assert.equal(composer.match(/if \(start !== micStarts\)/g)?.length, 4, 'every mic start (browser dictation, mic button, held Space twice) checks for a Send while it opened');
 });
