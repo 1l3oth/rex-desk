@@ -9,6 +9,8 @@ const AIS = [
   { id: 'gemini', label: t('I use Gemini'), service: 'Gemini', plan: t('A Google account'), plans: 'https://gemini.google/subscriptions/' },
   // OpenRouter has no sign-in: its API key is typed here, checked with OpenRouter, and kept encrypted on this computer.
   { id: 'openrouter', label: t('I use OpenRouter'), service: 'OpenRouter', plan: t('An OpenRouter API key'), plans: 'https://openrouter.ai/settings/keys', key: true },
+  // Ollama needs no plan or sign-in: Set up installs it, starts it and downloads a first model, then agents think with it.
+  { id: 'local', logo: 'ollama', label: t('I use Ollama'), service: 'Ollama', plan: t('Free, runs on this computer'), plans: 'https://ollama.com/download', local: true },
 ];
 const TICK = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3L13 4.5"/></svg>';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -18,11 +20,18 @@ export function aiReady(ui, id) {
   const list = ui.accounts?.[id];
   return list?.profiles?.find(item => item.profile === list.selected && item.loggedIn) || list?.profiles?.find(item => item.loggedIn) || null;
 }
-export const anyAiReady = ui => AIS.some(ai => aiReady(ui, ai.id));
+// The first local model that can use tools, on a running server: Ollama is ready when it has one.
+export function localReady(state) {
+  for (const server of state.ai?.local?.servers || []) { const model = server.running && (server.models || []).find(item => item.tools); if (model) return { server: server.id, model: model.name }; }
+  return null;
+}
+const ready = (ui, state, ai) => ai.local ? localReady(state) : aiReady(ui, ai.id);
+const setupJob = state => (state.ai?.local?.pulls || []).find(item => item.setup) || null;
+export const anyAiReady = (ui, state = {}) => AIS.some(ai => ready(ui, state, ai));
 
 // The looping pictures, one per step. Plain shapes in the accent colour; they move only when the person allows motion.
 function clip(step, ai) {
-  const logo = ai ? aiLogo(ai.id, 18).replace('<svg ', '<svg x="51" y="17" ') : '';
+  const logo = ai ? aiLogo(ai.logo || ai.id, 18).replace('<svg ', '<svg x="51" y="17" ') : '';
   const pictures = {
     pick: `<rect x="8" y="22" width="34" height="40" rx="6" class="fr-l"/><rect x="47" y="22" width="34" height="40" rx="6" class="fr-l fr-pickme"/><rect x="86" y="22" width="34" height="40" rx="6" class="fr-l"/>
       <circle cx="25" cy="36" r="6" class="fr-f"/><circle cx="64" cy="36" r="6" class="fr-f"/><circle cx="103" cy="36" r="6" class="fr-f"/>
@@ -43,11 +52,19 @@ export function firstRunHtml({ ui, esc }, state) {
   let body = '';
   if (fr.step === 'pick') {
     const card = item => {
-      const ready = state.ai?.loaded && aiReady(ui, item.id);
-      return `<button type="button" class="fr-card" data-fr-pick="${item.id}"><span class="fr-mark">${aiLogo(item.id, 26)}</span><b>${esc(item.label)}</b><small>${ready ? `<span class="fr-good">${TICK}${t`Ready on this computer`}</span>` : esc(item.plan)}</small></button>`;
+      const on = state.ai?.loaded && ready(ui, state, item);
+      return `<button type="button" class="fr-card" data-fr-pick="${item.id}"><span class="fr-mark">${aiLogo(item.logo || item.id, 26)}</span><b>${esc(item.label)}</b><small>${on ? `<span class="fr-good">${TICK}${t`Ready on this computer`}</span>` : esc(item.plan)}</small></button>`;
     };
     body = `<p>${t`Your agents think with the AI plan you already pay for. Which one do you use?`}</p><div class="fr-cards">${AIS.map(card).join('')}</div>
       <p class="fr-plans"><button type="button" class="linkish" data-fr-plans>${t`Don't have one? See plans`}</button>${fr.plans ? `<span>${AIS.map(item => `<a href="${item.plans}" target="_blank" rel="noopener">${esc(item.service)}</a>`).join('')}</span>` : ''}</p>`;
+  } else if (fr.step === 'signin' && ai.local) {
+    const job = setupJob(state), busy = job?.state === 'downloading' || fr.job?.state === 'starting', failed = job?.state === 'failed' || fr.job?.state === 'failed';
+    const status = busy ? `<p class="fr-wait" role="status"><span class="dot working"></span>${job ? esc(`${job.status}${job.total ? `: ${Math.floor((job.completed / job.total) * 100)}%` : ''}…`) : t('Starting…')}</p>`
+      : failed ? `<div class="fr-error" role="alert"><b>${t`That did not work`}</b><span>${esc(fr.job?.error || job?.error || '')}</span></div>`
+      : `<p class="muted">${t`Rex Desk installs Ollama, starts it and downloads a first model that fits this computer. It is free and private, but slower than the paid AIs.`}</p>`;
+    const action = busy ? '' : `<button type="button" class="btn primary" data-fr-local>${failed ? t('Try again') : t('Set up Ollama')}</button>`;
+    body = `<p class="fr-lead">${t`Set up Ollama`}</p>${status}<div class="fr-actions">${action}</div>
+      <p class="fr-plans"><button type="button" class="linkish" data-fr-back>${t`Pick another AI`}</button><a href="${ai.plans}" target="_blank" rel="noopener">${t`About Ollama`}</a></p>`;
   } else if (fr.step === 'signin' && ai.key) {
     body = `<p class="fr-lead">${t`Add your OpenRouter key`}</p><p class="muted">${t`Rex Desk checks the key with OpenRouter and keeps it encrypted on this computer. It is never shown in a chat.`}</p>
       <form class="fr-key" data-fr-keyform><input type="password" name="key" autocomplete="off" spellcheck="false" placeholder="sk-or-v1-…" aria-label="${t`OpenRouter API key`}" required>
@@ -65,8 +82,8 @@ export function firstRunHtml({ ui, esc }, state) {
     body = `<p class="fr-lead">${t`Sign in to ${ai.service}`}</p>${status}<div class="fr-actions">${action}</div>
       <p class="fr-plans"><button type="button" class="linkish" data-fr-back>${t`Pick another AI`}</button><a href="${ai.plans}" target="_blank" rel="noopener">${t`See ${ai.service} plans`}</a></p>`;
   } else {
-    const who = ai.key ? '' : aiReady(ui, ai.id)?.account;
-    body = `<p class="fr-lead fr-good">${TICK}${t`${ai.service} is connected`}</p><p class="muted">${who ? t`Signed in as ${esc(who)}. ` : ''}${t`Opening Rex Agent…`}</p>
+    const who = ai.key ? '' : ai.local ? localReady(state)?.model : aiReady(ui, ai.id)?.account;
+    body = `<p class="fr-lead fr-good">${TICK}${t`${ai.service} is connected`}</p><p class="muted">${who ? (ai.local ? t`Model: ${esc(who)}. ` : t`Signed in as ${esc(who)}. `) : ''}${t`Opening Rex Agent…`}</p>
       <div class="fr-actions"><button type="button" class="btn primary" data-fr-finish>${t`Open Rex Agent`}</button></div>`;
   }
   return `<div class="fr"><h2>${t`Connect your AI`}</h2>${bar}<div class="fr-pane">${clip(fr.step, ai)}<div class="fr-main">${body}</div></div></div>`;
@@ -91,13 +108,28 @@ export async function firstRunClick(ctx, state, target, draw, { load, finish, al
   const pick = target.closest('[data-fr-pick]');
   if (pick) {
     fr.ai = pick.dataset.frPick; fr.job = null;
-    fr.step = aiReady(ui, fr.ai) ? 'done' : 'signin'; draw();
+    fr.step = ready(ui, state, AIS.find(item => item.id === fr.ai)) ? 'done' : 'signin'; draw();
     if (fr.step === 'done') await connected(ctx, state, draw, finish);
     return true;
   }
   if (target.closest('[data-fr-back]')) { cancel(fr); fr.step = 'pick'; draw(); return true; }
   if (target.closest('[data-fr-cancel]')) { cancel(fr); draw(); return true; }
   if (target.closest('[data-fr-finish]')) { await finish(); return true; }
+  if (target.closest('[data-fr-local]')) {
+    fr.job = { state: 'starting' }; draw();
+    try { await api('/local-ai/setup', { method: 'POST', data: {} }); fr.job = null; } catch (error) { fr.job = { state: 'failed', error: error.message }; draw(); return true; }
+    // Follow the steps (install, start, download) until a model is ready or the setup stops with a reason.
+    const token = fr.token = (fr.token || 0) + 1, still = () => alive() && fr.token === token && fr.ai === 'local' && fr.step === 'signin';
+    await load(); draw();
+    for (let tries = 0; tries < 1800 && still(); tries++) {
+      await sleep(2000); if (!still()) return true;
+      await load(); if (!still()) return true;
+      if (localReady(state)) { fr.step = 'done'; draw(); await connected(ctx, state, draw, finish); return true; }
+      draw();
+      if (setupJob(state)?.state !== 'downloading') return true;
+    }
+    return true;
+  }
   if (target.closest('[data-fr-window]')) {
     // The old way, for a computer where the hidden sign-in keeps failing: a window the person can see and type in.
     await api('/agents/login', { method: 'POST', data: { provider: fr.ai, profile: '' } });
@@ -138,8 +170,10 @@ async function follow(ctx, state, draw, { load, finish, alive, hidden }) {
 
 // Connected: the AI becomes the one new agents use, a moment for the green tick, then Rex Agent opens.
 async function connected(ctx, state, draw, finish) {
-  const { ui, api, refresh } = ctx, id = state.fr.ai;
-  if (ui.snap.config?.provider !== id) { try { ui.snap.config = await api('/config', { method: 'PUT', data: { ...ui.snap.config, provider: id } }); void refresh(); } catch {} }
+  const { ui, api, refresh } = ctx, id = state.fr.ai, local = id === 'local' ? localReady(state) : null;
+  // Ollama runs through Claude Code's model list as "local:<server>/<model>", so agents get Claude as their AI and that model.
+  const next = local ? { ...ui.snap.config, provider: 'claude', models: { ...ui.snap.config?.models, claude: `local:${local.server}/${local.model}` } } : { ...ui.snap.config, provider: id };
+  if (local ? ui.snap.config?.models?.claude !== next.models.claude || ui.snap.config?.provider !== 'claude' : ui.snap.config?.provider !== id) { try { ui.snap.config = await api('/config', { method: 'PUT', data: next }); void refresh(); } catch {} }
   draw();
   await sleep(1800);
   if (state.fr.step === 'done' && document.querySelector('.tour-back')) await finish();

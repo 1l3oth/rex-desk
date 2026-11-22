@@ -1842,7 +1842,7 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 @keyframes fr-press{0%,10%{transform:translate(104px,30px)}45%,60%{transform:translate(70px,57px)}65%{transform:translate(70px,59px)}75%,100%{transform:translate(70px,57px)}}
 @keyframes fr-tick{0%{stroke-dashoffset:40}35%,100%{stroke-dashoffset:0}}
 @media (prefers-reduced-motion:reduce){.fr-clip *{animation:none!important}.fr-clip .fr-tick{stroke-dashoffset:0}.fr-clip .fr-cursor{transform:translate(66px,44px)}.fr-clip .fr-cursor2{transform:translate(70px,57px)}}
-.fr-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.fr-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.fr-card:last-child:nth-child(odd){grid-column:1/-1}
 .fr-key{display:flex;gap:8px;margin:4px 0 10px}.fr-key input{flex:1;min-width:0;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}.fr-key input:focus-visible{outline:2px solid var(--accent);outline-offset:0}
 .fr-card{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);text-align:left;cursor:pointer;font:inherit}
 .fr-card:hover{border-color:color-mix(in srgb,var(--accent) 60%,var(--line))}.fr-card:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
@@ -2800,3 +2800,31 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 /* The context details popup stays readable on glass and neon themes: an opaque base under the panel tint, so text behind never shows through. */
 .ctx-panel{background:linear-gradient(var(--panel),var(--panel)),#fff}
 html[data-theme=dark] .ctx-panel{background:linear-gradient(var(--panel),var(--panel)),#10131a}
+/* AI accounts, OpenRouter: a native settings page. Grouped rows, label on the left, value or action on the right. */
+.acct-dialog .or-intro{margin:0;font-size:13px;color:var(--muted);line-height:1.45}
+.acct-dialog .or-title{margin:4px 0 -8px 12px;font-size:11.5px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
+.acct-dialog .or-group{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+.acct-dialog .or-row{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;min-height:40px;margin:0;padding:6px 12px;box-sizing:border-box;font-size:13.5px;color:var(--ink);text-align:left}
+.acct-dialog .or-row+.or-row{border-top:1px solid var(--line)}
+.acct-dialog .or-row>span:first-child{flex:none}
+.acct-dialog .or-val{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);text-align:right}
+.acct-dialog .or-val.good{color:var(--good,#1f8f4e)}.acct-dialog .or-val.bad{color:var(--bad,#c0392b);white-space:normal}
+.acct-dialog .or-val.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px}
+.acct-dialog .or-link{flex:none;padding:4px 0;border:0;border-radius:0;background:none;box-shadow:none;color:var(--accent);font:inherit;font-size:13.5px;font-weight:500;cursor:pointer}
+.acct-dialog .or-link:disabled{color:var(--muted);cursor:default}.acct-dialog .or-link.bad{color:var(--bad,#c0392b)}
+.acct-dialog .or-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.acct-dialog .or-field input{flex:1;min-width:0;height:28px;padding:0;border:0;background:none;box-shadow:none;color:var(--ink);font:inherit;font-size:13.5px;outline:none}
+.acct-dialog .or-row select{flex:1;min-width:0;max-width:65%;height:28px;padding:0 4px;border:0;background:none;box-shadow:none;color:var(--muted);font:inherit;font-size:13.5px;text-align:right;text-align-last:right;cursor:pointer}
+.acct-dialog .or-note{margin:-8px 12px 0;font-size:12px;color:var(--muted);line-height:1.45}
+/* Phone: the AIs sit in one segmented row, like a native control, and the footer buttons share the width. */
+@media (max-width:560px){
+  .acct-dialog .acct-tabs{grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;padding:2px;border-radius:9px}
+  .acct-dialog .acct-tab{padding:7px 2px;border-radius:7px;font-size:12.5px}
+  .acct-dialog .acct-tab b{overflow:hidden;text-overflow:ellipsis}
+  .acct-dialog .acct-default-badge{display:none}
+  .acct-dialog .or-row{min-height:44px;font-size:15px}
+  .acct-dialog .or-field input,.acct-dialog .or-link,.acct-dialog .or-row select{font-size:15px}
+  .acct-dialog .acct-foot>.btn{flex:1}
+}
+.acct-dialog .acct-body>.or-group,.acct-dialog .acct-body>.or-title,.acct-dialog .acct-body>.or-note,.acct-dialog .acct-body>.or-intro{flex:none}
+.acct-dialog .or-group .or-field input[type=password]{border:0;border-radius:0;background:none;box-shadow:none;padding:0}

@@ -1397,14 +1397,24 @@ async function accountsDialog() {
     // OpenRouter has no accounts to sign in to: one API key (typed here, checked, kept encrypted, never shown again) and the model agents use.
     const orBody = () => {
       const key = list.profiles[0] || {}, models = ui.snap.choices?.providers?.openrouter?.models || [], chosen = ui.snap.config?.models?.openrouter || '';
-      const state = key.loggedIn ? `<p class="acct-or-state good">${t`Key works`}${key.plan ? ` · ${esc(key.plan)}` : ''}${key.account ? ` · ${esc(key.account)}` : ''}</p>`
-        : key.hasKey ? `<p class="acct-or-state bad">${esc(key.error || t('OpenRouter did not accept the saved key.'))}</p>` : `<p class="acct-or-state">${t`No key yet.`}</p>`;
-      return `<div class="acct-intro"><p>${t`Agents on OpenRouter run through Claude Code with your OpenRouter key. You pay OpenRouter for what they use.`}</p>${defaultAi === name ? `<span class="acct-note">${t`New agents and chats use OpenRouter`}</span>` : `<button type="button" class="btn small" data-acct-default="${name}" ${key.loggedIn ? '' : 'disabled'}>${t`Use OpenRouter for new agents`}</button>`}</div>
-      ${state}
-      <div class="acct-or-row"><input type="password" data-acct-orkey autocomplete="off" spellcheck="false" placeholder="${key.hasKey ? t('Paste a new key to replace it') : 'sk-or-v1-…'}" aria-label="${t`OpenRouter API key`}"><button type="button" class="btn small primary" data-acct-orsave>${t`Check and save`}</button>${key.hasKey ? `<button type="button" class="btn small" data-acct-ordel>${t`Remove key`}</button>` : ''}</div>
-      <p class="acct-or-note">${t`The key stays encrypted on this computer and is never shown in a chat. Jev uses the same key.`} <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">${t`Get a key`}</a></p>
-      ${key.loggedIn ? `<label class="acct-or-row"><span>${t`Model for agents`}</span><select data-acct-ormodel>${[['', t('Claude Sonnet, latest')], ...models.map(model => [model.id, model.label])].map(([id, label]) => `<option value="${esc(id)}" ${id === chosen ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
-      <p class="acct-or-note">${t`Claude models work best. Other models may not handle every tool.`}</p>` : ''}`;
+      // Laid out like a native settings page: grouped rows with the label on the left and the value on the right.
+      const status = key.loggedIn ? `<span class="or-val good">${t`Key works`}</span>` : key.hasKey ? `<span class="or-val bad">${esc(key.error || t('OpenRouter did not accept the saved key.'))}</span>` : `<span class="or-val">${t`No key yet.`}</span>`;
+      const use = defaultAi === name ? `<span class="or-val good">${t`In use`}</span>` : `<button type="button" class="or-link" data-acct-default="${name}" ${key.loggedIn ? '' : 'disabled'}>${t`Use`}</button>`;
+      return `<p class="or-intro">${t`Agents on OpenRouter run through Claude Code with your OpenRouter key. You pay OpenRouter for what they use.`}</p>
+      <div class="or-group">
+        <div class="or-row"><span>${t`Status`}</span>${status}</div>
+        ${key.plan ? `<div class="or-row"><span>${t`Plan`}</span><span class="or-val">${esc(key.plan)}</span></div>` : ''}
+        ${key.account ? `<div class="or-row"><span>${t`Key`}</span><span class="or-val mono">${esc(key.account)}</span></div>` : ''}
+        <div class="or-row"><span>${t`Use for new agents`}</span>${use}</div>
+      </div>
+      <h3 class="or-title">${key.hasKey ? t('Replace key') : t('API key')}</h3>
+      <div class="or-group">
+        <div class="or-row or-field"><input type="password" data-acct-orkey autocomplete="off" spellcheck="false" placeholder="${key.hasKey ? t('Paste a new key') : 'sk-or-v1-…'}" aria-label="${t`OpenRouter API key`}"><button type="button" class="or-link" data-acct-orsave>${t`Check and save`}</button></div>
+        ${key.hasKey ? `<div class="or-row"><button type="button" class="or-link bad" data-acct-ordel>${t`Remove key`}</button></div>` : ''}
+      </div>
+      <p class="or-note">${t`The key stays encrypted on this computer and is never shown in a chat. Jev uses the same key.`} <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">${t`Get a key`}</a></p>
+      ${key.loggedIn ? `<h3 class="or-title">${t`Agents`}</h3><div class="or-group"><label class="or-row"><span>${t`Model`}</span><select data-acct-ormodel>${[['', t('Claude Sonnet, latest')], ...models.map(model => [model.id, model.label])].map(([id, label]) => `<option value="${esc(id)}" ${id === chosen ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label></div>
+      <p class="or-note">${t`Claude models work best. Other models may not handle every tool.`}</p>` : ''}`;
     };
     back.innerHTML = `<form class="dialog acct-dialog"><div class="acct-head"><h2>${t`AI accounts`}</h2><button type="button" class="side-x" data-close aria-label="${t`Close`}" title="${t`Close`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>
       <div class="acct-tabs" role="tablist">${Object.entries(NAMES).map(([key, [, title]]) => `<button type="button" role="tab" aria-selected="${name === key}" class="acct-tab${name === key ? ' on' : ''}" data-acct-tab="${key}"><b>${title}</b>${defaultAi === key ? `<span class="acct-default-badge">${t`Default`}</span>` : ''}</button>`).join('')}</div>
