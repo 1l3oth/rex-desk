@@ -519,7 +519,7 @@ async function startHold(ctx) {
   hold.active = true; hold.pending = true; const start = micStarts;
   // The browser's own recognition, until Space is let go: the words are ready the moment it is.
   if (await browserDictate(ctx, { untilRelease: true })) {
-    hold.pending = false; if (start !== micStarts) { hold.active = false; return; }
+    hold.pending = false; if (start !== micStarts) { hold.active = hold.releasedEarly = false; return; }
     const box = document.getElementById('composer')?.getBoundingClientRect(); if (box) document.body.style.setProperty('--ptt-bottom', `${Math.max(16, Math.round(innerHeight - box.top + 12))}px`);
     document.body.classList.add('ptt');
     if (hold.releasedEarly) { hold.releasedEarly = false; hold.active = false; document.body.classList.remove('ptt'); void finishMic(ctx); }
@@ -527,8 +527,8 @@ async function startHold(ctx) {
   }
   warmVoice(ctx);
   let stream;
-  try { stream = await openMicrophone(); } catch (error) { hold.active = hold.pending = false; if (start === micStarts) ctx.toast(micProblem(error), true); return; }
-  if (start !== micStarts) { hold.active = hold.pending = false; stream.getTracks().forEach(track => track.stop()); return; }
+  try { stream = await openMicrophone(); } catch (error) { hold.active = hold.pending = hold.releasedEarly = false; if (start === micStarts) ctx.toast(micProblem(error), true); return; }
+  if (start !== micStarts) { hold.active = hold.pending = hold.releasedEarly = false; stream.getTracks().forEach(track => track.stop()); return; }
   // While Space is held, quiet does not end the recording; only letting go does (or a minute at most).
   const recording = startRecorder(stream, { onQuiet: () => { if (performance.now() - recording.started > 60000) void finishMic(ctx); } });
   listening = recording; hold.pending = false;

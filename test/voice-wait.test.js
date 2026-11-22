@@ -115,4 +115,6 @@ test('Send ends a dictation, so its later words never bring the sent message bac
   assert.match(composer, /const turn = \{ voiceTurn: true, stop:/, 'browser Voice mode is marked like the desktop one');
   assert.match(composer, /export function endDictation\(\) \{\n  micStarts\+\+;/);
   assert.equal(composer.match(/if \(start !== micStarts\)/g)?.length, 4, 'every mic start (browser dictation, mic button, held Space twice) checks for a Send while it opened');
+  assert.match(composer, /if \(start !== micStarts\) \{ hold\.active = hold\.releasedEarly = false; return; \}/, 'a held Space let go while the mic opened does not stop the next one');
+  assert.match(composer, /if \(start !== micStarts\) \{ hold\.active = hold\.pending = hold\.releasedEarly = false;/);
 });
