@@ -160,7 +160,10 @@ fn allow_own_microphone(window: &tauri::WebviewWindow) {
             if kind != COREWEBVIEW2_PERMISSION_KIND_MICROPHONE || !own { return Ok(()) }
             // A modal box inside this callback could hang the request (WebView2 reentrancy): defer it, return, then ask.
             let later = Later(args.clone(), args.GetDeferral()?);
-            let _ = main.run_on_main_thread(move || {
+            // run_on_main_thread runs at once when called on the UI thread, so it is called from a short-lived thread: the
+            // box is then queued on the event loop and opens only after this callback has returned.
+            let main = main.clone();
+            std::thread::spawn(move || { let _ = main.run_on_main_thread(move || {
                 let (args, deferral) = later.take();
                 let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
                 let (text, title) = (wide("Allow Rex Desk to use your microphone for voice messages?"), wide("Rex Desk"));
@@ -168,7 +171,7 @@ fn allow_own_microphone(window: &tauri::WebviewWindow) {
                 if !yes { if let Ok(more) = args.cast::<ICoreWebView2PermissionRequestedEventArgs3>() { let _ = more.SetSavesInProfile(false); } }
                 let _ = args.SetState(if yes { COREWEBVIEW2_PERMISSION_STATE_ALLOW } else { COREWEBVIEW2_PERMISSION_STATE_DENY });
                 let _ = deferral.Complete();
-            });
+            }); });
             Ok(())
         }));
         let mut token = 0i64;
