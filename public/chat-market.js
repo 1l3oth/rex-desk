@@ -16,7 +16,8 @@ export const MARKET_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill
 export async function loadMarket(ctx) {
   const { ui, api } = ctx;
   ui.market = await api('/market');
-  if (!ui.marketBox) void api('/toolbox').then(box => { ui.marketBox = box; ctx.renderAll(); }).catch(() => { ui.marketBox = { servers: [], skills: [], commands: [] }; });
+  // The toolbox check also asks each MCP server for its tools; once done, the list again so each server shows its tools.
+  if (!ui.marketBox) void api('/toolbox').then(async box => { ui.marketBox = box; ui.market = await api('/market').catch(() => ui.market); ctx.renderAll(); }).catch(() => { ui.marketBox = { servers: [], skills: [], commands: [] }; });
 }
 
 function usedBy(item, agents) {
