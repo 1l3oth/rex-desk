@@ -60,7 +60,7 @@ export function filterSlash(tools, off) {
 export function marketList(desk) {
   // First one wins: the toolbox reads folded YAML descriptions (description: >-) that the plain reader leaves as '>-'.
   const unique = list => { const seen = new Map(); for (const item of list) { const id = `${item.kind}:${item.name}`; if (!seen.has(id)) seen.set(id, item); } return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name)); };
-  const text = value => { const line = String(value || '').replace(/\s+/g, ' ').trim(); return /^[>|][-+]?$/.test(line) ? '' : line.slice(0, 200); };
+  const text = value => { const line = String(value || '').replace(/\s+/g, ' ').trim(); if (/^[>|][-+]?$/.test(line)) return ''; if (line.length <= 200) return line; const cut = line.slice(0, 200), space = cut.lastIndexOf(' '); return `${(space > 120 ? cut.slice(0, space) : cut).replace(/[\s,.;:-]+$/, '')}…`; };
   let skills = [], servers = {}, account = { skills: [], commands: [] };
   try { skills = desk.toolbox.skills('').filter(item => item.name); } catch { /* no skills folder */ }
   try { servers = desk.toolbox.servers(''); } catch { /* no MCP config */ }

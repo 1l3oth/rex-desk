@@ -2946,7 +2946,7 @@ html:has(.iv[open]){overflow:hidden}
 .mk-remove{border:0;background:none;color:var(--muted);font:inherit;font-size:12px;padding:4px 6px;border-radius:6px;cursor:pointer;opacity:0}
 .mk-row:hover .mk-remove,.mk-remove:focus-visible{opacity:1}
 .mk-remove:hover{color:var(--bad,#d64545)}
-@media (max-width:600px){.mk-row{align-items:flex-start}.mk-text b,.mk-desc,.mk-bad,.mk-text small{white-space:normal;overflow-wrap:anywhere}.mk-row>:not(.mk-text){align-self:center}}
+@media (max-width:600px){.mk-row{align-items:flex-start}.mk-text b,.mk-bad,.mk-text small{white-space:normal;overflow-wrap:anywhere}.mk-desc{white-space:normal;overflow-wrap:break-word;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}.mk-row>:not(.mk-text){align-self:center}}
 @media (hover:none){.mk-remove{opacity:1}}
 .mk-add summary{display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 14px;cursor:pointer;list-style:none}
 .mk-add summary::-webkit-details-marker{display:none}

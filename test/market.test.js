@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
-import { toolsOff, setToolOff, useIsOff, filterInventory, filterSlash, runAgentId } from '../src/market.js';
+import { toolsOff, setToolOff, useIsOff, filterInventory, filterSlash, runAgentId, marketList } from '../src/market.js';
 
 const store = () => new Store(mkdtempSync(path.join(os.tmpdir(), 'rex-desk-market-')));
 
@@ -33,4 +33,15 @@ test('switched-off items leave the prompt list, the / menu, desk_find and desk_r
   assert.ok(useIsOff(off, 'skill:brag')); assert.ok(useIsOff(off, 'stripe/create_payment'));
   assert.ok(!useIsOff(off, 'skill:eli5')); assert.ok(!useIsOff(off, 'aws-mcp/call'));
   assert.equal(runAgentId({ specialistId: 'a1' }), 'a1'); assert.equal(runAgentId({ roomAgent: 'a2' }), 'a2'); assert.equal(runAgentId({ main: true }), 'main');
+});
+
+test('long descriptions are cut at a word break, never mid-word', () => {
+  const long = `${'Builds generative applications on Bedrock with knowledge bases '.repeat(5)}end`;
+  const desk = { toolbox: { skills: () => [{ name: 'bedrock', description: long }], servers: () => ({}) }, agents: { selected: () => '' }, store: store(), specialists: { list: () => [] } };
+  let list; try { list = marketList(desk); } catch (error) { return assert.fail(`marketList needs more of the desk: ${error.message}`); }
+  const item = (list.items || list).find(entry => entry.name === 'bedrock');
+  assert.ok(item.description.length <= 201);
+  assert.match(item.description, /[a-z]…$/);
+  assert.ok(long.startsWith(item.description.slice(0, -1)));
+  assert.ok(long[item.description.length - 1] === ' ', 'the cut falls on a space');
 });
