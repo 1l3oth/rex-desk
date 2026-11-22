@@ -84,6 +84,8 @@ function show(index) {
 async function closeTab(index) {
   const tab = state.tabs[index]; if (!tab) return;
   if (dirty(tab) && !await askConfirm(t`${tab.name} has changes that are not saved. Close it anyway?`)) return;
+  // Other tabs may have opened or closed while the box was up, so find this tab again.
+  index = state.tabs.indexOf(tab); if (index < 0) return;
   editors.get(tab.path)?.wrap.remove(); editors.delete(tab.path);
   state.tabs.splice(index, 1);
   // The two panes keep pointing at the same tabs; closing the tab of one pane closes that pane.
