@@ -45,7 +45,7 @@ test('the voice guide has the same steps in English, Khmer and Korean, and recor
 function liveHarness() {
   const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
   const block = start => { const at = composer.indexOf(start); return composer.slice(at, composer.indexOf(start.startsWith('const') ? '\n' : '\n}', at) + (start.startsWith('const') ? 0 : 2)); };
-  const code = ['const joinWords', 'function liveStart', 'function liveShow'].map(block).join('\n');
+  const code = ['function liveStart', 'function liveShow'].map(block).join('\n');
   const box = { value: '', getAttribute: () => '', focus() {}, dispatchEvent() {} }; let key = 'a';
   const ctx = { draftKey: () => key, ui: { drafts: new Map() } };
   const run = new Function('document', 'Event', `${code}; return { liveStart, liveShow };`)({ getElementById: () => box }, class {});
@@ -58,15 +58,23 @@ test('live words keep text typed before, after or inside them, and stay with the
   box.value = 'Hi fix the, please';
   liveShow(ctx, live, 'fix the login'); assert.equal(box.value, 'Hi fix the login, please', 'typed after the words stays after them, no repeat');
   box.value = 'Hi fix it, please';
-  liveShow(ctx, live, 'fix the login button'); assert.equal(box.value, 'Hi fix it, please button', 'edited words stay as typed, only newer words are added');
+  liveShow(ctx, live, 'fix the login button'); assert.equal(box.value, 'Hi fix it button, please', 'edited words stay as typed, newer words go after the edit');
   const other = liveStart(ctx); switchTo('b'); box.value = 'other chat';
   liveShow(ctx, other, 'hello', { final: true });
-  assert.equal(box.value, 'other chat', 'the open chat is not touched'); assert.equal(ctx.ui.drafts.get('a'), 'Hi fix it, please button hello', 'the words land in the chat they started in');
+  assert.equal(box.value, 'other chat', 'the open chat is not touched'); assert.equal(ctx.ui.drafts.get('a'), 'Hi fix it button, please hello', 'the words land in the chat they started in');
+  // Text typed after the words that repeats them is the person's own, never replaced.
+  const again = liveHarness(); again.box.value = 'Hi'; const said = again.liveStart(again.ctx);
+  again.liveShow(again.ctx, said, 'yes'); again.box.value = 'Hi yes yes';
+  again.liveShow(again.ctx, said, 'yes please'); assert.equal(again.box.value, 'Hi yes please yes');
+  again.box.value = `Oh ${again.box.value}`;
+  again.liveShow(again.ctx, said, 'yes please now'); assert.equal(again.box.value, 'Oh Hi yes please now yes', 'typed before the words moves them along');
 });
 
 test('a Voice mode turn sends only into the chat it started in, and a cancelled one sends nothing', () => {
   const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
-  assert.match(composer, /if \(!said \|\| ctx\.draftKey\(\) !== chat\) \{ onState\('idle'\); return; \}/, 'browser Voice mode drops words after a chat switch');
+  assert.match(composer, /if \(!said \|\| !alive\(\)\) \{ onState\('idle'\); return; \}/, 'browser Voice mode drops words after a chat switch');
+  assert.ok(composer.indexOf('const turnOf = voiceTurns') < composer.indexOf('await browserTurn(ctx, onState, alive)'), 'the chat is taken before the mic opens');
+  assert.match(composer, /if \(!alive\(\)\) \{ stream\.getTracks\(\)\.forEach\(track => track\.stop\(\)\); return 'cancelled'; \}/);
   assert.match(composer, /cancelVoiceTurn\(\) \{ voiceTurns\+\+/);
   assert.match(composer, /hearWords\(ctx, recording\.wav\(\), \{ alive \}\); if \(alive\(\)\) await sendSpoken/);
   assert.match(composer, /if \(!alive\(\)\) throw Object\.assign\(new Error\('cancelled'\)/);

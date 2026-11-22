@@ -236,25 +236,31 @@ const voiceLanguage = ctx => { try { return localStorage.getItem('jev-language')
 // The words always belong to the chat the mic started in: after a switch they land in that chat's saved draft.
 function liveStart(ctx) {
   const box = document.getElementById('draft'); if (!box) return null;
-  return { key: ctx.draftKey(), before: box.value.trim(), after: '', placeholder: box.getAttribute('placeholder') || '', shown: '', written: box.value, said: '' };
+  // start and length: the exact part of the box the dictation wrote (with its spaces). Only that part ever changes.
+  const kept = box.value.replace(/\s+$/, '');
+  return { key: ctx.draftKey(), placeholder: box.getAttribute('placeholder') || '', written: box.value, start: kept.length, length: box.value.length - kept.length, said: '', from: '' };
 }
-const joinWords = (...parts) => parts.map(part => String(part || '').trim()).filter(Boolean).reduce((text, part) => !text ? part : /^[,.;:!?)]/.test(part) ? `${text}${part}` : `${text} ${part}`, '');
 function liveShow(ctx, live, text, { final = false } = {}) {
   if (!live) return;
   const box = document.getElementById('draft'), here = box && ctx.draftKey() === live.key;
   const current = here ? box.value : String(ctx.ui.drafts.get(live.key) ?? live.written);
   const words = String(text || '').trim();
-  // Typed since the last update, before or after the words: kept where it is, and only the words in the middle change.
+  // Typed since the last update: find what changed. Before the dictated part, it moves along; after it, it stays; inside
+  // it, the person edited the words, so those stay as typed and only words said after that are added, after the edit.
   if (current !== live.written) {
-    const at = live.shown ? current.lastIndexOf(live.shown) : -1;
-    if (at >= 0) { live.before = current.slice(0, at).trim(); live.after = current.slice(at + live.shown.length).trim(); }
-    else { live.before = current.trim(); live.after = ''; live.from = live.said; } // the words themselves were edited: they stay as typed, and only newer words are added
+    const was = live.written; let same = 0, tail = 0;
+    while (same < was.length && same < current.length && was[same] === current[same]) same++;
+    while (tail < was.length - same && tail < current.length - same && was[was.length - 1 - tail] === current[current.length - 1 - tail]) tail++;
+    const end = was.length - tail;
+    if (end <= live.start) live.start += current.length - was.length;
+    else if (same < live.start + live.length) { live.start = current.length - tail; live.length = 0; live.from = live.said; }
   }
   live.said = words;
   let common = 0; if (live.from) while (common < live.from.length && live.from[common] === words[common]) common++;
   const fresh = live.from ? words.slice(common).trim() : words;
-  live.shown = fresh;
-  const value = joinWords(live.before, fresh, live.after);
+  const pre = current.slice(0, live.start), post = current.slice(live.start + live.length);
+  const piece = fresh ? `${pre && !/\s$/.test(pre) ? ' ' : ''}${fresh}${post && !/^[\s,.;:!?)]/.test(post) ? ' ' : ''}` : '';
+  const value = pre + piece + post; live.length = piece.length;
   live.written = value; ctx.ui.drafts.set(live.key, value);
   if (final && words) { ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(live.key); }
   if (!here) return;
@@ -273,7 +279,7 @@ function liveWaiting(live, on) {
 const LIVE_EVERY_MS = 1500, LIVE_SLOW_MS = 3000;
 function liveLocal(ctx, recording) {
   const live = liveStart(ctx); recording.live = live; if (!live) return;
-  if (!live.before) liveWaiting(live, true);
+  if (!live.written.trim()) liveWaiting(live, true);
   let busy = false, slow = false;
   const tick = async () => {
     if (busy || slow || recording.stopped || !recording.heard) return;
@@ -282,7 +288,7 @@ function liveLocal(ctx, recording) {
       const heard = await transcribe(recording.wav(), voiceLanguage(ctx));
       if (!recording.stopped && heard.text) { liveWaiting(live, false); liveShow(ctx, live, heard.text); }
     } catch (error) { if (error.starting) slow = true; /* no words yet: try on the next tick */ }
-    finally { busy = false; if (performance.now() - started > LIVE_SLOW_MS) slow = true; if (slow && !live.shown) liveWaiting(live, true); }
+    finally { busy = false; if (performance.now() - started > LIVE_SLOW_MS) slow = true; if (slow && !live.length) liveWaiting(live, true); }
   };
   recording.liveTimer = setInterval(() => void tick(), LIVE_EVERY_MS);
 }
@@ -353,7 +359,7 @@ async function finishMic(ctx) {
     const heard = await hearWords(ctx, recording.wav());
     liveShow(ctx, live, heard.text, { final: true });
   } catch (error) {
-    liveShow(ctx, live, live?.shown || '');
+    liveShow(ctx, live, live?.said || '');
     ctx.toast(/not installed|install/i.test(error.message) ? t('Voice is not installed yet. Install it in Settings → Jev and voice.') : t`Voice input: ${error.message}`, true);
   } finally { clearTimeout(slow); liveWaiting(live, false); transcribing = false; micButton()?.classList.remove('busy'); }
 }
@@ -399,8 +405,9 @@ function listenLevel(stream) {
   tick();
   return () => { cancelAnimationFrame(timer); micLevel = 0; stream.getTracks().forEach(track => track.stop()); void context.close(); };
 }
-async function browserTurn(ctx, onState) {
+async function browserTurn(ctx, onState, alive) {
   let stream; try { stream = await openMicrophone(); } catch (error) { return { blocked: error }; }
+  if (!alive()) { stream.getTracks().forEach(track => track.stop()); return 'cancelled'; } // switched chats or left Voice mode while the mic opened
   const stopLevel = listenLevel(stream), recognition = new Recognition();
   // Continuous: on its own the recognition ends a turn at the first breath, cutting the person off mid-sentence. Rex Desk
   // decides the end itself: once something was said, a pause of PAUSE_MS with no new words and a quiet microphone.
@@ -416,12 +423,10 @@ async function browserTurn(ctx, onState) {
     else if (now - started > LONGEST_MS) finish();
   }, 150);
   const turn = { stop: () => { ended = true; clearInterval(watch); try { recognition.abort(); } catch { /* already over */ } } };
-  // The words go to the chat this turn started in: after a switch they are dropped, never sent into another chat.
-  const chat = ctx.draftKey();
   recognition.onend = async () => {
     clearInterval(watch); stopLevel(); if (listening !== turn) return;
     listening = null; micButton()?.classList.remove('rec');
-    if (!said || ctx.draftKey() !== chat) { onState('idle'); return; }
+    if (!said || !alive()) { onState('idle'); return; }
     transcribing = true; onState('thinking');
     try { await sendSpoken(ctx, said); } finally { transcribing = false; onState('idle'); }
   };
@@ -432,19 +437,21 @@ async function browserTurn(ctx, onState) {
 }
 export async function voiceTurn(ctx, { onState = () => {} } = {}) {
   if (listening || transcribing) return false;
+  // The words go to the chat this turn started in, and only while Voice mode is still on for it: both are taken before
+  // the mic opens, so a switch while it opens counts too.
+  const turnOf = voiceTurns, chat = ctx.draftKey(), alive = () => voiceTurns === turnOf && ctx.draftKey() === chat;
   if (browserSpeech !== 'no') {
-    const started = await browserTurn(ctx, onState);
-    if (started === 'started') return true;
+    const started = await browserTurn(ctx, onState, alive);
+    if (started === 'started' || started === 'cancelled') return true;
     if (started?.blocked) { ctx.toast(micProblem(started.blocked), true); return false; }
   }
   warmVoice(ctx);
   let stream;
   try { stream = await openMicrophone(); } catch (error) { ctx.toast(micProblem(error), true); return false; }
+  if (!alive()) { stream.getTracks().forEach(track => track.stop()); return true; }
   onState('listening');
   const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => hearLevel(Math.min(1, level * 6)), longest: 90000, pause: 1800 });
   listening = recording; micButton()?.classList.add('rec');
-  // The words go to the chat this turn started in, and only while Voice mode is still on for it.
-  const turnOf = voiceTurns, chat = ctx.draftKey(), alive = () => voiceTurns === turnOf && ctx.draftKey() === chat;
   async function finish() {
     if (listening !== recording) return;
     listening = null; micLevel = 0; recording.stop(); micButton()?.classList.remove('rec');
