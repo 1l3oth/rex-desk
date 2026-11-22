@@ -43,12 +43,13 @@ export function startRecorder(stream, { onQuiet = () => {}, onLevel = () => {}, 
   const context = primed && primed.state !== 'closed' ? primed : new (AudioContextClass())(); primed = null;
   if (context.state !== 'running') void context.resume?.().catch(() => {});
   const source = context.createMediaStreamSource(stream), processor = context.createScriptProcessor(4096, 1, 1);
-  const recorder = { chunks: [], rate: context.sampleRate, started: performance.now(), heard: false, quietSince: 0, stopped: false };
+  const recorder = { chunks: [], levels: [], rate: context.sampleRate, started: performance.now(), heard: false, quietSince: 0, stopped: false };
   processor.onaudioprocess = event => {
     if (recorder.stopped) return;
     const data = event.inputBuffer.getChannelData(0); recorder.chunks.push(new Float32Array(data));
     let sum = 0; for (const value of data) sum += value * value;
     const level = Math.sqrt(sum / data.length), time = performance.now();
+    recorder.levels.push(level);
     onLevel(level);
     if (level > 0.012) { recorder.heard = true; recorder.quietSince = 0; } else if (recorder.heard && !recorder.quietSince) recorder.quietSince = time;
     if ((recorder.heard && recorder.quietSince && time - recorder.quietSince > pause) || time - recorder.started > longest) onQuiet();

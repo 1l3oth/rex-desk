@@ -118,3 +118,17 @@ test('Send ends a dictation, so its later words never bring the sent message bac
   assert.match(composer, /if \(start !== micStarts\) \{ hold\.active = hold\.releasedEarly = false; return; \}/, 'a held Space let go while the mic opened does not stop the next one');
   assert.match(composer, /if \(start !== micStarts\) \{ hold\.active = hold\.pending = hold\.releasedEarly = false;/);
 });
+
+test('desktop live words are heard in short pieces cut at a quiet moment, so they keep coming however long the person talks', () => {
+  const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
+  const at = composer.indexOf('const LIVE_EVERY_MS'), code = composer.slice(at, composer.indexOf('\nfunction liveLocal', at)).replace('export function', 'function');
+  const livePieces = new Function(`${code}; return livePieces;`)();
+  const per = 4096 / 48000, chunks = seconds => Array.from({ length: Math.round(seconds / per) }, () => 0);
+  const short = { rate: 48000, chunks: chunks(4), levels: chunks(4).map(() => 0.1) };
+  assert.deepEqual(livePieces(short), { cut: 0, end: short.chunks.length }, 'under 5 seconds: the whole part is heard');
+  const long = { rate: 48000, chunks: chunks(7), levels: chunks(7).map(() => 0.1) }; const quiet = Math.round(4 / per); long.levels[quiet] = 0.001;
+  assert.equal(livePieces(long).cut, quiet, 'cut at the quietest moment after 2.5 seconds');
+  assert.equal(livePieces(long, quiet).cut, 0, 'the next part starts at the cut and is short again');
+  assert.match(composer, /wavFrom\(recording\.chunks\.slice\(start, stop\)/, 'each request sends only its own piece');
+  assert.doesNotMatch(composer, /LIVE_SLOW_MS/, 'live words never give up for the rest of the turn');
+});

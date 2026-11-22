@@ -9,7 +9,7 @@ const ICON = {
   help: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 2.2-2.6 4"/><path d="M12 17h.01"/></svg>',
 };
 import { pickerHtml } from '/chat-pick.js';
-import { micProblem, openMicrophone, startRecorder, transcribe } from '/recorder.js';
+import { micProblem, openMicrophone, startRecorder, transcribe, wavFrom } from '/recorder.js';
 const KEY = 'rex-desk-input';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
@@ -302,22 +302,37 @@ function liveWaiting(live, on) {
   const box = document.getElementById('draft'); if (!live || !box) return;
   box.setAttribute('placeholder', on ? t('Listening…') : live.placeholder); box.classList.toggle('listening', on);
 }
-// The on-computer engine has no live results: every 1.5 seconds the recording so far is turned into words and shown, one
-// request at a time. When the engine needs longer than 3 seconds for that, or is still loading, it stops trying for this
-// turn and the box shows Listening… until the final words come.
-const LIVE_EVERY_MS = 1500, LIVE_SLOW_MS = 3000;
+// The on-computer engine has no live results, so the recording is turned into words piece by piece while the person talks.
+// Every 1.5 seconds only the part since the last finished piece is sent, so each request stays short however long they
+// talk. Once that part is longer than 5 seconds, it is cut at its quietest moment after 2.5 seconds (between words), the
+// words before the cut are kept, and the next requests start from there. When the person stops, the whole recording is
+// heard once more, and those words replace the live ones.
+const LIVE_EVERY_MS = 1500, LIVE_PIECE_S = 5, LIVE_CUT_S = 2.5;
+export function livePieces(recording, from = 0) {
+  const per = 4096 / recording.rate, end = recording.chunks.length;
+  if ((end - from) * per <= LIVE_PIECE_S) return { cut: 0, end };
+  let cut = from + Math.ceil(LIVE_CUT_S / per);
+  for (let index = cut; index < end; index++) if ((recording.levels[index] ?? 1) < (recording.levels[cut] ?? 1)) cut = index;
+  return { cut, end };
+}
 function liveLocal(ctx, recording) {
   const live = liveStart(ctx); recording.live = live; if (!live) return;
   if (!live.written.trim()) liveWaiting(live, true);
-  let busy = false, slow = false;
+  let busy = false, kept = '', from = 0;
+  const hear = async (start, stop) => {
+    const heard = await transcribe(wavFrom(recording.chunks.slice(start, stop), recording.rate), voiceLanguage(ctx)).catch(() => null);
+    return String(heard?.text || '').trim();
+  };
   const tick = async () => {
-    if (busy || slow || recording.stopped || !recording.heard) return;
-    busy = true; const started = performance.now();
+    if (busy || recording.stopped || !recording.heard) return;
+    busy = true;
     try {
-      const heard = await transcribe(recording.wav(), voiceLanguage(ctx));
-      if (!recording.stopped && heard.text) { liveWaiting(live, false); liveShow(ctx, live, heard.text); }
-    } catch (error) { if (error.starting) slow = true; /* no words yet: try on the next tick */ }
-    finally { busy = false; if (performance.now() - started > LIVE_SLOW_MS) slow = true; if (slow && !live.length) liveWaiting(live, true); }
+      const { cut, end } = livePieces(recording, from);
+      if (cut) { const words = await hear(from, cut); if (recording.stopped) return; kept = [kept, words].filter(Boolean).join(' '); from = cut; }
+      const words = cut ? '' : await hear(from, end);
+      const text = [kept, words].filter(Boolean).join(' ');
+      if (!recording.stopped && text) { liveWaiting(live, false); liveShow(ctx, live, text); }
+    } finally { busy = false; }
   };
   recording.liveTimer = setInterval(() => void tick(), LIVE_EVERY_MS);
 }
