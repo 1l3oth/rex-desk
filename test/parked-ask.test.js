@@ -43,3 +43,36 @@ test('answers read as plain words', () => {
   assert.equal(answerText({ action: 'decline' }), 'No (declined).');
   assert.equal(answerText({ action: 'accept', content: { answer: 'main' } }), 'main');
 });
+
+test('screenshots that need an OK land in Needs you together, and OK or changes reach the agent', async () => {
+  const store = new Store(temporary('review')); const desk = new Desk(store, { root: temporary('root') });
+  store.put('run', 'run-3', { id: 'run-3', title: 'Agent', role: 'specialist', state: 'running', createdAt: now() });
+  const folder = temporary('shots'), before = path.join(folder, 'before.png'), after = path.join(folder, 'after.png');
+  const { writeFileSync } = await import('node:fs'); writeFileSync(before, 'png'); writeFileSync(after, 'png');
+  desk.message = () => {};
+  const first = desk.shareEvidence('run-3', { file: before, title: 'Before', needsOk: true });
+  const second = desk.shareEvidence('run-3', { file: after, title: 'After', needsOk: true });
+  // Before and after are one item, the agent is not held, and plain evidence makes no item.
+  assert.equal(first.needsOk, second.needsOk); assert.equal(desk.run('run-3').state, 'running');
+  desk.shareEvidence('run-3', { file: after, title: 'Just proof' });
+  const reviews = store.list('interaction').filter(item => item.kind === 'review');
+  assert.equal(reviews.length, 1); assert.equal(reviews[0].parked, true);
+  assert.deepEqual(reviews[0].request.pictures.map(picture => picture.title), ['Before', 'After']);
+  assert.match(reviews[0].request.pictures[0].type, /^image\//);
+  const resumed = []; desk.resume = async (runId, options) => { resumed.push(options.prompt); };
+  store.put('run', 'run-3', { ...store.get('run', 'run-3'), state: 'finished' });
+  desk.answer(first.needsOk, { action: 'accept', content: {} });
+  assert.match(resumed[0], /said OK/);
+  // A new round after the OK is a new item; asking for changes sends what to change.
+  const again = desk.shareEvidence('run-3', { file: after, title: 'After, round 2', needsOk: true });
+  assert.notEqual(again.needsOk, first.needsOk);
+  desk.answer(again.needsOk, { action: 'accept', content: { change: 'Make the list narrower' } });
+  assert.match(resumed[1], /wants changes: Make the list narrower/);
+  store.close();
+});
+
+test('the start instructions send every need for the person to Needs you', async () => {
+  const source = (await import('node:fs')).readFileSync(new URL('../src/coordinator.js', import.meta.url), 'utf8');
+  assert.match(source, /Whenever you need the person[^.]*it goes to Needs you/);
+  assert.match(source, /needsOk: true to desk_share_evidence or desk_show_page/);
+});

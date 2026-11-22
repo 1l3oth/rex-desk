@@ -2522,6 +2522,11 @@
  "Or type an answer": "ឬវាយចម្លើយ",
  "Type an answer": "វាយចម្លើយ",
  "Your answer": "ចម្លើយរបស់អ្នក",
+ "What to change, if anything": "អ្វីដែលត្រូវកែ បើមាន",
+ "What to change": "អ្វីដែលត្រូវកែ",
+ "Ask for changes": "សុំឱ្យកែ",
+ "Write what to change": "សរសេរអ្វីដែលត្រូវកែ",
+ "Open in Needs you": "បើកក្នុង ត្រូវការអ្នក",
  "Waiting questions": "សំណួរដែលកំពុងរង់ចាំ",
  "mentioned {0} in {1}": "បានលើកឡើងពី {0} ក្នុង {1}"
 }

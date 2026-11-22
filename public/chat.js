@@ -343,6 +343,8 @@ const FINISHED = ['ready_for_review', 'published', 'failed', 'stopped', 'interru
 function decisionCard(item) {
   if (item.kind === 'file') return fileCard(item);
   if (item.kind === 'terminal') return signInCard(item);
+  // Pictures waiting for the person's OK are looked at full size in Needs you.
+  if (item.kind === 'review') return `<div class="qcard"><div class="qtitle">${esc(item.title || '')}</div><div class="row"><button type="button" class="btn small primary" data-open="inbox" data-id="">${t`Open in Needs you`}</button></div></div>`;
   const request = item.request || {}, run = runById(item.runId), properties = request.requestedSchema?.properties || {}, required = request.requestedSchema?.required || [];
   const saved = ui.qanswers.get(item.id) || {};
   const field = (key, property, needed) => {

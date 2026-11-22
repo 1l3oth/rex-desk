@@ -38,6 +38,7 @@ function detail(ctx, helpers, entry) {
   if (entry.wake) {
     return `<div class="ny-detail">${head}${question}<div class="ny-dact"><button class="btn" data-action="wake-dismiss" data-id="${esc(item.id)}">${t`Dismiss`}</button><button class="btn primary" data-action="wake-approve" data-id="${esc(item.id)}">${t`Wake it up`}</button></div></div>`;
   }
+  if (item.kind === 'review') return review(ctx, item, head, question);
   if (!simple(item)) return `<div class="ny-detail">${head}${question}<div class="ny-dcard">${helpers.decisionCard(item)}</div></div>`;
   const request = item.request || {};
   if (item.kind === 'approval') {
@@ -48,6 +49,18 @@ function detail(ctx, helpers, entry) {
   const draft = ui.qanswers?.get(item.id)?.[name] || '';
   const quick = options.length ? `<div class="ny-opts">${options.map(option => `<button type="button" class="btn" data-ny-quick="${esc(option.label)}" title="${esc(option.description || option.label)}">${esc(option.label)}</button>`).join('')}</div>` : '';
   return `<form class="ny-detail" data-interaction="${esc(item.id)}" novalidate>${head}${question}${quick}<textarea class="qinput ny-answer" name="${esc(name)}" data-type="string" rows="3" placeholder="${options.length ? t('Or type an answer') : t('Type an answer')}" aria-label="${t`Your answer`}">${esc(draft)}</textarea><div class="ny-dact"><button class="btn" name="decision" value="decline" formnovalidate>${t`Skip`}</button><button class="btn primary" name="decision" value="accept">${t`Send`}</button></div></form>`;
+}
+
+// Pictures or pages an agent needs an OK on: they show here in full, with OK, or what to change.
+function review(ctx, item, head, question) {
+  const { esc } = ctx, shots = (item.request?.pictures || []).map(picture => {
+    const title = esc(picture.title || ''), url = esc(picture.url || '');
+    const look = String(picture.type).startsWith('image/') ? `<img class="md-media" src="${url}" alt="${title}" loading="lazy">`
+      : String(picture.type).startsWith('video/') ? `<video src="${url}" controls preload="metadata"></video>`
+      : `<button type="button" class="btn" ${picture.page ? `data-page-open="${url}"` : `data-open-url="${url}"`}>${t`Open`} ${title}</button>`;
+    return `<figure>${look}<figcaption>${title}${picture.note ? `<small>${esc(picture.note)}</small>` : ''}</figcaption></figure>`;
+  }).join('');
+  return `<form class="ny-detail" data-interaction="${esc(item.id)}" novalidate>${head}${question}<div class="ny-shots">${shots}</div><textarea class="ny-answer" name="change" data-type="string" rows="3" placeholder="${t`What to change, if anything`}" aria-label="${t`What to change`}"></textarea><div class="ny-dact"><button class="btn" name="decision" value="accept" data-ny-change>${t`Ask for changes`}</button><button class="btn primary" name="decision" value="accept" data-ny-ok>${t`OK`}</button></div></form>`;
 }
 
 export function inboxStage(ctx, helpers) {
@@ -85,6 +98,13 @@ export function wireInbox(ctx) {
     if (pick) { ctx.ui.nySelected = pick.dataset.nyPick; ctx.ui.nyOpen = true; ctx.renderAll(); return; }
     if (event.target.closest?.('[data-ny-back]')) { ctx.ui.nyOpen = false; ctx.renderAll(); return; }
     const quick = event.target.closest?.('[data-ny-quick]');
+    const link = event.target.closest?.('[data-open-url]'); if (link) { window.open(link.dataset.openUrl, '_blank', 'noopener'); return; }
     if (quick) { const form = quick.closest('form'), input = form?.querySelector('.qinput'); if (!input) return; input.value = quick.dataset.nyQuick; form.requestSubmit(form.querySelector('button[value=accept]')); }
   });
+  // A review: OK sends no change; asking for changes needs the change written first.
+  document.addEventListener('submit', event => {
+    const button = event.submitter, box = event.target.querySelector?.('.ny-answer[name=change]'); if (!box || !button) return;
+    if (button.dataset.nyOk !== undefined) box.value = '';
+    else if (button.dataset.nyChange !== undefined && !box.value.trim()) { event.preventDefault(); event.stopImmediatePropagation(); box.focus(); box.placeholder = t('Write what to change'); }
+  }, true);
 }

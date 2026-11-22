@@ -170,11 +170,11 @@ export function createMcp(desk, scope) {
     }, true);
   tool('desk_share_evidence', 'Share proof of a test with the person: a screenshot, a screen recording, or the test output. Use it every time you test something (passing or failing). The file is kept as evidence of the task, posted in the chat you are talking in (your room, or your personal chat), and shown in that chat\'s Media tab and on the task.',
     { runId, file: z.string().min(3).describe('Full path of the file on this computer: .png .jpg .gif .webp .webm .mp4 .mov .pdf .txt .log .json .html or .zip.'), title: z.string().min(1).max(120).describe('What it shows, in English, like "Upper task link after the fix".'),
-      taskId: z.string().optional().describe('The task it is evidence for. Omit it when you work on one task: that task is used.'), result: z.enum(['passed', 'failed', 'info']).default('info'), note: z.string().max(2000).optional().describe('One or two lines: what was tested and what you saw.') },
+      taskId: z.string().optional().describe('The task it is evidence for. Omit it when you work on one task: that task is used.'), result: z.enum(['passed', 'failed', 'info']).default('info'), note: z.string().max(2000).optional().describe('One or two lines: what was tested and what you saw.'), needsOk: z.boolean().default(false).describe('True when the person must OK it (before and after screenshots, a design, a page): it also goes to Needs you with OK and Change, and their answer comes to your chat later. Do not wait for it.') },
     input => { requireEnglish(`${input.title} ${input.note || ''}`, 'the title and note'); return desk.shareEvidence(resolveRun(input.runId), withTask(input)); });
   tool('desk_show_page', 'Show the person an HTML page you made, most often a code explainer page of your changes. It is posted in the chat you are talking in (your room, or your personal chat) as a button that opens the page full screen inside Rex Desk, and kept on the task.',
     { runId, file: z.string().min(3).describe('Full path of the .html file on this computer.'), title: z.string().min(1).max(120).describe('What the page explains, in English.'),
-      taskId: z.string().optional().describe('The task it belongs to. Omit it when you work on one task.'), note: z.string().max(2000).optional().describe('Two or three plain lines: what changed and why.') },
+      taskId: z.string().optional().describe('The task it belongs to. Omit it when you work on one task.'), note: z.string().max(2000).optional().describe('Two or three plain lines: what changed and why.'), needsOk: z.boolean().default(false).describe('True when the person must OK it (before and after screenshots, a design, a page): it also goes to Needs you with OK and Change, and their answer comes to your chat later. Do not wait for it.') },
     input => { requireEnglish(`${input.title} ${input.note || ''}`, 'the title and note'); return desk.shareEvidence(resolveRun(input.runId), { ...withTask(input), page: true }); });
   tool('desk_worktrees', 'List the worktree history: every git worktree in the projects of the person (made by Rex Desk, by an agent, or by hand), newest first, with the tasks that live in each one and whether it still exists. Filter by project or state.',
     { project: z.string().optional().describe('Project name or repository id.'), state: z.enum(['active', 'gone']).optional() },
@@ -219,8 +219,13 @@ export function createMcp(desk, scope) {
     if (!interaction) throw new Error('Question not found.'); desk.authorize(scope, interaction.runId);
     return { state: interaction.state, answer: interaction.answer };
   }, true);
-  tool('desk_elicit', 'Use native MCP form elicitation when the client supports it. In Rex-managed Claude Code runs the request is routed to the dashboard. Otherwise use desk_ask.',
+  tool('desk_elicit', 'Ask the person one question. Inside Rex Desk it goes to Needs you and returns at once, like desk_ask: keep working, the answer comes to your chat later. Outside Rex Desk it uses native MCP form elicitation when the client supports it.',
     { message: z.string(), field: z.string().default('answer') }, async ({ message, field }, extra) => {
+      // Inside Rex Desk it parks in Needs you like desk_ask, instead of holding the agent until the person answers.
+      if (scope.runId) {
+        const interaction = desk.beginAsk(resolveRun(), { kind: 'question', title: message, request: { requestedSchema: { type: 'object', properties: { [field]: { type: 'string', title: 'Your answer' } }, required: [field] } }, method: 'desk' }, { parked: true });
+        return { questionId: interaction.id, state: 'pending', note: 'Asked in Needs you. Do not wait or poll: keep working; the answer arrives in your chat as a new message.' };
+      }
       if (!server.server.getClientCapabilities()?.elicitation) throw new Error('This MCP client does not advertise elicitation. Use desk_ask instead.');
       return server.server.elicitInput({ mode: 'form', message, requestedSchema: { type: 'object', properties: { [field]: { type: 'string', title: 'Your answer' } }, required: [field] } }, { timeout: 86400000, relatedRequestId: extra.requestId });
     });

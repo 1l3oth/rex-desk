@@ -100,7 +100,7 @@ export class Notifier {
       const item = this.store.get('interaction', id);
       if (!item || item.state !== 'pending' || this.seen.has(id)) return;
       this.seen.add(id);
-      this.notify({ kind: 'ask', title: `${item.kind === 'approval' ? 'Needs your OK' : 'Needs your answer'} · ${this.runTitle(this.store.get('run', item.runId))}`, body: item.title, target: { type: 'inbox', id: '' } });
+      this.notify({ kind: 'ask', title: `${['approval', 'review'].includes(item.kind) ? 'Needs your OK' : 'Needs your answer'} · ${this.runTitle(this.store.get('run', item.runId))}`, body: item.title, target: { type: 'inbox', id: '' } });
     } else if (kind === 'run') {
       const run = this.store.get('run', id); if (!run) return;
       const before = this.states.get(id); this.states.set(id, run.state);
