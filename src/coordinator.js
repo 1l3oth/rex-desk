@@ -19,7 +19,7 @@ import { EFFORTS, MODES, modesFor, effortsFor, defaultModeFor, runOptions, model
 import { fetchModels } from './models.js';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdirSync, writeFileSync, existsSync, statSync, copyFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, statSync, copyFileSync, readFileSync, rmSync, realpathSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -640,10 +640,12 @@ export class Desk {
         const workers = [...this.live.keys()].map(runId => this.run(runId)).filter(item => item.role === 'worker' && !item.inApp).length; // a chat open in the Claude app waits for the person
         if (run.role === 'worker' && workers >= this.store.config().concurrency) continue;
         // Two workers never edit the same plain folder at once: the second waits for the first.
-        // Matched by the folder itself, not the Settings entry, so the same folder added twice still has one worker at a time.
-        const repositories = this.store.config().repositories, folderOf = item => item ? path.resolve(item.path || '').toLowerCase() : '';
+        // Matched by the real folder on disk (junctions and links followed), not the Settings entry, so the same folder added
+        // twice, or once through a junction, still has one worker at a time.
+        const realFolder = folder => { const plain = path.resolve(folder); try { return realpathSync.native(plain).toLowerCase(); } catch { return plain.toLowerCase(); } };
+        const repositories = this.store.config().repositories, folderOf = item => item ? realFolder(item.path || '') : '';
         const plainEntry = run.role === 'worker' && repositories.find(item => item.id === run.repositoryId), plainFolder = plainEntry?.plain ? folderOf(plainEntry) : '';
-        if (plainFolder && [...this.live.keys()].some(runId => { const other = this.run(runId); return other.id !== run.id && other.role === 'worker' && (folderOf(repositories.find(item => item.id === other.repositoryId)) === plainFolder || (other.worktree && path.resolve(other.worktree).toLowerCase() === plainFolder)); })) continue;
+        if (plainFolder && [...this.live.keys()].some(runId => { const other = this.run(runId); return other.id !== run.id && other.role === 'worker' && (folderOf(repositories.find(item => item.id === other.repositoryId)) === plainFolder || (other.worktree && realFolder(other.worktree) === plainFolder)); })) continue;
         const controller = new AbortController(); this.live.set(run.id, { controller });
         this.patchRun(run.id, { state: 'starting' });
         void this.execute(run.id, controller).catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
@@ -669,9 +671,12 @@ export class Desk {
       // The folder may have become a Git repository since it was added (git init): then it is a normal project again.
       const plainRepository = run.role === 'worker' && !run.worktree && this.store.config().repositories.find(item => item.id === run.repositoryId);
       // When Git cannot say (Git missing, access refused), the run stops instead of editing what may be a real checkout.
-      if (plainRepository?.plain && (await inspectRepository(plainRepository.path).catch(error => { throw new Error(`Could not check whether ${plainRepository.path} is a Git folder, so no agent works in it: ${error.message}`); })).git !== false) {
-        const current = this.store.config();
-        this.store.saveConfig({ ...this.store.publicConfig(), repositories: current.repositories.map(item => item.id === plainRepository.id ? { ...item, plain: false, baseBranch: item.baseBranch || 'develop', targetBranch: item.targetBranch || item.baseBranch || 'develop' } : item) });
+      const probed = plainRepository?.plain ? await inspectRepository(plainRepository.path).catch(error => { throw new Error(`Could not check whether ${plainRepository.path} is a Git folder, so no agent works in it: ${error.message}`); }) : null;
+      if (probed && probed.git !== false) {
+        // The branch Git reports (develop, else the current one) becomes the base, for the project and for this queued run.
+        const base = plainRepository.baseBranch || probed.preferredBranch || 'develop', target = plainRepository.targetBranch || base;
+        this.store.saveConfig({ ...this.store.publicConfig(), repositories: this.store.config().repositories.map(item => item.id === plainRepository.id ? { ...item, plain: false, baseBranch: base, targetBranch: target } : item) });
+        run = this.patchRun(runId, { baseBranch: run.baseBranch || base, targetBranch: run.targetBranch || target });
       }
       if (run.role === 'worker' && !run.worktree && this.store.config().repositories.find(item => item.id === run.repositoryId)?.plain) {
         const folder = this.store.config().repositories.find(item => item.id === run.repositoryId).path;
