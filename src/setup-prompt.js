@@ -25,7 +25,7 @@ export function setupPrompt({ target = 'local', root, dataDirectory, mcpUrl, pro
       `Rex Desk runs locally at ${mcpUrl || 'http://127.0.0.1:4317/mcp'}. A cloud client needs an HTTPS route to that address; replace <YOUR-REX-DESK-HOST> with that route's host name.`,
       'The route must forward only /mcp and keep bearer authentication. Do not expose the dashboard API.',
       '',
-      `If the client can only keep short tool calls open, use desk_ask with wait=false and poll desk_question. ${verify}`,
+      `desk_ask returns at once; read the answer later with desk_question. ${verify}`,
     ].join('\n');
   }
   return [

@@ -372,7 +372,7 @@ export class TursoSync {
     this.store.token = this.store.decrypt(this.store.get('secret', 'mcp-token'));
     await this.adoptIdentity(events.rows);
     for (const run of this.store.list('run')) if (['running', 'queued', 'waiting', 'starting', 'verifying'].includes(run.state)) this.store.put('run', run.id, { ...run, state: 'interrupted', error: 'Restored from Turso. Resume this run explicitly.' });
-    for (const item of this.store.list('interaction')) if (item.state === 'pending') this.store.put('interaction', item.id, { ...item, state: 'expired' });
+    for (const item of this.store.list('interaction')) if (item.state === 'pending' && !item.parked) this.store.put('interaction', item.id, { ...item, state: 'expired' });
     this.store.fresh = false; this.notify();
   }
   // After a restore: the same machine (a reinstall, a cleared data folder) takes back its old computer id, so its agents stay

@@ -141,11 +141,11 @@ export function createMcp(desk, scope) {
     desk.store.list('run').filter(run => scope.role !== 'worker' || run.id === scope.runId), true);
   tool('desk_message', 'Send a deliberate message to the human in the dashboard. Use for meaningful findings, blockers, and reports.',
     { runId, text: z.string().min(1).max(50000) }, input => { requireEnglish(input.text, 'this message'); return desk.message(resolveRun(input.runId), input.text); });
-  tool('desk_ask', 'Ask the human a question or request approval in the dashboard. Blocks until answered. For clients with short timeouts, use wait=false and poll desk_question.',
+  tool('desk_ask', 'Ask the human a question or request approval in Needs you. It returns at once: do not stop or wait. Park only the step that needs the answer, keep working on everything else, and end your turn normally. The answer comes to your chat as a new message whenever the person gives it, even hours later, and you carry on from there. Only an approval that must block (push, deleting data, spending money) may pass wait=true, and only when nothing else is left to do.',
     { runId, message: z.string().min(1), kind: z.enum(['question', 'approval']).default('question'),
       fields: z.record(z.string(), z.object({ type: z.enum(['string', 'boolean', 'number', 'integer']), title: z.string().optional(), enum: z.array(z.string()).optional(),
         options: z.array(z.object({ label: z.string().min(1).max(120), description: z.string().max(200).optional() })).max(6).optional().describe('Suggested answers shown as buttons. Give 2 to 4 whenever you can guess likely ones; the person can pick one or type their own.'), multiSelect: z.boolean().optional() })).optional(),
-      required: z.array(z.string()).optional(), wait: z.boolean().default(true), toolsChecked: z.boolean().optional().describe('Set when you already checked desk_find for a tool that does this step.') }, async input => {
+      required: z.array(z.string()).optional(), wait: z.boolean().default(false).describe('approval only: block until answered.'), toolsChecked: z.boolean().optional().describe('Set when you already checked desk_find for a tool that does this step.') }, async input => {
       requireEnglish(input.message, 'this question');
       const request = { requestedSchema: askSchema(input) };
       // Asking the person for a manual step a tool could do (L53): the agent is shown the tools that may do it, first.
@@ -154,8 +154,9 @@ export function createMcp(desk, scope) {
         const tools = (found?.found || []).filter(item => item.kind !== 'rex').slice(0, 5).map(item => item.use);
         if (tools.length) return { asked: false, hint: `You were about to ask the person for a step by hand. These tools may do it: ${tools.join(', ')}. Try them with desk_run first; if none can, ask again with toolsChecked: true and say which you tried.` };
       }
-      const interaction = desk.beginAsk(resolveRun(input.runId), { kind: input.kind, title: input.message, request, method: 'desk' });
-      if (!input.wait) return { questionId: interaction.id, state: 'pending' };
+      const blocking = input.wait && input.kind === 'approval';
+      const interaction = desk.beginAsk(resolveRun(input.runId), { kind: input.kind, title: input.message, request, method: 'desk' }, { parked: !blocking });
+      if (!blocking) return { questionId: interaction.id, state: 'pending', note: 'Asked in Needs you. Do not wait or poll: keep working on what you can, and end your turn as usual. The answer arrives in your chat as a new message.' };
       return interaction.promise;
     });
   tool('desk_attachment', 'Save an image or video attached to your issue (a screenshot, comment image, or attachment URL from desk_task) into this run’s folder, and return the local path to read it from.',
@@ -213,7 +214,7 @@ export function createMcp(desk, scope) {
       }
       return desk.monitor.end(input.pid, { outside: Boolean(outside) });
     });
-  tool('desk_question', 'Poll a dashboard question created with desk_ask wait=false.', { questionId: z.string() }, ({ questionId }) => {
+  tool('desk_question', 'Read where one of your desk_ask questions stands. Not needed to get the answer: it comes to your chat by itself.', { questionId: z.string() }, ({ questionId }) => {
     const interaction = desk.store.get('interaction', questionId);
     if (!interaction) throw new Error('Question not found.'); desk.authorize(scope, interaction.runId);
     return { state: interaction.state, answer: interaction.answer };

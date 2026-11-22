@@ -165,7 +165,7 @@ export class Store extends EventEmitter {
     }
     for (const key of this.list('token')) if (!reattached.has(key.runId)) this.delete('token', key.id);
     for (const prompt of this.list('interaction')) {
-      if (prompt.state === 'pending') this.put('interaction', prompt.id, { ...prompt, state: 'expired' });
+      if (prompt.state === 'pending' && !prompt.parked) this.put('interaction', prompt.id, { ...prompt, state: 'expired' });
     }
   }
 
