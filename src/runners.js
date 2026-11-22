@@ -142,6 +142,8 @@ export class ClaudeRunner {
     const executable = resolveCommand('claude');
     // Not installed: say so plainly (the chat shows an Install button) instead of the Agent SDK's message about its own binary.
     if (process.platform !== 'win32' && !executable.command.includes('/') && !this.sdk) throw new Error('Claude Code is not installed on this computer. Press Install Claude Code: Rex Desk installs it and signs you in.');
+    // Servers switched off on the Market page never join the session, so none of their tools load.
+    const withoutOff = (servers, off) => Object.fromEntries(Object.entries(servers).filter(([name]) => !(off || []).includes(name)));
     const connections = existingMcpConnections(this.sourcePath, env.CLAUDE_CONFIG_DIR), allowedTools = new Set();
     delete connections.rex_desk;
     const mode = sdkMode(this.run.permissionMode), resume = sessionId(this.run.sessionId);
@@ -152,7 +154,7 @@ export class ClaudeRunner {
       permissionMode: mode, ...(mode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
       ...(this.run.effort ? { effort: this.run.effort } : {}),
       // Claude Code's own question prompt would not reach the dashboard; the agent asks through desk_ask instead.
-      disallowedTools: [...(this.run?.locked ? ['AskUserQuestion', 'Bash', 'PowerShell', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'Skill', 'Workflow'] : ['AskUserQuestion']), ...(this.mcpOff || []).filter(name => /^[w-]+$/.test(name)).map(name => `mcp__${name}`)],
+      disallowedTools: [...(this.run?.locked ? ['AskUserQuestion', 'Bash', 'PowerShell', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'Skill', 'Workflow'] : ['AskUserQuestion']), ...(this.mcpOff || []).filter(name => /^[\w-]+$/.test(name)).map(name => `mcp__${name}`)],
       additionalDirectories: this.run?.locked ? [] : [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
       settingSources: this.run?.locked ? [] : ['user', 'project', 'local'],
       settings: COST_SETTINGS,
@@ -179,7 +181,7 @@ export class ClaudeRunner {
       ...(executable.command.includes('/') || executable.command.includes('\\') ? { pathToClaudeCodeExecutable: executable.command } : {}),
       ...(this.model ? { model: this.model } : {}), ...(resume ? { resume } : {}),
       strictMcpConfig: true,
-      mcpServers: this.run?.locked ? {} : { ...(this.gateway ? {} : connections), ...(this.extraMcp || {}), rex_desk: { type: 'http', url: this.mcpUrl, headers: { Authorization: `Bearer ${this.token}` }, alwaysLoad: true } },
+      mcpServers: this.run?.locked ? {} : { ...(this.gateway ? {} : withoutOff(connections, this.mcpOff)), ...withoutOff(this.extraMcp || {}, this.mcpOff), rex_desk: { type: 'http', url: this.mcpUrl, headers: { Authorization: `Bearer ${this.token}` }, alwaysLoad: true } },
       onElicitation: async request => {
         const answer = await this.ask({ kind: 'question', title: request.message, request, method: 'elicitation' });
         return { action: answer.action, ...(answer.action === 'accept' ? { content: answer.content || {} } : {}) };
