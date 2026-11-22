@@ -17,6 +17,7 @@ const cleanId = value => String(value || '').replace(/[^\w.-]/g, '').slice(0, 80
 const cleanName = value => String(value || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 80) || 'A phone';
 const json = value => Buffer.from(JSON.stringify(value));
 
+const STOP_CODES = { 4001: 'replaced', 4002: 'not-paid', 4003: 'signed-out' };
 export class PhoneRelay {
   constructor(desk, { url = RELAY_URL, socket = (target) => new WebSocket(target), port = () => desk.port } = {}) {
     this.desk = desk; this.url = url; this.makeSocket = socket; this.port = port;
@@ -64,7 +65,9 @@ export class PhoneRelay {
     this.socket = socket; socket.binaryType = 'arraybuffer';
     socket.addEventListener('open', () => this.send(RELAY_OP.HELLO, 0, json({ token, desk: this.store.nodeId, name: this.desk.peers?.self?.name || '' })));
     socket.addEventListener('message', event => { try { this.onFrame(readRelayFrame(Buffer.from(event.data))); } catch (error) { this.store.event('', 'phone-relay-error', { message: error.message }); } });
-    socket.addEventListener('close', () => { if (this.socket !== socket) return; this.socket = null; this.dropStreams(); this.state = 'offline'; this.retry(); });
+    // The relay closes with 4001 when a newer connection of this desk took over, 4002 when the plan has no relay and 4003 when the sign-in
+    // is no longer good. Those do not get better by dialling again, so the desk waits for the switch or a new sign-in instead.
+    socket.addEventListener('close', event => { if (this.socket !== socket) return; this.socket = null; this.dropStreams(); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); });
     socket.addEventListener('error', () => {});
   }
   stop() {

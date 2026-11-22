@@ -71,3 +71,17 @@ test('a new phone gets one 6-digit code and comes in only after the person appro
   relay.forget('phone-1');
   assert.equal(relay.approved('phone-1'), false);
 });
+
+test('a relay "not paid" or "signed out" close stops the desk dialling again', () => {
+  for (const [code, state] of [[4002, 'not-paid'], [4003, 'signed-out'], [4001, 'replaced']]) {
+    const { desk } = fakeDesk(1), sockets = [];
+    const relay = new PhoneRelay(desk, { socket: () => { const socket = fakeSocket(); sockets.push(socket); return socket; } });
+    relay.setEnabled(true); sockets[0].emit('close', { code });
+    assert.equal(relay.view().state, state);
+    assert.equal(relay.timer, null);
+    relay.stop();
+  }
+  const { desk } = fakeDesk(1), socket = fakeSocket(), relay = new PhoneRelay(desk, { socket: () => socket });
+  relay.setEnabled(true); socket.emit('close', { code: 1006 });
+  assert.equal(relay.view().state, 'offline'); assert.ok(relay.timer); relay.stop();
+});
