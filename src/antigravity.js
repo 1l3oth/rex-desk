@@ -161,7 +161,7 @@ export class AntigravityRunner {
       const set = (configId, value) => value ? this.client.request('session/set_config_option', { sessionId: this.sessionId, configId, value }) : null;
       await set('model', this.model);
       await set('thought_level', thought(this.run.effort))?.catch(() => {});
-      await set('mode', antigravityMode(this.run.permissionMode));
+      await this.setMode(set);
       this.live = true;
       const result = await Promise.race([this.client.request('session/prompt', { sessionId: this.sessionId, prompt: [{ type: 'text', text: prompt }] }, 0), broken]);
       this.flush();
@@ -172,6 +172,20 @@ export class AntigravityRunner {
       this.event('agent-result', { result: this.text, tokens: this.tokens, billedToApiKey: false });
       return { status: 'completed' };
     } finally { this.signal?.removeEventListener('abort', abort); this.client.close(); }
+  }
+  // Auto needs agy's OS terminal sandbox, which is not on every computer yet. When agy refuses it, the turn goes on in
+  // Accept edits (agy's next safest mode) with one quiet step line, and later turns go straight to Accept edits.
+  async setMode(set) {
+    const mode = antigravityMode(this.run.permissionMode);
+    if (mode !== 'auto') return set('mode', mode);
+    if (AntigravityRunner.autoRefused) return set('mode', 'accept-edits');
+    try { return await set('mode', 'auto'); } catch (error) {
+      AntigravityRunner.autoRefused = true;
+      await set('mode', 'accept-edits');
+      const id = 'auto-mode-fallback', reason = String(error?.message || error).slice(0, 300);
+      this.event('agent-tool', { id, tool: 'Mode', input: { description: 'Auto mode is not available on this computer, so Gemini uses Accept edits', reason } });
+      this.event('agent-tool-result', { id, text: reason, failed: false });
+    }
   }
   async interrupt() { if (this.sessionId) this.client?.notify('session/cancel', { sessionId: this.sessionId }); setTimeout(() => this.client?.close(), 500); }
   close() { this.client?.close(); }

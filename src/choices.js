@@ -26,7 +26,7 @@ export const pickerModels = (store, provider = 'claude') => { const refused = st
 // Gemini's own four modes, as agy reports them, plus Dangerous, which Rex Desk adds by starting agy with every tool approved.
 export const GEMINI_MODES = [
   { id: 'bypassPermissions', label: 'Dangerous', hint: 'Runs everything without asking' },
-  { id: 'auto', label: 'Auto', hint: 'Edits and safe commands run; asks before anything that cannot be undone' },
+  { id: 'auto', label: 'Auto', hint: 'Edits and safe commands run; asks before anything that cannot be undone. Uses Accept edits where this computer cannot run Auto' },
   { id: 'acceptEdits', label: 'Accept edits', hint: 'Edits files freely, asks before commands' },
   { id: 'manual', label: 'Ask first', hint: 'Asks you before each edit and command' },
   { id: 'plan', label: 'Plan', hint: 'Plans carefully before it does anything' },

@@ -110,3 +110,23 @@ test('the default mode from Settings is used when nobody picked one, and an AI w
   assert.equal(defaultModeFor('codex', 'auto'), 'manual');
   assert.equal(defaultModeFor('codex', 'plan'), 'plan');
 });
+
+test('when agy refuses Auto mode, the turn goes on in Accept edits with one quiet step, and later turns skip Auto', async () => {
+  AntigravityRunner.autoRefused = false;
+  const agentEnv = { ...process.env, FAKE_AGY_NO_AUTO: '1' };
+  const first = runner({ permissionMode: 'auto' }, { agentEnv });
+  assert.deepEqual(await first.item.start('hi'), { status: 'completed' }, 'the turn does not fail');
+  assert.match(first.events.find(event => event.kind === 'agent-result').data.result, /modes=accept-edits$/);
+  const notes = first.events.filter(event => event.kind === 'agent-tool' && event.data.tool === 'Mode');
+  assert.equal(notes.length, 1);
+  assert.match(notes[0].data.input.description, /Accept edits/);
+  assert.equal(first.events.some(event => event.kind === 'error'), false, 'no red error card');
+  const second = runner({ permissionMode: 'auto' }, { agentEnv });
+  await second.item.start('again');
+  assert.equal(second.events.some(event => event.data?.tool === 'Mode'), false, 'the note shows once');
+  assert.match(second.events.find(event => event.kind === 'agent-result').data.result, /modes=accept-edits$/);
+  AntigravityRunner.autoRefused = false;
+  const fine = runner({ permissionMode: 'auto' }, { agentEnv: { ...process.env, FAKE_AGY_NO_AUTO: '' } });
+  await fine.item.start('ok');
+  assert.equal(fine.events.some(event => event.data?.tool === 'Mode'), false, 'Auto stays when agy accepts it');
+});

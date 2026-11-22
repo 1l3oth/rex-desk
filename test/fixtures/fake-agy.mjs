@@ -3,7 +3,7 @@ import { createInterface } from 'node:readline';
 const skip = process.argv.includes('--dangerously-skip-permissions');
 const send = message => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
 const update = (sessionId, body) => send({ method: 'session/update', params: { sessionId, update: body } });
-const waiting = new Map(); let asked = 0; const calls = [];
+const waiting = new Map(); let asked = 0; const calls = [], modes = [];
 const config = [{ id: 'model', options: [{ value: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' }, { value: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Thinking)' }] }];
 createInterface({ input: process.stdin }).on('line', async line => {
   const message = JSON.parse(line);
@@ -13,7 +13,8 @@ createInterface({ input: process.stdin }).on('line', async line => {
   if (message.method === 'initialize') return reply({ protocolVersion: 1, agentCapabilities: { loadSession: true } });
   if (message.method === 'session/new') return reply({ sessionId: '11111111-2222-3333-4444-555555555555', configOptions: config });
   if (message.method === 'session/resume') return reply({ configOptions: config });
-  if (message.method === 'session/set_config_option') return reply({ configOptions: config });
+  if (message.method === 'session/set_config_option' && message.params.configId === 'mode' && message.params.value === 'auto' && process.env.FAKE_AGY_NO_AUTO) return send({ id: message.id, error: { code: -32603, message: 'Auto mode is not available: it needs the OS terminal sandbox and may not be rolled out to you yet' } });
+  if (message.method === 'session/set_config_option') { if (message.params.configId === 'mode') modes.push(message.params.value); return reply({ configOptions: config }); }
   if (message.method === 'session/cancel') return;
   if (message.method === 'session/prompt') {
     const { sessionId } = message.params, text = message.params.prompt[0].text;
@@ -26,7 +27,7 @@ createInterface({ input: process.stdin }).on('line', async line => {
       allowed = result.outcome.optionId === 'allow';
     }
     update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 't1', status: allowed ? 'completed' : 'failed', rawOutput: allowed ? { output: 'git version 2.54', exit_code: 0 } : { output: 'denied' } });
-    update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `done: ${text} [${calls.join(',')}]${skip ? ' skip' : ''}` } });
+    update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `done: ${text} [${calls.join(',')}]${skip ? ' skip' : ''}${process.env.FAKE_AGY_NO_AUTO ? ` modes=${modes.join('|')}` : ''}` } });
     return reply({ stopReason: 'end_turn', usage: { inputTokens: 900, outputTokens: 20, cachedReadTokens: 100, cachedWriteTokens: 0 } });
   }
   send({ id: message.id, error: { code: -32601, message: `unknown ${message.method}` } });
