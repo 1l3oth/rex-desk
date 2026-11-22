@@ -129,6 +129,10 @@ test('desktop live words are heard in short pieces cut at a quiet moment, so the
   const long = { rate: 48000, chunks: chunks(7), levels: chunks(7).map(() => 0.1) }; const quiet = Math.round(4 / per); long.levels[quiet] = 0.001;
   assert.equal(livePieces(long).cut, quiet, 'cut at the quietest moment after 2.5 seconds');
   assert.equal(livePieces(long, quiet).cut, 0, 'the next part starts at the cut and is short again');
+  // After a slow request a long backlog waits: the cut still falls within the first 5 seconds, so the request stays short.
+  const backlog = { rate: 48000, chunks: chunks(20), levels: chunks(20).map(() => 0.1) }; backlog.levels[Math.round(18 / per)] = 0.0001;
+  assert.ok(livePieces(backlog).cut * per <= 5, 'a quiet moment near the end of a long backlog is not used');
+  assert.match(composer, /if \(recording\.stopped \|\| words === null\) return;/, 'a failed request (engine warming up) keeps its piece for the next try');
   assert.match(composer, /wavFrom\(recording\.chunks\.slice\(start, stop\)/, 'each request sends only its own piece');
   assert.doesNotMatch(composer, /LIVE_SLOW_MS/, 'live words never give up for the rest of the turn');
 });

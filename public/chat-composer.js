@@ -304,15 +304,17 @@ function liveWaiting(live, on) {
 }
 // The on-computer engine has no live results, so the recording is turned into words piece by piece while the person talks.
 // Every 1.5 seconds only the part since the last finished piece is sent, so each request stays short however long they
-// talk. Once that part is longer than 5 seconds, it is cut at its quietest moment after 2.5 seconds (between words), the
-// words before the cut are kept, and the next requests start from there. When the person stops, the whole recording is
+// talk. Once that part is longer than 5 seconds, it is cut at its quietest moment between 2.5 and 5 seconds in (between
+// words; never further, even when a slow request left more waiting), the words before the cut are kept, and the next
+// requests start from there. A request that fails (the engine still warming up) keeps its piece for the next try. When the person stops, the whole recording is
 // heard once more, and those words replace the live ones.
 const LIVE_EVERY_MS = 1500, LIVE_PIECE_S = 5, LIVE_CUT_S = 2.5;
 export function livePieces(recording, from = 0) {
   const per = 4096 / recording.rate, end = recording.chunks.length;
   if ((end - from) * per <= LIVE_PIECE_S) return { cut: 0, end };
   let cut = from + Math.ceil(LIVE_CUT_S / per);
-  for (let index = cut; index < end; index++) if ((recording.levels[index] ?? 1) < (recording.levels[cut] ?? 1)) cut = index;
+  const last = Math.min(end, from + Math.floor(LIVE_PIECE_S / per));
+  for (let index = cut; index < last; index++) if ((recording.levels[index] ?? 1) < (recording.levels[cut] ?? 1)) cut = index;
   return { cut, end };
 }
 function liveLocal(ctx, recording) {
@@ -321,14 +323,14 @@ function liveLocal(ctx, recording) {
   let busy = false, kept = '', from = 0;
   const hear = async (start, stop) => {
     const heard = await transcribe(wavFrom(recording.chunks.slice(start, stop), recording.rate), voiceLanguage(ctx)).catch(() => null);
-    return String(heard?.text || '').trim();
+    return heard ? String(heard.text || '').trim() : null;
   };
   const tick = async () => {
     if (busy || recording.stopped || !recording.heard) return;
     busy = true;
     try {
       const { cut, end } = livePieces(recording, from);
-      if (cut) { const words = await hear(from, cut); if (recording.stopped) return; kept = [kept, words].filter(Boolean).join(' '); from = cut; }
+      if (cut) { const words = await hear(from, cut); if (recording.stopped || words === null) return; kept = [kept, words].filter(Boolean).join(' '); from = cut; }
       const words = cut ? '' : await hear(from, end);
       const text = [kept, words].filter(Boolean).join(' ');
       if (!recording.stopped && text) { liveWaiting(live, false); liveShow(ctx, live, text); }
