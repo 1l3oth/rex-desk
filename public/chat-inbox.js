@@ -1,5 +1,5 @@
-// Needs you: a native split view, like Mail. The list of waiting questions sits on the left, the open one on the right
-// with its answer box. On a phone the list fills the screen and a tap opens the question, with a way back.
+// Needs you: one quiet grouped list, like a settings page. Each row: who asks, the question in one or two lines, when,
+// and the answer right on the row. Longer questions open for the full text. Answered ones leave the list.
 import { t } from './i18n.js';
 import { avatarHtml } from '/chat-rooms.js';
 
@@ -15,7 +15,7 @@ function asker(ctx, helpers, runId) {
   return { name: who?.name || (run ? helpers.runTitle(run) : t('Agent')), project: who?.projectSlug || run?.projectSlug || '', agent: who };
 }
 
-// One approval or one question answers with the simple box; anything bigger shows the full card.
+// A row answers right here when it is one approval or one question; anything bigger opens the full card below the row.
 function simple(item) {
   if (['file', 'terminal'].includes(item.kind)) return false;
   const request = item.request || {}, properties = Object.entries(request.requestedSchema?.properties || {});
@@ -24,67 +24,64 @@ function simple(item) {
   return properties.length === 1 && ['string', undefined].includes(properties[0][1].type) && !properties[0][1].multiSelect;
 }
 
-// The row in the list on the left.
-function listRow(ctx, entry, selected) {
-  const { esc } = ctx, { who, item } = entry;
-  return `<button type="button" class="ny-item${selected ? ' on' : ''}" data-ny-pick="${esc(item.id)}" aria-current="${selected}">${avatarHtml(ctx, { name: who.name, agent: who.agent || null, size: 'sm' })}<span class="ny-item-body"><span class="ny-item-top"><b>${esc(who.name)}</b><time datetime="${esc(entry.at)}">${esc(ago(entry.at))}</time></span>${entry.sub ? `<span class="ny-item-sub">${esc(entry.sub)}</span>` : ''}<span class="ny-item-q">${esc(entry.text)}</span></span></button>`;
+function askRow(ctx, helpers, item) {
+  const { esc, ui } = ctx, who = asker(ctx, helpers, item.runId), text = plain(item.title);
+  const key = `ny:${item.id}`, open = ui.openSteps?.get(key) ? ' open' : '';
+  const head = `<div class="ny-top"><b>${esc(who.name)}</b>${who.project ? `<span class="ny-proj">${esc(who.project)}</span>` : ''}<time datetime="${esc(item.createdAt || '')}">${esc(ago(item.createdAt))}</time></div>`;
+  const avatar = avatarHtml(ctx, { name: who.name, agent: who.agent || null, size: 'sm' });
+  if (!simple(item)) {
+    return `<div class="ny-row" data-ny="${esc(item.id)}">${avatar}<div class="ny-body">${head}<div class="ny-q">${esc(text)}</div>
+      <details class="ny-more" data-steps="${esc(key)}"${open}><summary>${item.kind === 'file' ? t('Fill in') : t('Answer')}</summary>${helpers.decisionCard(item)}</details></div></div>`;
+  }
+  const request = item.request || {}, [field] = Object.entries(request.requestedSchema?.properties || {});
+  const detail = item.kind === 'approval' ? request.command || request.input || '' : '';
+  // The question shows in two lines; a tap opens it in full (and the command an approval would run).
+  const question = `<details class="ny-qd" data-steps="${esc(key)}"${open}><summary class="ny-q">${esc(text)}</summary>${detail ? `<pre>${esc(typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2).slice(0, 1500))}</pre>` : ''}</details>`;
+  let actions;
+  if (item.kind === 'approval') {
+    actions = `<button class="btn small primary" name="decision" value="accept">${t`Approve`}</button>${request.allowAlways ? `<button class="btn small" name="decision" value="always" formnovalidate>${t`Always allow`}</button>` : ''}<button class="btn small" name="decision" value="decline" formnovalidate>${t`Deny`}</button>`;
+  } else {
+    const [name, property] = field, options = (property.options || (property.enum || []).map(label => ({ label }))).slice(0, 4);
+    const draft = ui.qanswers?.get(item.id)?.[name] || '';
+    actions = `${options.map(option => `<button class="btn small" name="decision" value="accept" data-quick="${esc(option.label)}" formnovalidate title="${esc(option.description || option.label)}">${esc(option.label)}</button>`).join('')}
+      <span class="ny-reply"><input class="qinput" name="${esc(name)}" data-type="string" placeholder="${options.length ? t('Or type an answer') : t('Type an answer')}" autocomplete="off" value="${esc(draft)}" aria-label="${t`Your answer`}"><button class="btn small primary" name="decision" value="accept">${t`Send`}</button><button class="btn small ny-skip" name="decision" value="decline" formnovalidate>${t`Skip`}</button></span>`;
+  }
+  return `<form class="ny-row" data-interaction="${esc(item.id)}" data-ny="${esc(item.id)}" novalidate>${avatar}<div class="ny-body">${head}${question}<div class="ny-act">${actions}</div></div></form>`;
 }
 
-// The open question on the right: who asks, the full question, then the answer.
-function detail(ctx, helpers, entry) {
-  const { esc, ui } = ctx, { who, item } = entry;
-  const head = `<header class="ny-dhead"><button type="button" class="ny-back" data-ny-back aria-label="${t`Back to the list`}"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>${avatarHtml(ctx, { name: who.name, agent: who.agent || null })}<div class="ny-dwho"><b>${esc(who.name)}</b><span>${esc([entry.sub, ago(entry.at)].filter(Boolean).join(' · '))}</span></div></header>`;
-  const question = `<div class="ny-dq">${esc(entry.text)}</div>`;
-  if (entry.wake) {
-    return `<div class="ny-detail">${head}${question}<div class="ny-dact"><button class="btn" data-action="wake-dismiss" data-id="${esc(item.id)}">${t`Dismiss`}</button><button class="btn primary" data-action="wake-approve" data-id="${esc(item.id)}">${t`Wake it up`}</button></div></div>`;
-  }
-  if (!simple(item)) return `<div class="ny-detail">${head}${question}<div class="ny-dcard">${helpers.decisionCard(item)}</div></div>`;
-  const request = item.request || {};
-  if (item.kind === 'approval') {
-    const command = request.command || request.input || '';
-    return `<form class="ny-detail" data-interaction="${esc(item.id)}" novalidate>${head}${question}${command ? `<pre class="ny-cmd">${esc(typeof command === 'string' ? command : JSON.stringify(command, null, 2).slice(0, 4000))}</pre>` : ''}<div class="ny-dact"><button class="btn" name="decision" value="decline" formnovalidate>${t`Deny`}</button>${request.allowAlways ? `<button class="btn" name="decision" value="always" formnovalidate>${t`Always allow`}</button>` : ''}<button class="btn primary" name="decision" value="accept">${t`Approve`}</button></div></form>`;
-  }
-  const [[name, property]] = Object.entries(request.requestedSchema.properties), options = (property.options || (property.enum || []).map(label => ({ label }))).slice(0, 6);
-  const draft = ui.qanswers?.get(item.id)?.[name] || '';
-  const quick = options.length ? `<div class="ny-opts">${options.map(option => `<button type="button" class="btn" data-ny-quick="${esc(option.label)}" title="${esc(option.description || option.label)}">${esc(option.label)}</button>`).join('')}</div>` : '';
-  return `<form class="ny-detail" data-interaction="${esc(item.id)}" novalidate>${head}${question}${quick}<textarea class="qinput ny-answer" name="${esc(name)}" data-type="string" rows="3" placeholder="${options.length ? t('Or type an answer') : t('Type an answer')}" aria-label="${t`Your answer`}">${esc(draft)}</textarea><div class="ny-dact"><button class="btn" name="decision" value="decline" formnovalidate>${t`Skip`}</button><button class="btn primary" name="decision" value="accept">${t`Send`}</button></div></form>`;
+function wakeRow(ctx, helpers, wake) {
+  const { esc } = ctx, who = asker(ctx, helpers, wake.runId), room = (ctx.ui.snap.rooms || []).find(item => item.id === wake.roomId);
+  return `<div class="ny-row" data-ny="${esc(wake.id)}">${avatarHtml(ctx, { name: wake.from || who.name, size: 'sm' })}<div class="ny-body"><div class="ny-top"><b>${esc(wake.from || '')}</b><span class="ny-proj">${t`mentioned ${esc(who.name)} in ${esc(room?.name || 'a room')}`}</span>${wake.at || wake.createdAt ? `<time>${esc(ago(wake.at || wake.createdAt))}</time>` : ''}</div>
+    <div class="ny-q">${esc(wake.text)}</div><div class="ny-act"><button class="btn small primary" data-action="wake-approve" data-id="${esc(wake.id)}">${t`Wake it up`}</button><button class="btn small" data-action="wake-dismiss" data-id="${esc(wake.id)}">${t`Dismiss`}</button></div></div></div>`;
 }
 
 export function inboxStage(ctx, helpers) {
-  const { esc, ui } = ctx, asks = ctx.pending(), wakes = ui.snap.wakes || [], count = asks.length + wakes.length;
+  const asks = ctx.pending(), wakes = ctx.ui.snap.wakes || [], count = asks.length + wakes.length;
   if (!count) return { title: t('Needs you'), meta: '', feed: `<div class="empty"><h2>${t`All clear`}</h2><p>${t`Questions, approvals and wake-ups from your agents show up here.`}</p></div>` };
-  const group = saved(), entries = [
-    ...asks.map(item => { const who = asker(ctx, helpers, item.runId); return { item, who, at: item.createdAt || '', text: plain(item.title), sub: who.project }; }),
-    ...wakes.map(wake => {
-      const who = asker(ctx, helpers, wake.runId), room = (ui.snap.rooms || []).find(item => item.id === wake.roomId);
-      return { item: wake, wake: true, who: { ...who, name: wake.from || who.name, agent: null }, at: wake.at || wake.createdAt || '', text: wake.text || '', sub: t`mentioned ${who.name} in ${room?.name || 'a room'}` };
-    })
+  const group = saved(), rows = [
+    ...asks.map(item => ({ at: item.createdAt || '', html: askRow(ctx, helpers, item), who: asker(ctx, helpers, item.runId) })),
+    ...wakes.map(wake => ({ at: wake.at || wake.createdAt || '', html: wakeRow(ctx, helpers, wake), who: asker(ctx, helpers, wake.runId) }))
   ].sort((left, right) => String(right.at).localeCompare(String(left.at)));
-  // The open question stays open until it is answered; then the newest one opens.
-  let current = entries.find(entry => entry.item.id === ui.nySelected);
-  if (!current) { current = entries[0]; ui.nyOpen = false; }
-  ui.nySelected = current.item.id;
   const sections = new Map();
-  for (const entry of entries) {
-    const label = group === 'agent' ? entry.who.name : group === 'project' ? entry.who.project || t('No project') : '';
-    if (!sections.has(label)) sections.set(label, []); sections.get(label).push(listRow(ctx, entry, entry === current));
+  for (const row of rows) {
+    const label = group === 'agent' ? row.who.name : group === 'project' ? row.who.project || t('No project') : '';
+    if (!sections.has(label)) sections.set(label, []); sections.get(label).push(row.html);
   }
+  const { esc } = ctx;
   const seg = `<div class="kg-switch ny-seg" role="radiogroup" aria-label="${t`Group by`}">${GROUPS().map(([value, label]) => `<button type="button" role="radio" aria-checked="${group === value}" class="${group === value ? 'on' : ''}" data-ny-group="${value}">${esc(label)}</button>`).join('')}</div>`;
-  const list = [...sections].map(([label, rows]) => `${label ? `<h3 class="ny-sec">${esc(label)}<span>${rows.length}</span></h3>` : ''}${rows.join('')}`).join('');
-  return { title: t('Needs you'), meta: t`${count} waiting`, top: true, actions: seg, feedClass: 'ny-feed',
-    feed: `<div class="ny${ui.nyOpen ? ' open' : ''}"><nav class="ny-list" aria-label="${t`Waiting questions`}">${list}</nav><section class="ny-pane">${detail(ctx, helpers, current)}</section></div>` };
+  const list = [...sections].map(([label, html]) => `<section class="ny-sec">${label ? `<h3>${esc(label)} <span>${html.length}</span></h3>` : ''}<div class="ny-list">${html.join('')}</div></section>`).join('');
+  return { title: t('Needs you'), meta: t`${count} waiting`, top: true, actions: seg, feed: `<div class="ny">${list}</div>` };
 }
 
-// Picking a row opens it on the right (on a phone, over the list). The grouping is kept on this computer. A suggested
-// answer fills the box and sends at once.
+// The grouping is kept on this computer; a quick answer fills the row's box before the form sends it.
 export function wireInbox(ctx) {
   document.addEventListener('click', event => {
-    const group = event.target.closest?.('[data-ny-group]');
-    if (group) { try { localStorage.setItem('rex-ny-group', group.dataset.nyGroup); } catch {} ctx.renderAll(); return; }
-    const pick = event.target.closest?.('[data-ny-pick]');
-    if (pick) { ctx.ui.nySelected = pick.dataset.nyPick; ctx.ui.nyOpen = true; ctx.renderAll(); return; }
-    if (event.target.closest?.('[data-ny-back]')) { ctx.ui.nyOpen = false; ctx.renderAll(); return; }
-    const quick = event.target.closest?.('[data-ny-quick]');
-    if (quick) { const form = quick.closest('form'), input = form?.querySelector('.qinput'); if (!input) return; input.value = quick.dataset.nyQuick; form.requestSubmit(form.querySelector('button[value=accept]')); }
+    const button = event.target.closest?.('[data-ny-group]'); if (!button) return;
+    try { localStorage.setItem('rex-ny-group', button.dataset.nyGroup); } catch {}
+    ctx.renderAll();
   });
+  document.addEventListener('submit', event => {
+    const quick = event.submitter?.dataset?.quick, input = quick !== undefined && event.target.querySelector?.('.qinput');
+    if (input) input.value = quick;
+  }, true);
 }

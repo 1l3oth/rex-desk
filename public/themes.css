@@ -82,7 +82,12 @@ html[data-skin=crayon][data-theme=dark] .stage-head h1{background:linear-gradien
 /* --- Cyberpunk: a HUD. Cut corners, condensed type, scanlines, a neon grid floor, corner brackets. --- */
 html[data-skin=cyberpunk]{--sans:"Bahnschrift","DIN Alternate","Roboto Condensed","Segoe UI",sans-serif;--cut:14px}
 html[data-skin=cyberpunk] :is(.rail,.stage-main,.stage>.side,.dialog,.settings-pop,.kg-card,.nt-pane,.menu){border-radius:0;clip-path:polygon(var(--cut) 0,100% 0,100% calc(100% - var(--cut)),calc(100% - var(--cut)) 100%,0 100%,0 var(--cut))}
-html[data-skin=cyberpunk] :is(.btn,.place,.item,.composer .box2,.msg.mine .bubble,.kg-switch,.win-btn){border-radius:0;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px)}
+html[data-skin=cyberpunk] :is(.btn,.place,.item,.msg.mine .bubble,.kg-switch,.win-btn){border-radius:0;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px)}
+/* The composer box must NOT clip itself: the slash/@/# menu opens above it and clip-path would cut it off.
+   The cut-corner look sits on a ::before fill behind the content instead. */
+html[data-skin=cyberpunk] .composer .box2{border-radius:0;clip-path:none;background:transparent;border:0;isolation:isolate}
+html[data-skin=cyberpunk] .composer .box2::before{content:"";position:absolute;inset:0;z-index:-1;background:var(--raised);border:1px solid var(--line);clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px)}
+html[data-skin=cyberpunk] .composer .box2:focus-within::before{border-color:var(--accent)}
 html[data-skin=cyberpunk] .av{border-radius:4px}
 html[data-skin=cyberpunk] :is(.stage-head h1,.rail-head strong,.welcome h2,.place>span,h2,h3){font-family:"Bahnschrift SemiBold Condensed","Bahnschrift","Roboto Condensed",sans-serif;text-transform:uppercase;letter-spacing:.08em}
 html[data-skin=cyberpunk] .place.active,html[data-skin=cyberpunk] .item.active{background:linear-gradient(90deg,rgba(255,43,214,.28),transparent);box-shadow:inset 3px 0 0 #00e5ff}
