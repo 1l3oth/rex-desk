@@ -236,19 +236,25 @@ const voiceLanguage = ctx => { try { return localStorage.getItem('jev-language')
 // The words always belong to the chat the mic started in: after a switch they land in that chat's saved draft.
 function liveStart(ctx) {
   const box = document.getElementById('draft'); if (!box) return null;
-  return { key: ctx.draftKey(), before: box.value.trim(), placeholder: box.getAttribute('placeholder') || '', shown: '', written: box.value };
+  return { key: ctx.draftKey(), before: box.value.trim(), after: '', placeholder: box.getAttribute('placeholder') || '', shown: '', written: box.value, said: '' };
 }
+const joinWords = (...parts) => parts.map(part => String(part || '').trim()).filter(Boolean).reduce((text, part) => !text ? part : /^[,.;:!?)]/.test(part) ? `${text}${part}` : `${text} ${part}`, '');
 function liveShow(ctx, live, text, { final = false } = {}) {
   if (!live) return;
   const box = document.getElementById('draft'), here = box && ctx.draftKey() === live.key;
   const current = here ? box.value : String(ctx.ui.drafts.get(live.key) ?? live.written);
-  // Typed since the last update: keep it as the text before the words, without the words already shown.
+  const words = String(text || '').trim();
+  // Typed since the last update, before or after the words: kept where it is, and only the words in the middle change.
   if (current !== live.written) {
-    const typed = current.trim();
-    live.before = live.shown && typed.endsWith(live.shown) ? typed.slice(0, -live.shown.length).trim() : typed;
+    const at = live.shown ? current.lastIndexOf(live.shown) : -1;
+    if (at >= 0) { live.before = current.slice(0, at).trim(); live.after = current.slice(at + live.shown.length).trim(); }
+    else { live.before = current.trim(); live.after = ''; live.from = live.said; } // the words themselves were edited: they stay as typed, and only newer words are added
   }
-  const words = String(text || '').trim(); live.shown = words;
-  const value = words ? (live.before ? `${live.before} ${words}` : words) : live.before;
+  live.said = words;
+  let common = 0; if (live.from) while (common < live.from.length && live.from[common] === words[common]) common++;
+  const fresh = live.from ? words.slice(common).trim() : words;
+  live.shown = fresh;
+  const value = joinWords(live.before, fresh, live.after);
   live.written = value; ctx.ui.drafts.set(live.key, value);
   if (final && words) { ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(live.key); }
   if (!here) return;
@@ -410,10 +416,12 @@ async function browserTurn(ctx, onState) {
     else if (now - started > LONGEST_MS) finish();
   }, 150);
   const turn = { stop: () => { ended = true; clearInterval(watch); try { recognition.abort(); } catch { /* already over */ } } };
+  // The words go to the chat this turn started in: after a switch they are dropped, never sent into another chat.
+  const chat = ctx.draftKey();
   recognition.onend = async () => {
     clearInterval(watch); stopLevel(); if (listening !== turn) return;
     listening = null; micButton()?.classList.remove('rec');
-    if (!said) { onState('idle'); return; }
+    if (!said || ctx.draftKey() !== chat) { onState('idle'); return; }
     transcribing = true; onState('thinking');
     try { await sendSpoken(ctx, said); } finally { transcribing = false; onState('idle'); }
   };
