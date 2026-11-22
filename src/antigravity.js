@@ -192,10 +192,11 @@ export class AntigravityRunner {
   close() { this.client?.close(); }
 }
 
-// agy's refusal reads like "Auto mode is not available: it needs the OS terminal sandbox...".
+// agy's refusal reads like "Auto mode is not available: it needs the OS terminal sandbox...". Only a plain refusal counts:
+// a passing failure ("Auto sandbox initialization failed") leaves Auto on for the next turn.
 export const autoUnsupported = error => {
   const text = String(error?.message || error || '');
-  return !/timed out|stopped|closed|exited/i.test(text) && /\bauto\b/i.test(text) && /not (available|supported|enabled)|unsupported|unavailable|sandbox|rolled out|unknown mode|invalid mode/i.test(text);
+  return !/timed out|stopped|closed|exited/i.test(text) && /\bauto\b/i.test(text) && /not (available|supported|enabled|(yet )?rolled out)|unsupported|unavailable|unknown mode|invalid mode/i.test(text);
 };
 
 export async function antigravityModels({ env = process.env, cwd, clientFactory = options => new AcpClient(options) } = {}) {

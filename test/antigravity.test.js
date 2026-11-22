@@ -142,4 +142,5 @@ test('a Gemini Auto error that is not a refusal does not turn Auto off for later
   assert.equal(autoUnsupported(new Error('Antigravity session/set_config_option timed out.')), false);
   assert.equal(autoUnsupported(new Error('Auto mode is not available: it needs the OS terminal sandbox')), true);
   assert.equal(autoUnsupported(new Error('unsupported mode: auto')), true);
+  assert.equal(autoUnsupported(new Error('Auto sandbox initialization failed')), false, 'a passing sandbox failure is not a refusal');
 });
