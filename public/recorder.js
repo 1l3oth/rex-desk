@@ -75,7 +75,7 @@ export function wavFrom(chunks, rate) {
 export async function transcribe(wav, language) {
   const response = await fetch(`/api/voice/transcribe?language=${encodeURIComponent(language)}`, { method: 'POST', headers: { 'Content-Type': 'audio/wav', 'x-rex-desk': '1' }, body: wav });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  if (!response.ok) throw Object.assign(new Error(result.error || `HTTP ${response.status}`), { starting: Boolean(result.starting) });
   if (!result.text) throw new Error(t('No words were recognized. Try again a little closer to the microphone.'));
   return result;
 }

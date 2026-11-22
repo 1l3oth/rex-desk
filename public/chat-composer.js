@@ -267,6 +267,27 @@ async function browserDictate(ctx, { untilRelease = false } = {}) {
   listening = turn; micButton()?.classList.add('rec');
   return true;
 }
+// One path for every Rex Desk mic (the chat box mic, Space to talk and Voice mode): the same warm-up and the same way of
+// turning a recording into words. The on-computer engine can still be loading after a restart: the recording is kept and
+// sent again by itself until the engine is up, instead of an error. Voice mode only seemed to work better because its
+// greeting gave the engine time to load first.
+let warmed = '';
+export function warmVoice(ctx) {
+  const language = voiceLanguage(ctx); if (warmed === language) return; warmed = language;
+  try { localStorage.setItem('rex-voice-used', '1'); } catch { /* private window */ }
+  void fetch(`/api/voice/prepare?language=${language}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => { warmed = ''; });
+}
+const STARTING_TRIES = 12, STARTING_WAIT_MS = 5000;
+async function hearWords(ctx, wav) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await transcribe(wav, voiceLanguage(ctx)); }
+    catch (error) {
+      if (!error.starting || attempt >= STARTING_TRIES) throw error;
+      if (!attempt) ctx.toast(t('Loading the voice model. The first time after a restart takes a minute or two.'));
+      await new Promise(resolve => setTimeout(resolve, STARTING_WAIT_MS));
+    }
+  }
+}
 async function finishMic(ctx) {
   const recording = listening; if (!recording) return;
   // The browser's recognition puts the words in the box itself when it ends.
@@ -276,7 +297,7 @@ async function finishMic(ctx) {
   transcribing = true; micButton()?.classList.add('busy');
   const slow = setTimeout(() => ctx.toast(t('Loading the voice model. The first time after a restart takes a minute or two.')), 4000);
   try {
-    const heard = await transcribe(recording.wav(), voiceLanguage(ctx)), box = document.getElementById('draft');
+    const heard = await hearWords(ctx, recording.wav()), box = document.getElementById('draft');
     if (box) { ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(ctx.draftKey()); box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + heard.text; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); box.dispatchEvent(new Event('input', { bubbles: true })); }
   } catch (error) {
     ctx.toast(/not installed|install/i.test(error.message) ? t('Voice is not installed yet. Install it in Settings → Jev and voice.') : t`Voice input: ${error.message}`, true);
@@ -286,7 +307,7 @@ async function toggleMic(ctx) {
   if (transcribing) return;
   if (listening) return finishMic(ctx);
   if (await browserDictate(ctx)) return;
-  void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
+  warmVoice(ctx);
   let stream;
   try { stream = await openMicrophone(); } catch (error) { ctx.toast(micProblem(error), true); return; }
   listening = startRecorder(stream, { onQuiet: () => void finishMic(ctx) });
@@ -359,7 +380,7 @@ export async function voiceTurn(ctx, { onState = () => {} } = {}) {
     if (started === 'started') return true;
     if (started?.blocked) { ctx.toast(micProblem(started.blocked), true); return false; }
   }
-  void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
+  warmVoice(ctx);
   let stream;
   try { stream = await openMicrophone(); } catch (error) { ctx.toast(micProblem(error), true); return false; }
   onState('listening');
@@ -370,7 +391,7 @@ export async function voiceTurn(ctx, { onState = () => {} } = {}) {
     listening = null; micLevel = 0; recording.stop(); micButton()?.classList.remove('rec');
     if (!recording.heard) { onState('idle'); return; }
     transcribing = true; onState('thinking');
-    try { const heard = await transcribe(recording.wav(), voiceLanguage(ctx)); await sendSpoken(ctx, String(heard.text || '').trim()); }
+    try { const heard = await hearWords(ctx, recording.wav()); await sendSpoken(ctx, String(heard.text || '').trim()); }
     catch (error) { ctx.toast(/no voice engine|not installed|install/i.test(error.message) ? t('Voice mode needs a way to turn speech into words here: add an OpenRouter key (or install the voice model) in Settings → Jev and voice.') : t`Voice mode: ${error.message}`, true); }
     finally { transcribing = false; onState('idle'); }
   }
@@ -395,7 +416,7 @@ async function startHold(ctx) {
     if (hold.releasedEarly) { hold.releasedEarly = false; hold.active = false; document.body.classList.remove('ptt'); void finishMic(ctx); }
     return;
   }
-  void fetch(`/api/voice/prepare?language=${voiceLanguage(ctx)}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => {});
+  warmVoice(ctx);
   let stream;
   try { stream = await openMicrophone(); } catch (error) { hold.active = hold.pending = false; ctx.toast(micProblem(error), true); return; }
   // While Space is held, quiet does not end the recording; only letting go does (or a minute at most).
@@ -443,6 +464,11 @@ function initPushToTalk(ctx) {
 // ---------- wiring ----------
 export function initComposer(ctx) {
   initPushToTalk(ctx);
+  // Warm the voice engine before the first word: when the pointer reaches the mic, and a few seconds after start for
+  // someone who used voice before, so the first recording does not wait for the model to load.
+  document.addEventListener('pointerover', event => { if (event.target.closest?.('[data-action="mic"]')) warmVoice(ctx); }, { passive: true });
+  document.addEventListener('focusin', event => { if (event.target.closest?.('[data-action="mic"]')) warmVoice(ctx); });
+  try { if (localStorage.getItem('rex-voice-used')) setTimeout(() => { try { warmVoice(ctx); } catch { /* not loaded yet */ } }, 5000); } catch { /* private window */ }
   document.addEventListener('click', event => { if (event.target.closest?.('[data-action="st-voice"]')) { event.stopPropagation(); void voiceDialog(ctx); } }, true);
   document.addEventListener('click', event => {
     // The context ring opens (and closes) a panel with the full breakdown.
