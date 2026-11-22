@@ -2920,7 +2920,8 @@ html:has(.iv[open]){overflow:hidden}
 }
 
 /* Market: a grouped settings list. A bar with the agent and search, a segmented control, then one inset group per kind. */
-.page.mk{max-width:760px;padding:20px 20px 40px;display:flex;flex-direction:column;gap:14px}
+.feed-inner:has(>.page.mk){max-width:none;padding:0}
+.page.mk{max-width:none;margin:0;width:100%;box-sizing:border-box;padding:16px 20px 40px;display:flex;flex-direction:column;gap:14px}
 .mk-bar{display:flex;gap:10px;align-items:center}
 .mk-for{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 .mk-for .pick2{min-width:180px;max-width:260px}
