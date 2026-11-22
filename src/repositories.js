@@ -19,7 +19,17 @@ export async function inspectRepository(directory, { execute = run } = {}) {
   const git = args => execute('git', ['-C', directory, ...args], directory);
   let root;
   try { root = await git(['rev-parse', '--show-toplevel']); }
-  catch { throw new Error('This folder is not a Git project Rex Desk can open. Choose the project folder and check again.'); }
+  catch (error) {
+    // Only a clear "not a git repository" makes it a plain folder; a missing Git or a refused access stops here, so an agent never edits a real checkout directly.
+    let folder = false; try { folder = statSync(directory).isDirectory(); } catch { /* missing */ }
+    if (!folder) throw new Error('That folder was not found on this computer. Check the path and try again.');
+    if (!/not a git repository/i.test(`${error?.stderr || ''} ${error?.message || ''}`)) throw error;
+    // Not a Git folder: any folder can still be a project. Agents work straight in it, with no branches, remote or GitHub.
+    const found = detectProject(directory);
+    return { path: path.resolve(directory), name: path.basename(path.resolve(directory)) || directory, git: false, currentBranch: '', remote: '', remoteUrl: '', branches: [], preferredBranch: '',
+      gitAuthor: { name: '', email: '' }, github: { accounts: [], repository: null }, warnings: [], flow: null, electron: detectElectron(directory),
+      suggested: { setupCommand: found.setupCommand, testCommand: found.testCommand, devCommand: found.devCommand, from: found.from } };
+  }
   const optional = async args => { try { return await git(args); } catch { return ''; } };
   const [currentBranch, names, refs, authorName, authorEmail] = await Promise.all([
     optional(['branch', '--show-current']), optional(['remote']),
@@ -65,7 +75,7 @@ export async function inspectRepository(directory, { execute = run } = {}) {
   const list = [...branches.values()].sort((a, b) => a.name.localeCompare(b.name));
   const preferredBranch = branches.has('develop') ? 'develop' : list.find(branch => /(^|\/)develop$/.test(branch.name))?.name || currentBranch || github.repository?.defaultBranch || list[0]?.name || '';
   const found = detectProject(root);
-  return { path: path.resolve(root), name: github.repository?.name || path.basename(root), currentBranch,
+  return { path: path.resolve(root), git: true, name: github.repository?.name || path.basename(root), currentBranch,
     remote: remote || '', remoteUrl: safeRemote(remoteUrl), branches: list, preferredBranch,
     gitAuthor: { name: authorName, email: authorEmail }, github, warnings,
     flow: found.flowRuntime ? { available: true, ...found.flowRuntime } : null, electron: detectElectron(root),

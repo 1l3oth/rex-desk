@@ -270,14 +270,14 @@ export function openSettings(ctx, section = 'general') {
         return `<h3>${t`Where each project's agents work`}</h3><p class="muted">${t`For a project that is only on one computer, like work code. Changes save at once.`}</p>${rules.map(rule).join('')}`;
       };
       const repositories = config().repositories || [];
-      const row = (repo, index) => `<details class="st-repo" ${state.openRepo === index ? 'open' : ''}><summary><b>${esc(repo.name)}</b><code>${esc(repo.path)}</code><span class="muted">${esc(repo.baseBranch)} → ${esc(repo.targetBranch)}</span></summary>
-        <div class="st-row">${field(t('New work starts from'), input(`repo.${index}.baseBranch`, repo.baseBranch, 'spellcheck="false"'))}${field(t('Pull requests go to'), input(`repo.${index}.targetBranch`, repo.targetBranch, 'spellcheck="false"'))}</div>
+      const row = (repo, index) => `<details class="st-repo" ${state.openRepo === index ? 'open' : ''}><summary><b>${esc(repo.name)}</b><code>${esc(repo.path)}</code><span class="muted">${repo.plain ? t`Not a Git folder` : `${esc(repo.baseBranch)} → ${esc(repo.targetBranch)}`}</span></summary>
+        ${repo.plain ? `<p class="muted small">${t`Not a Git folder: agents work straight in it. There are no branches or pull requests.`}</p>` : `<div class="st-row">${field(t('New work starts from'), input(`repo.${index}.baseBranch`, repo.baseBranch, 'spellcheck="false"'))}${field(t('Pull requests go to'), input(`repo.${index}.targetBranch`, repo.targetBranch, 'spellcheck="false"'))}</div>`}
         <details class="st-adv"><summary>${t`Advanced`}</summary>
         ${field(t('Set up'), input(`repo.${index}.setupCommand`, repo.setupCommand, `spellcheck="false" placeholder="${t('Found from the project files')}"`))}
         ${field('Run (needs {port})', input(`repo.${index}.devCommand`, repo.devCommand, `spellcheck="false" placeholder="${t('Found from the project files')}"`))}
         ${field(t('Test'), input(`repo.${index}.testCommand`, repo.testCommand, `spellcheck="false" placeholder="${t('Found from the project files')}"`))}
         ${field(t('Work folder'), input(`repo.${index}.workFolder`, repo.workFolder || '', `spellcheck="false" placeholder="${esc(`${repo.path}-work`)}"`), t('Where agents keep the worktrees of this project (one folder per task), temp files and test data. Empty uses the folder next to the project, on its drive.'))}
-        ${field(t('How changes go out'), `<select name="repo.${index}.push"><option value="pr" ${repo.push !== 'direct' ? 'selected' : ''}>${t`Draft pull request`}</option><option value="direct" ${repo.push === 'direct' ? 'selected' : ''}>${t`Push straight to the branch`}</option></select>`, t('Push straight: agents push their commits onto the target branch, with no pull request. Saying "no PR" in a chat does the same for one change.'))}
+        ${repo.plain ? '' : field(t('How changes go out'), `<select name="repo.${index}.push"><option value="pr" ${repo.push !== 'direct' ? 'selected' : ''}>${t`Draft pull request`}</option><option value="direct" ${repo.push === 'direct' ? 'selected' : ''}>${t`Push straight to the branch`}</option></select>`, t('Push straight: agents push their commits onto the target branch, with no pull request. Saying "no PR" in a chat does the same for one change.'))}
         </details>
         <button type="button" class="btn small quiet danger" data-st-repo-remove="${index}">${t`Remove this project`}</button></details>`;
       return `<h2>${t`Projects`}</h2><p class="muted">${t`The code your agents work on. Each run gets its own copy, so your own copy of the project is never touched. Rex Agent can also add a project when you name it in chat.`}</p>
@@ -531,7 +531,8 @@ export function openSettings(ctx, section = 'general') {
           try { folder = (await api('/repositories/clone', { method: 'POST', data: { repository: folder } })).path; } finally { button.disabled = false; button.textContent = t('Add'); }
         }
         const found = await api('/repositories/inspect', { method: 'POST', data: { path: folder } });
-        ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: [...config().repositories, { name: found.name, path: found.path, baseBranch: found.preferredBranch || 'develop', targetBranch: found.preferredBranch || 'develop' }] } });
+        ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: [...config().repositories, { name: found.name, path: found.path, ...(found.git === false ? { plain: true } : { baseBranch: found.preferredBranch || 'develop', targetBranch: found.preferredBranch || 'develop' }) }] } });
+        if (found.git === false) await api('/memory/scan', { method: 'POST', data: {} }).catch(() => {});
         await refresh(); toast(t`Added ${found.name}.`); draw(); return;
       }
     } catch (error) { toast(error.message, true); }

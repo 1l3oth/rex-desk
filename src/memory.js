@@ -199,7 +199,7 @@ export class Memory {
   }
 
   // Find git projects under the roots (bounded depth and count), then write one page per project. Nothing outside the allow-listed files is read.
-  scan({ roots, depth = 3, limit = 4000 } = {}) {
+  scan({ roots, folders = [], depth = 3, limit = 4000 } = {}) {
     this.ensure();
     const found = new Map(); let visited = 0;
     const walk = (directory, level) => {
@@ -214,6 +214,8 @@ export class Memory {
       }
     };
     for (const root of new Set((roots || []).filter(Boolean).map(item => path.resolve(item)))) walk(root, 0);
+    // A folder that is not Git is a project when the person added it: it has no .git marker to find.
+    for (const folder of (folders || []).filter(Boolean).map(item => path.resolve(item))) { const stat = exists(folder); if (stat?.isDirectory()) found.set(folder.toLowerCase(), folder); }
     const taken = new Map(), previous = this.state(), projects = {};
     for (const directory of [...found.values()].sort()) {
       const slug = this.slug(directory, taken); taken.set(slug, directory.toLowerCase());

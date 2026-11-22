@@ -573,17 +573,17 @@ export class Desk {
     const config = this.store.config(), same = item => path.resolve(item.path).toLowerCase() === found.path.toLowerCase();
     let repository = config.repositories.find(same), added = false;
     if (!repository) {
-      const base = baseBranch || found.preferredBranch || 'develop';
-      repository = this.store.saveConfig({ ...this.store.publicConfig(), repositories: [...config.repositories, { name: found.name, path: found.path, baseBranch: base, targetBranch: targetBranch || base }] }).repositories.find(same);
+      const base = found.git === false ? '' : baseBranch || found.preferredBranch || 'develop';
+      repository = this.store.saveConfig({ ...this.store.publicConfig(), repositories: [...config.repositories, { name: found.name, path: found.path, baseBranch: base, targetBranch: targetBranch || base, ...(found.git === false ? { plain: true } : {}) }] }).repositories.find(same);
       this.store.event('', 'repository-added', { name: repository.name, path: repository.path, by }, true); added = true;
-    } else if (change && ((baseBranch && baseBranch !== repository.baseBranch) || (targetBranch && targetBranch !== repository.targetBranch))) {
+    } else if (change && !repository.plain && ((baseBranch && baseBranch !== repository.baseBranch) || (targetBranch && targetBranch !== repository.targetBranch))) {
       // Calling it again with branches the person chose updates the repository that is already there.
       const next = { ...repository, baseBranch: baseBranch || repository.baseBranch, targetBranch: targetBranch || baseBranch || repository.targetBranch };
       repository = this.store.saveConfig({ ...this.store.publicConfig(), repositories: config.repositories.map(item => same(item) ? next : item) }).repositories.find(same);
       this.store.event('', 'repository-branches-changed', { name: repository.name, baseBranch: repository.baseBranch, targetBranch: repository.targetBranch, by }, true);
     }
     const known = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === found.path.toLowerCase());
-    if (!known) { const previous = this.memory.state(); this.memory.scan({ roots: [...new Set([...(previous.roots || []), found.path])] }); }
+    if (!known) { const previous = this.memory.state(); this.memory.scan({ roots: [...new Set([...(previous.roots || []), ...(found.git === false ? [] : [found.path])])], folders: this.store.config().repositories.filter(item => item.plain).map(item => item.path) }); }
     const project = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === found.path.toLowerCase());
     return { added, repository: { id: repository.id, name: repository.name, path: repository.path, baseBranch: repository.baseBranch, targetBranch: repository.targetBranch }, project: project?.slug || '', branches: found.branches.length, warnings: found.warnings };
   }
@@ -639,6 +639,9 @@ export class Desk {
       for (const run of queued) {
         const workers = [...this.live.keys()].map(runId => this.run(runId)).filter(item => item.role === 'worker' && !item.inApp).length; // a chat open in the Claude app waits for the person
         if (run.role === 'worker' && workers >= this.store.config().concurrency) continue;
+        // Two workers never edit the same plain folder at once: the second waits for the first.
+        const plainFolder = run.role === 'worker' && this.store.config().repositories.find(item => item.id === run.repositoryId)?.plain ? run.repositoryId : '';
+        if (plainFolder && [...this.live.keys()].some(runId => { const other = this.run(runId); return other.id !== run.id && other.role === 'worker' && other.repositoryId === plainFolder; })) continue;
         const controller = new AbortController(); this.live.set(run.id, { controller });
         this.patchRun(run.id, { state: 'starting' });
         void this.execute(run.id, controller).catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
@@ -660,6 +663,18 @@ export class Desk {
       // on a computer where nobody signed in to Claude, every turn stopped at "profile is not signed in".
       if (!this.runnerFactory && !attach && !this.usesLocalModel(run)) await this.agents.ensureSignedIn(run.provider, this.accountFor(run) || this.agents.selected(run.provider));
       if (run.role === 'worker' && !run.worktree && run.placement?.state === 'pending') run = await this.place(run);
+      // A project that is not a Git folder has no branches or worktrees: the agent works straight in the folder.
+      // The folder may have become a Git repository since it was added (git init): then it is a normal project again.
+      const plainRepository = run.role === 'worker' && !run.worktree && this.store.config().repositories.find(item => item.id === run.repositoryId);
+      if (plainRepository?.plain && (await inspectRepository(plainRepository.path).catch(() => ({ git: false }))).git !== false) {
+        const current = this.store.config();
+        this.store.saveConfig({ ...this.store.publicConfig(), repositories: current.repositories.map(item => item.id === plainRepository.id ? { ...item, plain: false, baseBranch: item.baseBranch || 'develop', targetBranch: item.targetBranch || item.baseBranch || 'develop' } : item) });
+      }
+      if (run.role === 'worker' && !run.worktree && this.store.config().repositories.find(item => item.id === run.repositoryId)?.plain) {
+        const folder = this.store.config().repositories.find(item => item.id === run.repositoryId).path;
+        run = this.patchRun(runId, { worktree: folder, plain: true, branch: '', baseCommit: '', port: await freePort() });
+        this.store.event(runId, 'phase', { text: 'Not a Git folder: working straight in the project folder.' }, true);
+      }
       if (run.role === 'worker' && !run.worktree) {
         const config = this.store.config();
         const repository = { ...effectiveRepository(config.repositories.find(item => item.id === run.repositoryId)), baseBranch: run.baseBranch };
@@ -964,7 +979,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       `Read the whole issue first with desk_task, including its comments and screenshots.`,
       `Keep Rex Desk’s own status current with desk_progress so the human and the other agents can see where this issue stands: investigating when you start, waiting when you need an answer, ready when you know the fix, done when your report is sent. It never touches the tracker.`,
       `If your branch name is generic (issue-<number>) or does not describe the real cause, call desk_branch with 3 to 6 English words that say which feature breaks and how, and its type (fix, feature, refactor, chore, or docs), so the branch reads like temp/rex/fix/project-view-names-ignore-language.`,
-      `Repository ${repository?.name || 'this project'} at ${run.worktree}, branch ${run.branch}, based on ${run.baseBranch}. Work there unless the person says otherwise; use PORT=${run.port}. Read the repository's AGENTS.md and CLAUDE.md first.`,
+      `Repository ${repository?.name || 'this project'} at ${run.worktree}${run.plain ? ' (not a Git folder: no branch, no worktree, no pull request; work straight in it)' : `, branch ${run.branch}, based on ${run.baseBranch}`}. Work there unless the person says otherwise; use PORT=${run.port}. Read the repository's AGENTS.md and CLAUDE.md first.`,
       `Find the cause and report it with desk_message: the file and line where the behaviour comes from, why it happens, how you confirmed it, and what a fix would change. Name what you could not confirm instead of guessing.`,
       `When the fix works, commit, run desk_verify, call desk_finish with a factual report and risk {score:1-10,requiresHumanReview,reason,factors}, and send it out with desk_publish (set targetBranch when they name a branch, direct when they say no PR). When the person asks for something else, do that instead.`,
       lessons,
@@ -1888,6 +1903,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     this.store.put('usage', key, { ...saved, windows, at: now() });
   }
   async publishChecks(run, targetBranch) {
+    if (run.plain) throw new Error('Not a Git folder: there is no branch or pull request to publish. The changes are already in the folder.');
     const target = targetBranch || run.targetBranch;
     const opened = this.pullRequests(run).filter(item => !item.direct), already = opened.find(item => item.target === target);
     if (already) throw new Error(`A pull request from this run into ${target} is already open: ${already.url}. For one into another branch, call desk_publish again with targetBranch set to that branch.`);

@@ -478,7 +478,7 @@ export class Store extends EventEmitter {
       if (workFolder && drive(workFolder) !== drive(repository.path)) throw new Error(`Put the work folder on the same drive as the project (${path.parse(path.resolve(repository.path)).root}).`);
       issueBranch(branchPattern, { prefix: String(input.branchPrefix || 'rex-desk').replace(/^\/+|\/+$/g, '') });
       return { id: repository.id || id(), name: repository.name || path.basename(repository.path), path: path.resolve(repository.path),
-        baseBranch: repository.baseBranch || 'develop', targetBranch: repository.targetBranch || repository.baseBranch || 'develop',
+        ...(repository.plain ? { plain: true, baseBranch: '', targetBranch: '' } : { baseBranch: repository.baseBranch || 'develop', targetBranch: repository.targetBranch || repository.baseBranch || 'develop' }),
         branchPattern, flowRuntime: validateFlowRuntime(repository.flowRuntime), electronRuntime: validateElectronRuntime(repository.electronRuntime), ...commands, browserPath: repository.browserPath || '/', push: repository.push === 'direct' ? 'direct' : 'pr', ...(workFolder ? { workFolder: path.resolve(workFolder) } : {}) };
     });
     // One sign-in per site. A blank site is the fallback used wherever no site matches.

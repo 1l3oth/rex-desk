@@ -1612,7 +1612,6 @@
  "This desk has lost its key file. Bring it back from your cloud backup instead.": "Desk នេះបានបាត់ឯកសារសោរបស់វា។ ស្ដារវាមកវិញពីការបម្រុងទុកលើពពករបស់អ្នកជំនួស។",
  "This file is no longer waiting to be filled in.": "ឯកសារនេះមិនកំពុងរង់ចាំការបំពេញទៀតទេ។",
  "This file is too big to edit here.": "ឯកសារនេះធំពេកមិនអាចកែនៅទីនេះបានទេ។",
- "This folder is not a Git project Rex Desk can open. Choose the project folder and check again.": "ថតនេះមិនមែនជាគម្រោង Git ដែល Rex Desk អាចបើកបានទេ។ ជ្រើសរើសថតគម្រោង ហើយពិនិត្យម្ដងទៀត។",
  "This kind of file has no viewer here.": "ឯកសារប្រភេទនេះគ្មានកម្មវិធីមើលនៅទីនេះទេ។",
  "This one needs your yes first.": "រឿងនេះត្រូវការការយល់ព្រមរបស់អ្នកជាមុន។",
  "This password opens Rex Desk on this computer and keeps your agents' keys safe. If you forget it, Rex Desk cannot get it back.{0}": "ពាក្យសម្ងាត់នេះបើក Rex Desk នៅលើកុំព្យូទ័រនេះ ហើយរក្សាសោរបស់ភ្នាក់ងារអ្នកឱ្យមានសុវត្ថិភាព។ ប្រសិនបើអ្នកភ្លេចវា Rex Desk មិនអាចយកវាមកវិញបានទេ។{0}",
@@ -2537,5 +2536,7 @@
  "The microphone is busy (NotReadableError). Close other apps using it, like Zoom or Teams, then try again.": "មីក្រូហ្វូនកំពុងជាប់រវល់ (NotReadableError)។ បិទកម្មវិធីផ្សេងដែលកំពុងប្រើវា ដូចជា Zoom ឬ Teams រួចសាកម្តងទៀត។",
  "Rex Desk could not use the microphone ({0}). Try again.": "Rex Desk មិនអាចប្រើមីក្រូហ្វូនបានទេ ({0})។ សាកម្តងទៀត។",
  "Starting the voice engine ({0}s). Voice messages use another engine until it is ready.": "កំពុងចាប់ផ្តើមម៉ាស៊ីនសំឡេង ({0}s)។ សារជាសំឡេងប្រើម៉ាស៊ីនផ្សេងរហូតដល់វារួចរាល់។",
- "How to set up voice": "របៀបរៀបចំសំឡេង"
+ "How to set up voice": "របៀបរៀបចំសំឡេង",
+  "Not a Git folder": "មិនមែនជាថត Git",
+  "Not a Git folder: agents work straight in it. There are no branches or pull requests.": "មិនមែនជាថត Git៖ ភ្នាក់ងារធ្វើការដោយផ្ទាល់ក្នុងថតនេះ។ គ្មានសាខា ឬ pull request ទេ។"
 }
