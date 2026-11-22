@@ -86,8 +86,10 @@ const firstTaskReview = project => `This is the first task on ${project} whose w
 const addTokens = (total = {}, more = {}) => Object.fromEntries(['input', 'output', 'cacheRead', 'cacheWrite'].map(key => [key, (total?.[key] || 0) + (more?.[key] || 0)]));
 // Codex on a ChatGPT plan says "The '<model>' model is not supported when using Codex with a ChatGPT account" (model_not_found).
 const MODEL_MISSING = /issue with the selected model|may not have access to it|model[^.]{0,40}(does not exist|not found|is not available|is not supported)|model_not_found/i;
-// Cuts long text at a line end, so the handoff stays about 4k tokens (L60).
-const clip = (text, max) => { if (text.length <= max) return text; const end = text.lastIndexOf('\n', max); return `${text.slice(0, end > max / 2 ? end : max)}\n(cut to keep the handoff short)`; };
+// The handoff an agent writes before a fresh start: fixed headings, so its successor finds its state at once instead of re-discovering
+// the branch, worktree and screenshot harness. Rex Desk adds the git facts and open tasks itself (handoffFacts).
+export const HANDOFF_HEADINGS = ['Done', 'Waiting on', 'In progress', 'Rules from the person', 'Next step'];
+const HANDOFF_PROMPT = 'Your context is nearly full, so this chat moves to a fresh session after this reply. Write the handoff for your successor now, as your whole reply, under exactly these headings: "## Done" (what is finished, with commit ids), "## Waiting on" (who or what, with task ids), "## In progress" (exact repo, branch, worktree path, last commit, uncommitted files, running servers and ports, screenshot scripts and evidence paths), "## Rules from the person", "## Next step". Plain English, short lists, no greetings, at most about 600 words. Do not start new work.';
 const MEMORY_REMINDER = '(Memory: if your last work had a decision, a correction from the person, a finding or a finished task worth keeping, note it with desk_soul_memory, short, while you answer.)';
 const kiloTokens = value => { const n = Number(value || 0); return n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : `${Math.round(n / 1000)}k`; };
 const terminalStates = new Set(['ready_for_review', 'published', 'failed', 'stopped', 'interrupted', 'finished', 'qa_passed', 'qa_failed', 'qa_blocked']);
@@ -1170,7 +1172,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (run.roomAgent) { this.patchRun(runId, { handoffMidTurn: undefined }); await this.freshStart(runId, { reason: `automatically, because the conversation ${why}` }); return false; }
     this.patchRun(runId, { autoHandoff: 'writing', handoffShare: share, handoffWhy: why, handoffMidTurn: undefined });
     this.store.event(runId, 'phase', { text: byTokens ? `Context at ${kiloTokens(used)} tokens: writing a handoff for a fresh session` : `Context ${Math.round(100 * share)}% full: writing a handoff for a fresh session` }, true);
-    await this.resume(runId, { silent: true, prompt: 'Your context is nearly full, so this chat moves to a fresh session after this reply. Write the handoff for your successor now, as your whole reply: what the person asked for and what is done, what you are in the middle of, decisions and rules the person gave, files and branches involved, and the next step. Plain English, short lists, no greetings, at most about 500 words. Do not start new work.' });
+    await this.resume(runId, { silent: true, prompt: HANDOFF_PROMPT });
     return true;
   }
   // /clear in a chat: the conversation so far is written to a handoff file, the agent's session is dropped, and the next message
@@ -1213,12 +1215,39 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   // The gist of a chat that is about to be cleared goes into the agent's memory, replacing the last such note, so a fresh start
   // never forgets what it was doing. Kept short; a full notebook keeps it out rather than failing the fresh start.
-  distillHandoff(agentId, { note = '', task = null, lines = [] } = {}) {
+  // Never a cut copy: the whole handoff is in the file and memory points to it, keeping only whole lines that fit (the next step,
+  // the person's last asks).
+  distillHandoff(agentId, { note = '', task = null, lines = [], file = '' } = {}) {
     // (lines is newest first here: the loop above reversed it.)
-    const asked = lines.filter(line => line.startsWith('**The person**')).slice(0, 3).reverse().map(line => `- Asked: ${line.replace(/^\*\*The person\*\* \([^)]*\): /, '').replace(/\s+/g, ' ').slice(0, 220)}`);
-    const body = [task ? `- Task: #${task.taskNumber || task.externalId} ${task.titleEn || task.title}` : '', note ? `- My handoff: ${String(note).replace(/\s+/g, ' ').slice(0, 700)}` : '', ...asked].filter(Boolean).join('\n');
+    const whole = (text, max) => { const flat = String(text).replace(/\s+/g, ' ').trim(); return flat.length <= max ? flat : ''; };
+    const asked = lines.filter(line => line.startsWith('**The person**')).slice(0, 3).reverse().map(line => whole(line.replace(/^\*\*The person\*\* \([^)]*\): /, ''), 300)).filter(Boolean).map(text => `- Asked: ${text}`);
+    const next = whole(String(note).split(/^##\s*Next step\s*$/im)[1]?.split(/^##\s/m)[0] || '', 800);
+    const body = [task ? `- Task: #${task.taskNumber || task.externalId} ${task.titleEn || task.title}` : '', note && file ? `- My full handoff: ${file} (read it first)` : '', note && !file ? `- My handoff: ${whole(note, 700) || 'too long for memory'}` : '', next ? `- Next step: ${next}` : '', ...asked].filter(Boolean).join('\n');
     if (!body) return;
     try { this.notes.writeMemory(agentId, { action: 'replace', section: 'Before the last fresh start', text: `(${now().slice(0, 16).replace('T', ' ')})\n${body}` }, 'Rex Desk'); } catch { /* full or refused: the handoff file still has it */ }
+  }
+  // Facts Rex Desk knows itself, not from the agent's memory: where the work is (folder, branch, git status, last commits), the
+  // agent's open team tasks and its open Needs you items. Each part is left out when it cannot be read.
+  async handoffFacts(run, agentId) {
+    const folder = run.worktree || run.projectPath || '', parts = [];
+    const git = async (...args) => { try { return (await exec('git', ['-C', folder, ...args], { timeout: 10000, windowsHide: true })).stdout.trim(); } catch { return null; } };
+    if (folder && existsSync(folder)) {
+      const branch = await git('branch', '--show-current');
+      if (branch !== null) {
+        const status = await git('status', '--short'), log = await git('log', '-5', '--format=%h %s');
+        parts.push(`Folder: ${folder}${run.worktree ? ' (worktree)' : ''}\nBranch: ${branch || run.branch || '(detached)'}`,
+          `Uncommitted (git status --short):\n${status ? status.split('\n').slice(0, 40).join('\n') : 'nothing'}`, `Last 5 commits:\n${log || 'none'}`);
+      } else parts.push(`Folder: ${folder}${run.branch ? `\nBranch: ${run.branch}` : ''}`);
+    }
+    const open = new Set(['queued', 'working', 'needs-manager']);
+    const team = agentId ? this.store.list('team-task').filter(task => open.has(task.state) && (task.workerId === agentId || task.managerId === agentId))
+      .map(task => `- ${task.title || 'Task'} (${task.id}): ${task.state}, ${task.workerId === agentId ? `from ${task.managerName || 'the manager'}` : `given to ${task.workerName || 'an agent'}`}`) : [];
+    if (team.length) parts.push(`Open team tasks:\n${team.join('\n')}`);
+    const runs = new Set([run.id, ...(agentId ? this.store.list('run').filter(item => item.specialistId === agentId || item.roomAgent === agentId).map(item => item.id) : [])]);
+    const asks = this.store.list('interaction').filter(item => item.state === 'pending' && runs.has(item.runId))
+      .map(item => `- ${String(item.title || item.message || item.kind || 'Question').replace(/\s+/g, ' ').slice(0, 160)} (${item.id}${item.kind === 'review' ? ', waiting for OK' : ''})`);
+    if (asks.length) parts.push(`Open in Needs you:\n${asks.join('\n')}`);
+    return parts.length ? `## Facts from Rex Desk (read from git and the task list when this was written)\n${parts.join('\n\n')}` : '';
   }
   async freshStart(runId, { note = '', reason = '', notice = '' } = {}) {
     const run = this.run(runId);
@@ -1232,13 +1261,13 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     for (const line of lines.reverse()) { if (recent.length + line.length > 5000) break; recent = `${line}\n\n${recent}`; }
     const task = run.taskId ? this.store.get('task', run.taskId) : null;
     const handoff = [`# Handoff for ${name}`, `Written ${now()} ${reason || 'when the person cleared the conversation (/clear)'}. Read it, then continue from here: answer the latest message, without introducing yourself again.`,
-      note ? `## Your own handoff, written just before the fresh start\n${clip(String(note).trim(), 8000)}` : '',
+      note ? `## Your own handoff, written just before the fresh start\n${String(note).trim()}` : '',
+      await this.handoffFacts(run, agentId),
       task ? `## Task\n#${task.taskNumber || task.externalId} ${task.titleEn || task.title}${task.url ? `\n${task.url}` : ''}` : '',
-      run.worktree ? `## Where the work is\nWorktree: ${run.worktree}${run.branch ? `\nBranch: ${run.branch}` : ''}` : '',
       `## The conversation so far (oldest first, recent part)\n${recent || 'Nothing was said yet.'}`].filter(Boolean).join('\n\n');
-    if (agentId) this.distillHandoff(agentId, { note, task, lines });
     const directory = path.join(this.store.directory, 'handoffs'); mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `${runId}-${Date.now()}.md`); writeFileSync(file, handoff);
+    if (agentId) this.distillHandoff(agentId, { note, task, lines, file });
     this.patchRun(runId, { contextUsed: 0, contextResetAt: now(), handoffMidTurn: undefined, sessionId: undefined, mirror: undefined, followUp: '', handoffFile: file, modelFallback: undefined, error: '', ...(['failed', 'stopped', 'interrupted'].includes(run.state) ? { state: 'finished' } : {}) });
     this.store.event(runId, 'chat-cleared', { text: notice ? notice : reason ? `${name}'s context was nearly full, so it starts fresh with your next message and reads a handoff of this chat first.` : `${name} starts fresh with your next message and reads a handoff of what was said before.`, auto: Boolean(reason) }, true);
     return { cleared: true, handoff: file };

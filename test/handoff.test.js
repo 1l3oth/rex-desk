@@ -158,10 +158,10 @@ test('a late context report from the old session after a fresh start is ignored,
     await waitFor(() => prompts.length === 4 && store.get('run', run.id).state === 'finished', 'the next turn');
     await new Promise(resolve => setTimeout(resolve, 200));
     assert.equal(store.events(run.id, { visible: true }).filter(event => event.kind === 'chat-cleared').length, 1, 'no second handoff');
-    // The handoff file stays about 4k tokens even when the agent's note is long.
+    // The agent's own note is kept whole, never cut mid-sentence; only the conversation part is kept short.
     const folder = path.join(store.directory, 'handoffs'), handoff = readFileSync(path.join(folder, readdirSync(folder)[0]), 'utf8');
-    assert.ok(handoff.length < 16000, `handoff is ${handoff.length} characters`);
-    assert.match(handoff, /cut to keep the handoff short/);
+    assert.ok(handoff.includes('a long line of notes\n'.repeat(2000).trim()), 'the whole note');
+    assert.doesNotMatch(handoff, /cut to keep the handoff short/);
     assert.equal(store.get('run', run.id).handoffMidTurn, undefined);
   } finally { await desk.shutdown(); store.close(); }
 });

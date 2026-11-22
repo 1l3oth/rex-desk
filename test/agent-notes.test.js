@@ -4,7 +4,8 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store, shared } from '../src/store.js';
-import { Desk } from '../src/coordinator.js';
+import { Desk, HANDOFF_HEADINGS } from '../src/coordinator.js';
+import { execFileSync } from 'node:child_process';
 import { looksSecret } from '../src/agent-notes.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
@@ -84,7 +85,30 @@ test('the agent reads its soul and memory every session, and a fresh start keeps
   desk.resume = async () => {};
   await desk.freshStart('chat', { note: 'Building L49; tests next.' });
   const memory = notes.text(agent.id, 'memory');
-  assert.match(memory, /## Before the last fresh start/); assert.match(memory, /My handoff: Building L49; tests next\./); assert.match(memory, /Asked: Build the soul and memory feature/);
+  assert.match(memory, /## Before the last fresh start/); assert.match(memory, /My full handoff: .+\.md \(read it first\)/); assert.match(memory, /Asked: Build the soul and memory feature/);
+});
+
+test('a handoff keeps the fixed headings, the whole note and the git facts, and memory points to the file', async () => {
+  const { store, desk, agent } = setup(), notes = desk.notes, repo = temporary('repo');
+  const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' });
+  git('init', '-q', '-b', 'release/9.9.9'); writeFileSync(path.join(repo, 'a.txt'), '1'); git('add', '.'); git('commit', '-q', '-m', 'feat(a): #L1, first, Desky');
+  writeFileSync(path.join(repo, 'b.txt'), '2');
+  store.put('run', 'chat', { id: 'chat', role: 'specialist', specialistId: agent.id, state: 'finished', projectPath: repo, createdAt: new Date().toISOString() });
+  store.put('team-task', 'tt1', { id: 'tt1', workerId: agent.id, managerName: 'Boss', title: 'Market page', state: 'working', createdAt: new Date().toISOString() });
+  store.put('interaction', 'ny1', { id: 'ny1', runId: 'chat', kind: 'review', title: 'Split view screenshots', state: 'pending', parked: true, createdAt: new Date().toISOString() });
+  const long = 'This sentence is long on purpose. '.repeat(400);
+  const note = HANDOFF_HEADINGS.map(heading => `## ${heading}\n- ${heading === 'Next step' ? 'Commit the review card.' : long}`).join('\n\n');
+  desk.resume = async () => {};
+  const { handoff } = await desk.freshStart('chat', { note });
+  const text = readFileSync(handoff, 'utf8');
+  for (const heading of HANDOFF_HEADINGS) assert.match(text, new RegExp(`^## ${heading}$`, 'm'));
+  assert.ok(text.includes(long.trim()), 'the whole note, never cut');
+  assert.doesNotMatch(text, /cut to keep the handoff short/);
+  assert.match(text, /## Facts from Rex Desk/); assert.match(text, /Branch: release\/9\.9\.9/);
+  assert.match(text, /\?\? b\.txt/); assert.match(text, /[0-9a-f]{7} feat\(a\): #L1, first, Desky/);
+  assert.match(text, /Market page \(tt1\): working, from Boss/); assert.match(text, /Split view screenshots \(ny1, waiting for OK\)/);
+  const memory = notes.text(agent.id, 'memory');
+  assert.ok(memory.includes(handoff)); assert.match(memory, /Next step: - Commit the review card\./); assert.ok(!memory.includes('long on purpose'));
 });
 
 test('after a turn with real work no hidden turn runs: the next real message carries a one-line memory reminder (L61)', async () => {
