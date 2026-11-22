@@ -2923,7 +2923,7 @@ html:has(.iv[open]){overflow:hidden}
 .page.mk{max-width:760px;padding:20px 20px 40px;display:flex;flex-direction:column;gap:14px}
 .mk-bar{display:flex;gap:10px;align-items:center}
 .mk-for{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
-.mk-for select{min-width:180px;max-width:260px;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px}
+.mk-for .pick2{min-width:180px;max-width:260px}
 .mk-search{flex:1;min-width:0;height:30px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px}
 .mk-seg{display:flex;align-self:flex-start;padding:2px;border-radius:8px;background:color-mix(in srgb,var(--ink) 7%,transparent);gap:2px;max-width:100%;overflow-x:auto;scrollbar-width:none}
 .mk-seg button{border:0;background:none;color:var(--ink);font:inherit;font-size:12.5px;padding:4px 12px;border-radius:6px;cursor:pointer;white-space:nowrap}
@@ -2958,7 +2958,7 @@ html:has(.iv[open]){overflow:hidden}
 @media (max-width:760px){
   .page.mk{padding:12px 12px 32px}
   .mk-bar{flex-direction:column;align-items:stretch}
-  .mk-for select{flex:1;max-width:none}
+  .mk-for .pick2{flex:1;max-width:none}
   .mk-seg{align-self:stretch}
   .mk-seg button{flex:1}
   .mk-add-foot .tb-kinds{display:none}
@@ -2968,4 +2968,4 @@ html:has(.iv[open]){overflow:hidden}
 .mk-text .mk-used-sm{display:none}
 .page.mk,.page.mk>*{min-width:0;max-width:100%;box-sizing:border-box}
 @media (max-width:760px){.mk-used{display:none}.mk-text .mk-used-sm{display:block}.page.mk{width:100%}}
-.page.mk{width:100%}.mk-search,.mk-for select{height:32px}
+.page.mk{width:100%}.mk-search{height:32px}

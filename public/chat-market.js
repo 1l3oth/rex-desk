@@ -1,6 +1,7 @@
 import { t } from './i18n.js';
 import { askConfirm } from './confirm.js';
 import { skeletonHtml } from './chat-skeleton.js';
+import { pickerHtml } from './chat-pick.js';
 // Market: one list of what agents can use on this computer (skills, commands, MCP servers) and the connectors, in the
 // style of a system settings list. A switch per row turns an item on or off for the agent picked at the top; everything
 // is on by default. "Used by" says how many agents have it on. The install box at the top adds new ones.
@@ -62,7 +63,7 @@ export function marketStage(ctx) {
     <div class="mk-add-body"><textarea name="mk-install" rows="2" spellcheck="false" autocomplete="off" aria-label="${t`Install command`}" placeholder="claude mcp add notion --transport http https://mcp.notion.com/mcp"${busy ? ' disabled' : ''}>${esc(ui.marketText || '')}</textarea>
     <div class="mk-add-foot"><span class="tb-kinds">${['claude mcp add …', 'npx skills add owner/repo', '{ "mcpServers": … }', t`a GitHub link or folder`].map(item => `<code>${esc(item)}</code>`).join('')}</span><button type="button" class="btn primary small" data-action="mk-install"${busy ? ' disabled' : ''}>${busy ? t('Installing…') : t('Install')}</button></div>
     ${result ? `<ul class="mk-result" role="status">${result.map(item => `<li class="${item.ok ? 'ok' : 'bad'}">${esc(item.ok ? t`${item.name}: installed, agents can find it` : `${item.name}: ${item.error}`)}</li>`).join('')}</ul>` : ''}</div></details>`;
-  const bar = `<div class="mk-bar"><label class="mk-for"><span>${t`For`}</span><select data-mk-agent aria-label="${t`Agent`}">${agents.map(item => `<option value="${esc(item.id)}"${item.id === agent?.id ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label>
+  const bar = `<div class="mk-bar"><div class="mk-for"><span>${t`For`}</span>${pickerHtml(ctx, { id: 'mk-agent', label: t('Agent'), items: agents.map(item => ({ value: item.id, label: item.name })), value: agent?.id || '', searchable: agents.length > 8, compact: true })}</div>
     <input type="search" class="mk-search" data-mk-search placeholder="${t`Search`}" aria-label="${t`Search the market`}" value="${esc(ui.marketQuery || '')}" autocomplete="off"></div>
     <div class="mk-seg" role="tablist" aria-label="${t`Show`}">${KINDS.map(([id, label]) => `<button type="button" role="tab" aria-selected="${kind === id}" class="${kind === id ? 'on' : ''}" data-action="mk-kind" data-kind="${id}">${label}</button>`).join('')}</div>`;
   const none = !items.some(item => shown(item, query, kind));
@@ -113,7 +114,7 @@ export function initMarket(ctx) {
     ctx.ui.marketQuery = event.target.value; filterMarket(ctx);
   });
   document.addEventListener('change', event => {
-    if (!event.target.matches?.('[data-mk-agent]')) return;
+    if (!event.target.matches?.('#mk-agent')) return;
     ctx.ui.marketAgent = event.target.value; ctx.renderAll(); queueMicrotask(() => filterMarket(ctx));
   });
 }
