@@ -231,10 +231,43 @@ const voiceLanguage = ctx => { try { return localStorage.getItem('jev-language')
 // Dictation with the browser's own speech recognition (Chrome, Edge; see Voice mode below): it works the words out while
 // they are said, so they are in the box the moment the person stops, instead of being worked out from a recording after.
 // Where it cannot be used (the desktop app's window, no network), Rex Desk's own engine records as before.
-function putInBox(ctx, text) {
-  const box = document.getElementById('draft'); if (!box || !text) return;
-  ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(ctx.draftKey());
-  box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + text; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); box.dispatchEvent(new Event('input', { bubbles: true }));
+// Live words: while the mic listens, what was said so far shows in the message box after anything already typed, and is
+// replaced as the words change. The text typed before speaking is never touched; when nothing was said it is put back.
+function liveStart(ctx) {
+  const box = document.getElementById('draft'); if (!box) return null;
+  return { key: ctx.draftKey(), before: box.value.trim(), placeholder: box.getAttribute('placeholder') || '', shown: '' };
+}
+function liveShow(ctx, live, text, { final = false } = {}) {
+  const box = document.getElementById('draft'); if (!live || !box || ctx.draftKey() !== live.key) return;
+  const words = String(text || '').trim(); live.shown = words;
+  box.value = words ? (live.before ? `${live.before} ${words}` : words) : live.before;
+  ctx.ui.drafts.set(live.key, box.value);
+  if (final && words) { ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(live.key); box.focus(); }
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+}
+// Where words cannot come live (the on-computer engine), the box says it is listening until the words arrive.
+function liveWaiting(live, on) {
+  const box = document.getElementById('draft'); if (!live || !box) return;
+  box.setAttribute('placeholder', on ? t('Listening…') : live.placeholder); box.classList.toggle('listening', on);
+}
+// The on-computer engine has no live results: every 1.5 seconds the recording so far is turned into words and shown, one
+// request at a time. When the engine needs longer than 3 seconds for that, or is still loading, it stops trying for this
+// turn and the box shows Listening… until the final words come.
+const LIVE_EVERY_MS = 1500, LIVE_SLOW_MS = 3000;
+function liveLocal(ctx, recording) {
+  const live = liveStart(ctx); recording.live = live; if (!live) return;
+  if (!live.before) liveWaiting(live, true);
+  let busy = false, slow = false;
+  const tick = async () => {
+    if (busy || slow || recording.stopped || !recording.heard) return;
+    busy = true; const started = performance.now();
+    try {
+      const heard = await transcribe(recording.wav(), voiceLanguage(ctx));
+      if (!recording.stopped && heard.text) { liveWaiting(live, false); liveShow(ctx, live, heard.text); }
+    } catch (error) { if (error.starting) slow = true; /* no words yet: try on the next tick */ }
+    finally { busy = false; if (performance.now() - started > LIVE_SLOW_MS) slow = true; if (slow && !live.shown) liveWaiting(live, true); }
+  };
+  recording.liveTimer = setInterval(() => void tick(), LIVE_EVERY_MS);
 }
 // The browser's recognition listens to the browser's own microphone choice, which can be a muted virtual one (iVCam): it
 // is handed the microphone Rex Desk found working instead, where the browser allows that (Chrome does).
@@ -251,15 +284,15 @@ async function browserDictate(ctx, { untilRelease = false } = {}) {
   // Always continuous (on its own it stops at the first breath). Held Space ends when it is let go; the mic button ends after
   // a pause of two seconds with no new words, or when it is pressed again.
   recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = true;
-  let said = '', lastWords = 0;
+  let said = '', lastWords = 0; const live = liveStart(ctx);
   const watch = untilRelease ? 0 : setInterval(() => { if (said && performance.now() - lastWords > 2000) turn.stop(); }, 200);
   const turn = { browser: true, stop: () => { clearInterval(watch); try { recognition.stop(); } catch { /* already over */ } } };
-  recognition.onresult = event => { said = [...event.results].map(result => result[0].transcript).join(' ').replace(/\s+/g, ' ').trim(); lastWords = performance.now(); };
+  recognition.onresult = event => { said = [...event.results].map(result => result[0].transcript).join(' ').replace(/\s+/g, ' ').trim(); lastWords = performance.now(); liveShow(ctx, live, said); };
   recognition.onerror = event => { turn.failed = event.error; if (['network', 'not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(event.error)) browserSpeech = 'no'; };
   recognition.onend = () => {
     clearInterval(watch); release(); if (listening === turn) listening = null;
     micButton()?.classList.remove('rec'); document.body.classList.remove('ptt');
-    if (said) { putInBox(ctx, said); return; }
+    liveShow(ctx, live, said, { final: true }); if (said) return;
     ctx.toast(turn.failed && browserSpeech === 'no' ? t('The browser could not turn speech into words here. Press the mic again to use Rex Desk\'s own voice engine.') : t('Nothing was heard. Hold Space (or press the mic) and speak.'), true);
   };
   try { startOn(recognition, stream); } catch { release(); browserSpeech = 'no'; return false; }
@@ -292,16 +325,18 @@ async function finishMic(ctx) {
   const recording = listening; if (!recording) return;
   // The browser's recognition puts the words in the box itself when it ends.
   if (recording.browser) { recording.stop(); return; }
-  listening = null; recording.stop(); micButton()?.classList.remove('rec');
-  if (!recording.heard) { ctx.toast(t('Nothing was heard. Hold Space (or press the mic) and speak.'), true); return; }
+  listening = null; recording.stop(); clearInterval(recording.liveTimer); micButton()?.classList.remove('rec');
+  const live = recording.live || liveStart(ctx);
+  if (!recording.heard) { liveWaiting(live, false); liveShow(ctx, live, ''); ctx.toast(t('Nothing was heard. Hold Space (or press the mic) and speak.'), true); return; }
   transcribing = true; micButton()?.classList.add('busy');
   const slow = setTimeout(() => ctx.toast(t('Loading the voice model. The first time after a restart takes a minute or two.')), 4000);
   try {
-    const heard = await hearWords(ctx, recording.wav()), box = document.getElementById('draft');
-    if (box) { ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(ctx.draftKey()); box.value = (box.value.trim() ? `${box.value.trim()} ` : '') + heard.text; ctx.ui.drafts.set(ctx.draftKey(), box.value); box.focus(); box.dispatchEvent(new Event('input', { bubbles: true })); }
+    const heard = await hearWords(ctx, recording.wav());
+    liveShow(ctx, live, heard.text, { final: true });
   } catch (error) {
+    liveShow(ctx, live, live?.shown || '');
     ctx.toast(/not installed|install/i.test(error.message) ? t('Voice is not installed yet. Install it in Settings → Jev and voice.') : t`Voice input: ${error.message}`, true);
-  } finally { clearTimeout(slow); transcribing = false; micButton()?.classList.remove('busy'); }
+  } finally { clearTimeout(slow); liveWaiting(live, false); transcribing = false; micButton()?.classList.remove('busy'); }
 }
 async function toggleMic(ctx) {
   if (transcribing) return;
@@ -311,6 +346,7 @@ async function toggleMic(ctx) {
   let stream;
   try { stream = await openMicrophone(); } catch (error) { ctx.toast(micProblem(error), true); return; }
   listening = startRecorder(stream, { onQuiet: () => void finishMic(ctx) });
+  liveLocal(ctx, listening);
   micButton()?.classList.add('rec');
 }
 
@@ -422,6 +458,7 @@ async function startHold(ctx) {
   // While Space is held, quiet does not end the recording; only letting go does (or a minute at most).
   const recording = startRecorder(stream, { onQuiet: () => { if (performance.now() - recording.started > 60000) void finishMic(ctx); } });
   listening = recording; hold.pending = false;
+  liveLocal(ctx, recording);
   micButton()?.classList.add('rec');
   const box = document.getElementById('composer')?.getBoundingClientRect(); if (box) document.body.style.setProperty('--ptt-bottom', `${Math.max(16, Math.round(innerHeight - box.top + 12))}px`);
   document.body.classList.add('ptt');

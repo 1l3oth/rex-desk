@@ -2538,5 +2538,6 @@
  "Starting the voice engine ({0}s). Voice messages use another engine until it is ready.": "កំពុងចាប់ផ្តើមម៉ាស៊ីនសំឡេង ({0}s)។ សារជាសំឡេងប្រើម៉ាស៊ីនផ្សេងរហូតដល់វារួចរាល់។",
  "How to set up voice": "របៀបរៀបចំសំឡេង",
   "Not a Git folder": "មិនមែនជាថត Git",
-  "Not a Git folder: agents work straight in it. There are no branches or pull requests.": "មិនមែនជាថត Git៖ ភ្នាក់ងារធ្វើការដោយផ្ទាល់ក្នុងថតនេះ។ គ្មានសាខា ឬ pull request ទេ។"
+  "Not a Git folder: agents work straight in it. There are no branches or pull requests.": "មិនមែនជាថត Git៖ ភ្នាក់ងារធ្វើការដោយផ្ទាល់ក្នុងថតនេះ។ គ្មានសាខា ឬ pull request ទេ។",
+  "Listening…": "កំពុងស្តាប់…"
 }
