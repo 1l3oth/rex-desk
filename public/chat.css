@@ -2790,3 +2790,7 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
   .settings-pop .st-back span{display:none}
   .settings-pop .st-panel{padding:16px 16px calc(24px + env(safe-area-inset-bottom))!important}
 }
+
+/* The context details popup stays readable on glass and neon themes: an opaque base under the panel tint, so text behind never shows through. */
+.ctx-panel{background:linear-gradient(var(--panel),var(--panel)),#fff}
+html[data-theme=dark] .ctx-panel{background:linear-gradient(var(--panel),var(--panel)),#10131a}
