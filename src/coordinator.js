@@ -865,12 +865,13 @@ ${message}` : message);
       // Only this turn's own entry: an account switch may already have started the next turn under the same run.
       if (this.live.get(runId)?.controller === controller) this.live.delete(runId);
       void this.drain();
+      // A stuck turn is not the end of the work: the fresh chat carries on, and its own end reports to the manager and finishes
+      // the room reply. Recovering first keeps the room turn, so the resumed answer still reaches the room.
+      if (!this.closed && this.store.get('run', runId)?.stepsStuck && await this.recoverStuck(runId).catch(error => { this.store.event(runId, 'error', { message: `Fresh start after cancelled steps failed: ${error.message}` }, true); return false; })) return;
       void this.rooms.turnFinished(runId).catch(error => this.store.event(runId, 'error', { message: error.message }));
       // An answer to another person's agent: it is sent, held for the person, or the person is asked.
       { const ended = this.store.get('run', runId); if (!this.closed && ended?.role === 'net') void this.net.turnEnded(runId, ended.state === 'failed' ? ended.error || 'it failed' : '').catch(error => this.store.event(runId, 'error', { message: error.message })); }
       // A worker's turn ended: its manager gets the result, and the worker's next waiting task starts.
-      // A stuck turn is not the end of the work: the fresh chat carries on, and its own end reports to the manager.
-      if (!this.closed && this.store.get('run', runId)?.stepsStuck && await this.recoverStuck(runId).catch(error => { this.store.event(runId, 'error', { message: `Fresh start after cancelled steps failed: ${error.message}` }, true); return false; })) return;
       { const ended = this.store.get('run', runId); if (!this.closed && ended && !ended.roomAgent && ['specialist', 'coordinator'].includes(ended.role)) this.team.turnEnded(runId, ended.state === 'failed' ? ended.error || 'it failed' : ended.state === 'stopped' ? 'it was stopped' : ''); }
       // A chat whose context is nearly full hands over to a fresh session by itself (and waits with queued messages until then).
       if (!this.closed && await this.autoHandoff(runId).catch(error => { this.store.event(runId, 'error', { message: `Automatic handoff failed: ${error.message}` }, true); return false; })) return;

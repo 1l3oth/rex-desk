@@ -71,3 +71,20 @@ test('a stuck turn starts a fresh chat with a handoff, says so in one line, and 
     assert.ok(prompts[0].includes(BACKGROUND_RULE), 'agents are told to use the background mode and stop jobs by id');
   } finally { await desk.shutdown(); store.close(); }
 });
+
+test('a stuck turn in a room keeps the room reply open, so the resumed answer reaches the room', async () => {
+  const store = new Store(temporary('stuck-room')), prompts = [], finished = [];
+  const desk = new Desk(store, { root: temporary('stuck-room-root'), runnerFactory: options => ({ async start(prompt) {
+    prompts.push(prompt);
+    if (prompts.length === 1) { options.event('steps-stuck', { count: 3 }); return; }
+    options.event('agent-text', { text: 'the answer' });
+  }, async interrupt() {} }) });
+  const turnFinished = desk.rooms.turnFinished.bind(desk.rooms);
+  desk.rooms.turnFinished = async runId => { finished.push(prompts.length); return turnFinished(runId); };
+  try {
+    const run = await desk.startWebTask('reply in the room');
+    await waitFor(() => prompts.length === 2 && store.get('run', run.id).state === 'finished', 'the carried-on turn');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.deepEqual(finished, [2], 'the room turn is finished once, after the resumed answer, not when the stuck turn ended');
+  } finally { await desk.shutdown(); store.close(); }
+});
