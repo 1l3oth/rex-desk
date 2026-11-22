@@ -238,7 +238,7 @@ function liveStart(ctx) {
   const box = document.getElementById('draft'); if (!box) return null;
   // start and length: the exact part of the box the dictation wrote (with its spaces). Only that part ever changes.
   const kept = box.value.replace(/\s+$/, '');
-  const live = { key: ctx.draftKey(), placeholder: box.getAttribute('placeholder') || '', written: box.value, start: kept.length, length: box.value.length - kept.length, said: '', from: '' };
+  const live = { key: ctx.draftKey(), placeholder: box.getAttribute('placeholder') || '', written: box.value, start: kept.length, length: box.value.length - kept.length, lead: box.value.length - kept.length, said: '', from: '' };
   liveWatch(ctx, live);
   return live;
 }
@@ -260,8 +260,11 @@ function liveEdit(live, before, from, to, after, caret) {
   const at = Math.min(from, to, caret), added = caret - at, removed = added - (after.length - before.length), end = at + removed;
   if (!(at >= 0 && added >= 0 && removed >= 0 && end <= before.length && before.slice(0, at) === after.slice(0, at) && before.slice(end) === after.slice(caret))) return;
   const delta = after.length - before.length, stop = live.start + live.length;
+  // lead: the space the dictation put in front of its words. An edit that only touches that space is typed before the
+  // words, not into them, so a later correction of the words still replaces them.
   if (end <= live.start && (at < live.start || removed === 0)) live.start += delta; // before the words: they move along
-  else if (at < stop) { live.start = end <= stop ? stop + delta : caret; live.length = 0; live.from = live.said; } // inside: kept as typed, newer words go after
+  else if (at >= live.start && end <= live.start + live.lead) { live.length = stop + delta - caret; live.start = caret; live.lead = 0; }
+  else if (at < stop) { live.start = end <= stop ? stop + delta : caret; live.length = 0; live.lead = 0; live.from = live.said; } // inside: kept as typed, newer words go after
   live.written = after;
 }
 function liveShow(ctx, live, text, { final = false } = {}) {
@@ -277,14 +280,14 @@ function liveShow(ctx, live, text, { final = false } = {}) {
     while (tail < was.length - same && tail < current.length - same && was[was.length - 1 - tail] === current[current.length - 1 - tail]) tail++;
     const end = was.length - tail;
     if (end <= live.start) live.start += current.length - was.length;
-    else if (same < live.start + live.length) { live.start = current.length - tail; live.length = 0; live.from = live.said; }
+    else if (same < live.start + live.length) { live.start = current.length - tail; live.length = 0; live.lead = 0; live.from = live.said; }
   }
   live.said = words;
   let common = 0; if (live.from) while (common < live.from.length && live.from[common] === words[common]) common++;
   const fresh = live.from ? words.slice(common).trim() : words;
   const pre = current.slice(0, live.start), post = current.slice(live.start + live.length);
-  const piece = fresh ? `${pre && !/\s$/.test(pre) ? ' ' : ''}${fresh}${post && !/^[\s,.;:!?)]/.test(post) ? ' ' : ''}` : '';
-  const value = pre + piece + post; live.length = piece.length;
+  const lead = fresh && pre && !/\s$/.test(pre) ? ' ' : '', piece = fresh ? `${lead}${fresh}${post && !/^[\s,.;:!?)]/.test(post) ? ' ' : ''}` : '';
+  const value = pre + piece + post; live.length = piece.length; live.lead = lead.length;
   live.written = value; ctx.ui.drafts.set(live.key, value);
   if (final && words) { ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(live.key); }
   if (!here) return;

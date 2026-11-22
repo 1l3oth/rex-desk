@@ -78,6 +78,10 @@ test('live words follow the exact place the person typed, even when the typed wo
   type(3, 3, 'yes '); assert.equal(box.value, 'Hi yes yes');
   liveShow(ctx, live, 'yes please'); assert.equal(box.value, 'Hi yes yes please', 'typed right before the words: the typed copy stays, the dictated one changes');
   type(box.value.length, box.value.length, ' ok'); liveShow(ctx, live, 'yes please now'); assert.equal(box.value, 'Hi yes yes please now ok', 'typed right after them stays after');
+  // Typed between the dictation's own leading space and its first word: still before the words, so a correction replaces them.
+  const fixed = liveHarness(); fixed.box.value = 'Hi'; const heard = fixed.liveStart(fixed.ctx);
+  fixed.liveShow(fixed.ctx, heard, 'yes'); const was = fixed.box.value; fixed.box.value = 'Hi yes yes'; fixed.liveEdit(heard, was, 3, 3, fixed.box.value, 7);
+  fixed.liveShow(fixed.ctx, heard, 'yesterday'); assert.equal(fixed.box.value, 'Hi yes yesterday', 'the corrected word replaces the dictated one, not split around the typed copy');
   // A backspace inside the words: what is left stays as typed, newer words go after it.
   const before = box.value; box.value = before.slice(0, 20) + before.slice(21); liveEdit(live, before, 21, 21, box.value, 20);
   liveShow(ctx, live, 'yes please now go'); assert.equal(box.value, 'Hi yes yes please no go ok');
