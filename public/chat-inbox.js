@@ -2,7 +2,7 @@
 // with its answer box. On a phone the list fills the screen and a tap opens the question, with a way back.
 import { t } from './i18n.js';
 import { avatarHtml } from '/chat-rooms.js';
-import { phoneAskHtml } from '/chat-devices.js';
+import { phoneAskHtml, ICON as DEVICE_ICON } from '/chat-devices.js';
 
 const GROUPS = () => [['time', t('Newest')], ['agent', t('Agent')], ['project', t('Project')]];
 const saved = () => { try { return localStorage.getItem('rex-ny-group') || 'time'; } catch { return 'time'; } };
@@ -28,13 +28,13 @@ function simple(item) {
 // The row in the list on the left.
 function listRow(ctx, entry, selected) {
   const { esc } = ctx, { who, item } = entry;
-  return `<button type="button" class="ny-item${selected ? ' on' : ''}" data-ny-pick="${esc(item.id)}" aria-current="${selected}">${avatarHtml(ctx, { name: who.name, agent: who.agent || null, size: 'sm' })}<span class="ny-item-body"><span class="ny-item-top"><b>${esc(who.name)}</b><time datetime="${esc(entry.at)}">${esc(ago(entry.at))}</time></span>${entry.sub ? `<span class="ny-item-sub">${esc(entry.sub)}</span>` : ''}<span class="ny-item-q">${esc(entry.text)}</span></span></button>`;
+  return `<button type="button" class="ny-item${selected ? ' on' : ''}" data-ny-pick="${esc(item.id)}" aria-current="${selected}">${entry.phone ? `<span class="av sm ny-device" aria-hidden="true">${DEVICE_ICON.phone}</span>` : avatarHtml(ctx, { name: who.name, agent: who.agent || null, size: 'sm' })}<span class="ny-item-body"><span class="ny-item-top"><b>${esc(who.name)}</b><time datetime="${esc(entry.at)}">${esc(ago(entry.at))}</time></span>${entry.sub ? `<span class="ny-item-sub">${esc(entry.sub)}</span>` : ''}<span class="ny-item-q">${esc(entry.text)}</span></span></button>`;
 }
 
 // The open question on the right: who asks, the full question, then the answer.
 function detail(ctx, helpers, entry) {
   const { esc, ui } = ctx, { who, item } = entry;
-  const head = `<header class="ny-dhead"><button type="button" class="ny-back" data-ny-back aria-label="${t`Back to the list`}"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>${avatarHtml(ctx, { name: who.name, agent: who.agent || null })}<div class="ny-dwho"><b>${esc(who.name)}</b><span>${esc([entry.sub, ago(entry.at)].filter(Boolean).join(' · '))}</span></div></header>`;
+  const head = `<header class="ny-dhead"><button type="button" class="ny-back" data-ny-back aria-label="${t`Back to the list`}"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>${entry.phone ? `<span class="av ny-device" aria-hidden="true">${DEVICE_ICON.phone}</span>` : avatarHtml(ctx, { name: who.name, agent: who.agent || null })}<div class="ny-dwho"><b>${esc(who.name)}</b><span>${esc([entry.sub, ago(entry.at)].filter(Boolean).join(' · '))}</span></div></header>`;
   const question = `<div class="ny-dq">${esc(entry.text)}</div>`;
   if (entry.phone) return `<div class="ny-detail">${head}<div class="ny-dcard">${phoneAskHtml(ctx, entry.phone)}</div></div>`;
   if (entry.wake) {
@@ -75,7 +75,7 @@ export function inboxStage(ctx, helpers) {
       return { item: wake, wake: true, who: { ...who, name: wake.from || who.name, agent: null }, at: wake.at || wake.createdAt || '', text: wake.text || '', sub: t`mentioned ${who.name} in ${room?.name || 'a room'}` };
     }),
     // A new phone asking to open the desk through the relay.
-    ...phones.map(phone => ({ item: { id: `phone:${phone.id}` }, phone, who: { name: t('Rex Desk'), project: '', agent: (ui.snap.specialists || []).find(agent => agent.id === 'main') || null }, at: phone.createdAt || '', text: t`${phone.name} wants to open your desk`, sub: t('Phone') }))
+    ...phones.map(phone => ({ item: { id: `phone:${phone.id}` }, phone, who: { name: t('Rex Desk'), project: '', agent: null }, at: phone.createdAt || '', text: t`${phone.name} wants to open your desk`, sub: t('Phone') }))
   ].sort((left, right) => String(right.at).localeCompare(String(left.at)));
   // The open question stays open until it is answered; then the newest one opens.
   let current = entries.find(entry => entry.item.id === ui.nySelected);

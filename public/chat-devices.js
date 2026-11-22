@@ -1,7 +1,7 @@
 import { t, locale } from './i18n.js';
 // Devices: the person's computers, each the workspace of its own agents, and their phone. They share the chats over Tailscale
 // (and over Turso when every computer uses the same database). A computer that is off only takes its own agents offline.
-const ICON = {
+export const ICON = {
   laptop: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>',
   phone: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>',
   copy: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
@@ -18,12 +18,12 @@ export function devicesStage(ctx) {
       ${devices.remote && !address ? `<p class="dv-warn">${t`Tailscale is not running on this computer. Open Tailscale and sign in; the address shows up here.`}</p>` : ''}
     </section>`;
   const phone = devices.remote && address ? `<section class="dv-card dv-phone">
-      <div class="dv-phone-text"><h2>${t`Open Rex Desk on your phone`}</h2>
+      <div class="dv-phone-text"><h2>${t`Phone through Tailscale`}</h2>
         <ol class="dv-steps"><li>${t`Turn on the ${'<b>Tailscale</b>'} app on your phone, signed in to the same account.`}</li><li>${t`Scan this code with the phone camera. It opens Rex Desk already signed in.`}</li><li>${t`Add it to your home screen to open it like an app.`}</li></ol>
         <div class="dv-link"><code title="${esc(address)}">${esc(address)}</code><button class="btn small" data-action="dev-copy-link" data-link="${esc(address)}">${t`${ICON.copy} Copy link`}</button></div>
         <p class="muted small">${t`Opening the link instead of scanning? Sign in with the key under Advanced.`}</p></div>
       <img class="dv-qr" src="/api/devices/qr?v=${encodeURIComponent(address)}" alt="${t`QR code that opens Rex Desk on your phone`}" width="220" height="220">
-    </section>` : `<section class="dv-card dv-phone off"><span class="dv-icon">${ICON.phone}</span><div><h2>${t`Use Rex Desk on your phone`}</h2><p class="muted">${devices.remote ? t('Waiting for Tailscale on this computer.') : t('Turn on "Let my phone and other computers connect", then scan the code that appears here.')}</p></div></section>`;
+    </section>` : `<section class="dv-card dv-phone off"><span class="dv-icon">${ICON.phone}</span><div><h2>${t`Phone through Tailscale`}</h2><p class="muted">${devices.remote ? t('Waiting for Tailscale on this computer.') : t('Turn on "Let my phone and other computers connect", then scan the code that appears here.')}</p></div></section>`;
   const relay = phoneRelayCard(ctx);
   const row = peer => `<li class="dv-peer"><span class="dv-icon small">${ICON.laptop}</span><div class="dv-who"><b>${esc(peer.name || t('Computer'))}</b><span class="dv-state"><span class="dot ${peer.online ? 'good' : 'off'}"></span>${peer.online ? t('On') : peer.lastSeen ? t`Off · seen ${esc(new Date(peer.lastSeen).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}` : t('Off')}</span>${agentsOn(peer.id).length ? `<span class="dv-agents small">${agentsOn(peer.id).map(name => `<span class="dv-chip">${esc(name)}</span>`).join('')}</span>` : ''}${peer.error && !peer.online ? `<span class="dv-warn small">${esc(peer.error)}</span>` : ''}</div><button class="ag-x" data-action="dev-remove" data-id="${esc(peer.id)}" title="${t`Forget this computer`}" aria-label="${t`Forget ${esc(peer.name || 'this computer')}`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`;
   const others = `<section class="dv-card"><h2>${t`My other computers`}</h2>
@@ -48,7 +48,7 @@ export function phoneAskHtml(ctx, item) {
 function phoneRelayCard(ctx) {
   const { esc, ui } = ctx, relay = ui.snap.phones; if (!relay) return '';
   const state = { online: ['good', t('Connected')], connecting: ['warn', t('Connecting')], offline: ['warn', t('Not reachable, trying again')], 'signed-out': ['off', t('Sign in to your Rex Desk account first')], 'not-paid': ['off', t('Your plan does not include this. Upgrade on rexdesk.app.')], replaced: ['off', t('Rex Desk on another computer took over this connection')] }[relay.state];
-  const toggle = `<label class="dv-switch"><input type="checkbox" data-action="dev-phone-relay" ${relay.enabled ? 'checked' : ''}><span class="dv-track" aria-hidden="true"></span><span><b>${t`Open my desk from anywhere with my account`}</b><small>${t`Your phone signs in on web.rexdesk.app, no Tailscale needed. Part of a paid plan.`}</small></span></label>`;
+  const toggle = `<label class="dv-switch"><input type="checkbox" data-action="dev-phone-relay" ${relay.enabled ? 'checked' : ''}><span class="dv-track" aria-hidden="true"></span><span><b>${t`Open my desk from anywhere with my account`}</b><small>${t`Your phone signs in on app.rexdesk.dev, no Tailscale needed. Part of a paid plan.`}</small></span></label>`;
   const status = relay.enabled && state ? `<span class="dv-state"><span class="dot ${state[0]}"></span>${esc(state[1])}</span>` : '';
   const asks = relay.pending.map(item => phoneAskHtml(ctx, item)).join('');
   const when = value => new Date(value).toLocaleDateString(locale(), { month: 'short', day: 'numeric' });

@@ -2976,3 +2976,5 @@ html:has(.iv[open]){overflow:hidden}
 .page.mk,.page.mk>*{min-width:0;max-width:100%;box-sizing:border-box}
 @media (max-width:760px){.mk-used{display:none}.mk-text .mk-used-sm{display:block}.page.mk{width:100%}}
 .page.mk{width:100%}.mk-search{height:32px}
+/* Needs you: a phone asking to come in shows a plain phone, not an agent's picture. */
+.av.ny-device{background:var(--raised);color:var(--muted)}.av.sm.ny-device svg{width:18px;height:18px}
