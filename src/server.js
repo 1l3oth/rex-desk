@@ -837,7 +837,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         void sendSurvey();
         return json(response, 200, { saved: true });
       }
-      if (url.pathname === '/api/config' && request.method === 'PUT') { const saved = store.saveConfig(await body(request)); desk.agents.invalidate(); void desk.refreshModels().catch(() => {}); return json(response, 200, saved); }
+      if (url.pathname === '/api/config' && request.method === 'PUT') { const before = new Set(store.config().repositories.map(item => path.resolve(item.path).toLowerCase())), saved = store.saveConfig(await body(request)); desk.rememberProjects((saved.repositories || []).map(item => item.path).filter(folder => !before.has(path.resolve(folder).toLowerCase()))); desk.agents.invalidate(); void desk.refreshModels().catch(() => {}); return json(response, 200, saved); }
       // The skills, commands and MCP servers an agent has (or Rex Agent, with agent=main), for the / menu and its profile.
       // Local AI: the servers on this computer and their models, downloads into Ollama, and Hugging Face search.
       if (url.pathname === '/api/local-ai' && request.method === 'GET') return json(response, 200, await desk.localAi.status());

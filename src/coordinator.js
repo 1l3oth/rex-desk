@@ -583,9 +583,20 @@ export class Desk {
       this.store.event('', 'repository-branches-changed', { name: repository.name, baseBranch: repository.baseBranch, targetBranch: repository.targetBranch, by }, true);
     }
     const known = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === found.path.toLowerCase());
-    if (!known) { const previous = this.memory.state(); this.memory.scan({ roots: [...new Set([...(previous.roots || []), ...(found.git === false ? [] : [found.path])])], folders: this.store.config().repositories.filter(item => item.plain).map(item => item.path) }); }
+    if (!known) this.rememberProjects([found.path]);
     const project = this.memory.list().find(item => path.resolve(item.path || '').toLowerCase() === found.path.toLowerCase());
     return { added, repository: { id: repository.id, name: repository.name, path: repository.path, baseBranch: repository.baseBranch, targetBranch: repository.targetBranch }, project: project?.slug || '', branches: found.branches.length, warnings: found.warnings };
+  }
+  // Puts repository folders into memory (the project list the New agent picker reads) when they are not there yet.
+  // Only the memory's own roots and these folders are walked, so it never turns into a scan of the whole drive.
+  rememberProjects(folders) {
+    const key = folder => path.resolve(String(folder || '')).toLowerCase(), known = new Set(this.memory.list().map(item => key(item.path)));
+    const repositories = this.store.config().repositories, missing = [...new Set(folders.filter(Boolean).map(key))].filter(folder => !known.has(folder));
+    if (!missing.length) return 0;
+    const git = repositories.filter(item => !item.plain && missing.includes(key(item.path))).map(item => item.path);
+    const previous = this.memory.state();
+    this.memory.scan({ roots: [...new Set([...(previous.roots || []), ...git])], folders: repositories.filter(item => item.plain).map(item => item.path) });
+    return missing.length;
   }
   // Jev hands a task that happens on websites (search and compare, fill a form, book) to a browser agent with its own chat.
   async startWebTask(task) {
