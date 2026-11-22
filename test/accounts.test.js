@@ -142,6 +142,32 @@ test('the Tailscale https address (tailscale serve) is treated like another devi
   } finally { await app.close(); }
 });
 
+test('a phone through the relay waits for its 6-digit code to be approved on the desk, and cannot approve itself', async () => {
+  const http = await import('node:http');
+  const app = await accountApp(temporary('phone-relay'));
+  const owner = browser(app);
+  const ask = (route, headers = {}, method = 'GET', data) => new Promise((resolve, reject) => {
+    const request = http.request(app.address + route, { method, headers: { Host: 'node-1.relay.rexdesk.dev', 'x-rex-desk': '1', 'x-rex-relay': app.desk.phoneRelay.secret, 'x-rex-relay-device': 'phone-1', 'x-rex-relay-name': 'Pixel', ...(data ? { 'content-type': 'application/json' } : {}), ...headers } }, response => {
+      let raw = ''; response.on('data', chunk => { raw += chunk; }); response.on('end', () => resolve({ status: response.statusCode, text: raw }));
+    });
+    request.on('error', reject); request.end(data ? JSON.stringify(data) : undefined);
+  });
+  try {
+    await owner('/api/auth/create', { method: 'POST', data: { email: 'owner@example.com', passphrase } });
+    const waiting = await ask('/');
+    const code = /(\d{3}) (\d{3})/.exec(waiting.text)?.slice(1).join('');
+    assert.match(code, /^\d{6}$/, 'the phone shows a 6-digit code');
+    assert.equal((await ask('/api/state')).status, 403, 'no data before the OK');
+    assert.equal((await ask('/api/state', { 'x-rex-relay': 'forged' })).status, 403, 'a forged relay mark is turned away');
+    assert.equal((await ask('/api/phone-relay', {}, 'POST', { action: 'approve', device: 'phone-1', code })).status, 403, 'the phone cannot approve itself');
+    const listed = await owner('/api/phone-relay');
+    assert.equal(listed.body.pending[0].code, code, 'the desk shows the same code');
+    await owner('/api/phone-relay', { method: 'POST', data: { action: 'approve', device: 'phone-1', code } });
+    assert.equal((await ask('/api/state')).status, 200, 'after the OK the phone gets in');
+    assert.equal((await ask('/api/state', { 'x-rex-relay-device': 'phone-2' })).status, 403, 'another phone still waits');
+  } finally { await app.close(); }
+});
+
 test('stay signed in opens only a window holding the window key, never any program that asks', async () => {
   const root = temporary('window-key');
   const app = await accountApp(root, { requireAccount: false });

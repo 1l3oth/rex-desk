@@ -32,6 +32,7 @@ import { Speaker } from './tts.js';
 import { readyLines } from '../public/voice-phrases.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handleA2aHttp, a2aSettings, setA2a, A2aRelay } from './a2a.js';
+import { PhoneRelay, waitingPage } from './phone-relay.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
 import { weeklyReport } from './report.js';
@@ -239,6 +240,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     desk.net.start();
     // A2A on api.rexdesk.dev, for agents outside this computer.
     desk.a2aRelay = new A2aRelay(desk); desk.a2aRelay.start();
+    // The phone, through api.rexdesk.dev (paid accounts, turned on in Settings): see phone-relay.js.
+    desk.phoneRelay = new PhoneRelay(desk); if (!process.env.NODE_TEST_CONTEXT) desk.phoneRelay.start();
     // Agents from before avatars each get their own picture (this computer's agents only; the others get theirs at home).
     try { desk.specialists.ensureAvatars(store.nodeId); } catch (error) { store.event('', 'avatar-error', { message: error.message }); }
     desk.peers.onRemoteChange = () => { remoteAt = '-'; remoteOpen(); }; remoteOpen();
@@ -257,7 +260,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (!session) return;
     const { desk, store, id } = session; session = null;
     if (forget) accounts?.forget(id);
-    await desk.shutdown(); await store.cloud.close(); store.close(); notify();
+    desk.phoneRelay?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
   }
   const speakerOf = () => (session.speaker ||= new Speaker(session.store));
   const role = () => accounts ? accounts.role(session?.email) : 'superadmin';
@@ -495,7 +498,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       // A request that came in over Tailscale (the person's other computers and phone) needs the shared key, or a browser signed in with it.
       // Tailscale's https address (https://<computer>.<tailnet>.ts.net, made with "tailscale serve") reaches this server from this
       // computer itself, but it is the phone or another device asking: it needs the key the same way.
-      const remoteSocket = !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress) || (/\.ts\.net$/i.test(hostname) && !publicMcp);
+      // A request the phone sent through api.rexdesk.dev arrives from this desk's own relay connection, marked with its secret.
+      const relayed = Boolean(session?.desk?.phoneRelay?.isRelayed(request));
+      const remoteSocket = relayed || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.localAddress) || (/\.ts\.net$/i.test(hostname) && !publicMcp);
       if (!localHost && !publicMcp && !remoteSocket) return json(response, 403, { error: 'Use the local dashboard address.' });
       const url = new URL(request.url, `http://${host}`);
       // A2A: other agents reach this desk with the A2A key alone (it is off until the person turns it on), here or over Tailscale.
@@ -509,6 +514,18 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (url.pathname === '/login.css') return serveFile(request, response, path.join(root, 'public', 'login.css'));
         // What installing Rex Desk on the phone needs: the app's name and icons, and the page shown when the computer can't be reached.
         if (['/manifest.webmanifest', '/icon-180.png', '/icon-192.png', '/icon-512.png', '/favicon.svg', '/sw.js', '/offline.html'].includes(url.pathname)) return serveFile(request, response, path.join(root, 'public', url.pathname.slice(1)));
+        // Through the relay the account is already checked there; a phone this desk has not seen yet waits for the person's OK here.
+        if (relayed) {
+          const phone = desk.phoneRelay.device(request);
+          if (!phone.id) return json(response, 400, { error: 'The relay did not say which phone this is.' });
+          if (!desk.phoneRelay.approved(phone.id)) {
+            const waiting = desk.phoneRelay.pendingFor(phone);
+            if (request.method === 'GET' && !url.pathname.startsWith('/api/')) { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return response.end(waitingPage(waiting.code)); }
+            return json(response, 403, { error: 'Approve this phone on your desk first.', approve: true, code: waiting.code });
+          }
+        }
+        if (relayed) peerSignedIn = true;
+        else {
         // The phone's QR code carries the key, so scanning it signs in at once.
         if (url.pathname === '/login' && request.method === 'GET' && url.searchParams.get('key')) {
           if (!desk.peers.checkKey(url.searchParams.get('key').trim())) { response.writeHead(303, { Location: '/login?wrong=1' }); return response.end(); }
@@ -526,6 +543,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           return json(response, 401, { error: 'Sign in with the key from your Rex Desk first.' });
         }
         peerSignedIn = true;
+        }
       }
       // Local AI's bridge: an agent's Claude Code sends its model requests here, with its own Rex Desk token, and they go on to
       // the person's local server in the OpenAI format (see local-ai.js).
@@ -577,6 +595,19 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const address = desk.peers.status(desk.port).self?.addresses?.[0]; if (!address) return json(response, 404, { error: 'Turn on connecting from other devices first.' });
         const svg = await QRCode.toString(`${address.replace(/\/$/, '')}/login?key=${encodeURIComponent(desk.peers.key())}`, { type: 'svg', margin: 2, color: { dark: '#111418', light: '#ffffff' } });
         response.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' }); return response.end(svg);
+      }
+      // The phone through api.rexdesk.dev: on or off, and which phones may come in. Only this computer's own window may change it.
+      if (url.pathname.startsWith('/api/phone-relay')) {
+        if (response.rexRemote) return json(response, 403, { error: 'Approve phones on the computer itself.' });
+        if (url.pathname === '/api/phone-relay' && request.method === 'GET') return json(response, 200, desk.phoneRelay.view());
+        if (url.pathname === '/api/phone-relay' && request.method === 'POST') {
+          const input = await body(request);
+          if (input.action === 'enable') return json(response, 200, desk.phoneRelay.setEnabled(input.on));
+          if (input.action === 'approve') return json(response, 200, desk.phoneRelay.approve(input.device, input.code));
+          if (input.action === 'deny') return json(response, 200, desk.phoneRelay.deny(input.device));
+          if (input.action === 'forget') return json(response, 200, desk.phoneRelay.forget(input.device));
+          throw new Error('Unknown action.');
+        }
       }
       if (url.pathname === '/api/peers' && request.method === 'GET') return json(response, 200, desk.peers.status(desk.port));
       if (url.pathname === '/api/peers' && request.method === 'POST') {
