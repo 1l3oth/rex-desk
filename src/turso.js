@@ -139,8 +139,9 @@ export class TursoSync {
     const result = await this.client.execute({ sql: 'SELECT uid,run_id,kind,visible,value,created_at,v,deleted FROM rex_chat WHERE workspace=? AND v>? AND node!=? ORDER BY v LIMIT ?', args: [this.workspace, since, this.store.nodeId, limit] });
     return result.rows.map(row => ({ ...row }));
   }
-  // Rex Agent's chats belong to this computer alone and never go to the cloud.
-  event(row) { if (this.store.privateRun(row.run_id) || this.store.backupOff('chats') || this.store.mainRun(row.run_id)) return; this.enqueue('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,sequence) DO UPDATE SET run_id=excluded.run_id,kind=excluded.kind,visible=excluded.visible,value=excluded.value,created_at=excluded.created_at', [this.workspace, Number(row.sequence), row.run_id, row.kind, row.visible, row.value, row.created_at]); }
+  // Rex Agent's chats belong to this computer alone and never go to the cloud. Hidden records (raw agent output, tool steps,
+  // sessions) stay here too: they were most of the rows and filled the account's cloud database.
+  event(row) { if (!Number(row.visible) || this.store.privateRun(row.run_id) || this.store.backupOff('chats') || this.store.mainRun(row.run_id)) return; this.enqueue('INSERT INTO rex_events(workspace,sequence,run_id,kind,visible,value,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace,sequence) DO UPDATE SET run_id=excluded.run_id,kind=excluded.kind,visible=excluded.visible,value=excluded.value,created_at=excluded.created_at', [this.workspace, Number(row.sequence), row.run_id, row.kind, row.visible, row.value, row.created_at]); }
   // A project was set to stay out of the cloud: what the cloud holds of one of its agents is deleted there. The copies in the
   // shared table are removed outright (not marked deleted), so the other computers keep their own copy of the chat.
   forget(agentId) {
@@ -444,7 +445,7 @@ export class TursoSync {
     // chats and records there too, so the cloud copy may hold more than this computer, and that is fine.
     const local = this.store.db.prepare('SELECT kind,id,value FROM records ORDER BY kind,id').all().filter(row => !this.store.isPrivate(row.kind, JSON.parse(row.value)));
     const privateRuns = new Set(this.store.list('run').filter(run => this.store.isPrivate('run', run)).map(run => run.id));
-    const localEvents = this.store.backupOff('chats') ? [] : this.store.db.prepare('SELECT sequence,run_id FROM events').all().filter(row => !privateRuns.has(row.run_id));
+    const localEvents = this.store.backupOff('chats') ? [] : this.store.db.prepare('SELECT sequence,run_id FROM events WHERE visible=1').all().filter(row => !privateRuns.has(row.run_id));
     const remoteKeys = new Set(); let kind = '', id = '';
     for (;;) {
       const page = await this.client.execute({ sql: 'SELECT kind,id FROM rex_records WHERE workspace=? AND (kind>? OR (kind=? AND id>?)) ORDER BY kind,id LIMIT 5000', args: [this.workspace, kind, kind, id] });

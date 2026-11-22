@@ -343,16 +343,7 @@ html.has-win-bar .chat-shell{height:100dvh;padding-top:34px}
 @media (prefers-reduced-motion:reduce){.item.is-working .avwrap::before,.item.is-working .sub,.item.is-waiting .avwrap::before{animation:none}}
 html.fx-rest .item .avwrap::before,html.fx-rest .item.is-working .sub{animation-play-state:paused}
 /* Each theme's own halo. */
-/* Cyberpunk avatars are square, so a turning bordered box spins its corners into a diamond with bars sticking out. Instead,
-   keep a still square neon frame the exact shape of the face and sweep a cyan-to-pink light around it. */
-@property --halo{syntax:"<angle>";inherits:false;initial-value:0deg}
-html[data-skin=cyberpunk] .item.is-working .avwrap::before{inset:-3px;border:0;border-radius:6px;transform:none;
-  padding:2px;background:conic-gradient(from var(--halo),transparent 0 58%,#00e5ff 80%,#ff2bd6 96%,transparent 100%);
-  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;
-  mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude;
-  filter:drop-shadow(0 0 3px rgba(0,229,255,.55));animation:cyber-halo 1.1s linear infinite}
-@keyframes cyber-halo{to{--halo:360deg}}
-@media (prefers-reduced-motion:reduce){html[data-skin=cyberpunk] .item.is-working .avwrap::before{animation:none}}
+html[data-skin=cyberpunk] .item.is-working .avwrap::before{border-radius:6px;border-color:rgba(255,43,214,.25);border-top-color:#00e5ff;border-right-color:#ff2bd6}
 html[data-skin=crayon] .item.is-working .avwrap::before{border:2.5px dashed #e4572e;filter:none;animation-duration:4s}
 html[data-skin=sakura] .item.is-working .avwrap::before{border-color:rgba(255,154,201,.3);border-top-color:#ff7ab8;border-right-color:#c4a8ff}
 html[data-skin=gojo] .item.is-working .avwrap::before{border-color:rgba(160,210,255,.25);border-top-color:#cfe6ff;border-right-color:#59b4ff;filter:drop-shadow(0 0 5px #59b4ff)}

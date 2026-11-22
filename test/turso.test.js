@@ -385,3 +385,19 @@ test('a restore never takes an id whose computer left no hostname', async () => 
   assert.notEqual(second.nodeId, firstNode);
   await second.cloud.close(); second.close();
 });
+
+test('hidden agent records stay on this computer: only what the chat shows goes to the cloud', async () => {
+  const turso = fakeTurso(); turso.network.online = true;
+  const store = new Store(temporary('hidden-events'));
+  store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 40 });
+  await store.cloud.connect({ url: 'libsql://rex-hidden.example.invalid', authToken: 'hidden-token' });
+  store.event('run-1', 'message', { text: 'Shown' }, true);
+  store.event('run-1', 'tool-use', { name: 'Bash', input: 'x'.repeat(5000) });
+  store.event('run-1', 'session', { id: 'abc' });
+  await store.cloud.flush();
+  assert.equal(turso.remote.prepare('SELECT COUNT(*) n FROM rex_events').get().n, 1);
+  // The cloud check does not count the hidden ones as missing.
+  const check = await store.cloud.verify();
+  assert.equal(check.matched, true); assert.equal(check.localEvents, 1);
+  await store.cloud.close(); store.close();
+});
