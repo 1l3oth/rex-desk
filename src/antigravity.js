@@ -180,7 +180,8 @@ export class AntigravityRunner {
     if (mode !== 'auto') return set('mode', mode);
     if (AntigravityRunner.autoRefused) return set('mode', 'accept-edits');
     try { return await set('mode', 'auto'); } catch (error) {
-      AntigravityRunner.autoRefused = true;
+      // Only agy's own "Auto is not available" answer is remembered; a timeout or other hiccup tries Auto again next turn.
+      if (autoUnsupported(error)) AntigravityRunner.autoRefused = true;
       await set('mode', 'accept-edits');
       const id = 'auto-mode-fallback', reason = String(error?.message || error).slice(0, 300);
       this.event('agent-tool', { id, tool: 'Mode', input: { description: 'Auto mode is not available on this computer, so Gemini uses Accept edits', reason } });
@@ -190,6 +191,12 @@ export class AntigravityRunner {
   async interrupt() { if (this.sessionId) this.client?.notify('session/cancel', { sessionId: this.sessionId }); setTimeout(() => this.client?.close(), 500); }
   close() { this.client?.close(); }
 }
+
+// agy's refusal reads like "Auto mode is not available: it needs the OS terminal sandbox...".
+export const autoUnsupported = error => {
+  const text = String(error?.message || error || '');
+  return !/timed out|stopped|closed|exited/i.test(text) && /\bauto\b/i.test(text) && /not (available|supported|enabled)|unsupported|unavailable|sandbox|rolled out|unknown mode|invalid mode/i.test(text);
+};
 
 export async function antigravityModels({ env = process.env, cwd, clientFactory = options => new AcpClient(options) } = {}) {
   const client = clientFactory({ env, cwd: cwd || os.homedir() });

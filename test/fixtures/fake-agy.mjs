@@ -13,7 +13,7 @@ createInterface({ input: process.stdin }).on('line', async line => {
   if (message.method === 'initialize') return reply({ protocolVersion: 1, agentCapabilities: { loadSession: true } });
   if (message.method === 'session/new') return reply({ sessionId: '11111111-2222-3333-4444-555555555555', configOptions: config });
   if (message.method === 'session/resume') return reply({ configOptions: config });
-  if (message.method === 'session/set_config_option' && message.params.configId === 'mode' && message.params.value === 'auto' && process.env.FAKE_AGY_NO_AUTO) return send({ id: message.id, error: { code: -32603, message: 'Auto mode is not available: it needs the OS terminal sandbox and may not be rolled out to you yet' } });
+  if (message.method === 'session/set_config_option' && message.params.configId === 'mode' && message.params.value === 'auto' && process.env.FAKE_AGY_NO_AUTO) return send({ id: message.id, error: { code: -32603, message: process.env.FAKE_AGY_NO_AUTO === '1' ? 'Auto mode is not available: it needs the OS terminal sandbox and may not be rolled out to you yet' : process.env.FAKE_AGY_NO_AUTO } });
   if (message.method === 'session/set_config_option') { if (message.params.configId === 'mode') modes.push(message.params.value); return reply({ configOptions: config }); }
   if (message.method === 'session/cancel') return;
   if (message.method === 'session/prompt') {

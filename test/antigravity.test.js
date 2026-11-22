@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AcpClient, AntigravityRunner, antigravityModels, antigravityMode, parseAgyModels } from '../src/antigravity.js';
+import { AcpClient, AntigravityRunner, antigravityModels, antigravityMode, autoUnsupported, parseAgyModels } from '../src/antigravity.js';
 import { aiProvider, providerTitle } from '../src/codex.js';
 import { modesFor, effortsFor, runOptions, defaultModeFor } from '../src/choices.js';
 import { antigravityTool } from '../src/antigravity.js';
@@ -129,4 +129,17 @@ test('when agy refuses Auto mode, the turn goes on in Accept edits with one quie
   const fine = runner({ permissionMode: 'auto' }, { agentEnv: { ...process.env, FAKE_AGY_NO_AUTO: '' } });
   await fine.item.start('ok');
   assert.equal(fine.events.some(event => event.data?.tool === 'Mode'), false, 'Auto stays when agy accepts it');
+});
+
+test('a Gemini Auto error that is not a refusal does not turn Auto off for later turns', async () => {
+  AntigravityRunner.autoRefused = false;
+  const hiccup = runner({ permissionMode: 'auto' }, { agentEnv: { ...process.env, FAKE_AGY_NO_AUTO: 'Internal error' } });
+  assert.deepEqual(await hiccup.item.start('hi'), { status: 'completed' }, 'this turn still goes on in Accept edits');
+  assert.equal(AntigravityRunner.autoRefused, false, 'Auto is tried again next turn');
+  const next = runner({ permissionMode: 'auto' }, { agentEnv: { ...process.env, FAKE_AGY_NO_AUTO: '' } });
+  await next.item.start('again');
+  assert.equal(next.events.some(event => event.data?.tool === 'Mode'), false, 'Auto works again');
+  assert.equal(autoUnsupported(new Error('Antigravity session/set_config_option timed out.')), false);
+  assert.equal(autoUnsupported(new Error('Auto mode is not available: it needs the OS terminal sandbox')), true);
+  assert.equal(autoUnsupported(new Error('unsupported mode: auto')), true);
 });
