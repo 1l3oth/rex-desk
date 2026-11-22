@@ -15,6 +15,8 @@ export function noteItems(text) {
 
 export function showUpdateCard(update) {
   let card = document.getElementById('update-card');
+  // A split pane is the same app in an iframe (?embed=1): the card shows once, in the main window, never in each pane.
+  if (document.documentElement.classList.contains('embed')) { card?.remove(); return; }
   // Shown from the moment a new version starts downloading (with how much has arrived), then as ready to install.
   const loading = !update?.ready && update?.downloading, version = update?.ready ? update.available?.version : loading ? update.downloading.version : '', later = laterChoice();
   if (!version || (later.version === version && later.until > Date.now())) { card?.remove(); return; }
