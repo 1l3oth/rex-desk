@@ -171,6 +171,8 @@ function commands(ctx) {
 function toolsAgent(ctx) {
   const { ui } = ctx, view = ui.view;
   if (view.type === 'main') return 'main';
+  // A room has many agents: its / menu shows Rex Agent's list, which is every skill and command on this computer.
+  if (view.type === 'room') return 'main';
   if (view.type === 'run') { const run = (ui.snap?.runs || []).find(item => item.id === view.id); return run?.specialistId || (run?.main ? 'main' : ''); }
   return '';
 }

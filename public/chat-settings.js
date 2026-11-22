@@ -65,7 +65,6 @@ const SECTIONS = [
   ['jev', t('Jev and voice'), t('Voice, computer control, speech')],
   ['ai', t('AI'), t('Accounts, models, local AI')],
   ['agents', t('Agents'), t('How many, mode, branches')],
-  ['tools', t('Tools and skills'), t('MCP servers, skills, commands')],
   ['projects', t('Projects'), t('Repositories and test sign-ins')],
   ['connectors', t('Connectors'), t('Task apps, chat, code and docs')],
   ['backup', t('Account and backup'), t('Plan, cloud copy, devices')],
@@ -73,12 +72,12 @@ const SECTIONS = [
   ['about', t('About'), t('Version and updates')],
 ];
 // Each section is one or more panels. The old section names still open the right page.
-const PARTS = { general: ['general'], notify: ['notify'], jev: ['jev'], ai: ['accounts', 'localai'], agents: ['agents'], tools: ['tools'], projects: ['projects', 'signins'], connectors: ['sources', 'schedule'], backup: ['backup'], storage: ['storage', 'folders'], about: ['about'] };
+const PARTS = { general: ['general'], notify: ['notify'], jev: ['jev'], ai: ['accounts', 'localai'], agents: ['agents'], projects: ['projects', 'signins'], connectors: ['sources', 'schedule'], backup: ['backup'], storage: ['storage', 'folders'], about: ['about'] };
 const ALIAS = { accounts: 'ai', localai: 'ai', signins: 'projects', tasks: 'connectors', sources: 'connectors', schedule: 'connectors', plan: 'backup', devices: 'backup', folders: 'storage' };
 const SAVE_PARTS = ['general', 'agents', 'accounts', 'projects', 'sources', 'jev', 'schedule', 'signins'];
 const GROUPS = [
   [t('You'), ['general', 'notify', 'jev']],
-  [t('Agents'), ['ai', 'agents', 'tools']],
+  [t('Agents'), ['ai', 'agents']],
   [t('Work'), ['projects', 'connectors']],
   [t('This computer'), ['backup', 'storage', 'about']],
 ];
@@ -167,6 +166,7 @@ export function openSettings(ctx, section = 'general') {
   document.querySelector('.dialog-back.settings')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back settings'; document.body.append(back);
   const phone = window.matchMedia('(max-width:760px)').matches;
+  if (section === 'tools') { ctx.open('market'); return; }
   section = ALIAS[section] || section; if (!PARTS[section]) section = 'general';
   const state = { section, extra: {}, list: phone && section === 'general', trackers: trackerDraft(ui) };
   const has = part => (PARTS[state.section] || []).includes(part);
@@ -325,32 +325,6 @@ export function openSettings(ctx, section = 'general') {
       ${database.configured ? '' : `<div class="st-cloud">${CLOUD_ART}<div class="st-cloud-head"><b>${t`Back up with your Rex Desk account`}</b><small>${t`Your whole desk, kept safe in the cloud and ready on every computer you sign in on.`}</small></div><ul class="st-cloud-why">${CLOUD_WHY.map(([icon, title, text]) => `<li><span class="st-cloud-why-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span><span><b>${title}</b><small>${text}</small></span></li>`).join('')}</ul>${state.extra.billing?.signedIn ? (state.extra.billing.space?.paid ? `<button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || t('Turn on cloud backup'))}</button>` : `<button type="button" class="btn primary" data-st-section="plan">${t`See plans`}</button><p class="st-cloud-fine">${t`Cloud backup comes with the Cloud backup plan, from $2.99 a month.`}</p>`) : `<button type="button" class="btn primary" data-st-account ${state.extra.account ? 'disabled' : ''}>${esc(state.extra.account || t('Sign in with Rex Desk'))}</button><p class="st-cloud-fine">${t`New here? Signing in also makes your account.`}</p>`}</div>`}${database.accountNote ? `<p class="error-text" role="alert">${esc(database.accountNote)}</p>` : ''}${database.configured ? `<div class="st-actions"><button type="button" class="btn" data-st-db-sync>${t`Upload now and check`}</button><button type="button" class="btn" data-st-db-off>${t`Stop using this database`}</button></div>${backupPartsHtml(database.parts || {})}` : ''}
 
       ${database.configured && !hosted ? `<p class="muted">${t`Pictures and files stay on this computer: only a Rex Desk account backup keeps them in the cloud.`}</p>` : ''}${database.error ? `<p class="error-text" role="alert">${esc(database.error)}</p>` : ''}`; },
-    tools: () => {
-      const box = state.extra.toolbox, busy = state.extra.toolboxBusy;
-      if (!box) return `<h2>${t`Tools and skills`}</h2>${skeletonHtml(6)}`;
-      const status = (bad, text) => `<span class="tb-status ${bad ? 'bad' : 'ok'}"><i aria-hidden="true"></i>${esc(text)}</span>`;
-      const broken = box.servers.filter(item => item.error).length + box.skills.filter(item => item.error).length;
-      const row = (title, sub, act, name, extra = '') => `<li class="tb-row"><div class="tb-text"><b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}${extra}</div>${act ? `<button type="button" class="btn small" data-st-tb="${act}" data-name="${esc(name)}"${busy ? ' disabled' : ''}>${t`Remove`}</button>` : ''}</li>`;
-      const list = (items, empty) => items.length ? `<ul class="tb-list">${items.join('')}</ul>` : `<p class="muted small">${empty}</p>`;
-      return `<h2>${t`Tools and skills`}</h2>${box.computer ? `<p class="tb-computer">${t`On ${esc(box.computer)}. Each of your computers has its own list.`}</p>` : ''}<p class="muted">${t`Everything your agents can use on this computer. They do not carry it all in every chat: they search it when a task needs it, which keeps each chat small.`}</p>
-      <section class="tb-install" aria-labelledby="tb-install-h"><h3 id="tb-install-h">${t`Install a tool or skill`}</h3>
-        <p class="muted small">${t`Paste the install line from its page. Rex Desk installs it for every agent on this computer, then checks that agents can find it.`}</p>
-        <textarea name="tb-install" rows="2" spellcheck="false" autocomplete="off" aria-label="${t`Install command`}" placeholder="claude mcp add notion --transport http https://mcp.notion.com/mcp"${busy ? ' disabled' : ''}>${esc(state.extra.toolboxText || '')}</textarea>
-        <div class="tb-install-foot"><span class="tb-kinds">${['claude mcp add …', 'npx skills add owner/repo', '{ "mcpServers": … }', 'npx -y @scope/server', t`a GitHub link or folder`].map(kind => `<code>${esc(kind)}</code>`).join('')}</span><button type="button" class="btn primary" data-st-tb="install"${busy ? ' disabled' : ''}>${busy === 'install' ? t('Installing…') : t('Install')}</button></div>
-        ${state.extra.toolboxResult ? `<ul class="tb-result" role="status">${state.extra.toolboxResult.map(item => `<li>${status(!item.ok, item.ok ? (item.tools ? t`${item.name}: installed, agents can find it · ${item.tools} tools` : t`${item.name}: installed, agents can find it`) : `${item.name}: ${item.error}`)}</li>`).join('')}</ul>` : ''}
-        ${state.extra.toolboxError ? `<p class="error-text" role="alert">${esc(state.extra.toolboxError)}</p>` : ''}</section>
-      ${broken ? `<p class="tb-alert" role="status">${t`${broken} need a look. Each one says what is wrong below.`}</p>` : ''}
-      <h3 class="st-sub">${t`MCP servers`} <span class="cnt">${box.servers.length}</span></h3>
-      ${list([...box.servers].sort((a, b) => Boolean(b.error) - Boolean(a.error)).map(item => row(item.name, item.how, item.removable ? 'remove-server' : '', item.name, `${item.error ? status(true, t`Not working: ${item.error}`) : status(false, t`Working · ${item.tools} tools`)}`)), t`No MCP server yet.`)}
-      <h3 class="st-sub">${t`Skills`} <span class="cnt">${box.skills.length}</span></h3>
-      ${box.skills.length > 8 ? `<input class="tb-filter" type="search" name="tb-filter" placeholder="${t`Search ${box.skills.length} skills`}" aria-label="${t`Search skills`}" autocomplete="off">` : ''}
-      ${list([...box.skills].sort((a, b) => Boolean(b.error) - Boolean(a.error)).map(item => row(item.name, item.description, item.removable ? 'remove-skill' : '', item.name, item.error ? status(true, item.error) : '')), t`No skill yet.`)}
-      <h3 class="st-sub">${t`Commands`} <span class="cnt">${box.commands.length}</span></h3>
-      ${list(box.commands.map(item => row(`/${item.name}`, item.description, 'remove-command', item.name)), t`No command yet.`)}
-      <h3 class="st-sub">${t`Hooks`} <span class="cnt">${box.hooks.length}</span></h3>
-      ${list(box.hooks.map(item => row(item.event + (item.matcher ? ` · ${item.matcher}` : ''), item.command, '', '')), t`No hook yet.`)}
-      <p class="muted small">${t`Hooks are changed in Claude Code's own settings file.`}</p>`;
-    },
   };
     // One section: its panels one after the other. A panel's own title becomes a plain heading under the section's title.
   const sectionHtml = () => {
@@ -361,7 +335,6 @@ export function openSettings(ctx, section = 'general') {
   const draw = () => {
     if (has('backup') && !state.extra.billing && !state.extra.billingLoading) { state.extra.billingLoading = true; void api('/billing').then(data => { state.extra.billing = data; state.extra.billingLoading = false; draw(); }).catch(() => { state.extra.billing = { signedIn: false }; state.extra.billingLoading = false; draw(); }); }
     if (has('sources') && !state.extra.connectors) void loadConnectors(ctx, state, draw);
-    if (has('tools') && !state.extra.toolbox && !state.extra.toolboxLoading) { state.extra.toolboxLoading = true; void api('/toolbox').then(data => { state.extra.toolbox = data; draw(); }).catch(error => { state.extra.toolbox = { servers: [], skills: [], commands: [], hooks: [] }; toast(error.message, true); draw(); }); }
     // A redraw of the same section keeps the place the person scrolled to (ticking a box used to jump back to the top).
     // The list of sections on the left always keeps its place: picking one lower down used to jump the list back to the top.
     const keep = back.dataset.section === state.section ? back.querySelector('.st-panel')?.scrollTop || 0 : 0, keepNav = back.querySelector('.st-nav')?.scrollTop || 0;
@@ -546,24 +519,6 @@ export function openSettings(ctx, section = 'general') {
         finally { await refresh(); draw(); }
         return;
       }
-      const tbAct = target.closest('[data-st-tb]')?.dataset.stTb;
-      if (tbAct === 'install') {
-        const text = back.querySelector('[name="tb-install"]')?.value?.trim() || '';
-        if (!text) { back.querySelector('[name="tb-install"]')?.focus(); return; }
-        Object.assign(state.extra, { toolboxText: text, toolboxBusy: 'install', toolboxResult: null, toolboxError: '' }); draw();
-        try { const result = await api('/toolbox', { method: 'POST', data: { what: 'install', text } }); state.extra.toolbox = result; state.extra.toolboxResult = result.check || []; state.extra.toolboxText = ''; }
-        catch (error) { state.extra.toolboxError = error.message; }
-        finally { state.extra.toolboxBusy = false; draw(); }
-        return;
-      }
-      if (tbAct) {
-        const name = target.dataset.name;
-        if (!await askConfirm(t`Remove ${name}?`)) return;
-        state.extra.toolboxBusy = true; draw();
-        try { state.extra.toolbox = await api('/toolbox', { method: 'POST', data: { what: tbAct, name } }); toast(t('Removed.')); }
-        finally { state.extra.toolboxBusy = false; draw(); }
-        return;
-      }
       if (target.closest('[data-st-signin-add]')) { readSignins(); state.signins.push({ id: crypto.randomUUID(), site: '', username: '', password: '' }); draw(); back.querySelector(`[name="ta.${state.signins.length - 1}.site"]`)?.focus(); return; }
       const dropSignin = target.closest('[data-st-signin-remove]'); if (dropSignin) { readSignins(); state.signins.splice(Number(dropSignin.dataset.stSigninRemove), 1); draw(); await save(true); return; }
       const dropRepo = target.closest('[data-st-repo-remove]'); if (dropRepo) { const repo = config().repositories[Number(dropRepo.dataset.stRepoRemove)]; if (!await askConfirm(t`Remove ${repo.name} from Rex Desk? The folder on disk stays.`)) return; ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: config().repositories.filter((_, index) => index !== Number(dropRepo.dataset.stRepoRemove)) } }); await refresh(); draw(); return; }
@@ -585,7 +540,7 @@ export function openSettings(ctx, section = 'general') {
   let autoTimer = 0, pendingSave = false;
   // Save a waiting edit now, before the page it belongs to is redrawn or closed (it reads the fields synchronously).
   flushSave = () => { if (!pendingSave) return; clearTimeout(autoTimer); pendingSave = false; save(true).catch(error => toast(error.message, true)); };
-  const ownSave = el => el.matches?.('[data-st-part],[data-st-rule],[data-st-tts],[data-st-voice],[data-st-fish-key],[name="tb-filter"]') || el.closest?.('[data-st-fish]');
+  const ownSave = el => el.matches?.('[data-st-part],[data-st-rule],[data-st-tts],[data-st-voice],[data-st-fish-key]') || el.closest?.('[data-st-fish]');
   const autoSave = event => {
     const el = event.target;
     if (!el.matches?.('input,select,textarea') || !el.closest('[data-st-panel]') || ownSave(el) || !PARTS[state.section].some(part => SAVE_PARTS.includes(part))) return;
@@ -597,7 +552,6 @@ export function openSettings(ctx, section = 'general') {
   back.addEventListener('keydown', event => { if (event.key === 'Escape' && !document.body.classList.contains('driver-active')) { flushSave(); back.remove(); } });
   back.addEventListener('input', event => {
     // Tools and skills: the search box narrows the skill list as you type, with no redraw.
-    if (event.target.matches?.('[name="tb-filter"]')) { const words = event.target.value.trim().toLowerCase(); for (const row of event.target.nextElementSibling?.querySelectorAll('.tb-row') || []) row.hidden = Boolean(words) && !row.textContent.toLowerCase().includes(words); return; }
     if (has('storage') && storageInput(ctx, state, event, draw)) return;
     trackerInput(back, state, event, draw);
   });

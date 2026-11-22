@@ -15,6 +15,7 @@ import { collectShared, sharedTabsHtml, attachedFiles } from '/chat-media.js';
 import { chatPins, pinsAction, watchMessagePins } from '/chat-pins.js';
 import { whereLine } from '/chat-where.js';
 import { devicesStage, devicesAction, initDevices } from '/chat-devices.js';
+import { marketStage, marketAction, loadMarket, initMarket, MARKET_ICON } from '/chat-market.js';
 import { monitorStage, monitorAction } from '/chat-monitor.js';
 import { netStage, loadNet, wireNet, NET_ICON } from '/chat-net.js';
 import { worktreesStage, fillWorktreeEmbeds, wireWorktrees, wireChatSwitch, WORKTREE_ICON, chatWorktrees, worktreeSideHtml } from '/chat-worktrees.js';
@@ -36,7 +37,7 @@ import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttach
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
 // Which screen is open lives in the address (#/room/ID) and is also saved, so a refresh or a restart comes back to the same place.
-const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'jev', 'monitor', 'worktrees', 'net', 'split'];
+const SCREENS = ['main', 'inbox', 'room', 'run', 'specialist', 'task', 'tasks', 'project', 'person', 'devices', 'market', 'jev', 'monitor', 'worktrees', 'net', 'split'];
 const hashOf = view => `#/${view.type}${view.id ? `/${encodeURIComponent(view.id)}` : ''}`;
 // A chat loads its newest messages; "Show in chat" of an old pin asks for more (ui.historyLimit) until it finds the message.
 const historyQuery = runId => (ui?.historyLimit?.[runId] ? `?limit=${ui.historyLimit[runId]}` : '');
@@ -165,6 +166,7 @@ const SVG = {
   bell: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>',
   usage: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19a9 9 0 1 1 16 0"/><path d="M12 14l4-5"/></svg>',
   monitor: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M7 13l3-3 3 2 4-5M8 21h8"/></svg>',
+  market: MARKET_ICON,
   devices: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1"/></svg>',
   worktrees: WORKTREE_ICON,
   run: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 3 14 9-14 9z"/></svg>',
@@ -203,7 +205,7 @@ function renderRail() {
     ${newComputerCard(snap)}
     ${section('rooms', t('Meeting rooms'), snap.rooms.length, plus('new-room', t('New meeting room')), snap.rooms.length ? roomListHtml(ctx, snap.rooms, room => railItem('room', room.id, { avatar: withDot(avatarHtml(ctx, { name: room.name, image: room.image, id: room.id, members: (room.members || []).map(member => member.id || member), at: room.imageAt || '', size: 'sm' }), room.members.some(member => member.state === 'replying' || member.state === 'busy') ? 'working' : ''), name: room.name, sub: room.endedAt ? t('Ended') : room.members.length === 1 ? t`${room.members.length} agent` : t`${room.members.length} agents`, badge: unreadFor(ui, `room:${room.id}`) })) : `<button type="button" class="rail-cta" data-action="new-room">${t`New meeting room`}</button>`)}
     ${section('agents', t('Agents'), agents.length, plus('spec-new', t('New agent')), agents.length ? agentListHtml(ctx, agents, agent => railItem('specialist', agent.id, { avatar: withDot(avatarHtml(ctx, { name: agent.name, agent, size: 'sm' }), agentDot(agent.status?.state)), name: agent.name, sub: agentWhere(agent), live: agent.device && agent.status?.state === 'offline' ? null : agent.status, title: [agent.device && t`Works on ${agent.device}`, agent.projectPath && `Folder: ${agent.projectPath}`].filter(Boolean).join(' · '), badge: agent.runId ? unreadFor(ui, `run:${agent.runId}`) : 0 })) : `<button type="button" class="rail-cta" data-action="spec-new">${t`New agent`}</button>`)}
-  </div>${phoneTabs(asks)}<div class="rail-tools" role="toolbar" aria-label="${t`Tools`}"><button type="button" class="tool" data-open="jev" title="${t`Jev: control this computer and websites`}" aria-label="${t`Jev`}">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? t`Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : t('Memory and what uses it'))}" aria-label="${t`Memory`}">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="${t`Devices: your other computers and phone`}" aria-label="${t`Devices`}">${iconAv('devices')}</button><button type="button" class="tool" data-open="net" data-id="" title="${t`Agents online: let other people's agents reach yours`}" aria-label="${t`Agents online`}"><span class="av sm icon">${NET_ICON}</span></button></div><div class="rail-foot"><button class="acct-btn" data-action="account-open" title="${t`Your Rex Desk account`}">${rexAccountChip()}</button><button type="button" class="acct-ai" data-action="accounts" title="${t`Which Claude account the agents use`}">${accountChip()}</button><div class="rail-row"><button class="btn small rail-settings" data-action="settings-open" title="${t`Settings`}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SETTINGS_GEAR}</svg>${t`Settings`}</button><button class="btn small" data-action="theme">${t`Theme`}</button><button class="btn small" type="button" data-glass-open title="${t`How see-through Rex Desk is`}">${t`Glass`}</button><button type="button" class="rail-ver${ui.snap.update?.ready || ui.snap.update?.available ? ' new' : ''}" data-action="about-open" title="${t`About Rex Desk: version, storage and what it holds`}">${esc(ui.snap.update?.current ? `v${ui.snap.update.current}` : 'dev')}</button></div></div>`;
+  </div>${phoneTabs(asks)}<div class="rail-tools" role="toolbar" aria-label="${t`Tools`}"><button type="button" class="tool" data-open="jev" title="${t`Jev: control this computer and websites`}" aria-label="${t`Jev`}">${iconAv('mic', 'accent')}</button><button type="button" class="tool" data-open="monitor" title="${esc(ui.monitor ? t`Memory: ${ui.monitor.freeMb >= 1024 ? `${(ui.monitor.freeMb / 1024).toFixed(1)} GB` : `${ui.monitor.freeMb} MB`} free` : t('Memory and what uses it'))}" aria-label="${t`Memory`}">${iconAv('monitor')}</button><button type="button" class="tool" data-open="devices" title="${t`Devices: your other computers and phone`}" aria-label="${t`Devices`}">${iconAv('devices')}</button><button type="button" class="tool" data-open="market" data-id="" title="${t`Market: skills, commands and MCP servers`}" aria-label="${t`Market`}">${iconAv('market')}</button><button type="button" class="tool" data-open="net" data-id="" title="${t`Agents online: let other people's agents reach yours`}" aria-label="${t`Agents online`}"><span class="av sm icon">${NET_ICON}</span></button></div><div class="rail-foot"><button class="acct-btn" data-action="account-open" title="${t`Your Rex Desk account`}">${rexAccountChip()}</button><button type="button" class="acct-ai" data-action="accounts" title="${t`Which Claude account the agents use`}">${accountChip()}</button><div class="rail-row"><button class="btn small rail-settings" data-action="settings-open" title="${t`Settings`}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SETTINGS_GEAR}</svg>${t`Settings`}</button><button class="btn small" data-action="theme">${t`Theme`}</button><button class="btn small" type="button" data-glass-open title="${t`How see-through Rex Desk is`}">${t`Glass`}</button><button type="button" class="rail-ver${ui.snap.update?.ready || ui.snap.update?.available ? ' new' : ''}" data-action="about-open" title="${t`About Rex Desk: version, storage and what it holds`}">${esc(ui.snap.update?.current ? `v${ui.snap.update.current}` : 'dev')}</button></div></div>`;
 }
 
 // ---------- run conversation ----------
@@ -375,6 +377,7 @@ function stageModel() {
   if (type === 'inbox') return inboxStage(ctx, { decisionCard, personalAgent, runTitle });
   if (type === 'specialist') return agentStage(ctx);
   if (type === 'devices') return devicesStage(ctx);
+  if (type === 'market') return marketStage(ctx);
   if (type === 'monitor') return monitorStage(ctx);
   if (type === 'worktrees') return worktreesStage(ctx);
   if (type === 'net') return netStage(ctx);
@@ -610,6 +613,7 @@ async function loadView(early = null) {
       const room = ui.snap.rooms.find(item => item.id === id);
       if (room && ui.infoOpen !== false && ['activity', 'subagents', 'team', 'terminal'].includes(ui.sideTab)) await Promise.all(roomRunIds(ui, room).map(async runId => ui.events.set(runId, await api(`/runs/${runId}/messages`).catch(() => []))));
     } else if (type === 'net') { await loadNet(ctx);
+    } else if (type === 'market') { await loadMarket(ctx);
     } else if (type === 'worktrees') { await api('/worktrees');
     } else if (type === 'monitor') { ui.monitor = await api('/monitor'); 
     } else if (type === 'person') { ui.page = (await api('/memory/page?name=user')).text; }
@@ -816,6 +820,7 @@ document.addEventListener('click', async event => {
     else if (['room-shared', 'room-stop', 'room-remove', 'task-assign', 'info-toggle', 'room-image', 'room-delete', 'side-tab', 'agents-pop'].includes(action)) await roomAction(ctx, action, target);
     else if (action?.startsWith('pin-')) await pinsAction(ctx, action, target);
     else if (action?.startsWith('dev-')) await devicesAction(ctx, action, target);
+    else if (action?.startsWith('mk-')) await marketAction(ctx, action, target);
     else if (action?.startsWith('mo-')) await monitorAction(ctx, action, target);
     else if (action?.startsWith('nt-')) await noticesAction(ctx, action, target);
     else if (action?.startsWith('setup-')) await setupClick(ctx, action, target, { redraw: () => renderAll(), settings: section => openSettings(ctx, section), sendMain: async text => { if (mainRun()) await api(`/runs/${mainRun().id}/${workingStates.includes(mainRun().state) ? 'say' : 'resume'}`, { method: 'POST', data: workingStates.includes(mainRun().state) ? { text } : { prompt: text } }); else await api('/main', { method: 'POST', data: { prompt: text } }); open('main'); await refresh(); } });
@@ -867,7 +872,7 @@ document.addEventListener('pointerdown', event => { const feed = event.target.cl
 document.addEventListener('keydown', event => { if (['PageUp', 'ArrowUp', 'Home'].includes(event.key) && document.activeElement?.closest?.('#feed')) letGo(); });
 document.addEventListener('scroll', event => { if (event.target.id === 'feed') { if (ui.gliding) return; ui.stick = event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 80; if (ui.stick) ui.freshBelow = false; syncToEnd(); } }, true);
 
-initPickers(ctx); wireInbox(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); window.__rexCtx = ctx; wireFiles(ctx); wireAgentCards(ctx); wireSpeak(toast); wireWorktrees(ctx); wireNet(ctx); wireChatSwitch(); wireImageViewer();
+initPickers(ctx); wireInbox(ctx); initRoomInfo(ctx); initAgentCard(ctx); wireLoop(ctx); initLocalTasks(ctx); initDevices(ctx); initMarket(ctx); window.__rexCtx = ctx; wireFiles(ctx); wireAgentCards(ctx); wireSpeak(toast); wireWorktrees(ctx); wireNet(ctx); wireChatSwitch(); wireImageViewer();
 // On a phone the side panels start closed, and the menu button opens the list of chats.
 if (window.matchMedia('(max-width: 760px)').matches) { ui.infoOpen = false; ui.chatInfo = false; ui.termOpen = false; }
 // A page an agent made (an explanation of its changes) opens full screen over the chat, in a sandbox with no access to Rex Desk.

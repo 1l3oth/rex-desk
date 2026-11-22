@@ -52,6 +52,7 @@ import { knowledgeGraph } from './knowledge.js';
 import { BackoffPoll } from './poll-backoff.js';
 import { accountSignIn, accountDatabase, accountMe, accountReachable, billingCheckout, billingPortal, billingPack, billingDetails } from './rexdesk-account.js';
 import { bridge } from './local-ai.js';
+import { marketList, setToolOff } from './market.js';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -810,8 +811,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/local-ai/huggingface' && request.method === 'GET') return json(response, 200, { items: await desk.localAi.searchHuggingFace(url.searchParams.get('q')) });
       if (url.pathname === '/api/agents/tools' && request.method === 'GET') {
         // Exactly what this agent is told it has (its instructions read the same list), not a general list for the computer.
-        return json(response, 200, desk.toolsInventory(desk.toolsRunOf(url.searchParams.get('agent') || 'main')).items);
+        const run = desk.toolsRunOf(url.searchParams.get('agent') || 'main'), slash = desk.slashTools(run);
+        return json(response, 200, { ...desk.toolsInventory(run).items, commands: slash?.commands || [] });
       }
+      // Market: everything agents can use here, and a per-agent switch for each (on by default).
+      if (url.pathname === '/api/market' && request.method === 'GET') return json(response, 200, marketList(desk));
+      if (url.pathname === '/api/market/switch' && request.method === 'POST') { const input = await body(request); setToolOff(store, String(input.agent || ''), String(input.key || ''), input.on === false); return json(response, 200, marketList(desk)); }
       if (url.pathname === '/api/agents/login' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.agents.login(aiProvider(input.provider || 'claude'), String(input.profile || ''), { background: input.background === true })); }
       if (url.pathname === '/api/agents/login' && request.method === 'GET') return json(response, 200, desk.agents.loginJob(aiProvider(url.searchParams.get('provider') || 'claude')));
       // OpenRouter key for agents (and Jev): checked with OpenRouter first, saved encrypted only when it works. Never echoed back.

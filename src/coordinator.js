@@ -31,6 +31,7 @@ import { Evidence } from './browser.js';
 import { Monitor } from './monitor.js';
 import { Files } from './files.js';
 import { agentTools } from './agent-tools.js';
+import { toolsOff, runAgentId, filterInventory, filterSlash } from './market.js';
 import { randomUUID } from 'node:crypto';
 import { issueBranch, uniqueBranch, provisionalTitle } from './branches.js';
 import { effectiveRepository } from './project-detect.js';
@@ -716,6 +717,8 @@ export class Desk {
         // What the agent may not touch: Rex Desk's data, the installed app, and the server it runs inside (see app-guard.js).
         guard: { data: process.env.REX_DATA_DIR || this.store.directory, install: process.env.REX_DESK_EXE ? path.dirname(process.env.REX_DESK_EXE) : '', serverPid: process.pid }, projectDirectory: run.projectPath && existsSync(run.projectPath) ? run.projectPath : projectHere, token,
         sourcePath: this.store.config().repositories.find(item => item.id === run.repositoryId)?.path,
+        // MCP servers switched off for this agent on the Market page are blocked in its session too.
+        mcpOff: [...toolsOff(this.store, runAgentId(run))].filter(key => key.startsWith('mcp:')).map(key => key.slice(4)),
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' || run.provider === 'openrouter' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), requeue: text => this.requeue(runId, text), extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
@@ -1186,13 +1189,13 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // One source for what an agent has: its instructions (toolsText) and its profile (/api/agents/tools) both read this.
   toolsInventory(run) {
     const project = run?.worktree || run?.projectPath || '';
-    try { return this.toolbox.inventory(project); } catch { return { servers: [], skills: [], moreSkills: 0, items: { servers: [], skills: [], more: [] } }; }
+    try { return filterInventory(this.toolbox.inventory(project), toolsOff(this.store, runAgentId(run))); } catch { return { servers: [], skills: [], moreSkills: 0, items: { servers: [], skills: [], more: [] } }; }
   }
   // The run an agent's profile describes: its personal chat, or (no chat yet) its own folder.
   toolsRunOf(agentId) {
-    if (agentId === 'main') { const main = latestLocalMain(this.store.list('run')); return main || { projectPath: '' }; }
+    if (agentId === 'main') { const main = latestLocalMain(this.store.list('run')); return main || { projectPath: '', main: true }; }
     const agent = this.store.get('specialist', agentId); if (!agent) return { projectPath: '' };
-    return (agent.runId && this.store.get('run', agent.runId)) || { projectPath: this.specialists.folder(agent) || '' };
+    return (agent.runId && this.store.get('run', agent.runId)) || { projectPath: this.specialists.folder(agent) || '', specialistId: agent.id };
   }
   toolsText(run) {
     // Server names and a skill count, not a line per server and skill: the details are one desk_find away (L62).
@@ -1818,7 +1821,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   slashTools(run) {
     const agentId = run.specialistId || (run.roomAgent && run.roomAgent !== 'main' ? run.roomAgent : '');
     const agent = agentId ? this.store.get('specialist', agentId) : null;
-    try { return agentTools({ profile: this.accountFor(run) || agent?.profile || this.agents.selected(run.provider || 'claude') || '', projectPath: this.specialists.folder(agent) || [run.projectPath].find(folder => folder && existsSync(folder)) || '' }); } catch { return null; }
+    try { return filterSlash(agentTools({ profile: this.accountFor(run) || agent?.profile || this.agents.selected(run.provider || 'claude') || '', projectPath: this.specialists.folder(agent) || [run.projectPath].find(folder => folder && existsSync(folder)) || '' }), toolsOff(this.store, runAgentId(run))); } catch { return null; }
   }
   // The usage of each signed-in account: the share of its 5-hour and weekly limits used, and when each resets. Claude Code and
   // Codex report it while they work, so it is as fresh as the account's last turn. Kept per account, never the sign-in itself.

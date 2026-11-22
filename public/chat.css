@@ -2918,3 +2918,53 @@ html:has(.iv[open]){overflow:hidden}
   .ny-answer{font-size:15px}
   .ny-dact .btn,.ny-opts .btn{min-height:34px}
 }
+
+/* Market: a grouped settings list. A bar with the agent and search, a segmented control, then one inset group per kind. */
+.page.mk{max-width:760px;padding:20px 20px 40px;display:flex;flex-direction:column;gap:14px}
+.mk-bar{display:flex;gap:10px;align-items:center}
+.mk-for{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.mk-for select{min-width:180px;max-width:260px;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px}
+.mk-search{flex:1;min-width:0;height:30px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px}
+.mk-seg{display:flex;align-self:flex-start;padding:2px;border-radius:8px;background:color-mix(in srgb,var(--ink) 7%,transparent);gap:2px;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.mk-seg button{border:0;background:none;color:var(--ink);font:inherit;font-size:12.5px;padding:4px 12px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.mk-seg button.on{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.18)}
+.mk-group h3{margin:6px 4px 6px;font-size:12px;font-weight:600;color:var(--muted)}
+.mk-group h3 .cnt{font-weight:400}
+.mk-list,.mk-add{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+.mk-row{display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 14px}
+.mk-row+.mk-row{border-top:1px solid var(--line)}
+.mk-row[hidden],.mk-group[hidden]{display:none}
+.mk-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.mk-text b{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mk-desc,.mk-bad,.mk-text small{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mk-text small{font-size:11.5px}
+.mk-bad{color:var(--bad,#d64545)}
+.mk-row.off .mk-text b{color:var(--muted)}
+.mk-remove{border:0;background:none;color:var(--muted);font:inherit;font-size:12px;padding:4px 6px;border-radius:6px;cursor:pointer;opacity:0}
+.mk-row:hover .mk-remove,.mk-remove:focus-visible{opacity:1}
+.mk-remove:hover{color:var(--bad,#d64545)}
+@media (hover:none){.mk-remove{opacity:1}}
+.mk-add summary{display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 14px;cursor:pointer;list-style:none}
+.mk-add summary::-webkit-details-marker{display:none}
+.mk-plus{display:grid;place-items:center;width:28px;height:28px;border-radius:7px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);flex:none}
+.mk-add-body{display:flex;flex-direction:column;gap:8px;padding:0 14px 12px}
+.mk-add-body textarea{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);font:12.5px ui-monospace,Consolas,monospace;resize:vertical}
+.mk-add-foot{display:flex;align-items:center;gap:10px;justify-content:space-between}
+.mk-add-foot .tb-kinds{display:flex;flex-wrap:wrap;gap:4px}
+.mk-add-foot code{font-size:11px;color:var(--muted)}
+.mk-result{margin:0;padding:0;list-style:none;font-size:12.5px}
+.mk-result .bad{color:var(--bad,#d64545)}
+@media (max-width:760px){
+  .page.mk{padding:12px 12px 32px}
+  .mk-bar{flex-direction:column;align-items:stretch}
+  .mk-for select{flex:1;max-width:none}
+  .mk-seg{align-self:stretch}
+  .mk-seg button{flex:1}
+  .mk-add-foot .tb-kinds{display:none}
+}
+.mk-row{min-height:48px;padding:7px 14px}
+.mk-used{flex:none;font-size:12px;color:var(--muted);white-space:nowrap}
+.mk-text .mk-used-sm{display:none}
+.page.mk,.page.mk>*{min-width:0;max-width:100%;box-sizing:border-box}
+@media (max-width:760px){.mk-used{display:none}.mk-text .mk-used-sm{display:block}.page.mk{width:100%}}
+.page.mk{width:100%}.mk-search,.mk-for select{height:32px}

@@ -214,18 +214,19 @@ test('a removed task app stays removed after leaving and returning while the sav
 });
 
 // While a Settings page waits on the server it shows grey skeleton rows, not a Loading text.
-test('Tools and skills shows a skeleton while it loads', async () => {
+test('the Market page opens from the sidebar, lists what agents can use, and Settings has no Tools section', async () => {
   const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
-  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false });
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
   const browser = await chromium.launch();
   try {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.route('**/api/toolbox', () => {}); // never answers
     await page.goto(`http://127.0.0.1:${app.server.address().port}/`); await page.waitForTimeout(2500);
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await page.evaluate(() => document.querySelector('[data-open="market"]').click()); await page.waitForTimeout(600);
+    await page.waitForTimeout(1200);
+    assert.ok(await page.locator('.page.mk .mk-row').count() >= 1, 'rows once loaded (Rex Desk itself at least)');
+    assert.ok(await page.locator('.page.mk .mk-seg button').count() === 5, 'All, Skills, Commands, MCP, Connectors');
     await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
-    await page.evaluate(() => document.querySelector('[data-st-section="tools"]').click()); await page.waitForTimeout(800);
-    assert.ok(await page.locator('.settings-pop .st-skel .st-skel-row').count() >= 3, 'skeleton rows are shown');
-    assert.ok(!/Loading/.test(await page.locator('.settings-pop [data-st-panel]').innerText()), 'no Loading text');
+    assert.equal(await page.locator('[data-st-section="tools"]').count(), 0, 'no Tools and skills section in Settings');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });

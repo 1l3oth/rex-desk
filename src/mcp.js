@@ -9,6 +9,7 @@ import { cachedTaskMedia } from './images.js';
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { findTask as findLocalTask } from './local-tasks.js';
+import { toolsOff, runAgentId, useIsOff } from './market.js';
 
 const runId = z.string().optional().describe('Run ID. Omit when using a run-scoped agent connection.');
 const reply = value => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] });
@@ -477,6 +478,9 @@ export function createMcp(desk, scope) {
     async input => {
       const kind = input.kind === 'any' ? '' : input.kind;
       const result = await desk.toolbox.find(input.query, { project: toolProject(), limit: input.limit, kind });
+      // What the person switched off for this agent on the Market page is not offered.
+      const off = toolsOff(desk.store, runAgentId(scope.runId ? desk.store.get('run', scope.runId) : null));
+      if (off.size) result.found = (result.found || []).filter(item => !useIsOff(off, item.use));
       // Rex Desk's own deferred tools are not skills, so they only join a tool-or-any search.
       if (kind !== 'skill') { const natives = findDeferred(input.query, input.limit); if (natives.length) { result.found = [...natives, ...(result.found || [])]; result.searched = `${result.searched}; plus ${deferred.size} built-in Rex Desk tools`; } }
       return result;
@@ -497,6 +501,7 @@ export function createMcp(desk, scope) {
         return native.handler(z.object(native.schema).parse(input.input || {}), extra);
       }
       // In a mode that asks before acting, a tool that changes things waits for the person's yes, like any other tool would.
+      if (useIsOff(toolsOff(desk.store, runAgentId(run)), input.use)) throw new Error('The person switched this off for you on the Market page.');
       const target = await desk.toolbox.resolve(input.use, project);
       if (target.kind === 'tool' && !target.tool.readOnly && run && !['bypassPermissions', 'acceptEdits', 'auto', ''].includes(run.permissionMode || '')) {
         const answer = await desk.ask(scope.runId, { kind: 'approval', title: `Approve ${input.use}`, request: { tool: input.use, input: input.input }, method: 'claude-permission' });

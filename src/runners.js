@@ -152,7 +152,7 @@ export class ClaudeRunner {
       permissionMode: mode, ...(mode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
       ...(this.run.effort ? { effort: this.run.effort } : {}),
       // Claude Code's own question prompt would not reach the dashboard; the agent asks through desk_ask instead.
-      disallowedTools: this.run?.locked ? ['AskUserQuestion', 'Bash', 'PowerShell', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'Skill', 'Workflow'] : ['AskUserQuestion'],
+      disallowedTools: [...(this.run?.locked ? ['AskUserQuestion', 'Bash', 'PowerShell', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'Skill', 'Workflow'] : ['AskUserQuestion']), ...(this.mcpOff || []).filter(name => /^[w-]+$/.test(name)).map(name => `mcp__${name}`)],
       additionalDirectories: this.run?.locked ? [] : [this.artifactDirectory, this.uploadsDirectory, this.projectDirectory].filter(Boolean),
       settingSources: this.run?.locked ? [] : ['user', 'project', 'local'],
       settings: COST_SETTINGS,
