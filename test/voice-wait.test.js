@@ -29,3 +29,12 @@ test('microphone errors keep their real name', async () => {
   const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
   assert.doesNotMatch(composer, /catch \{[^}]*could not use the microphone/);
 });
+
+test('the voice guide has the same steps in English, Khmer and Korean, and the easiest engine is the default', () => {
+  const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
+  const guide = /VOICE_GUIDE = \{([\s\S]*?)\n\};/.exec(composer)[1];
+  for (const language of ["en", "km", "ko"]) assert.ok(guide.includes(`  ${language}: [`), language);
+  assert.doesNotMatch(composer, /<select data-v-language/);
+  const server = readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+  assert.match(server, /engine \|\| \(desk\.jev\.apiKey\(\) \? 'gemini' : elevenKey\(\) \? 'elevenlabs' : 'local'\)/);
+});

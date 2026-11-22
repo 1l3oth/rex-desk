@@ -532,6 +532,12 @@ export const redrawAttachments = drawChips;
 // ---------- voice engine: which speech-to-text understands the person best ----------
 const ENGINE = { local: [t('On this computer'), t('Private and free. Weak on Khmer.')], gemini: [t('Gemini (online)'), t('Uses your OpenRouter key. Good with Khmer.')], elevenlabs: [t('ElevenLabs Scribe (online)'), t('Its own key. Strong across languages.')] };
 const LANG = [['km', t('Khmer')], ['en', t('English')], ['ko', t('Korean')]];
+// The beginner setup steps, in the language the person speaks (not the screen language: Korean has no screen language yet).
+export const VOICE_GUIDE = {
+  en: ['Press the microphone and allow it when asked. On Windows, also open Settings > Privacy > Microphone and turn on "Let desktop apps access your microphone".', 'Pick the language you speak above.', 'Speak, then pause. Your words appear in the message box: check them, then send.', 'Want voice without the internet? Install "On this computer" below. Until it is ready, Rex Desk uses an online voice.'],
+  km: ['ចុចមីក្រូហ្វូន ហើយអនុញ្ញាតវានៅពេលវាសួរ។ នៅលើ Windows សូមបើក Settings > Privacy > Microphone ហើយបើក "Let desktop apps access your microphone"។', 'ជ្រើសភាសាដែលអ្នកនិយាយនៅខាងលើ។', 'និយាយ រួចឈប់បន្តិច។ ពាក្យរបស់អ្នកនឹងបង្ហាញក្នុងប្រអប់សារ៖ ពិនិត្យវា រួចផ្ញើ។', 'ចង់ប្រើសំឡេងដោយគ្មានអ៊ីនធឺណិត? ដំឡើង "On this computer" នៅខាងក្រោម។ មុនពេលវារួចរាល់ Rex Desk ប្រើសំឡេងតាមអ៊ីនធឺណិត។'],
+  ko: ['마이크를 누르고 권한을 물으면 허용하세요. Windows에서는 설정 > 개인 정보 > 마이크에서 "데스크톱 앱이 마이크에 액세스하도록 허용"도 켜세요.', '위에서 말할 언어를 고르세요.', '말한 뒤 잠시 멈추세요. 말한 내용이 메시지 상자에 나타납니다. 확인한 뒤 보내세요.', '인터넷 없이 음성을 쓰려면 아래에서 "On this computer"를 설치하세요. 준비될 때까지 Rex Desk는 온라인 음성을 씁니다.']
+};
 async function voiceDialog(ctx) {
   const { api, toast, esc } = ctx;
   document.querySelector('.dialog-back.voice')?.remove();
@@ -561,7 +567,8 @@ async function voiceDialog(ctx) {
   const draw = () => {
     const language = voiceLanguage(ctx);
     back.innerHTML = `<form class="dialog vdialog"><h2>${t`Voice`}</h2>
-      <label>${t`I speak`}<select data-v-language>${LANG.map(([value, label]) => `<option value="${value}" ${value === language ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      <div class="vlang"><span>${t`I speak`}</span>${pickerHtml(ctx, { id: 'v-language', label: t('I speak'), compact: true, value: language, items: LANG.map(([value, label]) => ({ value, label })) })}</div>
+      <details class="vguide"><summary>${t`How to set up voice`}</summary><ol>${(VOICE_GUIDE[language] || VOICE_GUIDE.en).map(step => `<li>${esc(step)}</li>`).join('')}</ol></details>
       <fieldset class="vengines"><legend>${t`Turn speech into text with`}</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] && !(key === 'local' && info.local?.starting?.length) ? hint : key === 'local' ? localHint() : key === 'gemini' ? t('Needs your OpenRouter key: Settings → Jev and voice.') : t('Paste a key below to use it.')}</small></span></label>`).join('')}</fieldset>
       <label>${t`ElevenLabs API key`}<span class="vkey"><input type="password" data-v-key autocomplete="off" spellcheck="false" placeholder="${info.available.elevenlabs ? t('Saved. Paste a new key to replace it.') : t('From elevenlabs.io → Profile → API keys')}"><button type="button" class="btn small" data-v-savekey>${t`Save key`}</button>${info.available.elevenlabs ? `<button type="button" class="btn small quiet danger" data-v-dropkey>${t`Remove`}</button>` : ''}</span></label>
       <section class="vcompare"><h3>${t`Which one understands you?`}</h3><p class="muted small">${t`Press Record, say one sentence, then Stop. It goes through every engine that is ready, so you can pick the best. Online engines receive this recording.`}</p>
@@ -573,7 +580,7 @@ async function voiceDialog(ctx) {
   draw();
   const choose = async engine => { try { info = { ...info, engine: (await api('/voice/engine', { method: 'POST', data: { engine } })).engine }; toast(t`Voice now uses ${ENGINE[engine][0]}.`); draw(); } catch (error) { toast(error.message, true); draw(); } };
   back.addEventListener('change', event => {
-    if (event.target.matches('[data-v-language]')) { setLanguage(event.target.value); results = null; draw(); }
+    if (event.target.matches('#v-language')) { setLanguage(event.target.value); results = null; draw(); }
     if (event.target.name === 'engine') void choose(event.target.value);
   });
   back.addEventListener('click', async event => {

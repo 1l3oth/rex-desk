@@ -2525,5 +2525,6 @@
  "No microphone found (NotFoundError). Plug one in or pick one in your sound settings, then try again.": "រកមិនឃើញមីក្រូហ្វូន (NotFoundError)។ ដោតមួយ ឬជ្រើសមួយនៅក្នុងការកំណត់សំឡេង រួចសាកម្តងទៀត។",
  "The microphone is busy (NotReadableError). Close other apps using it, like Zoom or Teams, then try again.": "មីក្រូហ្វូនកំពុងជាប់រវល់ (NotReadableError)។ បិទកម្មវិធីផ្សេងដែលកំពុងប្រើវា ដូចជា Zoom ឬ Teams រួចសាកម្តងទៀត។",
  "Rex Desk could not use the microphone ({0}). Try again.": "Rex Desk មិនអាចប្រើមីក្រូហ្វូនបានទេ ({0})។ សាកម្តងទៀត។",
- "Starting the voice engine ({0}s). Voice messages use another engine until it is ready.": "កំពុងចាប់ផ្តើមម៉ាស៊ីនសំឡេង ({0}s)។ សារជាសំឡេងប្រើម៉ាស៊ីនផ្សេងរហូតដល់វារួចរាល់។"
+ "Starting the voice engine ({0}s). Voice messages use another engine until it is ready.": "កំពុងចាប់ផ្តើមម៉ាស៊ីនសំឡេង ({0}s)។ សារជាសំឡេងប្រើម៉ាស៊ីនផ្សេងរហូតដល់វារួចរាល់។",
+ "How to set up voice": "របៀបរៀបចំសំឡេង"
 }
