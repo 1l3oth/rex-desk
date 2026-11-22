@@ -133,23 +133,31 @@ fn badge_dot() -> &'static [u8] {
 // Wry's default flags stay. Pop-ups share the main window's browser, so they get the same flags.
 const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
 
-// Windows (WebView2): the window never showed the microphone prompt, so voice failed with NotAllowedError. Only the
-// microphone, only for Rex Desk's own page (127.0.0.1:4317) in the main window, is allowed; the person still starts every
-// recording with the mic button, and Windows' own microphone privacy switch still applies. Camera, other sites and pop-ups
-// keep WebView2's normal handling.
+// Windows (WebView2): the window never showed the microphone prompt, so voice failed with NotAllowedError. For the
+// microphone on Rex Desk's own page (127.0.0.1:4317) in the main window, Rex Desk asks itself with a Windows Yes/No box;
+// WebView2 remembers a Yes, a No is not saved so the next press of the mic asks again. Windows' own microphone privacy
+// switch still applies. Camera, other sites and pop-ups keep WebView2's normal handling.
 #[cfg(windows)]
 fn allow_own_microphone(window: &tauri::WebviewWindow) {
-    let _ = window.with_webview(|webview| unsafe {
-        use webview2_com::Microsoft::Web::WebView2::Win32::{COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW};
+    let owner = window.hwnd().map(|handle| handle.0 as isize).unwrap_or(0);
+    let _ = window.with_webview(move |webview| unsafe {
+        use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2PermissionRequestedEventArgs3, COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW, COREWEBVIEW2_PERMISSION_STATE_DENY};
+        use windows::core::Interface;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, IDYES, MB_ICONQUESTION, MB_SETFOREGROUND, MB_YESNO};
         let Ok(core) = webview.controller().CoreWebView2() else { return };
-        let handler = webview2_com::PermissionRequestedEventHandler::create(Box::new(|_, args| {
+        let handler = webview2_com::PermissionRequestedEventHandler::create(Box::new(move |_, args| {
             let Some(args) = args else { return Ok(()) };
             let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
             args.PermissionKind(&mut kind)?;
             let mut uri = windows::core::PWSTR::null();
             args.Uri(&mut uri)?;
             let own = tauri::Url::parse(&webview2_com::take_pwstr(uri)).map(|url| url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port() == Some(4317)).unwrap_or(false);
-            if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE && own { args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?; }
+            if kind != COREWEBVIEW2_PERMISSION_KIND_MICROPHONE || !own { return Ok(()) }
+            let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+            let (text, title) = (wide("Allow Rex Desk to use your microphone for voice messages?"), wide("Rex Desk"));
+            let yes = MessageBoxW(owner as _, text.as_ptr(), title.as_ptr(), MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND) == IDYES;
+            if !yes { if let Ok(more) = args.cast::<ICoreWebView2PermissionRequestedEventArgs3>() { let _ = more.SetSavesInProfile(false); } }
+            args.SetState(if yes { COREWEBVIEW2_PERMISSION_STATE_ALLOW } else { COREWEBVIEW2_PERMISSION_STATE_DENY })?;
             Ok(())
         }));
         let mut token = 0i64;
