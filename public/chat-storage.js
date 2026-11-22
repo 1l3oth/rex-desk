@@ -36,8 +36,10 @@ export async function loadStorage(ctx, state, { keepPlace = true, onUpdate } = {
   } catch (error) { box.error = error.message; }
   if (onUpdate) box.onUpdate = onUpdate;
   waitForCount(ctx, state);
-  // The cloud side: the account's database and file space, from its plan.
-  box.billing = await ctx.api('/billing', { timeout: 8000 }).catch(() => null);
+  // The cloud side: the account's database and file space, from its plan. It can take a few seconds, so the page shows
+  // first and the cloud rows fill in (grey rows until then).
+  if (!box.billing) box.billingLoading = true;
+  void ctx.api('/billing', { timeout: 8000 }).catch(() => null).then(billing => { box.billing = billing; box.billingLoading = false; box.onUpdate?.(); });
 }
 function waitForCount(ctx, state, tries = 0) {
   clearTimeout(countTimer);
@@ -62,7 +64,7 @@ function usageHtml(ctx, box) {
   const legend = (usage?.kinds || []).map(kind => `<li><svg width="10" height="10" aria-hidden="true"><rect width="10" height="10" rx="3" fill="${KIND_COLORS[kind.id]}"/></svg><span>${ctx.esc(labels[kind.id])}</span><b>${size(kind.bytes)}</b></li>`).join('');
   const space = box.billing?.space, db = space?.database, files = space?.files;
   const cloudRow = (label, used, limit) => used == null ? '' : `<div class="sg-cloud-row"><span>${label}</span><svg class="sg-meter" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="${ctx.esc(`${label}: ${size(used)}${limit ? ` / ${size(limit)}` : ''}`)}"><rect width="100" height="8" rx="4" class="sg-meter-back"/><rect width="${limit ? Math.max(1, Math.min(100, used / limit * 100)).toFixed(1) : 0}" height="8" rx="4" class="sg-meter-fill"/></svg><b>${size(used)}${limit ? ` <small>/ ${size(limit)}</small>` : ''}</b></div>`;
-  const cloud = !box.billing ? '' : !box.billing.signedIn ? `<p class="muted small">${t`Sign in with your Rex Desk account to see your cloud space.`}</p>`
+  const cloud = !box.billing ? (box.billingLoading ? skeletonHtml(2) : '') : !box.billing.signedIn ? `<p class="muted small">${t`Sign in with your Rex Desk account to see your cloud space.`}</p>`
     : (db || files) ? `${cloudRow(t('Cloud database'), db?.used, db?.limit)}${cloudRow(t('Cloud files'), files?.used, files?.limit)}<p class="muted small">${t`Cleaning up here also deletes the cloud copy. The cloud number updates within a few minutes.`}</p>`
     : `<p class="muted small">${t`Cloud backup is off, so nothing is kept in the cloud.`}</p>`;
   return `<section class="sg-card" aria-labelledby="sg-use"><div class="sg-head"><h3 id="sg-use">${t`On this computer`}</h3>${box.data.counting && usage ? `<small class="muted">${t`Updating…`}</small>` : ''}<b class="sg-total">${usage ? size(usage.total) : ''}</b></div>
