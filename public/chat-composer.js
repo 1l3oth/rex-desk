@@ -232,17 +232,28 @@ const voiceLanguage = ctx => { try { return localStorage.getItem('jev-language')
 // they are said, so they are in the box the moment the person stops, instead of being worked out from a recording after.
 // Where it cannot be used (the desktop app's window, no network), Rex Desk's own engine records as before.
 // Live words: while the mic listens, what was said so far shows in the message box after anything already typed, and is
-// replaced as the words change. The text typed before speaking is never touched; when nothing was said it is put back.
+// replaced as the words change. Text typed before or while speaking is never touched; when nothing was said it is put back.
+// The words always belong to the chat the mic started in: after a switch they land in that chat's saved draft.
 function liveStart(ctx) {
   const box = document.getElementById('draft'); if (!box) return null;
-  return { key: ctx.draftKey(), before: box.value.trim(), placeholder: box.getAttribute('placeholder') || '', shown: '' };
+  return { key: ctx.draftKey(), before: box.value.trim(), placeholder: box.getAttribute('placeholder') || '', shown: '', written: box.value };
 }
 function liveShow(ctx, live, text, { final = false } = {}) {
-  const box = document.getElementById('draft'); if (!live || !box || ctx.draftKey() !== live.key) return;
+  if (!live) return;
+  const box = document.getElementById('draft'), here = box && ctx.draftKey() === live.key;
+  const current = here ? box.value : String(ctx.ui.drafts.get(live.key) ?? live.written);
+  // Typed since the last update: keep it as the text before the words, without the words already shown.
+  if (current !== live.written) {
+    const typed = current.trim();
+    live.before = live.shown && typed.endsWith(live.shown) ? typed.slice(0, -live.shown.length).trim() : typed;
+  }
   const words = String(text || '').trim(); live.shown = words;
-  box.value = words ? (live.before ? `${live.before} ${words}` : words) : live.before;
-  ctx.ui.drafts.set(live.key, box.value);
-  if (final && words) { ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(live.key); box.focus(); }
+  const value = words ? (live.before ? `${live.before} ${words}` : words) : live.before;
+  live.written = value; ctx.ui.drafts.set(live.key, value);
+  if (final && words) { ctx.ui.voiceDrafts = ctx.ui.voiceDrafts || new Set(); ctx.ui.voiceDrafts.add(live.key); }
+  if (!here) return;
+  box.value = value; live.written = box.value;
+  if (final && words) box.focus();
   box.dispatchEvent(new Event('input', { bubbles: true }));
 }
 // Where words cannot come live (the on-computer engine), the box says it is listening until the words arrive.
@@ -311,13 +322,15 @@ export function warmVoice(ctx) {
   void fetch(`/api/voice/prepare?language=${language}`, { method: 'POST', headers: { 'x-rex-desk': '1' } }).catch(() => { warmed = ''; });
 }
 const STARTING_TRIES = 12, STARTING_WAIT_MS = 5000;
-async function hearWords(ctx, wav) {
+// alive: false once the turn is cancelled (Voice mode closed), so a retry for a still-starting engine stops there.
+async function hearWords(ctx, wav, { alive = () => true } = {}) {
   for (let attempt = 0; ; attempt++) {
     try { return await transcribe(wav, voiceLanguage(ctx)); }
     catch (error) {
-      if (!error.starting || attempt >= STARTING_TRIES) throw error;
+      if (!error.starting || attempt >= STARTING_TRIES || !alive()) throw error;
       if (!attempt) ctx.toast(t('Loading the voice model. The first time after a restart takes a minute or two.'));
       await new Promise(resolve => setTimeout(resolve, STARTING_WAIT_MS));
+      if (!alive()) throw Object.assign(new Error('cancelled'), { cancelled: true });
     }
   }
 }
@@ -422,19 +435,22 @@ export async function voiceTurn(ctx, { onState = () => {} } = {}) {
   onState('listening');
   const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => hearLevel(Math.min(1, level * 6)), longest: 90000, pause: 1800 });
   listening = recording; micButton()?.classList.add('rec');
+  // The words go to the chat this turn started in, and only while Voice mode is still on for it.
+  const turnOf = voiceTurns, chat = ctx.draftKey(), alive = () => voiceTurns === turnOf && ctx.draftKey() === chat;
   async function finish() {
     if (listening !== recording) return;
     listening = null; micLevel = 0; recording.stop(); micButton()?.classList.remove('rec');
     if (!recording.heard) { onState('idle'); return; }
     transcribing = true; onState('thinking');
-    try { const heard = await hearWords(ctx, recording.wav()); await sendSpoken(ctx, String(heard.text || '').trim()); }
-    catch (error) { ctx.toast(/no voice engine|not installed|install/i.test(error.message) ? t('Voice mode needs a way to turn speech into words here: add an OpenRouter key (or install the voice model) in Settings → Jev and voice.') : t`Voice mode: ${error.message}`, true); }
+    try { const heard = await hearWords(ctx, recording.wav(), { alive }); if (alive()) await sendSpoken(ctx, String(heard.text || '').trim()); }
+    catch (error) { if (error.cancelled || !alive()) return; ctx.toast(/no voice engine|not installed|install/i.test(error.message) ? t('Voice mode needs a way to turn speech into words here: add an OpenRouter key (or install the voice model) in Settings → Jev and voice.') : t`Voice mode: ${error.message}`, true); }
     finally { transcribing = false; onState('idle'); }
   }
   return true;
 }
 // Ends a Voice mode turn that is still listening, without sending anything.
-export function cancelVoiceTurn() { const turn = listening; if (!turn) return; listening = null; micLevel = 0; turn.stop(); micButton()?.classList.remove('rec'); }
+let voiceTurns = 0;
+export function cancelVoiceTurn() { voiceTurns++; const turn = listening; if (!turn) return; listening = null; micLevel = 0; turn.stop(); micButton()?.classList.remove('rec'); }
 
 // Hold Space to talk: past a short hold it listens until Space is let go, then the words land in the message box.
 // A quick tap still types a space. It works in the message box, or anywhere that is not another text field.

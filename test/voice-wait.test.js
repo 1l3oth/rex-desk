@@ -40,3 +40,14 @@ test('the voice guide has the same steps in English, Khmer and Korean, and recor
   assert.match(server, /\?\.engine \|\| 'local';/);
   assert.match(server, /wanted === 'local' && !ready\.local\) return json\(response, 400/);
 });
+
+test('live words keep text typed while speaking and stay with the chat they started in; a cancelled Voice mode turn sends nothing', () => {
+  const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
+  const show = /function liveShow[\s\S]*?\n\}/.exec(composer)[0];
+  assert.match(show, /current !== live\.written/, 'typing since the last update becomes the text before the words');
+  assert.match(show, /ctx\.ui\.drafts\.set\(live\.key, value\)/, 'the words are saved to the original chat even after a switch');
+  assert.doesNotMatch(show, /ctx\.draftKey\(\) !== live\.key\) return/);
+  assert.match(composer, /cancelVoiceTurn\(\) \{ voiceTurns\+\+/);
+  assert.match(composer, /hearWords\(ctx, recording\.wav\(\), \{ alive \}\); if \(alive\(\)\) await sendSpoken/);
+  assert.match(composer, /if \(!alive\(\)\) throw Object\.assign\(new Error\('cancelled'\)/);
+});
