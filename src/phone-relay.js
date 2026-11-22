@@ -3,7 +3,7 @@
 // (phone-relay-frame.js). Each one is played against this desk's own server, so the phone sees the same app as here.
 // A phone the desk has never seen gets a 6-digit code: the same code shows on the desk, and only the person's OK there lets it in.
 import http from 'node:http';
-import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { relayFrame, readRelayFrame, RELAY_OP } from './phone-relay-frame.js';
 
 export const RELAY_URL = 'wss://api.rexdesk.dev/v1/relay/desk';
@@ -16,10 +16,14 @@ const same = (left, right) => { const a = Buffer.from(String(left || '')), b = B
 const cleanId = value => String(value || '').replace(/[^\w.-]/g, '').slice(0, 80);
 const cleanName = value => String(value || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 80) || 'A phone';
 const json = value => Buffer.from(JSON.stringify(value));
+// A phone's id works like a key: whoever holds it is that phone. So the desk keeps only its hash, and the screens (and the
+// snapshot other devices see) only a short reference to that hash, which cannot be sent back as an id.
+const keyOf = id => createHash('sha256').update(`rex-phone:${id}`).digest('hex');
+const refOf = key => key.slice(0, 20);
 
 const STOP_CODES = { 4001: 'replaced', 4002: 'not-paid', 4003: 'signed-out' };
 export class PhoneRelay {
-  constructor(desk, { url = RELAY_URL, socket = (target) => new WebSocket(target), port = () => desk.port } = {}) {
+  constructor(desk, { url = RELAY_URL, socket = (target, token) => new WebSocket(target, { headers: { authorization: `Bearer ${token}` } }), port = () => desk.port } = {}) {
     this.desk = desk; this.url = url; this.makeSocket = socket; this.port = port;
     // Only requests carrying this secret count as relayed. It never leaves this process.
     this.secret = randomBytes(24).toString('base64url');
@@ -32,28 +36,35 @@ export class PhoneRelay {
   // ---------- which phones may come in ----------
   isRelayed(request) { return same(request.headers['x-rex-relay'], this.secret); }
   device(request) { return { id: cleanId(request.headers['x-rex-relay-device']), name: cleanName(decodeURIComponent(String(request.headers['x-rex-relay-name'] || ''))) }; }
-  approved(deviceId) { return Boolean(deviceId) && this.settings().devices.some(item => item.id === deviceId); }
+  approved(deviceId) { const key = deviceId ? keyOf(deviceId) : ''; return Boolean(key) && this.settings().devices.some(item => item.key === key); }
   // The code a new phone shows, kept for ten minutes. Asking again within that time shows the same code.
   pendingFor({ id, name }) {
     const at = Date.now(), live = this.settings().pending.filter(item => item.until > at);
-    let item = live.find(entry => entry.id === id);
+    const key = keyOf(id); let item = live.find(entry => entry.key === key);
     if (!item) {
-      item = { id, name, code: String(randomInt(0, 1000000)).padStart(6, '0'), createdAt: new Date(at).toISOString(), until: at + PENDING_MS };
+      item = { key, ref: refOf(key), name, code: String(randomInt(0, 1000000)).padStart(6, '0'), createdAt: new Date(at).toISOString(), until: at + PENDING_MS };
       live.push(item); while (live.length > MAX_PENDING) live.shift();
-      this.store.event('', 'phone-approval', { device: id, name, code: item.code }, true);
+      this.store.event('', 'phone-approval', { device: item.ref, name, code: item.code }, true);
     }
     this.save({ pending: live }); return item;
   }
-  pending() { const at = Date.now(); return this.settings().pending.filter(item => item.until > at).map(({ id, name, code, createdAt }) => ({ id, name, code, createdAt })); }
-  approve(deviceId, code) {
-    const settings = this.settings(), item = settings.pending.find(entry => entry.id === deviceId && entry.until > Date.now());
+  // The screens pass the short reference ("id" in what they get); never the phone's own id.
+  pending() { const at = Date.now(); return this.settings().pending.filter(item => item.until > at).map(({ ref, name, code, createdAt }) => ({ id: ref, name, code, createdAt })); }
+  approve(ref, code) {
+    const settings = this.settings(), item = settings.pending.find(entry => entry.ref === ref && entry.until > Date.now());
     if (!item || !same(String(code || ''), item.code)) throw new Error('That phone is no longer waiting. Open Rex Desk on the phone again for a new code.');
-    this.save({ pending: settings.pending.filter(entry => entry.id !== deviceId), devices: [...settings.devices.filter(entry => entry.id !== deviceId), { id: item.id, name: item.name, at: new Date().toISOString() }] });
+    this.save({ pending: settings.pending.filter(entry => entry.ref !== ref), devices: [...settings.devices.filter(entry => entry.key !== item.key), { key: item.key, ref: item.ref, name: item.name, at: new Date().toISOString() }] });
     return { approved: true };
   }
-  deny(deviceId) { this.save({ pending: this.settings().pending.filter(entry => entry.id !== deviceId) }); return { denied: true }; }
-  forget(deviceId) { this.save({ devices: this.settings().devices.filter(entry => entry.id !== deviceId) }); return { removed: true }; }
-  view() { const settings = this.settings(); return { enabled: Boolean(settings.enabled), state: this.state, url: this.publicUrl, devices: settings.devices, pending: this.pending() }; }
+  deny(ref) { this.save({ pending: this.settings().pending.filter(entry => entry.ref !== ref) }); return { denied: true }; }
+  // A removed phone is cut off at once: its open requests (the live updates stay open) end too.
+  forget(ref) {
+    const gone = this.settings().devices.filter(entry => entry.ref === ref);
+    this.save({ devices: this.settings().devices.filter(entry => entry.ref !== ref) });
+    for (const [streamId, stream] of this.streams) if (gone.some(entry => entry.key === stream.key)) { this.streams.delete(streamId); stream.request?.destroy(); this.send(RELAY_OP.ABORT, streamId); }
+    return { removed: true };
+  }
+  view() { const settings = this.settings(); return { enabled: Boolean(settings.enabled), state: this.state, url: this.publicUrl, devices: settings.devices.map(({ ref, name, at }) => ({ id: ref, name, at })), pending: this.pending() }; }
 
   // ---------- the connection to the relay ----------
   setEnabled(on) { this.save({ enabled: Boolean(on) }); if (on) this.start(); else this.stop(); return this.view(); }
@@ -61,7 +72,8 @@ export class PhoneRelay {
     if (this.socket || !this.settings().enabled || this.desk.closed) return;
     const token = this.desk.net?.token?.(); if (!token) { this.state = 'signed-out'; return; }
     this.state = 'connecting';
-    let socket; try { socket = this.makeSocket(this.url); } catch { return this.retry(); }
+    // The relay checks the sign-in on the upgrade itself, so the token rides on the handshake; HELLO repeats it with the desk's name.
+    let socket; try { socket = this.makeSocket(this.url, token); } catch { return this.retry(); }
     this.socket = socket; socket.binaryType = 'arraybuffer';
     socket.addEventListener('open', () => this.send(RELAY_OP.HELLO, 0, json({ token, desk: this.store.nodeId, name: this.desk.peers?.self?.name || '' })));
     socket.addEventListener('message', event => { try { this.onFrame(readRelayFrame(Buffer.from(event.data))); } catch (error) { this.store.event('', 'phone-relay-error', { message: error.message }); } });
@@ -99,7 +111,7 @@ export class PhoneRelay {
     Object.assign(headers, { 'x-rex-relay': this.secret, 'x-rex-relay-device': cleanId(meta.device?.id), 'x-rex-relay-name': encodeURIComponent(cleanName(meta.device?.name)) });
     const method = /^[A-Z]{3,7}$/.test(String(meta.method)) ? meta.method : 'GET', route = String(meta.path || '/');
     if (!route.startsWith('/')) return this.send(RELAY_OP.ABORT, streamId);
-    const stream = { size: 0 }; this.streams.set(streamId, stream);
+    const device = cleanId(meta.device?.id), stream = { size: 0, key: device ? keyOf(device) : '' }; this.streams.set(streamId, stream);
     stream.request = http.request({ host: '127.0.0.1', port: this.port(), method, path: route, headers }, response => {
       const out = {}; for (const [key, value] of Object.entries(response.headers)) if (!HOP.has(key)) out[key] = value;
       this.send(RELAY_OP.RES, streamId, json({ status: response.statusCode, headers: out }));

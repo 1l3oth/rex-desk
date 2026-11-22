@@ -27,8 +27,9 @@ test('the relay connection says hello with the account and plays phone requests 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     const { desk } = fakeDesk(server.address().port), socket = fakeSocket();
-    const relay = new PhoneRelay(desk, { socket: () => socket });
+    let dialled; const relay = new PhoneRelay(desk, { socket: (url, token) => { dialled = token; return socket; } });
     relay.setEnabled(true); socket.emit('open');
+    assert.equal(dialled, 'account-token');
     const hello = socket.sent[0];
     assert.equal(hello.op, RELAY_OP.HELLO);
     assert.deepEqual(JSON.parse(hello.payload), { token: 'account-token', desk: 'node-1', name: 'Laptop' });
