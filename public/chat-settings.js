@@ -532,7 +532,6 @@ export function openSettings(ctx, section = 'general') {
         }
         const found = await api('/repositories/inspect', { method: 'POST', data: { path: folder } });
         ui.snap.config = await api('/config', { method: 'PUT', data: { ...config(), repositories: [...config().repositories, { name: found.name, path: found.path, ...(found.git === false ? { plain: true } : { baseBranch: found.preferredBranch || 'develop', targetBranch: found.preferredBranch || 'develop' }) }] } });
-        if (found.git === false) await api('/memory/scan', { method: 'POST', data: {} }).catch(() => {});
         await refresh(); toast(t`Added ${found.name}.`); draw(); return;
       }
     } catch (error) { toast(error.message, true); }
