@@ -2837,3 +2837,16 @@ html:has(.iv[open]){overflow:hidden}
 .acct-dialog .or-title-act h3{margin:0;font:inherit;font-size:11.5px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
 .acct-dialog .or-title-act .or-link{padding:0;font-size:13px}
 .acct-dialog .or-field input{width:100%}
+/* Connector logos: colour pictures for most brands; masks for dark brands and the folder (see logoHtml). */
+.cx-logo.cx-img{background:none;-webkit-mask:none;mask:none;object-fit:contain;border-radius:4px}
+.cx-logo[data-icon="vercel"]{-webkit-mask-image:url(/connectors/vercel.svg);mask-image:url(/connectors/vercel.svg)}
+.cx-logo[data-icon="sentry"]{-webkit-mask-image:url(/connectors/sentry.svg);mask-image:url(/connectors/sentry.svg)}
+.cx-logo[data-icon="folder"]{-webkit-mask-image:url(/connectors/folder.svg);mask-image:url(/connectors/folder.svg)}
+/* Add connector cards: every card the same size, name and line below on one line each, cut with an ellipsis. */
+.cx-grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr));grid-auto-rows:1fr;gap:8px}
+.cx-grid>li{display:flex;min-width:0}
+.cx-pick{height:100%;min-width:0;grid-template-columns:24px minmax(0,1fr);align-content:center;padding:10px 12px}
+.cx-pick .cx-logo{width:24px;height:24px}
+.cx-pick small{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:640px){.cx-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:360px){.cx-grid{grid-template-columns:1fr}}

@@ -9,11 +9,15 @@ const TRACKERS = ['orbit', 'flow', 'morningmate'];
 const NAMES = { orbit: 'Orbit', flow: 'Flow', morningmate: 'Morningmate' };
 export const connectorName = type => NAMES[type] || type;
 
-// A real brand mark (Simple Icons, CC0, in public/connectors/) drawn in the text colour through a CSS mask (chat.css,
-// one rule per icon: the page allows no inline styles), or a plain letter tile.
-export const logoHtml = (item, esc) => String(item?.icon || '').startsWith('letter:')
-  ? `<span class="cx-logo cx-letter" aria-hidden="true">${esc(item.icon.slice(7))}</span>`
-  : `<span class="cx-logo" aria-hidden="true" data-icon="${esc(String(item?.icon || '').replace(/\.svg$/, ''))}"></span>`;
+// The company's own logo. Colour marks (public/connectors/color/) show as pictures; dark brands (GitHub, Notion, Vercel,
+// Sentry) and the folder are drawn in the text colour through a CSS mask (chat.css, one rule per icon: the page allows no
+// inline styles), so they stay visible in dark mode. An old letter tile still works for a catalog that names one.
+export const logoHtml = (item, esc) => {
+  const icon = String(item?.icon || '');
+  if (icon.startsWith('letter:')) return `<span class="cx-logo cx-letter" aria-hidden="true">${esc(icon.slice(7))}</span>`;
+  if (icon.startsWith('color/')) return `<img class="cx-logo cx-img" src="/connectors/${esc(icon)}" alt="" aria-hidden="true" loading="lazy" decoding="async">`;
+  return `<span class="cx-logo" aria-hidden="true" data-icon="${esc(icon.replace(/\.svg$/, ''))}"></span>`;
+};
 
 export async function loadConnectors(ctx, state, draw) {
   if (state.extra.connectorsLoading) return;

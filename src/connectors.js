@@ -21,9 +21,9 @@ export const CONNECTOR_TYPES = [
 // ready: it can be connected from the Add connector picker in this version.
 const entry = (id, name, type, icon, auth, gives, extra = {}) => ({ id, name, type, icon, auth, gives, fields: [], ready: false, ...extra });
 export const CONNECTORS = [
-  entry('orbit', 'Orbit', 'tasks', 'letter:O', 'key', ['tasks', 'statuses', 'comments', 'report', 'mcpTools'], { ready: true, fields: ['apiKey', 'baseUrl', 'statusFilter', 'sendReport'], keyHint: 'Orbit: open the goal, then Settings, API, Generate Project Key.', account: 'device' }),
-  entry('flow', 'Flow', 'tasks', 'letter:F', 'key', ['tasks', 'statuses', 'runPresets'], { ready: true, fields: ['apiKey', 'baseUrl', 'projectIds', 'userId', 'statusFilter', 'statusMap'] }),
-  entry('morningmate', 'Morningmate', 'tasks', 'letter:M', 'key', ['tasks', 'statuses', 'runPresets'], { ready: true, fields: ['apiKey', 'baseUrl', 'projectIds', 'userId', 'statusFilter', 'statusMap'] }),
+  entry('orbit', 'Orbit', 'tasks', 'color/orbit.png', 'key', ['tasks', 'statuses', 'comments', 'report', 'mcpTools'], { ready: true, fields: ['apiKey', 'baseUrl', 'statusFilter', 'sendReport'], keyHint: 'Orbit: open the goal, then Settings, API, Generate Project Key.', account: 'device' }),
+  entry('flow', 'Flow', 'tasks', 'color/flow.png', 'key', ['tasks', 'statuses', 'runPresets'], { ready: true, fields: ['apiKey', 'baseUrl', 'projectIds', 'userId', 'statusFilter', 'statusMap'] }),
+  entry('morningmate', 'Morningmate', 'tasks', 'color/morningmate.png', 'key', ['tasks', 'statuses', 'runPresets'], { ready: true, fields: ['apiKey', 'baseUrl', 'projectIds', 'userId', 'statusFilter', 'statusMap'] }),
 ];
 export const connector = id => CONNECTORS.find(item => item.id === id) || null;
 // What the window needs to draw the picker: no code, no secrets.
