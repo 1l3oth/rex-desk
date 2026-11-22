@@ -581,6 +581,10 @@ html.embed .chat-shell{zoom:.88;height:calc(100dvh / .88);max-height:calc(100dvh
 /* Phones: no text-size zoom on the whole screen. iPhone Safari zooms the screen but not the height made to make up for
    it, which left an empty strip under the tab bar (about a tenth of the screen at Compact). Phones keep their own sizes. */
 @media (max-width:760px){html[data-size] .chat-shell{zoom:1;height:100dvh;max-height:100dvh}}
+/* Desktop: the window fills the page by percentage, not by screen-height units divided by the zoom. The Mac app's
+   WebKit does that sum its own way, so in full screen and on big screens the window grew taller than the screen and
+   the chat box fell off the bottom. A percentage of the page is the same in every engine and every text size. */
+@media (min-width:761px){#app{height:100%}#app>.chat-shell{height:100%;max-height:100%}}
 
 /* Split view picker: each agent's face with its status dot, and what it is doing in colour. */
 .sp-choices .avwrap{position:relative;flex:none}.sp-ct{display:flex;flex-direction:column;min-width:0}.sp-ct b,.sp-ct small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
