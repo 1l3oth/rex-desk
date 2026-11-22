@@ -268,7 +268,7 @@ function liveEdit(live, before, from, to, after, caret) {
   live.written = after;
 }
 function liveShow(ctx, live, text, { final = false } = {}) {
-  if (!live) return;
+  if (!live || live.ended) return;
   const box = document.getElementById('draft'), here = box && ctx.draftKey() === live.key;
   const current = here ? box.value : String(ctx.ui.drafts.get(live.key) ?? live.written);
   const words = String(text || '').trim();
@@ -336,12 +336,13 @@ async function browserDictate(ctx, { untilRelease = false } = {}) {
   recognition.lang = SPEECH_LANG[voiceLanguage(ctx)] || 'en-US'; recognition.interimResults = true; recognition.continuous = true;
   let said = '', lastWords = 0; const live = liveStart(ctx);
   const watch = untilRelease ? 0 : setInterval(() => { if (said && performance.now() - lastWords > 2000) turn.stop(); }, 200);
-  const turn = { browser: true, stop: () => { clearInterval(watch); try { recognition.stop(); } catch { /* already over */ } } };
+  const turn = { browser: true, live, stop: () => { clearInterval(watch); try { recognition.stop(); } catch { /* already over */ } } };
   recognition.onresult = event => { said = [...event.results].map(result => result[0].transcript).join(' ').replace(/\s+/g, ' ').trim(); lastWords = performance.now(); liveShow(ctx, live, said); };
   recognition.onerror = event => { turn.failed = event.error; if (['network', 'not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(event.error)) browserSpeech = 'no'; };
   recognition.onend = () => {
     clearInterval(watch); release(); if (listening === turn) listening = null;
     micButton()?.classList.remove('rec'); document.body.classList.remove('ptt');
+    if (live?.ended) return;
     liveShow(ctx, live, said, { final: true }); if (said) return;
     ctx.toast(turn.failed && browserSpeech === 'no' ? t('The browser could not turn speech into words here. Press the mic again to use Rex Desk\'s own voice engine.') : t('Nothing was heard. Hold Space (or press the mic) and speak.'), true);
   };
@@ -478,7 +479,7 @@ export async function voiceTurn(ctx, { onState = () => {} } = {}) {
   if (!alive()) { stream.getTracks().forEach(track => track.stop()); return true; }
   onState('listening');
   const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => hearLevel(Math.min(1, level * 6)), longest: 90000, pause: 1800 });
-  listening = recording; micButton()?.classList.add('rec');
+  listening = recording; recording.voiceTurn = true; micButton()?.classList.add('rec');
   async function finish() {
     if (listening !== recording) return;
     listening = null; micLevel = 0; recording.stop(); micButton()?.classList.remove('rec');
@@ -492,6 +493,14 @@ export async function voiceTurn(ctx, { onState = () => {} } = {}) {
 }
 // Ends a Voice mode turn that is still listening, without sending anything.
 let voiceTurns = 0;
+// Send ends the dictation in the box: the mic stops, and words still on their way (live or the final ones) are dropped,
+// so they never write the sent message back into the cleared box.
+export function endDictation() {
+  const turn = listening, live = turn?.live || liveNow?.live;
+  if (live) live.ended = true; liveNow = null;
+  if (turn && !turn.voiceTurn) { listening = null; clearInterval(turn.liveTimer); turn.stop(); micButton()?.classList.remove('rec'); document.body.classList.remove('ptt'); hold.active = false; }
+  if (live) liveWaiting(live, false);
+}
 export function cancelVoiceTurn() { voiceTurns++; const turn = listening; if (!turn) return; listening = null; micLevel = 0; turn.stop(); micButton()?.classList.remove('rec'); }
 
 // Hold Space to talk: past a short hold it listens until Space is let go, then the words land in the message box.

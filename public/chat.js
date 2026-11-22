@@ -33,7 +33,7 @@ import { openAvatarPicker, saveCover } from '/chat-avatar.js';
 import { watchForStar } from '/chat-star.js';
 import { setupHtml, setupClick, showSetup } from '/chat-setup.js';
 import { showUpdateCard, updateLater, updateShow, installUpdate, updateWhenIdle, watchForUpdates, showSyncNote } from '/chat-update.js';
-import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments, voiceTurn, voiceBusy, cancelVoiceTurn, voiceListening } from '/chat-composer.js';
+import { composerHtml, initComposer, pickedOptions, attachmentText, redrawAttachments, voiceTurn, voiceBusy, cancelVoiceTurn, voiceListening, endDictation } from '/chat-composer.js';
 // Rex Desk, chat first. One conversation at a time: the main agent, an agent run, a room of agents, or what needs you.
 const app = document.getElementById('app');
 // Which screen is open lives in the address (#/room/ID) and is also saved, so a refresh or a restart comes back to the same place.
@@ -677,6 +677,8 @@ async function send() {
   const text = `${typed || t('See the attached files.')}${attachmentText(ctx)}${spoken}`, picked = pickedOptions(ctx);
   // Local AI with no model on this computer yet: the message would go to Claude instead, so it waits for the setup.
   if (document.getElementById('opt-provider')?.value === 'local' && !picked.model) return toast(t('Open Settings, Local AI, and press Set up: it installs Ollama and a starter model.'), true);
+  // A dictation still listening ends here, so its words never come back into the box once it is cleared.
+  endDictation();
   const { type, id } = ui.view; box.disabled = true; ui.voiceDrafts?.delete(draftKey());
   try {
     if (type === 'jev') { box.value = ''; ui.drafts.set(draftKey(), ''); void jevDo(typed); }

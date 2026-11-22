@@ -45,10 +45,10 @@ test('the voice guide has the same steps in English, Khmer and Korean, and recor
 function liveHarness() {
   const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
   const block = start => { const at = composer.indexOf(start); return composer.slice(at, composer.indexOf(start.startsWith('const') ? '\n' : '\n}', at) + (start.startsWith('const') ? 0 : 2)); };
-  const code = ['let liveNow = null, liveTyping = null;', ...['function liveStart', 'function liveWatch', 'function liveEdit', 'function liveShow'].map(block)].join('\n');
-  const box = { value: '', getAttribute: () => '', focus() {}, dispatchEvent() {} }; let key = 'a';
+  const code = ['let liveNow = null, liveTyping = null, listening = null; const micButton = () => null, hold = {}, t = text => text;', ...['function liveStart', 'function liveWatch', 'function liveEdit', 'function liveShow', 'function liveWaiting', 'export function endDictation'].map(block)].join('\n').replace('export function', 'function');
+  const box = { value: '', getAttribute: () => '', setAttribute() {}, classList: { toggle() {} }, focus() {}, dispatchEvent() {} }; let key = 'a';
   const ctx = { draftKey: () => key, ui: { drafts: new Map() } };
-  const run = new Function('document', 'Event', `${code}; return { liveStart, liveShow, liveEdit };`)({ getElementById: () => box }, class {});
+  const run = new Function('document', 'Event', `${code}; return { liveStart, liveShow, liveEdit, endDictation, listen: turn => { listening = turn; }, listening: () => listening };`)({ getElementById: () => box, body: { classList: { remove() {} } } }, class {});
   return { box, ctx, ...run, switchTo: next => { key = next; } };
 }
 test('live words keep text typed before, after or inside them, and stay with the chat they started in', () => {
@@ -97,4 +97,17 @@ test('a Voice mode turn sends only into the chat it started in, and a cancelled 
   assert.match(composer, /catch \(error\) \{ if \(!alive\(\)\) return true; ctx\.toast\(micProblem\(error\)/);
   assert.match(composer, /hearWords\(ctx, recording\.wav\(\), \{ alive \}\); if \(alive\(\)\) await sendSpoken/);
   assert.match(composer, /if \(!alive\(\)\) throw Object\.assign\(new Error\('cancelled'\)/);
+});
+
+test('Send ends a dictation, so its later words never bring the sent message back into the cleared box', () => {
+  const { box, ctx, liveStart, liveShow, endDictation, listen, listening } = liveHarness();
+  box.value = 'Hi'; const live = liveStart(ctx); let stopped = 0;
+  listen({ live, stop: () => { stopped++; } });
+  liveShow(ctx, live, 'fix the login'); assert.equal(box.value, 'Hi fix the login');
+  endDictation(); box.value = ''; ctx.ui.drafts.delete('a');
+  liveShow(ctx, live, 'fix the login button'); liveShow(ctx, live, 'fix the login button', { final: true });
+  assert.equal(box.value, '', 'the box stays empty after Send'); assert.equal(ctx.ui.drafts.has('a'), false, 'no draft is made again');
+  assert.equal(stopped, 1, 'the mic stops'); assert.equal(listening(), null);
+  const chat = readFileSync(new URL('../public/chat.js', import.meta.url), 'utf8'), at = chat.indexOf('endDictation();');
+  assert.ok(at > chat.indexOf('async function send()') && at < chat.indexOf("box.value = ''; box.style.height = ''"), 'send() ends the dictation before clearing the box');
 });
