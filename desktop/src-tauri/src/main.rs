@@ -140,11 +140,16 @@ const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreen
 #[cfg(windows)]
 fn allow_own_microphone(window: &tauri::WebviewWindow) {
     let owner = window.hwnd().map(|handle| handle.0 as isize).unwrap_or(0);
+    let main = window.clone();
     let _ = window.with_webview(move |webview| unsafe {
         use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2PermissionRequestedEventArgs3, COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW, COREWEBVIEW2_PERMISSION_STATE_DENY};
         use windows::core::Interface;
         use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, IDYES, MB_ICONQUESTION, MB_SETFOREGROUND, MB_YESNO};
         let Ok(core) = webview.controller().CoreWebView2() else { return };
+        // The request and its deferral go back to the same UI thread after the callback returns; they never cross threads.
+        struct Later(webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2PermissionRequestedEventArgs, webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Deferral);
+        unsafe impl Send for Later {}
+        impl Later { fn take(self) -> (webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2PermissionRequestedEventArgs, webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Deferral) { (self.0, self.1) } }
         let handler = webview2_com::PermissionRequestedEventHandler::create(Box::new(move |_, args| {
             let Some(args) = args else { return Ok(()) };
             let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
@@ -153,11 +158,17 @@ fn allow_own_microphone(window: &tauri::WebviewWindow) {
             args.Uri(&mut uri)?;
             let own = tauri::Url::parse(&webview2_com::take_pwstr(uri)).map(|url| url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port() == Some(4317)).unwrap_or(false);
             if kind != COREWEBVIEW2_PERMISSION_KIND_MICROPHONE || !own { return Ok(()) }
-            let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
-            let (text, title) = (wide("Allow Rex Desk to use your microphone for voice messages?"), wide("Rex Desk"));
-            let yes = MessageBoxW(owner as _, text.as_ptr(), title.as_ptr(), MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND) == IDYES;
-            if !yes { if let Ok(more) = args.cast::<ICoreWebView2PermissionRequestedEventArgs3>() { let _ = more.SetSavesInProfile(false); } }
-            args.SetState(if yes { COREWEBVIEW2_PERMISSION_STATE_ALLOW } else { COREWEBVIEW2_PERMISSION_STATE_DENY })?;
+            // A modal box inside this callback could hang the request (WebView2 reentrancy): defer it, return, then ask.
+            let later = Later(args.clone(), args.GetDeferral()?);
+            let _ = main.run_on_main_thread(move || {
+                let (args, deferral) = later.take();
+                let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+                let (text, title) = (wide("Allow Rex Desk to use your microphone for voice messages?"), wide("Rex Desk"));
+                let yes = MessageBoxW(owner as _, text.as_ptr(), title.as_ptr(), MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND) == IDYES;
+                if !yes { if let Ok(more) = args.cast::<ICoreWebView2PermissionRequestedEventArgs3>() { let _ = more.SetSavesInProfile(false); } }
+                let _ = args.SetState(if yes { COREWEBVIEW2_PERMISSION_STATE_ALLOW } else { COREWEBVIEW2_PERMISSION_STATE_DENY });
+                let _ = deferral.Complete();
+            });
             Ok(())
         }));
         let mut token = 0i64;
