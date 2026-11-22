@@ -669,19 +669,28 @@ export class Desk {
       if (run.role === 'worker' && !run.worktree && run.placement?.state === 'pending') run = await this.place(run);
       // A project that is not a Git folder has no branches or worktrees: the agent works straight in the folder.
       // The folder may have become a Git repository since it was added (git init): then it is a normal project again.
-      const plainRepository = run.role === 'worker' && !run.worktree && this.store.config().repositories.find(item => item.id === run.repositoryId);
+      // Checked on every start, a resumed plain run too, since its saved folder would now be a real checkout.
+      const plainRepository = run.role === 'worker' && (!run.worktree || run.plain) && this.store.config().repositories.find(item => item.id === run.repositoryId);
+      const probeFolder = run.plain && run.worktree ? run.worktree : plainRepository?.path;
       // When Git cannot say (Git missing, access refused), the run stops instead of editing what may be a real checkout.
-      const probed = plainRepository?.plain ? await inspectRepository(plainRepository.path).catch(error => { throw new Error(`Could not check whether ${plainRepository.path} is a Git folder, so no agent works in it: ${error.message}`); }) : null;
+      const probed = plainRepository?.plain || (run.role === 'worker' && run.plain) ? await inspectRepository(probeFolder).catch(error => { throw new Error(`Could not check whether ${probeFolder} is a Git folder, so no agent works in it: ${error.message}`); }) : null;
       if (probed && probed.git !== false) {
-        // The branch Git reports (develop, else the current one) becomes the base, for the project and for this queued run.
-        const base = plainRepository.baseBranch || probed.preferredBranch || 'develop', target = plainRepository.targetBranch || base;
-        this.store.saveConfig({ ...this.store.publicConfig(), repositories: this.store.config().repositories.map(item => item.id === plainRepository.id ? { ...item, plain: false, baseBranch: base, targetBranch: target } : item) });
-        run = this.patchRun(runId, { baseBranch: run.baseBranch || base, targetBranch: run.targetBranch || target });
+        // The branch Git reports (develop, else the current one) becomes the base of the project.
+        if (plainRepository?.plain) {
+          const base = plainRepository.baseBranch || probed.preferredBranch || 'develop', target = plainRepository.targetBranch || base;
+          this.store.saveConfig({ ...this.store.publicConfig(), repositories: this.store.config().repositories.map(item => item.id === plainRepository.id ? { ...item, plain: false, baseBranch: base, targetBranch: target } : item) });
+        }
+        if (run.worktree) throw new Error(`${run.worktree} is a Git project now, so this run no longer works straight in it. Start the task again to work in its own copy.`);
       }
       if (run.role === 'worker' && !run.worktree && this.store.config().repositories.find(item => item.id === run.repositoryId)?.plain) {
         const folder = this.store.config().repositories.find(item => item.id === run.repositoryId).path;
         run = this.patchRun(runId, { worktree: folder, plain: true, branch: '', baseCommit: '', port: await freePort() });
         this.store.event(runId, 'phase', { text: 'Not a Git folder: working straight in the project folder.' }, true);
+      }
+      // A run queued while its project was a plain folder has no branches yet: it takes the project's (every such run, not only the first).
+      if (run.role === 'worker' && !run.worktree && (!run.baseBranch || !run.targetBranch)) {
+        const entry = this.store.config().repositories.find(item => item.id === run.repositoryId);
+        if (entry?.baseBranch) run = this.patchRun(runId, { baseBranch: run.baseBranch || entry.baseBranch, targetBranch: run.targetBranch || entry.targetBranch || entry.baseBranch });
       }
       if (run.role === 'worker' && !run.worktree) {
         const config = this.store.config();

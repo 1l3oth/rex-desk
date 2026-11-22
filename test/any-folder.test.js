@@ -82,5 +82,15 @@ test('a plain folder that became a Git project takes the branch Git reports as i
     assert.ok(!repository.plain); assert.equal(repository.baseBranch, 'trunk');
     assert.equal(store.get('run', 'r').baseBranch, 'trunk', 'the queued run uses the detected branch');
     assert.equal(store.get('run', 'r').targetBranch, 'trunk');
+    // A second run queued while it was plain takes the branch too.
+    store.put('run', 'r2', { id: 'r2', role: 'worker', taskId: 't1', repositoryId: saved.repositories[0].id, state: 'starting', baseBranch: '', targetBranch: '' });
+    const second = new AbortController(); desk.live.set('r2', { controller: second });
+    await desk.execute('r2', second).catch(() => {});
+    assert.equal(store.get('run', 'r2').baseBranch, 'trunk', 'every queued run gets the branch, not only the first');
+    // A plain run that resumes after git init no longer works straight in the checkout.
+    store.put('run', 'r3', { id: 'r3', role: 'worker', taskId: 't1', repositoryId: saved.repositories[0].id, state: 'starting', plain: true, worktree: folder, branch: '' });
+    const third = new AbortController(); desk.live.set('r3', { controller: third });
+    await desk.execute('r3', third).catch(() => {});
+    assert.match(JSON.stringify(store.events('r3', { limit: 50 })), /is a Git project now/);
   } finally { await desk.shutdown?.().catch(() => {}); store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
