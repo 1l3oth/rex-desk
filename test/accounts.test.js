@@ -162,7 +162,8 @@ test('a phone through the relay waits for its 6-digit code to be approved on the
     assert.equal((await ask('/api/phone-relay', {}, 'POST', { action: 'approve', device: 'phone-1', code })).status, 403, 'the phone cannot approve itself');
     const listed = await owner('/api/phone-relay');
     assert.equal(listed.body.pending[0].code, code, 'the desk shows the same code');
-    await owner('/api/phone-relay', { method: 'POST', data: { action: 'approve', device: 'phone-1', code } });
+    assert.ok(!JSON.stringify(listed.body).includes('phone-1'), 'the desk lists a reference, never the phone id');
+    await owner('/api/phone-relay', { method: 'POST', data: { action: 'approve', device: listed.body.pending[0].id, code } });
     assert.equal((await ask('/api/state')).status, 200, 'after the OK the phone gets in');
     assert.equal((await ask('/api/state', { 'x-rex-relay-device': 'phone-2' })).status, 403, 'another phone still waits');
   } finally { await app.close(); }
