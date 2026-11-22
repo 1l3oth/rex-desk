@@ -63,14 +63,32 @@ test('a new phone gets one 6-digit code and comes in only after the person appro
   const first = relay.pendingFor(phone), again = relay.pendingFor(phone);
   assert.match(first.code, /^\d{6}$/); assert.equal(again.code, first.code);
   assert.equal(events.filter(([, kind]) => kind === 'phone-approval').length, 1);
-  assert.deepEqual(relay.view().pending.map(item => item.id), ['phone-1']);
-  assert.throws(() => relay.approve('phone-1', first.code === '000000' ? '111111' : '000000'));
+  // The screens and the snapshot get a short reference, never the phone's own id (which works like its key).
+  const [waiting] = relay.view().pending, ref = waiting.id;
+  assert.notEqual(ref, 'phone-1'); assert.ok(!JSON.stringify(relay.view()).includes('phone-1')); assert.ok(!JSON.stringify(desk.store.get('phone-relay', 'main')).includes('phone-1'));
+  assert.throws(() => relay.approve('phone-1', first.code), /no longer waiting/);
+  assert.throws(() => relay.approve(ref, first.code === '000000' ? '111111' : '000000'));
   assert.equal(relay.approved('phone-1'), false);
-  relay.approve('phone-1', first.code);
-  assert.equal(relay.approved('phone-1'), true);
+  relay.approve(ref, first.code);
+  assert.equal(relay.approved('phone-1'), true); assert.equal(relay.approved(ref), false);
   assert.deepEqual(relay.view().pending, []);
-  relay.forget('phone-1');
+  assert.equal(relay.view().devices[0].id, ref);
+  relay.forget(ref);
   assert.equal(relay.approved('phone-1'), false);
+});
+
+test('removing a phone ends its open requests at once', () => {
+  const { desk } = fakeDesk(1), socket = fakeSocket(), relay = new PhoneRelay(desk, { socket: () => socket });
+  relay.pendingFor({ id: 'phone-1', name: 'Pixel' }); const { id: ref, code } = relay.view().pending[0]; relay.approve(ref, code);
+  relay.setEnabled(true); socket.emit('open');
+  const destroyed = [];
+  // A live-updates request of that phone, and one of another phone.
+  relay.streams.set(5, { key: relay.settings().devices[0].key, request: { destroy: () => destroyed.push(5) } });
+  relay.streams.set(6, { key: 'other', request: { destroy: () => destroyed.push(6) } });
+  relay.forget(ref);
+  assert.deepEqual(destroyed, [5]); assert.ok(relay.streams.has(6)); assert.ok(!relay.streams.has(5));
+  assert.ok(socket.sent.some(frame => frame.op === RELAY_OP.ABORT && frame.streamId === 5));
+  relay.stop();
 });
 
 test('a relay "not paid" or "signed out" close stops the desk dialling again', () => {
