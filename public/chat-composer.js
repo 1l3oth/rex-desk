@@ -238,7 +238,31 @@ function liveStart(ctx) {
   const box = document.getElementById('draft'); if (!box) return null;
   // start and length: the exact part of the box the dictation wrote (with its spaces). Only that part ever changes.
   const kept = box.value.replace(/\s+$/, '');
-  return { key: ctx.draftKey(), placeholder: box.getAttribute('placeholder') || '', written: box.value, start: kept.length, length: box.value.length - kept.length, said: '', from: '' };
+  const live = { key: ctx.draftKey(), placeholder: box.getAttribute('placeholder') || '', written: box.value, start: kept.length, length: box.value.length - kept.length, said: '', from: '' };
+  liveWatch(ctx, live);
+  return live;
+}
+// Every edit the person makes in the box while the mic listens moves the dictated part by the exact range that edit
+// touched (the caret before and after it), so typing the same words next to it never gets mistaken for it.
+let liveNow = null, liveTyping = null;
+function liveWatch(ctx, live) {
+  liveNow = { ctx, live };
+  if (typeof document.addEventListener !== 'function' || liveWatch.on) return; liveWatch.on = true;
+  document.addEventListener('beforeinput', event => { const box = event.target; liveTyping = box?.id === 'draft' ? { value: box.value, from: box.selectionStart, to: box.selectionEnd } : null; }, true);
+  document.addEventListener('input', event => {
+    const box = event.target, was = liveTyping; liveTyping = null;
+    if (box?.id !== 'draft' || !was || !liveNow || liveNow.ctx.draftKey() !== liveNow.live.key || liveNow.live.written !== was.value) return;
+    liveEdit(liveNow.live, was.value, was.from, was.to, box.value, box.selectionEnd);
+  }, true);
+}
+function liveEdit(live, before, from, to, after, caret) {
+  // The edit starts where the caret or selection was (or where a delete left the caret) and wrote up to the caret after.
+  const at = Math.min(from, to, caret), added = caret - at, removed = added - (after.length - before.length), end = at + removed;
+  if (!(at >= 0 && added >= 0 && removed >= 0 && end <= before.length && before.slice(0, at) === after.slice(0, at) && before.slice(end) === after.slice(caret))) return;
+  const delta = after.length - before.length, stop = live.start + live.length;
+  if (end <= live.start && (at < live.start || removed === 0)) live.start += delta; // before the words: they move along
+  else if (at < stop) { live.start = end <= stop ? stop + delta : caret; live.length = 0; live.from = live.said; } // inside: kept as typed, newer words go after
+  live.written = after;
 }
 function liveShow(ctx, live, text, { final = false } = {}) {
   if (!live) return;
@@ -443,11 +467,11 @@ export async function voiceTurn(ctx, { onState = () => {} } = {}) {
   if (browserSpeech !== 'no') {
     const started = await browserTurn(ctx, onState, alive);
     if (started === 'started' || started === 'cancelled') return true;
-    if (started?.blocked) { ctx.toast(micProblem(started.blocked), true); return false; }
+    if (started?.blocked) { if (!alive()) return true; ctx.toast(micProblem(started.blocked), true); return false; } // a failure after a switch is a cancel
   }
   warmVoice(ctx);
   let stream;
-  try { stream = await openMicrophone(); } catch (error) { ctx.toast(micProblem(error), true); return false; }
+  try { stream = await openMicrophone(); } catch (error) { if (!alive()) return true; ctx.toast(micProblem(error), true); return false; }
   if (!alive()) { stream.getTracks().forEach(track => track.stop()); return true; }
   onState('listening');
   const recording = startRecorder(stream, { onQuiet: () => void finish(), onLevel: level => hearLevel(Math.min(1, level * 6)), longest: 90000, pause: 1800 });
