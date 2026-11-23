@@ -62,7 +62,8 @@ export function rank(items, query, limit = 8) {
     .filter(entry => entry.score > 0).sort((a, b) => b.score - a.score).slice(0, limit).map(entry => entry.item);
 }
 
-const hookPrint = (matcher, hook) => createHash('sha256').update(JSON.stringify([matcher || '', hook])).digest('hex').slice(0, 12);
+// A hash of the whole hooks list, so a Remove from an old list is refused once anything in it changed.
+const hooksPrint = settings => createHash('sha256').update(JSON.stringify(settings?.hooks || {})).digest('hex').slice(0, 16);
 export class Toolbox {
   constructor({ connect, home = os.homedir(), bundled = '', configDirectory = () => process.env.CLAUDE_CONFIG_DIR, mcpConfig, cli, clone } = {}) {
     this.cli = cli || runClaude; this.clone = clone || gitClone;
@@ -258,27 +259,20 @@ export class Toolbox {
     writeFileSync(this.settingsFile, `${JSON.stringify({ ...settings, hooks: { ...hooks, [event]: groups } }, null, 2)}\n`);
     return { added: event };
   }
-  // id: "<event>:<group>:<hook>:<print>:<copies>", the place listHooks gave it, a print of the hook itself and how many hooks
-  // of that event had the same print then. A hook that moved (another window removed one) is found again by its print only
-  // when it is the one hook with it, both then and now; with identical copies, or a different count, nothing is removed,
-  // so a stale row never takes a neighbour or the surviving copy.
+  // id: "<event>:<group>:<hook>:<list>", the place listHooks gave it and a hash of the whole hooks list as it was then. A hook
+  // is removed only when that list is still exactly the same; any change since (another window, an edit by hand) refuses.
   removeHook(id) {
-    const [event, group, index, print, copies] = String(id || '').split(':'), settings = this.readSettings(), groups = settings.hooks?.[event];
-    const same = (Array.isArray(groups) ? groups : []).flatMap((item, place) => (item?.hooks || []).map((hook, slot) => ({ place, slot, print: hookPrint(item.matcher, hook) }))).filter(item => item.print === print);
-    const exact = same.find(item => item.place === Number(group) && item.slot === Number(index));
-    const found = !print || same.length !== Number(copies || 1) ? null : same.length === 1 ? same[0] : exact;
-    if (!found) throw new Error('That hook changed or is already gone. Open Market again to see the hooks as they are now.');
-    const list = groups[found.place].hooks;
-    list.splice(found.slot, 1); if (!list.length) groups.splice(found.place, 1); if (!groups.length) delete settings.hooks[event];
+    const [event, group, index, list] = String(id || '').split(':'), settings = this.readSettings(), groups = settings.hooks?.[event];
+    const hooks = Array.isArray(groups) ? groups[Number(group)]?.hooks : null;
+    if (!list || list !== hooksPrint(settings) || !Array.isArray(hooks) || !hooks[Number(index)]) throw new Error('The hooks changed since this list was shown, so nothing was removed. Open Market again and remove it from the new list.');
+    hooks.splice(Number(index), 1); if (!hooks.length) groups.splice(Number(group), 1); if (!groups.length) delete settings.hooks[event];
     writeFileSync(this.settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
     return { removed: event };
   }
   listHooks() {
     let settings = {}; try { settings = this.readSettings(); } catch { return []; }
-    return Object.entries(settings.hooks || {}).flatMap(([event, groups]) => {
-      const rows = (Array.isArray(groups) ? groups : []).flatMap((group, at) => (group?.hooks || []).map((hook, index) => ({ at, index, print: hookPrint(group.matcher, hook), matcher: group.matcher || '', command: String(hook.command || hook.url || hook.prompt || '').slice(0, 200) })));
-      return rows.map(row => ({ id: `${event}:${row.at}:${row.index}:${row.print}:${rows.filter(other => other.print === row.print).length}`, event, matcher: row.matcher, command: row.command }));
-    });
+    const print = hooksPrint(settings);
+    return Object.entries(settings.hooks || {}).flatMap(([event, groups]) => (Array.isArray(groups) ? groups : []).flatMap((group, at) => (group?.hooks || []).map((hook, index) => ({ id: `${event}:${at}:${index}:${print}`, event, matcher: group.matcher || '', command: String(hook.command || hook.url || hook.prompt || '').slice(0, 200) }))));
   }
   removeCommand(name) {
     const file = path.join(this.commandsHome, `${String(name).replace(/[^A-Za-z0-9_.-]/g, '')}.md`);
