@@ -120,14 +120,25 @@ export class HostRunner {
   follow() {
     return new Promise((resolve, reject) => {
       let buffer = '', quiet = 0, inboxAt = 0;
-      const finish = (fn, value) => { clearInterval(this.timer); this.timer = null; this.cleanup(); fn(value); };
+      // Hand-overs still on their way to the process. The reply's end waits for them, so one the process refuses (its reply had
+      // just ended) goes back with its tickets before the turn counts anything as sent.
+      const sending = new Set();
+      const finish = (fn, value) => { clearInterval(this.timer); this.timer = null; void Promise.allSettled([...sending]).then(() => { this.cleanup(); fn(value); }); };
+      const handOver = (news, handover) => {
+        const sent = this.post('/inbox', { text: news, handover })
+          // Taken into its inbox: the agent reads it, or it comes back unread before the end, so the clean end may count it.
+          .then(() => { if (handover) this.options.event?.('handover-delivered', { handover }); },
+            error => { if (!/timeout|aborted/i.test(String(error?.name || '') + error?.message)) this.options.requeue?.(news, handover); })
+          .finally(() => sending.delete(sent));
+        sending.add(sent);
+      };
       const read = () => {
         if (this.detached) { clearInterval(this.timer); return; }
         try {
           // New messages for the agent go over as they come, the way an in-process agent picks them up between steps.
           // A message the process refuses (its reply just ended) or cannot take goes back to the run's queue, for the next turn.
           // Each goes with its handover (its tickets and queue entries), which comes back with it if it is refused or left unread.
-          if (Date.now() - inboxAt > 1000) { inboxAt = Date.now(); const got = this.options.inbox?.({ withId: true }), news = typeof got === 'string' ? got : got?.text || '', handover = typeof got === 'string' ? null : got?.handover ?? null; if (news) void this.post('/inbox', { text: news, handover }).catch(error => { if (!/timeout|aborted/i.test(String(error?.name || '') + error?.message)) this.options.requeue?.(news, handover); }); }
+          if (Date.now() - inboxAt > 1000) { inboxAt = Date.now(); const got = this.options.inbox?.({ withId: true }), news = typeof got === 'string' ? got : got?.text || '', handover = typeof got === 'string' ? null : got?.handover ?? null; if (news) handOver(news, handover); }
           const size = existsSync(this.state.journal) ? statSync(this.state.journal).size : 0;
           if (size > this.state.offset) {
             const fd = openSync(this.state.journal, 'r'), chunk = Buffer.alloc(size - this.state.offset);

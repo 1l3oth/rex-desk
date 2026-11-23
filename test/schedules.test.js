@@ -535,3 +535,65 @@ test('path 14, an agent in its own process leaves a scheduled message unread: it
   assert.equal(t.item().on, false, 'sent once the next turn took it'); assert.equal(hosts.length, 2, 'sent once');
   }
 });
+
+test('path 15, a hand-over still on its way to an agent in its own process when its reply ends: refused, it stays due and is not counted as sent', async () => {
+  const { HostRunner } = await import('../src/hosts.js');
+  const { appendFileSync } = await import('node:fs');
+  const hosts = [], posted = [], directory = temporary('host-journal-race');
+  let refuse = null;
+  const t = deskWith(options => {
+    const host = new HostRunner(options, { directory, pollMs: 20, spawner: () => ({ pid: process.pid, unref() {} }) });
+    // The first hand-over hangs until the test refuses it, the way a POST is still open when the process writes its end.
+    host.port = async () => 1; host.post = (route, data) => { if (route !== '/inbox') return Promise.resolve(); posted.push(data); return posted.length === 1 ? new Promise((resolve, reject) => { refuse = () => reject(new Error('The reply is over.')); }) : Promise.resolve(); };
+    hosts.push(host); return host;
+  });
+  const journal = (index, entry) => appendFileSync(hosts[index].state.journal, `${JSON.stringify(entry)}\n`);
+  const waitFor = async (check, label) => { for (let step = 0; step < 150 && !check(); step++) await new Promise(done => setTimeout(done, 20)); assert.ok(check(), label); };
+  try { await hostTurns(); } finally { for (const host of hosts) { clearInterval(host.timer); host.detached = true; } t.desk.live.clear(); }
+  async function hostTurns() {
+  void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' });
+  await waitFor(() => hosts[0]?.state?.journal, 'the agent process started');
+  journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
+  await t.desk.schedules.tick(at(0, '09:00'));
+  await waitFor(() => refuse, 'the message is on its way to the agent process');
+  // The process ends its reply while the hand-over is still open, then refuses it.
+  journal(0, { type: 'done' });
+  await new Promise(done => setTimeout(done, 150));
+  assert.notEqual(t.store.list('delivery')[0]?.state, 'taken', 'not sent while the hand-over is still open');
+  refuse();
+  await waitFor(() => hosts.length === 2, 'the refused message starts the next turn');
+  assert.notEqual(t.store.list('delivery')[0]?.state, 'taken', 'refused is not sent');
+  await t.desk.schedules.tick(at(0, '09:02'));
+  assert.equal(t.item().on, true, 'still due');
+  journal(1, { type: 'event', kind: 'prompt-accepted', data: {} }); journal(1, { type: 'done' });
+  await t.settled(); await t.desk.schedules.tick(at(0, '09:05'));
+  assert.equal(t.item().on, false, 'sent once the next turn took it'); assert.equal(hosts.length, 2, 'sent once');
+  }
+});
+
+test('path 16, a hand-over an agent in its own process never confirms (its send timed out): a clean end leaves it due', async () => {
+  const { HostRunner } = await import('../src/hosts.js');
+  const { appendFileSync } = await import('node:fs');
+  const hosts = [], directory = temporary('host-journal-timeout');
+  let tried = false;
+  const t = deskWith(options => {
+    const host = new HostRunner(options, { directory, pollMs: 20, spawner: () => ({ pid: process.pid, unref() {} }) });
+    host.port = async () => 1; host.post = async route => { if (route === '/inbox') { tried = true; const error = new Error('The operation was aborted due to timeout'); error.name = 'TimeoutError'; throw error; } };
+    hosts.push(host); return host;
+  });
+  const journal = (index, entry) => appendFileSync(hosts[index].state.journal, `${JSON.stringify(entry)}\n`);
+  const waitFor = async (check, label) => { for (let step = 0; step < 150 && !check(); step++) await new Promise(done => setTimeout(done, 20)); assert.ok(check(), label); };
+  try { await hostTurns(); } finally { for (const host of hosts) { clearInterval(host.timer); host.detached = true; } t.desk.live.clear(); }
+  async function hostTurns() {
+  void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' });
+  await waitFor(() => hosts[0]?.state?.journal, 'the agent process started');
+  journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
+  await t.desk.schedules.tick(at(0, '09:00'));
+  await waitFor(() => tried, 'the hand-over was tried');
+  journal(0, { type: 'done' });
+  await t.settled();
+  assert.notEqual(t.store.list('delivery')[0]?.state, 'taken', 'never confirmed, never counted as sent');
+  await t.desk.schedules.tick(at(0, '09:02'));
+  assert.equal(t.item().on, true, 'still due');
+  }
+});

@@ -716,9 +716,12 @@ export class Desk {
     // back (a refused steer, messages left unread) returns only those, even when two steers have the same words or resolve out
     // of order. Without one (the turn's prompt, or the model's next real output) every ticket in flight is settled.
     const handovers = value => (value == null ? [] : Array.isArray(value) ? value : [value]).filter(item => item && typeof item === 'object');
-    const inTurn = ticket => bound.delete(ticket) || (this.store.get('delivery', ticket)?.state === 'turn' && this.store.get('delivery', ticket)?.runId === runId);
+    // A mid-turn hand-over is unconfirmed until its runner says it got it (an accepted steer, or an agent's own process that took
+    // the POST): a clean end never settles it, so one the runner never confirmed (still in flight, refused late) stays due.
+    const unconfirmed = new Set();
+    const inTurn = ticket => { unconfirmed.delete(ticket); return bound.delete(ticket) || (this.store.get('delivery', ticket)?.state === 'turn' && this.store.get('delivery', ticket)?.runId === runId); };
     const markLaunched = (handover = null) => {
-      const tickets = handover === null ? [...bound] : handovers(handover).flatMap(item => item.tickets || []);
+      const tickets = handover === null ? [...bound].filter(ticket => !unconfirmed.has(ticket)) : handovers(handover).flatMap(item => item.tickets || []);
       for (const ticket of tickets) if (inTurn(ticket)) this.setDelivery(ticket, { state: 'taken' });
     };
     const bind = (entries, whole = false) => { const tickets = []; for (const item of this.waitingDeliveries(this.store.get('run', runId), whole ? null : entries)) { bound.add(item.id); tickets.push(item.id); this.setDelivery(item.id, { state: 'turn', runId }); } return tickets; };
@@ -826,6 +829,7 @@ export class Desk {
           const entries = [...(this.store.get('run', runId)?.queued || [])], text = this.takeInbox(runId);
           if (!text) return withId ? { text: '', handover: null } : '';
           const handover = { entries, tickets: bind(entries) };
+          if (withId) for (const ticket of handover.tickets) unconfirmed.add(ticket);
           return withId ? { text, handover } : text;
         },
         // A hand-over given back with its handovers (a refused steer, messages left unread): only their own tickets wait again,
@@ -839,6 +843,9 @@ export class Desk {
           // Only the runner knows when its prompt was really taken (Codex: turn/start accepted; Claude: the model's first real
           // words or step). A session opening, a sign-in error written as a reply, or a result before an error check prove nothing.
           if (kind === 'prompt-accepted') { markLaunched(data?.handover ?? null); return; }
+          // An agent's own process took a hand-over into its inbox: the agent reads it, or it comes back unread, before its reply
+          // ends. Its tickets stay in the turn (so an unread one still goes back), and the clean end may now settle them.
+          if (kind === 'handover-delivered') { for (const ticket of handovers(data?.handover).flatMap(item => item.tickets || [])) unconfirmed.delete(ticket); return; }
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
           // The quiet turn that reads Voice mode's report is not said: Rex Desk has welcomed the person already.
           const reading = this.store.get('run', runId)?.voice?.reading;
@@ -972,7 +979,7 @@ ${message}` : message;
     } finally {
       // Tickets whose prompt was never taken: a turn handed on to the next one keeps them waiting for it; any other end loses them.
       for (const ticket of bound) this.setDelivery(ticket, { state: handedOn ? 'waiting' : 'lost' });
-      bound.clear();
+      bound.clear(); unconfirmed.clear();
       if (handedOn) {
         if (token) this.forgetToken(token);
         if (this.live.get(runId)?.controller === controller) this.live.delete(runId);
