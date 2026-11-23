@@ -144,8 +144,10 @@ export function wireLoop(ctx) {
     if (event.target.matches?.('[data-loop-on]')) void save({ on: event.target.checked });
     else if (event.target.matches?.('[data-loop-every]')) void save({ every: Number(event.target.value) });
     else if (event.target.matches?.('[data-loop-hours-on], [data-loop-hours], [data-loop-day]')) {
-      const box = event.target.closest('.agp-grp') || document, value = name => box.querySelector(`[data-loop-hours="${name}"]`)?.value || '';
-      void save({ hours: { on: box.querySelector('[data-loop-hours-on]').checked, start: value('start') || '08:00', end: value('end') || '17:00', days: [...box.querySelectorAll('[data-loop-day]:checked')].map(input => Number(input.dataset.loopDay)) } });
+      // The time and day controls are hidden while Work hours is off, so whatever is not on screen keeps its saved value instead of being cleared.
+      const box = event.target.closest('.agp-grp') || document, saved = (ctx.ui.snap.specialists || []).find(item => item.id === (ctx.ui.profileId || ctx.ui.view.id))?.loop?.hours || {}, value = name => box.querySelector(`[data-loop-hours="${name}"]`)?.value || '';
+      const shownDays = box.querySelectorAll('[data-loop-day]'), days = shownDays.length ? [...box.querySelectorAll('[data-loop-day]:checked')].map(input => Number(input.dataset.loopDay)) : (saved.days?.length ? saved.days : [1, 2, 3, 4, 5]);
+      void save({ hours: { on: box.querySelector('[data-loop-hours-on]').checked, start: value('start') || saved.start || '08:00', end: value('end') || saved.end || '17:00', days } });
     } else if (event.target.matches?.('[data-agent-follow]')) void agentAction(ctx, 'spec-follow', { dataset: { agentId: event.target.dataset.agentFollow || '' } }).catch(error => ctx.toast(error.message, true));
     else if (event.target.matches?.('[data-sched-on]')) void ctx.api(`/schedules/${event.target.dataset.schedOn}`, { method: 'PUT', data: { on: event.target.checked } }).then(() => ctx.refresh(), error => ctx.toast(error.message, true));
   });
