@@ -114,6 +114,8 @@ test('Keep chat history deletes older messages here and in the cloud, on its own
   store.put('task', 't1', { id: 't1', local: true, title: 'Old task', status: 'todo', createdAt: old(400).toISOString() });
   store.put('pin', 'p1', { id: 'p1', chat: `agent:${agent.id}`, kind: 'link', url: 'https://example.com', pinnedAt: old(400).toISOString() });
   for (const [text, age] of [['very old', 400], ['old', 100], ['new', 2]]) { store.event('run-h', 'human-message', { text }, true); store.db.prepare('UPDATE events SET created_at = ? WHERE sequence = (SELECT MAX(sequence) FROM events)').run(old(age).toISOString()); }
+  // Run and approval history is not chat: it stays however old it is.
+  for (const kind of ['approval', 'verification-result', 'phase']) { store.event('run-h', kind, { text: kind }, false); store.db.prepare('UPDATE events SET created_at = ? WHERE sequence = (SELECT MAX(sequence) FROM events)').run(old(400).toISOString()); }
   assert.equal(desk.storage.historyDays(), 0, 'Forever by default');
   assert.equal(desk.storage.historyTick(), null, 'Forever deletes nothing');
   assert.throws(() => desk.storage.setHistory(7), /Pick how long/);
@@ -128,5 +130,7 @@ test('Keep chat history deletes older messages here and in the cloud, on its own
   assert.equal(desk.storage.historyTick(Date.now() + 3600000), null, 'not again within 6 hours');
   assert.ok(store.get('task', 't1')); assert.ok(store.get('pin', 'p1'));
   assert.match(desk.specialists.lessonsText(agent.id), /Short replies/, 'lessons stay');
+  assert.deepEqual(store.events('run-h', { visible: false }).map(event => event.kind).filter(kind => kind !== 'human-message'), ['approval', 'verification-result', 'phase'], 'run and approval history stays');
+  assert.match(queued.at(-1)[0], /AND kind IN [(]/, 'the cloud copy deletes chat messages only');
   desk.storage.setHistory(0); assert.equal(store.config().keepHistory, 0);
 });

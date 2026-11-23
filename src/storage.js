@@ -28,6 +28,7 @@ const DATA_PLACES = [
 ];
 // How long chat history can be kept, in days: 0 is forever, then a year, six months, three months and one month.
 export const HISTORY_DAYS = [0, 365, 180, 90, 30];
+const CHAT_KINDS = ['human-message', 'message', 'app-message', 'turn-start', 'agent-text', 'agent-text-partial', 'agent-tool', 'agent-tool-result', 'agent-result', 'agent-operation', 'agent-file', 'subagent-text', 'subagent-done'];
 // A count this recent is shown as it is; an older one is still shown at once and counted again behind it.
 const FRESH_MS = 30000;
 
@@ -195,6 +196,7 @@ export class Storage {
     return { id, before, after: Math.max(0, before - freed), freed };
   }
   // ---------- keep chat history ----------
+  // The event kinds that are chat messages: what the person and the agents said, and the steps shown with an agent's reply.
   // How long chat messages are kept (Settings > Storage): 0 is forever. Older messages are deleted on their own, here and in
   // the cloud copy. Only messages go: agents' memory and lessons, tasks, pins and files are records or files and stay.
   historyDays() { const days = Number(this.store.config().keepHistory) || 0; return HISTORY_DAYS.includes(days) ? days : 0; }
@@ -213,8 +215,10 @@ export class Storage {
     const before = new Date(now - days * scan.DAY).toISOString(), cloud = this.store.cloud;
     let removed = 0;
     this.store.transaction(() => {
-      removed = Number(this.store.db.prepare('DELETE FROM events WHERE created_at < ?').run(before).changes) || 0;
-      if (cloud?.enabled) cloud.enqueue('DELETE FROM rex_events WHERE workspace=? AND created_at < ?', [cloud.workspace, before]);
+      // Only chat messages: run steps, approvals, verification, tracker and other history stay.
+      const kinds = CHAT_KINDS.map(() => '?').join(',');
+      removed = Number(this.store.db.prepare(`DELETE FROM events WHERE created_at < ? AND kind IN (${kinds})`).run(before, ...CHAT_KINDS).changes) || 0;
+      if (cloud?.enabled) cloud.enqueue(`DELETE FROM rex_events WHERE workspace=? AND created_at < ? AND kind IN (${kinds})`, [cloud.workspace, before, ...CHAT_KINDS]);
     });
     if (removed) { cloud?.schedule?.(); this.forget(); }
     return { removed, before };
