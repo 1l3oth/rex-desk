@@ -1,5 +1,5 @@
 import { aiProvider } from './codex.js';
-import { connector, defaultBase } from './connectors.js';
+import { connector, defaultBase, currentBase } from './connectors.js';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -434,7 +434,8 @@ export class Store extends EventEmitter {
     writeFileSync(path.join(this.directory, 'files-folder.txt'), chosen);
     this.filesRoot = chosen;
   }
-  config() { const saved = this.get('config', 'main') || {}; return { ...defaults, ...saved, control: { ...defaults.control, ...(saved.control || {}) } }; }
+  // A connection saved at an address that moved (connectors.js currentBase) is read, and saved again, at the right one.
+  config() { const saved = this.get('config', 'main') || {}; return { ...defaults, ...saved, ...(Array.isArray(saved.sources) ? { sources: saved.sources.map(source => source.baseUrl ? { ...source, baseUrl: currentBase(source.type, source.baseUrl) } : source) } : {}), control: { ...defaults.control, ...(saved.control || {}) } }; }
   publicConfig() {
     const config = this.config();
     return { ...config, sources: config.sources.map(source => ({ ...source, hasKey: Boolean(this.credential(source.id)) })), jev: { ...defaults.jev, ...config.jev, hasKey: Boolean(this.get('secret', 'openrouter')) }, testAccounts: (config.testAccounts || []).map(account => ({ ...account, hasPassword: Boolean(this.get('secret', `test-account:${account.id}`)) })) };

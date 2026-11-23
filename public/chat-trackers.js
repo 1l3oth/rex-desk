@@ -64,7 +64,7 @@ export async function trackerClick({ ui, api, toast, refresh }, state, target, b
   const hit = name => target.closest(`[data-${name}]`);
   if (hit('tr-add')) {
     readTrackers(back, state); const type = hit('tr-add').dataset.trAdd, id = crypto.randomUUID();
-    state.trackers.push({ id, name: TYPES[type][0], type, baseUrl: 'https://api.morningmate.com', apiKey: '', projectIds: [], userId: '', repositoryId: '', statusFilter: 'active', statusMap: {} });
+    state.trackers.push({ id, name: TYPES[type][0], type, baseUrl: (state.extra.connectors?.connectors || []).find(item => item.id === type)?.baseUrl || '', apiKey: '', projectIds: [], userId: '', repositoryId: '', statusFilter: 'active', statusMap: {} });
     state.openTracker = id; draw(); return true;
   }
   if (hit('tr-remove')) {

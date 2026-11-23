@@ -23,7 +23,7 @@ import { mkdirSync, writeFileSync, existsSync, statSync, copyFileSync, readFileS
 import { randomBytes, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { promptHints } from './connectors.js';
+import { promptHints, currentBase } from './connectors.js';
 import { now, id, thisComputer, latestLocalMain, modelName, deskStatus, deskStatusLabels, keepLines } from './store.js';
 import { Sources } from './providers.js';
 import { AgentProfiles, conversationHere, canonical as canonicalProfile } from './agents.js';
@@ -291,7 +291,8 @@ export class Desk {
     return run.queued.join('\n\n');
   }
   // The person's Orbit account, when connected: every agent can search and read their goals, notes and knowledge.
-  orbitAccount() { const saved = this.store.get('secret', 'orbit-account'); if (!saved) return null; try { return JSON.parse(this.store.decrypt(saved)); } catch { return null; } }
+  // An account signed in at the old Orbit address is used at the current one.
+  orbitAccount() { const saved = this.store.get('secret', 'orbit-account'); if (!saved) return null; try { const account = JSON.parse(this.store.decrypt(saved)); return account?.base ? { ...account, base: currentBase('orbit', account.base) } : account; } catch { return null; } }
   orbitAccountMcp() { const account = this.orbitAccount(); return account?.token ? { orbit: { type: 'http', url: `${account.base.replace(/\/$/, '')}/mcp`, headers: { Authorization: `Bearer ${account.token}` } } } : {}; }
   // Usage saver (on unless the person turns it off): talking in rooms and away check-ins run on Sonnet, which uses much less of the
   // Claude subscription than the top model; changing code, personal chats and Rex Agent keep the model the person chose.

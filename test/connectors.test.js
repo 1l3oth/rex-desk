@@ -4,7 +4,8 @@ import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
-import { CONNECTORS, CONNECTOR_TYPES, catalog, connectionOf, sourceOf, connections, promptHints, connectorModule } from '../src/connectors.js';
+import { CONNECTORS, CONNECTOR_TYPES, catalog, connectionOf, sourceOf, connections, promptHints, connectorModule, defaultBase } from '../src/connectors.js';
+import { ORBIT_URL } from '../src/orbit.js';
 import { createApp } from '../src/server.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
@@ -25,7 +26,7 @@ test('every connector has the same shape, a known type, and a logo file or a let
 });
 
 test('an old source row reads as a connection, the old report switch moves onto Orbit, and it writes back the same row', () => {
-  const old = { id: 'o1', type: 'orbit', name: 'Launch', baseUrl: 'https://orbitkh.vercel.app', projectIds: [], statusFilter: 'active', hasKey: true };
+  const old = { id: 'o1', type: 'orbit', name: 'Launch', baseUrl: 'https://orbit.vongpichdaraboth.com', projectIds: [], statusFilter: 'active', hasKey: true };
   const connection = connectionOf(old, { reportToOrbit: true });
   assert.deepEqual(Object.keys(connection), ['id', 'connectorId', 'name', 'enabled', 'secretRef', 'options']);
   assert.equal(connection.connectorId, 'orbit'); assert.equal(connection.enabled, true); assert.equal(connection.secretRef, 'secret:o1'); assert.equal(connection.options.sendReport, true);
@@ -38,7 +39,7 @@ test('the store keeps report on the Orbit row, refuses connectors that bring no 
   const store = new Store(temporary('connectors-store'));
   assert.deepEqual(promptHints(store.config()), [], 'nothing connected: nothing said');
   // A desk from before: the global switch was on.
-  store.saveConfig({ ...store.publicConfig(), reportToOrbit: true, sources: [{ type: 'orbit', name: 'Launch', baseUrl: 'https://orbitkh.vercel.app', projectIds: [] }] });
+  store.saveConfig({ ...store.publicConfig(), reportToOrbit: true, sources: [{ type: 'orbit', name: 'Launch', baseUrl: 'https://orbit.vongpichdaraboth.com', projectIds: [] }] });
   const [orbit] = store.config().sources;
   assert.equal(orbit.sendReport, true); assert.equal(store.config().reportToOrbit, true);
   assert.match(promptHints(store.config()).join(' '), /Orbit MCP/);
@@ -59,7 +60,7 @@ test('the Connectors API lists the picker and what is connected; the old Orbit r
     assert.ok(empty.body.connectors.some(item => item.id === 'orbit'));
     assert.equal((await call('/api/orbit/account')).body.connected, false, 'the old account route forwards');
     assert.equal((await call('/api/sources/orbit', 'POST', { apiKey: 'nope' })).status, 400, 'the old key route forwards and checks the key');
-    const source = app.store.saveConnection({ type: 'orbit', name: 'Launch', baseUrl: 'https://orbitkh.vercel.app', projectIds: [] });
+    const source = app.store.saveConnection({ type: 'orbit', name: 'Launch', baseUrl: 'https://orbit.vongpichdaraboth.com', projectIds: [] });
     const listed = await call('/api/connectors');
     assert.equal(listed.body.connections[0].connectorId, 'orbit');
     const changed = await call(`/api/connectors/${source.id}`, 'PATCH', { options: { sendReport: true }, enabled: false });
@@ -68,4 +69,26 @@ test('the Connectors API lists the picker and what is connected; the old Orbit r
     assert.equal((await call(`/api/connectors/${source.id}`, 'DELETE')).body.removed, true);
     assert.deepEqual((await call('/api/connectors')).body.connections, []);
   } finally { await app.close(); }
+});
+
+// Each task app keeps its own API address: a new card gets it, and saved rows on a wrong or moved address are read at the right one.
+test('Flow, Morningmate and Orbit each default to their own address, and saved rows on the old Orbit or the Morningmate address for Flow move', () => {
+  assert.equal(ORBIT_URL, 'https://orbit.vongpichdaraboth.com');
+  assert.equal(defaultBase('orbit'), ORBIT_URL); assert.equal(defaultBase('flow'), 'https://api.flow.team'); assert.equal(defaultBase('morningmate'), 'https://api.morningmate.com');
+  const bases = Object.fromEntries(catalog().connectors.filter(item => ['orbit', 'flow', 'morningmate'].includes(item.id)).map(item => [item.id, item.baseUrl]));
+  assert.deepEqual(bases, { orbit: ORBIT_URL, flow: 'https://api.flow.team', morningmate: 'https://api.morningmate.com' }, 'the window gets each default from the server');
+  const store = new Store(temporary('connectors-bases'));
+  // Rows saved by older versions, written straight to the database as they were.
+  store.put('config', 'main', { ...store.get('config', 'main'), sources: [
+    { id: 'o1', type: 'orbit', name: 'Orbit Secondbrain', baseUrl: 'https://orbitkh.vercel.app', projectIds: [] },
+    { id: 'f1', type: 'flow', name: 'Flow', baseUrl: 'https://api.morningmate.com', projectIds: ['1'] },
+    { id: 'm1', type: 'morningmate', name: 'Morningmate', baseUrl: 'https://api.morningmate.com', projectIds: ['2'] },
+    { id: 'f2', type: 'flow', name: 'Flow own', baseUrl: 'https://flow.example.com', projectIds: ['3'] }] });
+  const read = () => Object.fromEntries(store.config().sources.map(source => [source.id, source.baseUrl]));
+  assert.deepEqual(read(), { o1: ORBIT_URL, f1: 'https://api.flow.team', m1: 'https://api.morningmate.com', f2: 'https://flow.example.com' });
+  store.saveConfig(store.publicConfig());
+  assert.deepEqual(Object.fromEntries(store.get('config', 'main').sources.map(source => [source.id, source.baseUrl])), { o1: ORBIT_URL, f1: 'https://api.flow.team', m1: 'https://api.morningmate.com', f2: 'https://flow.example.com' }, 'the next save writes the right address');
+  // A new card that leaves the address empty gets its app's own.
+  store.saveConnection({ type: 'flow', name: 'Flow new', baseUrl: '', projectIds: [] });
+  assert.equal(store.config().sources.find(source => source.name === 'Flow new').baseUrl, 'https://api.flow.team');
 });

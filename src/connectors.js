@@ -7,7 +7,7 @@
 // in config.sources (that is what sync, the task list and every agent's task-source picks read), so a connection is a view
 // of a source row: connectionOf() reads one, sourceOf() writes one back. The key stays encrypted in the secret store under
 // the connection id (secretRef), as before.
-import { ORBIT_URL, orbitCall, orbitTasks, orbitStatus, orbitComment } from './orbit.js';
+import { ORBIT_URL, ORBIT_OLD_URLS, orbitCall, orbitTasks, orbitStatus, orbitComment } from './orbit.js';
 
 export const CONNECTOR_TYPES = [
   { id: 'tasks', name: 'Task trackers' },
@@ -27,7 +27,7 @@ export const CONNECTORS = [
 ];
 export const connector = id => CONNECTORS.find(item => item.id === id) || null;
 // What the window needs to draw the picker: no code, no secrets.
-export const catalog = () => ({ types: CONNECTOR_TYPES, connectors: CONNECTORS.map(({ id, name, type, icon, auth, gives, ready, keyHint, keyUrl, account }) => ({ id, name, type, icon, auth, gives, ready, keyHint: keyHint || '', keyUrl: keyUrl || '', account: account || '' })) });
+export const catalog = () => ({ types: CONNECTOR_TYPES, connectors: CONNECTORS.map(({ id, name, type, icon, auth, gives, ready, keyHint, keyUrl, account }) => ({ id, name, type, icon, auth, gives, ready, keyHint: keyHint || '', keyUrl: keyUrl || '', account: account || '', baseUrl: defaultBase(id) })) });
 
 // ---------- the saved shape ----------
 const OPTION_KEYS = ['baseUrl', 'projectIds', 'userId', 'repositoryId', 'statusFilter', 'statuses', 'statusMap', 'sendReport'];
@@ -56,6 +56,12 @@ const MODULES = {
   },
 };
 export const connectorModule = id => MODULES[id] || null;
-export const defaultBase = type => type === 'orbit' ? ORBIT_URL : '';
+// Each task app's own API address. Flow and Morningmate are two services with the same open API: a Flow key only works on Flow's.
+export const DEFAULT_BASES = { orbit: ORBIT_URL, flow: 'https://api.flow.team', morningmate: 'https://api.morningmate.com' };
+export const defaultBase = type => DEFAULT_BASES[type] || '';
+// Addresses a saved connection may still hold that are wrong for its app: the old Orbit address, and the Morningmate
+// address every new Flow card used to get. Such a row is read at its app's own address.
+const MOVED = { orbit: ORBIT_OLD_URLS, flow: ['https://api.morningmate.com'] };
+export const currentBase = (type, base) => { try { return MOVED[type]?.includes(new URL(base).origin) ? defaultBase(type) : base; } catch { return base; } };
 // The lines connected apps add to a run prompt, one per connection that has something to say.
 export const promptHints = (config, extra = {}) => [...new Set(connections(config).filter(item => item.enabled).map(item => connectorModule(item.connectorId)?.promptHint?.(item, extra) || '').filter(Boolean))];

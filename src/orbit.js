@@ -1,6 +1,8 @@
-// Orbit (orbitkh.vercel.app) as a task source. One Orbit project key (dgm_...) opens one goal; each connection is one goal.
+// Orbit (orbit.vongpichdaraboth.com) as a task source. One Orbit project key (dgm_...) opens one goal; each connection is one goal.
 // Every call is POST /api/mcp with { tool, input } and the key in X-Project-Api-Key. See orbit/.claude/skills/orbit-api.md.
-export const ORBIT_URL = 'https://orbitkh.vercel.app';
+// The one Orbit address (its API guide, ORBIT_API_GUIDE.md). The old Vercel address no longer answers; saved rows on it move here.
+export const ORBIT_URL = 'https://orbit.vongpichdaraboth.com';
+export const ORBIT_OLD_URLS = ['https://orbitkh.vercel.app'];
 const STATUS_NAMES = { backlog: 'Backlog', todo: 'To do', in_progress: 'In progress', in_review: 'In review', blocked: 'Blocked', done: 'Done' };
 // The run's phase becomes the Orbit status, the same way a Rex Desk task moves.
 const PHASE_STATUS = { working: 'in_progress', review: 'in_review', done: 'done' };

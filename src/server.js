@@ -41,7 +41,7 @@ import { Voice } from './voice.js';
 import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
 // How long a voice message waits for the on-computer model to load before another engine answers.
 export const LOCAL_VOICE_WAIT_MS = 20000;
-import { orbitDeviceStart, orbitDevicePoll } from './orbit.js';
+import { ORBIT_URL, orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { catalog as connectorCatalog, connections as connectionList, connector as connectorOf } from './connectors.js';
 import { loadCatalog, catalogItem, probe as probeConnector, saveConnector, catalogConnections, removeCatalogConnection } from './connector-catalog.js';
 import { Anywhere } from './anywhere.js';
@@ -998,10 +998,10 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         }
         if (!connectionMatch[2] && request.method === 'DELETE') { store.saveConfig({ ...config, sources: config.sources.filter(item => item.id !== connectionId) }); notify(); return json(response, 200, { removed: true }); }
       }
-      if (url.pathname === '/api/connectors/orbit/account' && request.method === 'GET') { const account = desk.orbitAccount(); return json(response, 200, { connected: Boolean(account?.token), base: account?.base || 'https://orbitkh.vercel.app', since: account?.at || '' }); }
+      if (url.pathname === '/api/connectors/orbit/account' && request.method === 'GET') { const account = desk.orbitAccount(); return json(response, 200, { connected: Boolean(account?.token), base: account?.base || ORBIT_URL, since: account?.at || '' }); }
       if (url.pathname === '/api/connectors/orbit/account' && request.method === 'DELETE') { store.delete('secret', 'orbit-account'); return json(response, 200, { connected: false }); }
       if (url.pathname === '/api/connectors/orbit/account/start' && request.method === 'POST') {
-        const base = String((await body(request)).base || 'https://orbitkh.vercel.app').replace(/\/$/, '');
+        const base = String((await body(request)).base || ORBIT_URL).replace(/\/$/, '');
         if (!/^https:\/\//.test(base)) return json(response, 400, { error: 'Orbit must be an https address.' });
         const login = await orbitDeviceStart(base);
         desk.orbitLogin = { ...login, base, until: Date.now() + login.expiresIn * 1000 };
@@ -1019,7 +1019,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const input = await body(request), name = String(input.name || 'Orbit').trim().slice(0, 80) || 'Orbit', key = String(input.apiKey || '').trim();
         const existing = input.id ? store.config().sources.find(item => item.id === input.id && item.type === 'orbit') : null;
         if (!existing && !/^dgm_\S{8,}$/.test(key)) return json(response, 400, { error: 'Paste an Orbit project key. It starts with dgm_ (Orbit: Goal → Settings → API → Generate Project Key).' });
-        const draft = { ...(existing || {}), id: existing?.id, name, type: 'orbit', baseUrl: input.baseUrl || existing?.baseUrl || 'https://orbitkh.vercel.app', projectIds: [], userId: '', statusFilter: ['active', 'unfinished', 'all'].includes(input.statusFilter) ? input.statusFilter : existing?.statusFilter || 'active', statuses: [], statusMap: {}, ...(typeof input.sendReport === 'boolean' ? { sendReport: input.sendReport } : {}) };
+        const draft = { ...(existing || {}), id: existing?.id, name, type: 'orbit', baseUrl: input.baseUrl || existing?.baseUrl || ORBIT_URL, projectIds: [], userId: '', statusFilter: ['active', 'unfinished', 'all'].includes(input.statusFilter) ? input.statusFilter : existing?.statusFilter || 'active', statuses: [], statusMap: {}, ...(typeof input.sendReport === 'boolean' ? { sendReport: input.sendReport } : {}) };
         if (key) await desk.sources.testConnector(draft, key);
         const source = store.saveConnection({ ...draft, ...(key ? { apiKey: key } : {}) });
         return json(response, 200, { source: store.publicConfig().sources.find(item => item.id === source.id), sync: await desk.sources.syncSource(source).catch(error => { const failed = { sourceId: source.id, name: source.name, error: error.message, at: new Date().toISOString() }; store.put('sync', source.id, failed); return failed; }) });
