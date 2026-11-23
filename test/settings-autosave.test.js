@@ -518,3 +518,69 @@ test('a failed Orbit sync stays on its row, Paste a new key opens that connectio
     assert.equal(await page.locator('.settings-pop [data-cn-field="apiKey"]').count(), 1, 'the change form has the key field');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// A voice-engine load started while a save is still on its way may be answered before that save lands: when it comes back after the save, it must be dropped.
+test('a voice engine load started during a save cannot bring the old engine back after the save', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    await page.goto(`${base}/`, { timeout: 120000 }); await page.locator('.rail-settings').waitFor({ timeout: 120000 });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await openJev(page); await page.waitForTimeout(1500);
+    let releaseSave = () => {}, releaseLoad = () => {}, saveHeld = false, loadHeld = false, saved = false;
+    const saveGate = new Promise(done => { releaseSave = done; }), loadGate = new Promise(done => { releaseLoad = done; });
+    await page.route('**/api/speak/engine', async route => {
+      // The save waits before it reaches the desk; the load is answered by the desk at once (the old engine) and held on its way back.
+      if (route.request().method() === 'POST') { saveHeld = true; await saveGate; const reply = await route.fetch(); saved = true; return route.fulfill({ response: reply }); }
+      const reply = await route.fetch(); loadHeld = true; await loadGate; await route.fulfill({ response: reply });
+    });
+    await pickEngine(page, 'fish');
+    for (let i = 0; i < 100 && !saveHeld; i++) await page.waitForTimeout(50);
+    assert.ok(saveHeld, 'test setup: the save is on its way');
+    await page.evaluate(() => document.querySelector('.settings-pop [data-st-close]').click());
+    await openJev(page);
+    for (let i = 0; i < 100 && !loadHeld; i++) await page.waitForTimeout(50);
+    assert.ok(loadHeld, 'test setup: a load started during the save holds the old engine');
+    releaseSave();
+    const cachedEngine = () => page.evaluate(() => JSON.parse(localStorage.getItem('rex-desk-speak-cache') || '{}').tts?.engine);
+    for (let i = 0; i < 50 && (!saved || await cachedEngine() !== 'fish'); i++) await page.waitForTimeout(100);
+    assert.equal(await cachedEngine(), 'fish', 'test setup: the save landed');
+    releaseLoad(); await page.waitForTimeout(1000);
+    assert.equal(await cachedEngine(), 'fish', 'the cache keeps the save');
+    assert.equal(await page.locator('.settings-pop [data-st-tts="engine"]').inputValue(), 'fish', 'the screen keeps the save');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});
+
+// A newer voice save that fails must not hide an earlier save that worked.
+test('a failed newer voice save does not hide an earlier save that worked', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    await page.goto(`${base}/`, { timeout: 120000 }); await page.locator('.rail-settings').waitFor({ timeout: 120000 });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await openJev(page); await page.waitForTimeout(1500);
+    let release = () => {}, held = false, posts = 0;
+    const gate = new Promise(done => { release = done; });
+    await page.route('**/api/speak/engine', async route => {
+      if (route.request().method() !== 'POST') return route.continue();
+      // The first save (Fish Audio) works but its answer is slow; the second one fails.
+      if (++posts === 1) { const reply = await route.fetch(); held = true; await gate; return route.fulfill({ response: reply }); }
+      return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'The voice service did not answer.' }) });
+    });
+    await pickEngine(page, 'fish');
+    for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(50);
+    assert.ok(held, 'test setup: the first save is on its way back');
+    await pickEngine(page, 'standard');
+    for (let i = 0; i < 50 && posts < 2; i++) await page.waitForTimeout(100);
+    await page.waitForTimeout(300); release(); await page.waitForTimeout(1200);
+    const cachedEngine = await page.evaluate(() => JSON.parse(localStorage.getItem('rex-desk-speak-cache') || '{}').tts?.engine);
+    assert.equal(cachedEngine, 'fish', 'the save that worked is kept in the cache');
+    assert.equal(await page.locator('.settings-pop [data-st-tts="engine"]').inputValue(), 'fish', 'and shown');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});

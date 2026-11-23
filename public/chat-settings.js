@@ -61,7 +61,8 @@ function planCard(database, state) {
 }
 // Voice engine answers across every Settings window. A save always wins: a load counts only when no save started or was still out while it ran,
 // and only the newest save (or newest load) counts. show puts a kept answer on the Settings window that is open now.
-const ttsRun = { saves: 0, open: 0, loads: 0, show: null };
+// saves: voice saves started; open: saves still out; loads: engine loads started; best: the newest save that worked; shown: the save on screen.
+const ttsRun = { saves: 0, open: 0, loads: 0, best: null, shown: 0, show: null };
 const SECTIONS = [
   ['general', t('General'), t('Name, language, look')],
   ['notify', t('Notifications'), t('Pop-ups, sound, quiet hours')],
@@ -600,13 +601,24 @@ export function openSettings(ctx, section = 'general') {
   } catch { /* private window */ }
   const keepSpeak = status => { try { localStorage.setItem(SPEAK_CACHE, JSON.stringify({ tts: status })); } catch { /* private window */ } };
   const keepVoiceLists = neural => { try { localStorage.setItem(VOICE_LIST_CACHE, JSON.stringify(neural)); } catch { /* private window */ } };
+  const showTts = status => { keepSpeak(status); setSpeechEngine(status); ttsRun.show?.(status); };
   const takeTts = async (request, save = false) => {
-    const mine = save ? ++ttsRun.saves : ++ttsRun.loads, savesAtStart = ttsRun.saves;
-    if (save) ttsRun.open++;
-    let status;
-    try { status = await request(); } finally { if (save) ttsRun.open--; }
-    if (save ? mine !== ttsRun.saves : mine !== ttsRun.loads || savesAtStart !== ttsRun.saves || ttsRun.open) return null;
-    keepSpeak(status); setSpeechEngine(status); ttsRun.show?.(status); return status;
+    if (save) {
+      // Once no save is out any more, the newest save that worked is shown and cached; a failed save never touches either,
+      // so it cannot hide an earlier save that worked.
+      const mine = ++ttsRun.saves; ttsRun.open++;
+      let status, failed = null;
+      try { status = await request(); if (mine > (ttsRun.best?.n || 0)) ttsRun.best = { n: mine, status }; } catch (error) { failed = error; } finally { ttsRun.open--; }
+      if (!ttsRun.open && ttsRun.best && ttsRun.best.n > ttsRun.shown) { ttsRun.shown = ttsRun.best.n; showTts(ttsRun.best.status); }
+      if (failed) throw failed;
+      return status;
+    }
+    // A load counts only when no save was out when it started, none started since, and it is the newest load:
+    // a load started during a save may have been answered before that save landed.
+    const mine = ++ttsRun.loads, savesAtStart = ttsRun.saves, openAtStart = ttsRun.open;
+    const status = await request();
+    if (mine !== ttsRun.loads || openAtStart || savesAtStart !== ttsRun.saves || ttsRun.open) return null;
+    showTts(status); return status;
   };
   ttsRun.show = status => { state.extra.tts = status; jevDraw(); };
   // A background answer redraws the Jev tab only when no edit is waiting to save; otherwise the redraw waits until that save has read the fields.
