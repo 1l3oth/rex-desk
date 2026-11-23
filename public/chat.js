@@ -442,13 +442,24 @@ function patchFeed(inner, html, full) {
   const next = document.createElement('template'); next.innerHTML = html;
   const want = [...next.content.childNodes], have = [...inner.childNodes];
   if (full || !have.length) { inner.replaceChildren(...want); return true; }
-  // An element marked data-keep (the graph's canvas lives in one) is kept as it is while its mark stays the same.
+  return patchChildren(inner, want, have);
+}
+// An element marked data-keep (the graph's canvas lives in one) is kept as it is while its mark stays the same. An element
+// marked data-patch (the Needs you list and pane) keeps itself and patches its children one by one, so a change in the list
+// leaves a playing video in the pane alone.
+function patchChildren(inner, want, have = [...inner.childNodes]) {
   const same = (a, b) => a.nodeType === b.nodeType && (a.nodeType === 1 ? (a.dataset.keep && a.dataset.keep === b.dataset.keep) || a.outerHTML === b.outerHTML : a.nodeValue === b.nodeValue);
+  const nested = (a, b) => a.nodeType === 1 && b.nodeType === 1 && a.tagName === b.tagName && b.hasAttribute('data-patch') && a.hasAttribute('data-patch');
   let changed = false;
   for (let index = 0; index < want.length; index++) {
-    const old = have[index];
-    if (!old) { inner.append(want[index]); changed = true; }
-    else if (!same(old, want[index])) { old.replaceWith(want[index]); changed = true; }
+    const old = have[index], fresh = want[index];
+    if (!old) { inner.append(fresh); changed = true; }
+    else if (same(old, fresh)) continue;
+    else if (nested(old, fresh)) {
+      for (const { name } of [...old.attributes]) if (!fresh.hasAttribute(name)) { old.removeAttribute(name); changed = true; }
+      for (const { name, value } of [...fresh.attributes]) if (old.getAttribute(name) !== value) { old.setAttribute(name, value); changed = true; }
+      if (patchChildren(old, [...fresh.childNodes])) changed = true;
+    } else { old.replaceWith(fresh); changed = true; }
   }
   for (let index = want.length; index < have.length; index++) { have[index].remove(); changed = true; }
   return changed;

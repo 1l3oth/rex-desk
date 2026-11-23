@@ -88,8 +88,11 @@ export function inboxStage(ctx, helpers) {
   }
   const seg = `<div class="kg-switch ny-seg" role="radiogroup" aria-label="${t`Group by`}">${GROUPS().map(([value, label]) => `<button type="button" role="radio" aria-checked="${group === value}" class="${group === value ? 'on' : ''}" data-ny-group="${value}">${esc(label)}</button>`).join('')}</div>`;
   const list = [...sections].map(([label, rows]) => `${label ? `<h3 class="ny-sec">${esc(label)}<span>${rows.length}</span></h3>` : ''}${rows.join('')}`).join('');
+  // A pane with pictures or videos stays as it is while the same question shows them, so a playing video is not restarted.
+  const pictures = (current.item.request?.pictures || []).map(picture => picture.url).filter(Boolean);
+  const keep = pictures.length ? ` data-keep="${esc(`${current.item.id}:${pictures.join(',')}`)}"` : '';
   return { title: t('Needs you'), meta: t`${count} waiting`, top: true, actions: seg, feedClass: 'ny-feed',
-    feed: `<div class="ny${ui.nyOpen ? ' open' : ''}"><nav class="ny-list" aria-label="${t`Waiting questions`}">${list}</nav><section class="ny-pane">${detail(ctx, helpers, current)}</section></div>` };
+    feed: `<div class="ny${ui.nyOpen ? ' open' : ''}" data-patch><nav class="ny-list" aria-label="${t`Waiting questions`}">${list}</nav><section class="ny-pane"${keep}>${detail(ctx, helpers, current)}</section></div>` };
 }
 
 // Picking a row opens it on the right (on a phone, over the list). The grouping is kept on this computer. A suggested
