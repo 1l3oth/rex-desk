@@ -92,9 +92,9 @@ export function startTour(ctx, { firstRun = false } = {}) {
     done: '<circle cx="60" cy="40" r="24" class="tp-fill"/><path d="M48 40l8 8 16-16" class="tp-check"/>',
   }[step]}</svg>`;
   const body = {
-    welcome: () => `<h2>${t`Welcome to Rex Desk`}</h2><p>${t`AI agents work on your projects here, and you chat with them like teammates. A few short steps get you ready.`}</p>
+    welcome: () => `<h2>${t`Welcome to Rex Desk`}</h2><p>${t`An agent is an AI teammate you hand a project to: it reads your code, does the work, and you chat with it like a colleague. A few short steps get you ready.`}</p>
       <div class="tour-lang">${languagePicker(t('Language'))}</div>
-      <label class="st-field"><span>${t`What should agents call you?`}</span><input data-tour-name value="${esc(ui.snap.config?.name || '')}" maxlength="60"></label>`,
+      <label class="st-field"><span>${t`What should agents call you?`}</span><input data-tour-name value="" placeholder="${esc(ui.snap.config?.name || t('Your name'))}" maxlength="60"></label>`,
     about: () => {
       const icon = id => { const brand = SOCIAL[id]; return `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">${brand ? brand.svg || `<path d="${brand.path}" fill="${brand.color}"/>` : OTHER_ICON[id]}</svg>`; };
       return `<h2>${t`A little about you`}</h2><p>${t`Two quick questions so we can make Rex Desk better for people like you. Skip them if you like.`}</p>
