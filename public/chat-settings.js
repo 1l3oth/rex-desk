@@ -175,7 +175,7 @@ export function openSettings(ctx, section = 'general') {
   const field = (label, control, help = '') => `<label class="st-field"><span>${label}</span>${control}${help ? `<small>${help}</small>` : ''}</label>`;
   // Spoken replies: which voice says Rex Desk's English lines. Microsoft's natural voices (free), or Fish Audio (online).
   const speechBlock = () => {
-    const tts = state.extra.tts; if (!tts) return '';
+    const tts = state.extra.tts || { engine: 'standard' };
     const fish = tts.engine === 'fish', money = t`The free model costs nothing (Fish Audio's fair use). The best model costs about ${'$' + (tts.paidCostPerMinute || 0.02).toFixed(2)} for each minute of speech.`;
     const select = (name, options, current) => `<select data-st-tts="${name}">${options.map(([value, label]) => `<option value="${esc(value)}" ${String(current) === String(value) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>`;
     const keyRow = tts.hasKey
@@ -194,6 +194,13 @@ export function openSettings(ctx, section = 'general') {
       ${field(t('Voice engine'), select('engine', [['standard', t('Natural voices (Microsoft, free)')], ['fish', t('Fish Audio (online)')]], tts.engine), t('Fish Audio says English only. Korean and Khmer keep the natural voices. If there is no key, or Fish Audio cannot answer, your usual voice says it, so Voice mode never goes silent.'))}
       ${details}
       ${['en', 'ko', 'km'].map(lang => field(t`Reading voice, ${{ en: t('English'), ko: t('Korean'), km: t('Khmer') }[lang]}`, `<select data-st-voice="${lang}"><option value="">${t`Natural voice (recommended)`}</option><optgroup label="${t`Natural voices`}">${(state.extra.neural?.[lang] || []).map(([id, label]) => `<option value="${esc(id)}" ${chosenVoice(lang) === id ? 'selected' : ''}>${esc(label)}</option>`).join('')}</optgroup>${(state.extra.voices?.[lang] || []).length ? `<optgroup label="${t`This computer's voices`}">${state.extra.voices[lang].map(voice => `<option value="${esc(voice.name)}" ${chosenVoice(lang) === voice.name ? 'selected' : ''}>${esc(voice.name)}</option>`).join('')}</optgroup>` : ''}</select>`, lang === 'en' ? t("For the speaker button on agent messages. Natural voices are Microsoft's Edge voices (the same studybook uses): the text is sent to Microsoft to be read. This computer's voices stay on this computer.") : '')).join('')}`;
+  };
+  const jevStatus = () => {
+    if (config().control?.enabled === false) return t('Off. Jev does nothing until you turn it on.');
+    const claude = ui.accounts?.claude?.profiles?.some(item => item.loggedIn);
+    if (config().jev?.hasKey || claude) return t('Ready. Press Ctrl+Alt+J in any app, then say or type what to do.');
+    if (!ui.accounts) return t('Checking what Jev needs…');
+    return t('To start, Jev needs Claude signed in (Settings, AI) or an OpenRouter key under Advanced.');
   };
   const check = (name, on, label, help = '') => `<label class="st-check"><input type="checkbox" name="${name}" ${on ? 'checked' : ''}><span><b>${label}</b>${help ? `<small>${help}</small>` : ''}</span></label>`;
   const input = (name, value, attrs = '') => `<input name="${name}" value="${esc(value ?? '')}" ${attrs}>`;
@@ -291,22 +298,25 @@ export function openSettings(ctx, section = 'general') {
     sources: () => connectorsHtml(ctx, state, config(), {
       trackers: (state.trackers || []).length ? trackersHtml(ctx, state, config()) : '',
       syncField: (config().sources || []).length ? field(t('Check for new tasks every'), `<span class="st-unit">${input('syncMinutes', config().syncMinutes, 'type="number" min="0" max="1440"')}<em>${t`minutes`}</em></span>`, t('0 checks only when you press Sync.')) : '' }),
+    // One switch on top says whether Jev is on and what it still needs; keys, ranking, the spoken-reply engine and the reading voices wait under Advanced.
     jev: () => `<h2>${t`Jev and voice`}</h2>
+      ${check('control.enabled', config().control?.enabled !== false, t('Jev and voice'), jevStatus())}
       ${tip('jev', t('Talk to Jev to run this computer by voice: open apps, change volume, read the screen. Keep "Ask me before shutting down" on.'))}
+      <h3>${t`Controlling this computer`}</h3>
+      ${check('control.confirm', config().control?.confirm !== false, t('Ask me before shutting down, restarting, signing out, closing apps or emptying the Recycle Bin'))}
+      ${check('control.agents', config().control?.agents, t('Let agents control this computer too'))}
+      ${(config().control?.allow || []).length ? `<div class="st-field"><span>${t`Done without asking`}</span><div class="st-chips">${config().control.allow.map(action => `<span class="st-chip">${esc(ASKS[action] || action.replaceAll('_', ' '))}<button type="button" class="ag-x" data-st-allow-off="${esc(action)}" aria-label="${t`Ask again before this`}">×</button></span>`).join('')}</div><small>${t`Press × to have Jev ask you again first. "Yes, always" on a Jev question adds one here.`}</small></div>` : ''}
+      ${field(t('Voice language'), `<select name="control.language">${LANGS.map(([value, label]) => `<option value="${value}" ${(config().control?.language || 'en') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
+      <details class="st-adv st-adv-top"><summary>${t`Advanced`}</summary><div class="st-adv-body">
+      <h3>${t`OpenRouter`}</h3>
       ${field(t('OpenRouter key'), `<input type="password" name="jev.apiKey" autocomplete="off" spellcheck="false" placeholder="${config().jev?.hasKey ? t('Saved. Paste a new key to replace it.') : 'sk-or-…'}">`, t('Optional. For issue ranking and the Gemini voice engine. Kept locked on this computer and sent only to OpenRouter.'))}
       ${config().jev?.hasKey ? check('jev.clearKey', false, t('Remove the saved key')) : ''}
       ${hasTracker() ? `<h3>${t`Ranking your issues`}</h3>
       <div class="st-row">${field(t('Jev model'), input('jev.model', config().jev?.model, 'placeholder="Newest Jev release" spellcheck="false"'))}${field(t('Versions you ship now'), input('jev.versions', config().jev?.versions, `placeholder="${t('App 2.0.1, website current release')}"`))}</div>
       ${check('jev.auto', config().jev?.auto !== false, t('Rank new and changed issues after each sync'))}
-      ${config().jev?.hasKey ? `<div class="st-actions"><button type="button" class="btn small" data-st-rank ${state.extra.ranking ? 'disabled' : ''}>${state.extra.ranking ? t('Ranking…') : t('Rank my issues now')}</button><small class="muted">${t`Shift-click to check every issue again.`}</small></div>` : ''}` : `<p class="muted">${t`Jev can also rank the issues from Flow or Morningmate by what to fix first. That shows here once you connect one in Task sources.`}</p>`}
-      <h3>${t`Controlling this computer`}</h3>
-      ${check('control.enabled', config().control?.enabled !== false, t('Let Jev control this computer when I ask'))}
-      ${check('control.confirm', config().control?.confirm !== false, t('Ask me before shutting down, restarting, signing out, closing apps or emptying the Recycle Bin'))}
-      ${check('control.agents', config().control?.agents, t('Let agents control this computer too'))}
-      ${(config().control?.allow || []).length ? `<div class="st-field"><span>${t`Done without asking`}</span><div class="st-chips">${config().control.allow.map(action => `<span class="st-chip">${esc(ASKS[action] || action.replaceAll('_', ' '))}<button type="button" class="ag-x" data-st-allow-off="${esc(action)}" aria-label="${t`Ask again before this`}">×</button></span>`).join('')}</div><small>${t`Press × to have Jev ask you again first. "Yes, always" on a Jev question adds one here.`}</small></div>` : ''}
-      ${field(t('Voice language'), `<select name="control.language">${LANGS.map(([value, label]) => `<option value="${value}" ${(config().control?.language || 'en') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
+      ${config().jev?.hasKey ? `<div class="st-actions"><button type="button" class="btn small" data-st-rank ${state.extra.ranking ? 'disabled' : ''}>${state.extra.ranking ? t('Ranking…') : t('Rank my issues now')}</button><small class="muted">${t`Shift-click to check every issue again.`}</small></div>` : ''}` : ''}
       ${speechBlock()}
-      <div class="st-actions"><button type="button" class="btn" data-st-open="voice">${t`Voice engine and compare`}</button></div>`,
+      <div class="st-actions"><button type="button" class="btn" data-st-open="voice">${t`Voice engine and compare`}</button></div></div></details>`,
     schedule: () => { if (state.extra.connectorPick) return ''; const schedule = config().schedule || {}; const days = schedule.days || [1, 2, 3, 4, 5]; if (!hasTracker() && !hasOrbit()) return ''; return `<h2>${t`Schedule`}</h2><p class="muted">${t`At the set time Rex Desk looks for new tasks, Rex Agent sorts them, and agents start work up to your daily limit. Questions wait in Needs you.`}</p>
       ${tip('schedule', t('Set it for when you start your day, with a small limit like 3 runs. You come back to finished work and a short list of questions.'))}
       ${check('schedule.enabled', schedule.enabled, t('Start work on its own on a schedule'))}
@@ -355,6 +365,7 @@ export function openSettings(ctx, section = 'general') {
     let box = null;
     for (const node of [...panel.children]) {
       if (node.matches('.st-tip')) continue;
+      if (node.matches('.st-adv-top')) { box = null; node.querySelectorAll(':scope > .st-adv-body').forEach(groupPanel); continue; }
       if (node.matches('h2,h3,p,.error-text,small') || node.classList.contains('muted')) { box = null; continue; }
       if (node.classList.contains('st-box')) { box = null; continue; }
       if (!box) { box = document.createElement('div'); box.className = 'st-box'; panel.insertBefore(box, node); }
@@ -574,8 +585,12 @@ export function openSettings(ctx, section = 'general') {
     catch (error) { event.target.checked = !on; toast(error.message, true); }
   });
   // The voices on this computer, for the reading voice choices.
-  void api('/speak/engine').then(status => { state.extra.tts = status; setSpeechEngine(status); if (has('jev') && document.body.contains(back)) draw(); }).catch(() => {});
-  void api('/speak/voices').then(neural => { state.extra.neural = neural; if (has('jev') && document.body.contains(back)) draw(); }).catch(() => {});
+  const SPEAK_CACHE = 'rex-desk-speak-cache';
+  try { const cached = JSON.parse(localStorage.getItem(SPEAK_CACHE) || 'null'); if (cached) { state.extra.tts ||= cached.tts; state.extra.neural ||= cached.neural; } } catch { /* private window */ }
+  const keepSpeak = () => { try { localStorage.setItem(SPEAK_CACHE, JSON.stringify({ tts: state.extra.tts, neural: state.extra.neural })); } catch { /* private window */ } };
+  if (has('jev') && !ui.accounts) void api('/agents').then(list => { ui.accounts ||= list; if (has('jev') && document.body.contains(back)) draw(); }).catch(() => {});
+  void api('/speak/engine').then(status => { state.extra.tts = status; keepSpeak(); setSpeechEngine(status); if (has('jev') && document.body.contains(back)) draw(); }).catch(() => {});
+  void api('/speak/voices').then(neural => { state.extra.neural = neural; keepSpeak(); if (has('jev') && document.body.contains(back)) draw(); }).catch(() => {});
   if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); if (has('jev') && document.body.contains(back)) draw(); });
   // Spoken replies: each control saves at once.
   back.addEventListener('change', async event => {

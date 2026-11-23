@@ -2980,3 +2980,8 @@ html:has(.iv[open]){overflow:hidden}
 .page.mk{width:100%}.mk-search{height:32px}
 /* Needs you: a phone asking to come in shows a plain phone, not an agent's picture. */
 .av.ny-device{background:var(--raised);color:var(--muted)}.av.sm.ny-device svg{width:18px;height:18px}
+/* Jev and voice: Advanced is its own quiet row under the main groups, and the groups inside it read like the rest of the page. */
+.settings-pop .st-panel>.st-adv-top{margin-top:14px}
+.settings-pop .st-panel>.st-adv-top>summary{padding:2px 4px}
+.settings-pop .st-adv-body{display:flex;flex-direction:column;gap:10px}
+.settings-pop .st-adv-body>h3:first-child{margin-top:4px}
