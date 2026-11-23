@@ -29,7 +29,7 @@ const server = http.createServer(async (request, response) => {
   if (request.method !== 'POST') return send(404, { error: 'Not found.' });
   const input = await body(request);
   if (url.pathname === '/answer') { const waiter = asks.get(input.id); if (!waiter) return send(404, { error: 'No such question.' }); asks.delete(input.id); waiter(input.answer || { action: 'cancel' }); return send(200, { ok: true }); }
-  if (url.pathname === '/inbox') { if (finished) return send(409, { error: 'The reply is over.' }); if (input.text) inbox.push(String(input.text)); return send(200, { ok: true }); }
+  if (url.pathname === '/inbox') { if (finished) return send(409, { error: 'The reply is over.' }); if (input.text) inbox.push({ text: String(input.text), handover: input.handover ?? null }); return send(200, { ok: true }); }
   if (url.pathname === '/stop') { controller.abort(); void runner?.interrupt?.().catch(() => {}); return send(200, { ok: true }); }
   return send(404, { error: 'Not found.' });
 });
@@ -46,11 +46,17 @@ async function main() {
   runner = new Runner({ ...spec.options, ...(sdk ? { sdk } : {}), controller, signal: controller.signal,
     event: (kind, data) => write({ type: 'event', kind, data }),
     ask: request => new Promise(resolve => { const id = randomUUID(); asks.set(id, resolve); write({ type: 'ask', id, request }); }),
-    inbox: () => inbox.splice(0).join('\n\n'),
-    // A note for the agent after its turn ended (a step Claude Code cancelled): handed back with the unread messages.
-    requeue: text => { if (String(text || '').trim()) inbox.push(String(text)); } });
-  // Messages that came after the agent's last step were never read: they go back to Rex Desk, which starts the next turn with them.
-  const handBack = () => { finished = true; if (inbox.length) write({ type: 'unread', text: inbox.splice(0).join('\n\n') }); };
+    // withId (Codex): the handovers of everything drained go with it; a part without one (a note) is carried as its own text.
+    inbox: ({ withId = false } = {}) => {
+      const items = inbox.splice(0), text = items.map(item => item.text).join('\n\n');
+      return withId ? { text, handover: items.length ? items.map(item => item.handover ?? { entries: [item.text], tickets: [] }) : null } : text;
+    },
+    // A note for the agent after its turn ended (a step Claude Code cancelled), or a refused steer with its handovers: handed
+    // back with the unread messages.
+    requeue: (text, handover = null) => { if (String(text || '').trim()) inbox.push({ text: String(text), handover }); } });
+  // Messages that came after the agent's last step were never read: they go back to Rex Desk one by one with their handovers,
+  // which starts the next turn with them.
+  const handBack = () => { finished = true; if (inbox.length) { const items = inbox.splice(0); write({ type: 'unread', text: items.map(item => item.text).join('\n\n'), items }); } };
   try { await runner.start(spec.prompt); handBack(); write({ type: 'done' }); }
   catch (error) { handBack(); write({ type: 'error', message: String(error?.message || error), aborted: controller.signal.aborted }); }
 }

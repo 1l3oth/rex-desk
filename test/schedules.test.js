@@ -502,3 +502,36 @@ test('path 13, two steers with the same words resolve out of order: each acknowl
   assert.equal(t.store.get('schedmsg', second.id).on, false, 'second sent');
   assert.equal(starts, 2, 'the next turn took the first'); assert.equal(t.store.get('schedmsg', first.id).on, false, 'first sent once that turn took it');
 });
+
+test('path 14, an agent in its own process leaves a scheduled message unread: its ticket goes back with it, so a clean end does not count it as sent', async () => {
+  const { HostRunner } = await import('../src/hosts.js');
+  const { appendFileSync } = await import('node:fs');
+  const hosts = [], posted = [], directory = temporary('host-journal');
+  const t = deskWith(options => {
+    const host = new HostRunner(options, { directory, pollMs: 20, spawner: () => ({ pid: process.pid, unref() {} }) });
+    host.port = async () => 1; host.post = async (route, data) => { if (route === '/inbox') posted.push(data); };
+    hosts.push(host); return host;
+  });
+  const journal = (index, entry) => appendFileSync(hosts[index].state.journal, `${JSON.stringify(entry)}\n`);
+  const waitFor = async (check, label) => { for (let step = 0; step < 150 && !check(); step++) await new Promise(done => setTimeout(done, 20)); assert.ok(check(), label); };
+  // A failed check still ends every stand-in process, so the test fails instead of hanging.
+  try { await hostTurns(); } finally { for (const host of hosts) { clearInterval(host.timer); host.detached = true; } t.desk.live.clear(); }
+  async function hostTurns() {
+  void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' });
+  await waitFor(() => hosts[0]?.state?.journal, 'the agent process started');
+  journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
+  await t.desk.schedules.tick(at(0, '09:00'));
+  await waitFor(() => posted.some(item => item.text.includes('Ping')), 'the message went over to the agent process');
+  assert.ok(posted[0].handover?.tickets?.length, 'it went with its handover');
+  // The reply ends before the agent read it: the process hands it back unread, with its handover, then ends cleanly.
+  journal(0, { type: 'unread', text: posted[0].text, items: [{ text: posted[0].text, handover: posted[0].handover }] });
+  journal(0, { type: 'done' });
+  await waitFor(() => hosts.length === 2, 'the next turn starts with the unread message');
+  assert.notEqual(t.store.list('delivery')[0]?.state, 'taken', 'unread is not sent');
+  await t.desk.schedules.tick(at(0, '09:02'));
+  assert.equal(t.item().on, true, 'still due');
+  journal(1, { type: 'event', kind: 'prompt-accepted', data: {} }); journal(1, { type: 'done' });
+  await t.settled(); await t.desk.schedules.tick(at(0, '09:05'));
+  assert.equal(t.item().on, false, 'sent once the next turn took it'); assert.equal(hosts.length, 2, 'sent once');
+  }
+});

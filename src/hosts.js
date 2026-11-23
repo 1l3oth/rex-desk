@@ -126,7 +126,8 @@ export class HostRunner {
         try {
           // New messages for the agent go over as they come, the way an in-process agent picks them up between steps.
           // A message the process refuses (its reply just ended) or cannot take goes back to the run's queue, for the next turn.
-          if (Date.now() - inboxAt > 1000) { inboxAt = Date.now(); const news = this.options.inbox?.(); if (news) void this.post('/inbox', { text: news }).catch(error => { if (!/timeout|aborted/i.test(String(error?.name || '') + error?.message)) this.options.requeue?.(news); }); }
+          // Each goes with its handover (its tickets and queue entries), which comes back with it if it is refused or left unread.
+          if (Date.now() - inboxAt > 1000) { inboxAt = Date.now(); const got = this.options.inbox?.({ withId: true }), news = typeof got === 'string' ? got : got?.text || '', handover = typeof got === 'string' ? null : got?.handover ?? null; if (news) void this.post('/inbox', { text: news, handover }).catch(error => { if (!/timeout|aborted/i.test(String(error?.name || '') + error?.message)) this.options.requeue?.(news, handover); }); }
           const size = existsSync(this.state.journal) ? statSync(this.state.journal).size : 0;
           if (size > this.state.offset) {
             const fd = openSync(this.state.journal, 'r'), chunk = Buffer.alloc(size - this.state.offset);
@@ -138,7 +139,8 @@ export class HostRunner {
               if (!line.trim()) continue;
               const entry = JSON.parse(line);
               if (entry.type === 'event') this.options.event(entry.kind, entry.data);
-              else if (entry.type === 'unread') this.options.requeue?.(entry.text);
+              // Unread messages come back one by one with their handovers, so their own tickets wait again (an older process sends text only).
+              else if (entry.type === 'unread') { if (Array.isArray(entry.items)) for (const item of entry.items) this.options.requeue?.(item.text, item.handover ?? null); else this.options.requeue?.(entry.text); }
               else if (entry.type === 'ask' && !(this.state.asks || []).some(item => item.id === entry.id)) { this.save({ asks: [...(this.state.asks || []), { id: entry.id, request: entry.request }] }); this.answer(entry.id, entry.request); }
               else if (entry.type === 'done') { this.save({ offset }); return finish(resolve, { status: 'completed' }); }
               else if (entry.type === 'error') { this.save({ offset }); return finish(reject, new Error(entry.message)); }

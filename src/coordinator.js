@@ -710,15 +710,16 @@ export class Desk {
     // says so (prompt-accepted, after the turn's prompt or after a message handed over mid-turn, like a Codex steer that was
     // accepted) or the turn ends cleanly. A hand-over the runner gives back (requeue) waits again; any other end loses them.
     const bound = new Set();
-    // Each mid-turn hand-over (one inbox drain, like one Codex steer) gets its own id and keeps its queue entries and the ids of
-    // the tickets it carries. An acknowledgment for one hand-over (an accepted steer, by its id) settles only those tickets, and
-    // a hand-over given back (a refused steer) returns only those, even when two steers have the same words or resolve out of
-    // order. Without one (the turn's prompt, or the model's next real output) every ticket in flight is settled.
-    const handed = new Map(); let handSeq = 0;
+    // Each mid-turn hand-over (one inbox drain, like one Codex steer) comes with a handover: the queue entries it carried and the
+    // ids of their tickets, plain data that also travels through an agent's own process and its journal (src/hosts.js), so it
+    // survives a restart. An acknowledgment with handovers (an accepted steer) settles only those tickets, and a hand-over given
+    // back (a refused steer, messages left unread) returns only those, even when two steers have the same words or resolve out
+    // of order. Without one (the turn's prompt, or the model's next real output) every ticket in flight is settled.
+    const handovers = value => (value == null ? [] : Array.isArray(value) ? value : [value]).filter(item => item && typeof item === 'object');
+    const inTurn = ticket => bound.delete(ticket) || (this.store.get('delivery', ticket)?.state === 'turn' && this.store.get('delivery', ticket)?.runId === runId);
     const markLaunched = (handover = null) => {
-      const tickets = handover === null ? [...bound] : handed.get(handover)?.tickets || [];
-      for (const ticket of tickets) { if (!bound.delete(ticket)) continue; this.setDelivery(ticket, { state: 'taken' }); }
-      if (handover === null) handed.clear(); else handed.delete(handover);
+      const tickets = handover === null ? [...bound] : handovers(handover).flatMap(item => item.tickets || []);
+      for (const ticket of tickets) if (inTurn(ticket)) this.setDelivery(ticket, { state: 'taken' });
     };
     const bind = (entries, whole = false) => { const tickets = []; for (const item of this.waitingDeliveries(this.store.get('run', runId), whole ? null : entries)) { bound.add(item.id); tickets.push(item.id); this.setDelivery(item.id, { state: 'turn', runId }); } return tickets; };
     // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
@@ -819,21 +820,21 @@ export class Desk {
         mcpOff: [...toolsOff(this.store, runAgentId(run))].filter(key => key.startsWith('mcp:')).map(key => key.slice(4)),
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' || run.provider === 'openrouter' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
-        ask: request => this.ask(runId, request), // withId: the runner (Codex) acknowledges or gives back this hand-over by its id; others get just the text.
+        ask: request => this.ask(runId, request), // withId: the runner (Codex, an agent's own process) acknowledges or gives back this hand-over with its handover; others
+        // get just the text.
         inbox: ({ withId = false } = {}) => {
           const entries = [...(this.store.get('run', runId)?.queued || [])], text = this.takeInbox(runId);
-          if (!text) return withId ? { text: '', id: null } : '';
-          const id = ++handSeq; handed.set(id, { entries, tickets: bind(entries) });
-          return withId ? { text, id } : text;
+          if (!text) return withId ? { text: '', handover: null } : '';
+          const handover = { entries, tickets: bind(entries) };
+          return withId ? { text, handover } : text;
         },
-        // A hand-over given back by its id (a refused steer): only its own tickets wait again, and its entries go back to the
-        // queue one by one. Other text (a cancel note) carries no ticket and just goes back to the queue.
+        // A hand-over given back with its handovers (a refused steer, messages left unread): only their own tickets wait again,
+        // and their entries go back to the queue one by one. Text without one (a cancel note) carries no ticket and just goes back.
         requeue: (text, handover = null) => {
-          const hand = handover === null ? null : handed.get(handover);
-          if (!hand) return this.requeue(runId, text);
-          handed.delete(handover);
-          for (const id of hand.tickets) if (bound.delete(id)) this.setDelivery(id, { state: 'waiting' });
-          this.requeue(runId, hand.entries);
+          const hands = handovers(handover);
+          if (!hands.length) return this.requeue(runId, text);
+          for (const ticket of hands.flatMap(item => item.tickets || [])) if (inTurn(ticket)) this.setDelivery(ticket, { state: 'waiting' });
+          this.requeue(runId, hands.flatMap(item => item.entries || []));
         }, extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
           // Only the runner knows when its prompt was really taken (Codex: turn/start accepted; Claude: the model's first real
           // words or step). A session opening, a sign-in error written as a reply, or a result before an error check prove nothing.
