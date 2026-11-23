@@ -137,6 +137,15 @@ test('a phone signed in to the desk\'s own account comes in with no code; anothe
   assert.equal(relay.sameAccount({ headers: { 'x-rex-relay': 'forged', 'x-rex-relay-account': 'user-1' } }), false, 'only requests the relay played count');
   relay.save({ askCode: true }); assert.equal(relay.sameAccount(ask('user-1')), false, 'the person can still ask for the code');
   relay.save({ askCode: false });
+  // Same-account trust rests on the relay's account alone: no phone id is needed, and an approval cannot stand in for it.
+  assert.deepEqual(relay.admit({ headers: { 'x-rex-relay': relay.secret, 'x-rex-relay-account': 'user-1' } }), { ok: true }, 'same account with no phone id');
+  assert.equal(relay.admit({ headers: { 'x-rex-relay': relay.secret, 'x-rex-relay-account': 'user-2' } }).missing, true, 'another account still needs a phone id');
+  // A code approval keeps the account it was made under: the same cookie id under another account needs a new code.
+  const waiting = relay.pendingFor({ id: 'their-phone', name: 'Pixel', account: 'user-2' }); relay.approve(waiting.ref, waiting.code);
+  const as = account => ({ headers: { 'x-rex-relay': relay.secret, 'x-rex-relay-device': 'their-phone', ...(account ? { 'x-rex-relay-account': account } : {}) } });
+  assert.equal(relay.admit(as('user-2')).ok, true, 'approved phone, same account as when approved');
+  assert.equal(relay.admit(as('user-3')).ok, false, 'the copied id under another account');
+  assert.equal(relay.admit(as('')).ok, false, 'the copied id with no account');
   socket.emit('close', { code: 1006 }); relay.stop();
   assert.equal(relay.account, '', 'a closed connection forgets the account');
 });

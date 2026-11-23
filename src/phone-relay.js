@@ -51,13 +51,27 @@ export class PhoneRelay {
     const account = cleanId(request.headers['x-rex-relay-account']);
     return this.isRelayed(request) && Boolean(account) && account === this.account && !this.settings().askCode;
   }
-  approved(deviceId) { const key = deviceId ? keyOf(deviceId) : ''; return Boolean(key) && this.settings().devices.some(item => item.key === key); }
+  // A code-approved phone is known by the id the relay sends for it. That id comes from a cookie the desk cannot check, so
+  // an approval also keeps the account the relay saw then: the same id under another account (or with none) needs a new code.
+  approved(deviceId, account = '') {
+    const key = deviceId ? keyOf(deviceId) : ''; if (!key) return false;
+    return this.settings().devices.some(item => item.key === key && (!item.account || item.account === cleanId(account)));
+  }
+  // Whether a relayed request may come in. The same account needs nothing else: trust there rests on the relay's checked
+  // account alone, never on the phone's id. Any other phone needs its id and an approval made with the code.
+  admit(request) {
+    if (this.sameAccount(request)) return { ok: true };
+    const phone = this.device(request), account = cleanId(request.headers['x-rex-relay-account']);
+    if (!phone.id) return { ok: false, missing: true };
+    if (this.approved(phone.id, account)) return { ok: true };
+    return { ok: false, phone: { ...phone, account } };
+  }
   // The code a new phone shows, kept for ten minutes. Asking again within that time shows the same code.
-  pendingFor({ id, name }) {
+  pendingFor({ id, name, account = '' }) {
     const at = Date.now(), live = this.settings().pending.filter(item => item.until > at);
     const key = keyOf(id); let item = live.find(entry => entry.key === key);
     if (!item) {
-      item = { key, ref: refOf(key), name, code: String(randomInt(0, 1000000)).padStart(6, '0'), createdAt: new Date(at).toISOString(), until: at + PENDING_MS };
+      item = { key, ref: refOf(key), name, account: cleanId(account), code: String(randomInt(0, 1000000)).padStart(6, '0'), createdAt: new Date(at).toISOString(), until: at + PENDING_MS };
       live.push(item); while (live.length > MAX_PENDING) live.shift();
       this.store.event('', 'phone-approval', { device: item.ref, name, code: item.code }, true);
     }
@@ -68,7 +82,7 @@ export class PhoneRelay {
   approve(ref, code) {
     const settings = this.settings(), item = settings.pending.find(entry => entry.ref === ref && entry.until > Date.now());
     if (!item || !same(String(code || ''), item.code)) throw new Error('That phone is no longer waiting. Open Rex Desk on the phone again for a new code.');
-    this.save({ pending: settings.pending.filter(entry => entry.ref !== ref), devices: [...settings.devices.filter(entry => entry.key !== item.key), { key: item.key, ref: item.ref, name: item.name, at: new Date().toISOString() }] });
+    this.save({ pending: settings.pending.filter(entry => entry.ref !== ref), devices: [...settings.devices.filter(entry => entry.key !== item.key), { key: item.key, ref: item.ref, name: item.name, account: item.account || '', at: new Date().toISOString() }] });
     return { approved: true };
   }
   deny(ref) { this.save({ pending: this.settings().pending.filter(entry => entry.ref !== ref) }); return { denied: true }; }

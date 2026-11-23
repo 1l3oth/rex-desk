@@ -517,10 +517,10 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         // Through the relay the account is already checked there. A phone on this desk's own account comes straight in; any
         // other phone this desk has not seen yet waits for the person's OK here.
         if (relayed) {
-          const phone = desk.phoneRelay.device(request);
-          if (!phone.id) return json(response, 400, { error: 'The relay did not say which phone this is.' });
-          if (!desk.phoneRelay.approved(phone.id) && !desk.phoneRelay.sameAccount(request)) {
-            const waiting = desk.phoneRelay.pendingFor(phone);
+          const entry = desk.phoneRelay.admit(request);
+          if (entry.missing) return json(response, 400, { error: 'The relay did not say which phone this is.' });
+          if (!entry.ok) {
+            const waiting = desk.phoneRelay.pendingFor(entry.phone);
             if (request.method === 'GET' && !url.pathname.startsWith('/api/')) { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return response.end(waitingPage(waiting.code)); }
             return json(response, 403, { error: 'Approve this phone on your desk first.', approve: true, code: waiting.code });
           }
