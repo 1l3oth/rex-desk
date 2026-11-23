@@ -29,9 +29,13 @@ test('the relay connection says hello with the account and plays phone requests 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     const { desk } = fakeDesk(server.address().port), socket = fakeSocket();
-    let dialled; const relay = new PhoneRelay(desk, { socket: (url, token) => { dialled = token; return socket; } });
+    let dialled, address; const relay = new PhoneRelay(desk, { socket: (url, token) => { dialled = token; address = url; return socket; } });
     relay.setEnabled(true); socket.emit('open');
     assert.equal(dialled, 'account-token');
+    // Each desktop dials its own line: its id and name are on the connect address, not only in HELLO.
+    const dial = new URL(address);
+    assert.equal(dial.origin + dial.pathname, 'wss://api.rexdesk.dev/v1/relay/desk');
+    assert.equal(dial.searchParams.get('device'), 'node-1'); assert.equal(dial.searchParams.get('name'), 'Laptop');
     const hello = socket.sent[0];
     assert.equal(hello.op, RELAY_OP.HELLO);
     assert.deepEqual(JSON.parse(hello.payload), { token: 'account-token', desk: 'node-1', name: 'Laptop' });

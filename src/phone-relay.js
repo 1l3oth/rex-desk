@@ -106,7 +106,9 @@ export class PhoneRelay {
     const token = this.desk.net?.token?.(); if (!token) { this.state = 'signed-out'; return; }
     this.state = 'connecting';
     // The relay checks the sign-in on the upgrade itself, so the token rides on the handshake; HELLO repeats it with the desk's name.
-    let socket; try { socket = this.makeSocket(this.url, token); } catch (error) { this.failed({ error: error.message }); this.state = 'offline'; return this.retry(); }
+    // The desk's id and name ride on the connect address too, so the relay gives each desktop its own line from the start
+    // and a second desktop on the same account no longer replaces the first. HELLO still repeats them.
+    let socket; try { socket = this.makeSocket(this.dialUrl(), token); } catch (error) { this.failed({ error: error.message }); this.state = 'offline'; return this.retry(); }
     this.socket = socket; socket.binaryType = 'arraybuffer';
     let opened = false, error = '';
     socket.addEventListener('open', () => opened = true);
@@ -143,6 +145,10 @@ export class PhoneRelay {
     if (op === RELAY_OP.ABORT) { this.streams.get(streamId)?.request?.destroy(); this.streams.delete(streamId); return; }
     // The app's live updates use server-sent events over plain HTTP, so a WebSocket from the phone is refused.
     if (op === RELAY_OP.WS_OPEN) return this.send(RELAY_OP.WS_CLOSE, streamId, json({ code: 1003, reason: 'Not used by Rex Desk.' }));
+  }
+  dialUrl() {
+    const target = new URL(this.url); target.searchParams.set('device', this.store.nodeId || ''); target.searchParams.set('name', this.desk.peers?.self?.name || '');
+    return target.toString();
   }
   // One request from the phone: played against this desk's own server, marked as relayed, with the phone's device id.
   openStream(streamId, meta) {
