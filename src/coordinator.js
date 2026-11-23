@@ -716,15 +716,18 @@ export class Desk {
     // back (a refused steer, messages left unread) returns only those, even when two steers have the same words or resolve out
     // of order. Without one (the turn's prompt, or the model's next real output) every ticket in flight is settled.
     const handovers = value => (value == null ? [] : Array.isArray(value) ? value : [value]).filter(item => item && typeof item === 'object');
-    // A mid-turn hand-over is unconfirmed until its runner says it got it (an accepted steer, or an agent's own process that took
-    // the POST): a clean end never settles it, so one the runner never confirmed (still in flight, refused late) stays due.
-    const unconfirmed = new Set();
-    const inTurn = ticket => { unconfirmed.delete(ticket); return bound.delete(ticket) || (this.store.get('delivery', ticket)?.state === 'turn' && this.store.get('delivery', ticket)?.runId === runId); };
-    const markLaunched = (handover = null) => {
-      const tickets = handover === null ? [...bound].filter(ticket => !unconfirmed.has(ticket)) : handovers(handover).flatMap(item => item.tickets || []);
+    // A mid-turn hand-over never counts on a general acknowledgment (that one is for the turn's prompt, maybe before the agent
+    // read its inbox). It counts on its own acknowledgment (an accepted steer), or, once an agent's own process took it into its
+    // inbox (delivered), at the clean end, after every unread record and open hand-over was handled. One never confirmed
+    // (still in flight, refused late, timed out) stays due.
+    const unconfirmed = new Set(), delivered = new Set();
+    const inTurn = ticket => { unconfirmed.delete(ticket); delivered.delete(ticket); return bound.delete(ticket) || (this.store.get('delivery', ticket)?.state === 'turn' && this.store.get('delivery', ticket)?.runId === runId); };
+    // final: the turn ended cleanly (the runner's start or attach resolved), the only point where delivered hand-overs count.
+    const markLaunched = (handover = null, { final = false } = {}) => {
+      const tickets = handover === null ? [...bound].filter(ticket => !unconfirmed.has(ticket) && (final || !delivered.has(ticket))) : handovers(handover).flatMap(item => item.tickets || []);
       for (const ticket of tickets) if (inTurn(ticket)) this.setDelivery(ticket, { state: 'taken' });
     };
-    const bind = (entries, whole = false) => { const tickets = []; for (const item of this.waitingDeliveries(this.store.get('run', runId), whole ? null : entries)) { bound.add(item.id); tickets.push(item.id); this.setDelivery(item.id, { state: 'turn', runId }); } return tickets; };
+    const bind = (entries, whole = false) => { const tickets = []; for (const item of this.waitingDeliveries(this.store.get('run', runId), whole ? null : entries)) { bound.add(item.id); tickets.push(item.id); this.setDelivery(item.id, { state: 'turn', runId, handedOver: undefined }); } return tickets; };
     // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
     const turnAt = new Date().toISOString();
     try {
@@ -829,7 +832,7 @@ export class Desk {
           const entries = [...(this.store.get('run', runId)?.queued || [])], text = this.takeInbox(runId);
           if (!text) return withId ? { text: '', handover: null } : '';
           const handover = { entries, tickets: bind(entries) };
-          if (withId) for (const ticket of handover.tickets) unconfirmed.add(ticket);
+          if (withId) for (const ticket of handover.tickets) { unconfirmed.add(ticket); this.setDelivery(ticket, { handedOver: 'sent' }); }
           return withId ? { text, handover } : text;
         },
         // A hand-over given back with its handovers (a refused steer, messages left unread): only their own tickets wait again,
@@ -845,7 +848,7 @@ export class Desk {
           if (kind === 'prompt-accepted') { markLaunched(data?.handover ?? null); return; }
           // An agent's own process took a hand-over into its inbox: the agent reads it, or it comes back unread, before its reply
           // ends. Its tickets stay in the turn (so an unread one still goes back), and the clean end may now settle them.
-          if (kind === 'handover-delivered') { for (const ticket of handovers(data?.handover).flatMap(item => item.tickets || [])) unconfirmed.delete(ticket); return; }
+          if (kind === 'handover-delivered') { for (const ticket of handovers(data?.handover).flatMap(item => item.tickets || [])) if (unconfirmed.delete(ticket)) { delivered.add(ticket); this.setDelivery(ticket, { handedOver: 'delivered' }); } return; }
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
           // The quiet turn that reads Voice mode's report is not said: Rex Desk has welcomed the person already.
           const reading = this.store.get('run', runId)?.voice?.reading;
@@ -902,9 +905,10 @@ export class Desk {
         this.store.event(runId, 'phase', { text: 'Rex Desk restarted; the agent kept working and is followed again' }, true);
         this.patchRun(runId, { state: 'running', reattach: undefined });
         // Followed again after a restart: the tickets its turn carried are still this turn's.
-        for (const item of this.store.list('delivery').filter(entry => entry.runId === runId && entry.state === 'turn')) bound.add(item.id);
+        // A hand-over the process had not confirmed before the restart stays unconfirmed (its send was cut off with Rex Desk).
+        for (const item of this.store.list('delivery').filter(entry => entry.runId === runId && entry.state === 'turn')) { bound.add(item.id); if (item.handedOver === 'sent') unconfirmed.add(item.id); else if (item.handedOver === 'delivered') delivered.add(item.id); }
         await runner.attach(attach);
-        markLaunched();
+        markLaunched(null, { final: true });
       } else {
       // Each turn records its own start, so a resumed run shows time since it resumed, not since it was first created.
       // The account this turn really runs on, so a usage limit is put on that account, not on whatever is chosen by the time it hits.
@@ -943,7 +947,7 @@ ${message}` : message;
       if (!remoteOn) bind(sending, true);
       await runner.start(sending);
       // A turn that ended without a start error took its prompt, even if the runner never said so on the way.
-      markLaunched();
+      markLaunched(null, { final: true });
       // In-app mode starts with no message, so the missed context was not sent: it stays unseen for the next turn.
       if (remoteOn) this.seenMarks?.delete(runId); else this.saveSeenMark(runId);
       if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
@@ -979,7 +983,7 @@ ${message}` : message;
     } finally {
       // Tickets whose prompt was never taken: a turn handed on to the next one keeps them waiting for it; any other end loses them.
       for (const ticket of bound) this.setDelivery(ticket, { state: handedOn ? 'waiting' : 'lost' });
-      bound.clear(); unconfirmed.clear();
+      bound.clear(); unconfirmed.clear(); delivered.clear();
       if (handedOn) {
         if (token) this.forgetToken(token);
         if (this.live.get(runId)?.controller === controller) this.live.delete(runId);

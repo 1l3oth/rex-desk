@@ -597,3 +597,37 @@ test('path 16, a hand-over an agent in its own process never confirms (its send 
   assert.equal(t.item().on, true, 'still due');
   }
 });
+
+test('path 17, an agent in its own process took a scheduled message into its inbox, then a general acknowledgment came before it read it: left unread, it still goes back and is not counted as sent', async () => {
+  const { HostRunner } = await import('../src/hosts.js');
+  const { appendFileSync } = await import('node:fs');
+  const hosts = [], posted = [], directory = temporary('host-journal-ack');
+  const t = deskWith(options => {
+    const host = new HostRunner(options, { directory, pollMs: 20, spawner: () => ({ pid: process.pid, unref() {} }) });
+    host.port = async () => 1; host.post = async (route, data) => { if (route === '/inbox') posted.push(data); };
+    hosts.push(host); return host;
+  });
+  const journal = (index, entry) => appendFileSync(hosts[index].state.journal, `${JSON.stringify(entry)}\n`);
+  const waitFor = async (check, label) => { for (let step = 0; step < 150 && !check(); step++) await new Promise(done => setTimeout(done, 20)); assert.ok(check(), label); };
+  try { await hostTurns(); } finally { for (const host of hosts) { clearInterval(host.timer); host.detached = true; } t.desk.live.clear(); }
+  async function hostTurns() {
+  void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' });
+  await waitFor(() => hosts[0]?.state?.journal, 'the agent process started');
+  await t.desk.schedules.tick(at(0, '09:00'));
+  await waitFor(() => posted.length, 'the message went over to the agent process');
+  await new Promise(done => setTimeout(done, 100)); // the process took it into its inbox
+  // The acknowledgment of the turn's own prompt comes now, before the agent read its inbox.
+  journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
+  await new Promise(done => setTimeout(done, 150));
+  assert.notEqual(t.store.list('delivery')[0]?.state, 'taken', 'a general acknowledgment does not count the hand-over');
+  journal(0, { type: 'unread', text: posted[0].text, items: [{ text: posted[0].text, handover: posted[0].handover }] });
+  journal(0, { type: 'done' });
+  await waitFor(() => hosts.length === 2, 'the next turn starts with the unread message');
+  assert.notEqual(t.store.list('delivery')[0]?.state, 'taken', 'unread is not sent');
+  await t.desk.schedules.tick(at(0, '09:02'));
+  assert.equal(t.item().on, true, 'still due');
+  journal(1, { type: 'event', kind: 'prompt-accepted', data: {} }); journal(1, { type: 'done' });
+  await t.settled(); await t.desk.schedules.tick(at(0, '09:05'));
+  assert.equal(t.item().on, false, 'sent once the next turn took it'); assert.equal(hosts.length, 2, 'sent once');
+  }
+});
