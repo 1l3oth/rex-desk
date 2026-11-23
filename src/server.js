@@ -518,7 +518,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         // other phone this desk has not seen yet waits for the person's OK here.
         if (relayed) {
           const entry = desk.phoneRelay.admit(request);
-          if (entry.missing) return json(response, 400, { error: 'The relay did not say which phone this is.' });
+          if (entry.missing) return json(response, 400, { error: 'The relay did not say which phone or account this is.' });
           if (!entry.ok) {
             const waiting = desk.phoneRelay.pendingFor(entry.phone);
             if (request.method === 'GET' && !url.pathname.startsWith('/api/')) { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return response.end(waitingPage(waiting.code)); }

@@ -53,16 +53,18 @@ export class PhoneRelay {
   }
   // A code-approved phone is known by the id the relay sends for it. That id comes from a cookie the desk cannot check, so
   // an approval also keeps the account the relay saw then: the same id under another account (or with none) needs a new code.
+  // An approval from before accounts were kept has none, so it counts under no account: that phone pairs again once.
   approved(deviceId, account = '') {
-    const key = deviceId ? keyOf(deviceId) : ''; if (!key) return false;
-    return this.settings().devices.some(item => item.key === key && (!item.account || item.account === cleanId(account)));
+    const key = deviceId ? keyOf(deviceId) : '', who = cleanId(account); if (!key || !who) return false;
+    return this.settings().devices.some(item => item.key === key && Boolean(item.account) && item.account === who);
   }
   // Whether a relayed request may come in. The same account needs nothing else: trust there rests on the relay's checked
   // account alone, never on the phone's id. Any other phone needs its id and an approval made with the code.
   admit(request) {
     if (this.sameAccount(request)) return { ok: true };
     const phone = this.device(request), account = cleanId(request.headers['x-rex-relay-account']);
-    if (!phone.id) return { ok: false, missing: true };
+    // Approvals are bound to an account, so a phone the relay names no account for can never be let in by a code.
+    if (!phone.id || !account) return { ok: false, missing: true };
     if (this.approved(phone.id, account)) return { ok: true };
     return { ok: false, phone: { ...phone, account } };
   }

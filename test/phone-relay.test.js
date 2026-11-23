@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { PhoneRelay, relayProblem } from '../src/phone-relay.js';
 import { relayFrame, readRelayFrame, RELAY_OP } from '../src/phone-relay-frame.js';
@@ -59,8 +60,8 @@ test('the relay connection says hello with the account and plays phone requests 
 
 test('a new phone gets one 6-digit code and comes in only after the person approves that code', () => {
   const { desk, events } = fakeDesk(0), relay = new PhoneRelay(desk, { socket: () => fakeSocket() });
-  const phone = { id: 'phone-1', name: 'Pixel' };
-  assert.equal(relay.approved('phone-1'), false);
+  const phone = { id: 'phone-1', name: 'Pixel', account: 'user-2' };
+  assert.equal(relay.approved('phone-1', 'user-2'), false);
   const first = relay.pendingFor(phone), again = relay.pendingFor(phone);
   assert.match(first.code, /^\d{6}$/); assert.equal(again.code, first.code);
   assert.equal(events.filter(([, kind]) => kind === 'phone-approval').length, 1);
@@ -69,13 +70,29 @@ test('a new phone gets one 6-digit code and comes in only after the person appro
   assert.notEqual(ref, 'phone-1'); assert.ok(!JSON.stringify(relay.view()).includes('phone-1')); assert.ok(!JSON.stringify(desk.store.get('phone-relay', 'main')).includes('phone-1'));
   assert.throws(() => relay.approve('phone-1', first.code), /no longer waiting/);
   assert.throws(() => relay.approve(ref, first.code === '000000' ? '111111' : '000000'));
-  assert.equal(relay.approved('phone-1'), false);
+  assert.equal(relay.approved('phone-1', 'user-2'), false);
   relay.approve(ref, first.code);
-  assert.equal(relay.approved('phone-1'), true); assert.equal(relay.approved(ref), false);
+  assert.equal(relay.approved('phone-1', 'user-2'), true); assert.equal(relay.approved(ref, 'user-2'), false);
   assert.deepEqual(relay.view().pending, []);
   assert.equal(relay.view().devices[0].id, ref);
   relay.forget(ref);
-  assert.equal(relay.approved('phone-1'), false);
+  assert.equal(relay.approved('phone-1', 'user-2'), false);
+});
+
+test('an approval from before accounts were kept lets the phone in under no account: it pairs again', () => {
+  const { desk } = fakeDesk(0), relay = new PhoneRelay(desk, { socket: () => fakeSocket() });
+  const key = createHash('sha256').update('rex-phone:old-phone').digest('hex');
+  relay.save({ devices: [{ key, ref: key.slice(0, 20), name: 'Old phone', at: '2026-11-01T00:00:00.000Z' }] });
+  const as = account => ({ headers: { 'x-rex-relay': relay.secret, 'x-rex-relay-device': 'old-phone', ...(account ? { 'x-rex-relay-account': account } : {}) } });
+  for (const account of ['user-1', 'user-2']) {
+    assert.equal(relay.approved('old-phone', account), false, `no stored account: not accepted under ${account}`);
+    assert.equal(relay.admit(as(account)).ok, false);
+  }
+  assert.equal(relay.approved('old-phone'), false); assert.equal(relay.admit(as('')).missing, true, 'no account from the relay: no code can let it in');
+  // Pairing again binds the phone to the account it is on now.
+  const waiting = relay.pendingFor({ ...relay.admit(as('user-2')).phone }); relay.approve(waiting.ref, waiting.code);
+  assert.equal(relay.admit(as('user-2')).ok, true); assert.equal(relay.admit(as('user-1')).ok, false);
+  assert.equal(relay.settings().devices.length, 1, 'the new approval replaces the old one');
 });
 
 test('removing a phone ends its open requests at once', () => {

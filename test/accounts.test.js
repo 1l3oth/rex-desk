@@ -147,7 +147,7 @@ test('a phone through the relay waits for its 6-digit code to be approved on the
   const app = await accountApp(temporary('phone-relay'));
   const owner = browser(app);
   const ask = (route, headers = {}, method = 'GET', data) => new Promise((resolve, reject) => {
-    const request = http.request(app.address + route, { method, headers: { Host: 'node-1.relay.rexdesk.dev', 'x-rex-desk': '1', 'x-rex-relay': app.desk.phoneRelay.secret, 'x-rex-relay-device': 'phone-1', 'x-rex-relay-name': 'Pixel', ...(data ? { 'content-type': 'application/json' } : {}), ...headers } }, response => {
+    const request = http.request(app.address + route, { method, headers: { Host: 'node-1.relay.rexdesk.dev', 'x-rex-desk': '1', 'x-rex-relay': app.desk.phoneRelay.secret, 'x-rex-relay-device': 'phone-1', 'x-rex-relay-name': 'Pixel', 'x-rex-relay-account': 'user-2', ...(data ? { 'content-type': 'application/json' } : {}), ...headers } }, response => {
       let raw = ''; response.on('data', chunk => { raw += chunk; }); response.on('end', () => resolve({ status: response.statusCode, text: raw }));
     });
     request.on('error', reject); request.end(data ? JSON.stringify(data) : undefined);
@@ -166,6 +166,8 @@ test('a phone through the relay waits for its 6-digit code to be approved on the
     await owner('/api/phone-relay', { method: 'POST', data: { action: 'approve', device: listed.body.pending[0].id, code } });
     assert.equal((await ask('/api/state')).status, 200, 'after the OK the phone gets in');
     assert.equal((await ask('/api/state', { 'x-rex-relay-device': 'phone-2' })).status, 403, 'another phone still waits');
+    assert.equal((await ask('/api/state', { 'x-rex-relay-account': 'user-3' })).status, 403, 'the approved phone id under another account waits for its own code');
+    assert.equal((await ask('/api/state', { 'x-rex-relay-account': '' })).status, 400, 'a phone the relay names no account for is refused');
     // Signed in to the desk's own account (the relay says so in WELCOME and in the request): no code at all.
     app.desk.phoneRelay.account = 'user-1';
     assert.equal((await ask('/api/state', { 'x-rex-relay-device': 'phone-3', 'x-rex-relay-account': 'user-1' })).status, 200, 'a phone on the same account gets straight in');
