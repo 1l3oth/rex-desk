@@ -61,6 +61,10 @@ test('Market labels each item: Orbit is an MCP server, never a connector; one-fi
   assert.equal(named('deploy').file, undefined);
   assert.deepEqual(named('Orbit').orbit, { signedIn: true, goals: 1 });
   assert.equal(named('Orbit').kind, 'mcp');
+  // A new person (no Orbit account, no goal) still finds Orbit here: it is no longer in the Connectors picker.
+  memory.put('config', 'main', { ...memory.config(), sources: [] });
+  const fresh = marketList({ ...desk, orbitAccount: () => null }).items.find(item => item.name === 'Orbit');
+  assert.deepEqual(fresh?.orbit, { signedIn: false, goals: 0 });
   assert.ok(!items.some(item => item.kind === 'connector' && item.name === 'Goal'), 'an Orbit goal is not listed as a connector');
   assert.equal(named('Stop').kind, 'hook');
   assert.equal(named('Stop').id, 'Stop:0:0');

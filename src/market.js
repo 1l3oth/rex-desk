@@ -81,7 +81,8 @@ export function marketList(desk) {
   const linked = connections(desk.store.config()), goals = linked.filter(item => item.connectorId === 'orbit');
   const connectorsList = linked.filter(item => item.connectorId !== 'orbit').map(item => ({ kind: 'connector', name: item.name || connector(item.connectorId)?.name || item.connectorId, description: connector(item.connectorId)?.name || item.connectorId, enabled: item.enabled, id: item.id }));
   let signedIn = false; try { signedIn = Boolean(desk.orbitAccount?.()?.token); } catch { /* no account */ }
-  const orbit = signedIn || goals.length ? [{ kind: 'mcp', name: 'Orbit', orbit: { signedIn, goals: goals.length }, fixed: true }] : [];
+  // Always listed: it left the Connectors picker, so this row is also how a new person connects Orbit.
+  const orbit = [{ kind: 'mcp', name: 'Orbit', orbit: { signedIn, goals: goals.length }, fixed: true }];
   const hooks = (desk.toolbox.listHooks?.() || []).map(hook => ({ kind: 'hook', name: hook.matcher ? `${hook.event} · ${hook.matcher}` : hook.event, description: hook.command, id: hook.id, fixed: true }));
   const main = desk.store.get('specialist', 'main');
   const agents = [...(main ? [{ id: 'main', name: main.name || 'Rex Agent' }] : []), ...desk.specialists.list().map(agent => ({ id: agent.id, name: agent.name }))]

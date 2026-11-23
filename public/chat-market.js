@@ -30,7 +30,7 @@ export async function loadMarket(ctx) {
 
 function usedBy(item, agents) {
   if (item.kind === 'connector') return item.enabled ? t('Connected') : t('Paused');
-  if (item.orbit) return t('Connected');
+  if (item.orbit) return item.orbit.signedIn || item.orbit.goals ? t('Connected') : t('Not connected yet');
   if (item.kind === 'hook') return t('Runs for every agent');
   if (item.fixed) return t('Always on for every agent');
   const on = agents.filter(agent => !agent.off.includes(key(item))).length;
@@ -50,10 +50,10 @@ function removable(ui, item) {
 function row(ctx, item, agent, agents, query) {
   const { esc, ui } = ctx, on = !agent?.off.includes(key(item)), remove = removable(ui, item);
   const name = item.kind === 'command' ? `/${item.name}` : item.name;
-  const about = item.orbit ? [item.orbit.signedIn ? t('Your Orbit goals, notes and knowledge') : '', item.orbit.goals === 1 ? t('Tasks of 1 goal') : item.orbit.goals ? t`Tasks of ${item.orbit.goals} goals` : ''].filter(Boolean).join(' · ') : item.description;
+  const about = item.orbit ? [item.orbit.signedIn || !item.orbit.goals ? t('Your Orbit goals, notes and knowledge') : '', item.orbit.goals === 1 ? t('Tasks of 1 goal') : item.orbit.goals ? t`Tasks of ${item.orbit.goals} goals` : ''].filter(Boolean).join(' · ') : item.description;
   const sub = item.error ? `<span class="mk-bad">${esc(t`Not working: ${item.error}`)}</span>` : about ? `<span class="mk-desc">${esc(about)}</span>` : '';
   const ask = `<button type="button" class="mk-ask" data-action="mk-explain" data-kind="${item.kind}" data-name="${esc(name)}" data-tag="${esc(TAG(item))}">${t`Ask AI`}</button>`;
-  const control = item.kind === 'connector' || item.orbit ? `<button type="button" class="btn small" data-action="mk-manage"${item.orbit ? ' data-orbit' : ''}>${t`Manage`}</button>`
+  const control = item.kind === 'connector' || item.orbit ? `<button type="button" class="btn small" data-action="mk-manage"${item.orbit ? ' data-orbit' : ''}>${item.orbit && !item.orbit.signedIn && !item.orbit.goals ? t`Connect` : t`Manage`}</button>`
     : item.fixed || !agent ? '' : `<label class="switch"><input type="checkbox" role="switch" data-action="mk-switch" data-key="${esc(key(item))}" ${on ? 'checked' : ''} aria-label="${esc(t`${name} for ${agent.name}`)}"><span></span></label>`;
   const removeButton = remove ? `<button type="button" class="mk-remove" data-action="mk-remove" data-what="${remove}" data-name="${esc(item.kind === 'hook' ? item.id : item.name)}" data-label="${esc(name)}">${t`Remove`}</button>` : '';
   return `<li class="mk-row${on ? '' : ' off'}"${shown(item, query, '') ? '' : ' hidden'} data-mk="${esc(`${item.name} ${item.description || ''}`.toLowerCase())}" data-kind="${item.kind}"><div class="mk-text"><span class="mk-name"><b>${esc(name)}</b><span class="mk-tag">${esc(TAG(item))}</span></span>${sub}<small class="mk-used-sm">${esc(usedBy(item, agents))}</small></div><span class="mk-used">${esc(usedBy(item, agents))}</span>${ask}${removeButton}${control}</li>`;
