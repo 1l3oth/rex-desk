@@ -8,6 +8,7 @@
 // reads their tool lists once, and keeps a connection open only while it is used.
 import { existsSync, readdirSync, readFileSync, statSync, cpSync, rmSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { resolveCommand } from './processes.js';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,6 +29,7 @@ export function readSkill(file) {
     const value = lines[at].replace(new RegExp(`^${name}:\\s*`, 'i'), '').trim();
     // A YAML block (description: >- or |, then indented lines): the indented lines are the value, joined into one line.
     if (/^[>|][+-]?$/.test(value)) { const block = []; for (const line of lines.slice(at + 1)) { if (line.trim() && !/^\s/.test(line)) break; block.push(line.trim()); } return block.join(' ').replace(/\s+/g, ' ').trim(); }
+    if (/^".*"$/.test(value)) { try { return JSON.parse(value); } catch { /* not JSON-style escapes: strip the quotes */ } }
     return value.replace(/^["']|["']$/g, '');
   };
   return { name: field('name') || path.basename(path.dirname(file)), description: field('description'), file, folder: path.dirname(file) };
@@ -60,6 +62,7 @@ export function rank(items, query, limit = 8) {
     .filter(entry => entry.score > 0).sort((a, b) => b.score - a.score).slice(0, limit).map(entry => entry.item);
 }
 
+const hookPrint = (matcher, hook) => createHash('sha256').update(JSON.stringify([matcher || '', hook])).digest('hex').slice(0, 12);
 export class Toolbox {
   constructor({ connect, home = os.homedir(), bundled = '', configDirectory = () => process.env.CLAUDE_CONFIG_DIR, mcpConfig, cli, clone } = {}) {
     this.cli = cli || runClaude; this.clone = clone || gitClone;
@@ -222,7 +225,8 @@ export class Toolbox {
     const folder = path.join(this.skillsHome, id); if (existsSync(folder)) throw new Error(`A skill folder named ${id} is already there.`);
     if (!/^---\r?\n[\s\S]*?\r?\n---/.test(body)) {
       const first = body.split(/\r?\n/).map(line => line.replace(/^#+\s*/, '').trim()).find(Boolean) || id;
-      body = `---\nname: ${id}\ndescription: ${first.slice(0, 200)}\n---\n\n${body}`;
+      // Quoted (a JSON string is valid YAML), so a first line like "Purpose: ..." cannot break the front matter.
+      body = `---\nname: ${id}\ndescription: ${JSON.stringify(first.slice(0, 200))}\n---\n\n${body}`;
     }
     mkdirSync(folder, { recursive: true }); writeFileSync(path.join(folder, 'SKILL.md'), `${body}\n`);
     return { added: readSkill(path.join(folder, 'SKILL.md')).name };
@@ -254,17 +258,21 @@ export class Toolbox {
     writeFileSync(this.settingsFile, `${JSON.stringify({ ...settings, hooks: { ...hooks, [event]: groups } }, null, 2)}\n`);
     return { added: event };
   }
-  // id: "<event>:<group>:<hook>", the place listHooks gave it.
+  // id: "<event>:<group>:<hook>:<print>", the place listHooks gave it and a print of the hook itself. When the list changed
+  // since (another window removed one), the hook is found again by its print, so a neighbour is never removed instead.
   removeHook(id) {
-    const [event, group, index] = String(id || '').split(':'), settings = this.readSettings(), groups = settings.hooks?.[event];
-    const list = Array.isArray(groups) ? groups[Number(group)]?.hooks : null; if (!Array.isArray(list) || !list[Number(index)]) throw new Error('No such hook.');
-    list.splice(Number(index), 1); if (!list.length) groups.splice(Number(group), 1); if (!groups.length) delete settings.hooks[event];
+    const [event, group, index, print] = String(id || '').split(':'), settings = this.readSettings(), groups = settings.hooks?.[event];
+    const at = (Array.isArray(groups) ? groups : []).flatMap((item, place) => (item?.hooks || []).map((hook, slot) => ({ place, slot, print: hookPrint(item.matcher, hook) })));
+    const found = at.find(item => item.place === Number(group) && item.slot === Number(index) && item.print === print) || at.find(item => item.print === print);
+    if (!print || !found) throw new Error('That hook changed or is already gone. Open Market again to see the hooks as they are now.');
+    const list = groups[found.place].hooks;
+    list.splice(found.slot, 1); if (!list.length) groups.splice(found.place, 1); if (!groups.length) delete settings.hooks[event];
     writeFileSync(this.settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
     return { removed: event };
   }
   listHooks() {
     let settings = {}; try { settings = this.readSettings(); } catch { return []; }
-    return Object.entries(settings.hooks || {}).flatMap(([event, groups]) => (Array.isArray(groups) ? groups : []).flatMap((group, at) => (group.hooks || []).map((hook, index) => ({ id: `${event}:${at}:${index}`, event, matcher: group.matcher || '', command: String(hook.command || hook.url || hook.prompt || '').slice(0, 200) }))));
+    return Object.entries(settings.hooks || {}).flatMap(([event, groups]) => (Array.isArray(groups) ? groups : []).flatMap((group, at) => (group.hooks || []).map((hook, index) => ({ id: `${event}:${at}:${index}:${hookPrint(group.matcher, hook)}`, event, matcher: group.matcher || '', command: String(hook.command || hook.url || hook.prompt || '').slice(0, 200) }))));
   }
   removeCommand(name) {
     const file = path.join(this.commandsHome, `${String(name).replace(/[^A-Za-z0-9_.-]/g, '')}.md`);

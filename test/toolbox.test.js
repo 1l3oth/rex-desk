@@ -102,7 +102,7 @@ test('the person adds and removes MCP servers (through Claude Code), skills and 
   const seen = await box.overview();
   assert.deepEqual(seen.skills.map(item => [item.name, item.removable]), [['khmer-voice', true]]);
   assert.deepEqual(seen.commands, [{ name: 'ship', description: 'Push and deploy' }]);
-  assert.deepEqual(seen.hooks, [{ id: 'PostToolUse:0:0', event: 'PostToolUse', matcher: 'Edit', command: 'npm run lint' }]);
+  assert.deepEqual(seen.hooks.map(({ id, ...hook }) => [id.split(':').slice(0, 3).join(':'), hook]), [['PostToolUse:0:0', { event: 'PostToolUse', matcher: 'Edit', command: 'npm run lint' }]]);
   box.removeSkill('khmer-voice'); box.removeCommand('ship');
   const after = await box.overview();
   assert.equal(after.skills.length + after.commands.length, 0);
@@ -208,8 +208,20 @@ test('Market adds a skill from one SKILL.md, a slash command and a hook, and kee
   assert.equal(settings.hooks.Stop[0].hooks[0].command, 'echo done');
   assert.deepEqual(settings.hooks.PostToolUse, [{ matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'npx prettier --write .' }] }]);
   const hooks = box.listHooks();
-  assert.deepEqual(hooks.map(hook => hook.id), ['Stop:0:0', 'PostToolUse:0:0']);
-  box.removeHook('PostToolUse:0:0');
+  assert.deepEqual(hooks.map(hook => hook.id.split(':').slice(0, 3).join(':')), ['Stop:0:0', 'PostToolUse:0:0']);
+  box.removeHook(hooks[1].id);
   assert.deepEqual(box.listHooks().map(hook => hook.event), ['Stop']);
   assert.equal(JSON.parse(readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8')).hooks.PostToolUse, undefined);
+  // A stale row: another window removed an earlier hook, so the places moved. Its own hook goes, never the neighbour.
+  box.addHook({ event: 'Stop', command: 'echo two' }); box.addHook({ event: 'Stop', command: 'echo three' });
+  const [one, two, three] = box.listHooks();
+  box.removeHook(one.id); box.removeHook(three.id);
+  assert.deepEqual(box.listHooks().map(hook => hook.command), ['echo two'], 'the stale id still finds echo three');
+  assert.throws(() => box.removeHook(three.id), /already gone/);
+  assert.deepEqual(box.listHooks().map(hook => hook.command), ['echo two'], 'a hook already gone removes nothing else');
+  void two;
+  // A first line with a colon is quoted, so the skill's front matter stays valid YAML.
+  box.addSkillFile({ name: 'notes', text: 'Purpose: Write "release" notes\nMore.' });
+  assert.match(readFileSync(path.join(box.skillsHome, 'notes', 'SKILL.md'), 'utf8'), /^description: "Purpose: Write \\"release\\" notes"$/m);
+  assert.equal(box.skills().find(item => item.name === 'notes').description, 'Purpose: Write "release" notes');
 });
