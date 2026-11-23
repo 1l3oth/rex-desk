@@ -589,37 +589,40 @@ export function openSettings(ctx, section = 'general') {
   const SPEAK_CACHE = 'rex-desk-speak-cache';
   try { const cached = JSON.parse(localStorage.getItem(SPEAK_CACHE) || 'null'); if (cached) { state.extra.tts ||= cached.tts; state.extra.neural ||= cached.neural; } } catch { /* private window */ }
   const keepSpeak = () => { try { localStorage.setItem(SPEAK_CACHE, JSON.stringify({ tts: state.extra.tts, neural: state.extra.neural })); } catch { /* private window */ } };
+  // Only the newest voice-engine answer counts: a slow first load must not overwrite a save made after it, on screen or in the cache.
+  let ttsSeq = 0;
+  const takeTts = async request => { const mine = ++ttsSeq, status = await request(); if (mine !== ttsSeq) return null; state.extra.tts = status; keepSpeak(); setSpeechEngine(status); return status; };
   // A background answer redraws the Jev tab only when no edit is waiting to save; otherwise the redraw waits until that save has read the fields.
   const jevDraw = () => { if (!has('jev') || !document.body.contains(back)) return; if (pendingSave) { jevLater = true; return; } draw(); };
   if (has('jev') && !ui.accounts) void api('/agents').then(list => { ui.accounts ||= list; jevDraw(); }).catch(() => {});
   void api('/computer').then(info => { state.extra.anywhere = info.anywhere; jevDraw(); }).catch(() => {});
-  void api('/speak/engine').then(status => { state.extra.tts = status; keepSpeak(); setSpeechEngine(status); jevDraw(); }).catch(() => {});
+  void takeTts(() => api('/speak/engine')).then(status => { if (status) jevDraw(); }).catch(() => {});
   void api('/speak/voices').then(neural => { state.extra.neural = neural; keepSpeak(); jevDraw(); }).catch(() => {});
   if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); jevDraw(); });
   // Spoken replies: each control saves at once.
   back.addEventListener('change', async event => {
     const name = event.target.dataset?.stTts; if (!name) return;
-    try { const status = await api('/speak/engine', { method: 'POST', data: { [name]: event.target.value } }); state.extra.tts = status; keepSpeak(); setSpeechEngine(status); toast(t('Saved.')); }
+    try { await takeTts(() => api('/speak/engine', { method: 'POST', data: { [name]: event.target.value } })); toast(t('Saved.')); }
     catch (error) { toast(error.message, true); }
-    draw();
+    jevDraw();
   });
   back.addEventListener('click', async event => {
     const save = event.target.closest('[data-st-fish-save]'), remove = event.target.closest('[data-st-fish-remove]'), test = event.target.closest('[data-st-tts-test]');
     if (!save && !remove && !test) return;
     event.preventDefault();
     try {
-      if (save) { const key = back.querySelector('[data-st-fish-key]')?.value || ''; const result = await api('/speak/fish-key', { method: 'POST', data: { key } }); state.extra.tts = result; keepSpeak(); setSpeechEngine(result); toast(t('Fish Audio key saved.')); }
-      if (remove) { const result = await api('/speak/fish-key', { method: 'POST', data: { key: '' } }); state.extra.tts = result; keepSpeak(); setSpeechEngine(result); toast(t('Fish Audio key removed.')); }
+      if (save) { const key = back.querySelector('[data-st-fish-key]')?.value || ''; await takeTts(() => api('/speak/fish-key', { method: 'POST', data: { key } })); toast(t('Fish Audio key saved.')); }
+      if (remove) { await takeTts(() => api('/speak/fish-key', { method: 'POST', data: { key: '' } })); toast(t('Fish Audio key removed.')); }
       if (test) {
-        state.extra.ttsTesting = true; draw();
+        state.extra.ttsTesting = true; jevDraw();
         const response = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text: 'Hi, this is how I will sound when we talk in Voice mode.', lang: 'en' }) });
         if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || t('The voice service did not answer.'));
         const audio = new Audio(URL.createObjectURL(await response.blob())); await audio.play().catch(() => {});
         await new Promise(resolve => { audio.onended = resolve; audio.onerror = resolve; setTimeout(resolve, 15000); });
-        state.extra.tts = await api('/speak/engine'); keepSpeak(); setSpeechEngine(state.extra.tts);
+        await takeTts(() => api('/speak/engine'));
       }
     } catch (error) { toast(error.message, true); }
-    state.extra.ttsTesting = false; draw();
+    state.extra.ttsTesting = false; jevDraw();
   });
   back.addEventListener('change', event => { const lang = event.target.dataset?.stVoice; if (!lang) return; try { if (event.target.value) localStorage.setItem(`rex-desk-voice-${lang}`, event.target.value); else localStorage.removeItem(`rex-desk-voice-${lang}`); } catch { /* private window */ } toast(t('Reading voice saved.')); });
   if (has('projects')) void loadGithub();

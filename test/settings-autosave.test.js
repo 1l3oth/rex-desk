@@ -13,20 +13,29 @@ test('Settings saves a waiting edit at once when it is closed or the section cha
   const browser = await chromium.launch();
   try {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`${base}/`); await page.waitForTimeout(2500);
+    // A busy machine (the whole file in one run) can make a section slow to show, so each step waits for what it needs instead of a fixed pause.
+    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     const saver = async () => (await (await fetch(`${base}/api/state`)).json()).config.saver;
-    const open = async () => { await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600); await page.evaluate(() => document.querySelector('[data-st-section="agents"]').click()); await page.waitForTimeout(600); };
-    await open();
-    await page.locator('.settings-pop [name="saver"]').evaluate(box => box.click());
-    await page.evaluate(() => document.querySelector('[data-st-section="notify"]').click());
-    await page.waitForTimeout(300);
-    assert.equal(await saver(), false, 'a section switch saves the edit of the section left');
-    await page.evaluate(() => document.querySelector('[data-st-section="agents"]').click()); await page.waitForTimeout(500);
-    await page.locator('.settings-pop [name="saver"]').evaluate(box => box.click());
+    const saverIs = async want => { for (let i = 0; i < 100 && await saver() !== want; i++) await page.waitForTimeout(100); return saver(); };
+    const go = async id => {
+      for (let i = 0; i < 5; i++) {
+        await page.evaluate(section => document.querySelector(`.settings-pop [data-st-section="${section}"]`)?.click(), id);
+        try { await page.locator(`.settings-pop [data-st-section="${id}"].on`).waitFor({ timeout: 10000 }); return; } catch { /* clicked during a redraw: click again */ }
+      }
+      throw new Error(`Settings did not open ${id}`);
+    };
+    const saverBox = page.locator('.settings-pop [name="saver"]');
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click());
+    await page.locator('.settings-pop').waitFor({ timeout: 30000 });
+    await go('agents'); await saverBox.waitFor({ timeout: 30000 });
+    await saverBox.evaluate(box => box.click());
+    await go('notify');
+    assert.equal(await saverIs(false), false, 'a section switch saves the edit of the section left');
+    await go('agents'); await saverBox.waitFor({ timeout: 30000 });
+    await saverBox.evaluate(box => box.click());
     await page.evaluate(() => document.querySelector('.settings-pop [data-st-close]').click());
-    await page.waitForTimeout(300);
-    assert.equal(await saver(), true, 'closing saves the waiting edit');
+    assert.equal(await saverIs(true), true, 'closing saves the waiting edit');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
 
@@ -256,5 +265,74 @@ test('a Jev and voice switch change keeps the allowed actions and survives a slo
     assert.equal(saved.agents, true, 'the switch change was saved');
     assert.deepEqual(saved.allow, ['close_app'], 'the allowed actions are kept');
     assert.equal(await page.locator('.settings-pop [name="control.agents"]').isChecked(), true, 'the switch still shows on after the redraw');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});
+
+// Opens Settings on the Jev and voice tab and waits for its voice engine picker.
+async function openJev(page) {
+  await page.evaluate(() => document.querySelector('.rail-settings').click());
+  await page.locator('.settings-pop').waitFor({ timeout: 30000 });
+  await page.evaluate(() => document.querySelector('.settings-pop [data-st-section="jev"]').click());
+  await page.locator('.settings-pop [data-st-tts="engine"]').waitFor({ state: 'attached', timeout: 30000 });
+}
+const pickEngine = (page, value) => page.locator('.settings-pop [data-st-tts="engine"]').evaluate((select, next) => { select.value = next; select.dispatchEvent(new Event('change', { bubbles: true })); }, value);
+
+// A voice-engine save that answers while a Jev switch change waits to save must not redraw the tab and undo that switch.
+test('a voice save answering during a pending Jev switch change keeps the switch', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const config = async () => (await (await fetch(`${base}/api/state`)).json()).config;
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await openJev(page); await page.waitForTimeout(1500);
+    let release = () => {}, held = false;
+    const gate = new Promise(done => { release = done; });
+    await page.route('**/api/speak/engine', async route => { if (route.request().method() !== 'POST') return route.continue(); const reply = await route.fetch(); held = true; await gate; await route.fulfill({ response: reply }); });
+    await pickEngine(page, 'fish');
+    for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(50);
+    assert.ok(held, 'test setup: the voice save is waiting');
+    // Tick the switch, then let the voice answer in at once, inside the short autosave wait.
+    await page.evaluate(() => document.querySelector('.settings-pop [name="control.agents"]').click()); release();
+    for (let i = 0; i < 50 && (await config()).control?.agents !== true; i++) await page.waitForTimeout(100);
+    assert.equal((await config()).control?.agents, true, 'the switch change was saved');
+    assert.equal(await page.locator('.settings-pop [name="control.agents"]').isChecked(), true, 'the switch still shows on');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});
+
+// A slow first voice-engine load that answers after a newer save must not replace that save on screen or in the cache.
+test('a slow voice engine load cannot overwrite a newer voice save in the cache', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    // Open once so the cache holds the voice lists, then hold back the next load with its old answer.
+    await openJev(page); await page.waitForTimeout(1500);
+    await page.evaluate(() => document.querySelector('.settings-pop [data-st-close]').click());
+    let release = () => {}, held = false;
+    const gate = new Promise(done => { release = done; });
+    await page.route('**/api/speak/engine', async route => { if (route.request().method() !== 'GET') return route.continue(); const reply = await route.fetch(); held = true; await gate; await route.fulfill({ response: reply }); });
+    await openJev(page);
+    for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(50);
+    assert.ok(held, 'test setup: the first load holds an old answer');
+    await pickEngine(page, 'fish');
+    const cachedEngine = () => page.evaluate(() => JSON.parse(localStorage.getItem('rex-desk-speak-cache') || '{}').tts?.engine);
+    for (let i = 0; i < 50 && await cachedEngine() !== 'fish'; i++) await page.waitForTimeout(100);
+    release(); await page.waitForTimeout(1000);
+    assert.equal(await cachedEngine(), 'fish', 'the cache keeps the newer save');
+    assert.equal(await page.locator('.settings-pop [data-st-tts="engine"]').inputValue(), 'fish', 'the screen keeps the newer save');
+    // The next load fails: the tab shows the saved engine from the cache.
+    await page.evaluate(() => document.querySelector('.settings-pop [data-st-close]').click());
+    await page.unroute('**/api/speak/engine');
+    await page.route('**/api/speak/engine', route => route.abort());
+    await openJev(page);
+    assert.equal(await page.locator('.settings-pop [data-st-tts="engine"]').inputValue(), 'fish', 'the tab shows the saved engine');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
