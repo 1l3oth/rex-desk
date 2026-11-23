@@ -16,13 +16,10 @@ export const BUNDLE_LIMIT = 15 * 1024 * 1024;
 const same = (left, right) => Boolean(left && right) && path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase();
 
 // On the computer the agent leaves: save its work and pack its branch.
-export async function saveWork({ worktree = '', project = '', agentName = 'The agent', to = 'the other computer' } = {}, git = runGit) {
+// ownFiles: the files this agent's own chats edited or wrote (their tool events), used only when it has no worktree of its own.
+export async function saveWork({ worktree = '', project = '', agentName = 'The agent', to = 'the other computer', ownFiles = [] } = {}, git = runGit) {
   const own = worktree && existsSync(worktree) && !same(worktree, project) ? worktree : '';
-  if (!own) {
-    // No worktree of its own: the shared project folder is never committed in (the changes there may be someone else's).
-    if (project && existsSync(project) && await git(project, ['status', '--porcelain']).catch(() => '')) throw new Error(`${agentName} has no worktree of its own, and the project folder ${project} has changes that may be someone else's, so nothing was committed. Commit or set them aside there first.`);
-    return { nothing: true };
-  }
+  if (!own) return saveShared({ project, agentName, to, ownFiles }, git);
   const branch = await git(own, ['rev-parse', '--abbrev-ref', 'HEAD']);
   const dirty = Boolean(await git(own, ['status', '--porcelain']));
   if (dirty && (branch === 'HEAD' || PROTECTED.test(branch))) throw new Error(`${agentName}'s worktree is on ${branch === 'HEAD' ? 'no branch' : branch}, where work is never committed, so its unsaved changes stayed. Put them on a branch of its own first.`);
@@ -33,17 +30,48 @@ export async function saveWork({ worktree = '', project = '', agentName = 'The a
     await git(own, ['commit', '-m', `WIP: ${agentName} moves to ${to} (saved by Rex Desk)`]);
     committed = await git(own, ['rev-parse', 'HEAD']);
   }
-  const head = await git(own, ['rev-parse', 'HEAD']);
-  // Only what the other computer may not have yet: the commits since the branch left its remote's main line.
+  return { ...await pack(own, branch, agentName, git), committed, worktree: own };
+}
+
+// No worktree of its own: the shared project folder is never committed in and its state never changes, since other changes
+// there may be someone else's and stay on this computer. Only the changed files this agent itself edited or wrote travel: they
+// go into a commit on a branch of its own, built in a separate index, so the folder's files, index and branch stay as they were.
+async function saveShared({ project, agentName, to, ownFiles }, git) {
+  if (!project || !existsSync(project)) return { nothing: true };
+  // Changed tracked files (deleted ones too) and new untracked ones, NUL-separated so odd names stay whole.
+  const list = async args => (await git(project, args).catch(() => '')).split(String.fromCharCode(0)).filter(Boolean);
+  const changed = [...new Set([...await list(['diff', '--name-only', '--no-renames', '-z', 'HEAD']), ...await list(['ls-files', '--others', '--exclude-standard', '-z'])])];
+  if (!changed.length) return { nothing: true };
+  const key = file => path.resolve(project, file).toLowerCase();
+  const mine = new Set(ownFiles.map(file => path.resolve(project, String(file)).toLowerCase()));
+  const files = changed.filter(file => mine.has(key(file)));
+  const others = changed.length - files.length;
+  if (!files.length) return { nothing: true, others };
+  const branch = `rex-handover/${slug(agentName, 40)}`, index = path.join(os.tmpdir(), `rex-handover-${randomUUID()}.index`), env = { GIT_INDEX_FILE: index };
+  try {
+    await git(project, ['read-tree', 'HEAD'], { env });
+    await git(project, ['add', '-A', '--', ...files], { env });
+    const tree = await git(project, ['write-tree'], { env });
+    const who = await git(project, ['config', 'user.email']).catch(() => '') ? {} : { GIT_AUTHOR_NAME: 'Rex Desk', GIT_AUTHOR_EMAIL: 'desk@rexdesk.invalid', GIT_COMMITTER_NAME: 'Rex Desk', GIT_COMMITTER_EMAIL: 'desk@rexdesk.invalid' };
+    const committed = await git(project, ['commit-tree', tree, '-p', 'HEAD', '-m', `WIP: ${agentName} moves to ${to} (saved by Rex Desk, its own ${files.length === 1 ? 'file' : 'files'} only)`], { env: who });
+    await git(project, ['update-ref', `refs/heads/${branch}`, committed]);
+    return { ...await pack(project, branch, agentName, git), committed, files, others };
+  } finally { rmSync(index, { force: true }); }
+}
+
+// The branch packed for the other computer: only the commits since it left its remote's main line.
+async function pack(cwd, branch, agentName, git) {
+  const own = cwd, ref = `refs/heads/${branch}`;
+  const head = await git(own, ['rev-parse', ref]);
   let base = '';
-  for (const ref of ['origin/HEAD', 'origin/master', 'origin/main']) { try { base = await git(own, ['merge-base', 'HEAD', ref]); if (base) break; } catch { /* no such remote branch */ } }
-  if (base === head) return { branch, head, committed, bundle: '', worktree: own };
+  for (const main of ['origin/HEAD', 'origin/master', 'origin/main']) { try { base = await git(own, ['merge-base', ref, main]); if (base) break; } catch { /* no such remote branch */ } }
+  if (base === head) return { branch, head, bundle: '' };
   const file = path.join(os.tmpdir(), `rex-handover-${randomUUID()}.bundle`);
   try {
     await git(own, ['bundle', 'create', file, base ? `${base}..${branch}` : branch]);
     const bytes = readFileSync(file);
     if (bytes.length > BUNDLE_LIMIT) throw new Error(`${agentName}'s branch ${branch} is ${Math.round(bytes.length / 1048576)} MB to carry over, more than ${BUNDLE_LIMIT / 1048576} MB, so it stayed. Push it, then move the agent.`);
-    return { branch, head, committed, base, bundle: bytes.toString('base64'), worktree: own };
+    return { branch, head, base, bundle: bytes.toString('base64') };
   } finally { rmSync(file, { force: true }); }
 }
 
@@ -76,7 +104,7 @@ export class Handover {
   async serve(command) {
     const desk = this.desk, agent = desk.specialists.get(command.agentId), run = agent.runId ? this.store.get('run', agent.runId) : null;
     if (run && ['starting', 'running', 'queued', 'verifying'].includes(run.state)) throw new Error(`${agent.name} is still working here.`);
-    const saved = await saveWork({ worktree: run?.worktree || '', project: desk.specialists.folder(agent) || run?.projectPath || '', agentName: agent.name, to: command.input?.to || 'the other computer' });
+    const saved = await saveWork({ worktree: run?.worktree || '', project: desk.specialists.folder(agent) || run?.projectPath || '', agentName: agent.name, to: command.input?.to || 'the other computer', ownFiles: this.ownFiles(agent) });
     const { worktree, ...shared } = saved;
     this.store.put('handover', command.id, { id: command.id, agentId: agent.id, ...shared, from: worktree || '', at: new Date().toISOString() });
     return { saved: true };
@@ -93,6 +121,14 @@ export class Handover {
       await new Promise(resolve => setTimeout(resolve, 700));
     }
     throw new Error(`${peers.deviceName(agent.node)} did not answer in time, so ${agent.name}'s work was not saved and it stayed there.`);
+  }
+  // The files this agent's own chats (personal and room sessions) edited or wrote here, from their tool events.
+  ownFiles(agent) {
+    const files = new Set();
+    for (const runId of [agent.runId, ...Object.values(agent.roomRuns || {})].filter(Boolean)) {
+      for (const event of this.store.events(runId, { limit: 100000 })) if (event.kind === 'agent-tool' && event.change?.file) files.add(String(event.change.file));
+    }
+    return [...files];
   }
   pickUp(input) { return pickUp(input); }
   directoryFor(agent, branch, project = '') { return path.join(workFolder(project, this.store.directory, this.store.config?.().repositories || []), 'worktrees', `${slug(agent.slug || agent.name, 40)}-${slug(branch, 60)}`); }

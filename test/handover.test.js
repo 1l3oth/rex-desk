@@ -39,12 +39,39 @@ test('before an agent moves, its unsaved work becomes a WIP commit on its own br
   assert.equal(await git(work, ['rev-parse', '--abbrev-ref', 'HEAD']), 'master', 'the folder there was not switched either');
 });
 
-test('work is never committed in a shared folder or on master: the move stops with a reason and nothing is committed', async () => {
+// No worktree of its own: someone else's changes in the shared folder never block the move and stay exactly as they were.
+test('an agent with no worktree and no changes of its own moves, and the others\' changes in the shared folder stay untouched', async () => {
+  const { home } = await setup();
+  writeFileSync(path.join(home, 'app.txt'), 'changed by someone\n'); writeFileSync(path.join(home, 'theirs.txt'), 'their new file\n');
+  const before = await git(home, ['status', '--porcelain']), head = await git(home, ['rev-parse', 'HEAD']);
+  const saved = await saveWork({ worktree: '', project: home, agentName: 'Desky', ownFiles: [path.join(home, 'elsewhere.txt')] });
+  assert.deepEqual(saved, { nothing: true, others: 2 });
+  assert.equal(await git(home, ['status', '--porcelain']), before, 'the folder is as it was');
+  assert.equal(await git(home, ['rev-parse', 'HEAD']), head, 'nothing was committed');
+  assert.equal(await git(home, ['branch', '--list', 'rex-handover/*']), '', 'no branch was made');
+});
+
+test('an agent with no worktree carries only the files it changed itself, and the shared folder stays as it was', async () => {
+  const { home, work } = await setup();
+  writeFileSync(path.join(home, 'app.txt'), 'changed by someone else\n');
+  writeFileSync(path.join(home, 'mine.txt'), 'written by Desky\n'); writeFileSync(path.join(home, 'notes.md'), 'someone else\'s note\n');
+  const before = await git(home, ['status', '--porcelain']), head = await git(home, ['rev-parse', 'HEAD']), index = await git(home, ['diff', '--cached', '--name-only']);
+  const saved = await saveWork({ worktree: '', project: home, agentName: 'Desky', to: 'Work', ownFiles: [path.join(home, 'mine.txt')] });
+  assert.equal(saved.branch, 'rex-handover/desky'); assert.deepEqual(saved.files, ['mine.txt']); assert.equal(saved.others, 2); assert.ok(saved.bundle.length > 0);
+  assert.equal(await git(home, ['status', '--porcelain']), before, 'nobody\'s files changed in the shared folder');
+  assert.equal(await git(home, ['rev-parse', 'HEAD']), head); assert.equal(await git(home, ['rev-parse', '--abbrev-ref', 'HEAD']), 'master');
+  assert.equal(await git(home, ['diff', '--cached', '--name-only']), index, 'nothing was staged');
+  assert.deepEqual((await git(home, ['diff', '--name-only', head, saved.head])).split('\n'), ['mine.txt'], 'the commit holds only its own file');
+  const directory = path.join(temporary('ho-own'), 'desky');
+  const picked = await pickUp({ project: work, branch: saved.branch, head: saved.head, bundle: saved.bundle, directory });
+  assert.equal(picked.head, saved.head);
+  assert.equal(readFileSync(path.join(directory, 'mine.txt'), 'utf8'), 'written by Desky\n');
+  assert.equal(existsSync(path.join(directory, 'notes.md')), false, 'someone else\'s file did not travel');
+  assert.equal(readFileSync(path.join(directory, 'app.txt'), 'utf8'), 'one\n', 'someone else\'s change did not travel');
+});
+
+test('work is never committed on master or a release branch: the move stops with a reason and nothing is committed', async () => {
   const { home, worktree } = await setup();
-  // No worktree of its own, and the shared folder has changes (maybe someone else's).
-  writeFileSync(path.join(home, 'app.txt'), 'changed by someone\n');
-  await assert.rejects(saveWork({ worktree: '', project: home, agentName: 'Desky' }), /no worktree of its own[\s\S]*someone else's/);
-  assert.match(await git(home, ['status', '--porcelain']), /app\.txt/, 'left as it was');
   // Its worktree on a protected branch (master, main, release/...) with changes.
   await git(worktree, ['checkout', '-q', '-B', 'release/2.0', 'origin/master']); writeFileSync(path.join(worktree, 'app.txt'), 'on a release branch\n');
   await assert.rejects(saveWork({ worktree, project: home, agentName: 'Desky' }), /on release\/2\.0, where work is never committed/);

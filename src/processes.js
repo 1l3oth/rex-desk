@@ -18,8 +18,8 @@ export function userBinPath(current = '', home = os.homedir(), exists = existsSy
   return [...wanted, ...parts].join(':');
 }
 if (process.platform !== 'win32') process.env.PATH = userBinPath(process.env.PATH);
-export async function git(cwd, args) {
-  const { stdout } = await exec('git', ['-C', cwd, ...args], { windowsHide: true, maxBuffer: 8 * 1024 * 1024, timeout: 120000 });
+export async function git(cwd, args, { env } = {}) {
+  const { stdout } = await exec('git', ['-C', cwd, ...args], { windowsHide: true, maxBuffer: 8 * 1024 * 1024, timeout: 120000, ...(env ? { env: { ...process.env, ...env } } : {}) });
   return stdout.trim();
 }
 export function slug(value, maximum = 48) {
