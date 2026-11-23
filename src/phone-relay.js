@@ -34,7 +34,7 @@ export class PhoneRelay {
     this.desk = desk; this.url = url; this.makeSocket = socket; this.port = port;
     // Only requests carrying this secret count as relayed. It never leaves this process.
     this.secret = randomBytes(24).toString('base64url');
-    this.streams = new Map(); this.socket = null; this.state = 'off'; this.tries = 0; this.timer = null; this.publicUrl = ''; this.problem = null;
+    this.streams = new Map(); this.socket = null; this.state = 'off'; this.tries = 0; this.timer = null; this.publicUrl = ''; this.problem = null; this.account = '';
   }
   get store() { return this.desk.store; }
   settings() { return this.store.get('phone-relay', 'main') || { enabled: false, devices: [], pending: [] }; }
@@ -43,6 +43,14 @@ export class PhoneRelay {
   // ---------- which phones may come in ----------
   isRelayed(request) { return same(request.headers['x-rex-relay'], this.secret); }
   device(request) { return { id: cleanId(request.headers['x-rex-relay-device']), name: cleanName(decodeURIComponent(String(request.headers['x-rex-relay-name'] || ''))) }; }
+  // A phone signed in to the same Rex Desk account as this desk comes in with no code. Both accounts come from the relay
+  // itself, never from the phone: the desk's in WELCOME (checked against the desk's own sign-in on this socket) and the
+  // phone's in each request's frame (from the phone's checked session). The phone's own x-rex-relay-* headers are dropped.
+  // askCode: the person can still ask for the code from every new phone.
+  sameAccount(request) {
+    const account = cleanId(request.headers['x-rex-relay-account']);
+    return this.isRelayed(request) && Boolean(account) && account === this.account && !this.settings().askCode;
+  }
   approved(deviceId) { const key = deviceId ? keyOf(deviceId) : ''; return Boolean(key) && this.settings().devices.some(item => item.key === key); }
   // The code a new phone shows, kept for ten minutes. Asking again within that time shows the same code.
   pendingFor({ id, name }) {
@@ -88,7 +96,7 @@ export class PhoneRelay {
     socket.addEventListener('message', event => { try { this.onFrame(readRelayFrame(Buffer.from(event.data))); } catch (error) { this.store.event('', 'phone-relay-error', { message: error.message }); } });
     // The relay closes with 4001 when a newer connection of this desk took over, 4002 when the plan has no relay and 4003 when the sign-in
     // is no longer good. Those do not get better by dialling again, so the desk waits for the switch or a new sign-in instead.
-    socket.addEventListener('close', event => { if (this.socket !== socket) return; this.socket = null; this.dropStreams(); this.failed({ code: event?.code, reason: event?.reason, error, opened }); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); });
+    socket.addEventListener('close', event => { if (this.socket !== socket) return; this.socket = null; this.account = ''; this.dropStreams(); this.failed({ code: event?.code, reason: event?.reason, error, opened }); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); });
     // The error itself is kept for the close that always follows it, which says what went wrong.
     socket.addEventListener('error', event => { error = String(event?.message || event?.error?.message || 'connection error'); });
   }
@@ -98,7 +106,7 @@ export class PhoneRelay {
     this.store.event('', 'phone-relay-error', { message }); console.warn(`Phone relay: ${message}`);
   }
   stop() {
-    clearTimeout(this.timer); this.timer = null; const socket = this.socket; this.socket = null; this.dropStreams();
+    clearTimeout(this.timer); this.timer = null; const socket = this.socket; this.socket = null; this.account = ''; this.dropStreams();
     try { socket?.close(); } catch {} this.state = 'off';
   }
   retry() {
@@ -110,7 +118,7 @@ export class PhoneRelay {
   dropStreams() { for (const stream of this.streams.values()) stream.request?.destroy(); this.streams.clear(); }
 
   onFrame({ op, streamId, payload }) {
-    if (op === RELAY_OP.WELCOME) { this.state = 'online'; this.tries = 0; this.problem = null; try { this.publicUrl = String(JSON.parse(payload.toString('utf8')).url || ''); } catch {} return; }
+    if (op === RELAY_OP.WELCOME) { this.state = 'online'; this.tries = 0; this.problem = null; try { const hello = JSON.parse(payload.toString('utf8')); this.publicUrl = String(hello.url || ''); this.account = cleanId(hello.account); } catch {} return; }
     if (op === RELAY_OP.PING) return this.send(RELAY_OP.PONG, streamId, payload);
     if (op === RELAY_OP.REQ) return this.openStream(streamId, JSON.parse(payload.toString('utf8')));
     if (op === RELAY_OP.REQ_BODY) return this.bodyChunk(streamId, payload);
@@ -123,7 +131,7 @@ export class PhoneRelay {
     if (this.streams.has(streamId)) return;
     const headers = {};
     for (const [key, value] of Object.entries(meta.headers || {})) if (!HOP.has(key.toLowerCase()) && !OWN.test(key)) headers[key.toLowerCase()] = String(value);
-    Object.assign(headers, { 'x-rex-relay': this.secret, 'x-rex-relay-device': cleanId(meta.device?.id), 'x-rex-relay-name': encodeURIComponent(cleanName(meta.device?.name)) });
+    Object.assign(headers, { 'x-rex-relay': this.secret, 'x-rex-relay-device': cleanId(meta.device?.id), 'x-rex-relay-name': encodeURIComponent(cleanName(meta.device?.name)), 'x-rex-relay-account': cleanId(meta.account?.id ?? meta.account) });
     const method = /^[A-Z]{3,7}$/.test(String(meta.method)) ? meta.method : 'GET', route = String(meta.path || '/');
     if (!route.startsWith('/')) return this.send(RELAY_OP.ABORT, streamId);
     const device = cleanId(meta.device?.id), stream = { size: 0, key: device ? keyOf(device) : '' }; this.streams.set(streamId, stream);

@@ -124,3 +124,36 @@ test('a failed relay connect says why: not signed in, plan, server unreachable, 
   assert.match(page, /web\.rexdesk\.app/); assert.doesNotMatch(page, /app\.rexdesk\.dev/);
   assert.match(page, /problem\?\.reason === 'unreachable'/, 'the status line shows the reason');
 });
+
+test('a phone signed in to the desk\'s own account comes in with no code; another account or a forged header still needs it', () => {
+  const { desk } = fakeDesk(1), socket = fakeSocket(), relay = new PhoneRelay(desk, { socket: () => socket });
+  relay.setEnabled(true);
+  const ask = account => ({ headers: { 'x-rex-relay': relay.secret, 'x-rex-relay-device': 'new-phone', ...(account ? { 'x-rex-relay-account': account } : {}) } });
+  assert.equal(relay.sameAccount(ask('user-1')), false, 'no WELCOME yet: the desk does not know its account');
+  socket.emit('message', { data: relayFrame(RELAY_OP.WELCOME, 0, Buffer.from(JSON.stringify({ url: 'https://web.rexdesk.app', account: 'user-1' }))) });
+  assert.equal(relay.sameAccount(ask('user-1')), true, 'same account: straight in');
+  assert.equal(relay.sameAccount(ask('user-2')), false, 'another account needs the code');
+  assert.equal(relay.sameAccount(ask('')), false, 'an older relay that sends no account needs the code');
+  assert.equal(relay.sameAccount({ headers: { 'x-rex-relay': 'forged', 'x-rex-relay-account': 'user-1' } }), false, 'only requests the relay played count');
+  relay.save({ askCode: true }); assert.equal(relay.sameAccount(ask('user-1')), false, 'the person can still ask for the code');
+  relay.save({ askCode: false });
+  socket.emit('close', { code: 1006 }); relay.stop();
+  assert.equal(relay.account, '', 'a closed connection forgets the account');
+});
+
+test('the desk copies the relay\'s account into the request and drops one the phone sent', async () => {
+  const server = http.createServer((request, response) => { response.end(JSON.stringify({ account: request.headers['x-rex-relay-account'] || '' })); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { desk } = fakeDesk(server.address().port), socket = fakeSocket(), relay = new PhoneRelay(desk, { socket: () => socket });
+    relay.setEnabled(true);
+    const body = async (streamId, meta) => {
+      socket.play(RELAY_OP.REQ, streamId, Buffer.from(JSON.stringify({ method: 'GET', path: '/x', end: true, device: { id: 'p1' }, headers: { 'x-rex-relay-account': 'user-1' }, ...meta })));
+      for (let i = 0; i < 50 && !socket.sent.some(frame => frame.op === RELAY_OP.RES_BODY && frame.streamId === streamId && frame.payload.length); i++) await new Promise(resolve => setTimeout(resolve, 20));
+      return JSON.parse(socket.sent.find(frame => frame.op === RELAY_OP.RES_BODY && frame.streamId === streamId && frame.payload.length).payload.toString()).account;
+    };
+    assert.equal(await body(1, {}), '', 'a header the phone set itself is not passed on');
+    assert.equal(await body(3, { account: { id: 'user-1' } }), 'user-1', 'the relay\'s account is');
+    relay.stop();
+  } finally { server.close(); }
+});

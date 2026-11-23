@@ -166,6 +166,10 @@ test('a phone through the relay waits for its 6-digit code to be approved on the
     await owner('/api/phone-relay', { method: 'POST', data: { action: 'approve', device: listed.body.pending[0].id, code } });
     assert.equal((await ask('/api/state')).status, 200, 'after the OK the phone gets in');
     assert.equal((await ask('/api/state', { 'x-rex-relay-device': 'phone-2' })).status, 403, 'another phone still waits');
+    // Signed in to the desk's own account (the relay says so in WELCOME and in the request): no code at all.
+    app.desk.phoneRelay.account = 'user-1';
+    assert.equal((await ask('/api/state', { 'x-rex-relay-device': 'phone-3', 'x-rex-relay-account': 'user-1' })).status, 200, 'a phone on the same account gets straight in');
+    assert.equal((await ask('/api/state', { 'x-rex-relay-device': 'phone-4', 'x-rex-relay-account': 'user-2' })).status, 403, 'another account still waits for the code');
   } finally { await app.close(); }
 });
 
