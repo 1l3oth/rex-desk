@@ -5,6 +5,7 @@ import { memoryFolder } from './folders.js';
 import { createHash } from 'node:crypto';
 import { detectProject } from './project-detect.js';
 import { APP_GUIDE } from './app-guard.js';
+import { noteKey, parseNotes } from './notes-merge.js';
 
 const now = () => new Date().toISOString();
 const NOTES_BEGIN = '<!-- notes:begin -->', NOTES_END = '<!-- notes:end -->';
@@ -97,13 +98,14 @@ export class Memory {
     // A note carries its date and, unless it is clearly lasting, a mark that it may change. A note that replaces an older one removes it.
     const plain = item => item.replace(/\s+\(\d{4}-\d{2}-\d{2}(?:, may change)?\)$/, '').toLowerCase();
     const gone = String(replaces || '').trim().toLowerCase();
-    for (const [name, items] of sections) sections.set(name, gone ? items.filter(item => !plain(item).includes(gone)) : items);
+    const dropped = [];
+    for (const [name, items] of sections) sections.set(name, gone ? items.filter(item => { const keep = !plain(item).includes(gone); if (!keep) dropped.push(item); return keep; }) : items);
     const list = sections.get(title);
     if (list.some(item => plain(item) === note.toLowerCase())) return { saved: false, reason: 'Already known.' };
     list.push(`${note} (${new Date().toISOString().slice(0, 10)}${lasting ? '' : ', may change'})`); sections.set(title, list.slice(-40));
     const page = ['# About the person', '', 'What the agents learned from how the person talks to them. Every agent reads this. The person can change or delete any line. Notes marked "may change" are hints: what the person says now wins.', '',
       ...[...sections].filter(([, items]) => items.length).flatMap(([name, items]) => [`## ${name}`, '', ...items.map(item => `- ${item}`), ''])].join('\n');
-    atomic(this.file('user.md'), page); return { saved: true };
+    atomic(this.file('user.md'), page); this.markNotes('user.md', dropped, true); this.markNotes('user.md', [note], false); return { saved: true };
   }
   // Removes one line the person no longer wants agents to follow, matched by its words.
   forgetPersonNote(kind, text) {
@@ -111,7 +113,7 @@ export class Memory {
     const current = read(this.file('user.md'), 20000), wanted = String(text || '').trim().toLowerCase(); let section = '', removed = false;
     const lines = current.split('\n').filter(line => {
       const heading = /^##\s+(.+)$/.exec(line); if (heading) { section = heading[1].trim(); return true; }
-      if (!removed && section === title && /^-\s+/.test(line) && line.replace(/^-\s+/, '').trim().toLowerCase().startsWith(wanted)) { removed = true; return false; }
+      if (!removed && section === title && /^-\s+/.test(line) && line.replace(/^-\s+/, '').trim().toLowerCase().startsWith(wanted)) { removed = true; this.markNotes('user.md', [line], true); return false; }
       return true;
     });
     if (removed) atomic(this.file('user.md'), lines.join('\n'));
@@ -271,11 +273,12 @@ export class Memory {
     const file = this.file('workflows', `${name}.md`), gone = String(replaces || '').trim().toLowerCase();
     const plain = line => line.replace(/^- /, '').replace(/\s+\(\d{4}-\d{2}-\d{2}[^)]*\)$/, '').toLowerCase();
     let rules = read(file, 20000).split('\n').filter(line => line.startsWith('- '));
-    if (gone) rules = rules.filter(line => !plain(line).includes(gone));
+    if (gone) { this.markNotes(`workflows/${name}.md`, rules.filter(line => plain(line).includes(gone)), true); rules = rules.filter(line => !plain(line).includes(gone)); }
     if (rules.some(line => plain(line) === rule.toLowerCase())) return { saved: false, reason: 'Already known.' };
     rules = [...rules, `- ${rule} (${now().slice(0, 10)}, ${String(by).slice(0, 40)})`].slice(-60);
     mkdirSync(path.dirname(file), { recursive: true });
     atomic(file, [`# How work is done on ${name}`, '', 'Learned from what the person said in chat. Every agent on this project follows it. The person can change or delete any line.', '', ...rules, ''].join('\n'));
+    this.markNotes(`workflows/${name}.md`, [rule], false);
     return { saved: true, rules: rules.length };
   }
   // Whether the person has looked at a project's workflow once, after the first task an agent finished there.
@@ -286,5 +289,22 @@ export class Memory {
     mkdirSync(this.file('workflows'), { recursive: true }); atomic(this.file('workflows', `${name}.json`), JSON.stringify({ confirmedAt: now() }, null, 2));
     return { confirmed: true };
   }
-  setUser(text) { this.ensure(); atomic(this.file('user.md'), redactText(String(text || '')).slice(0, 20000)); return { saved: true }; }
+  setUser(text) {
+    this.ensure();
+    const keys = page => new Set([...parseNotes(page).sections.values()].flat().map(noteKey)), before = keys(read(this.file('user.md'), 20000)), value = redactText(String(text || '')).slice(0, 20000), after = keys(value);
+    atomic(this.file('user.md'), value);
+    // A line the person deleted stays deleted on their other computers too; a line they typed back counts again.
+    this.markNotes('user.md', [...before].filter(key => !after.has(key)), true); this.markNotes('user.md', [...after].filter(key => !before.has(key)), false);
+    return { saved: true };
+  }
+  // Learned notes removed here are remembered, so the merge with other computers never brings them back (src/notes-merge.js).
+  forgotten() { try { return JSON.parse(readFileSync(this.file('forgotten.json'), 'utf8')) || {}; } catch { return {}; } }
+  markNotes(name, lines, gone) {
+    const list = lines.map(noteKey).filter(Boolean); if (!list.length) return;
+    const all = this.forgotten(), at = now(), notes = all[name] || {};
+    let changed = false;
+    for (const key of list) { if (!gone && !notes[key]) continue; notes[key] = { gone, at }; changed = true; }
+    if (!changed) return;
+    all[name] = notes; atomic(this.file('forgotten.json'), JSON.stringify(all, null, 1));
+  }
 }

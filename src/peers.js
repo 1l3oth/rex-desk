@@ -10,6 +10,7 @@ import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { HUMAN } from './rooms.js';
 import { keepLines } from './store.js';
+import { MERGED_FILES, mergeNotes, mergeForgotten } from './notes-merge.js';
 import { execFile } from 'node:child_process';
 
 const now = () => new Date().toISOString();
@@ -140,7 +141,7 @@ export class Peers {
   }
   // What the agents learned about the person and how each project is worked on, shared by every computer.
   sharedFiles() {
-    const memory = this.desk.memory, names = ['user.md', 'chat-style.md'];
+    const memory = this.desk.memory, names = ['forgotten.json', 'user.md', 'chat-style.md'];
     try { for (const name of readdirSync(memory.file('workflows'))) if (name.endsWith('.md')) names.push(`workflows/${name}`); } catch { /* none yet */ }
     return names;
   }
@@ -161,7 +162,10 @@ export class Peers {
   async pullFrom(peer) {
     doing('sync: reading another computer');
     if (!peer) return;
-    const settings = this.settings(); let cursor = settings.cursors?.[peer.id] || 0, filesCursor = settings.files?.[peer.id] || 0, page;
+    // The first sync after this update reads all of the other computer's learned notes once, so notes it saved before the
+    // merge existed (and that an older newest-wins copy skipped) are joined in too.
+    const settings = this.settings(), merged = Boolean(settings.notesMerged?.[peer.id]);
+    let cursor = settings.cursors?.[peer.id] || 0, filesCursor = merged ? settings.files?.[peer.id] || 0 : 0, page;
     try {
       do {
         page = await this.transport(peer, 'GET', `/api/peer/pull?since=${cursor}&files=${filesCursor}`);
@@ -170,7 +174,7 @@ export class Peers {
         cursor = page.cursor; filesCursor = page.filesCursor || filesCursor;
       } while (page.more);
       const fresh = this.settings();
-      this.store.put('peers', 'main', { ...fresh, cursors: { ...fresh.cursors, [peer.id]: cursor }, files: { ...fresh.files, [peer.id]: filesCursor },
+      this.store.put('peers', 'main', { ...fresh, cursors: { ...fresh.cursors, [peer.id]: cursor }, files: { ...fresh.files, [peer.id]: filesCursor }, notesMerged: { ...fresh.notesMerged, [peer.id]: true },
         peers: fresh.peers.map(item => item.id === peer.id ? { ...item, name: page.node?.name || item.name, lastSeen: now(), error: '' } : item) });
       const was = this.online(peer.id);
       this.live.set(peer.id, { at: Date.now(), ...page.live });
@@ -200,13 +204,31 @@ export class Peers {
     }
   }
   applyFiles(files) {
-    for (const item of files) {
+    // Removed notes first, so the notes merged after them leave those out.
+    const ordered = [...files].sort((left, right) => Number(right.name === 'forgotten.json') - Number(left.name === 'forgotten.json'));
+    for (const item of ordered) {
       if (!this.sharedFiles().includes(item.name) && !/^workflows\/[a-z0-9._-]+\.md$/.test(item.name)) continue;
       const file = this.desk.memory.file(...item.name.split('/'));
+      // Learned notes are joined line by line, whichever side is newer: a note saved on either computer is kept on both.
+      if (item.name === 'forgotten.json' || MERGED_FILES(item.name)) { this.mergeFile(file, item); continue; }
       const local = existsSync(file) ? Math.floor(statSync(file).mtimeMs) : 0;
       if (item.mtime <= local) continue;
       mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, item.text); const at = new Date(item.mtime); utimesSync(file, at, at);
     }
+  }
+  mergeFile(file, item) {
+    const before = existsSync(file) ? readFileSync(file, 'utf8') : '';
+    let text;
+    if (item.name === 'forgotten.json') {
+      const parse = value => { try { return JSON.parse(value) || {}; } catch { return {}; } };
+      text = JSON.stringify(mergeForgotten(parse(before), parse(item.text)), null, 1);
+      if (JSON.stringify(parse(before)) === JSON.stringify(parse(text))) return;
+    } else {
+      text = mergeNotes(before, item.text, this.desk.memory.forgotten()[item.name] || {});
+      const flat = value => value.replace(/\r\n/g, '\n').trim();
+      if (flat(text) === flat(before)) return;
+    }
+    mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, text);
   }
   // Whether this computer answers for an agent in a message: its own agents, and its Rex Agent for messages written here.
   owns(agentId, message = {}) {

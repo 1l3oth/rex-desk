@@ -394,3 +394,42 @@ test('an attached file has one id on Windows and macOS, and an incoming file nev
   assert.notEqual(path.resolve(other), path.resolve(here));
   assert.equal(readFileSync(other, 'utf8'), 'theirs');
 });
+
+test('notes learned about the person on two computers are merged, not replaced, a removed note stays removed, and agents\' lessons and memory carry across', async () => {
+  const { a, b } = computers();
+  a.desk.memory.personNote('likes', 'Short replies.');
+  a.desk.memory.learnWorkflow('shop', 'Branch from global/release.');
+  b.desk.memory.personNote('dislikes', 'Emoji in replies.');
+  b.desk.memory.personNote('likes', 'Plain words.');
+  await b.desk.peers.add('a');
+  const toA = () => b.desk.peers.pullFrom(b.desk.peers.byNode(a.desk.store.nodeId)), toB = () => a.desk.peers.pullFrom({ id: b.desk.store.nodeId, url: 'http://b' });
+  // An older copy already read a's files with newest-wins: its file cursor is past a's notes. The first sync after the update reads them all once.
+  a.desk.memory.personNote('about', 'Works on two laptops.');
+  const settings = b.desk.store.get('peers', 'main');
+  b.desk.store.put('peers', 'main', { ...settings, notesMerged: {}, files: { ...settings.files, [a.desk.store.nodeId]: Date.now() + 60000 } });
+  await toA(); await toB();
+  for (const desk of [a.desk, b.desk]) {
+    const person = desk.memory.person();
+    assert.match(person, /Works on two laptops/, 'skipped by the old cursor, read by the one-time merge');
+    assert.match(person, /Short replies/); assert.match(person, /Plain words/); assert.match(person, /Emoji in replies/);
+    assert.equal(person.match(/Short replies/g).length, 1, 'never doubled');
+  }
+  assert.match(readFileSync(b.desk.memory.file('workflows', 'shop.md'), 'utf8'), /global\/release/);
+  assert.equal(b.desk.store.get('peers', 'main').notesMerged[a.desk.store.nodeId], true);
+  // A note removed on one computer goes on the other too, and the next merge does not bring it back.
+  a.desk.memory.forgetPersonNote('likes', 'Plain words');
+  a.desk.memory.personNote('likes', 'Answers first.');
+  await toA(); await toB(); await toA();
+  for (const desk of [a.desk, b.desk]) { assert.doesNotMatch(desk.memory.person(), /Plain words/); assert.match(desk.memory.person(), /Answers first/); }
+  // A note replaced on b is replaced on a.
+  b.desk.memory.personNote('dislikes', 'Emoji anywhere.', { replaces: 'Emoji in replies' });
+  await toB();
+  assert.doesNotMatch(a.desk.memory.person(), /Emoji in replies/); assert.match(a.desk.memory.person(), /Emoji anywhere/);
+  // An agent's own lessons and memory travel with it.
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  a.desk.specialists.learn(dara.id, 'Run only the touched tests.', 'you');
+  a.desk.notes.put(dara.id, 'memory', '- Release branch is release/0.0.111.', { by: 'Dara' });
+  await toA();
+  assert.match(b.desk.specialists.lessonsText(dara.id), /touched tests/);
+  assert.match(b.desk.notes.text(dara.id, 'memory'), /release\/0\.0\.111/);
+});
