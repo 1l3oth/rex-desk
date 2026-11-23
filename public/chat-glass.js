@@ -100,9 +100,23 @@ const rough = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 rough.setAttribute('width', '0'); rough.setAttribute('height', '0'); rough.setAttribute('aria-hidden', 'true');
 rough.innerHTML = '<filter id="crayon-rough"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="4"/></filter>';
 document.body.append(rough);
+let waterfest = null; // the Water Festival 3D scene, mounted only while that theme is on
 function dressSkin() {
+  if (waterfest) { waterfest.dispose?.(); waterfest = null; }
   fx.replaceChildren();
-  if (root.dataset.skin !== 'sakura' || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const skin = root.dataset.skin, reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Water Festival: a Three.js night on the Tonle Sap behind the app. It handles its own pausing and still frame,
+  // so it mounts even with reduced motion (it just holds one frame).
+  if (skin === 'waterfest') {
+    const canvas = document.createElement('canvas'); canvas.className = 'wf-canvas'; canvas.setAttribute('aria-hidden', 'true');
+    fx.append(canvas);
+    import('./waterfest-scene.js').then(m => {
+      if (root.dataset.skin !== 'waterfest') return; // switched away while loading
+      try { waterfest = m.mountWaterFestival(canvas); } catch { canvas.remove(); }
+    }).catch(() => canvas.remove());
+    return;
+  }
+  if (skin !== 'sakura' || reduced) return;
   for (let i = 0; i < 18; i++) {
     const petal = document.createElement('i');
     petal.style.left = `${(i * 53) % 100}%`; petal.style.animationDuration = `${11 + (i * 7) % 9}s`; petal.style.animationDelay = `${-((i * 1.7) % 14)}s`;
