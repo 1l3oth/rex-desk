@@ -10,7 +10,9 @@ import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { HUMAN } from './rooms.js';
 import { keepLines } from './store.js';
-import { MERGED_FILES, mergeNotes, mergeForgotten } from './notes-merge.js';
+import { MERGED_FILES, mergeNotes, mergeForgotten, parseNotes, noteKey } from './notes-merge.js';
+// Whether a notes page holds a note that matches.
+const parseNotesHas = (text, match) => [...parseNotes(text).sections.values()].some(items => items.some(line => match(noteKey(line))));
 import { execFile } from 'node:child_process';
 
 const now = () => new Date().toISOString();
@@ -221,14 +223,27 @@ export class Peers {
     let text;
     if (item.name === 'forgotten.json') {
       const parse = value => { try { return JSON.parse(value) || {}; } catch { return {}; } };
-      text = JSON.stringify(mergeForgotten(parse(before), parse(item.text)), null, 1);
-      if (JSON.stringify(parse(before)) === JSON.stringify(parse(text))) return;
+      const forgotten = mergeForgotten(parse(before), parse(item.text));
+      text = JSON.stringify(forgotten, null, 1);
+      if (JSON.stringify(parse(before)) !== JSON.stringify(parse(text))) { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, text); }
+      // A removal that comes without the notes file is applied to the notes here at once, so the note leaves active memory now.
+      this.dropForgotten(forgotten);
+      return;
     } else {
       text = mergeNotes(before, item.text, this.desk.memory.forgotten()[item.name] || {});
       const flat = value => value.replace(/\r\n/g, '\n').trim();
       if (flat(text) === flat(before)) return;
     }
     mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, text);
+  }
+  dropForgotten(forgotten) {
+    for (const [name, notes] of Object.entries(forgotten || {})) {
+      if (!MERGED_FILES(name)) continue;
+      const file = this.desk.memory.file(...name.split('/')); if (!existsSync(file)) continue;
+      const before = readFileSync(file, 'utf8');
+      if (!parseNotesHas(before, key => notes[key]?.gone === true)) continue;
+      writeFileSync(file, mergeNotes(before, '', notes));
+    }
   }
   // Whether this computer answers for an agent in a message: its own agents, and its Rex Agent for messages written here.
   owns(agentId, message = {}) {

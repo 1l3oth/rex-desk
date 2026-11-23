@@ -433,3 +433,14 @@ test('notes learned about the person on two computers are merged, not replaced, 
   assert.match(b.desk.specialists.lessonsText(dara.id), /touched tests/);
   assert.match(b.desk.notes.text(dara.id, 'memory'), /release\/0\.0\.111/);
 });
+
+test('a removed note that arrives without the notes file leaves the other computer\'s active memory at once', () => {
+  const { a, b } = computers();
+  for (const desk of [a.desk, b.desk]) { desk.memory.personNote('likes', 'Plain words.'); desk.memory.personNote('likes', 'Answers first.'); }
+  a.desk.memory.forgetPersonNote('likes', 'Plain words');
+  const forgotten = readFileSync(a.desk.memory.file('forgotten.json'), 'utf8');
+  b.desk.peers.applyFiles([{ name: 'forgotten.json', mtime: Date.now(), text: forgotten }]);
+  assert.doesNotMatch(b.desk.memory.person(), /Plain words/);
+  assert.match(b.desk.memory.person(), /Answers first/);
+  assert.deepEqual(JSON.parse(readFileSync(b.desk.memory.file('forgotten.json'), 'utf8')), JSON.parse(forgotten));
+});
