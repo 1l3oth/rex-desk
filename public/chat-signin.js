@@ -8,7 +8,7 @@ windowBar();
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const root = document.getElementById('signin');
 const TABS = [['signin', t('Sign in')], ['create', t('New account')], ['cloud', t('Bring back from backup')]];
-const state = { auth: null, tab: '', error: '', email: '', scene: undefined, account: '', offline: false, switching: false };
+const state = { auth: null, tab: '', error: '', email: '', scene: undefined, account: '', offline: false, switching: false, provider: '', authUrl: '' };
 const ICON = {
   key: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3m-4 4 3 3m-5-1 2 2"/></svg>',
   mail: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
@@ -55,15 +55,18 @@ function drawAccount() {
       ? `<p class="si-note">${t`${esc(auth.occupied)} is signed in on this computer.`}</p>`
       : state.switching
       ? `<p class="si-note warn">${t`Switching accounts will close the current desk and stop its working agents.`}</p>`
-      : `<p class="si-note">${t`Use your Rex Desk account. The sign-in opens in your browser.`}</p>`;
+      : `<p class="si-note">${t`A new window will open to finish signing in.`}</p>`;
     const choose = occupied
       ? `<div class="si-ways si-ways-buttons"><button type="button" class="btn primary si-way" data-account data-provider="">${t`Continue as ${esc(auth.occupied)}`}</button><button type="button" class="si-link si-center" data-switch-to>${t`Use a different account`}</button></div>`
       : ways;
+    const waitLabel = state.provider === 'google' ? t`Waiting for Google…` : state.provider === 'github' ? t`Waiting for GitHub…` : t`Waiting for the email window…`;
+    const waitingBody = `<button type="button" class="btn primary si-submit si-big" disabled>${waitLabel}</button>
+      <button type="button" class="si-link si-center" data-reopen>${t`Window did not open? Try again`}</button>`;
     body = `<h2 class="si-title">${t`Sign in to your desk`}</h2>${note}
-      ${waiting ? `<button type="button" class="btn primary si-submit si-big" disabled>${t`Waiting for you in the browser…`}</button>` : choose}
+      ${waiting ? waitingBody : choose}
       ${waiting ? `<button type="button" class="si-link si-center" data-cancel>${t`Cancel`}</button>` : ''}
       <p class="si-error" role="alert">${esc(state.error)}</p>
-      <p class="si-foot">${t`New here? These buttons also make your account.`}</p>`;
+      <p class="si-foot">${t`A Rex Desk account is free and keeps your desk, agents and chats. These buttons also make yours.`}</p>`;
   } else {
     const who = `<div class="si-who"><span class="si-avatar">${account.image ? `<img src="${esc(account.image)}" alt="" referrerpolicy="no-referrer">` : esc((account.name || account.email || '?')[0].toUpperCase())}</span><span><b>${esc(account.name || account.email)}</b><small>${esc(account.name ? account.email : t('Rex Desk account'))}</small></span><button type="button" class="si-link" data-switch>${t`Not you?`}</button></div>`;
     const unclaimed = auth.workspaces.find(item => !item.claimed);
@@ -115,11 +118,14 @@ function mountScene() {}
 root.addEventListener('click', event => {
   const tab = event.target.closest('[data-tab]'); if (tab) { state.tab = tab.dataset.tab; state.error = ''; draw(); return; }
   const account = event.target.closest('[data-email]'); if (account) { state.email = account.dataset.email; draw(); return; }
+  if (event.target.closest('[data-reopen]')) { if (state.authUrl) window.open(state.authUrl, '_blank', 'noopener'); return; }
   if (event.target.closest('[data-account]')) {
+    const provider = event.target.closest('[data-account]')?.dataset.provider || '';
+    state.provider = provider; state.authUrl = '';
     state.email = root.querySelector('input[name=email]')?.value || state.email; state.account = 'waiting'; state.error = ''; state.offline = false; draw();
     void (async () => {
       try {
-        const { url } = await post('/auth/account-start', { provider: event.target.closest('[data-account]')?.dataset.provider || '' }); window.open(url, '_blank', 'noopener');
+        const { url } = await post('/auth/account-start', { provider }); state.authUrl = url; window.open(url, '_blank', 'noopener');
         const found = await waitForBrowserSignIn('/auth/account-finish', () => state.account === 'waiting');
         if (!found) return; // cancelled meanwhile: the Cancel button already drew the screen
         if (state.auth.requireAccount) { state.auth.account = found; state.account = ''; }
