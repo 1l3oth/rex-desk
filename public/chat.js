@@ -1182,11 +1182,14 @@ document.addEventListener('click', event => {
   const jump = event.target.closest?.('[data-jump]');
   if (jump) { const target = document.querySelector(`[data-msg="${CSS.escape(jump.dataset.jump)}"]`); if (target) { target.scrollIntoView({ block: 'center', behavior: 'smooth' }); target.classList.add('flash'); setTimeout(() => target.classList.remove('flash'), 1200); } }
 });
-// A picture or video whose file was deleted (Settings, Storage) shows "File removed" in the chat, never a broken image.
+// A picture or video that does not load shows "Not on this computer yet" in the chat, never a broken image; only when the
+// server says the file was deleted (Settings, Storage) does it say "File removed".
 document.addEventListener('error', event => {
   const media = event.target; if (!['IMG', 'VIDEO'].includes(media?.tagName) || !media.closest('.msg .md, .sh-grid, .pin-list')) return;
-  const gone = document.createElement('span'); gone.className = 'file-gone'; gone.setAttribute('role', 'img'); gone.textContent = t('File removed');
+  const gone = document.createElement('span'); gone.className = 'file-gone'; gone.setAttribute('role', 'img'); gone.textContent = t('Not on this computer yet');
+  const source = media.currentSrc || media.src || media.querySelector?.('source')?.src;
   (media.closest('.md-media-link, .sh-thumb') || media).replaceWith(gone);
+  if (source) fetch(source, { cache: 'no-store' }).then(answer => answer.status === 404 ? answer.text() : '').then(text => { if (/This file was deleted/.test(text)) gone.textContent = t('File removed'); }).catch(() => {});
 }, true);
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && ui.reply && event.target.id === 'draft' && !ui.menu) { ui.reply = null; drawReplyBar(); } });
 // Ctrl+Up in the message box replies to the message above (again: the one before it); Ctrl+Down goes back down, past the newest stops replying.

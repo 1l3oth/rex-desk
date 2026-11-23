@@ -1264,6 +1264,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           // A picture attached in a chat on another computer comes from the shared copy of that chat.
           const picture = desk.peers.chatPicture(String(url.searchParams.get('path') || ''));
           if (picture) { response.writeHead(200, { 'Content-Type': picture.picture ? mime[path.extname(picture.name).toLowerCase()] || 'application/octet-stream' : 'application/octet-stream', ...(picture.picture ? {} : { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(picture.name)}` }), 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Length': picture.data.length }); return response.end(picture.data); }
+          // Not on this computer yet (a chat from the backup, a new computer): fetched now from the account's backup, only this one file.
+          if (moved) { const here = path.join(uploads, moved[1], moved[2]); if (!existsSync(here)) await store.cloud.files?.fetchOne?.(`data/uploads/${moved[1]}/${moved[2]}`).catch(() => false); if (existsSync(here)) return serveFile(request, response, here, { sandbox: /\.(html?|svg)$/i.test(here), download: url.searchParams.has('download'), cache: 'private, max-age=86400' }); }
           return json(response, 404, { error: 'That file is not in the chat uploads.' });
         }
         return serveFile(request, response, file, { sandbox: /\.(html?|svg)$/i.test(file), download: url.searchParams.has('download'), cache: 'private, max-age=86400' });

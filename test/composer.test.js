@@ -74,3 +74,19 @@ test('the model list comes from the signed-in Claude Code; agents and choices fo
   assert.deepEqual(runOptions({ model: 'sonnet' }, store), { model: 'sonnet' });
   assert.throws(() => runOptions({ model: 'claude-opus-5-5' }, store), /listed models/);
 });
+
+test('a chat upload missing here is fetched from the backup before the chat says it is not here, and a deleted one says so', async () => {
+  const app = await createApp({ dataDirectory: temporary('upload-backup'), port: 0 });
+  try {
+    const uploads = path.join(app.store.directory, 'uploads'), asked = [];
+    app.store.cloud.files = { fetchOne: async key => { asked.push(key); if (key !== 'data/uploads/u1/photo.png') return false; const { mkdirSync } = await import('node:fs'); mkdirSync(path.join(uploads, 'u1'), { recursive: true }); writeFileSync(path.join(uploads, 'u1', 'photo.png'), 'png'); return true; } };
+    const fetched = await fetch(`${app.address}/api/uploads/file?path=${encodeURIComponent('C:/old/uploads/u1/photo.png')}`);
+    assert.equal(fetched.status, 200); assert.equal(await fetched.text(), 'png');
+    assert.deepEqual(asked, ['data/uploads/u1/photo.png']);
+    const missing = await fetch(`${app.address}/api/uploads/file?path=${encodeURIComponent('C:/old/uploads/u2/none.png')}`);
+    assert.equal(missing.status, 404); assert.doesNotMatch(await missing.text(), /This file was deleted/);
+    app.desk.storage.gone = key => key === 'data/uploads/u3/gone.png';
+    const deleted = await fetch(`${app.address}/api/uploads/file?path=${encodeURIComponent('C:/old/uploads/u3/gone.png')}`);
+    assert.equal(deleted.status, 404); assert.equal(await deleted.text(), 'This file was deleted.');
+  } finally { await app.close(); }
+});
