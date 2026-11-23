@@ -105,3 +105,28 @@ test('Storage counts in a worker thread, so the desk keeps answering while a big
   again.storage.close();
   desk.storage.close(); store.close();
 });
+test('Keep chat history deletes older messages here and in the cloud, on its own; memory, tasks and pins stay', () => {
+  const store = new Store(temporary('history')), desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory') });
+  const queued = [];
+  store.cloud = { enabled: true, workspace: 'w1', enqueue: (sql, args) => queued.push([sql, args]), files: { forget() {} }, schedule() {}, record() {}, remove() {}, event() {}, chatEvent() {}, shared() {} };
+  const agent = desk.specialists.create({ name: 'Dara', purpose: 'Keeps history.' });
+  desk.specialists.learn(agent.id, 'Short replies.', 'you');
+  store.put('task', 't1', { id: 't1', local: true, title: 'Old task', status: 'todo', createdAt: old(400).toISOString() });
+  store.put('pin', 'p1', { id: 'p1', chat: `agent:${agent.id}`, kind: 'link', url: 'https://example.com', pinnedAt: old(400).toISOString() });
+  for (const [text, age] of [['very old', 400], ['old', 100], ['new', 2]]) { store.event('run-h', 'human-message', { text }, true); store.db.prepare('UPDATE events SET created_at = ? WHERE sequence = (SELECT MAX(sequence) FROM events)').run(old(age).toISOString()); }
+  assert.equal(desk.storage.historyDays(), 0, 'Forever by default');
+  assert.equal(desk.storage.historyTick(), null, 'Forever deletes nothing');
+  assert.throws(() => desk.storage.setHistory(7), /Pick how long/);
+  const result = desk.storage.setHistory(365);
+  assert.equal(result.removed, 1); assert.equal(store.config().keepHistory, 365);
+  assert.deepEqual(store.events('run-h', { visible: true }).map(event => event.text), ['old', 'new']);
+  assert.match(queued.at(-1)[0], /DELETE FROM rex_events WHERE workspace=\? AND created_at < \?/);
+  // Later, by the timer: a shorter setting deletes more, at most once every 6 hours.
+  store.saveConfig({ ...store.config(), keepHistory: 90 });
+  assert.equal(desk.storage.historyTick(Date.now()).removed, 1);
+  assert.deepEqual(store.events('run-h', { visible: true }).map(event => event.text), ['new']);
+  assert.equal(desk.storage.historyTick(Date.now() + 3600000), null, 'not again within 6 hours');
+  assert.ok(store.get('task', 't1')); assert.ok(store.get('pin', 'p1'));
+  assert.match(desk.specialists.lessonsText(agent.id), /Short replies/, 'lessons stay');
+  desk.storage.setHistory(0); assert.equal(store.config().keepHistory, 0);
+});

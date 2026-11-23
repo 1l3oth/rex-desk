@@ -2569,5 +2569,16 @@
  "Not added": "មិនបានបន្ថែម",
  "Orbit connects through its MCP server: agents use your goals, notes and knowledge, and a goal's tasks come into Tasks.": "Orbit ភ្ជាប់តាម MCP server របស់វា៖ ភ្នាក់ងារប្រើគោលដៅ កំណត់ចំណាំ និងចំណេះដឹងរបស់អ្នក ហើយកិច្ចការនៃគោលដៅមួយចូលមកក្នុង កិច្ចការ។",
  "Goals": "គោលដៅ",
- "On, but finds nothing: choose where its tasks come from above": "បើក ប៉ុន្តែរកមិនឃើញអ្វីទេ៖ សូមជ្រើសរើសកន្លែងដែលកិច្ចការរបស់វាមកពីខាងលើ"
+ "On, but finds nothing: choose where its tasks come from above": "បើក ប៉ុន្តែរកមិនឃើញអ្វីទេ៖ សូមជ្រើសរើសកន្លែងដែលកិច្ចការរបស់វាមកពីខាងលើ",
+ "Keep chat history": "រក្សាប្រវត្តិជជែក",
+ "Forever": "ជារៀងរហូត",
+ "1 year": "១ ឆ្នាំ",
+ "6 months": "៦ ខែ",
+ "3 months": "៣ ខែ",
+ "1 month": "១ ខែ",
+ "Messages are kept until you delete them.": "សារត្រូវបានរក្សាទុករហូតដល់អ្នកលុបវា។",
+ "Older messages are deleted on their own, here and in the cloud. Agent memory, tasks and pinned items stay.": "សារចាស់ៗត្រូវបានលុបដោយខ្លួនឯង ទាំងនៅទីនេះ និងក្នុងពពក។ ការចងចាំរបស់ភ្នាក់ងារ កិច្ចការ និងធាតុដែលបានខ្ទាស់ នៅដដែល។",
+ "Keep chat history for {0}? Messages older than that are deleted now and from then on, here and in the cloud. Agent memory, tasks and pinned items stay.": "រក្សាប្រវត្តិជជែករយៈពេល {0}? សារដែលចាស់ជាងនេះនឹងត្រូវលុបឥឡូវ និងតទៅទៀត ទាំងនៅទីនេះ និងក្នុងពពក។ ការចងចាំរបស់ភ្នាក់ងារ កិច្ចការ និងធាតុដែលបានខ្ទាស់ នៅដដែល។",
+ "Saved. 1 old message deleted.": "បានរក្សាទុក។ សារចាស់ ១ ត្រូវបានលុប។",
+ "Saved. {0} old messages deleted.": "បានរក្សាទុក។ សារចាស់ {0} ត្រូវបានលុប។"
 }

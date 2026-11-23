@@ -1,6 +1,7 @@
 import { askConfirm } from './confirm.js';
 import { t, locale } from './i18n.js';
 import { skeletonHtml } from './chat-skeleton.js';
+import { pickerHtml, setPickActions } from '/chat-pick.js';
 // Settings › Storage: what Rex Desk keeps and how much room it takes, here and in the cloud; one-click clean-ups; and a
 // file browser like Explorer or Finder (folders on the left, files on the right) to look, preview, show in folder and delete.
 
@@ -26,7 +27,7 @@ const ICON = {
 
 // The server answers at once with its last count (or none yet) and counts again behind it; while it counts, the page
 // asks again every few seconds and redraws (onUpdate) when the new numbers are in.
-let countTimer = 0;
+let countTimer = 0, historyRedraw = null;
 export async function loadStorage(ctx, state, { keepPlace = true, onUpdate } = {}) {
   const box = state.storage || (state.storage = { place: '', folder: '', sort: 'size', selected: new Set(), query: '' });
   try {
@@ -35,6 +36,7 @@ export async function loadStorage(ctx, state, { keepPlace = true, onUpdate } = {
     await listFolder(ctx, state);
   } catch (error) { box.error = error.message; }
   if (onUpdate) box.onUpdate = onUpdate;
+  historyRedraw = () => box.onUpdate?.();
   waitForCount(ctx, state);
   // The cloud side: the account's database and file space, from its plan. It can take a few seconds, so the page shows
   // first and the cloud rows fill in (grey rows until then).
@@ -109,10 +111,30 @@ function browserHtml(ctx, box) {
     </div></div></section>`;
 }
 
+// Keep chat history: how long messages stay. Older ones are deleted on their own, in the cloud copy too; memory, tasks and pins stay.
+const HISTORY = () => [{ value: '0', label: t('Forever') }, { value: '365', label: t('1 year') }, { value: '180', label: t('6 months') }, { value: '90', label: t('3 months') }, { value: '30', label: t('1 month') }];
+function historyHtml(ctx) {
+  const value = String(Number(ctx.ui.snap?.config?.keepHistory) || 0);
+  return `<section class="sg-card sg-keep" aria-labelledby="sg-keep"><div class="sg-head"><h3 id="sg-keep">${t`Keep chat history`}</h3>${pickerHtml(ctx, { id: 'sg-history', label: t('Keep chat history'), value, items: HISTORY(), action: 'sg-history', compact: true })}</div>
+    <p class="muted small">${value === '0' ? t('Messages are kept until you delete them.') : t('Older messages are deleted on their own, here and in the cloud. Agent memory, tasks and pinned items stay.')}</p></section>`;
+}
+setPickActions({ 'sg-history': async (value, ctx) => {
+  const days = Number(value) || 0, now = Number(ctx.ui.snap?.config?.keepHistory) || 0;
+  if (days === now) return;
+  const label = HISTORY().find(item => item.value === String(days))?.label || '';
+  if (days && (!now || days < now) && !await askConfirm(t`Keep chat history for ${label}? Messages older than that are deleted now and from then on, here and in the cloud. Agent memory, tasks and pinned items stay.`)) return;
+  try {
+    const result = await ctx.api('/storage/history', { method: 'PUT', data: { days } });
+    ctx.ui.snap.config = { ...ctx.ui.snap.config, keepHistory: result.keepHistory };
+    ctx.toast(result.removed ? (result.removed === 1 ? t('Saved. 1 old message deleted.') : t`Saved. ${result.removed} old messages deleted.`) : t('Saved.'));
+    historyRedraw?.(); void ctx.refresh?.();
+  } catch (error) { ctx.toast(error.message, true); }
+} });
+
 export function storageHtml(ctx, state) {
   const box = state.storage;
-  if (!box?.data) return `<h2>${t`Storage`}</h2><p class="muted">${box?.error ? ctx.esc(box.error) : t('Counting what Rex Desk keeps…')}</p>`;
-  return `<h2 data-sg-page>${t`Storage`}</h2><p class="muted">${t`Only Rex Desk's own data is here. Your project folders and notes are never touched.`}</p>${usageHtml(ctx, box)}${cleanHtml(ctx, box)}${browserHtml(ctx, box)}`;
+  if (!box?.data) return `<h2>${t`Storage`}</h2>${historyHtml(ctx)}<p class="muted">${box?.error ? ctx.esc(box.error) : t('Counting what Rex Desk keeps…')}</p>`;
+  return `<h2 data-sg-page>${t`Storage`}</h2><p class="muted">${t`Only Rex Desk's own data is here. Your project folders and notes are never touched.`}</p>${historyHtml(ctx)}${usageHtml(ctx, box)}${cleanHtml(ctx, box)}${browserHtml(ctx, box)}`;
 }
 
 let searchTimer = 0;

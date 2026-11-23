@@ -26,6 +26,8 @@ const DATA_PLACES = [
   ['handoffs', 'Chat handoffs', 'handoffs'],
   ['runtime', 'Agent copies of the app', 'runtime'],
 ];
+// How long chat history can be kept, in days: 0 is forever, then a year, six months, three months and one month.
+export const HISTORY_DAYS = [0, 365, 180, 90, 30];
 // A count this recent is shown as it is; an older one is still shown at once and counted again behind it.
 const FRESH_MS = 30000;
 
@@ -191,6 +193,31 @@ export class Storage {
     else if (id === 'old-copies') { for (const item of await this.run('oldCopies')) { try { freed += this.remove([item]).freed; } catch { /* an agent still runs from it */ } } }
     this.forget();
     return { id, before, after: Math.max(0, before - freed), freed };
+  }
+  // ---------- keep chat history ----------
+  // How long chat messages are kept (Settings > Storage): 0 is forever. Older messages are deleted on their own, here and in
+  // the cloud copy. Only messages go: agents' memory and lessons, tasks, pins and files are records or files and stay.
+  historyDays() { const days = Number(this.store.config().keepHistory) || 0; return HISTORY_DAYS.includes(days) ? days : 0; }
+  setHistory(days) {
+    const value = Number(days) || 0; if (!HISTORY_DAYS.includes(value)) throw new Error('Pick how long to keep chat history.');
+    this.store.saveConfig({ ...this.store.config(), keepHistory: value });
+    return { keepHistory: value, ...this.dropOldHistory() };
+  }
+  // Called by the server's timer; deletes at most every 6 hours, so a big desk is not scanned every minute.
+  historyTick(now = Date.now()) {
+    if (!this.historyDays() || now - (this.historyAt || 0) < 6 * 3600000) return null;
+    this.historyAt = now; return this.dropOldHistory(now);
+  }
+  dropOldHistory(now = Date.now()) {
+    const days = this.historyDays(); if (!days) return { removed: 0 };
+    const before = new Date(now - days * scan.DAY).toISOString(), cloud = this.store.cloud;
+    let removed = 0;
+    this.store.transaction(() => {
+      removed = Number(this.store.db.prepare('DELETE FROM events WHERE created_at < ?').run(before).changes) || 0;
+      if (cloud?.enabled) cloud.enqueue('DELETE FROM rex_events WHERE workspace=? AND created_at < ?', [cloud.workspace, before]);
+    });
+    if (removed) { cloud?.schedule?.(); this.forget(); }
+    return { removed, before };
   }
   dropRawOutput(now = Date.now()) {
     const before = new Date(now - 30 * scan.DAY).toISOString(), cloud = this.store.cloud;

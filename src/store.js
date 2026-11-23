@@ -490,7 +490,7 @@ export class Store extends EventEmitter {
       concurrency: input.concurrency, branchPrefix: String(input.branchPrefix || 'rex-desk').replace(/^\/+|\/+$/g, ''),
       syncMinutes: input.syncMinutes, reportToOrbit: sources.some(source => source.sendReport && source.enabled !== false), autoPrLowRisk: Boolean(input.autoPrLowRisk), saver: input.saver !== false, autoFree: input.autoFree !== false, models: { claude: modelName('claude', input.models?.claude), codex: modelName('codex', input.models?.codex), gemini: modelName('gemini', input.models?.gemini), openrouter: modelName('openrouter', input.models?.openrouter) }, sources, repositories,
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex'), gemini: agentProfile(input.agentProfiles?.gemini, 'Gemini') },
-      tourDismissed: Boolean(input.tourDismissed), execution: 'headless', testAccounts: accounts,
+      tourDismissed: Boolean(input.tourDismissed), keepHistory: [0, 365, 180, 90, 30].includes(Number(input.keepHistory)) ? Number(input.keepHistory) : 0, execution: 'headless', testAccounts: accounts,
       // The permission mode a new agent or chat starts in.
       defaultMode: ['bypassPermissions', 'auto', 'acceptEdits', 'manual', 'plan'].includes(input.defaultMode) ? input.defaultMode : 'bypassPermissions',
       // How full a chat's context may get before it hands over to a fresh session by itself (false: never).

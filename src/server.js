@@ -1079,6 +1079,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/storage/file' && request.method === 'GET') return serveFile(request, response, desk.storage.file(url.searchParams.get('place') || '', url.searchParams.get('path') || ''), { sandbox: true });
       if (url.pathname === '/api/storage/reveal' && request.method === 'POST') { const input = await body(request); return json(response, 200, desk.storage.reveal(String(input.place || ''), String(input.path || ''))); }
       if (url.pathname === '/api/storage/delete' && request.method === 'POST') return json(response, 200, desk.storage.remove((await body(request)).items || []));
+      if (url.pathname === '/api/storage/history' && request.method === 'PUT') { const result = desk.storage.setHistory((await body(request)).days); notify(); return json(response, 200, result); }
       if (url.pathname === '/api/storage/clean' && request.method === 'POST') return json(response, 200, await desk.storage.clean(String((await body(request)).id || '')));
       // Pins: a file, picture or link pinned in a chat, for its Pinned tab.
       if (url.pathname === '/api/pins' && request.method === 'POST') return json(response, 200, desk.pins.add(await body(request), { by: 'you' }));
@@ -1419,6 +1420,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     void desk.rooms.awayTick().catch(error => store.event('', 'away-error', { message: error.message }, true));
     void desk.loopTick().catch(error => store.event('', 'loop-error', { message: error.message }, true));
     void desk.resumeTick().catch(error => store.event('', 'resume-error', { message: error.message }, true));
+    try { desk.storage.historyTick(); } catch (error) { store.event('', 'history-clean-error', { message: error.message }, true); }
     void desk.schedules.tick().catch(error => store.event('', 'schedule-message-error', { message: error.message }, true));
     if (++ticks % 8 === 0) void desk.findPullRequests();
     if (ticks % 4 === 0) remoteOpen(); // Tailscale may start after Rex Desk
