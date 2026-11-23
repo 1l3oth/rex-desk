@@ -406,3 +406,59 @@ test('a late voice list answer from a closed Settings window cannot bring back t
     assert.equal(await page.locator('.settings-pop [data-st-tts="engine"]').inputValue(), 'fish', 'the tab shows the saved engine');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// Settings reopened while a voice save is still out: once the save answers, the new engine shows and is cached, not the older load.
+test('a voice save still out when Settings is reopened wins over the reopened window load', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await openJev(page); await page.waitForTimeout(1500);
+    // The save is held before it reaches the server, so the reopened window loads the old engine.
+    let release = () => {}, held = false;
+    const gate = new Promise(done => { release = done; });
+    await page.route('**/api/speak/engine', async route => { if (route.request().method() !== 'POST') return route.continue(); held = true; await gate; await route.continue(); });
+    await pickEngine(page, 'fish');
+    for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(50);
+    assert.ok(held, 'test setup: the voice save is out');
+    await page.evaluate(() => document.querySelector('.settings-pop [data-st-close]').click());
+    await openJev(page); await page.waitForTimeout(1500);
+    release();
+    const cachedEngine = () => page.evaluate(() => JSON.parse(localStorage.getItem('rex-desk-speak-cache') || '{}').tts?.engine);
+    for (let i = 0; i < 50 && await cachedEngine() !== 'fish'; i++) await page.waitForTimeout(100);
+    await page.waitForTimeout(500);
+    assert.equal(await cachedEngine(), 'fish', 'the cache holds the saved engine');
+    assert.equal(await page.locator('.settings-pop [data-st-tts="engine"]').inputValue(), 'fish', 'the reopened window shows the saved engine');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});
+
+// Voice lists cached by an earlier build (inside the engine cache) survive the first engine answer of this build.
+test('voice lists cached by an earlier build are kept after an engine refresh', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await openJev(page); await page.waitForTimeout(1500);
+    await page.evaluate(() => document.querySelector('.settings-pop [data-st-close]').click());
+    // Put the cache back in the earlier shape: lists inside the engine cache, no list cache of its own.
+    await page.evaluate(() => {
+      const engine = JSON.parse(localStorage.getItem('rex-desk-speak-cache'));
+      localStorage.setItem('rex-desk-speak-cache', JSON.stringify({ tts: engine.tts, neural: { en: [['old-build-voice', 'Old build voice']], ko: [], km: [] } }));
+      localStorage.removeItem('rex-desk-voice-list-cache');
+    });
+    // The lists never answer from now on; the engine does, and rewrites its cache.
+    await page.route('**/api/speak/voices', route => route.abort());
+    await openJev(page); await page.waitForTimeout(1500);
+    await page.evaluate(() => document.querySelector('.settings-pop [data-st-close]').click());
+    await openJev(page);
+    assert.equal(await page.locator('.settings-pop [data-st-voice="en"] option[value="old-build-voice"]').count(), 1, 'the old cached voice list still shows');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});

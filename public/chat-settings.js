@@ -59,8 +59,9 @@ function planCard(database, state) {
   <div class="pl-card"><div class="pl-head"><b>${t`Billing history`}</b></div>
     ${(billing.invoices || []).length ? `<ul class="pl-bills">${billing.invoices.map(item => `<li><span>${new Date(item.date).toLocaleDateString(document.documentElement.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' })}</span><span>${'$' + Number(item.amount).toFixed(2)}</span><span class="pl-badge pl-${item.status === 'paid' ? 'good' : item.status === 'open' ? 'warn' : 'bad'}">${item.status === 'paid' ? t('Paid') : item.status === 'open' ? t('Due') : t('Not paid')}</span>${item.url ? `<a href="${item.url.replace(/"/g, '')}" target="_blank" rel="noopener">${t`Receipt`}</a>` : '<span></span>'}</li>`).join('')}</ul>` : `<p class="pl-sub">${t`No payments yet.`}</p>`}</div>`;
 }
-// Voice engine answers are numbered across every Settings window: a reopened window ignores any answer from one opened before it.
-let ttsSeq = 0;
+// Voice engine answers across every Settings window. A save always wins: a load counts only when no save started or was still out while it ran,
+// and only the newest save (or newest load) counts. show puts a kept answer on the Settings window that is open now.
+const ttsRun = { saves: 0, open: 0, loads: 0, show: null };
 const SECTIONS = [
   ['general', t('General'), t('Name, language, look')],
   ['notify', t('Notifications'), t('Pop-ups, sound, quiet hours')],
@@ -590,11 +591,24 @@ export function openSettings(ctx, section = 'general') {
   // The voices on this computer, for the reading voice choices.
   // Two caches with one writer each: the engine settings come only from a voice save or the newest engine answer, the voice lists only from the list answer.
   const SPEAK_CACHE = 'rex-desk-speak-cache', VOICE_LIST_CACHE = 'rex-desk-voice-list-cache';
-  try { const cached = JSON.parse(localStorage.getItem(SPEAK_CACHE) || 'null'), lists = JSON.parse(localStorage.getItem(VOICE_LIST_CACHE) || 'null'); if (cached?.tts) state.extra.tts ||= cached.tts; state.extra.neural ||= lists || cached?.neural; } catch { /* private window */ }
+  try {
+    const cached = JSON.parse(localStorage.getItem(SPEAK_CACHE) || 'null');
+    let lists = JSON.parse(localStorage.getItem(VOICE_LIST_CACHE) || 'null');
+    // Earlier builds kept the voice lists inside the engine cache: move them to their own cache once, before an engine answer rewrites that one.
+    if (!lists && cached?.neural) { lists = cached.neural; localStorage.setItem(VOICE_LIST_CACHE, JSON.stringify(lists)); }
+    if (cached?.tts) state.extra.tts ||= cached.tts; state.extra.neural ||= lists;
+  } catch { /* private window */ }
   const keepSpeak = status => { try { localStorage.setItem(SPEAK_CACHE, JSON.stringify({ tts: status })); } catch { /* private window */ } };
   const keepVoiceLists = neural => { try { localStorage.setItem(VOICE_LIST_CACHE, JSON.stringify(neural)); } catch { /* private window */ } };
-  // Only the newest voice-engine answer counts: a slow first load must not overwrite a save made after it, on screen or in the cache.
-  const takeTts = async request => { const mine = ++ttsSeq, status = await request(); if (mine !== ttsSeq) return null; state.extra.tts = status; keepSpeak(status); setSpeechEngine(status); return status; };
+  const takeTts = async (request, save = false) => {
+    const mine = save ? ++ttsRun.saves : ++ttsRun.loads, savesAtStart = ttsRun.saves;
+    if (save) ttsRun.open++;
+    let status;
+    try { status = await request(); } finally { if (save) ttsRun.open--; }
+    if (save ? mine !== ttsRun.saves : mine !== ttsRun.loads || savesAtStart !== ttsRun.saves || ttsRun.open) return null;
+    keepSpeak(status); setSpeechEngine(status); ttsRun.show?.(status); return status;
+  };
+  ttsRun.show = status => { state.extra.tts = status; jevDraw(); };
   // A background answer redraws the Jev tab only when no edit is waiting to save; otherwise the redraw waits until that save has read the fields.
   const jevDraw = () => { if (!has('jev') || !document.body.contains(back)) return; if (pendingSave) { jevLater = true; return; } draw(); };
   if (has('jev') && !ui.accounts) void api('/agents').then(list => { ui.accounts ||= list; jevDraw(); }).catch(() => {});
@@ -605,7 +619,7 @@ export function openSettings(ctx, section = 'general') {
   // Spoken replies: each control saves at once.
   back.addEventListener('change', async event => {
     const name = event.target.dataset?.stTts; if (!name) return;
-    try { await takeTts(() => api('/speak/engine', { method: 'POST', data: { [name]: event.target.value } })); toast(t('Saved.')); }
+    try { await takeTts(() => api('/speak/engine', { method: 'POST', data: { [name]: event.target.value } }), true); toast(t('Saved.')); }
     catch (error) { toast(error.message, true); }
     jevDraw();
   });
@@ -614,8 +628,8 @@ export function openSettings(ctx, section = 'general') {
     if (!save && !remove && !test) return;
     event.preventDefault();
     try {
-      if (save) { const key = back.querySelector('[data-st-fish-key]')?.value || ''; await takeTts(() => api('/speak/fish-key', { method: 'POST', data: { key } })); toast(t('Fish Audio key saved.')); }
-      if (remove) { await takeTts(() => api('/speak/fish-key', { method: 'POST', data: { key: '' } })); toast(t('Fish Audio key removed.')); }
+      if (save) { const key = back.querySelector('[data-st-fish-key]')?.value || ''; await takeTts(() => api('/speak/fish-key', { method: 'POST', data: { key } }), true); toast(t('Fish Audio key saved.')); }
+      if (remove) { await takeTts(() => api('/speak/fish-key', { method: 'POST', data: { key: '' } }), true); toast(t('Fish Audio key removed.')); }
       if (test) {
         state.extra.ttsTesting = true; jevDraw();
         const response = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text: 'Hi, this is how I will sound when we talk in Voice mode.', lang: 'en' }) });
