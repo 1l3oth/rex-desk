@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
@@ -78,6 +79,8 @@ export function fileChange(name, input = {}) {
   const hidden = SECRET_FILE.test(file);
   return { file, created: name === 'Write', added, removed, diff: hidden ? [] : diff.slice(0, 80).map(diffLine), more: hidden ? 0 : Math.max(0, diff.length - 80), hidden };
 }
+// sha256 of a file's bytes, or '' when it cannot be read.
+export const fileHash = file => { try { return createHash('sha256').update(readFileSync(file)).digest('hex'); } catch { return ''; } };
 const isShell = name => name === 'Bash' || name === 'PowerShell';
 const sessionId = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '')) ? String(value) : '';
 
@@ -258,7 +261,8 @@ export class ClaudeRunner {
         for (const block of content || []) if (block.type === 'tool_use') {
           if (isShell(block.name)) (this.terminals ||= new Set()).add(block.id);
           if (/^(Task|Agent)$/.test(block.name)) { (this.subagents ||= new Set()).add(block.id); this.event('agent-tool', { id: block.id, tool: 'Agent', ...(parent ? { parent } : {}), input: { description: String(block.input?.description || '').slice(0, 200), type: String(block.input?.subagent_type || 'general-purpose'), model: String(block.input?.model || ''), prompt: String(block.input?.prompt || '').slice(0, 1500) } }); continue; }
-          this.event('agent-tool', { id: block.id, tool: String(block.name).replace(/^mcp__[a-z0-9_]+?__/i, ''), ...(parent ? { parent } : {}), input: toolInput(block.input), ...(fileChange(block.name, block.input) ? { change: fileChange(block.name, block.input) } : {}) });
+          const change = fileChange(block.name, block.input); if (change) (this.edits ||= new Map()).set(block.id, change.file);
+          this.event('agent-tool', { id: block.id, tool: String(block.name).replace(/^mcp__[a-z0-9_]+?__/i, ''), ...(parent ? { parent } : {}), input: toolInput(block.input), ...(change ? { change } : {}) });
         }
         this.event('agent-operation', { type: 'assistant', content });
       }
@@ -275,6 +279,8 @@ export class ClaudeRunner {
           // A step Claude Code cancelled by itself: not shown as a failure, and the agent is told at once to run it again.
           if (block.is_error && cancelledByItself(block.content)) { this.noteCancelled(); continue; }
           this.cancelStreak = 0;
+          // A file edit that worked: the file's hash as the agent left it, so Follow me can tell later whether it is still only theirs.
+          if (this.edits?.has(block.tool_use_id)) { const file = this.edits.get(block.tool_use_id); this.edits.delete(block.tool_use_id); if (!block.is_error) { const sha = fileHash(file); if (sha) this.event('agent-file', { file, sha }); } }
           if (this.terminals?.has(block.tool_use_id)) this.event('agent-tool-result', { id: block.tool_use_id, text: terminalText(block.content), failed: Boolean(block.is_error) });
           else if (block.is_error) this.event('agent-tool', { tool: 'result', failed: true, text: (Array.isArray(block.content) ? block.content.map(part => part.text || '').join(' ') : String(block.content || '')).slice(0, 300) });
         }

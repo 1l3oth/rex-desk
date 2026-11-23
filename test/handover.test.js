@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { git } from '../src/processes.js';
 import { saveWork, pickUp } from '../src/handover.js';
 
+const sha = text => createHash('sha256').update(text).digest('hex');
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 // A shared repository, the clone on the computer the agent leaves (with the agent's own worktree), and the clone it moves to.
 async function setup() {
@@ -56,7 +58,7 @@ test('an agent with no worktree carries only the files it changed itself, and th
   writeFileSync(path.join(home, 'app.txt'), 'changed by someone else\n');
   writeFileSync(path.join(home, 'mine.txt'), 'written by Desky\n'); writeFileSync(path.join(home, 'notes.md'), 'someone else\'s note\n');
   const before = await git(home, ['status', '--porcelain']), head = await git(home, ['rev-parse', 'HEAD']), index = await git(home, ['diff', '--cached', '--name-only']);
-  const saved = await saveWork({ worktree: '', project: home, agentName: 'Desky', to: 'Work', ownFiles: [path.join(home, 'mine.txt')] });
+  const saved = await saveWork({ worktree: '', project: home, agentName: 'Desky', to: 'Work', ownFiles: [{ file: path.join(home, 'mine.txt'), sha: sha('written by Desky\n') }] });
   assert.equal(saved.branch, 'rex-handover/desky'); assert.deepEqual(saved.files, ['mine.txt']); assert.equal(saved.others, 2); assert.ok(saved.bundle.length > 0);
   assert.equal(await git(home, ['status', '--porcelain']), before, 'nobody\'s files changed in the shared folder');
   assert.equal(await git(home, ['rev-parse', 'HEAD']), head); assert.equal(await git(home, ['rev-parse', '--abbrev-ref', 'HEAD']), 'master');
@@ -70,22 +72,22 @@ test('an agent with no worktree carries only the files it changed itself, and th
   assert.equal(readFileSync(path.join(directory, 'app.txt'), 'utf8'), 'one\n', 'someone else\'s change did not travel');
 });
 
-test('a file holding someone else\'s lines (before or after the agent\'s edit) and others\' unpushed commits never travel', async () => {
+test('a file travels only when it is byte for byte what the agent left; anything else, and others\' unpushed commits, stay and are named', async () => {
   const { home } = await setup();
   writeFileSync(path.join(home, 'theirs.txt'), 'their commit\n'); await git(home, ['add', 'theirs.txt']); await git(home, ['commit', '-qm', 'someone else, not pushed']);
   writeFileSync(path.join(home, 'mine.txt'), 'written by Desky\n');
-  // Someone else wrote shared.txt first; Desky edited it last. Both changes are in the file, so it stays whole.
-  writeFileSync(path.join(home, 'shared.txt'), 'someone else\nDesky\n');
+  // Desky left shared.txt as "Desky\n"; someone changed it after, so it no longer matches and stays whole.
+  writeFileSync(path.join(home, 'shared.txt'), 'Desky\nsomeone else\n');
   const saved = await saveWork({ worktree: '', project: home, agentName: 'Desky', ownFiles: [
-    { file: path.join(home, 'mine.txt'), lines: ['+written by Desky'], complete: true },
-    { file: path.join(home, 'shared.txt'), lines: ['+Desky'], complete: true }] });
+    { file: path.join(home, 'mine.txt'), sha: sha('written by Desky\n') }, { file: path.join(home, 'shared.txt'), sha: sha('Desky\n') }] });
   assert.deepEqual(saved.files, ['mine.txt']); assert.deepEqual(saved.mixed, ['shared.txt'], 'the move names the file it left behind');
   assert.equal(saved.others, 2, 'shared.txt and the unpushed theirs.txt stay');
   assert.deepEqual((await git(home, ['diff', '--name-only', 'origin/master', saved.head])).split('\n'), ['mine.txt'], 'the commit sits on origin/master, without the unpushed commit');
+  assert.equal(await git(home, ['show', `${saved.head}:mine.txt`]), 'written by Desky', 'the committed bytes are the ones checked');
   assert.equal(saved.base, await git(home, ['rev-parse', 'origin/master']));
-  // A file whose diff was cut off (or is a secret file) cannot be shown to be Desky's alone, so it stays too.
-  const cut = await saveWork({ worktree: '', project: home, agentName: 'Desky', ownFiles: [{ file: path.join(home, 'mine.txt'), lines: ['+written by Desky'], complete: false }] });
-  assert.equal(cut.nothing, true); assert.deepEqual(cut.mixed, ['mine.txt']);
+  // No recorded hash (an edit whose result never came back): it stays too.
+  const unknown = await saveWork({ worktree: '', project: home, agentName: 'Desky', ownFiles: [{ file: path.join(home, 'mine.txt'), sha: '' }] });
+  assert.equal(unknown.nothing, true); assert.deepEqual(unknown.mixed, ['mine.txt']);
 });
 
 test('work is never committed on master or a release branch: the move stops with a reason and nothing is committed', async () => {

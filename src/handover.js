@@ -4,12 +4,11 @@
 // the agent carries on there. Each step is an event in the agent's chat ("move-step": saved, committed, moved, picked-up; or
 // failed); when a step fails the agent stays where it is.
 import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import os from 'node:os';
 import { workFolder } from './work-folder.js';
 import path from 'node:path';
 import { git as runGit, slug } from './processes.js';
-import { diffLine } from './runners.js';
 
 // Branches work is never committed on.
 const PROTECTED = /^(master|main|develop|trunk|release\/.+|global\/.+)$/i;
@@ -48,37 +47,34 @@ async function saveShared({ project, agentName, to, ownFiles }, git) {
   base ||= 'HEAD';
   const changed = [...new Set([...await list(['diff', '--name-only', '--no-renames', '-z', base]), ...await list(['ls-files', '--others', '--exclude-standard', '-z'])])];
   if (!changed.length) return { nothing: true };
-  // ownFiles: names, or { file, lines, complete } with every line the agent's own edits added (+) or removed (-). A file it
-  // edited travels only when each changed line in it (against the main line) is one of those: a line someone else added or
-  // removed, before or after the agent, means the file holds their work too, so it stays here and the move says so.
+  // ownFiles: { file, sha } with the sha256 of the file right after the agent's last successful edit of it. A file travels
+  // only when it is, byte for byte, what the agent left: it is read once, that same read is hashed and checked, and those
+  // same bytes are what is committed, so nothing written later can slip in. Any other file it edited stays and is named.
   const key = file => path.resolve(project, file).toLowerCase();
-  const mine = new Map(ownFiles.map(item => typeof item === 'string' ? { file: item } : item).map(item => [key(String(item.file)), item]));
-  const onlyMine = async file => {
-    const own = mine.get(key(file)); if (!own.lines) return true;
-    if (!own.complete) return false;
-    const tracked = Boolean(await git(project, ['ls-files', '--', file]).catch(() => ''));
-    let changedLines;
-    if (tracked) changedLines = (await git(project, ['diff', '-U0', '--no-color', '--no-ext-diff', base, '--', file]).catch(() => '')).split('\n').filter(line => /^[+-]/.test(line) && !/^(\+\+\+|---) /.test(line));
-    else { try { changedLines = readFileSync(path.resolve(project, file), 'utf8').replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n').map(line => `+${line}`); } catch { return false; } }
-    // No readable line changes (a binary file, a mode change) cannot be checked, so it stays.
-    if (!changedLines.length) return false;
-    const owned = new Set(own.lines);
-    return changedLines.every(line => owned.has(diffLine(line.replace(/\r$/, ''))));
-  };
-  const files = [], mixed = [];
-  for (const file of changed) if (mine.has(key(file))) (await onlyMine(file) ? files : mixed).push(file);
-  const others = changed.length - files.length;
-  if (!files.length) return { nothing: true, others, ...(mixed.length ? { mixed } : {}) };
+  const mine = new Map(ownFiles.filter(item => item && typeof item === 'object' && item.file).map(item => [key(String(item.file)), String(item.sha || '')]));
   const branch = `rex-handover/${slug(agentName, 40)}`, index = path.join(os.tmpdir(), `rex-handover-${randomUUID()}.index`), env = { GIT_INDEX_FILE: index };
+  const temp = path.join(os.tmpdir(), `rex-handover-${randomUUID()}.blob`);
   try {
     await git(project, ['read-tree', base], { env });
-    await git(project, ['add', '-A', '--', ...files], { env });
+    const files = [], mixed = [];
+    for (const file of changed) {
+      if (!mine.has(key(file))) continue;
+      let bytes = null; try { bytes = readFileSync(path.resolve(project, file)); } catch { /* deleted: never the agent's own edit */ }
+      if (!bytes || !mine.get(key(file)) || createHash('sha256').update(bytes).digest('hex') !== mine.get(key(file))) { mixed.push(file); continue; }
+      writeFileSync(temp, bytes);
+      const blob = await git(project, ['hash-object', '-w', `--path=${file}`, temp]);
+      const mode = (await git(project, ['ls-tree', base, '--', file]).catch(() => '')).split(' ')[0] === '100755' ? '100755' : '100644';
+      await git(project, ['update-index', '--add', '--cacheinfo', `${mode},${blob},${file}`], { env });
+      files.push(file);
+    }
+    const others = changed.length - files.length, named = mixed.length ? { mixed } : {};
+    if (!files.length) return { nothing: true, others, ...named };
     const tree = await git(project, ['write-tree'], { env });
     const who = await git(project, ['config', 'user.email']).catch(() => '') ? {} : { GIT_AUTHOR_NAME: 'Rex Desk', GIT_AUTHOR_EMAIL: 'desk@rexdesk.invalid', GIT_COMMITTER_NAME: 'Rex Desk', GIT_COMMITTER_EMAIL: 'desk@rexdesk.invalid' };
     const committed = await git(project, ['commit-tree', tree, '-p', base, '-m', `WIP: ${agentName} moves to ${to} (saved by Rex Desk, its own ${files.length === 1 ? 'file' : 'files'} only)`], { env: who });
     await git(project, ['update-ref', `refs/heads/${branch}`, committed]);
-    return { ...await pack(project, branch, agentName, git), committed, files, others, ...(mixed.length ? { mixed } : {}) };
-  } finally { rmSync(index, { force: true }); }
+    return { ...await pack(project, branch, agentName, git), committed, files, others, ...named };
+  } finally { rmSync(index, { force: true }); rmSync(temp, { force: true }); }
 }
 
 // The branch packed for the other computer: only the commits since it left its remote's main line.
@@ -144,20 +140,18 @@ export class Handover {
     }
     throw new Error(`${peers.deviceName(agent.node)} did not answer in time, so ${agent.name}'s work was not saved and it stayed there.`);
   }
-  // The files this agent's own chats (personal and room sessions) edited or wrote here, from their tool events.
+  // The files this agent's own chats (personal and room sessions) edited or wrote here, each with the hash the file had right
+  // after its last successful edit ("agent-file" events, written when the edit's result came back).
   ownFiles(agent) {
     const files = new Map();
     for (const runId of [agent.runId, ...Object.values(agent.roomRuns || {})].filter(Boolean)) {
       for (const event of this.store.events(runId, { limit: 100000 })) {
-        const change = event.kind === 'agent-tool' ? event.change : null; if (!change?.file) continue;
-        const file = String(change.file), own = files.get(file) || { file, lines: [], complete: true };
-        // A secret file or a cut-off diff leaves lines unknown, so that file cannot be shown to be the agent's alone.
-        if (change.hidden || change.more || !Array.isArray(change.diff)) own.complete = false;
-        else own.lines.push(...change.diff.filter(line => /^[+-]/.test(line)));
-        files.set(file, own);
+        if (event.kind !== 'agent-file' || !event.file) continue;
+        const at = String(event.createdAt || ''), was = files.get(String(event.file));
+        if (!was || at >= was.at) files.set(String(event.file), { file: String(event.file), sha: String(event.sha || ''), at });
       }
     }
-    return [...files.values()];
+    return [...files.values()].map(({ file, sha }) => ({ file, sha }));
   }
   pickUp(input) { return pickUp(input); }
   directoryFor(agent, branch, project = '') { return path.join(workFolder(project, this.store.directory, this.store.config?.().repositories || []), 'worktrees', `${slug(agent.slug || agent.name, 40)}-${slug(branch, 60)}`); }
