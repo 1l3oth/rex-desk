@@ -328,3 +328,56 @@ test('path 7, turned off or deleted while its turn is going: off stays off, dele
     if (change === 'deleted') assert.equal(t.store.list('delivery').length, 0, 'its ticket is gone');
   }
 });
+
+test('path 8, queued then handed to Codex mid-turn as a steer: counts only once Codex accepts it; a refused steer keeps it due', async () => {
+  for (const steer of ['accepted', 'refused']) {
+    let notify, finish, starts = 0;
+    const clientFactory = options => ({ open: async () => {}, close() {}, request: async (method, params) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } };
+      if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: 'thread-1' } };
+      if (method === 'turn/start') {
+        const id = `u${++starts}`;
+        if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }
+        else setTimeout(() => { options.onNotification('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Done: pinged.' } }); options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }, 5);
+        return { turn: { id } };
+      }
+      if (method === 'turn/steer') { if (steer === 'refused') throw new Error('turn/steer refused: no active turn'); return {}; }
+      return {};
+    } });
+    const t = deskWith(options => new CodexRunner({ ...options, clientFactory }), 'codex');
+    t.store.delete('schedmsg', t.once.id);
+    const once = t.desk.schedules.create(t.agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
+    void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' }); await new Promise(done => setTimeout(done, 100));
+    assert.equal(t.desk.live.size, 1, `${steer}: Codex is mid-turn`);
+    await t.desk.schedules.tick(at(0, '09:00'));
+    assert.ok(t.runOf().queued.some(text => text.includes('Ping')), 'queued for Codex');
+    // Codex finishes a step: Rex Desk hands the queue over as a steer.
+    notify('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Reading the logs.' } });
+    await new Promise(done => setTimeout(done, 50));
+    const ticket = () => t.store.list('delivery')[0];
+    if (steer === 'accepted') {
+      assert.equal(ticket()?.state, 'taken', 'Codex accepted the steer');
+      finish(); await t.settled(); await t.desk.schedules.tick(at(0, '09:05'));
+      assert.equal(t.store.get('schedmsg', once.id).on, false, 'sent'); assert.equal(starts, 1, 'no second turn');
+      continue;
+    }
+    assert.notEqual(ticket()?.state, 'taken', 'a refused steer is not taken');
+    assert.ok(t.runOf().queued.some(text => text.includes('Ping')), 'back in the queue');
+    await t.desk.schedules.tick(at(0, '09:02'));
+    assert.equal(t.store.get('schedmsg', once.id).on, true, 'still due');
+    finish(); await t.settled(); await t.desk.schedules.tick(at(0, '09:05'));
+    assert.equal(starts, 2, 'the next turn took it'); assert.equal(t.store.get('schedmsg', once.id).on, false, 'sent once that turn took it');
+  }
+});
+
+test('path 9, Rex Desk restarts while a scheduled message is in flight in a turn nobody follows: it goes back to due and is sent again', async () => {
+  const t = deskWith((options, launch) => ({ async start() { if (launch === 1) await new Promise(() => {}); }, interrupt() {}, close() {} }));
+  await t.desk.schedules.tick(at(0, '09:00')); await new Promise(done => setTimeout(done, 80));
+  assert.equal(t.store.list('delivery')[0]?.state, 'turn', 'in flight, not taken');
+  // The restart: the turn's process is gone and the run is marked interrupted, as the store does on load.
+  t.desk.live.clear(); t.store.put('run', t.runOf().id, { ...t.runOf(), state: 'interrupted', endedAt: new Date().toISOString(), error: 'Server restarted. Resume this run to continue.' });
+  t.desk.reattachHosts();
+  assert.equal(t.store.list('delivery')[0]?.state, 'lost', 'never confirmed, so back to due');
+  await t.desk.schedules.tick(at(0, '09:05')); await t.settled(); await t.desk.schedules.tick(at(0, '09:10'));
+  assert.equal(t.launches.length, 2, 'sent again'); assert.equal(t.item().on, false, 'sent once the new turn took it');
+});

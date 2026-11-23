@@ -204,6 +204,8 @@ export class ClaudeRunner {
         PostToolUse: [{ hooks: [async () => {
         // New messages for this agent arrived while it worked: hand them over now, between steps.
         const news = this.inbox?.() || '', note = this.takeCancelNote();
+        // Handed over between steps: taken once the model answers after it (the next real output says prompt-accepted again).
+        if (news) this.acceptedSaid = false;
         const text = [note, news ? `New messages arrived while you were working. Read them now; they may change what you are doing. Answer them in your reply.\n\n${news}` : ''].filter(Boolean).join('\n\n');
         return text ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: text } } : {};
       }] }] },
@@ -335,7 +337,7 @@ export class ClaudeRunner {
     if (String(first || '').trim()) yield user(first);
     while (!this.signal?.aborted && !this.ended) {
       const news = this.inbox?.() || '';
-      if (news) yield user(news);
+      if (news) { this.acceptedSaid = false; yield user(news); }
       await new Promise(resolve => setTimeout(resolve, 600));
     }
   }

@@ -151,7 +151,10 @@ export class CodexRunner {
       if (item.type === 'commandExecution') this.event('agent-tool-result', { id: item.id, text: String(item.aggregatedOutput || '').slice(-6000), failed: item.status === 'failed' || Boolean(item.exitCode) });
       if (item.type === 'mcpToolCall' && item.status === 'failed') this.event('agent-tool-result', { id: item.id, text: item.error?.message || 'MCP tool failed.', failed: true });
       const news = this.inbox?.();
-      if (news && this.turnId) void this.client.request('turn/steer', { threadId: this.threadId, expectedTurnId: this.turnId, input: [{ type: 'text', text: news }] }).catch(error => this.event('error', { message: error.message }));
+      // Taken only once Codex accepts the steer; a refused one goes back to the queue for the next turn.
+      if (news && this.turnId) void this.client.request('turn/steer', { threadId: this.threadId, expectedTurnId: this.turnId, input: [{ type: 'text', text: news }] })
+        .then(() => this.event('prompt-accepted', { steer: true }), error => { this.requeue?.(news); this.event('error', { message: error.message }); });
+      else if (news) this.requeue?.(news);
     }
     if (method === 'account/rateLimits/updated' && params?.rateLimits) this.event('rate-limit', { codex: params.rateLimits });
     if (method === 'thread/tokenUsage/updated') {

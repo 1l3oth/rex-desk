@@ -53,7 +53,8 @@ export class LocalRunner {
       for (let round = 0; round < ROUNDS; round++) {
         if (signal.aborted) throw new Error('Local AI run interrupted.');
         const answer = await this.chat(messages, tools.list, signal, text => this.event('agent-text-partial', { text }));
-        if (round === 0) this.event('prompt-accepted', {});
+        // The model answered everything it was given so far (the prompt, and messages added between steps).
+        this.event('prompt-accepted', {});
         used.input += answer.inputTokens || 0; used.output += answer.outputTokens || 0;
         if (answer.inputTokens) this.event('context', { used: answer.inputTokens, window: CONTEXT });
         const calls = answer.toolCalls || [];

@@ -499,6 +499,9 @@ export class Desk {
       const controller = new AbortController(); this.live.set(run.id, { controller });
       void this.execute(run.id, controller, { attach: run.host }).catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
     }
+    // A scheduled message that was in flight when Rex Desk stopped, in a turn nobody follows now, was never confirmed taken:
+    // it goes back to due (lost), so the schedule sends it again. One in a turn followed again stays with that turn.
+    for (const item of this.store.list('delivery').filter(entry => entry.state === 'turn' && !this.live.has(entry.runId))) this.setDelivery(item.id, { state: 'lost' });
   }
   authorize(scope, runId, { coordinator = false } = {}) {
     if (!scope) throw new Error('Sign in first.');
@@ -693,12 +696,13 @@ export class Desk {
   async execute(runId, controller, { attach = null } = {}) {
     // handedOn: this turn ended by queueing the next one (another account, the default model). That turn owns the run's
     // browser, tools, questions and room reply now, so this one's clean-up leaves them alone.
-    let run = this.run(runId), token, handedOn = false, launched = false;
-    // Scheduled message tickets this turn carries (see deliveryState). They count as taken only once the prompt was really
-    // accepted: the runner says so (prompt-accepted) or the turn ends cleanly. Any other end loses them, so they are sent again.
+    let run = this.run(runId), token, handedOn = false;
+    // Scheduled message tickets this turn carries (see deliveryState), in flight until the agent really took them: the runner
+    // says so (prompt-accepted, after the turn's prompt or after a message handed over mid-turn, like a Codex steer that was
+    // accepted) or the turn ends cleanly. A hand-over the runner gives back (requeue) waits again; any other end loses them.
     const bound = new Set();
-    const markLaunched = () => { if (launched) return; launched = true; for (const ticket of bound) this.setDelivery(ticket, { state: 'taken' }); bound.clear(); };
-    const bind = (text, whole = false) => { for (const item of this.waitingDeliveries(this.store.get('run', runId), whole ? null : text)) { if (launched) this.setDelivery(item.id, { state: 'taken', runId }); else { bound.add(item.id); this.setDelivery(item.id, { state: 'turn', runId }); } } };
+    const markLaunched = () => { for (const ticket of bound) this.setDelivery(ticket, { state: 'taken' }); bound.clear(); };
+    const bind = (text, whole = false) => { for (const item of this.waitingDeliveries(this.store.get('run', runId), whole ? null : text)) { bound.add(item.id); this.setDelivery(item.id, { state: 'turn', runId }); } };
     // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
     const turnAt = new Date().toISOString();
     try {
@@ -798,7 +802,7 @@ export class Desk {
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' || run.provider === 'openrouter' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => { const text = this.takeInbox(runId); bind(text); return text; },
-        requeue: text => { for (const item of this.store.list('delivery').filter(entry => entry.runId === runId && ['turn', 'taken'].includes(entry.state) && String(text || '').includes(entry.text))) { bound.delete(item.id); this.setDelivery(item.id, { state: 'waiting' }); } this.requeue(runId, text); }, extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
+        requeue: text => { for (const item of this.store.list('delivery').filter(entry => entry.runId === runId && entry.state === 'turn' && String(text || '').includes(entry.text))) { bound.delete(item.id); this.setDelivery(item.id, { state: 'waiting' }); } this.requeue(runId, text); }, extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
           // Only the runner knows when its prompt was really taken (Codex: turn/start accepted; Claude: the model's first real
           // words or step). A session opening, a sign-in error written as a reply, or a result before an error check prove nothing.
           if (kind === 'prompt-accepted') { markLaunched(); return; }
