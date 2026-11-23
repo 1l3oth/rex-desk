@@ -184,3 +184,22 @@ test('a due message turned off or deleted while the one before it is sending is 
   await desk.schedules.tick(at(0, '09:00'));
   assert.equal(sent.length, 1, 'only the first one was sent');
 });
+
+test('a scheduled message counts as sent only once its turn really started: a start that fails leaves it on and due', async () => {
+  const { store, desk, agent } = setup();
+  desk.specialists.status = () => ({ state: 'idle' });
+  const once = desk.schedules.create(agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
+  const run = id => { store.put('run', id, { id, state: 'queued' }); return { id }; };
+  desk.specialistTurn = async () => run('run-a');
+  await desk.schedules.tick(at(0, '09:00'));
+  assert.equal(store.get('schedmsg', once.id).on, true, 'only queued: not sent yet');
+  store.put('run', 'run-a', { ...store.get('run', 'run-a'), state: 'failed', error: 'no account' });
+  let calls = 0; desk.specialistTurn = async () => { calls++; return run('run-b'); };
+  await desk.schedules.tick(at(0, '09:05'));
+  const saved = store.get('schedmsg', once.id);
+  assert.equal(saved.on, true, 'a failed start keeps it on'); assert.match(saved.error || '', /no account/); assert.equal(calls, 1, 'and it is tried again');
+  store.put('run', 'run-b', { ...store.get('run', 'run-b'), state: 'running', turnStartedAt: new Date().toISOString() });
+  await desk.schedules.tick(at(0, '09:10'));
+  assert.equal(store.get('schedmsg', once.id).on, false, 'sent once the turn started'); assert.equal(calls, 1);
+  assert.equal(store.get('schedmsg', once.id).lastAt, at(0, '09:05').toISOString());
+});

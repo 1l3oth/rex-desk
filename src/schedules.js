@@ -53,8 +53,10 @@ export class Schedules {
   // Called by the server's timer. A message that came due while the computer was off is sent once, not once per missed day.
   // It waits while the agent is busy with another turn, and counts as sent only once its turn really started; if that fails it stays due.
   async tick(at = new Date()) {
+    // A send whose turn was queued earlier is settled first: sent once its turn started, due again if the start failed.
+    for (const item of this.list().filter(entry => entry.pending)) this.settle(item);
     // Only the computer the agent works on sends it, so two computers never send the same message twice.
-    for (let item of this.list().filter(entry => entry.on && entry.nextAt && Date.parse(entry.nextAt) <= at.getTime() && (entry.agentId === 'main' || this.desk.peers?.owns?.(entry.agentId) !== false))) {
+    for (let item of this.list().filter(entry => entry.on && !entry.pending && entry.nextAt && Date.parse(entry.nextAt) <= at.getTime() && (entry.agentId === 'main' || this.desk.peers?.owns?.(entry.agentId) !== false))) {
       if (this.sending?.has(item.id)) continue;
       const agent = item.agentId === 'main' ? this.desk.specialists.ensureMain() : this.store.get('specialist', item.agentId);
       if (!agent) { this.store.delete('schedmsg', item.id); continue; }
@@ -65,24 +67,41 @@ export class Schedules {
       // Read again right before sending: the list was read before the messages ahead of this one were sent, and this one
       // may have been turned off, deleted or changed since.
       const fresh = this.store.get('schedmsg', item.id);
-      if (!fresh?.on || !fresh.nextAt || Date.parse(fresh.nextAt) > at.getTime()) continue;
+      if (!fresh?.on || fresh.pending || !fresh.nextAt || Date.parse(fresh.nextAt) > at.getTime()) continue;
       item = fresh;
       (this.sending ||= new Set()).add(item.id);
       try {
-        await this.desk.specialistTurn(item.agentId, { prompt: `Scheduled message from the person (set for ${item.time}):
+        const since = new Date().toISOString();
+        const run = await this.desk.specialistTurn(item.agentId, { prompt: `Scheduled message from the person (set for ${item.time}):
 ${item.text}` });
+        // The turn is only queued here: the message stays due, with the run to watch, until that turn really starts.
         const current = this.store.get('schedmsg', item.id); if (!current) continue;
-        const next = current.repeat === 'once' ? null : nextRun(current, at);
-        const { error, tries, ...rest } = current;
-        // Read again after the turn: a message turned off while it was being sent stays off.
-        this.store.put('schedmsg', item.id, { ...rest, lastAt: at.toISOString(), on: Boolean(current.on) && Boolean(next), nextAt: next ? next.toISOString() : current.nextAt });
-      } catch (error) {
-        const current = this.store.get('schedmsg', item.id);
-        // Kept due for the next tick; after three failed tries in a row it turns off and shows the error.
-        const tries = (Number(current?.tries) || 0) + 1;
-        // A failed try never turns a message back on: one turned off while it was being sent stays off.
-        if (current) this.store.put('schedmsg', item.id, { ...current, tries, on: Boolean(current.on) && tries < 3, error: String(error.message || error).slice(0, 300) });
-      } finally { this.sending.delete(item.id); }
+        this.store.put('schedmsg', item.id, { ...current, pending: { runId: String(run?.id || ''), since, due: at.toISOString() } });
+        this.settle(this.store.get('schedmsg', item.id));
+      } catch (error) { this.failed(item.id, error); } finally { this.sending.delete(item.id); }
     }
+  }
+  // A queued send: started (a new turn began, or it joined a turn already running) counts as sent; a start that failed leaves
+  // it due for the next tick; one still queued or starting waits.
+  settle(item) {
+    const { runId, since, due } = item.pending || {}, run = runId ? this.store.get('run', runId) : null;
+    if (run && run.state === 'failed' && !(run.turnStartedAt && run.turnStartedAt >= since)) return this.failed(item.id, run.error || 'The agent could not start.');
+    if (run && ['queued', 'starting'].includes(run.state)) return;
+    this.sent(item.id, new Date(due || Date.now()));
+  }
+  sent(id, at) {
+    const current = this.store.get('schedmsg', id); if (!current) return;
+    const next = current.repeat === 'once' ? null : nextRun(current, at);
+    const { error, tries, pending, ...rest } = current;
+    // Read again after the turn: a message turned off while it was being sent stays off.
+    this.store.put('schedmsg', id, { ...rest, lastAt: at.toISOString(), on: Boolean(current.on) && Boolean(next), nextAt: next ? next.toISOString() : current.nextAt });
+  }
+  failed(id, error) {
+    const current = this.store.get('schedmsg', id); if (!current) return;
+    const { pending, ...rest } = current;
+    // Kept due for the next tick; after three failed tries in a row it turns off and shows the error.
+    const tries = (Number(current.tries) || 0) + 1;
+    // A failed try never turns a message back on: one turned off while it was being sent stays off.
+    this.store.put('schedmsg', id, { ...rest, tries, on: Boolean(current.on) && tries < 3, error: String(error?.message || error).slice(0, 300) });
   }
 }
