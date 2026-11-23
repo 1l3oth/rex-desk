@@ -8,7 +8,7 @@ windowBar();
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const root = document.getElementById('signin');
 const TABS = [['signin', t('Sign in')], ['create', t('New account')], ['cloud', t('Bring back from backup')]];
-const state = { auth: null, tab: '', error: '', email: '', scene: undefined, account: '', offline: false };
+const state = { auth: null, tab: '', error: '', email: '', scene: undefined, account: '', offline: false, switching: false };
 const ICON = {
   key: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3m-4 4 3 3m-5-1 2 2"/></svg>',
   mail: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
@@ -49,8 +49,18 @@ function drawAccount() {
       <button type="button" class="btn si-submit" data-retry>${t`Try the Rex Desk sign-in again`}</button><p class="si-error" role="alert">${esc(state.error)}</p></form>`;
   } else if (!account) {
     const waiting = state.account === 'waiting';
-    body = `<h2 class="si-title">${t`Sign in to your desk`}</h2><p class="si-note">${t`Use your Rex Desk account. The sign-in opens in your browser.`}</p>
-      ${waiting ? `<button type="button" class="btn primary si-submit si-big" disabled>${t`Waiting for you in the browser…`}</button>` : `<div class="si-ways si-ways-buttons" role="group" aria-label="${t`Ways to sign in`}"><button type="button" class="btn si-way" data-account data-provider="google">${t`${ICON.google} Continue with Google`}</button><button type="button" class="btn si-way" data-account data-provider="github">${t`${ICON.github} Continue with GitHub`}</button><button type="button" class="btn primary si-way" data-account data-provider="">${t`${ICON.mail} Continue with email`}</button></div>`}
+    const occupied = auth.occupied && !state.switching;
+    const ways = `<div class="si-ways si-ways-buttons" role="group" aria-label="${t`Ways to sign in`}"><button type="button" class="btn si-way" data-account data-provider="google">${t`${ICON.google} Continue with Google`}</button><button type="button" class="btn si-way" data-account data-provider="github">${t`${ICON.github} Continue with GitHub`}</button><button type="button" class="btn primary si-way" data-account data-provider="">${t`${ICON.mail} Continue with email`}</button></div>`;
+    const note = occupied
+      ? `<p class="si-note">${t`${esc(auth.occupied)} is signed in on this computer.`}</p>`
+      : state.switching
+      ? `<p class="si-note warn">${t`Switching accounts will close the current desk and stop its working agents.`}</p>`
+      : `<p class="si-note">${t`Use your Rex Desk account. The sign-in opens in your browser.`}</p>`;
+    const choose = occupied
+      ? `<div class="si-ways si-ways-buttons"><button type="button" class="btn primary si-way" data-account data-provider="">${t`Continue as ${esc(auth.occupied)}`}</button><button type="button" class="si-link si-center" data-switch-to>${t`Use a different account`}</button></div>`
+      : ways;
+    body = `<h2 class="si-title">${t`Sign in to your desk`}</h2>${note}
+      ${waiting ? `<button type="button" class="btn primary si-submit si-big" disabled>${t`Waiting for you in the browser…`}</button>` : choose}
       ${waiting ? `<button type="button" class="si-link si-center" data-cancel>${t`Cancel`}</button>` : ''}
       <p class="si-error" role="alert">${esc(state.error)}</p>
       <p class="si-foot">${t`New here? These buttons also make your account.`}</p>`;
@@ -70,7 +80,7 @@ function drawAccount() {
       <form id="si-form" data-mode="${mode}">${step.fields}<button class="btn primary si-submit" type="submit">${step.submit}</button><p class="si-error" role="alert">${esc(state.error)}</p></form>`;
   }
   root.innerHTML = `<section class="si-card" aria-labelledby="si-brand"><div class="si-brand"><img src="/favicon.svg" alt="" width="28" height="28"><h1 id="si-brand">${t`Rex Desk`}</h1></div><div class="si-lang">${languagePicker(t('Language'))}</div>
-    ${auth.occupied ? `<p class="si-note warn">${t`${esc(auth.occupied)} is signed in on this computer. Signing in to another account closes that desk and stops its working agents.`}</p>` : ''}${body}</section>`;
+    ${body}</section>`;
   root.querySelector('input[type=password], select')?.focus();
   mountScene();
 }
@@ -123,6 +133,7 @@ root.addEventListener('click', event => {
     })();
     return;
   }
+  if (event.target.closest('[data-switch-to]')) { state.switching = true; state.error = ''; draw(); return; }
   if (event.target.closest('[data-cancel]') || event.target.closest('[data-switch]')) {
     void post('/auth/account-forget', {}).catch(() => {});
     state.auth.account = null; state.account = ''; state.error = ''; draw(); return;
