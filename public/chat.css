@@ -1691,6 +1691,12 @@ html[data-theme=dark] #update-card{box-shadow:0 20px 60px rgb(0 0 0 / .55)}
 .tour-body{display:flex;flex-direction:column;gap:12px}.tour-ok{color:var(--good,#16a34a)}.tour-warn{color:var(--warn,#d97706)}
 .tour-foot{display:flex;gap:8px;align-items:center;margin-top:4px}.tour-foot .spacer{flex:1}
 .tour-wait{z-index:70}
+.tour-card{box-shadow:0 12px 32px rgba(0,0,0,.18)}.tour-pic{width:72px;height:48px;opacity:.9}
+@media (max-width:760px){.tour-back{padding:12px;padding-bottom:calc(12px + env(safe-area-inset-bottom));box-sizing:border-box}.tour-card{width:100%;max-width:100%;box-sizing:border-box;max-height:calc(100dvh - 24px - env(safe-area-inset-bottom));justify-self:center;align-self:center;margin:0}}
+/* The waiting state is a status line, not a disabled button. */
+.si-wait{display:flex;align-items:center;justify-content:center;gap:9px;min-height:44px;margin:0;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:14.5px;font-weight:600}
+.si-wait-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:uc-wait 1.8s ease-out infinite}
+@media (prefers-reduced-motion:reduce){.si-wait-dot{animation:none}}
 
 /* "Syncing with your cloud backup…": a quiet note bottom left while Rex Desk merges in the cloud copy after opening. */
 #sync-note{position:fixed;left:16px;bottom:16px;z-index:28;display:flex;align-items:center;gap:8px;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);font-size:12.5px;box-shadow:0 6px 20px rgb(0 0 0 / .18);animation:uc-rise .25s cubic-bezier(.16,1,.3,1)}

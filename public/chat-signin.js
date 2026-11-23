@@ -60,13 +60,13 @@ function drawAccount() {
       ? `<div class="si-ways si-ways-buttons"><button type="button" class="btn primary si-way" data-account data-provider="">${t`Continue as ${esc(auth.occupied)}`}</button><button type="button" class="si-link si-center" data-switch-to>${t`Use a different account`}</button></div>`
       : ways;
     const waitLabel = state.provider === 'google' ? t`Waiting for Google…` : state.provider === 'github' ? t`Waiting for GitHub…` : t`Waiting for the email window…`;
-    const waitingBody = `<button type="button" class="btn primary si-submit si-big" disabled>${waitLabel}</button>
+    const waitingBody = `<p class="si-wait" role="status"><span class="si-wait-dot" aria-hidden="true"></span>${waitLabel}</p>
       <button type="button" class="si-link si-center" data-reopen>${t`Window did not open? Try again`}</button>`;
     body = `<h2 class="si-title">${t`Sign in to your desk`}</h2>${note}
       ${waiting ? waitingBody : choose}
       ${waiting ? `<button type="button" class="si-link si-center" data-cancel>${t`Cancel`}</button>` : ''}
       <p class="si-error" role="alert">${esc(state.error)}</p>
-      <p class="si-foot">${t`A Rex Desk account is free and keeps your desk, agents and chats. These buttons also make yours.`}</p>`;
+      ${occupied || waiting ? '' : `<p class="si-foot">${t`A Rex Desk account is free and keeps your desk, agents and chats. These buttons also make yours.`}</p>`}`;
   } else {
     const who = `<div class="si-who"><span class="si-avatar">${account.image ? `<img src="${esc(account.image)}" alt="" referrerpolicy="no-referrer">` : esc((account.name || account.email || '?')[0].toUpperCase())}</span><span><b>${esc(account.name || account.email)}</b><small>${esc(account.name ? account.email : t('Rex Desk account'))}</small></span><button type="button" class="si-link" data-switch>${t`Not you?`}</button></div>`;
     const unclaimed = auth.workspaces.find(item => !item.claimed);
