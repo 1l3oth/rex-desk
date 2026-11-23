@@ -84,7 +84,9 @@ export class TursoSync {
     const wanted = heads.rows.filter(row => !Number(row.deleted) && seen.get(key(row)) !== row.v);
     const values = new Map();
     if (wanted.length) {
-      const found = await this.client.execute({ sql: `SELECT kind,id,value,v FROM rex_shared WHERE workspace = ? AND (kind || char(31) || id) IN (${wanted.map(() => '?').join(',')})`, args: [this.workspace, ...wanted.map(key)] });
+      // By the primary key (kind, id): matching on joined text, or letting the planner take the workspace index, read every
+      // shared row of the desk on each look and used up a billion cloud reads a month. +workspace keeps it a plain filter.
+      const found = await this.client.execute({ sql: `SELECT kind,id,value,v FROM rex_shared WHERE (kind,id) IN (VALUES ${wanted.map(() => '(?,?)').join(',')}) AND +workspace = ?`, args: [...wanted.flatMap(row => [row.kind, row.id]), this.workspace] });
       for (const row of found.rows) values.set(key(row), row);
     }
     return heads.rows.map(row => {
@@ -273,6 +275,8 @@ export class TursoSync {
       // same database (another account, a development copy) stays out of this account's view.
       for (const table of ['rex_shared', 'rex_presence']) await this.client.execute({ sql: `ALTER TABLE ${table} ADD COLUMN workspace TEXT`, args: [] }).catch(() => {});
       await this.client.execute({ sql: 'CREATE INDEX IF NOT EXISTS rex_shared_workspace_v ON rex_shared(workspace, v)', args: [] }).catch(() => {});
+      // The heartbeat reads (every 2 s while another computer is on) look computers up by account; without this they read the whole table.
+      await this.client.execute({ sql: 'CREATE INDEX IF NOT EXISTS rex_presence_workspace ON rex_presence(workspace)', args: [] }).catch(() => {});
       for (const table of ['rex_shared', 'rex_presence']) await this.client.execute({ sql: `UPDATE ${table} SET workspace=? WHERE workspace IS NULL AND node IN (?, ?)`, args: [this.workspace, this.store.nodeId, this.workspace] }).catch(() => {});
       // Another computer finds this workspace by name; only the passphrase unseals its key.
       if (this.store.auth?.kdf) await this.client.batch([{ sql: 'INSERT INTO rex_workspaces(workspace,name,kdf,sealed_key,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace) DO UPDATE SET name=excluded.name,kdf=excluded.kdf,sealed_key=excluded.sealed_key,updated_at=excluded.updated_at',

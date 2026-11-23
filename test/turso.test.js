@@ -262,6 +262,26 @@ test('shared agents and computers belong to one account: another account (or a d
   await store.cloud.close(); store.close();
 });
 
+test('reading other computers changes looks rows up by key and computers by account, never reading the whole table', async () => {
+  const turso = fakeTurso(); turso.network.online = true;
+  const store = new Store(temporary('shared-reads'));
+  store.cloud = new TursoSync(store, { clientFactory: turso.clientFactory, retryMs: 1000 });
+  await store.cloud.connect({ url: 'libsql://rex-test.example.invalid', authToken: 'secret-turso-token' });
+  const workspace = store.cloud.workspace, plans = [], execute = turso.clientFactory().execute;
+  store.cloud.client.execute = async query => { if (/^SELECT/i.test(query.sql)) plans.push(turso.remote.prepare(`EXPLAIN QUERY PLAN ${query.sql}`).all(...query.args).map(row => row.detail).join(' | ')); return execute(query); };
+  const add = (id, owner, v = '00000000a') => turso.remote.prepare('INSERT INTO rex_shared(kind,id,value,deleted,v,node,workspace) VALUES(?,?,?,?,?,?,?)').run('roommsg', id, JSON.stringify({ id }), 0, `${v}.${id}.other`, 'other-laptop', owner);
+  for (let index = 0; index < 50; index++) add(`old-${index}`, workspace);
+  add('new', workspace, '00000000b'); add('theirs', 'another-workspace', '00000000b');
+  const rows = await store.cloud.pullShared('00000000a.zzz');
+  assert.equal(rows.find(row => row.id === 'new').value.id, 'new');
+  assert.ok(!rows.some(row => row.id === 'theirs'));
+  await store.cloud.presence('Here', {});
+  assert.ok(plans.length >= 3);
+  for (const plan of plans) assert.doesNotMatch(plan, /SCAN rex_|USING INDEX rex_shared_workspace_v \(workspace=\?\)$/, plan);
+  assert.ok(plans.some(plan => plan.includes('sqlite_autoindex_rex_shared_1 (kind=? AND id=?)')), plans.join('\n'));
+  await store.cloud.close(); store.close();
+});
+
 test('a part left out of the backup is deleted from the cloud, skipped from then on, and sent back when turned on again', async () => {
   const directory = temporary('parts'), turso = fakeTurso(); turso.network.online = true;
   const store = new Store(directory);
