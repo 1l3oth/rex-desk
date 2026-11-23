@@ -95,6 +95,19 @@ test('an approval from before accounts were kept lets the phone in under no acco
   assert.equal(relay.settings().devices.length, 1, 'the new approval replaces the old one');
 });
 
+test('a waiting code belongs to the phone id and its account: the same id under another account gets its own code', () => {
+  const { desk } = fakeDesk(0), relay = new PhoneRelay(desk, { socket: () => fakeSocket() });
+  const mine = relay.pendingFor({ id: 'phone-1', name: 'Pixel', account: 'user-2' });
+  const copied = relay.pendingFor({ id: 'phone-1', name: 'Pixel', account: 'user-3' });
+  assert.notEqual(copied.ref, mine.ref); assert.equal(relay.pendingFor({ id: 'phone-1', name: 'Pixel', account: 'user-2' }).ref, mine.ref, 'same id and account: same wait');
+  assert.equal(relay.view().pending.length, 2);
+  // Approving the first one's code lets in only that account.
+  relay.approve(mine.ref, mine.code);
+  assert.equal(relay.approved('phone-1', 'user-2'), true); assert.equal(relay.approved('phone-1', 'user-3'), false);
+  assert.deepEqual(relay.view().pending.map(item => item.id), [copied.ref], 'the other account still waits for its own code');
+  assert.throws(() => relay.approve(copied.ref, mine.code === copied.code ? String((Number(mine.code) + 1) % 1000000).padStart(6, '0') : mine.code), /no longer waiting/);
+});
+
 test('removing a phone ends its open requests at once', () => {
   const { desk } = fakeDesk(1), socket = fakeSocket(), relay = new PhoneRelay(desk, { socket: () => socket });
   relay.pendingFor({ id: 'phone-1', name: 'Pixel' }); const { id: ref, code } = relay.view().pending[0]; relay.approve(ref, code);

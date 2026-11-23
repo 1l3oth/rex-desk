@@ -69,12 +69,13 @@ export class PhoneRelay {
     return { ok: false, phone: { ...phone, account } };
   }
   setAskCode(on) { this.save({ askCode: Boolean(on) }); return this.view(); }
-  // The code a new phone shows, kept for ten minutes. Asking again within that time shows the same code.
+  // The code a new phone shows, kept for ten minutes. Asking again within that time shows the same code. A wait belongs to
+  // the phone id and the relay's account together: the same id under another account gets its own code, never this one.
   pendingFor({ id, name, account = '' }) {
     const at = Date.now(), live = this.settings().pending.filter(item => item.until > at);
-    const key = keyOf(id); let item = live.find(entry => entry.key === key);
+    const key = keyOf(id), who = cleanId(account); let item = live.find(entry => entry.key === key && (entry.account || '') === who);
     if (!item) {
-      item = { key, ref: refOf(key), name, account: cleanId(account), code: String(randomInt(0, 1000000)).padStart(6, '0'), createdAt: new Date(at).toISOString(), until: at + PENDING_MS };
+      item = { key, ref: refOf(createHash('sha256').update(`${key}:${who}`).digest('hex')), name, account: who, code: String(randomInt(0, 1000000)).padStart(6, '0'), createdAt: new Date(at).toISOString(), until: at + PENDING_MS };
       live.push(item); while (live.length > MAX_PENDING) live.shift();
       this.store.event('', 'phone-approval', { device: item.ref, name, code: item.code }, true);
     }
