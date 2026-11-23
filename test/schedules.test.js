@@ -418,3 +418,40 @@ test('path 10, two Codex steers overlap: the first accepted settles only its own
   assert.equal(t.store.get('schedmsg', first.id).on, false, 'first sent');
   assert.equal(starts, 2, 'the next turn took the second'); assert.equal(t.store.get('schedmsg', second.id).on, false, 'second sent once that turn took it');
 });
+
+test('path 11, "Ping the team" accepted and "Ping" refused at the same set time: each steer settles only its own ticket', async () => {
+  let notify, finish, starts = 0, steers = 0, acceptFirst, refuseSecond;
+  const clientFactory = options => ({ open: async () => {}, close() {}, request: async (method) => {
+    if (method === 'account/read') return { account: { type: 'chatgpt' } };
+    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: 'thread-1' } };
+    if (method === 'turn/start') {
+      const id = `u${++starts}`;
+      if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }
+      else setTimeout(() => { options.onNotification('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Done.' } }); options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }, 5);
+      return { turn: { id } };
+    }
+    if (method === 'turn/steer') return ++steers === 1 ? new Promise(done => { acceptFirst = () => done({}); }) : new Promise((done, fail) => { refuseSecond = () => fail(new Error('turn/steer refused')); });
+    return {};
+  } });
+  const t = deskWith(options => new CodexRunner({ ...options, clientFactory }), 'codex');
+  t.store.delete('schedmsg', t.once.id);
+  const team = t.desk.schedules.create(t.agent.id, { text: 'Ping the team', time: '09:00', repeat: 'once' }, at(0, '08:00'));
+  void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' }); await new Promise(done => setTimeout(done, 100));
+  await t.desk.schedules.tick(at(0, '09:00'));
+  notify('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Step one.' } });
+  await new Promise(done => setTimeout(done, 30));
+  // A second schedule for the same time, whose text is the start of the first one's.
+  const ping = t.desk.schedules.create(t.agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
+  await t.desk.schedules.tick(at(0, '09:00'));
+  notify('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Step two.' } });
+  await new Promise(done => setTimeout(done, 30));
+  acceptFirst(); await new Promise(done => setTimeout(done, 30));
+  refuseSecond(); await new Promise(done => setTimeout(done, 30));
+  const state = text => t.store.list('delivery').find(item => item.text.endsWith(`\n${text}`))?.state;
+  assert.equal(state('Ping the team'), 'taken', 'the accepted steer settles its own message');
+  assert.notEqual(state('Ping'), 'taken', 'the refused "Ping" is not counted as sent');
+  assert.ok(t.runOf().queued.some(text => text.endsWith('\nPing')), 'the refused one is back in the queue');
+  finish(); await t.settled(); await t.desk.schedules.tick(at(0, '09:05'));
+  assert.equal(t.store.get('schedmsg', team.id).on, false, '"Ping the team" sent');
+  assert.equal(starts, 2, 'the next turn took "Ping"'); assert.equal(t.store.get('schedmsg', ping.id).on, false, '"Ping" sent once that turn took it');
+});
