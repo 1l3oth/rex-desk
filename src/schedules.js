@@ -69,12 +69,14 @@ ${item.text}` });
         const current = this.store.get('schedmsg', item.id); if (!current) continue;
         const next = current.repeat === 'once' ? null : nextRun(current, at);
         const { error, tries, ...rest } = current;
-        this.store.put('schedmsg', item.id, { ...rest, lastAt: at.toISOString(), on: Boolean(next), nextAt: next ? next.toISOString() : current.nextAt });
+        // Read again after the turn: a message turned off while it was being sent stays off.
+        this.store.put('schedmsg', item.id, { ...rest, lastAt: at.toISOString(), on: Boolean(current.on) && Boolean(next), nextAt: next ? next.toISOString() : current.nextAt });
       } catch (error) {
         const current = this.store.get('schedmsg', item.id);
         // Kept due for the next tick; after three failed tries in a row it turns off and shows the error.
         const tries = (Number(current?.tries) || 0) + 1;
-        if (current) this.store.put('schedmsg', item.id, { ...current, tries, on: tries < 3, error: String(error.message || error).slice(0, 300) });
+        // A failed try never turns a message back on: one turned off while it was being sent stays off.
+        if (current) this.store.put('schedmsg', item.id, { ...current, tries, on: Boolean(current.on) && tries < 3, error: String(error.message || error).slice(0, 300) });
       } finally { this.sending.delete(item.id); }
     }
   }

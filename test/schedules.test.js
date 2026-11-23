@@ -156,3 +156,15 @@ test('a loop that is on with no task source to look at is shown as finding nothi
   assert.equal(loopFindsNothing({ on: true }, ['flow'], ['flow']), false);
   assert.equal(loopFindsNothing({ on: false }, [], []), false);
 });
+
+test('a scheduled message turned off while it is being sent stays off, whether the send fails or works', async () => {
+  const { store, desk, agent } = setup();
+  desk.specialists.status = () => ({ state: 'idle' });
+  for (const fails of [true, false]) {
+    const item = desk.schedules.create(agent.id, { text: fails ? 'Fails' : 'Works', time: '09:00', repeat: 'daily' }, at(0, '08:00'));
+    desk.specialistTurn = async () => { desk.schedules.toggle(item.id, false); if (fails) throw new Error('no account'); return { id: 'run-x' }; };
+    await desk.schedules.tick(at(0, '09:00'));
+    assert.equal(store.get('schedmsg', item.id).on, false, fails ? 'a failed try never turns it back on' : 'a sent one stays off');
+    store.delete('schedmsg', item.id);
+  }
+});
