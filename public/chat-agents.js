@@ -5,6 +5,7 @@ import { notesSection, notesAction, exportNotes } from './chat-notes.js';
 import { pickerHtml } from '/chat-pick.js';
 import { whereHtml } from '/chat-where.js';
 import { connectorName } from '/chat-connectors.js';
+import { loopFindsNothing } from '/agent-loop.js';
 // Specialist agents: one identity per project. The card shows who the agent is and what it was told; the person can rename, edit or duplicate it.
 const providerName = name => name === 'gemini' ? t('Gemini (Antigravity)') : aiName(name);
 
@@ -49,13 +50,14 @@ export function agentStage(ctx, id = (ctx.ui.profileId || ctx.ui.view.id)) {
   // Work hours, like a shift: the loop checks only then, and is told to stop when the shift ends.
   const hours = { on: false, start: '08:00', end: '17:00', days: [1, 2, 3, 4, 5], ...(loop.hours || {}) }, offDuty = hours.on && !onShift(hours);
   const dayName = day => new Date(2024, 0, 7 + day).toLocaleDateString(locale(), { weekday: 'short' });
-  const status = loop.on && offDuty ? t`Off duty until ${esc(hours.start)}` : loop.on ? (nextIn === null ? t('First check soon') : nextIn <= 0 ? t('Checking soon') : t`Next check in ${nextIn >= 60 ? `${Math.round(nextIn / 60)} h` : t`${nextIn} min`}`) : t('Off');
+  const blind = loopFindsNothing(loop, agent.taskSources, (ui.snap.config?.sources || []).map(source => source.id));
+  const status = blind ? t('On, but finds nothing: choose where its tasks come from above') : loop.on && offDuty ? t`Off duty until ${esc(hours.start)}` : loop.on ? (nextIn === null ? t('First check soon') : nextIn <= 0 ? t('Checking soon') : t`Next check in ${nextIn >= 60 ? `${Math.round(nextIn / 60)} h` : t`${nextIn} min`}`) : t('Off');
   const last = loop.lastAt ? t`Last ${esc(new Date(loop.lastAt).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}` : '';
   const loopBox = group(t('Own loop'), row(t('Check tasks by itself'), toggle('data-loop-on', loop.on, t('Own loop')), t`${esc(agent.name)} looks at its tasks and starts work on its own.`)
       + `<div class="agp-fold${loop.on ? '' : ' off'}">`
       + row(t('How often'), `<div class="agp-seg" role="radiogroup" aria-label="${t`How often`}">${[15, 30, 60, 120, 240, 1440].map(minutes => `<label title="${everyLabel(minutes)}"><input type="radio" name="loop-every-${esc(agent.id)}" value="${minutes}" data-loop-every ${Number(loop.every) === minutes ? 'checked' : ''}><span>${STEP[minutes]}</span></label>`).join('')}</div>`)
       + block(`<label class="agp-blabel" for="lp-prompt-${esc(agent.id)}">${t`On each check`}</label><textarea id="lp-prompt-${esc(agent.id)}" class="agp-text" data-loop-prompt rows="2" maxlength="2000" placeholder="${t`Optional. For example: pick up QA issues first and test them in the browser.`}">${esc(loop.prompt || '')}</textarea>`)
-      + row(`${loop.on ? `<i class="agp-dot${offDuty ? ' rest' : ' on'}"></i>` : ''}${status}`, `<button type="button" class="btn small" data-action="spec-loop-now">${t`Check now`}</button>`, last, ' agp-status')
+      + row(`${loop.on ? `<i class="agp-dot${offDuty || blind ? ' rest' : ' on'}"></i>` : ''}${status}`, `<button type="button" class="btn small" data-action="spec-loop-now">${t`Check now`}</button>`, last, ' agp-status')
       + '</div>');
   // Work hours are the agent's whole shift, not just the loop's: off-shift, the loop pauses and scheduled messages wait.
   const hoursBox = group(t('Work hours'), row(t('Keep to work hours'), toggle('data-loop-hours-on', hours.on, t('Work hours')), t('During these hours the agent works. Off hours its loop pauses and scheduled messages wait.'))

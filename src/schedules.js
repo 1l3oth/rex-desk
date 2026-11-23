@@ -44,22 +44,38 @@ export class Schedules {
   remove(id) { if (!this.store.get('schedmsg', id)) throw new Error('That scheduled message is gone.'); this.store.delete('schedmsg', id); return { removed: true }; }
   toggle(id, on) {
     const item = this.store.get('schedmsg', id); if (!item) throw new Error('That scheduled message is gone.');
-    const next = on ? nextRun(item, new Date()) : null;
+    const now = new Date(), next = on ? nextRun(item, now) : null;
+    // Like create: a once-message whose date is past cannot be turned back on, or it would fire at once for a time already gone.
+    if (on && (!next || next <= now)) throw new Error('That time has already passed. Pick a new time.');
     const updated = { ...item, on: Boolean(on) && Boolean(next), ...(next ? { nextAt: next.toISOString() } : {}) };
     this.store.put('schedmsg', id, updated); return updated;
   }
   // Called by the server's timer. A message that came due while the computer was off is sent once, not once per missed day.
+  // It waits while the agent is busy with another turn, and counts as sent only once its turn really started; if that fails it stays due.
   async tick(at = new Date()) {
     // Only the computer the agent works on sends it, so two computers never send the same message twice.
     for (const item of this.list().filter(entry => entry.on && entry.nextAt && Date.parse(entry.nextAt) <= at.getTime() && (entry.agentId === 'main' || this.desk.peers?.owns?.(entry.agentId) !== false))) {
+      if (this.sending?.has(item.id)) continue;
+      const agent = item.agentId === 'main' ? this.desk.specialists.ensureMain() : this.store.get('specialist', item.agentId);
+      if (!agent) { this.store.delete('schedmsg', item.id); continue; }
       // Work hours are the agent's whole shift: a message due off-shift waits, and is sent once the shift is back.
-      const hours = this.store.get('specialist', item.agentId)?.loop?.hours;
+      const hours = agent.loop?.hours;
       if (hours?.on && !inHours(hours, at)) continue;
-      const next = item.repeat === 'once' ? null : nextRun(item, at);
-      this.store.put('schedmsg', item.id, { ...item, lastAt: at.toISOString(), on: Boolean(next), nextAt: next ? next.toISOString() : item.nextAt });
-      if (!this.store.get('specialist', item.agentId) && item.agentId !== 'main') { this.store.delete('schedmsg', item.id); continue; }
-      try { await this.desk.specialistTurn(item.agentId, { prompt: `Scheduled message from the person (set for ${item.time}):\n${item.text}` }); }
-      catch (error) { this.store.put('schedmsg', item.id, { ...this.store.get('schedmsg', item.id), error: String(error.message || error).slice(0, 300) }); }
+      if (['busy', 'replying'].includes(this.desk.specialists.status(agent)?.state)) continue;
+      (this.sending ||= new Set()).add(item.id);
+      try {
+        await this.desk.specialistTurn(item.agentId, { prompt: `Scheduled message from the person (set for ${item.time}):
+${item.text}` });
+        const current = this.store.get('schedmsg', item.id); if (!current) continue;
+        const next = current.repeat === 'once' ? null : nextRun(current, at);
+        const { error, tries, ...rest } = current;
+        this.store.put('schedmsg', item.id, { ...rest, lastAt: at.toISOString(), on: Boolean(next), nextAt: next ? next.toISOString() : current.nextAt });
+      } catch (error) {
+        const current = this.store.get('schedmsg', item.id);
+        // Kept due for the next tick; after three failed tries in a row it turns off and shows the error.
+        const tries = (Number(current?.tries) || 0) + 1;
+        if (current) this.store.put('schedmsg', item.id, { ...current, tries, on: tries < 3, error: String(error.message || error).slice(0, 300) });
+      } finally { this.sending.delete(item.id); }
     }
   }
 }

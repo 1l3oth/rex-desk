@@ -1604,7 +1604,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     }
   }
   // Cooling down, so a loop never runs flat out: the next check waits the chosen time from the last one, and at least
-  // 10 minutes after the last check finished. Each check in a row that found nothing to do doubles the wait, up to 4 times.
+  // 10 minutes after the last check finished. Each check in a row that found nothing to do doubles the wait, at most twice (4 times the chosen wait).
   loopNextAt(loop) {
     const quiet = Math.min(Number(loop.quiet) || 0, 2), every = loop.every * 60000 * (2 ** quiet);
     return Math.max((Date.parse(loop.lastAt || 0) || 0) + every, (Date.parse(loop.doneAt || 0) || 0) + LOOP_REST);

@@ -2568,5 +2568,6 @@
  "What is this?": "នេះជាអ្វី?",
  "Not added": "មិនបានបន្ថែម",
  "Orbit connects through its MCP server: agents use your goals, notes and knowledge, and a goal's tasks come into Tasks.": "Orbit ភ្ជាប់តាម MCP server របស់វា៖ ភ្នាក់ងារប្រើគោលដៅ កំណត់ចំណាំ និងចំណេះដឹងរបស់អ្នក ហើយកិច្ចការនៃគោលដៅមួយចូលមកក្នុង កិច្ចការ។",
- "Goals": "គោលដៅ"
+ "Goals": "គោលដៅ",
+ "On, but finds nothing: choose where its tasks come from above": "បើក ប៉ុន្តែរកមិនឃើញអ្វីទេ៖ សូមជ្រើសរើសកន្លែងដែលកិច្ចការរបស់វាមកពីខាងលើ"
 }

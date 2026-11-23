@@ -121,3 +121,38 @@ test('work hours hold a scheduled message off-shift, then send it once the shift
   assert.equal(sent.length, 1, 'sent once the shift starts');
   assert.equal(new Date(store.get('schedmsg', daily.id).nextAt).getDate(), at(1, '07:00').getDate(), 'then rolls to the next day');
 });
+
+test('a past one-time message cannot be turned back on, and a due message waits for a free agent and counts as sent only after its turn', async () => {
+  const { store, desk, agent, sent } = setup();
+  const day = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const soon = new Date(Date.now() + 2 * 86400000), past = new Date(Date.now() - 2 * 86400000);
+  const once = desk.schedules.create(agent.id, { text: 'Ping', time: '09:00', repeat: 'once', date: day(soon) });
+  desk.schedules.toggle(once.id, false);
+  store.put('schedmsg', once.id, { ...store.get('schedmsg', once.id), date: day(past) });
+  assert.throws(() => desk.schedules.toggle(once.id, true), /already passed/);
+  assert.equal(store.get('schedmsg', once.id).on, false);
+  const daily = desk.schedules.create(agent.id, { text: 'Check Orbit', time: '09:00', repeat: 'daily' }, at(0, '08:00'));
+  desk.specialists.status = () => ({ state: 'replying' });
+  await desk.schedules.tick(at(0, '09:00'));
+  assert.equal(sent.length, 0, 'agent busy: held');
+  assert.equal(store.get('schedmsg', daily.id).nextAt, daily.nextAt);
+  desk.specialists.status = () => ({ state: 'idle' });
+  desk.specialistTurn = async () => { throw new Error('no account'); };
+  await desk.schedules.tick(at(0, '09:05'));
+  assert.equal(store.get('schedmsg', daily.id).nextAt, daily.nextAt, 'a failed turn is not marked sent');
+  assert.equal(store.get('schedmsg', daily.id).on, true); assert.match(store.get('schedmsg', daily.id).error, /no account/);
+  desk.specialistTurn = async (agentId, input) => { sent.push({ agentId, ...input }); return { id: 'run-x' }; };
+  await desk.schedules.tick(at(0, '09:10'));
+  assert.equal(sent.length, 1);
+  const saved = store.get('schedmsg', daily.id);
+  assert.equal(new Date(saved.nextAt).getDate(), at(1, '09:00').getDate()); assert.equal(saved.error, undefined); assert.equal(saved.lastAt, at(0, '09:10').toISOString());
+});
+
+test('a loop that is on with no task source to look at is shown as finding nothing', async () => {
+  const { loopFindsNothing } = await import('../public/agent-loop.js');
+  assert.equal(loopFindsNothing({ on: true }, [], ['flow']), true);
+  assert.equal(loopFindsNothing({ on: true }, ['gone'], ['flow']), true, 'only a removed tracker');
+  assert.equal(loopFindsNothing({ on: true }, ['local'], []), false);
+  assert.equal(loopFindsNothing({ on: true }, ['flow'], ['flow']), false);
+  assert.equal(loopFindsNothing({ on: false }, [], []), false);
+});
