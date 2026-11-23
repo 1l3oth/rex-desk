@@ -169,9 +169,6 @@ const LOOP_REST = 10 * 60000;
 // The greeting a new agent chat starts with (public/chat-agents.js sends it with greeting: true). Replayed in a handoff it made
 // the new session introduce itself again instead of answering, so handoffs leave it out. The flag, not the words, marks it.
 const isGreeting = event => event.kind === 'human-message' && event.greeting === true;
-// Runner events that come only after the prompt was submitted and taken: a scheduled message counts as delivered on the first.
-const ACCEPTED_EVENTS = new Set(['prompt-accepted', 'agent-text-partial', 'agent-text', 'agent-tool', 'agent-tool-result', 'agent-operation', 'subagent-text', 'subagent-done', 'app-message', 'context', 'agent-result']);
-
 export class Desk {
   constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, netJudge, toolbox, ownRuntime = false, diskWatch = false } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
@@ -277,6 +274,31 @@ export class Desk {
     const queued = run.queued || [], at = queued.indexOf(message.text);
     if (at >= 0) { this.store.put('run', runId, { ...run, queued: queued.filter((_, index) => index !== at) }); return { unsent: true, seen: false }; }
     return { unsent: true, seen: this.live.has(runId) || !['queued'].includes(run.state) };
+  }
+  // Scheduled message tickets (src/schedules.js). waiting: handed to the agent's chat, not yet in a turn; turn: in a turn whose
+  // prompt was not taken yet; taken: the agent really got it; lost: it never will (a failed start, or the run ended with it queued).
+  expectDelivery(id, { agentId, text }) { this.store.put('delivery', id, { id, agentId, text: String(text || '').trim(), state: 'waiting', runId: '', at: now() }); }
+  forgetDelivery(id) { if (id && this.store.get('delivery', id)) this.store.delete('delivery', id); }
+  setDelivery(id, patch) { const item = this.store.get('delivery', id); if (item) this.store.put('delivery', id, { ...item, ...patch }); }
+  // Waiting tickets of this run's agent. Only the agent's personal chat (the main agent's own chat, or a specialist's) carries
+  // scheduled messages; rooms and team sessions never do. A turn that starts takes them all (the message reaches it as its
+  // follow-up, its first instructions or the chat so far, not always word for word); a queue handed over mid-turn takes only
+  // those whose text is in it (text, null for all).
+  waitingDeliveries(run, text) {
+    const agentId = !run || run.roomAgent || run.roomOf || run.teamOf ? '' : run.role === 'coordinator' && run.main ? 'main' : run.role === 'specialist' ? run.specialistId || '' : '';
+    if (!agentId || (text !== null && !String(text || '').trim())) return [];
+    return this.store.list('delivery').filter(item => item.state === 'waiting' && item.agentId === agentId && (text === null || (item.text && String(text).includes(item.text))));
+  }
+  deliveryState(id, runId) {
+    const item = this.store.get('delivery', id); if (!item) return 'lost';
+    if (item.state !== 'waiting') return item.state;
+    const run = this.store.get('run', item.runId || runId);
+    // Still on its way: the agent's turn is going, or one is queued or starting that will take it.
+    if (run && (this.live.has(run.id) || ['queued', 'starting'].includes(run.state))) return 'waiting';
+    // Nothing will hand it to the agent any more (the run stopped or failed with it still queued): it comes out of the queue,
+    // so a later turn never sends it as well as the retry.
+    if (run?.queued?.some(entry => String(entry).includes(item.text))) this.store.put('run', run.id, { ...run, queued: run.queued.filter(entry => !String(entry).includes(item.text)) });
+    this.setDelivery(id, { state: 'lost' }); return 'lost';
   }
   // Messages the agent was handed but never read (they came just as its reply ended) go back to the front of its queue.
   requeue(runId, text) {
@@ -672,7 +694,11 @@ export class Desk {
     // handedOn: this turn ended by queueing the next one (another account, the default model). That turn owns the run's
     // browser, tools, questions and room reply now, so this one's clean-up leaves them alone.
     let run = this.run(runId), token, handedOn = false, launched = false;
-    const markLaunched = () => { if (launched) return; launched = true; this.patchRun(runId, { turnLaunchedAt: now() }); };
+    // Scheduled message tickets this turn carries (see deliveryState). They count as taken only once the prompt was really
+    // accepted: the runner says so (prompt-accepted) or the turn ends cleanly. Any other end loses them, so they are sent again.
+    const bound = new Set();
+    const markLaunched = () => { if (launched) return; launched = true; for (const ticket of bound) this.setDelivery(ticket, { state: 'taken' }); bound.clear(); };
+    const bind = (text, whole = false) => { for (const item of this.waitingDeliveries(this.store.get('run', runId), whole ? null : text)) { if (launched) this.setDelivery(item.id, { state: 'taken', runId }); else { bound.add(item.id); this.setDelivery(item.id, { state: 'turn', runId }); } } };
     // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
     const turnAt = new Date().toISOString();
     try {
@@ -771,12 +797,11 @@ export class Desk {
         mcpOff: [...toolsOff(this.store, runAgentId(run))].filter(key => key.startsWith('mcp:')).map(key => key.slice(4)),
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' || run.provider === 'openrouter' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
-        ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), requeue: text => this.requeue(runId, text), extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
-          // The prompt was really accepted: the runner said so (prompt-accepted), or the agent already answered to it (wrote,
-          // took a step, reported its context or ended). A session opening proves nothing: Codex opens one before it submits the
-          // prompt, so a submit that fails after it would count as delivered. A scheduled message waits for this mark.
-          if (!launched && ACCEPTED_EVENTS.has(kind)) markLaunched();
-          if (kind === 'prompt-accepted') return;
+        ask: request => this.ask(runId, request), inbox: () => { const text = this.takeInbox(runId); bind(text); return text; },
+        requeue: text => { for (const item of this.store.list('delivery').filter(entry => entry.runId === runId && ['turn', 'taken'].includes(entry.state) && String(text || '').includes(entry.text))) { bound.delete(item.id); this.setDelivery(item.id, { state: 'waiting' }); } this.requeue(runId, text); }, extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
+          // Only the runner knows when its prompt was really taken (Codex: turn/start accepted; Claude: the model's first real
+          // words or step). A session opening, a sign-in error written as a reply, or a result before an error check prove nothing.
+          if (kind === 'prompt-accepted') { markLaunched(); return; }
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
           // The quiet turn that reads Voice mode's report is not said: Rex Desk has welcomed the person already.
           const reading = this.store.get('run', runId)?.voice?.reading;
@@ -832,7 +857,10 @@ export class Desk {
       if (attach) {
         this.store.event(runId, 'phase', { text: 'Rex Desk restarted; the agent kept working and is followed again' }, true);
         this.patchRun(runId, { state: 'running', reattach: undefined });
+        // Followed again after a restart: the tickets its turn carried are still this turn's.
+        for (const item of this.store.list('delivery').filter(entry => entry.runId === runId && entry.state === 'turn')) bound.add(item.id);
         await runner.attach(attach);
+        markLaunched();
       } else {
       // Each turn records its own start, so a resumed run shows time since it resumed, not since it was first created.
       // The account this turn really runs on, so a usage limit is put on that account, not on whatever is chosen by the time it hits.
@@ -864,11 +892,14 @@ export class Desk {
       const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, lessonsUpdate, notesUpdate, styleReminder, memoryReminder].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : [this.prompt(run), run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
       // The handoff is used up only by a turn that really ran: a turn that fails to start reads it next time.
       // An open Claude-app session starts with no message: it waits for the person to write, there or here.
-      await runner.start(remoteOn ? '' : digest ? `${digest}
+      const sending = remoteOn ? '' : digest ? `${digest}
 
-${message}` : message);
-      // A turn that ended without a start error took its prompt, even if the runner sent no answer events on the way.
-      if (!remoteOn) markLaunched();
+${message}` : message;
+      // Whatever the agent was handed before this turn (its follow-up, its first instructions, the chat so far) goes in now.
+      if (!remoteOn) bind(sending, true);
+      await runner.start(sending);
+      // A turn that ended without a start error took its prompt, even if the runner never said so on the way.
+      markLaunched();
       // In-app mode starts with no message, so the missed context was not sent: it stays unseen for the next turn.
       if (remoteOn) this.seenMarks?.delete(runId); else this.saveSeenMark(runId);
       if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
@@ -902,6 +933,9 @@ ${message}` : message);
       }
       if (run.role === 'helper') this.helperDone(runId, friendlyDiskError(error.message));
     } finally {
+      // Tickets whose prompt was never taken: a turn handed on to the next one keeps them waiting for it; any other end loses them.
+      for (const ticket of bound) this.setDelivery(ticket, { state: handedOn ? 'waiting' : 'lost' });
+      bound.clear();
       if (handedOn) {
         if (token) this.forgetToken(token);
         if (this.live.get(runId)?.controller === controller) this.live.delete(runId);

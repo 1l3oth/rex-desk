@@ -153,7 +153,10 @@ export class ClaudeRunner {
   noteCancelled() { this.cancelCount = (this.cancelCount || 0) + 1; this.cancelStreak = (this.cancelStreak || 0) + 1; this.cancelPending = true; }
   // Given once, right after the cancel, so the agent never has to work out for itself that the person did not stop it.
   takeCancelNote() { if (!this.cancelPending) return ''; this.cancelPending = false; return cancelNote(this.cancelCount); }
+  // Says once per turn that the prompt was really taken (src/coordinator.js counts a scheduled message as sent on it).
+  accepted() { if (this.acceptedSaid) return; this.acceptedSaid = true; this.event('prompt-accepted', {}); }
   async start(prompt) {
+    this.acceptedSaid = false;
     const { query } = this.sdk || await import('@anthropic-ai/claude-agent-sdk');
     const env = { ...subscriptionEnv(this.agentEnv || process.env), REX_AGENT_TOKEN: this.token, REX_DESK_TOKEN: this.token, REX_DESK_URL: this.mcpUrl, MCP_TOOL_TIMEOUT: '86400000' };
     // Tools of the person's own MCP servers are listed by name and loaded only when needed, not all at the start of every chat.
@@ -240,6 +243,7 @@ export class ClaudeRunner {
         if (!message.parent_tool_use_id) {
           if (part.type === 'content_block_start') this.partial = '';
           if (part.type === 'content_block_delta' && part.delta?.type === 'text_delta') {
+            this.accepted();
             this.partial = `${this.partial || ''}${part.delta.text || ''}`;
             if (Date.now() - (this.partialAt || 0) > 120) { this.partialAt = Date.now(); this.event('agent-text-partial', { text: this.partial }); }
           }
@@ -250,6 +254,9 @@ export class ClaudeRunner {
       // How much of the account's 5-hour and weekly limits is used, as Claude Code reports it during a turn.
       if (message.type === 'rate_limit_event' && message.rate_limit_info) this.event('rate-limit', { ...message.rate_limit_info });
       if (message.type === 'assistant') {
+        // The model itself answered, so the prompt was taken. Claude Code writes a sign-in or API error as a reply of its own
+        // (model "<synthetic>"), and its result comes before the error check below: neither of those counts.
+        if (message.message?.model && message.message.model !== '<synthetic>') this.accepted();
         // How full the conversation is: everything the model read for this step (new, cached and cache-written input).
         const used = message.message?.usage; if (used && !message.parent_tool_use_id) { this.contextUsed = (used.input_tokens || 0) + (used.cache_read_input_tokens || 0) + (used.cache_creation_input_tokens || 0); this.event('context', { used: this.contextUsed, model: message.message?.model || '', ...(this.contextWindow ? { window: this.contextWindow } : {}) }); }
         const content = message.message?.content?.filter(block => block.type !== 'thinking' && block.type !== 'redacted_thinking');

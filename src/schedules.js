@@ -41,7 +41,7 @@ export class Schedules {
     const saved = { ...item, nextAt: next.toISOString() };
     this.store.put('schedmsg', saved.id, saved); return saved;
   }
-  remove(id) { if (!this.store.get('schedmsg', id)) throw new Error('That scheduled message is gone.'); this.store.delete('schedmsg', id); return { removed: true }; }
+  remove(id) { const item = this.store.get('schedmsg', id); if (!item) throw new Error('That scheduled message is gone.'); this.desk.forgetDelivery(item.pending?.delivery); this.store.delete('schedmsg', id); return { removed: true }; }
   toggle(id, on) {
     const item = this.store.get('schedmsg', id); if (!item) throw new Error('That scheduled message is gone.');
     const now = new Date(), next = on ? nextRun(item, now) : null;
@@ -51,7 +51,7 @@ export class Schedules {
     this.store.put('schedmsg', id, updated); return updated;
   }
   // Called by the server's timer. A message that came due while the computer was off is sent once, not once per missed day.
-  // It waits while the agent is busy with another turn, and counts as sent only once its turn really started; if that fails it stays due.
+  // It waits while the agent is busy with another turn, and counts as sent only once the agent really took it; if it never does it stays due.
   async tick(at = new Date()) {
     // A send whose turn was queued earlier is settled first: sent once its turn started, due again if the start failed.
     for (const item of this.list().filter(entry => entry.pending)) this.settle(item);
@@ -70,27 +70,26 @@ export class Schedules {
       if (!fresh?.on || fresh.pending || !fresh.nextAt || Date.parse(fresh.nextAt) > at.getTime()) continue;
       item = fresh;
       (this.sending ||= new Set()).add(item.id);
+      // A ticket for this one send, made before the agent can see the message: the coordinator marks it taken only once the
+      // agent really took the prompt, and lost if it never will (src/coordinator.js deliveryState).
+      const prompt = `Scheduled message from the person (set for ${item.time}):
+${item.text}`, delivery = `${item.id}@${new Date().toISOString()}`;
       try {
-        const since = new Date().toISOString();
-        const run = await this.desk.specialistTurn(item.agentId, { prompt: `Scheduled message from the person (set for ${item.time}):
-${item.text}` });
-        // The turn is only queued here: the message stays due, with the run to watch, until that turn really starts.
-        const current = this.store.get('schedmsg', item.id); if (!current) continue;
-        // Sent into a turn that was already running (the agent picks it up from its queue): that counts as delivered.
-        const live = run?.id ? this.store.get('run', run.id) : null, joined = Boolean(live?.state === 'running' && live.turnLaunchedAt && live.turnLaunchedAt < since);
-        this.store.put('schedmsg', item.id, { ...current, pending: { runId: String(run?.id || ''), since, due: at.toISOString(), ...(joined ? { joined } : {}) } });
+        this.desk.expectDelivery(delivery, { agentId: item.agentId, text: prompt });
+        const run = await this.desk.specialistTurn(item.agentId, { prompt });
+        const current = this.store.get('schedmsg', item.id); if (!current) { this.desk.forgetDelivery(delivery); continue; }
+        this.store.put('schedmsg', item.id, { ...current, pending: { runId: String(run?.id || ''), delivery, due: at.toISOString() } });
         this.settle(this.store.get('schedmsg', item.id));
-      } catch (error) { this.failed(item.id, error); } finally { this.sending.delete(item.id); }
+      } catch (error) { this.desk.forgetDelivery(delivery); this.failed(item.id, error); } finally { this.sending.delete(item.id); }
     }
   }
-  // A queued send counts as sent once the agent really launched on it (the coordinator's turnLaunchedAt, set when the agent
-  // first answers; turnStartedAt is set before the launch, so it proves nothing), or when it joined a turn already running.
-  // A launch that failed leaves it due for the next tick; one still queued, starting or launching waits.
+  // A send counts as sent only once its ticket was taken (the agent really got the prompt). Lost (a failed start, a sign-in
+  // error, a submit that failed, a run stopped with it still queued) leaves it due for the next tick. Anything else waits.
   settle(item) {
-    const { runId, since, due, joined } = item.pending || {}, run = runId ? this.store.get('run', runId) : null;
-    const launched = !run || joined || Boolean(run.turnLaunchedAt && run.turnLaunchedAt >= since);
-    if (!launched && run.state === 'failed') return this.failed(item.id, run.error || 'The agent could not start.');
-    if (!launched && ['queued', 'starting', 'running'].includes(run.state)) return;
+    const { runId, due, delivery } = item.pending || {}, state = this.desk.deliveryState(delivery, runId);
+    if (state === 'waiting' || state === 'turn') return;
+    this.desk.forgetDelivery(delivery);
+    if (state === 'lost') { const run = runId ? this.store.get('run', runId) : null; return this.failed(item.id, run?.state === 'failed' && run.error ? run.error : 'The agent did not get the message.'); }
     this.sent(item.id, new Date(due || Date.now()));
   }
   sent(id, at) {

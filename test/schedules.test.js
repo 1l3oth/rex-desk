@@ -7,7 +7,11 @@ import { Store } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
 import { inHours, cleanHours } from '../src/specialists.js';
 import { nextRun } from '../src/schedules.js';
+import { ClaudeRunner } from '../src/runners.js';
+import { CodexRunner } from '../src/codex.js';
 
+// A stand-in for an agent that really took the prompt: its waiting tickets are marked taken.
+const accept = (desk, prompt) => { for (const item of desk.store.list('delivery').filter(entry => entry.state === 'waiting' && String(prompt).includes(entry.text))) desk.setDelivery(item.id, { state: 'taken' }); };
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 function setup() {
   const projects = temporary('projects'), directory = path.join(projects, 'shop');
@@ -16,7 +20,7 @@ function setup() {
   const store = new Store(temporary('sched')), desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory') });
   desk.memory.scan({ roots: [projects] });
   const agent = desk.specialists.create({ name: 'Desky', projectSlug: 'shop' });
-  const sent = []; desk.specialistTurn = async (agentId, input) => { sent.push({ agentId, ...input }); return { id: `run-${sent.length}` }; };
+  const sent = []; desk.specialistTurn = async (agentId, input) => { sent.push({ agentId, ...input }); accept(desk, input.prompt); return { id: `run-${sent.length}` }; };
   return { store, desk, agent, sent };
 }
 const at = (day, time) => { const date = new Date(2026, 10, 16 + day); const [hour, minute] = time.split(':').map(Number); date.setHours(hour, minute, 0, 0); return date; }; // day 0 = Monday 16 Nov 2026
@@ -141,7 +145,7 @@ test('a past one-time message cannot be turned back on, and a due message waits 
   await desk.schedules.tick(at(0, '09:05'));
   assert.equal(store.get('schedmsg', daily.id).nextAt, daily.nextAt, 'a failed turn is not marked sent');
   assert.equal(store.get('schedmsg', daily.id).on, true); assert.match(store.get('schedmsg', daily.id).error, /no account/);
-  desk.specialistTurn = async (agentId, input) => { sent.push({ agentId, ...input }); return { id: 'run-x' }; };
+  desk.specialistTurn = async (agentId, input) => { sent.push({ agentId, ...input }); accept(desk, input.prompt); return { id: 'run-x' }; };
   await desk.schedules.tick(at(0, '09:10'));
   assert.equal(sent.length, 1);
   const saved = store.get('schedmsg', daily.id);
@@ -162,7 +166,7 @@ test('a scheduled message turned off while it is being sent stays off, whether t
   desk.specialists.status = () => ({ state: 'idle' });
   for (const fails of [true, false]) {
     const item = desk.schedules.create(agent.id, { text: fails ? 'Fails' : 'Works', time: '09:00', repeat: 'daily' }, at(0, '08:00'));
-    desk.specialistTurn = async () => { desk.schedules.toggle(item.id, false); if (fails) throw new Error('no account'); return { id: 'run-x' }; };
+    desk.specialistTurn = async (agentId, input) => { desk.schedules.toggle(item.id, false); if (fails) throw new Error('no account'); accept(desk, input.prompt); return { id: 'run-x' }; };
     await desk.schedules.tick(at(0, '09:00'));
     assert.equal(store.get('schedmsg', item.id).on, false, fails ? 'a failed try never turns it back on' : 'a sent one stays off');
     store.delete('schedmsg', item.id);
@@ -178,6 +182,7 @@ test('a due message turned off or deleted while the one before it is sending is 
   // Whichever is sent first turns one of the others off and deletes the last.
   desk.specialistTurn = async (agentId, input) => {
     sent.push(input.prompt);
+    accept(desk, input.prompt);
     if (sent.length === 1) { const others = [first, second, third].filter(item => !input.prompt.includes(item.text)); desk.schedules.toggle(others[0].id, false); store.delete('schedmsg', others[1].id); }
     return { id: 'run-x' };
   };
@@ -185,81 +190,116 @@ test('a due message turned off or deleted while the one before it is sending is 
   assert.equal(sent.length, 1, 'only the first one was sent');
 });
 
-test('a scheduled message counts as sent only once its turn really started: a start that fails leaves it on and due', async () => {
-  const { store, desk, agent } = setup();
-  desk.specialists.status = () => ({ state: 'idle' });
-  const once = desk.schedules.create(agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
-  const run = id => { store.put('run', id, { id, state: 'queued' }); return { id }; };
-  desk.specialistTurn = async () => run('run-a');
-  await desk.schedules.tick(at(0, '09:00'));
-  assert.equal(store.get('schedmsg', once.id).on, true, 'only queued: not sent yet');
-  store.put('run', 'run-a', { ...store.get('run', 'run-a'), state: 'failed', error: 'no account' });
-  let calls = 0; desk.specialistTurn = async () => { calls++; return run('run-b'); };
-  await desk.schedules.tick(at(0, '09:05'));
-  const saved = store.get('schedmsg', once.id);
-  assert.equal(saved.on, true, 'a failed start keeps it on'); assert.match(saved.error || '', /no account/); assert.equal(calls, 1, 'and it is tried again');
-  store.put('run', 'run-b', { ...store.get('run', 'run-b'), state: 'running', turnStartedAt: new Date().toISOString() });
-  await desk.schedules.tick(at(0, '09:07'));
-  assert.equal(store.get('schedmsg', once.id).on, true, 'turnStartedAt alone is not a launch');
-  store.put('run', 'run-b', { ...store.get('run', 'run-b'), turnLaunchedAt: new Date().toISOString() });
-  await desk.schedules.tick(at(0, '09:10'));
-  assert.equal(store.get('schedmsg', once.id).on, false, 'sent once the turn started'); assert.equal(calls, 1);
-  assert.equal(store.get('schedmsg', once.id).lastAt, at(0, '09:05').toISOString());
-});
-
-test('a one-time message whose agent fails to launch after its turn was marked started stays due, and is sent on the next launch', async () => {
+// Every path a scheduled turn can take, for Claude and Codex, through the real coordinator: a message counts as sent only
+// when the agent really took the prompt; anything else leaves it on and due, and it is never delivered twice.
+function deskWith(makeRunner, provider = 'claude') {
   const projects = temporary('projects'), directory = path.join(projects, 'shop');
   mkdirSync(path.join(directory, '.git'), { recursive: true });
   writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name: 'shop' }));
-  let launches = 0;
-  const store = new Store(temporary('sched')), desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'), runnerFactory: options => ({
-    async start() { launches++; if (launches === 1) throw new Error('spawn claude ENOENT'); options.event('session', { sessionId: 'abc' }); options.event('agent-text', { text: 'On it.' }); }, interrupt() {}, close() {} }) });
+  const store = new Store(temporary('sched')), launches = [];
+  const desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'), runnerFactory: options => { launches.push(options); return makeRunner(options, launches.length); } });
   desk.memory.scan({ roots: [projects] });
-  const agent = desk.specialists.create({ name: 'Desky', projectSlug: 'shop' });
+  const agent = desk.specialists.create({ name: 'Desky', projectSlug: 'shop', provider });
   desk.specialists.status = () => ({ state: 'idle' });
   const once = desk.schedules.create(agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
-  const settled = async () => { for (let step = 0; step < 100 && desk.live.size; step++) await new Promise(done => setTimeout(done, 20)); };
-  await desk.schedules.tick(at(0, '09:00')); await settled();
-  const run = store.get('run', store.get('specialist', agent.id).runId);
-  assert.equal(run.state, 'failed'); assert.ok(run.turnStartedAt, 'the turn was marked started before the launch failed');
-  // The next tick sees the failed launch, keeps the message due and sends it again.
-  await desk.schedules.tick(at(0, '09:05')); await settled(); await desk.schedules.tick(at(0, '09:10'));
-  assert.equal(launches, 2, 'the failed launch left it due, so it was tried again');
-  assert.equal(store.get('schedmsg', once.id).on, false, 'sent once the agent really launched');
-  await desk.schedules.tick(at(0, '09:15')); await settled();
-  assert.equal(launches, 2, 'never sent twice');
+  const settled = async () => { for (let step = 0; step < 150 && desk.live.size; step++) await new Promise(done => setTimeout(done, 20)); };
+  const runOf = () => store.get('run', store.get('specialist', agent.id).runId);
+  return { store, desk, agent, once, launches, settled, runOf, item: () => store.get('schedmsg', once.id) };
+}
+// A stand-in for the Agent SDK: each launch replays its own messages (or throws).
+const claudeSdk = script => { let launch = 0; return { query: () => { const messages = script(++launch); if (messages instanceof Error) throw messages; return Object.assign((async function* replay() { for (const message of messages) yield message; })(), { interrupt: async () => {}, close: () => {} }); } }; };
+const reply = (text, model = 'claude-opus-5-5') => [{ type: 'system', subtype: 'init', session_id: '11111111-1111-1111-1111-111111111111', apiKeySource: 'none' }, { type: 'assistant', message: { model, content: [{ type: 'text', text }] } }, { type: 'result', subtype: 'success', result: text, usage: {} }];
+
+test('path 1, launch fails (Claude): nothing was taken, so it stays due and the next launch sends it once', async () => {
+  const sdk = claudeSdk(launch => launch === 1 ? new Error('spawn claude ENOENT') : reply('On it.'));
+  const t = deskWith(options => new ClaudeRunner({ ...options, sdk }));
+  await t.desk.schedules.tick(at(0, '09:00')); await t.settled();
+  assert.equal(t.runOf().state, 'failed');
+  assert.equal(t.store.list('delivery')[0]?.state, 'lost', 'the ticket is lost, not taken');
+  await t.desk.schedules.tick(at(0, '09:05')); await t.settled(); await t.desk.schedules.tick(at(0, '09:10'));
+  assert.equal(t.launches.length, 2, 'tried again'); assert.equal(t.item().on, false, 'sent once the agent took it');
+  await t.desk.schedules.tick(at(0, '09:15')); await t.settled();
+  assert.equal(t.launches.length, 2, 'never sent twice');
 });
 
-test('a one-time message whose session opens but whose prompt submit fails (Codex style) stays due, and is sent once the prompt is accepted', async () => {
-  const projects = temporary('projects'), directory = path.join(projects, 'shop');
-  mkdirSync(path.join(directory, '.git'), { recursive: true });
-  writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name: 'shop' }));
-  let launches = 0;
-  // Like CodexRunner: the thread (session) opens first, then turn/start submits the prompt. The first submit fails.
-  const store = new Store(temporary('sched')), desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'), provider: 'codex', runnerFactory: options => ({
-    async start() {
-      launches++; options.event('session', { sessionId: `thread-${launches}`, apiKeySource: 'subscription' });
-      if (launches === 1) throw new Error('turn/start failed: connection closed');
-      options.event('prompt-accepted', { turnId: 'turn-2' });
-    }, interrupt() {}, close() {} }) });
-  desk.memory.scan({ roots: [projects] });
-  const agent = desk.specialists.create({ name: 'Desky', projectSlug: 'shop' });
-  desk.specialists.status = () => ({ state: 'idle' });
-  const once = desk.schedules.create(agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
-  const settled = async () => { for (let step = 0; step < 100 && desk.live.size; step++) await new Promise(done => setTimeout(done, 20)); };
-  await desk.schedules.tick(at(0, '09:00')); await settled();
-  const run = store.get('run', store.get('specialist', agent.id).runId);
-  assert.equal(run.state, 'failed'); assert.equal(run.sessionId, 'thread-1', 'the session opened before the submit failed');
-  assert.equal(run.turnLaunchedAt, undefined, 'an opened session is not an accepted prompt');
-  await desk.schedules.tick(at(0, '09:05'));
-  await settled(); await desk.schedules.tick(at(0, '09:10'));
-  assert.equal(launches, 2, 'the failed submit left it due, so it was tried again');
-  assert.equal(store.get('schedmsg', once.id).on, false, 'sent once the prompt was accepted');
-  await desk.schedules.tick(at(0, '09:15')); await settled();
-  assert.equal(launches, 2, 'never sent twice');
+test('path 2, sign-in error (Claude): a synthetic "not logged in" reply and its result do not count, so it stays due', async () => {
+  const signedOut = [{ type: 'system', subtype: 'init', session_id: '11111111-1111-1111-1111-111111111111', apiKeySource: 'none' }, { type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: 'Not logged in · Please run /login' }] } }, { type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login', usage: {} }];
+  const sdk = claudeSdk(launch => launch === 1 ? signedOut : reply('On it.'));
+  const t = deskWith(options => new ClaudeRunner({ ...options, sdk }));
+  await t.desk.schedules.tick(at(0, '09:00')); await t.settled();
+  assert.equal(t.runOf().state, 'failed'); assert.match(t.runOf().error, /not signed in/);
+  assert.equal(t.store.list('delivery')[0]?.state, 'lost', 'the ticket is lost, not taken');
+  await t.desk.schedules.tick(at(0, '09:05')); await t.settled(); await t.desk.schedules.tick(at(0, '09:10'));
+  assert.equal(t.launches.length, 2, 'tried again'); assert.equal(t.item().on, false, 'sent once a signed-in agent took it');
 });
 
-test('a one-time message whose turn ends cleanly without any answer event still counts as sent', async () => {
+test('path 3, session opens then the submit fails (Codex): the open thread does not count, so it stays due', async () => {
+  let submits = 0;
+  const clientFactory = options => ({ open: async () => {}, close() {}, request: async method => {
+    if (method === 'account/read') return { account: { type: 'chatgpt' } };
+    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: 'thread-1' } };
+    if (method === 'turn/start') {
+      if (++submits === 1) throw new Error('turn/start failed: connection closed');
+      setTimeout(() => { options.onNotification('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Done: pinged.' } }); options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id: 'u2', status: 'completed' } }); }, 5);
+      return { turn: { id: 'u2' } };
+    }
+    return {};
+  } });
+  const t = deskWith(options => new CodexRunner({ ...options, clientFactory }), 'codex');
+  await t.desk.schedules.tick(at(0, '09:00')); await t.settled();
+  assert.equal(t.runOf().state, 'failed'); assert.equal(t.runOf().sessionId, 'thread-1', 'the session opened before the submit failed');
+  assert.equal(t.store.list('delivery')[0]?.state, 'lost');
+  await t.desk.schedules.tick(at(0, '09:05')); await t.settled(); await t.desk.schedules.tick(at(0, '09:10'));
+  assert.equal(submits, 2, 'submitted again'); assert.equal(t.item().on, false, 'sent once Codex accepted the turn');
+});
+
+test('path 4, queued behind an agent waiting for an answer: not sent while queued; taken from the queue counts, a stop keeps it due', async () => {
+  for (const ending of ['taken', 'stopped']) {
+    let release;
+    const t = deskWith((options, launch) => ({
+      async start() {
+        options.event('prompt-accepted', {});
+        if (launch === 1) {
+          await new Promise(done => { release = done; options.signal.addEventListener('abort', () => done(), { once: true }); });
+          if (options.signal.aborted) throw new Error('Run stopped.');
+          if (ending === 'taken') options.inbox();
+        }
+      }, interrupt() {}, close() {} }));
+    void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' }); await new Promise(done => setTimeout(done, 80));
+    assert.equal(t.desk.live.size, 1, `${ending}: the agent is mid-turn, waiting for an answer`);
+    await t.desk.schedules.tick(at(0, '09:00'));
+    assert.ok(t.runOf().queued.some(text => text.includes('Ping')), 'queued for the agent'); assert.equal(t.item().on, true, 'queued is not sent');
+    await t.desk.schedules.tick(at(0, '09:02'));
+    assert.equal(t.item().on, true, 'still waiting');
+    if (ending === 'taken') {
+      release(); await t.settled(); await t.desk.schedules.tick(at(0, '09:05'));
+      assert.equal(t.item().on, false, 'taken from the queue: sent'); assert.equal(t.launches.length, 1, 'no second turn');
+      continue;
+    }
+    await t.desk.stop(t.runOf().id); await t.settled();
+    await t.desk.schedules.tick(at(0, '09:05'));
+    assert.equal((t.runOf().queued || []).some(text => text.includes('Ping')), false, 'out of the stopped run\'s queue, so it is not sent twice');
+    await t.settled(); await t.desk.schedules.tick(at(0, '09:10'));
+    assert.equal(t.launches.length, 2, 'sent again in a new turn'); assert.equal(t.item().on, false);
+  }
+});
+
+test('path 5, run stopped: before the prompt was taken it stays due; after, it counts as sent', async () => {
+  for (const accepted of [false, true]) {
+    const t = deskWith((options, launch) => ({
+      async start() {
+        if (launch === 1) { if (accepted) options.event('prompt-accepted', {}); await new Promise(done => options.signal.addEventListener('abort', () => done(), { once: true })); throw new Error('Run stopped.'); }
+      }, interrupt() {}, close() {} }));
+    await t.desk.schedules.tick(at(0, '09:00')); await new Promise(done => setTimeout(done, 80));
+    assert.equal(t.item().on, !accepted, accepted ? 'taken at once: sent' : 'in a turn, not taken: waiting');
+    await t.desk.stop(t.runOf().id); await t.settled();
+    await t.desk.schedules.tick(at(0, '09:05')); await t.settled(); await t.desk.schedules.tick(at(0, '09:10'));
+    assert.equal(t.launches.length, accepted ? 1 : 2, accepted ? 'taken before the stop: not sent again' : 'stopped before it was taken: sent again');
+    assert.equal(t.item().on, false);
+  }
+});
+
+test('path 6, the turn ends cleanly without any accepted signal (any runner): it counts as sent', async () => {
   const projects = temporary('projects'), directory = path.join(projects, 'shop');
   mkdirSync(path.join(directory, '.git'), { recursive: true });
   writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name: 'shop' }));
@@ -271,6 +311,20 @@ test('a one-time message whose turn ends cleanly without any answer event still 
   const once = desk.schedules.create(agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
   const settled = async () => { for (let step = 0; step < 100 && desk.live.size; step++) await new Promise(done => setTimeout(done, 20)); };
   await desk.schedules.tick(at(0, '09:00')); await settled(); await desk.schedules.tick(at(0, '09:05')); await settled();
-  assert.ok(store.get('run', store.get('specialist', agent.id).runId).turnLaunchedAt, 'a clean end marks the prompt taken');
   assert.equal(store.get('schedmsg', once.id).on, false); assert.equal(launches, 1, 'not sent twice');
+});
+
+test('path 7, turned off or deleted while its turn is going: off stays off, deleted is dropped with its ticket', async () => {
+  for (const change of ['off', 'deleted']) {
+    let release;
+    const t = deskWith(options => ({ async start() { await new Promise(done => { release = done; }); options.event('prompt-accepted', {}); }, interrupt() {}, close() {} }));
+    t.store.delete('schedmsg', t.once.id);
+    const daily = t.desk.schedules.create(t.agent.id, { text: 'Daily', time: '09:00', repeat: 'daily' }, at(0, '08:00'));
+    await t.desk.schedules.tick(at(0, '09:00')); await new Promise(done => setTimeout(done, 80));
+    if (change === 'off') t.desk.schedules.toggle(daily.id, false); else t.desk.schedules.remove(daily.id);
+    release(); await t.settled(); await t.desk.schedules.tick(at(0, '09:05'));
+    if (change === 'off') assert.equal(t.store.get('schedmsg', daily.id).on, false, 'stays off'); else assert.equal(t.store.get('schedmsg', daily.id), undefined);
+    assert.equal(t.launches.length, 1, 'not sent again');
+    if (change === 'deleted') assert.equal(t.store.list('delivery').length, 0, 'its ticket is gone');
+  }
 });
