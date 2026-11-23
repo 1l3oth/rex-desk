@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { PhoneRelay } from '../src/phone-relay.js';
+import { readFileSync } from 'node:fs';
+import { PhoneRelay, relayProblem } from '../src/phone-relay.js';
 import { relayFrame, readRelayFrame, RELAY_OP } from '../src/phone-relay-frame.js';
 
 function fakeDesk(port) {
@@ -103,4 +104,23 @@ test('a relay "not paid" or "signed out" close stops the desk dialling again', (
   const { desk } = fakeDesk(1), socket = fakeSocket(), relay = new PhoneRelay(desk, { socket: () => socket });
   relay.setEnabled(true); socket.emit('close', { code: 1006 });
   assert.equal(relay.view().state, 'offline'); assert.ok(relay.timer); relay.stop();
+});
+
+test('a failed relay connect says why: not signed in, plan, server unreachable, or the error itself', () => {
+  assert.deepEqual(relayProblem({ code: 4002, opened: true }), { reason: 'not-paid', detail: '' });
+  assert.deepEqual(relayProblem({ code: 4003, opened: true }), { reason: 'signed-out', detail: '' });
+  assert.equal(relayProblem({ code: 1006, error: 'getaddrinfo ENOTFOUND api.rexdesk.dev' }).reason, 'unreachable');
+  assert.deepEqual(relayProblem({ code: 1011, reason: 'relay restarting', opened: true }), { reason: 'other', detail: 'relay restarting' });
+  const { desk, events } = fakeDesk(1), socket = fakeSocket(), relay = new PhoneRelay(desk, { socket: () => socket });
+  relay.setEnabled(true); socket.emit('error', { message: 'connect ECONNREFUSED' }); socket.emit('close', { code: 1006 });
+  assert.equal(relay.view().state, 'offline');
+  assert.deepEqual(relay.view().problem, { reason: 'unreachable', detail: 'connect ECONNREFUSED' }, 'the real error is kept');
+  assert.ok(events.some(([, kind, data]) => kind === 'phone-relay-error' && /ECONNREFUSED/.test(data.message)), 'and logged');
+  relay.stop();
+  const signedOut = fakeDesk(1), gone = fakeSocket(), other = new PhoneRelay(signedOut.desk, { socket: () => gone });
+  other.setEnabled(true); gone.emit('open'); gone.emit('close', { code: 4003 });
+  assert.equal(other.view().state, 'signed-out'); assert.equal(other.view().problem.reason, 'signed-out');
+  const page = readFileSync(new URL('../public/chat-devices.js', import.meta.url), 'utf8');
+  assert.match(page, /web\.rexdesk\.app/); assert.doesNotMatch(page, /app\.rexdesk\.dev/);
+  assert.match(page, /problem\?\.reason === 'unreachable'/, 'the status line shows the reason');
 });

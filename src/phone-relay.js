@@ -22,12 +22,19 @@ const keyOf = id => createHash('sha256').update(`rex-phone:${id}`).digest('hex')
 const refOf = key => key.slice(0, 20);
 
 const STOP_CODES = { 4001: 'replaced', 4002: 'not-paid', 4003: 'signed-out' };
+// Why the last try to reach the relay failed, for the line under the switch: the relay's own stop codes first; a socket that
+// never opened could not reach the server (or it refused the handshake); anything after it opened is shown with its own words.
+export function relayProblem({ code, reason = '', error = '', opened = false } = {}) {
+  if (STOP_CODES[code]) return { reason: STOP_CODES[code], detail: '' };
+  const detail = String(reason || error || (code ? `closed with code ${code}` : '')).slice(0, 200);
+  return { reason: opened ? 'other' : 'unreachable', detail };
+}
 export class PhoneRelay {
   constructor(desk, { url = RELAY_URL, socket = (target, token) => new WebSocket(target, { headers: { authorization: `Bearer ${token}` } }), port = () => desk.port } = {}) {
     this.desk = desk; this.url = url; this.makeSocket = socket; this.port = port;
     // Only requests carrying this secret count as relayed. It never leaves this process.
     this.secret = randomBytes(24).toString('base64url');
-    this.streams = new Map(); this.socket = null; this.state = 'off'; this.tries = 0; this.timer = null; this.publicUrl = '';
+    this.streams = new Map(); this.socket = null; this.state = 'off'; this.tries = 0; this.timer = null; this.publicUrl = ''; this.problem = null;
   }
   get store() { return this.desk.store; }
   settings() { return this.store.get('phone-relay', 'main') || { enabled: false, devices: [], pending: [] }; }
@@ -64,7 +71,7 @@ export class PhoneRelay {
     for (const [streamId, stream] of this.streams) if (gone.some(entry => entry.key === stream.key)) { this.streams.delete(streamId); stream.request?.destroy(); this.send(RELAY_OP.ABORT, streamId); }
     return { removed: true };
   }
-  view() { const settings = this.settings(); return { enabled: Boolean(settings.enabled), state: this.state, url: this.publicUrl, devices: settings.devices.map(({ ref, name, at }) => ({ id: ref, name, at })), pending: this.pending() }; }
+  view() { const settings = this.settings(); return { enabled: Boolean(settings.enabled), state: this.state, problem: this.state === 'online' ? null : this.problem, url: this.publicUrl, devices: settings.devices.map(({ ref, name, at }) => ({ id: ref, name, at })), pending: this.pending() }; }
 
   // ---------- the connection to the relay ----------
   setEnabled(on) { this.save({ enabled: Boolean(on) }); if (on) this.start(); else this.stop(); return this.view(); }
@@ -73,14 +80,22 @@ export class PhoneRelay {
     const token = this.desk.net?.token?.(); if (!token) { this.state = 'signed-out'; return; }
     this.state = 'connecting';
     // The relay checks the sign-in on the upgrade itself, so the token rides on the handshake; HELLO repeats it with the desk's name.
-    let socket; try { socket = this.makeSocket(this.url, token); } catch { return this.retry(); }
+    let socket; try { socket = this.makeSocket(this.url, token); } catch (error) { this.failed({ error: error.message }); this.state = 'offline'; return this.retry(); }
     this.socket = socket; socket.binaryType = 'arraybuffer';
+    let opened = false, error = '';
+    socket.addEventListener('open', () => opened = true);
     socket.addEventListener('open', () => this.send(RELAY_OP.HELLO, 0, json({ token, desk: this.store.nodeId, name: this.desk.peers?.self?.name || '' })));
     socket.addEventListener('message', event => { try { this.onFrame(readRelayFrame(Buffer.from(event.data))); } catch (error) { this.store.event('', 'phone-relay-error', { message: error.message }); } });
     // The relay closes with 4001 when a newer connection of this desk took over, 4002 when the plan has no relay and 4003 when the sign-in
     // is no longer good. Those do not get better by dialling again, so the desk waits for the switch or a new sign-in instead.
-    socket.addEventListener('close', event => { if (this.socket !== socket) return; this.socket = null; this.dropStreams(); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); });
-    socket.addEventListener('error', () => {});
+    socket.addEventListener('close', event => { if (this.socket !== socket) return; this.socket = null; this.dropStreams(); this.failed({ code: event?.code, reason: event?.reason, error, opened }); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); });
+    // The error itself is kept for the close that always follows it, which says what went wrong.
+    socket.addEventListener('error', event => { error = String(event?.message || event?.error?.message || 'connection error'); });
+  }
+  failed(what) {
+    this.problem = relayProblem(what);
+    const message = [this.problem.reason, this.problem.detail].filter(Boolean).join(': ');
+    this.store.event('', 'phone-relay-error', { message }); console.warn(`Phone relay: ${message}`);
   }
   stop() {
     clearTimeout(this.timer); this.timer = null; const socket = this.socket; this.socket = null; this.dropStreams();
@@ -95,7 +110,7 @@ export class PhoneRelay {
   dropStreams() { for (const stream of this.streams.values()) stream.request?.destroy(); this.streams.clear(); }
 
   onFrame({ op, streamId, payload }) {
-    if (op === RELAY_OP.WELCOME) { this.state = 'online'; this.tries = 0; try { this.publicUrl = String(JSON.parse(payload.toString('utf8')).url || ''); } catch {} return; }
+    if (op === RELAY_OP.WELCOME) { this.state = 'online'; this.tries = 0; this.problem = null; try { this.publicUrl = String(JSON.parse(payload.toString('utf8')).url || ''); } catch {} return; }
     if (op === RELAY_OP.PING) return this.send(RELAY_OP.PONG, streamId, payload);
     if (op === RELAY_OP.REQ) return this.openStream(streamId, JSON.parse(payload.toString('utf8')));
     if (op === RELAY_OP.REQ_BODY) return this.bodyChunk(streamId, payload);
