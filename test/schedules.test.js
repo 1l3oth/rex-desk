@@ -168,3 +168,19 @@ test('a scheduled message turned off while it is being sent stays off, whether t
     store.delete('schedmsg', item.id);
   }
 });
+
+test('a due message turned off or deleted while the one before it is sending is not sent from the old list', async () => {
+  const { store, desk, agent, sent } = setup();
+  desk.specialists.status = () => ({ state: 'idle' });
+  const first = desk.schedules.create(agent.id, { text: 'First', time: '09:00', repeat: 'daily' }, at(0, '08:00'));
+  const second = desk.schedules.create(agent.id, { text: 'Second', time: '09:00', repeat: 'daily' }, at(0, '08:00'));
+  const third = desk.schedules.create(agent.id, { text: 'Third', time: '09:00', repeat: 'daily' }, at(0, '08:00'));
+  // Whichever is sent first turns one of the others off and deletes the last.
+  desk.specialistTurn = async (agentId, input) => {
+    sent.push(input.prompt);
+    if (sent.length === 1) { const others = [first, second, third].filter(item => !input.prompt.includes(item.text)); desk.schedules.toggle(others[0].id, false); store.delete('schedmsg', others[1].id); }
+    return { id: 'run-x' };
+  };
+  await desk.schedules.tick(at(0, '09:00'));
+  assert.equal(sent.length, 1, 'only the first one was sent');
+});

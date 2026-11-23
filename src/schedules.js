@@ -54,7 +54,7 @@ export class Schedules {
   // It waits while the agent is busy with another turn, and counts as sent only once its turn really started; if that fails it stays due.
   async tick(at = new Date()) {
     // Only the computer the agent works on sends it, so two computers never send the same message twice.
-    for (const item of this.list().filter(entry => entry.on && entry.nextAt && Date.parse(entry.nextAt) <= at.getTime() && (entry.agentId === 'main' || this.desk.peers?.owns?.(entry.agentId) !== false))) {
+    for (let item of this.list().filter(entry => entry.on && entry.nextAt && Date.parse(entry.nextAt) <= at.getTime() && (entry.agentId === 'main' || this.desk.peers?.owns?.(entry.agentId) !== false))) {
       if (this.sending?.has(item.id)) continue;
       const agent = item.agentId === 'main' ? this.desk.specialists.ensureMain() : this.store.get('specialist', item.agentId);
       if (!agent) { this.store.delete('schedmsg', item.id); continue; }
@@ -62,6 +62,11 @@ export class Schedules {
       const hours = agent.loop?.hours;
       if (hours?.on && !inHours(hours, at)) continue;
       if (['busy', 'replying'].includes(this.desk.specialists.status(agent)?.state)) continue;
+      // Read again right before sending: the list was read before the messages ahead of this one were sent, and this one
+      // may have been turned off, deleted or changed since.
+      const fresh = this.store.get('schedmsg', item.id);
+      if (!fresh?.on || !fresh.nextAt || Date.parse(fresh.nextAt) > at.getTime()) continue;
+      item = fresh;
       (this.sending ||= new Set()).add(item.id);
       try {
         await this.desk.specialistTurn(item.agentId, { prompt: `Scheduled message from the person (set for ${item.time}):
