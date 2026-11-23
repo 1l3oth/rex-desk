@@ -380,7 +380,7 @@
  "Comparing…": "កំពុងប្រៀបធៀប…",
  "Computer": "កុំព្យូទ័រ",
  "Computer control is off. Turn it on in Rex Desk → Settings → Jev and voice.": "ការគ្រប់គ្រងកុំព្យូទ័របានបិទ។ បើកវាក្នុង Rex Desk → ការកំណត់ → Jev និងសំឡេង។",
- "Computer control is off. Turn it on in Settings → Jev and voice → Controlling this computer.": "ការគ្រប់គ្រងកុំព្យូទ័របានបិទ។ បើកវាក្នុងការកំណត់ → Jev និងសំឡេង → ការគ្រប់គ្រងកុំព្យូទ័រនេះ។",
+ "Jev and voice is off. Turn on the Jev and voice switch at the top of Settings → Jev and voice.": "Jev និងសំឡេងបានបិទ។ បើកកុងតាក់ Jev និងសំឡេង នៅខាងលើនៃការកំណត់ → Jev និងសំឡេង។",
  "Concurrency must be 1–6.": "ចំនួនក្នុងពេលតែមួយត្រូវតែ 1–6។",
  "Connect": "តភ្ជាប់",
  "Connect an Orbit goal": "តភ្ជាប់គោលដៅ Orbit",
@@ -2516,9 +2516,9 @@
  "Rex Desk could not use the microphone ({0}). Try again.": "Rex Desk មិនអាចប្រើមីក្រូហ្វូនបានទេ ({0})។ សាកម្តងទៀត។",
  "Starting the voice engine ({0}s). Voice messages use another engine until it is ready.": "កំពុងចាប់ផ្តើមម៉ាស៊ីនសំឡេង ({0}s)។ សារជាសំឡេងប្រើម៉ាស៊ីនផ្សេងរហូតដល់វារួចរាល់។",
  "How to set up voice": "របៀបរៀបចំសំឡេង",
-  "Not a Git folder": "មិនមែនជាថត Git",
-  "Not a Git folder: agents work straight in it. There are no branches or pull requests.": "មិនមែនជាថត Git៖ ភ្នាក់ងារធ្វើការដោយផ្ទាល់ក្នុងថតនេះ។ គ្មានសាខា ឬ pull request ទេ។",
-  "Listening…": "កំពុងស្តាប់…",
+ "Not a Git folder": "មិនមែនជាថត Git",
+ "Not a Git folder: agents work straight in it. There are no branches or pull requests.": "មិនមែនជាថត Git៖ ភ្នាក់ងារធ្វើការដោយផ្ទាល់ក្នុងថតនេះ។ គ្មានសាខា ឬ pull request ទេ។",
+ "Listening…": "កំពុងស្តាប់…",
  "Computers": "កុំព្យូទ័រ",
  "To add another computer, sign in to the same Rex Desk account on it.": "ដើម្បីបន្ថែមកុំព្យូទ័រមួយទៀត ចូលគណនី Rex Desk ដដែលនៅលើវា។",
  "Connect over Tailscale": "ភ្ជាប់តាម Tailscale",
@@ -2533,5 +2533,6 @@
  "Off. Jev does nothing until you turn it on.": "បិទ។ Jev មិនធ្វើអ្វីទេ រហូតដល់អ្នកបើកវា។",
  "Ready. Press Ctrl+Alt+J in any app, then say or type what to do.": "រួចរាល់។ ចុច Ctrl+Alt+J នៅក្នុងកម្មវិធីណាមួយ រួចនិយាយ ឬវាយអ្វីដែលត្រូវធ្វើ។",
  "Checking what Jev needs…": "កំពុងពិនិត្យមើលអ្វីដែល Jev ត្រូវការ…",
- "To start, Jev needs Claude signed in (Settings, AI) or an OpenRouter key under Advanced.": "ដើម្បីចាប់ផ្តើម Jev ត្រូវការ Claude ដែលបានចូលគណនី (Settings, AI) ឬ OpenRouter key នៅក្រោម កម្រិតខ្ពស់។"
+ "To start, Jev needs Claude signed in (Settings, AI) or an OpenRouter key under Advanced.": "ដើម្បីចាប់ផ្តើម Jev ត្រូវការ Claude ដែលបានចូលគណនី (Settings, AI) ឬ OpenRouter key នៅក្រោម កម្រិតខ្ពស់។",
+ "Ready. Open Jev from the left bar, then say or type what to do.": "រួចរាល់។ បើក Jev ពីរបារខាងឆ្វេង រួចនិយាយ ឬវាយអ្វីដែលត្រូវធ្វើ។"
 }

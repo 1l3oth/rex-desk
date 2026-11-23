@@ -230,3 +230,31 @@ test('the Market page opens from the sidebar, lists what agents can use, and Set
     assert.equal(await page.locator('[data-st-section="tools"]').count(), 0, 'no Tools and skills section in Settings');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// Jev and voice: a switch change keeps the "Done without asking" list, and a slow background answer cannot redraw the tab before the save reads it.
+test('a Jev and voice switch change keeps the allowed actions and survives a slow background redraw', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const config = async () => (await (await fetch(`${base}/api/state`)).json()).config;
+    const current = await config();
+    const put = await fetch(`${base}/api/config`, { method: 'PUT', headers: { 'content-type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ ...current, control: { ...current.control, allow: ['close_app'] } }) });
+    assert.ok(put.ok, 'test setup: an allowed action saved');
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    await page.goto(`${base}/`); await page.waitForTimeout(2500);
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    let release = () => {};
+    const gate = new Promise(done => { release = done; });
+    await page.route('**/api/speak/voices', async route => { await gate; await route.continue(); });
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
+    await page.evaluate(() => document.querySelector('[data-st-section="jev"]').click()); await page.waitForTimeout(800);
+    await page.locator('.settings-pop [name="control.agents"]').evaluate(box => box.click());
+    release(); await page.waitForTimeout(1500);
+    const saved = (await config()).control;
+    assert.equal(saved.agents, true, 'the switch change was saved');
+    assert.deepEqual(saved.allow, ['close_app'], 'the allowed actions are kept');
+    assert.equal(await page.locator('.settings-pop [name="control.agents"]').isChecked(), true, 'the switch still shows on after the redraw');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});

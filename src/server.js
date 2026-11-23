@@ -754,7 +754,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname.startsWith('/api/computer') || url.pathname.startsWith('/api/voice')) {
         const control = store.config().control || {};
         if (url.pathname === '/api/computer' && request.method === 'GET') return json(response, 200, { platform: computer.key, catalog: computer.catalog(), control, voice: { ...voice.status(), sizeMB: voice.size() }, anywhere: await anywhere.status() });
-        if (control.enabled === false) return json(response, 403, { error: 'Computer control is off. Turn it on in Settings → Jev and voice → Controlling this computer.' });
+        if (control.enabled === false) return json(response, 403, { error: 'Jev and voice is off. Turn on the Jev and voice switch at the top of Settings → Jev and voice.' });
         if (url.pathname === '/api/computer/anywhere' && request.method === 'POST') return json(response, 200, await anywhere.set((await body(request)).on === true));
         if (url.pathname === '/api/computer/do' && request.method === 'POST') return json(response, 200, await desk.commander.perform((await body(request)).text));
         // "Yes, always": these actions stop asking. Only actions that normally ask can be added.

@@ -198,7 +198,7 @@ export function openSettings(ctx, section = 'general') {
   const jevStatus = () => {
     if (config().control?.enabled === false) return t('Off. Jev does nothing until you turn it on.');
     const claude = ui.accounts?.claude?.profiles?.some(item => item.loggedIn);
-    if (config().jev?.hasKey || claude) return t('Ready. Press Ctrl+Alt+J in any app, then say or type what to do.');
+    if (config().jev?.hasKey || claude) return state.extra.anywhere?.platform === 'windows' && state.extra.anywhere.running ? t('Ready. Press Ctrl+Alt+J in any app, then say or type what to do.') : t('Ready. Open Jev from the left bar, then say or type what to do.');
     if (!ui.accounts) return t('Checking what Jev needs…');
     return t('To start, Jev needs Claude signed in (Settings, AI) or an OpenRouter key under Advanced.');
   };
@@ -394,7 +394,7 @@ export function openSettings(ctx, section = 'general') {
     if (has('projects') && back.querySelector('[name="branchPrefix"]')) next.branchPrefix = v.branchPrefix;
     if (has('projects')) next.repositories = base.repositories.map((repo, index) => ({ ...repo, ...Object.fromEntries(['baseBranch', 'targetBranch', 'setupCommand', 'devCommand', 'testCommand', 'workFolder', 'push'].map(key => [key, v[`repo.${index}.${key}`] ?? repo[key]])) }));
     if (has('jev')) next.jev = { ...base.jev, apiKey: v['jev.apiKey'] || '', clearKey: checked('jev.clearKey'), ...(back.querySelector('[name="jev.model"]') ? { model: v['jev.model'], versions: v['jev.versions'], auto: checked('jev.auto') } : {}) };
-    if (has('jev')) { next.control = { enabled: checked('control.enabled'), confirm: checked('control.confirm'), agents: checked('control.agents'), language: v['control.language'] }; }
+    if (has('jev')) { next.control = { ...base.control, enabled: checked('control.enabled'), confirm: checked('control.confirm'), agents: checked('control.agents'), language: v['control.language'] }; }
     const schedule0 = base.schedule || {};
     if (has('schedule') && back.querySelector('[name="schedule.enabled"]')) next.schedule = { enabled: checked('schedule.enabled'), time: v['schedule.time'], maxRuns: Number(v['schedule.maxRuns']), fix: back.querySelector('[name="schedule.fix"]') ? checked('schedule.fix') : schedule0.fix !== false, days: [...back.querySelectorAll('[name="schedule.days"]:checked')].map(box => Number(box.value)) };
     if (has('sources')) { readTrackers(back, state); next.sources = trackerSources(ui, state, config()); if (v.syncMinutes != null) next.syncMinutes = Number(v.syncMinutes); }
@@ -548,15 +548,16 @@ export function openSettings(ctx, section = 'general') {
     } catch (error) { toast(error.message, true); }
   });
   // Every field saves by itself: a change saves at once, typing saves a moment after the last key. There is no Save button.
-  let autoTimer = 0, pendingSave = false;
+  let autoTimer = 0, pendingSave = false, jevLater = false;
+  const afterSave = () => { if (jevLater) { jevLater = false; if (has('jev') && document.body.contains(back)) draw(); } };
   // Save a waiting edit now, before the page it belongs to is redrawn or closed (it reads the fields synchronously).
-  flushSave = () => { if (!pendingSave) return; clearTimeout(autoTimer); pendingSave = false; save(true).catch(error => toast(error.message, true)); };
+  flushSave = () => { if (!pendingSave) return; clearTimeout(autoTimer); pendingSave = false; save(true).catch(error => toast(error.message, true)); jevLater = false; };
   const ownSave = el => el.matches?.('[data-st-part],[data-st-rule],[data-st-tts],[data-st-voice],[data-st-fish-key]') || el.closest?.('[data-st-fish]');
   const autoSave = event => {
     const el = event.target;
     if (!el.matches?.('input,select,textarea') || !el.closest('[data-st-panel]') || ownSave(el) || !PARTS[state.section].some(part => SAVE_PARTS.includes(part))) return;
     clearTimeout(autoTimer); pendingSave = true;
-    autoTimer = setTimeout(() => { pendingSave = false; if (document.body.contains(back)) save(true).catch(error => toast(error.message, true)); }, event.type === 'input' ? 700 : 150);
+    autoTimer = setTimeout(() => { pendingSave = false; if (document.body.contains(back)) save(true).catch(error => toast(error.message, true)); afterSave(); }, event.type === 'input' ? 700 : 150);
   };
   back.addEventListener('input', event => { if (event.target.matches?.('input:not([type=checkbox],[type=radio],[type=range]),textarea')) autoSave(event); });
   back.addEventListener('change', autoSave);
@@ -588,14 +589,17 @@ export function openSettings(ctx, section = 'general') {
   const SPEAK_CACHE = 'rex-desk-speak-cache';
   try { const cached = JSON.parse(localStorage.getItem(SPEAK_CACHE) || 'null'); if (cached) { state.extra.tts ||= cached.tts; state.extra.neural ||= cached.neural; } } catch { /* private window */ }
   const keepSpeak = () => { try { localStorage.setItem(SPEAK_CACHE, JSON.stringify({ tts: state.extra.tts, neural: state.extra.neural })); } catch { /* private window */ } };
-  if (has('jev') && !ui.accounts) void api('/agents').then(list => { ui.accounts ||= list; if (has('jev') && document.body.contains(back)) draw(); }).catch(() => {});
-  void api('/speak/engine').then(status => { state.extra.tts = status; keepSpeak(); setSpeechEngine(status); if (has('jev') && document.body.contains(back)) draw(); }).catch(() => {});
-  void api('/speak/voices').then(neural => { state.extra.neural = neural; keepSpeak(); if (has('jev') && document.body.contains(back)) draw(); }).catch(() => {});
-  if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); if (has('jev') && document.body.contains(back)) draw(); });
+  // A background answer redraws the Jev tab only when no edit is waiting to save; otherwise the redraw waits until that save has read the fields.
+  const jevDraw = () => { if (!has('jev') || !document.body.contains(back)) return; if (pendingSave) { jevLater = true; return; } draw(); };
+  if (has('jev') && !ui.accounts) void api('/agents').then(list => { ui.accounts ||= list; jevDraw(); }).catch(() => {});
+  void api('/computer').then(info => { state.extra.anywhere = info.anywhere; jevDraw(); }).catch(() => {});
+  void api('/speak/engine').then(status => { state.extra.tts = status; keepSpeak(); setSpeechEngine(status); jevDraw(); }).catch(() => {});
+  void api('/speak/voices').then(neural => { state.extra.neural = neural; keepSpeak(); jevDraw(); }).catch(() => {});
+  if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); jevDraw(); });
   // Spoken replies: each control saves at once.
   back.addEventListener('change', async event => {
     const name = event.target.dataset?.stTts; if (!name) return;
-    try { const status = await api('/speak/engine', { method: 'POST', data: { [name]: event.target.value } }); state.extra.tts = status; setSpeechEngine(status); toast(t('Saved.')); }
+    try { const status = await api('/speak/engine', { method: 'POST', data: { [name]: event.target.value } }); state.extra.tts = status; keepSpeak(); setSpeechEngine(status); toast(t('Saved.')); }
     catch (error) { toast(error.message, true); }
     draw();
   });
@@ -604,15 +608,15 @@ export function openSettings(ctx, section = 'general') {
     if (!save && !remove && !test) return;
     event.preventDefault();
     try {
-      if (save) { const key = back.querySelector('[data-st-fish-key]')?.value || ''; const result = await api('/speak/fish-key', { method: 'POST', data: { key } }); state.extra.tts = result; setSpeechEngine(result); toast(t('Fish Audio key saved.')); }
-      if (remove) { const result = await api('/speak/fish-key', { method: 'POST', data: { key: '' } }); state.extra.tts = result; setSpeechEngine(result); toast(t('Fish Audio key removed.')); }
+      if (save) { const key = back.querySelector('[data-st-fish-key]')?.value || ''; const result = await api('/speak/fish-key', { method: 'POST', data: { key } }); state.extra.tts = result; keepSpeak(); setSpeechEngine(result); toast(t('Fish Audio key saved.')); }
+      if (remove) { const result = await api('/speak/fish-key', { method: 'POST', data: { key: '' } }); state.extra.tts = result; keepSpeak(); setSpeechEngine(result); toast(t('Fish Audio key removed.')); }
       if (test) {
         state.extra.ttsTesting = true; draw();
         const response = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text: 'Hi, this is how I will sound when we talk in Voice mode.', lang: 'en' }) });
         if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || t('The voice service did not answer.'));
         const audio = new Audio(URL.createObjectURL(await response.blob())); await audio.play().catch(() => {});
         await new Promise(resolve => { audio.onended = resolve; audio.onerror = resolve; setTimeout(resolve, 15000); });
-        state.extra.tts = await api('/speak/engine'); setSpeechEngine(state.extra.tts);
+        state.extra.tts = await api('/speak/engine'); keepSpeak(); setSpeechEngine(state.extra.tts);
       }
     } catch (error) { toast(error.message, true); }
     state.extra.ttsTesting = false; draw();
