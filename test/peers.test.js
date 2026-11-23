@@ -444,3 +444,18 @@ test('a removed note that arrives without the notes file leaves the other comput
   assert.match(b.desk.memory.person(), /Answers first/);
   assert.deepEqual(JSON.parse(readFileSync(b.desk.memory.file('forgotten.json'), 'utf8')), JSON.parse(forgotten));
 });
+
+test('a synced note removal takes out only that note line and keeps the rest of the page byte for byte', () => {
+  const { a, b } = computers();
+  for (const desk of [a.desk, b.desk]) { desk.memory.personNote('likes', 'Plain words.'); desk.memory.personNote('likes', 'Answers first.'); }
+  const file = b.desk.memory.file('user.md'), page = readFileSync(file, 'utf8');
+  const lines = page.split('\n'), at = lines.findIndex(line => /Answers first/.test(line));
+  lines.splice(at + 1, 0, 'Some text under the heading the person wrote.');
+  writeFileSync(file, lines.join('\r\n'));
+  const before = readFileSync(file, 'utf8');
+  a.desk.memory.forgetPersonNote('likes', 'Plain words');
+  b.desk.peers.applyFiles([{ name: 'forgotten.json', mtime: Date.now(), text: readFileSync(a.desk.memory.file('forgotten.json'), 'utf8') }]);
+  const after = readFileSync(file, 'utf8'), gone = before.split(/(?<=\n)/).find(line => /Plain words/.test(line));
+  assert.equal(after, before.replace(gone, ''), 'only the removed note line went');
+  assert.match(after, /Some text under the heading/); assert.match(after, /Answers first/);
+});

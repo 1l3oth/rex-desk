@@ -242,7 +242,9 @@ export class Peers {
       const file = this.desk.memory.file(...name.split('/')); if (!existsSync(file)) continue;
       const before = readFileSync(file, 'utf8');
       if (!parseNotesHas(before, key => notes[key]?.gone === true)) continue;
-      writeFileSync(file, mergeNotes(before, '', notes));
+      // Only the removed note lines go; every other byte of the page (text under headings, spacing, line ends) stays.
+      const after = before.split(/(?<=\n)/).filter(line => !(/^-\s+/.test(line) && notes[noteKey(line.trimEnd())]?.gone === true)).join('');
+      if (after !== before) writeFileSync(file, after);
     }
   }
   // Whether this computer answers for an agent in a message: its own agents, and its Rex Agent for messages written here.
