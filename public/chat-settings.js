@@ -59,6 +59,8 @@ function planCard(database, state) {
   <div class="pl-card"><div class="pl-head"><b>${t`Billing history`}</b></div>
     ${(billing.invoices || []).length ? `<ul class="pl-bills">${billing.invoices.map(item => `<li><span>${new Date(item.date).toLocaleDateString(document.documentElement.lang || 'en', { day: 'numeric', month: 'short', year: 'numeric' })}</span><span>${'$' + Number(item.amount).toFixed(2)}</span><span class="pl-badge pl-${item.status === 'paid' ? 'good' : item.status === 'open' ? 'warn' : 'bad'}">${item.status === 'paid' ? t('Paid') : item.status === 'open' ? t('Due') : t('Not paid')}</span>${item.url ? `<a href="${item.url.replace(/"/g, '')}" target="_blank" rel="noopener">${t`Receipt`}</a>` : '<span></span>'}</li>`).join('')}</ul>` : `<p class="pl-sub">${t`No payments yet.`}</p>`}</div>`;
 }
+// Voice engine answers are numbered across every Settings window: a reopened window ignores any answer from one opened before it.
+let ttsSeq = 0;
 const SECTIONS = [
   ['general', t('General'), t('Name, language, look')],
   ['notify', t('Notifications'), t('Pop-ups, sound, quiet hours')],
@@ -590,7 +592,6 @@ export function openSettings(ctx, section = 'general') {
   try { const cached = JSON.parse(localStorage.getItem(SPEAK_CACHE) || 'null'); if (cached) { state.extra.tts ||= cached.tts; state.extra.neural ||= cached.neural; } } catch { /* private window */ }
   const keepSpeak = () => { try { localStorage.setItem(SPEAK_CACHE, JSON.stringify({ tts: state.extra.tts, neural: state.extra.neural })); } catch { /* private window */ } };
   // Only the newest voice-engine answer counts: a slow first load must not overwrite a save made after it, on screen or in the cache.
-  let ttsSeq = 0;
   const takeTts = async request => { const mine = ++ttsSeq, status = await request(); if (mine !== ttsSeq) return null; state.extra.tts = status; keepSpeak(); setSpeechEngine(status); return status; };
   // A background answer redraws the Jev tab only when no edit is waiting to save; otherwise the redraw waits until that save has read the fields.
   const jevDraw = () => { if (!has('jev') || !document.body.contains(back)) return; if (pendingSave) { jevLater = true; return; } draw(); };
