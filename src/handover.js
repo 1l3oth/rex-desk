@@ -3,18 +3,17 @@
 // commit on its own branch, and that branch travels as a git bundle. The new computer unpacks it into a worktree of its own and
 // the agent carries on there. Each step is an event in the agent's chat ("move-step": saved, committed, moved, picked-up; or
 // failed); when a step fails the agent stays where it is.
-import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { workFolder } from './work-folder.js';
 import path from 'node:path';
 import { git as runGit, slug } from './processes.js';
+import { diffLine } from './runners.js';
 
 // Branches work is never committed on.
 const PROTECTED = /^(master|main|develop|trunk|release\/.+|global\/.+)$/i;
 export const BUNDLE_LIMIT = 15 * 1024 * 1024;
-// A file's own edit is written a moment after its tool event is saved.
-const EDIT_SLACK_MS = 5000;
 const same = (left, right) => Boolean(left && right) && path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase();
 
 // On the computer the agent leaves: save its work and pack its branch.
@@ -49,17 +48,27 @@ async function saveShared({ project, agentName, to, ownFiles }, git) {
   base ||= 'HEAD';
   const changed = [...new Set([...await list(['diff', '--name-only', '--no-renames', '-z', base]), ...await list(['ls-files', '--others', '--exclude-standard', '-z'])])];
   if (!changed.length) return { nothing: true };
-  // ownFiles: names, or { file, at } with the time of the agent's last edit of it. A file changed after that edit (or
-  // deleted, which its own edits never do) may hold someone else's later work, so it stays here like theirs.
+  // ownFiles: names, or { file, lines, complete } with every line the agent's own edits added (+) or removed (-). A file it
+  // edited travels only when each changed line in it (against the main line) is one of those: a line someone else added or
+  // removed, before or after the agent, means the file holds their work too, so it stays here and the move says so.
   const key = file => path.resolve(project, file).toLowerCase();
-  const mine = new Map(ownFiles.map(item => typeof item === 'string' ? { file: item } : item).map(item => [path.resolve(project, String(item.file)).toLowerCase(), item.at ? Date.parse(item.at) : 0]));
-  const untouched = file => {
-    const at = mine.get(key(file)); if (!at) return true;
-    try { return statSync(path.resolve(project, file)).mtimeMs <= at + EDIT_SLACK_MS; } catch { return false; }
+  const mine = new Map(ownFiles.map(item => typeof item === 'string' ? { file: item } : item).map(item => [key(String(item.file)), item]));
+  const onlyMine = async file => {
+    const own = mine.get(key(file)); if (!own.lines) return true;
+    if (!own.complete) return false;
+    const tracked = Boolean(await git(project, ['ls-files', '--', file]).catch(() => ''));
+    let changedLines;
+    if (tracked) changedLines = (await git(project, ['diff', '-U0', '--no-color', '--no-ext-diff', base, '--', file]).catch(() => '')).split('\n').filter(line => /^[+-]/.test(line) && !/^(\+\+\+|---) /.test(line));
+    else { try { changedLines = readFileSync(path.resolve(project, file), 'utf8').replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n').map(line => `+${line}`); } catch { return false; } }
+    // No readable line changes (a binary file, a mode change) cannot be checked, so it stays.
+    if (!changedLines.length) return false;
+    const owned = new Set(own.lines);
+    return changedLines.every(line => owned.has(diffLine(line.replace(/\r$/, ''))));
   };
-  const files = changed.filter(file => mine.has(key(file)) && untouched(file));
+  const files = [], mixed = [];
+  for (const file of changed) if (mine.has(key(file))) (await onlyMine(file) ? files : mixed).push(file);
   const others = changed.length - files.length;
-  if (!files.length) return { nothing: true, others };
+  if (!files.length) return { nothing: true, others, ...(mixed.length ? { mixed } : {}) };
   const branch = `rex-handover/${slug(agentName, 40)}`, index = path.join(os.tmpdir(), `rex-handover-${randomUUID()}.index`), env = { GIT_INDEX_FILE: index };
   try {
     await git(project, ['read-tree', base], { env });
@@ -68,7 +77,7 @@ async function saveShared({ project, agentName, to, ownFiles }, git) {
     const who = await git(project, ['config', 'user.email']).catch(() => '') ? {} : { GIT_AUTHOR_NAME: 'Rex Desk', GIT_AUTHOR_EMAIL: 'desk@rexdesk.invalid', GIT_COMMITTER_NAME: 'Rex Desk', GIT_COMMITTER_EMAIL: 'desk@rexdesk.invalid' };
     const committed = await git(project, ['commit-tree', tree, '-p', base, '-m', `WIP: ${agentName} moves to ${to} (saved by Rex Desk, its own ${files.length === 1 ? 'file' : 'files'} only)`], { env: who });
     await git(project, ['update-ref', `refs/heads/${branch}`, committed]);
-    return { ...await pack(project, branch, agentName, git), committed, files, others };
+    return { ...await pack(project, branch, agentName, git), committed, files, others, ...(mixed.length ? { mixed } : {}) };
   } finally { rmSync(index, { force: true }); }
 }
 
@@ -140,12 +149,15 @@ export class Handover {
     const files = new Map();
     for (const runId of [agent.runId, ...Object.values(agent.roomRuns || {})].filter(Boolean)) {
       for (const event of this.store.events(runId, { limit: 100000 })) {
-        if (event.kind !== 'agent-tool' || !event.change?.file) continue;
-        const file = String(event.change.file), at = String(event.createdAt || '');
-        if (!files.has(file) || at > files.get(file)) files.set(file, at);
+        const change = event.kind === 'agent-tool' ? event.change : null; if (!change?.file) continue;
+        const file = String(change.file), own = files.get(file) || { file, lines: [], complete: true };
+        // A secret file or a cut-off diff leaves lines unknown, so that file cannot be shown to be the agent's alone.
+        if (change.hidden || change.more || !Array.isArray(change.diff)) own.complete = false;
+        else own.lines.push(...change.diff.filter(line => /^[+-]/.test(line)));
+        files.set(file, own);
       }
     }
-    return [...files].map(([file, at]) => ({ file, at }));
+    return [...files.values()];
   }
   pickUp(input) { return pickUp(input); }
   directoryFor(agent, branch, project = '') { return path.join(workFolder(project, this.store.directory, this.store.config?.().repositories || []), 'worktrees', `${slug(agent.slug || agent.name, 40)}-${slug(branch, 60)}`); }

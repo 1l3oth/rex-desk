@@ -123,6 +123,7 @@ export class ProjectRules {
         step('saved', saved.branch ? `Work saved on ${from}.` : `Nothing unsaved on ${from}.`);
         // Changes in the shared folder that are not this agent's never block the move; they stay where they are.
         if (saved.others) step('saved', saved.others === 1 ? `1 other change in the folder stays on ${from}, untouched.` : `${saved.others} other changes in the folder stay on ${from}, untouched.`, { others: saved.others });
+        if (saved.mixed?.length) step('saved', `${saved.mixed.length === 1 ? '1 file' : `${saved.mixed.length} files`} ${agent.name} edited also ${saved.mixed.length === 1 ? 'holds' : 'hold'} someone else's changes, so ${saved.mixed.length === 1 ? 'it stays' : 'they stay'} on ${from}: ${saved.mixed.join(', ')}.`, { mixed: saved.mixed });
         if (saved.committed) step('committed', `Uncommitted changes committed on ${saved.branch} (WIP).`, { branch: saved.branch, commit: saved.committed });
       } else step('saved', `${from} is off, so work not committed there stays on it until it is back.`, { skipped: true });
       // 3. The branch is unpacked here into a worktree of the agent's own before anything moves, so a failure leaves it where it was.

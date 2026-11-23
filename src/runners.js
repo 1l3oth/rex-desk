@@ -57,6 +57,8 @@ const terminalText = value => {
 // What a file edit changed, for the chat and the Activity panel: the file, how many lines were added and removed, and those
 // lines (at most 80, each clipped). Files that usually hold secrets show only the counts, and secret-looking values are hidden.
 const SECRET_FILE = /(^|[\\/])(\.env[^\\/]*|.*\.(pem|key|p12|pfx)|.*secret.*|.*credential.*|id_rsa[^\\/]*)$/i;
+// One changed line as a tool event keeps it ("+text" or "-text"): secrets masked, cut at 220 characters.
+export const diffLine = line => String(line).replace(secretLine, '$1: [redacted]').slice(0, 220);
 const lines = value => String(value ?? '').replace(/\r\n/g, '\n').split('\n');
 export function fileChange(name, input = {}) {
   if (!['Edit', 'MultiEdit', 'Write', 'NotebookEdit'].includes(name)) return null;
@@ -74,7 +76,7 @@ export function fileChange(name, input = {}) {
     for (const line of gone) diff.push(`-${line}`); for (const line of come) diff.push(`+${line}`);
   }
   const hidden = SECRET_FILE.test(file);
-  return { file, created: name === 'Write', added, removed, diff: hidden ? [] : diff.slice(0, 80).map(line => line.replace(secretLine, '$1: [redacted]').slice(0, 220)), more: hidden ? 0 : Math.max(0, diff.length - 80), hidden };
+  return { file, created: name === 'Write', added, removed, diff: hidden ? [] : diff.slice(0, 80).map(diffLine), more: hidden ? 0 : Math.max(0, diff.length - 80), hidden };
 }
 const isShell = name => name === 'Bash' || name === 'PowerShell';
 const sessionId = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '')) ? String(value) : '';
