@@ -76,17 +76,21 @@ export class Schedules {
 ${item.text}` });
         // The turn is only queued here: the message stays due, with the run to watch, until that turn really starts.
         const current = this.store.get('schedmsg', item.id); if (!current) continue;
-        this.store.put('schedmsg', item.id, { ...current, pending: { runId: String(run?.id || ''), since, due: at.toISOString() } });
+        // Sent into a turn that was already running (the agent picks it up from its queue): that counts as delivered.
+        const live = run?.id ? this.store.get('run', run.id) : null, joined = Boolean(live?.state === 'running' && live.turnLaunchedAt && live.turnLaunchedAt < since);
+        this.store.put('schedmsg', item.id, { ...current, pending: { runId: String(run?.id || ''), since, due: at.toISOString(), ...(joined ? { joined } : {}) } });
         this.settle(this.store.get('schedmsg', item.id));
       } catch (error) { this.failed(item.id, error); } finally { this.sending.delete(item.id); }
     }
   }
-  // A queued send: started (a new turn began, or it joined a turn already running) counts as sent; a start that failed leaves
-  // it due for the next tick; one still queued or starting waits.
+  // A queued send counts as sent once the agent really launched on it (the coordinator's turnLaunchedAt, set when the agent
+  // first answers; turnStartedAt is set before the launch, so it proves nothing), or when it joined a turn already running.
+  // A launch that failed leaves it due for the next tick; one still queued, starting or launching waits.
   settle(item) {
-    const { runId, since, due } = item.pending || {}, run = runId ? this.store.get('run', runId) : null;
-    if (run && run.state === 'failed' && !(run.turnStartedAt && run.turnStartedAt >= since)) return this.failed(item.id, run.error || 'The agent could not start.');
-    if (run && ['queued', 'starting'].includes(run.state)) return;
+    const { runId, since, due, joined } = item.pending || {}, run = runId ? this.store.get('run', runId) : null;
+    const launched = !run || joined || Boolean(run.turnLaunchedAt && run.turnLaunchedAt >= since);
+    if (!launched && run.state === 'failed') return this.failed(item.id, run.error || 'The agent could not start.');
+    if (!launched && ['queued', 'starting', 'running'].includes(run.state)) return;
     this.sent(item.id, new Date(due || Date.now()));
   }
   sent(id, at) {

@@ -199,7 +199,33 @@ test('a scheduled message counts as sent only once its turn really started: a st
   const saved = store.get('schedmsg', once.id);
   assert.equal(saved.on, true, 'a failed start keeps it on'); assert.match(saved.error || '', /no account/); assert.equal(calls, 1, 'and it is tried again');
   store.put('run', 'run-b', { ...store.get('run', 'run-b'), state: 'running', turnStartedAt: new Date().toISOString() });
+  await desk.schedules.tick(at(0, '09:07'));
+  assert.equal(store.get('schedmsg', once.id).on, true, 'turnStartedAt alone is not a launch');
+  store.put('run', 'run-b', { ...store.get('run', 'run-b'), turnLaunchedAt: new Date().toISOString() });
   await desk.schedules.tick(at(0, '09:10'));
   assert.equal(store.get('schedmsg', once.id).on, false, 'sent once the turn started'); assert.equal(calls, 1);
   assert.equal(store.get('schedmsg', once.id).lastAt, at(0, '09:05').toISOString());
+});
+
+test('a one-time message whose agent fails to launch after its turn was marked started stays due, and is sent on the next launch', async () => {
+  const projects = temporary('projects'), directory = path.join(projects, 'shop');
+  mkdirSync(path.join(directory, '.git'), { recursive: true });
+  writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name: 'shop' }));
+  let launches = 0;
+  const store = new Store(temporary('sched')), desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'), runnerFactory: options => ({
+    async start() { launches++; if (launches === 1) throw new Error('spawn claude ENOENT'); options.event('session', { sessionId: 'abc' }); options.event('agent-text', { text: 'On it.' }); }, interrupt() {}, close() {} }) });
+  desk.memory.scan({ roots: [projects] });
+  const agent = desk.specialists.create({ name: 'Desky', projectSlug: 'shop' });
+  desk.specialists.status = () => ({ state: 'idle' });
+  const once = desk.schedules.create(agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
+  const settled = async () => { for (let step = 0; step < 100 && desk.live.size; step++) await new Promise(done => setTimeout(done, 20)); };
+  await desk.schedules.tick(at(0, '09:00')); await settled();
+  const run = store.get('run', store.get('specialist', agent.id).runId);
+  assert.equal(run.state, 'failed'); assert.ok(run.turnStartedAt, 'the turn was marked started before the launch failed');
+  // The next tick sees the failed launch, keeps the message due and sends it again.
+  await desk.schedules.tick(at(0, '09:05')); await settled(); await desk.schedules.tick(at(0, '09:10'));
+  assert.equal(launches, 2, 'the failed launch left it due, so it was tried again');
+  assert.equal(store.get('schedmsg', once.id).on, false, 'sent once the agent really launched');
+  await desk.schedules.tick(at(0, '09:15')); await settled();
+  assert.equal(launches, 2, 'never sent twice');
 });

@@ -668,7 +668,7 @@ export class Desk {
   async execute(runId, controller, { attach = null } = {}) {
     // handedOn: this turn ended by queueing the next one (another account, the default model). That turn owns the run's
     // browser, tools, questions and room reply now, so this one's clean-up leaves them alone.
-    let run = this.run(runId), token, handedOn = false;
+    let run = this.run(runId), token, handedOn = false, launched = false;
     // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
     const turnAt = new Date().toISOString();
     try {
@@ -768,6 +768,9 @@ export class Desk {
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' || run.provider === 'openrouter' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), requeue: text => this.requeue(runId, text), extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
+          // The agent answered (its session opened, or it wrote or took a step): the turn really launched. turnStartedAt is set
+          // before the runner starts, so a scheduled message waits for this mark to count as delivered.
+          if (!launched && ['session', 'agent-text-partial', 'agent-text', 'agent-tool', 'context'].includes(kind)) { launched = true; this.patchRun(runId, { turnLaunchedAt: now() }); }
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
           // The quiet turn that reads Voice mode's report is not said: Rex Desk has welcomed the person already.
           const reading = this.store.get('run', runId)?.voice?.reading;
