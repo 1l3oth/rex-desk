@@ -459,3 +459,23 @@ test('a synced note removal takes out only that note line and keeps the rest of 
   assert.equal(after, before.replace(gone, ''), 'only the removed note line went');
   assert.match(after, /Some text under the heading/); assert.match(after, /Answers first/);
 });
+
+test('a sync that carries a note removal and the notes file together keeps the rest of About you byte for byte', () => {
+  const { a, b } = computers();
+  for (const desk of [a.desk, b.desk]) { desk.memory.personNote('likes', 'Plain words.'); desk.memory.personNote('likes', 'Answers first.'); }
+  const file = b.desk.memory.file('user.md'), lines = readFileSync(file, 'utf8').split('\n');
+  lines.splice(lines.findIndex(line => /Answers first/.test(line)) + 1, 0, 'Some text under the heading the person wrote.');
+  writeFileSync(file, lines.join('\r\n'));
+  const before = readFileSync(file, 'utf8');
+  a.desk.memory.forgetPersonNote('likes', 'Plain words');
+  a.desk.memory.personNote('likes', 'Short replies.');
+  b.desk.peers.applyFiles([
+    { name: 'forgotten.json', mtime: Date.now(), text: readFileSync(a.desk.memory.file('forgotten.json'), 'utf8') },
+    { name: 'user.md', mtime: Date.now(), text: readFileSync(a.desk.memory.file('user.md'), 'utf8') },
+  ]);
+  const after = readFileSync(file, 'utf8'), gone = before.split(/(?<=\n)/).find(line => /Plain words/.test(line));
+  const answers = before.split(/(?<=\n)/).find(line => /Answers first/.test(line));
+  const added = after.split(/(?<=\n)/).find(line => /Short replies/.test(line));
+  assert.equal(after, before.replace(gone, '').replace(answers, answers + added), 'only the removed line went and the new note joined its section');
+  assert.match(after, /Some text under the heading the person wrote\.\r\n/); assert.doesNotMatch(after, /Plain words/);
+});

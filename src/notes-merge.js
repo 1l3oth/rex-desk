@@ -24,15 +24,48 @@ export function writeNotes({ head, sections }) {
   return out.join('\n');
 }
 
-// Both pages joined: this computer's notes in their order, then the other's notes it does not have yet. Forgotten notes go.
+// Both pages joined: this computer's page stays as it is, byte for byte (text under headings, spacing, line ends), less its
+// forgotten note lines; the other's notes it does not have yet go in after the last note of the same section (a section it
+// does not have goes at the end). With no page here yet, the other's page is the start.
 export function mergeNotes(local, remote, forgotten = {}) {
   const gone = key => forgotten[key]?.gone === true;
-  const mine = parseNotes(local), theirs = parseNotes(remote), seen = new Set();
-  const result = { head: mine.head.length ? mine.head : theirs.head, sections: new Map() };
-  const add = (name, line) => { const key = noteKey(line); if (!key || seen.has(key) || gone(key)) return; seen.add(key); if (!result.sections.has(name)) result.sections.set(name, []); result.sections.get(name).push(line); };
-  for (const [name, items] of mine.sections) for (const line of items) add(name, line);
-  for (const [name, items] of theirs.sections) for (const line of items) add(name, line);
-  return writeNotes(result);
+  const base = String(local || '') || String(remote || ''), eol = /\r\n/.test(base) ? '\r\n' : '\n';
+  const kept = [], seen = new Set(), after = new Map();
+  let section = '', firstHeading = -1;
+  for (const line of base.split(/(?<=\n)/)) {
+    const bare = line.replace(/\r?\n$/, ''), heading = /^##\s+(.+)$/.exec(bare);
+    if (heading) { section = heading[1].trim(); if (firstHeading < 0) firstHeading = kept.length; kept.push(line); after.set(section, kept.length); continue; }
+    if (/^-\s+/.test(bare)) {
+      const key = noteKey(bare.trim());
+      if (key && gone(key)) continue;
+      if (key) seen.add(key);
+      kept.push(line); after.set(section, kept.length); continue;
+    }
+    kept.push(line);
+  }
+  const adds = new Map();
+  for (const [name, items] of parseNotes(remote).sections) for (const line of items) {
+    const key = noteKey(line); if (!key || seen.has(key) || gone(key)) continue;
+    seen.add(key); if (!adds.has(name)) adds.set(name, []); adds.get(name).push(line);
+  }
+  if (!adds.size) return kept.join('');
+  const ended = index => { if (index > 0 && !/\n$/.test(kept[index - 1])) kept[index - 1] += eol; };
+  // Into sections this page has, from the bottom up so earlier places do not move.
+  const inserts = [];
+  for (const [name, lines] of adds) {
+    if (after.has(name)) inserts.push([after.get(name), lines.map(line => line + eol)]);
+    else if (name === '' && firstHeading >= 0) inserts.push([firstHeading, [...lines.map(line => line + eol), eol]]);
+  }
+  for (const [index, lines] of inserts.sort((left, right) => right[0] - left[0])) { ended(index); kept.splice(index, 0, ...lines); }
+  // Sections this page does not have yet, at the end.
+  for (const [name, lines] of adds) {
+    if (after.has(name) || (name === '' && firstHeading >= 0)) continue;
+    ended(kept.length);
+    if (kept.length && kept.join('').trim()) kept.push(eol);
+    if (name) kept.push(`## ${name}${eol}`, eol);
+    kept.push(...lines.map(line => line + eol));
+  }
+  return kept.join('');
 }
 
 // forgotten.json: { "<file>": { "<note key>": { gone, at } } }. Joined per note, the newest word wins.
