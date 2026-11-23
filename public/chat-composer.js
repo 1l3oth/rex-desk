@@ -14,7 +14,7 @@ const KEY = 'rex-desk-input';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
 const MODE_HINT = { bypassPermissions: t('Runs tools without asking'), manual: t('Asks you for each tool, in the chat'), auto: t('A checker decides what is safe'), plan: t('Plans only, runs nothing'), acceptEdits: t('Edits files freely, asks for the rest') };
-const DEFAULT_MODE = 'bypassPermissions';
+const DEFAULT_MODE = 'auto';
 
 function saved() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } }
 function remember(patch) { try { localStorage.setItem(KEY, JSON.stringify({ ...saved(), ...patch })); } catch { /* private window */ } }

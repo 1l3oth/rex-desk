@@ -44,7 +44,7 @@ function mergeComments(base, other) {
 export const defaults = {
   name: 'Rex', notify: true, provider: 'claude', concurrency: 2, branchPrefix: 'rex-desk',
   syncMinutes: 5, reportToOrbit: false, autoPrLowRisk: false, sources: [], repositories: [],
-  models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, execution: 'headless', defaultMode: 'bypassPermissions', handoffTokens: 200000,
+  models: { claude: '' }, agentProfiles: { claude: null }, tourDismissed: false, execution: 'headless', defaultMode: 'auto', handoffTokens: 200000,
   schedule: { enabled: false, time: '09:00', days: [1, 2, 3, 4, 5], fix: true, maxRuns: 6 }, jev: { model: '', auto: true, versions: '' }, testAccounts: [],
   // Computer control: on for the person here, with a yes asked before shutdown-like actions; agents only when allowed.
   // allow: actions that run without asking even though they normally ask (the person chose "Yes, always"). Closing an app is simple and asks no more.
@@ -492,7 +492,7 @@ export class Store extends EventEmitter {
       agentProfiles: { claude: agentProfile(input.agentProfiles?.claude, 'Claude Code'), codex: agentProfile(input.agentProfiles?.codex, 'Codex'), gemini: agentProfile(input.agentProfiles?.gemini, 'Gemini') },
       tourDismissed: Boolean(input.tourDismissed), keepHistory: [0, 365, 180, 90, 30].includes(Number(input.keepHistory)) ? Number(input.keepHistory) : 0, execution: 'headless', testAccounts: accounts,
       // The permission mode a new agent or chat starts in.
-      defaultMode: ['bypassPermissions', 'auto', 'acceptEdits', 'manual', 'plan'].includes(input.defaultMode) ? input.defaultMode : 'bypassPermissions',
+      defaultMode: ['bypassPermissions', 'auto', 'acceptEdits', 'manual', 'plan'].includes(input.defaultMode) ? input.defaultMode : 'auto',
       // How full a chat's context may get before it hands over to a fresh session by itself (false: never).
       autoHandoff: input.autoHandoff === false ? false : Math.min(0.98, Math.max(0.5, Number(input.autoHandoff) || 0.85)),
       // And the size in tokens that starts a fresh session whatever the window (L58): a 1M window at 85% let chats grow to 700k+

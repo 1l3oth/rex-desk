@@ -105,7 +105,7 @@ test('Gemini offers its own modes and efforts, not the Claude list', () => {
 });
 
 test('the default mode from Settings is used when nobody picked one, and an AI without it asks first', () => {
-  assert.equal(defaultModeFor('claude', ''), 'bypassPermissions');
+  assert.equal(defaultModeFor('claude', ''), 'auto');
   assert.equal(defaultModeFor('gemini', 'auto'), 'auto');
   assert.equal(defaultModeFor('codex', 'auto'), 'manual');
   assert.equal(defaultModeFor('codex', 'plan'), 'plan');

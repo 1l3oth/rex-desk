@@ -457,3 +457,14 @@ test('a project set to push straight, or the person saying "no PR", pushes the c
   await assert.rejects(desk.requestPublish('run-1', { direct: true }), /needs the person to say so/);
   store.close();
 });
+
+test('the Agents setting starts new users on Auto, and a mode someone already chose stays', () => {
+  const directory = temporary('default-mode'); let store = new Store(directory);
+  assert.equal(store.config().defaultMode, 'auto');
+  store.saveConfig({ ...store.publicConfig(), defaultMode: undefined });
+  assert.equal(store.config().defaultMode, 'auto');
+  store.saveConfig({ ...store.publicConfig(), defaultMode: 'bypassPermissions' });
+  store.close(); store = new Store(directory);
+  assert.equal(store.config().defaultMode, 'bypassPermissions');
+  store.close();
+});
