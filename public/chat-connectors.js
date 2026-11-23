@@ -41,11 +41,13 @@ export function connectorsHtml(ctx, state, cfg, { trackers = '', syncField = '' 
   const rows = {};
   for (const item of data.connections.filter(item => byId.get(item.connectorId)?.id && !['flow', 'morningmate'].includes(item.connectorId))) {
     const kind = byId.get(item.connectorId), sync = syncs.get(item.id), busy = state.extra.connectorBusy === item.id;
-    const sub = sync?.error ? `<span class="tb-status bad"><i aria-hidden="true"></i>${esc(sync.error)}</span>` : `<span>${esc(kind.name)} · ${count(item.id) === 1 ? t('1 task') : t`${count(item.id)} tasks`} · ${ago(sync?.at)}${item.enabled ? '' : ` · ${t('Off')}`}</span>`;
+    // A failed sync stays on its own row (a Sync click or a save that synced), never on the add form.
+    const failed = state.extra.syncErrors?.[item.id] ?? sync?.error;
+    const sub = failed ? `<span class="tb-status bad"><i aria-hidden="true"></i>${esc(failed)}</span>` : `<span>${esc(kind.name)} · ${count(item.id) === 1 ? t('1 task') : t`${count(item.id)} tasks`} · ${ago(sync?.at)}${item.enabled ? '' : ` · ${t('Off')}`}</span>`;
     const report = kind.gives.includes('report') ? `<label class="cx-opt"><input type="checkbox" data-cn-report="${esc(item.id)}" ${item.options.sendReport ? 'checked' : ''}> ${t`Agents send their final report here`}</label>` : '';
     (rows[kind.type] ||= []).push(`<li class="tb-row cx-row">${logoHtml(kind, esc)}<div class="tb-text"><b>${esc(item.name)}</b>${sub}${report}</div>
       <button type="button" class="btn small" data-cn-sync="${esc(item.id)}" ${busy ? 'disabled' : ''}>${busy ? t('Syncing…') : t('Sync')}</button>
-      <button type="button" class="btn small quiet" data-cn-edit="${esc(item.id)}">${t`Change`}</button>
+      <button type="button" class="btn small quiet" data-cn-edit="${esc(item.id)}">${failed ? t('Paste a new key') : t('Change')}</button>
       <button type="button" class="btn small quiet danger" data-cn-remove="${esc(item.id)}" aria-label="${esc(t`Remove ${item.name}`)}">${t`Remove`}</button></li>`);
   }
   for (const account of data.accounts || []) {
@@ -129,6 +131,8 @@ function orbitFormHtml({ esc }, state, cfg) {
   const account = signedIn ? '' : login ? `<p>${t`Open Orbit and approve this code:`}</p><p class="orbit-code">${esc(login.userCode)}</p><p><a class="btn small primary" href="${esc(login.url)}" target="_blank" rel="noopener noreferrer">${t`Open Orbit to approve`}</a> <span class="muted small">${t`Waiting for you to approve…`}</span></p>`
     : `<p class="muted">${t`Give every agent your Orbit goals, notes and knowledge (search, read, add notes). You approve it once in Orbit; no key to copy.`}</p><div class="st-actions"><button type="button" class="btn small" data-cn-signin="orbit">${t`Sign in to Orbit`}</button></div>`;
   const busy = state.extra.connectorBusy === 'orbit-form';
+  // Only the error of this very form: an add error never shows on a change form, nor the other way round.
+  const formError = state.extra.connectorError?.form === (editing?.id || 'new') ? state.extra.connectorError.text : '';
   return `<h2>${editing ? t`Change ${esc(editing.name)}` : t('Connect an Orbit goal')}</h2><p class="muted">${t`Brings one goal's tasks into Tasks. For your goals, notes and knowledge in every agent, use the Orbit account sign-in instead. One Orbit goal per connection. In Orbit open the goal, then Settings → API → Generate Project Key, and paste the key (it starts with dgm_).`}</p>
     <div class="cx-form">
       <label class="st-field"><span>${t`Name`}</span><input data-cn-field="name" type="text" maxlength="80" value="${esc(editing?.name || 'Orbit')}"></label>
@@ -137,7 +141,7 @@ function orbitFormHtml({ esc }, state, cfg) {
       <label class="cx-opt"><input type="checkbox" data-cn-field="sendReport" ${editing?.sendReport ? 'checked' : ''}> ${t`Agents send their final report here`}</label>
       <details><summary>${t`Orbit address`}</summary><label class="st-field"><span>${t`Address`}</span><input data-cn-field="baseUrl" type="url" value="${esc(editing?.baseUrl || 'https://orbitkh.vercel.app')}"></label></details>
     </div>
-    ${state.extra.connectorError ? `<p class="error-text" role="alert">${esc(state.extra.connectorError)}</p>` : ''}
+    ${formError ? `<p class="error-text" role="alert">${esc(formError)}</p>` : ''}
     <div class="st-actions"><button type="button" class="btn small primary" data-cn-orbit-save ${busy ? 'disabled' : ''}>${busy ? t('Checking the key…') : editing ? t('Save and sync') : t('Connect and sync')}</button><button type="button" class="btn small" data-cn-back>${t`Back`}</button></div>
     ${editing ? '' : `<h3>${t`Orbit account`}</h3><div class="cx-account">${account}</div>`}`;
 }
@@ -150,7 +154,7 @@ export async function connectorsClick(ctx, state, target, back, draw) {
   if (hit('cn-back')) { state.extra.cnProbe = null; state.extra.cnValues = {}; state.extra.connectorPick = ''; state.extra.connectorEdit = ''; state.extra.connectorError = ''; state.extra.orbitLogin = null; draw(); return true; }
   // Flow and Morningmate open their card in the list (chat-trackers.js adds it); this just leaves the picker.
   if (hit('cn-picked')) { state.extra.connectorPick = ''; return false; }
-  const picked = hit('cn-pick'); if (picked) { state.extra.connectorPick = picked.dataset.cnPick; state.extra.connectorEdit = ''; state.extra.cnProbe = null; state.extra.cnValues = {}; draw(); return true; }
+  const picked = hit('cn-pick'); if (picked) { state.extra.connectorPick = picked.dataset.cnPick; state.extra.connectorEdit = ''; state.extra.connectorError = ''; state.extra.cnProbe = null; state.extra.cnValues = {}; draw(); return true; }
   const values = () => Object.fromEntries([...back.querySelectorAll('[data-cn-field]')].map(input => [input.dataset.cnField, input.value]));
   if (hit('cn-probe') || hit('cn-save')) {
     const id = state.extra.connectorPick, saving = Boolean(hit('cn-save')); state.extra.cnValues = values();
@@ -168,12 +172,13 @@ export async function connectorsClick(ctx, state, target, back, draw) {
     try { await api(`/connectors/links/${encodeURIComponent(link.id)}`, { method: 'DELETE' }); } catch (error) { toast(error.message, true); }
     await reload(); return true;
   }
-  const edit = hit('cn-edit'); if (edit) { state.extra.connectorPick = 'orbit'; state.extra.connectorEdit = edit.dataset.cnEdit; draw(); return true; }
+  const edit = hit('cn-edit'); if (edit) { state.extra.connectorPick = 'orbit'; state.extra.connectorEdit = edit.dataset.cnEdit; state.extra.connectorError = ''; draw(); return true; }
   const sync = hit('cn-sync');
   if (sync) {
-    state.extra.connectorBusy = sync.dataset.cnSync; draw();
-    try { const result = await api(`/connectors/${encodeURIComponent(sync.dataset.cnSync)}/sync`, { method: 'POST', data: {} }); const failed = (Array.isArray(result) ? result : []).find(item => item.error); if (failed) toast(failed.error, true); }
-    catch (error) { toast(error.message, true); }
+    const id = sync.dataset.cnSync, errors = state.extra.syncErrors ||= {};
+    state.extra.connectorBusy = id; draw();
+    try { const result = await api(`/connectors/${encodeURIComponent(id)}/sync`, { method: 'POST', data: {} }); const failed = (Array.isArray(result) ? result : []).find(item => item.error); if (failed) errors[id] = failed.error; else delete errors[id]; }
+    catch (error) { errors[id] = error.message; }
     state.extra.connectorBusy = ''; await reload(); return true;
   }
   const remove = hit('cn-remove');
@@ -190,10 +195,12 @@ export async function connectorsClick(ctx, state, target, back, draw) {
     const data = { id: state.extra.connectorEdit || '', name: field('name')?.value, apiKey: field('apiKey')?.value, statusFilter: field('statusFilter')?.value, baseUrl: field('baseUrl')?.value, sendReport: Boolean(field('sendReport')?.checked) };
     state.extra.connectorBusy = 'orbit-form'; state.extra.connectorError = ''; draw();
     try {
-      const result = await api('/connectors/orbit', { method: 'POST', data });
+      const result = await api('/connectors/orbit', { method: 'POST', data }), errors = state.extra.syncErrors ||= {};
+      // Saved: a sync that then fails belongs on the connection's row, not on the form.
+      if (result.sync?.error) errors[result.source.id] = result.sync.error; else delete errors[result.source.id];
       toast(result.sync?.error ? t`Connected, but the sync failed: ${result.sync.error}` : t`${result.source.name}: ${result.sync?.count ?? 0} tasks brought in.`, Boolean(result.sync?.error));
       state.extra.connectorPick = ''; state.extra.connectorEdit = '';
-    } catch (error) { state.extra.connectorError = error.message; }
+    } catch (error) { state.extra.connectorError = { form: data.id || 'new', text: error.message }; }
     state.extra.connectorBusy = ''; await reload(); return true;
   }
   return false;

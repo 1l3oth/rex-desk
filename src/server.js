@@ -1022,7 +1022,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const draft = { ...(existing || {}), id: existing?.id, name, type: 'orbit', baseUrl: input.baseUrl || existing?.baseUrl || 'https://orbitkh.vercel.app', projectIds: [], userId: '', statusFilter: ['active', 'unfinished', 'all'].includes(input.statusFilter) ? input.statusFilter : existing?.statusFilter || 'active', statuses: [], statusMap: {}, ...(typeof input.sendReport === 'boolean' ? { sendReport: input.sendReport } : {}) };
         if (key) await desk.sources.testConnector(draft, key);
         const source = store.saveConnection({ ...draft, ...(key ? { apiKey: key } : {}) });
-        return json(response, 200, { source: store.publicConfig().sources.find(item => item.id === source.id), sync: await desk.sources.syncSource(source).catch(error => ({ error: error.message })) });
+        return json(response, 200, { source: store.publicConfig().sources.find(item => item.id === source.id), sync: await desk.sources.syncSource(source).catch(error => { const failed = { sourceId: source.id, name: source.name, error: error.message, at: new Date().toISOString() }; store.put('sync', source.id, failed); return failed; }) });
       }
       const sourceMatch = url.pathname.match(/^\/api\/sources\/([^/]+)$/);
       if (sourceMatch && request.method === 'DELETE') {

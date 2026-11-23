@@ -462,3 +462,59 @@ test('voice lists cached by an earlier build are kept after an engine refresh', 
     assert.equal(await page.locator('.settings-pop [data-st-voice="en"] option[value="old-build-voice"]').count(), 1, 'the old cached voice list still shows');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// A failed sync shows on its own connection's row with a "Paste a new key" button, and the Orbit add form shows only its own errors.
+test('a failed Orbit sync stays on its row, Paste a new key opens that connection, and the add form shows only add errors', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  let mode = 'ok';
+  // A stand-in Orbit: every call the desk makes goes through this fetcher.
+  const orbitUrl = 'https://orbit.example.test';
+  const fetcher = async (url, options = {}) => {
+    if (!String(url).startsWith(orbitUrl)) return fetch(url, options);
+    const input = JSON.parse(options.body || '{}').input || {}, refuse = mode === 'refuse' || (mode === 'refuse-sync' && input.limit === 200);
+    return new Response(JSON.stringify(refuse ? { ok: false, error: 'bad key' } : { ok: true, result: { tasks: [] } }), { status: refuse ? 401 : 200, headers: { 'content-type': 'application/json' } });
+  };
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false, fetcher, runnerFactory: () => ({ async start() {}, async interrupt() {} }) });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const call = async (url, data) => (await fetch(`${base}${url}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify(data) })).json();
+    // The key passes its check but the sync after the save fails: that failure is kept for the row, not only sent back once.
+    mode = 'refuse-sync';
+    const saved = await call('/api/connectors/orbit', { name: 'Goal X', apiKey: 'dgm_testkey12345', baseUrl: orbitUrl });
+    assert.ok(saved.source?.id, 'test setup: the connection was saved: ' + JSON.stringify(saved));
+    const kept = (await (await fetch(`${base}/api/state`)).json()).sync.find(item => item.sourceId === saved.source.id);
+    assert.match(kept?.error || '', /refused the key for Goal X/, 'a save whose sync fails keeps the error for the row');
+    mode = 'ok'; await call('/api/sync', { sourceId: saved.source.id });
+    mode = 'refuse';
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click());
+    await page.locator('.settings-pop').waitFor({ timeout: 30000 });
+    await page.evaluate(() => document.querySelector('.settings-pop [data-st-section="connectors"]').click());
+    const row = page.locator(`.settings-pop .cx-row:has([data-cn-sync="${saved.source.id}"])`);
+    await row.waitFor({ timeout: 30000 });
+    assert.equal(await row.locator('.tb-status.bad').count(), 0, 'test setup: the row starts without an error');
+    await row.locator('[data-cn-sync]').click();
+    await row.locator('.tb-status.bad').waitFor({ timeout: 30000 });
+    assert.match(await row.locator('.tb-status.bad').innerText(), /refused the key for Goal X/, 'the sync error is on its own row');
+    assert.equal((await row.locator('[data-cn-edit]').innerText()).trim(), 'Paste a new key', 'the row offers to paste a new key');
+    // The add form: no sync error from the row, only its own add error.
+    await page.locator('.settings-pop [data-cn-add]').click();
+    await page.locator('.settings-pop [data-cn-pick="orbit"]').click();
+    await page.locator('.settings-pop [data-cn-orbit-save]').waitFor({ timeout: 10000 });
+    assert.equal(await page.locator('.settings-pop .error-text').count(), 0, 'the add form shows no sync error');
+    await page.locator('.settings-pop [data-cn-field="apiKey"]').fill('dgm_otherkey12345');
+    await page.locator('.settings-pop [data-cn-field="baseUrl"]').evaluate((input, url) => { input.value = url; }, orbitUrl);
+    await page.locator('.settings-pop [data-cn-orbit-save]').click();
+    await page.locator('.settings-pop .error-text').waitFor({ timeout: 30000 });
+    assert.match(await page.locator('.settings-pop .error-text').innerText(), /refused the key/, 'an add error shows on the add form');
+    await page.locator('.settings-pop [data-cn-back]').first().click();
+    await row.locator('[data-cn-edit]').click();
+    await page.locator('.settings-pop [data-cn-orbit-save]', { hasText: 'Save and sync' }).waitFor({ timeout: 10000 });
+    assert.match(await page.locator('.settings-pop [data-st-panel]').innerText(), /Change Goal X/, 'Paste a new key opens that connection');
+    assert.equal(await page.locator('.settings-pop .error-text').count(), 0, 'the change form does not carry over the add error');
+    assert.equal(await page.locator('.settings-pop [data-cn-field="apiKey"]').count(), 1, 'the change form has the key field');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});
