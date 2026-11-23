@@ -258,13 +258,16 @@ export class Toolbox {
     writeFileSync(this.settingsFile, `${JSON.stringify({ ...settings, hooks: { ...hooks, [event]: groups } }, null, 2)}\n`);
     return { added: event };
   }
-  // id: "<event>:<group>:<hook>:<print>", the place listHooks gave it and a print of the hook itself. When the list changed
-  // since (another window removed one), the hook is found again by its print, so a neighbour is never removed instead.
+  // id: "<event>:<group>:<hook>:<print>:<copies>", the place listHooks gave it, a print of the hook itself and how many hooks
+  // of that event had the same print then. A hook that moved (another window removed one) is found again by its print only
+  // when it is the one hook with it, both then and now; with identical copies, or a different count, nothing is removed,
+  // so a stale row never takes a neighbour or the surviving copy.
   removeHook(id) {
-    const [event, group, index, print] = String(id || '').split(':'), settings = this.readSettings(), groups = settings.hooks?.[event];
-    const at = (Array.isArray(groups) ? groups : []).flatMap((item, place) => (item?.hooks || []).map((hook, slot) => ({ place, slot, print: hookPrint(item.matcher, hook) })));
-    const found = at.find(item => item.place === Number(group) && item.slot === Number(index) && item.print === print) || at.find(item => item.print === print);
-    if (!print || !found) throw new Error('That hook changed or is already gone. Open Market again to see the hooks as they are now.');
+    const [event, group, index, print, copies] = String(id || '').split(':'), settings = this.readSettings(), groups = settings.hooks?.[event];
+    const same = (Array.isArray(groups) ? groups : []).flatMap((item, place) => (item?.hooks || []).map((hook, slot) => ({ place, slot, print: hookPrint(item.matcher, hook) }))).filter(item => item.print === print);
+    const exact = same.find(item => item.place === Number(group) && item.slot === Number(index));
+    const found = !print || same.length !== Number(copies || 1) ? null : same.length === 1 ? same[0] : exact;
+    if (!found) throw new Error('That hook changed or is already gone. Open Market again to see the hooks as they are now.');
     const list = groups[found.place].hooks;
     list.splice(found.slot, 1); if (!list.length) groups.splice(found.place, 1); if (!groups.length) delete settings.hooks[event];
     writeFileSync(this.settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
@@ -272,7 +275,10 @@ export class Toolbox {
   }
   listHooks() {
     let settings = {}; try { settings = this.readSettings(); } catch { return []; }
-    return Object.entries(settings.hooks || {}).flatMap(([event, groups]) => (Array.isArray(groups) ? groups : []).flatMap((group, at) => (group.hooks || []).map((hook, index) => ({ id: `${event}:${at}:${index}:${hookPrint(group.matcher, hook)}`, event, matcher: group.matcher || '', command: String(hook.command || hook.url || hook.prompt || '').slice(0, 200) }))));
+    return Object.entries(settings.hooks || {}).flatMap(([event, groups]) => {
+      const rows = (Array.isArray(groups) ? groups : []).flatMap((group, at) => (group?.hooks || []).map((hook, index) => ({ at, index, print: hookPrint(group.matcher, hook), matcher: group.matcher || '', command: String(hook.command || hook.url || hook.prompt || '').slice(0, 200) })));
+      return rows.map(row => ({ id: `${event}:${row.at}:${row.index}:${row.print}:${rows.filter(other => other.print === row.print).length}`, event, matcher: row.matcher, command: row.command }));
+    });
   }
   removeCommand(name) {
     const file = path.join(this.commandsHome, `${String(name).replace(/[^A-Za-z0-9_.-]/g, '')}.md`);

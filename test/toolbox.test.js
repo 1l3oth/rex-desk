@@ -220,6 +220,13 @@ test('Market adds a skill from one SKILL.md, a slash command and a hook, and kee
   assert.throws(() => box.removeHook(three.id), /already gone/);
   assert.deepEqual(box.listHooks().map(hook => hook.command), ['echo two'], 'a hook already gone removes nothing else');
   void two;
+  // Two identical hooks: a stale row for one copy never removes the surviving copy once the other is gone.
+  box.addHook({ event: 'Stop', command: 'echo twin' }); box.addHook({ event: 'Stop', command: 'echo twin' });
+  const twins = box.listHooks().filter(hook => hook.command === 'echo twin');
+  assert.equal(twins.length, 2);
+  box.removeHook(twins[0].id);
+  assert.throws(() => box.removeHook(twins[1].id), /changed or is already gone/);
+  assert.deepEqual(box.listHooks().map(hook => hook.command), ['echo two', 'echo twin'], 'the surviving copy stays');
   // A first line with a colon is quoted, so the skill's front matter stays valid YAML.
   box.addSkillFile({ name: 'notes', text: 'Purpose: Write "release" notes\nMore.' });
   assert.match(readFileSync(path.join(box.skillsHome, 'notes', 'SKILL.md'), 'utf8'), /^description: "Purpose: Write \\"release\\" notes"$/m);
