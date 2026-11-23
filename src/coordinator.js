@@ -178,7 +178,7 @@ export class Desk {
     // so a model the person adds shows in the AI picker by itself, without opening Settings.
     if (!runnerFactory) {
       const look = () => { if (!this.closed) void this.localAi.status().catch(() => {}); };
-      this.localTimers = [setTimeout(look, 5000), setInterval(look, 120000)]; if (!process.env.NODE_TEST_CONTEXT) { const tidy = () => { if (!this.closed) { this.dropOldRuntime(); void this.tidyWorktrees().catch(() => {}); } }; this.localTimers.push(setTimeout(tidy, 60000), setInterval(tidy, 30 * 60000)); }; for (const timer of this.localTimers) timer.unref?.();
+      this.localTimers = [setTimeout(look, 5000), setInterval(look, 120000)]; if (!process.env.NODE_TEST_CONTEXT) { const tidy = () => { if (!this.closed) { this.dropOldRuntime(); void this.tidyWorktrees().catch(() => {}); } }; this.localTimers.push(setTimeout(tidy, 60000), setInterval(tidy, 30 * 60000), setInterval(() => void this.team.check().catch(() => {}), 5 * 60000)); }; for (const timer of this.localTimers) timer.unref?.();
     }
     // The installed app on Windows copies itself beside the data once per version, in the background; agents started after
     // that run from the copy, so an update installs while they work (see prepareRuntime). Until it is ready they start as before.
@@ -1650,7 +1650,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   }
   // Gives a task to an agent. No separate run is started: in a room the agent does it in its room session, otherwise in its personal
   // chat, the way the person says. callerRunId: the agent took the task in the chat it is talking in, so it simply carries on there.
-  async assignTask({ specialistId, taskId, roomId = '', instructions = '', callerRunId = '' }) {
+  async assignTask({ specialistId, taskId, roomId = '', instructions = '', callerRunId = '', giverRunId = '' }) {
     const agent = this.specialists.get(specialistId);
     if (roomId) return this.shareTask({ taskId, add: [agent.id], roomId, instructions });
     const task = this.task(taskId), number = task.taskNumber || task.externalId || '', name = await this.englishName(taskId).catch(() => task.title);
@@ -1660,6 +1660,12 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       `What it says:\n${String(task.description || task.title || '').slice(0, 4000)}`, instructions ? `Notes from the person: ${instructions}` : '',
       'Change, run and test the code in your project, share test results with desk_share_evidence, commit when it works, and send it out the way the person wants (desk_publish with worktree set to the folder you worked in and taskId). Say what you did in a short reply.',
       this.worktrees.briefFor(taskId) || WORKTREE_RULE, this.memory.workflowText(agent.projectSlug)].filter(Boolean).join('\n\n');
+    // Given by another agent: tracked like a team task, so the result (or a stall) goes back to the giver by itself.
+    const tracked = giverRunId ? await this.team.handOver(giverRunId, { workerId: agent.id, title: `#${number} ${name}`, prompt: brief, deskTaskId: task.local ? taskId : '' }) : null;
+    if (tracked) {
+      if (tracked.runId) this.store.event(tracked.runId, 'loop-check', { text: `Task given: #${number} ${name}` }, true);
+      return { inChat: true, agentId: agent.id, runId: tracked.runId || '', taskId, state: tracked.state, note: `${agent.name} ${tracked.state === 'working' ? 'is on it' : 'is busy; it starts when free'}. End your reply; the result, or a stall, reaches you by itself.` };
+    }
     const run = await this.specialistTurn(agent.id, { prompt: brief, quiet: true });
     this.store.event(run.id, 'loop-check', { text: `Task given: #${number} ${name}` }, true);
     return { inChat: true, agentId: agent.id, runId: run.id, taskId, state: run.state };

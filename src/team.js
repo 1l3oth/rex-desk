@@ -5,6 +5,7 @@
 //   working   the worker is on it
 //   needs-manager   the worker asked a question; the manager answers it (or asks the person)
 //   done / failed / canceled
+//   stalled   the worker's turn ended without a result, or without moving its task forward; the manager is told
 //
 // The manager never waits: the result is handed to its team session when the worker's turn ends. That is a second session of
 // the manager, apart from its personal chat, so reports never fill the person's chat and never interrupt it. The person sees
@@ -13,7 +14,8 @@ import crypto from 'node:crypto';
 
 const now = () => new Date().toISOString();
 const open = new Set(['queued', 'working', 'needs-manager']);
-export const MAX_OPEN_TASKS = 8;   // per manager: more than this and the manager is flooding its team
+export const MAX_OPEN_TASKS = 30;  // per manager: more than this and the manager is flooding its team
+export const NUDGE_AFTER = 15 * 60000;   // an open task with no live turn this long gets a nudge, then is flagged to its manager
 const short = id => String(id).slice(0, 8);
 const clip = (text, size) => { const value = String(text || '').trim(); return value.length > size ? `${value.slice(0, size)}…` : value; };
 
@@ -70,6 +72,19 @@ export class Team {
     return { id: short(record.id), agent: worker.name, state, note: state === 'working' ? `${worker.name} is on it. End your reply; the result reaches you when it is done.` : `${worker.name} is busy; this starts when it is free. End your reply; the result reaches you when it is done.` };
   }
 
+  // A task handed over another way (desk_assign_task, desk_create_task with assignTo) by an agent: it is tracked like a team task,
+  // so the worker's last reply goes back to the giver, and a turn that ends without moving the task on comes back as stalled.
+  // Returns null when there is no agent to report back to (the person gave it).
+  async handOver(giverRunId, { workerId, title, prompt, deskTaskId = '' }) {
+    const managerId = this.agentOf(giverRunId), worker = this.store.get('specialist', workerId);
+    if (!managerId || !worker || managerId === workerId || this.desk.peers.isRemote(worker)) return null;
+    const desk = deskTaskId ? this.store.get('task', deskTaskId) : null;
+    const record = { id: crypto.randomUUID(), managerId, managerRunId: giverRunId, workerId, workerName: worker.name, title: clip(String(title || '').replace(/\s+/g, ' '), 80), text: clip(prompt, 8000), prompt: String(prompt || ''), deskTaskId, deskStatus: desk?.status || '', via: 'assign', state: 'queued', createdAt: now() };
+    this.store.put('team-task', record.id, record);
+    await this.startNext(workerId);
+    return this.store.get('team-task', record.id);
+  }
+
   // ---------- between the person's computers ----------
   // A command for the other computer. It syncs with the shared data, so it arrives even when that computer was off.
   send(node, action, agentId, input) { const id = crypto.randomUUID(); this.store.put('peercmd', id, { id, target: node, action, agentId, input, at: now(), done: false }); }
@@ -96,7 +111,9 @@ export class Team {
     if (run && this.desk.live.has(run.id)) return;
     const next = this.tasks(item => item.workerId === workerId && item.state === 'queued')[0]; if (!next) return;
     const manager = this.managerName(next);
-    const prompt = `Task ${short(next.id)} from ${manager}, who is managing this work for the person: ${next.title}\n\n${next.text}\n\nDo it now. Your last reply of this turn goes back to ${manager} as the result, so end with what you did and what you found. If you cannot go on without an answer, end your reply with a line that starts with "NEED:" and your question; ${manager} answers it.`;
+    const prompt = next.prompt ? `${next.prompt}
+
+This task came from ${manager}. Your last reply of this turn goes back to ${manager} as the result, so end with what you did and what you found, and move the task on (desk_update_task) when you finish or block. If you cannot go on without an answer, end your reply with a line that starts with "NEED:" and your question.` : `Task ${short(next.id)} from ${manager}, who is managing this work for the person: ${next.title}\n\n${next.text}\n\nDo it now. Your last reply of this turn goes back to ${manager} as the result, so end with what you did and what you found. If you cannot go on without an answer, end your reply with a line that starts with "NEED:" and your question; ${manager} answers it.`;
     this.store.put('team-task', next.id, { ...next, state: 'working', startedAt: now() });
     try {
       const started = await this.desk.specialistTurn(workerId, { prompt, quiet: true });
@@ -113,10 +130,38 @@ export class Team {
     const said = this.store.events(runId, { visible: true, limit: 80 }).filter(event => event.kind === 'agent-text' && event.text && String(event.createdAt || '') >= task.startedAt).map(event => String(event.text).trim());
     if (failure) return this.finish(task.id, 'failed', `It did not work: ${failure}`);
     const last = said.at(-1) || '';
-    if (!last) return this.finish(task.id, 'failed', 'It ended without an answer.');
+    if (!last) return this.finish(task.id, 'stalled', 'It ended without an answer.');
     const question = last.match(/^\s*NEED:\s*([\s\S]+)$/m)?.[1]?.trim();
     if (question) return this.finish(task.id, 'needs-manager', last, clip(question, 2000));
+    if (this.untouched(task)) return this.finish(task.id, 'stalled', `It ended without moving the task on. Its last reply:
+${last}`);
     this.finish(task.id, 'done', last);
+  }
+  // A handed-over Rex Desk task that is still where it was when the turn began: same status, no change since.
+  untouched(task) {
+    if (!task.deskTaskId) return false;
+    const desk = this.store.get('task', task.deskTaskId); if (!desk) return false;
+    return desk.status === task.deskStatus && ['backlog', 'todo'].includes(desk.status) && String(desk.updatedAt || '') < String(task.startedAt || task.createdAt);
+  }
+
+  // The watch over open tasks, every few minutes: a waiting task whose worker is free starts; a task marked working with no live
+  // turn (its end was missed, or the desk restarted) gets one nudge to its worker, and is flagged to its manager as stalled if
+  // nothing moves after that.
+  async check(at = Date.now()) {
+    if (this.desk.closed) return;
+    const age = stamp => at - Date.parse(stamp || 0);
+    for (const task of this.tasks(item => !item.foreign && !item.remote && open.has(item.state))) {
+      const fresh = this.store.get('team-task', task.id); if (!fresh || !open.has(fresh.state)) continue;
+      if (fresh.state === 'queued') { if (age(fresh.createdAt) > NUDGE_AFTER) await this.startNext(fresh.workerId).catch(() => {}); continue; }
+      if (fresh.state !== 'working' || (fresh.runId && this.desk.live.has(fresh.runId))) continue;
+      if (!fresh.nudgedAt) {
+        if (age(fresh.startedAt || fresh.createdAt) < NUDGE_AFTER) continue;
+        this.store.put('team-task', fresh.id, { ...fresh, nudgedAt: new Date(at).toISOString(), startedAt: new Date(at).toISOString() });
+        const prompt = `You still have task ${short(fresh.id)} from ${this.managerName(fresh)} open: ${fresh.title}. Carry on with it now. Your last reply of this turn goes back as the result; if you are stuck, end with a line that starts with "NEED:" and your question.`;
+        try { const run = await this.desk.specialistTurn(fresh.workerId, { prompt, quiet: true }); if (run?.id) this.store.put('team-task', fresh.id, { ...this.store.get('team-task', fresh.id), runId: run.id }); }
+        catch (error) { this.finish(fresh.id, 'stalled', `It was nudged but could not carry on: ${error.message}`); }
+      } else if (age(fresh.nudgedAt) > NUDGE_AFTER) this.finish(fresh.id, 'stalled', `No progress for ${Math.round(age(fresh.createdAt) / 60000)} minutes, even after a nudge.`);
+    }
   }
 
   finish(taskId, state, answer = '', question = '') {
@@ -132,8 +177,13 @@ export class Team {
   tell(task) {
     const desk = this.desk;
     if (!task.managerId || (task.managerId !== 'main' && !this.store.get('specialist', task.managerId))) return;
-    const head = task.state === 'done' ? 'done' : task.state === 'needs-manager' ? 'needs an answer' : task.state === 'canceled' ? 'canceled' : 'failed';
-    const prompt = task.state === 'needs-manager'
+    const head = task.state === 'done' ? 'done' : task.state === 'needs-manager' ? 'needs an answer' : task.state === 'canceled' ? 'canceled' : task.state === 'stalled' ? 'stalled' : 'failed';
+    const prompt = task.state === 'stalled'
+      ? `Task ${short(task.id)} that you gave ${task.workerName} (${task.title}) ended: stalled. It has no result.
+${clip(task.answer, 6000)}
+
+Check on it: give it again with desk_team_task, do it another way, or tell the person it is stuck. Do not tell the person it is in progress.`
+      : task.state === 'needs-manager'
       ? `${task.workerName} cannot go on with task ${short(task.id)} (${task.title}) and asks:\n${task.question}\n\nAnswer with desk_team_answer if you know. If only the person can decide, ask them, then pass the answer on.`
       : `Task ${short(task.id)} that you gave ${task.workerName} (${task.title}) ended: ${head}.\n${clip(task.answer, 6000)}\n\nCarry on: use the result, give the next task if there is one, and tell the person the outcome in a line or two when it matters to them.`;
     const saved = this.store.get('team-session', task.managerId)?.runId, session = saved ? this.store.get('run', saved) : null;

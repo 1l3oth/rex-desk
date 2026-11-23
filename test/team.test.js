@@ -148,3 +148,49 @@ test('waiting reports stay queued when the resume fails (L70 review)', async () 
     assert.deepEqual(store.get('run', 'team').queued, ['first report', 'later report']);
   } finally { await desk.shutdown?.(); store.close(); }
 });
+
+test('a task one agent gives another with desk_assign_task reports back, and a turn that does not move it on comes back as stalled (L97)', async () => {
+  const { store, desk, turns } = setup(prompt => /You were given task #L\d+ Review the branch/.test(prompt) ? 'I will start the review now.' : /You were given task #L\d+ Write the notes/.test(prompt) ? 'Notes written and the task moved to review.' : 'Noted.');
+  try {
+    const manager = desk.specialists.create({ name: 'Manager', purpose: 'Routes work' }), reviewer = desk.specialists.create({ name: 'Reviewer', purpose: 'Reviews code' });
+    const managerRun = await desk.specialistTurn(manager.id, { prompt: 'hi', quiet: true });
+    await waitFor(() => idle(store, desk), 'the manager turn');
+    const review = await desk.localTasks.create({ title: 'Review the branch', project: '' });
+    const given = await desk.assignTask({ specialistId: reviewer.id, taskId: review.id, giverRunId: managerRun.id });
+    assert.equal(given.state, 'working'); assert.match(given.note, /reaches you by itself/);
+    await waitFor(() => desk.team.tasks().some(task => task.deskTaskId === review.id && task.state === 'stalled'), 'the stall');
+    const stalled = desk.team.tasks().find(task => task.deskTaskId === review.id);
+    assert.equal(stalled.managerId, manager.id); assert.match(stalled.answer, /without moving the task on[\s\S]*I will start the review now/);
+    await waitFor(() => turns.some(turn => turn.run.teamOf === manager.id && /that you gave Reviewer \(#L\d+ Review the branch\) ended: stalled[\s\S]*I will start the review now[\s\S]*Do not tell the person it is in progress/.test(turn.prompt)), 'the stall in the manager\'s team session');
+    assert.equal(desk.snapshot().teamTasks.find(task => task.id === stalled.id).state, 'stalled', 'the Team tab shows it as stalled');
+    await waitFor(() => idle(store, desk), 'settle');
+    // A task the worker moves on is done, and its reply is the result.
+    const notes = await desk.localTasks.create({ title: 'Write the notes', project: '' });
+    const before = turns.length;
+    await desk.assignTask({ specialistId: reviewer.id, taskId: notes.id, giverRunId: managerRun.id });
+    await waitFor(() => turns.length > before, 'the worker turn');
+    desk.localTasks.update(notes.id, { status: 'in_review' });
+    await waitFor(() => desk.team.tasks().some(task => task.deskTaskId === notes.id && task.state === 'done'), 'the moved task to be done');
+    await waitFor(() => idle(store, desk), 'settle');
+  } finally { await desk.shutdown?.(); store.close(); }
+});
+
+test('the watch nudges a task with no live turn once, then flags it to its manager as stalled (L97)', async () => {
+  const { store, desk, turns } = setup(() => 'Noted.');
+  try {
+    const manager = desk.specialists.create({ name: 'Manager', purpose: 'Routes work' }), qa = desk.specialists.create({ name: 'QA', purpose: 'Tests' });
+    const managerRun = await desk.specialistTurn(manager.id, { prompt: 'hi', quiet: true });
+    await waitFor(() => idle(store, desk), 'the manager turn');
+    const old = new Date(Date.now() - 20 * 60000).toISOString();
+    store.put('team-task', 'lost-task', { id: 'lost-task', managerId: manager.id, managerRunId: managerRun.id, workerId: qa.id, workerName: 'QA', title: 'Check the phone', text: 'Check the phone', state: 'working', runId: 'gone', createdAt: old, startedAt: old });
+    await desk.team.check();
+    await waitFor(() => turns.some(turn => turn.run.specialistId === qa.id && /You still have task lost-tas from Manager open: Check the phone/.test(turn.prompt)), 'the nudge');
+    assert.ok(store.get('team-task', 'lost-task').nudgedAt);
+    await waitFor(() => idle(store, desk), 'settle');
+    store.put('team-task', 'stuck-task', { id: 'stuck-task', managerId: manager.id, managerRunId: managerRun.id, workerId: qa.id, workerName: 'QA', title: 'Check the laptop', text: 'x', state: 'working', runId: 'gone', createdAt: old, startedAt: old, nudgedAt: old });
+    await desk.team.check();
+    assert.equal(store.get('team-task', 'stuck-task').state, 'stalled');
+    await waitFor(() => turns.some(turn => turn.run.teamOf === manager.id && /\(Check the laptop\) ended: stalled[\s\S]*even after a nudge/.test(turn.prompt)), 'the flag to the manager');
+    await waitFor(() => idle(store, desk), 'settle');
+  } finally { await desk.shutdown?.(); store.close(); }
+});

@@ -1267,8 +1267,8 @@ function teamOf(agentId) {
   return { tasks, open: tasks.filter(task => TEAM_OPEN.has(task.state)).length, owed: tasks.some(task => task.state === 'needs-manager' && task.managerId === agentId) };
 }
 function teamPanel(agent, team) {
-  const label = { queued: t('Waiting its turn'), working: t('Working'), 'needs-manager': t('Has a question'), done: t('Done'), failed: t('Failed'), canceled: t('Canceled') };
-  const tone = { working: 'live', 'needs-manager': 'owed', done: 'done', failed: 'bad', queued: '', canceled: '' };
+  const label = { queued: t('Waiting its turn'), working: t('Working'), 'needs-manager': t('Has a question'), done: t('Done'), failed: t('Failed'), stalled: t('Stalled'), canceled: t('Canceled') };
+  const tone = { working: 'live', 'needs-manager': 'owed', done: 'done', failed: 'bad', stalled: 'bad', queued: '', canceled: '' };
   const row = task => {
     const mine = task.managerId === agent.id, other = mine ? task.workerName : task.managerName || t('its manager'), when = hhmm(task.endedAt || task.createdAt);
     return `<li class="tm-task ${tone[task.state] || ''}"><div class="tm-top"><span class="tm-dot ${tone[task.state] || ''}" aria-hidden="true"></span><b>${esc(task.title)}</b><span class="tm-when">${esc(when)}</span></div>
