@@ -1006,8 +1006,13 @@ button.cn-main{cursor:pointer}
 .signin-body{min-height:100dvh}
 .si-scene{position:fixed;inset:0;z-index:0;width:100vw;height:100dvh;display:block;pointer-events:none}
 .signin{position:relative;z-index:1;min-height:100dvh;display:grid;place-items:center;padding:24px 16px}
-@media(min-width:901px){.signin{place-items:center start;padding-left:max(48px,9vw)}}
-@media(max-width:700px){.signin{place-items:end center;padding-bottom:20px}}
+@media(max-width:700px){.signin{padding:16px}}
+/* Sign-in: a quiet native card, not the app's lit glass. No glow backdrop, flat buttons. */
+.signin-body::before{display:none}
+.signin-body .btn.primary{background:var(--accent);border:1px solid var(--accent);box-shadow:none;isolation:auto}
+.signin-body .btn.primary::after{display:none}
+.signin-body .btn.primary:hover:not(:disabled){transform:none;box-shadow:none;filter:none;background:color-mix(in srgb,var(--accent) 90%,#000)}
+.signin-body .btn.primary:active:not(:disabled){transform:none}
 .si-card{width:min(420px,100%);padding:22px;border:1px solid var(--line);border-radius:16px;background:var(--panel);box-shadow:0 18px 50px rgba(0,0,0,.18)}
 .si-card form{display:flex;flex-direction:column;gap:12px}
 .si-card input:not([type=checkbox]){width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit}
