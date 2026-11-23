@@ -207,6 +207,8 @@ export class CodexRunner {
       const text = session ? prompt : `${CODEX_RULE}\n\n${prompt}`;
       const started = await this.client.request('turn/start', { ...this.turnOptions, threadId: this.threadId, input: [{ type: 'text', text }] });
       this.turnId = started.turn.id;
+      // Only now is the prompt really submitted: the session above opened before it, and a failed submit throws before this.
+      this.event('prompt-accepted', { turnId: this.turnId });
       return await completed;
     } finally { this.signal?.removeEventListener('abort', abort); this.client.close(); }
   }

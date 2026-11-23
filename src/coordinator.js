@@ -169,6 +169,9 @@ const LOOP_REST = 10 * 60000;
 // The greeting a new agent chat starts with (public/chat-agents.js sends it with greeting: true). Replayed in a handoff it made
 // the new session introduce itself again instead of answering, so handoffs leave it out. The flag, not the words, marks it.
 const isGreeting = event => event.kind === 'human-message' && event.greeting === true;
+// Runner events that come only after the prompt was submitted and taken: a scheduled message counts as delivered on the first.
+const ACCEPTED_EVENTS = new Set(['prompt-accepted', 'agent-text-partial', 'agent-text', 'agent-tool', 'agent-tool-result', 'agent-operation', 'subagent-text', 'subagent-done', 'app-message', 'context', 'agent-result']);
+
 export class Desk {
   constructor(store, { root, runnerFactory, fetcher, agentCommand, jevFetcher, namingFetcher, namingCommand, queryModel, imageFetcher = fetch, memoryDirectory, peerTransport, netFetcher, netJudge, toolbox, ownRuntime = false, diskWatch = false } = {}) {
     this.store = store; this.root = root; this.runnerFactory = runnerFactory; this.namingFetcher = namingFetcher; this.namingCommand = namingCommand; this.imageFetcher = imageFetcher;
@@ -669,6 +672,7 @@ export class Desk {
     // handedOn: this turn ended by queueing the next one (another account, the default model). That turn owns the run's
     // browser, tools, questions and room reply now, so this one's clean-up leaves them alone.
     let run = this.run(runId), token, handedOn = false, launched = false;
+    const markLaunched = () => { if (launched) return; launched = true; this.patchRun(runId, { turnLaunchedAt: now() }); };
     // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
     const turnAt = new Date().toISOString();
     try {
@@ -768,9 +772,11 @@ export class Desk {
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' || run.provider === 'openrouter' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
         ask: request => this.ask(runId, request), inbox: () => this.takeInbox(runId), requeue: text => this.requeue(runId, text), extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
-          // The agent answered (its session opened, or it wrote or took a step): the turn really launched. turnStartedAt is set
-          // before the runner starts, so a scheduled message waits for this mark to count as delivered.
-          if (!launched && ['session', 'agent-text-partial', 'agent-text', 'agent-tool', 'context'].includes(kind)) { launched = true; this.patchRun(runId, { turnLaunchedAt: now() }); }
+          // The prompt was really accepted: the runner said so (prompt-accepted), or the agent already answered to it (wrote,
+          // took a step, reported its context or ended). A session opening proves nothing: Codex opens one before it submits the
+          // prompt, so a submit that fails after it would count as delivered. A scheduled message waits for this mark.
+          if (!launched && ACCEPTED_EVENTS.has(kind)) markLaunched();
+          if (kind === 'prompt-accepted') return;
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
           // The quiet turn that reads Voice mode's report is not said: Rex Desk has welcomed the person already.
           const reading = this.store.get('run', runId)?.voice?.reading;
@@ -861,6 +867,8 @@ export class Desk {
       await runner.start(remoteOn ? '' : digest ? `${digest}
 
 ${message}` : message);
+      // A turn that ended without a start error took its prompt, even if the runner sent no answer events on the way.
+      if (!remoteOn) markLaunched();
       // In-app mode starts with no message, so the missed context was not sent: it stays unseen for the next turn.
       if (remoteOn) this.seenMarks?.delete(runId); else this.saveSeenMark(runId);
       if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });

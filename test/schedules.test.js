@@ -229,3 +229,48 @@ test('a one-time message whose agent fails to launch after its turn was marked s
   await desk.schedules.tick(at(0, '09:15')); await settled();
   assert.equal(launches, 2, 'never sent twice');
 });
+
+test('a one-time message whose session opens but whose prompt submit fails (Codex style) stays due, and is sent once the prompt is accepted', async () => {
+  const projects = temporary('projects'), directory = path.join(projects, 'shop');
+  mkdirSync(path.join(directory, '.git'), { recursive: true });
+  writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name: 'shop' }));
+  let launches = 0;
+  // Like CodexRunner: the thread (session) opens first, then turn/start submits the prompt. The first submit fails.
+  const store = new Store(temporary('sched')), desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'), provider: 'codex', runnerFactory: options => ({
+    async start() {
+      launches++; options.event('session', { sessionId: `thread-${launches}`, apiKeySource: 'subscription' });
+      if (launches === 1) throw new Error('turn/start failed: connection closed');
+      options.event('prompt-accepted', { turnId: 'turn-2' });
+    }, interrupt() {}, close() {} }) });
+  desk.memory.scan({ roots: [projects] });
+  const agent = desk.specialists.create({ name: 'Desky', projectSlug: 'shop' });
+  desk.specialists.status = () => ({ state: 'idle' });
+  const once = desk.schedules.create(agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
+  const settled = async () => { for (let step = 0; step < 100 && desk.live.size; step++) await new Promise(done => setTimeout(done, 20)); };
+  await desk.schedules.tick(at(0, '09:00')); await settled();
+  const run = store.get('run', store.get('specialist', agent.id).runId);
+  assert.equal(run.state, 'failed'); assert.equal(run.sessionId, 'thread-1', 'the session opened before the submit failed');
+  assert.equal(run.turnLaunchedAt, undefined, 'an opened session is not an accepted prompt');
+  await desk.schedules.tick(at(0, '09:05'));
+  await settled(); await desk.schedules.tick(at(0, '09:10'));
+  assert.equal(launches, 2, 'the failed submit left it due, so it was tried again');
+  assert.equal(store.get('schedmsg', once.id).on, false, 'sent once the prompt was accepted');
+  await desk.schedules.tick(at(0, '09:15')); await settled();
+  assert.equal(launches, 2, 'never sent twice');
+});
+
+test('a one-time message whose turn ends cleanly without any answer event still counts as sent', async () => {
+  const projects = temporary('projects'), directory = path.join(projects, 'shop');
+  mkdirSync(path.join(directory, '.git'), { recursive: true });
+  writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name: 'shop' }));
+  let launches = 0;
+  const store = new Store(temporary('sched')), desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'), runnerFactory: () => ({ async start() { launches++; }, interrupt() {}, close() {} }) });
+  desk.memory.scan({ roots: [projects] });
+  const agent = desk.specialists.create({ name: 'Desky', projectSlug: 'shop' });
+  desk.specialists.status = () => ({ state: 'idle' });
+  const once = desk.schedules.create(agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
+  const settled = async () => { for (let step = 0; step < 100 && desk.live.size; step++) await new Promise(done => setTimeout(done, 20)); };
+  await desk.schedules.tick(at(0, '09:00')); await settled(); await desk.schedules.tick(at(0, '09:05')); await settled();
+  assert.ok(store.get('run', store.get('specialist', agent.id).runId).turnLaunchedAt, 'a clean end marks the prompt taken');
+  assert.equal(store.get('schedmsg', once.id).on, false); assert.equal(launches, 1, 'not sent twice');
+});
