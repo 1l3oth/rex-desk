@@ -954,7 +954,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/toolbox' && request.method === 'POST') {
         const input = await body(request), what = String(input.what || '');
         const result = what === 'install' ? await desk.toolbox.install(input.text) : what === 'add-server' ? await desk.toolbox.addServer(input) : what === 'remove-server' ? await desk.toolbox.removeServer(input.name)
-          : what === 'add-skill' ? await desk.toolbox.addSkill(input.source) : what === 'remove-skill' ? desk.toolbox.removeSkill(input.name) : what === 'remove-command' ? desk.toolbox.removeCommand(input.name) : null;
+          : what === 'add-skill' ? await desk.toolbox.addSkill(input.source) : what === 'remove-skill' ? desk.toolbox.removeSkill(input.name) : what === 'remove-command' ? desk.toolbox.removeCommand(input.name)
+          : what === 'add-skill-file' ? desk.toolbox.addSkillFile(input) : what === 'add-command' ? desk.toolbox.addCommand(input) : what === 'add-hook' ? desk.toolbox.addHook(input) : what === 'remove-hook' ? desk.toolbox.removeHook(input.name) : null;
         if (!result) return json(response, 400, { error: 'Unknown change.' });
         return json(response, 200, { ...result, ...(await desk.toolbox.overview()) });
       }

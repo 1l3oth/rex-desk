@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
@@ -44,4 +44,24 @@ test('long descriptions are cut at a word break, never mid-word', () => {
   assert.match(item.description, /[a-z]…$/);
   assert.ok(long.startsWith(item.description.slice(0, -1)));
   assert.ok(long[item.description.length - 1] === ' ', 'the cut falls on a space');
+});
+
+test('Market labels each item: Orbit is an MCP server, never a connector; one-file skills and hooks show as such', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'rex-desk-market-kinds-'));
+  const single = path.join(home, 'notes'), full = path.join(home, 'deploy');
+  mkdirSync(single); writeFileSync(path.join(single, 'SKILL.md'), 'x');
+  mkdirSync(full); writeFileSync(path.join(full, 'SKILL.md'), 'x'); writeFileSync(path.join(full, 'run.sh'), 'x');
+  const memory = store();
+  memory.put('config', 'main', { ...memory.config(), sources: [{ id: 'c1', type: 'orbit', name: 'Goal', enabled: true }, { id: 'c2', type: 'flow', name: 'Flow', enabled: true }] });
+  const desk = { toolbox: { skills: () => [{ name: 'notes', description: 'Notes', folder: single }, { name: 'deploy', description: 'Deploy', folder: full }], servers: () => ({}), listHooks: () => [{ id: 'Stop:0:0', event: 'Stop', matcher: '', command: 'echo done' }] },
+    orbitAccount: () => ({ token: 't' }), agents: { selected: () => '' }, store: memory, specialists: { list: () => [] } };
+  const items = marketList(desk).items;
+  const named = name => items.find(item => item.name === name);
+  assert.equal(named('notes').file, true);
+  assert.equal(named('deploy').file, undefined);
+  assert.deepEqual(named('Orbit').orbit, { signedIn: true, goals: 1 });
+  assert.equal(named('Orbit').kind, 'mcp');
+  assert.ok(!items.some(item => item.kind === 'connector' && item.name === 'Goal'), 'an Orbit goal is not listed as a connector');
+  assert.equal(named('Stop').kind, 'hook');
+  assert.equal(named('Stop').id, 'Stop:0:0');
 });

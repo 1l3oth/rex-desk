@@ -1,6 +1,7 @@
 // Market: one list of what agents can use on this computer (skills, commands, MCP servers) and the connectors, with a switch
 // per agent. Everything is on by default; an agent's record keeps only what is switched off (toolsOff: ["skill:x", "mcp:y"]),
 // and that list is filtered out of its start prompt, its / menu, desk_find and desk_run, and (for MCP) its Claude Code session.
+import { readdirSync } from 'node:fs';
 import { agentTools } from './agent-tools.js';
 import { connections, connector } from './connectors.js';
 
@@ -56,6 +57,9 @@ export function filterSlash(tools, off) {
   return { ...tools, skills: (tools.skills || []).filter(item => !off.has(toolKey('skill', item.name))), commands: (tools.commands || []).filter(item => !off.has(toolKey('command', item.name))) };
 }
 
+// A skill that is only its SKILL.md (no scripts or other files beside it), shown as "Skill file".
+const onlyFile = folder => { try { return readdirSync(folder).filter(name => !name.startsWith('.')).length === 1; } catch { return false; } };
+
 // The Market page's data: every item once, and each agent with what it has switched off.
 export function marketList(desk) {
   // First one wins: the toolbox reads folded YAML descriptions (description: >-) that the plain reader leaves as '>-'.
@@ -66,15 +70,21 @@ export function marketList(desk) {
   try { servers = desk.toolbox.servers(''); } catch { /* no MCP config */ }
   try { account = agentTools({ profile: desk.agents.selected('claude') || '' }); } catch { /* no profile */ }
   const items = unique([
-    ...skills.map(item => ({ kind: 'skill', name: item.name, description: text(item.description), ...(item.error ? { error: item.error } : {}) })),
+    ...skills.map(item => ({ kind: 'skill', name: item.name, description: text(item.description), ...(onlyFile(item.folder) ? { file: true } : {}), ...(item.error ? { error: item.error } : {}) })),
     ...account.skills.map(item => ({ kind: 'skill', name: item.name, description: text(item.description) })),
     ...account.commands.map(item => ({ kind: 'command', name: item.name, description: text(item.description) })),
     ...Object.keys(servers).map(name => { const tools = desk.toolbox.lists?.get(name)?.tools || [], error = desk.toolbox.failed?.get(name)?.error || ''; return { kind: 'mcp', name, description: error ? '' : tools.length ? tools.slice(0, 4).map(tool => tool.name).join(', ') : '', tools: tools.length, ...(error ? { error } : {}) }; }),
     { kind: 'mcp', name: 'rex_desk', description: 'Rex Desk itself: chats, tasks, Needs you, evidence', fixed: true },
   ]);
-  const connectorsList = connections(desk.store.config()).map(item => ({ kind: 'connector', name: item.name || connector(item.connectorId)?.name || item.connectorId, description: connector(item.connectorId)?.name || item.connectorId, enabled: item.enabled, id: item.id }));
+  // Connectors are the apps Rex Desk reaches through their API with a pasted key (API). Orbit only speaks MCP, so its goals and
+  // its account sign-in show once, as an MCP server, and its Manage button opens the Orbit form.
+  const linked = connections(desk.store.config()), goals = linked.filter(item => item.connectorId === 'orbit');
+  const connectorsList = linked.filter(item => item.connectorId !== 'orbit').map(item => ({ kind: 'connector', name: item.name || connector(item.connectorId)?.name || item.connectorId, description: connector(item.connectorId)?.name || item.connectorId, enabled: item.enabled, id: item.id }));
+  let signedIn = false; try { signedIn = Boolean(desk.orbitAccount?.()?.token); } catch { /* no account */ }
+  const orbit = signedIn || goals.length ? [{ kind: 'mcp', name: 'Orbit', orbit: { signedIn, goals: goals.length }, fixed: true }] : [];
+  const hooks = (desk.toolbox.listHooks?.() || []).map(hook => ({ kind: 'hook', name: hook.matcher ? `${hook.event} · ${hook.matcher}` : hook.event, description: hook.command, id: hook.id, fixed: true }));
   const main = desk.store.get('specialist', 'main');
   const agents = [...(main ? [{ id: 'main', name: main.name || 'Rex Agent' }] : []), ...desk.specialists.list().map(agent => ({ id: agent.id, name: agent.name }))]
     .map(agent => ({ ...agent, off: [...toolsOff(desk.store, agent.id)] }));
-  return { items: [...items, ...connectorsList], agents, computer: desk.toolbox.computer?.() || '' };
+  return { items: [...items, ...orbit, ...hooks, ...connectorsList], agents, computer: desk.toolbox.computer?.() || '' };
 }

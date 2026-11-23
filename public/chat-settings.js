@@ -165,14 +165,14 @@ export function aboutHtml(about, update, checking) {
     <div class="ab-foot"><button type="button" class="btn small" data-st-about-refresh>${t`Count again`}</button></div>`;
 }
 
-export function openSettings(ctx, section = 'general') {
+export function openSettings(ctx, section = 'general', extra = {}) {
   const { ui, esc, api, toast, refresh } = ctx;
   document.querySelector('.dialog-back.settings')?.remove();
   const back = document.createElement('div'); back.className = 'dialog-back settings'; document.body.append(back);
   const phone = window.matchMedia('(max-width:760px)').matches;
   if (section === 'tools') { ctx.open('market'); return; }
   section = ALIAS[section] || section; if (!PARTS[section]) section = 'general';
-  const state = { section, extra: {}, list: phone && section === 'general', trackers: trackerDraft(ui) };
+  const state = { section, extra: { ...extra }, list: phone && section === 'general', trackers: trackerDraft(ui) };
   const has = part => (PARTS[state.section] || []).includes(part);
   const local = {};
   const config = () => ({ ...(ui.snap.config || {}), ...local });

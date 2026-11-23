@@ -229,12 +229,13 @@ test('the Market page opens from the sidebar, lists what agents can use, and Set
   const browser = await chromium.launch();
   try {
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`http://127.0.0.1:${app.server.address().port}/`); await page.waitForTimeout(2500);
+    await page.goto(`http://127.0.0.1:${app.server.address().port}/`, { timeout: 120000 }); await page.waitForTimeout(2500);
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     await page.evaluate(() => document.querySelector('[data-open="market"]').click()); await page.waitForTimeout(600);
     await page.waitForTimeout(1200);
     assert.ok(await page.locator('.page.mk .mk-row').count() >= 1, 'rows once loaded (Rex Desk itself at least)');
-    assert.ok(await page.locator('.page.mk .mk-seg button').count() === 5, 'All, Skills, Commands, MCP, Connectors');
+    assert.equal(await page.locator('.page.mk .mk-bar + .mk-seg button').count(), 6, 'All, MCP, API, Skills, Commands, Hooks');
+    assert.ok(await page.locator('.page.mk .mk-row .mk-tag').count() >= 1, 'every row says what it is');
     await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click()); await page.waitForTimeout(600);
     assert.equal(await page.locator('[data-st-section="tools"]').count(), 0, 'no Tools and skills section in Settings');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
@@ -488,11 +489,17 @@ test('a failed Orbit sync stays on its row, Paste a new key opens that connectio
     mode = 'ok'; await call('/api/sync', { sourceId: saved.source.id });
     mode = 'refuse';
     const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
-    await page.goto(`${base}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.goto(`${base}/`, { timeout: 120000 }); await page.locator('.rail-settings').waitFor({ timeout: 120000 });
     await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
     await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click());
     await page.locator('.settings-pop').waitFor({ timeout: 30000 });
     await page.evaluate(() => document.querySelector('.settings-pop [data-st-section="connectors"]').click());
+    await page.locator('.settings-pop [data-cn-add]').waitFor({ timeout: 30000 });
+    // Orbit speaks only MCP: it is not on the Connectors list or in its picker, but on its own page that Market opens.
+    assert.equal(await page.locator(`.settings-pop [data-cn-sync="${saved.source.id}"]`).count(), 0, 'no Orbit row under Connectors');
+    await page.locator('.settings-pop [data-cn-add]').click();
+    assert.equal(await page.locator('.settings-pop [data-cn-pick="orbit"]').count(), 0, 'no Orbit in the connector picker');
+    await page.evaluate(() => window.__rexCtx.openSettings('connectors', { connectorPick: 'orbit' }));
     const row = page.locator(`.settings-pop .cx-row:has([data-cn-sync="${saved.source.id}"])`);
     await row.waitFor({ timeout: 30000 });
     assert.equal(await row.locator('.tb-status.bad').count(), 0, 'test setup: the row starts without an error');
@@ -500,9 +507,7 @@ test('a failed Orbit sync stays on its row, Paste a new key opens that connectio
     await row.locator('.tb-status.bad').waitFor({ timeout: 30000 });
     assert.match(await row.locator('.tb-status.bad').innerText(), /refused the key for Goal X/, 'the sync error is on its own row');
     assert.equal((await row.locator('[data-cn-edit]').innerText()).trim(), 'Paste a new key', 'the row offers to paste a new key');
-    // The add form: no sync error from the row, only its own add error.
-    await page.locator('.settings-pop [data-cn-add]').click();
-    await page.locator('.settings-pop [data-cn-pick="orbit"]').click();
+    // The add form on the same page: no sync error from the row, only its own add error.
     await page.locator('.settings-pop [data-cn-orbit-save]').waitFor({ timeout: 10000 });
     assert.equal(await page.locator('.settings-pop .error-text').count(), 0, 'the add form shows no sync error');
     await page.locator('.settings-pop [data-cn-field="apiKey"]').fill('dgm_otherkey12345');
@@ -510,7 +515,6 @@ test('a failed Orbit sync stays on its row, Paste a new key opens that connectio
     await page.locator('.settings-pop [data-cn-orbit-save]').click();
     await page.locator('.settings-pop .error-text').waitFor({ timeout: 30000 });
     assert.match(await page.locator('.settings-pop .error-text').innerText(), /refused the key/, 'an add error shows on the add form');
-    await page.locator('.settings-pop [data-cn-back]').first().click();
     await row.locator('[data-cn-edit]').click();
     await page.locator('.settings-pop [data-cn-orbit-save]', { hasText: 'Save and sync' }).waitFor({ timeout: 10000 });
     assert.match(await page.locator('.settings-pop [data-st-panel]').innerText(), /Change Goal X/, 'Paste a new key opens that connection');

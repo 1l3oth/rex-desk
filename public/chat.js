@@ -58,7 +58,7 @@ const provider = name => name === 'codex' ? t('Codex') : name === 'gemini' ? t('
 const aiKey = value => ['codex', 'gemini', 'openrouter'].includes(value) ? value : 'claude';
 const ctx = { get ui() { return ui; }, api, esc, toast, refresh, open, railItem, markdown, mainRun: () => mainRun(), runById: id => runById(id), draftKey: () => draftKey(), send: () => send(),
   bubble: args => bubble(args), note: text => note(text), typing: (name, caption) => typing(name, caption), hhmm: value => hhmm(value), tokenText,
-  render: () => renderAll(), renderAll: () => renderAll(), isCollapsed: key => collapsed.has(key), currentRunId: () => (ui.view.type === 'main' ? mainRun()?.id : ui.view.type === 'run' ? ui.view.id : '') || '', openSettings: section => openSettings(ctx, section), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
+  render: () => renderAll(), renderAll: () => renderAll(), isCollapsed: key => collapsed.has(key), currentRunId: () => (ui.view.type === 'main' ? mainRun()?.id : ui.view.type === 'run' ? ui.view.id : '') || '', openSettings: (section, extra) => openSettings(ctx, section, extra), askMain: text => askMain(text), avatar: args => avatarHtml(ctx, args), pending: runId => pending(runId), decisionCard: item => decisionCard(item),
   commands: { assign: () => { const box = document.getElementById('draft'); if (box) { box.value = '/assign '; ui.drafts.set(draftKey(), box.value); box.focus(); } }, sync: () => syncIssues().catch(error => toast(error.message, true)), projects: () => scanProjects().catch(error => toast(error.message, true)), room: () => newRoomDialog(), agent: () => agentAction(ctx, 'spec-new'), main: () => open('main'), stop: () => stopAgent().catch(error => toast(error.message, true)), clear: () => clearAgent().catch(error => toast(error.message, true)), loop: () => loopNow().catch(error => toast(error.message, true)), settings: () => openSettings(ctx), setup: () => { showSetup(ctx); open('main'); renderAll(); } }, get initials() { return initials; } };
 const initials = text => (String(text).match(/[\p{L}\p{N}]/gu) || ['?']).slice(0, 2).join('').toUpperCase();
 
@@ -668,6 +668,13 @@ function open(type, id = '') {
 // ---------- actions ----------
 let voiceRest = 0;
 const voiceQuiet = { since: 0, asked: false };
+// A question from a page (Market "What is this?") goes to Rex Agent's chat as the person's message, and that chat opens.
+async function askMain(text) {
+  const run = mainRun();
+  if (run) await api(`/runs/${run.id}/${workingStates.includes(run.state) ? 'say' : 'resume'}`, { method: 'POST', data: workingStates.includes(run.state) ? { text } : { prompt: text } });
+  else await api('/main', { method: 'POST', data: { prompt: text } });
+  open('main'); await refresh();
+}
 async function send() {
   const box = document.getElementById('draft'), typed = box?.value.trim(), hasFiles = ui.attachments.some(file => file.path);
   if (!typed && !hasFiles) return;

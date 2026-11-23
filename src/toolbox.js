@@ -6,13 +6,15 @@
 //
 // Rex Desk opens the MCP servers itself (the same ones Claude Code would, from ~/.claude.json and the project's .mcp.json),
 // reads their tool lists once, and keeps a connection open only while it is used.
-import { existsSync, readdirSync, readFileSync, statSync, cpSync, rmSync, mkdirSync, renameSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, cpSync, rmSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { resolveCommand } from './processes.js';
 import os from 'node:os';
 import path from 'node:path';
 import { existingMcpConnections } from './runners.js';
 
+// When a Claude Code hook can run (Claude Code hooks reference): the common ones, offered in Market.
+export const HOOK_EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'SessionStart', 'Notification'];
 const IDLE_MS = 5 * 60000, LIST_MS = 10 * 60000, CALL_MS = 5 * 60000;
 const clip = (text, size) => { const value = String(text ?? ''); return value.length > size ? `${value.slice(0, size)}\n… (${value.length - size} more characters)` : value; };
 const words = text => String(text || '').toLowerCase().normalize('NFKD').split(/[^a-z0-9ក-៿가-힯]+/).filter(word => word.length > 1);
@@ -127,8 +129,7 @@ export class Toolbox {
     const servers = this.servers(project), user = this.mcpConfigUser ? this.mcpConfigUser() : null;
     const lists = await Promise.all(Object.entries(servers).map(async ([name, config]) => ({ name, config, tools: await this.toolsOf(name, config) })));
     const commands = existsSync(this.commandsHome) ? readdirSync(this.commandsHome).filter(file => file.endsWith('.md')).map(file => { const text = readFileSync(path.join(this.commandsHome, file), 'utf8'); return { name: file.slice(0, -3), description: (text.match(/^description:\s*(.*)$/m)?.[1] || text.replace(/^---[\s\S]*?---/, '').trim().split(/\r?\n/)[0] || '').slice(0, 200) }; }) : [];
-    const settings = (() => { try { return JSON.parse(readFileSync(path.join(this.home, '.claude', 'settings.json'), 'utf8')); } catch { return {}; } })();
-    const hooks = Object.entries(settings.hooks || {}).flatMap(([event, groups]) => (groups || []).flatMap(group => (group.hooks || []).map(hook => ({ event, matcher: group.matcher || '', command: String(hook.command || hook.url || '').slice(0, 200) }))));
+    const hooks = this.listHooks();
     return {
       computer: this.computer?.() || '',
       servers: lists.map(({ name, config, tools }) => ({ name, how: config.command ? [config.command, ...(config.args || [])].join(' ').slice(0, 200) : config.url, tools: tools.length, error: this.failed.get(name)?.error || '', removable: !user || Boolean(user[name]) })),
@@ -210,6 +211,60 @@ export class Toolbox {
     const skill = this.skills().find(item => item.name === name && item.folder.startsWith(this.skillsHome + path.sep));
     if (!skill) throw new Error('Only skills in your own skills folder can be removed here.');
     rmSync(skill.folder, { recursive: true, force: true }); return { removed: name };
+  }
+  // A skill that is only a SKILL.md, pasted or uploaded in Market and named there. Front matter is added when the text has none,
+  // so agents can find it by its name and first line.
+  addSkillFile({ name, text }) {
+    const id = String(name || '').trim().toLowerCase().replace(/\s+/g, '-');
+    if (!/^[a-z0-9][a-z0-9_-]{0,59}$/.test(id)) throw new Error('A skill name is letters, numbers, - or _.');
+    let body = String(text || '').replace(/^﻿/, '').trim(); if (!body) throw new Error('Paste the SKILL.md text or upload the file.');
+    if (body.length > 200000) throw new Error('That file is too big for a skill.');
+    const folder = path.join(this.skillsHome, id); if (existsSync(folder)) throw new Error(`A skill folder named ${id} is already there.`);
+    if (!/^---\r?\n[\s\S]*?\r?\n---/.test(body)) {
+      const first = body.split(/\r?\n/).map(line => line.replace(/^#+\s*/, '').trim()).find(Boolean) || id;
+      body = `---\nname: ${id}\ndescription: ${first.slice(0, 200)}\n---\n\n${body}`;
+    }
+    mkdirSync(folder, { recursive: true }); writeFileSync(path.join(folder, 'SKILL.md'), `${body}\n`);
+    return { added: readSkill(path.join(folder, 'SKILL.md')).name };
+  }
+  // A slash command: one Markdown file in the person's commands folder, named by its command.
+  addCommand({ name, text }) {
+    const id = String(name || '').trim().replace(/^\//, '');
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$/.test(id)) throw new Error('A command name is letters, numbers, - or _.');
+    const body = String(text || '').trim(); if (!body) throw new Error('Write what the command tells the agent to do.');
+    const file = path.join(this.commandsHome, `${id}.md`); if (existsSync(file)) throw new Error(`/${id} is already there.`);
+    mkdirSync(this.commandsHome, { recursive: true }); writeFileSync(file, `${body}\n`);
+    return { added: `/${id}` };
+  }
+  // Hooks live in Claude Code's own settings.json. Only the hooks part changes; every other setting stays as it was.
+  get settingsFile() { return path.join(this.home, '.claude', 'settings.json'); }
+  readSettings() {
+    if (!existsSync(this.settingsFile)) return {};
+    try { return JSON.parse(readFileSync(this.settingsFile, 'utf8')); } catch { throw new Error('Claude Code settings.json cannot be read, so hooks were not changed.'); }
+  }
+  addHook({ event, matcher = '', command }) {
+    if (!HOOK_EVENTS.includes(event)) throw new Error('Pick when the hook runs.');
+    const line = String(command || '').trim(); if (!line) throw new Error('Give the command the hook runs.');
+    const settings = this.readSettings(), hooks = settings.hooks && typeof settings.hooks === 'object' ? settings.hooks : {};
+    const groups = Array.isArray(hooks[event]) ? hooks[event] : [], match = String(matcher || '').trim();
+    const group = groups.find(item => (item.matcher || '') === match);
+    if (group) group.hooks = [...(group.hooks || []), { type: 'command', command: line }];
+    else groups.push({ ...(match ? { matcher: match } : {}), hooks: [{ type: 'command', command: line }] });
+    mkdirSync(path.dirname(this.settingsFile), { recursive: true });
+    writeFileSync(this.settingsFile, `${JSON.stringify({ ...settings, hooks: { ...hooks, [event]: groups } }, null, 2)}\n`);
+    return { added: event };
+  }
+  // id: "<event>:<group>:<hook>", the place listHooks gave it.
+  removeHook(id) {
+    const [event, group, index] = String(id || '').split(':'), settings = this.readSettings(), groups = settings.hooks?.[event];
+    const list = Array.isArray(groups) ? groups[Number(group)]?.hooks : null; if (!Array.isArray(list) || !list[Number(index)]) throw new Error('No such hook.');
+    list.splice(Number(index), 1); if (!list.length) groups.splice(Number(group), 1); if (!groups.length) delete settings.hooks[event];
+    writeFileSync(this.settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
+    return { removed: event };
+  }
+  listHooks() {
+    let settings = {}; try { settings = this.readSettings(); } catch { return []; }
+    return Object.entries(settings.hooks || {}).flatMap(([event, groups]) => (Array.isArray(groups) ? groups : []).flatMap((group, at) => (group.hooks || []).map((hook, index) => ({ id: `${event}:${at}:${index}`, event, matcher: group.matcher || '', command: String(hook.command || hook.url || hook.prompt || '').slice(0, 200) }))));
   }
   removeCommand(name) {
     const file = path.join(this.commandsHome, `${String(name).replace(/[^A-Za-z0-9_.-]/g, '')}.md`);

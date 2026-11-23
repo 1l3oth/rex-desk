@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -102,7 +102,7 @@ test('the person adds and removes MCP servers (through Claude Code), skills and 
   const seen = await box.overview();
   assert.deepEqual(seen.skills.map(item => [item.name, item.removable]), [['khmer-voice', true]]);
   assert.deepEqual(seen.commands, [{ name: 'ship', description: 'Push and deploy' }]);
-  assert.deepEqual(seen.hooks, [{ event: 'PostToolUse', matcher: 'Edit', command: 'npm run lint' }]);
+  assert.deepEqual(seen.hooks, [{ id: 'PostToolUse:0:0', event: 'PostToolUse', matcher: 'Edit', command: 'npm run lint' }]);
   box.removeSkill('khmer-voice'); box.removeCommand('ship');
   const after = await box.overview();
   assert.equal(after.skills.length + after.commands.length, 0);
@@ -186,4 +186,30 @@ test('a skill description written as a YAML block (>- or |) is read as its text,
   writeFileSync(file, '---\nname: aws-auth\ndescription: >-\n  Adds sign-in to web apps\n  with Amazon Cognito.\nlicense: MIT\n---\n# body\n');
   const skill = listSkillsFrom([folder])[0];
   assert.equal(skill.description, 'Adds sign-in to web apps with Amazon Cognito.'); assert.equal(skill.error, undefined);
+});
+
+test('Market adds a skill from one SKILL.md, a slash command and a hook, and keeps the other Claude Code settings', () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'rex-desk-adds-'));
+  mkdirSync(path.join(home, '.claude'), { recursive: true });
+  writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify({ model: 'opus', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo done' }] }] } }));
+  const box = new Toolbox({ home, mcpConfig: () => ({}), bundled: '' });
+  // No front matter: the name and first line become it, so agents can find the skill.
+  assert.deepEqual(box.addSkillFile({ name: 'Release Notes', text: '# Write short release notes\nRead the commits.' }), { added: 'release-notes' });
+  const skill = box.skills().find(item => item.name === 'release-notes');
+  assert.equal(skill.description, 'Write short release notes');
+  assert.throws(() => box.addSkillFile({ name: 'release-notes', text: 'again' }), /already there/);
+  assert.throws(() => box.addSkillFile({ name: '../x', text: 'x' }), /letters, numbers/);
+  assert.deepEqual(box.addCommand({ name: '/review', text: 'Review my last change.' }), { added: '/review' });
+  assert.throws(() => box.addCommand({ name: 'review', text: 'again' }), /already there/);
+  box.addHook({ event: 'PostToolUse', matcher: 'Edit|Write', command: 'npx prettier --write .' });
+  assert.throws(() => box.addHook({ event: 'Whenever', command: 'x' }), /Pick when/);
+  const settings = JSON.parse(readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(settings.model, 'opus');
+  assert.equal(settings.hooks.Stop[0].hooks[0].command, 'echo done');
+  assert.deepEqual(settings.hooks.PostToolUse, [{ matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'npx prettier --write .' }] }]);
+  const hooks = box.listHooks();
+  assert.deepEqual(hooks.map(hook => hook.id), ['Stop:0:0', 'PostToolUse:0:0']);
+  box.removeHook('PostToolUse:0:0');
+  assert.deepEqual(box.listHooks().map(hook => hook.event), ['Stop']);
+  assert.equal(JSON.parse(readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8')).hooks.PostToolUse, undefined);
 });
