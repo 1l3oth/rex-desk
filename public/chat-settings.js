@@ -588,17 +588,19 @@ export function openSettings(ctx, section = 'general') {
     catch (error) { event.target.checked = !on; toast(error.message, true); }
   });
   // The voices on this computer, for the reading voice choices.
-  const SPEAK_CACHE = 'rex-desk-speak-cache';
-  try { const cached = JSON.parse(localStorage.getItem(SPEAK_CACHE) || 'null'); if (cached) { state.extra.tts ||= cached.tts; state.extra.neural ||= cached.neural; } } catch { /* private window */ }
-  const keepSpeak = () => { try { localStorage.setItem(SPEAK_CACHE, JSON.stringify({ tts: state.extra.tts, neural: state.extra.neural })); } catch { /* private window */ } };
+  // Two caches with one writer each: the engine settings come only from a voice save or the newest engine answer, the voice lists only from the list answer.
+  const SPEAK_CACHE = 'rex-desk-speak-cache', VOICE_LIST_CACHE = 'rex-desk-voice-list-cache';
+  try { const cached = JSON.parse(localStorage.getItem(SPEAK_CACHE) || 'null'), lists = JSON.parse(localStorage.getItem(VOICE_LIST_CACHE) || 'null'); if (cached?.tts) state.extra.tts ||= cached.tts; state.extra.neural ||= lists || cached?.neural; } catch { /* private window */ }
+  const keepSpeak = status => { try { localStorage.setItem(SPEAK_CACHE, JSON.stringify({ tts: status })); } catch { /* private window */ } };
+  const keepVoiceLists = neural => { try { localStorage.setItem(VOICE_LIST_CACHE, JSON.stringify(neural)); } catch { /* private window */ } };
   // Only the newest voice-engine answer counts: a slow first load must not overwrite a save made after it, on screen or in the cache.
-  const takeTts = async request => { const mine = ++ttsSeq, status = await request(); if (mine !== ttsSeq) return null; state.extra.tts = status; keepSpeak(); setSpeechEngine(status); return status; };
+  const takeTts = async request => { const mine = ++ttsSeq, status = await request(); if (mine !== ttsSeq) return null; state.extra.tts = status; keepSpeak(status); setSpeechEngine(status); return status; };
   // A background answer redraws the Jev tab only when no edit is waiting to save; otherwise the redraw waits until that save has read the fields.
   const jevDraw = () => { if (!has('jev') || !document.body.contains(back)) return; if (pendingSave) { jevLater = true; return; } draw(); };
   if (has('jev') && !ui.accounts) void api('/agents').then(list => { ui.accounts ||= list; jevDraw(); }).catch(() => {});
   void api('/computer').then(info => { state.extra.anywhere = info.anywhere; jevDraw(); }).catch(() => {});
   void takeTts(() => api('/speak/engine')).then(status => { if (status) jevDraw(); }).catch(() => {});
-  void api('/speak/voices').then(neural => { state.extra.neural = neural; keepSpeak(); jevDraw(); }).catch(() => {});
+  void api('/speak/voices').then(neural => { state.extra.neural = neural; keepVoiceLists(neural); jevDraw(); }).catch(() => {});
   if ('speechSynthesis' in window) void Promise.all(['en', 'ko', 'km'].map(lang => voicesFor(lang).then(list => [lang, list.map(voice => ({ name: voice.name }))]))).then(pairs => { state.extra.voices = Object.fromEntries(pairs); jevDraw(); });
   // Spoken replies: each control saves at once.
   back.addEventListener('change', async event => {
