@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createWorktree } from '../src/processes.js';
 import { worktreeList, removeMerged, inside } from '../src/worktree-cleanup.js';
 import { workFolder } from '../src/work-folder.js';
 
-const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
+// CI's temp folder is a short 8.3 name (RUNNER~1); the code compares real long paths, so the tests start from the long one too.
+const tmp = realpathSync.native(os.tmpdir());
+const temporary = label => mkdtempSync(path.join(tmp, `rex-desk-${label}-`));
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 
 test('each task gets one worktree folder inside the project\'s work folder, and only merged, clean ones are removed', async () => {
@@ -139,7 +141,7 @@ test('an agent never starts in a folder being removed, saved or fallback, and it
 
 test('a worktree is a cleanup candidate only after it has been idle for 10 minutes', async () => {
   const { busyFolders, usedBy } = await import('../src/worktree-cleanup.js');
-  const tree = path.join(os.tmpdir(), 'app-work', 'worktrees', '501'), now = Date.parse('2026-11-22T10:00:00Z');
+  const tree = path.join(tmp, 'app-work', 'worktrees', '501'), now = Date.parse('2026-11-22T10:00:00Z');
   const ended = minutes => [{ id: 'r', state: 'done', worktree: tree, endedAt: new Date(now - minutes * 60000).toISOString() }];
   assert.ok(usedBy(busyFolders(ended(3), { now }), { path: tree }), 'ended 3 minutes ago: kept');
   assert.ok(!usedBy(busyFolders(ended(11), { now }), { path: tree }), 'ended 11 minutes ago: can go');
@@ -148,7 +150,7 @@ test('a worktree is a cleanup candidate only after it has been idle for 10 minut
 
 test('the tidy script reads the project from any position and --apply keeps worktrees live runs use', async () => {
   const { parseArgs, liveFolders } = await import('../scripts/tidy-worktrees.mjs');
-  const project = path.join(os.tmpdir(), 'app');
+  const project = path.join(tmp, 'app');
   assert.equal(parseArgs([project]).project, project, 'without --base the first argument is the project');
   assert.deepEqual(parseArgs(['--base', 'origin/main', project, '--apply']), { apply: true, base: 'origin/main', data: '', project });
   assert.equal(parseArgs(['--apply', '--data', 'D:\\data', project]).project, project);
@@ -192,9 +194,9 @@ test('tidy --apply reads the databases fresh for each worktree and removes only 
 });
 
 test('a project can name its own work folder', () => {
-  const project = path.join(os.tmpdir(), 'site'), own = path.join(os.tmpdir(), 'elsewhere', 'site-work');
-  assert.equal(workFolder(project, os.tmpdir(), [{ path: project, workFolder: own }]), own);
-  assert.equal(workFolder(project, os.tmpdir(), [{ path: path.join(os.tmpdir(), 'other'), workFolder: own }]), path.join(os.tmpdir(), 'site-work'));
+  const project = path.join(tmp, 'site'), own = path.join(tmp, 'elsewhere', 'site-work');
+  assert.equal(workFolder(project, tmp, [{ path: project, workFolder: own }]), own);
+  assert.equal(workFolder(project, tmp, [{ path: path.join(tmp, 'other'), workFolder: own }]), path.join(tmp, 'site-work'));
 });
 
 test('a project\'s work folder is saved from Settings, Projects, and the agents\' worktrees follow it', async () => {
