@@ -112,8 +112,13 @@ function drawLocal() {
   mountScene();
 }
 
-// The sign-in page is a quiet, centred native card on its own: no 3D scene behind it.
-function mountScene() {}
+// The 3D desk sits behind the centred card; without WebGL the page stays flat and the card still reads.
+function mountScene() {
+  if (state.scene !== undefined) return;
+  state.scene = null;
+  const canvas = document.createElement('canvas'); canvas.className = 'si-scene'; canvas.setAttribute('aria-hidden', 'true'); document.body.prepend(canvas);
+  import('/login-scene.js').then(module => { state.scene = module.mountLoginScene(canvas); }).catch(() => canvas.remove());
+}
 
 root.addEventListener('click', event => {
   const tab = event.target.closest('[data-tab]'); if (tab) { state.tab = tab.dataset.tab; state.error = ''; draw(); return; }
