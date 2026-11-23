@@ -701,7 +701,9 @@ export class Desk {
     // says so (prompt-accepted, after the turn's prompt or after a message handed over mid-turn, like a Codex steer that was
     // accepted) or the turn ends cleanly. A hand-over the runner gives back (requeue) waits again; any other end loses them.
     const bound = new Set();
-    const markLaunched = () => { for (const ticket of bound) this.setDelivery(ticket, { state: 'taken' }); bound.clear(); };
+    // text: what this acknowledgment was for (one Codex steer); it settles only those tickets, so an overlapping steer that is
+    // refused keeps its own. Without text (the turn's prompt) every ticket in flight is settled.
+    const markLaunched = (text = null) => { for (const ticket of [...bound]) { if (text !== null && !String(text).includes(this.store.get('delivery', ticket)?.text ?? ' ')) continue; this.setDelivery(ticket, { state: 'taken' }); bound.delete(ticket); } };
     const bind = (text, whole = false) => { for (const item of this.waitingDeliveries(this.store.get('run', runId), whole ? null : text)) { bound.add(item.id); this.setDelivery(item.id, { state: 'turn', runId }); } };
     // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
     const turnAt = new Date().toISOString();
@@ -805,7 +807,7 @@ export class Desk {
         requeue: text => { for (const item of this.store.list('delivery').filter(entry => entry.runId === runId && entry.state === 'turn' && String(text || '').includes(entry.text))) { bound.delete(item.id); this.setDelivery(item.id, { state: 'waiting' }); } this.requeue(runId, text); }, extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
           // Only the runner knows when its prompt was really taken (Codex: turn/start accepted; Claude: the model's first real
           // words or step). A session opening, a sign-in error written as a reply, or a result before an error check prove nothing.
-          if (kind === 'prompt-accepted') { markLaunched(); return; }
+          if (kind === 'prompt-accepted') { markLaunched(typeof data?.text === 'string' ? data.text : null); return; }
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
           // The quiet turn that reads Voice mode's report is not said: Rex Desk has welcomed the person already.
           const reading = this.store.get('run', runId)?.voice?.reading;

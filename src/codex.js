@@ -153,7 +153,7 @@ export class CodexRunner {
       const news = this.inbox?.();
       // Taken only once Codex accepts the steer; a refused one goes back to the queue for the next turn.
       if (news && this.turnId) void this.client.request('turn/steer', { threadId: this.threadId, expectedTurnId: this.turnId, input: [{ type: 'text', text: news }] })
-        .then(() => this.event('prompt-accepted', { steer: true }), error => { this.requeue?.(news); this.event('error', { message: error.message }); });
+        .then(() => this.event('prompt-accepted', { steer: true, text: news }), error => { this.requeue?.(news); this.event('error', { message: error.message }); });
       else if (news) this.requeue?.(news);
     }
     if (method === 'account/rateLimits/updated' && params?.rateLimits) this.event('rate-limit', { codex: params.rateLimits });
