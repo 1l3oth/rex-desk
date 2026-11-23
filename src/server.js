@@ -604,6 +604,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (url.pathname === '/api/phone-relay' && request.method === 'POST') {
           const input = await body(request);
           if (input.action === 'enable') return json(response, 200, desk.phoneRelay.setEnabled(input.on));
+          if (input.action === 'ask-code') return json(response, 200, desk.phoneRelay.setAskCode(input.on));
           if (input.action === 'approve') return json(response, 200, desk.phoneRelay.approve(input.device, input.code));
           if (input.action === 'deny') return json(response, 200, desk.phoneRelay.deny(input.device));
           if (input.action === 'forget') return json(response, 200, desk.phoneRelay.forget(input.device));

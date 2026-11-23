@@ -146,6 +146,8 @@ test('a phone signed in to the desk\'s own account comes in with no code; anothe
   assert.equal(relay.admit(as('user-2')).ok, true, 'approved phone, same account as when approved');
   assert.equal(relay.admit(as('user-3')).ok, false, 'the copied id under another account');
   assert.equal(relay.admit(as('')).ok, false, 'the copied id with no account');
+  assert.equal(relay.setAskCode(true).askCode, true); assert.equal(relay.admit({ headers: { 'x-rex-relay': relay.secret, 'x-rex-relay-account': 'user-1' } }).ok, false, 'askCode on: the same account needs the code too');
+  assert.equal(relay.setAskCode(false).askCode, false, 'off again');
   socket.emit('close', { code: 1006 }); relay.stop();
   assert.equal(relay.account, '', 'a closed connection forgets the account');
 });

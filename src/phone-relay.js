@@ -66,6 +66,7 @@ export class PhoneRelay {
     if (this.approved(phone.id, account)) return { ok: true };
     return { ok: false, phone: { ...phone, account } };
   }
+  setAskCode(on) { this.save({ askCode: Boolean(on) }); return this.view(); }
   // The code a new phone shows, kept for ten minutes. Asking again within that time shows the same code.
   pendingFor({ id, name, account = '' }) {
     const at = Date.now(), live = this.settings().pending.filter(item => item.until > at);
@@ -93,7 +94,7 @@ export class PhoneRelay {
     for (const [streamId, stream] of this.streams) if (gone.some(entry => entry.key === stream.key)) { this.streams.delete(streamId); stream.request?.destroy(); this.send(RELAY_OP.ABORT, streamId); }
     return { removed: true };
   }
-  view() { const settings = this.settings(); return { enabled: Boolean(settings.enabled), state: this.state, problem: this.state === 'online' ? null : this.problem, url: this.publicUrl, devices: settings.devices.map(({ ref, name, at }) => ({ id: ref, name, at })), pending: this.pending() }; }
+  view() { const settings = this.settings(); return { enabled: Boolean(settings.enabled), askCode: Boolean(settings.askCode), state: this.state, problem: this.state === 'online' ? null : this.problem, url: this.publicUrl, devices: settings.devices.map(({ ref, name, at }) => ({ id: ref, name, at })), pending: this.pending() }; }
 
   // ---------- the connection to the relay ----------
   setEnabled(on) { this.save({ enabled: Boolean(on) }); if (on) this.start(); else this.stop(); return this.view(); }

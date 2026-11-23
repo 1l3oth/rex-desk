@@ -20,7 +20,9 @@ export function devicesStage(ctx) {
   const tailscale = `<div class="dv-field"><label class="dv-switch"><input type="checkbox" data-action="dev-remote" ${devices.remote ? 'checked' : ''}><span class="dv-track" aria-hidden="true"></span><span><b>${t`Connect over Tailscale`}</b><small>${t`Only devices on your own Tailscale network can reach it.`}</small></span></label>
       ${devices.remote && !address ? `<p class="dv-warn">${t`Tailscale is not running on this computer. Open Tailscale and sign in; the address shows up here.`}</p>` : ''}
       ${devices.remote && address ? `<div class="dv-ts"><img class="dv-qr" src="/api/devices/qr?v=${encodeURIComponent(address)}" alt="${t`QR code that opens Rex Desk on your phone`}" width="150" height="150"><div class="dv-ts-text"><p class="dv-foot">${t`Scan with your phone camera. The phone needs Tailscale on the same account.`}</p><div class="dv-link"><code title="${esc(address)}">${esc(address)}</code><button class="btn small" data-action="dev-copy-link" data-link="${esc(address)}">${t`${ICON.copy} Copy link`}</button></div></div></div>` : ''}</div>`;
+  const askCode = ui.snap.phones ? `<div class="dv-field"><label class="dv-switch"><input type="checkbox" data-action="dev-phone-askcode" ${ui.snap.phones.askCode ? 'checked' : ''}><span class="dv-track" aria-hidden="true"></span><span><b>${t`Ask for a code on new phones`}</b><small>${t`Even a phone signed in to your own account must show a code you approve here.`}</small></span></label></div>` : '';
   const advanced = `<details class="dv-group dv-adv"${devices.remote ? ' open' : ''}><summary>${t`Advanced`}</summary><div class="dv-list dv-adv-body">
+      ${askCode}
       ${tailscale}
       <div class="dv-field"><span class="dv-label">${t`Add a computer by address`}</span><div class="dv-line"><input id="dev-url" type="text" placeholder="100.101.102.103" aria-label="${t`Address of another computer`}"><button class="btn small" data-action="dev-add">${t`Add`}</button></div></div>
       <div class="dv-field"><span class="dv-label">${t`Device key`}</span><div class="dv-line"><input id="dev-key" type="password" value="${esc(devices.key || '')}" aria-label="${t`Device key`}" readonly><button class="btn small" data-action="dev-show">${t`Show`}</button><button class="btn small" data-action="dev-copy">${t`Copy`}</button></div></div>
@@ -60,6 +62,7 @@ export async function devicesAction(ctx, action, target) {
   else if (action.startsWith('dev-phone-')) {
     const phone = data => api('/phone-relay', { method: 'POST', data });
     if (action === 'dev-phone-relay') await phone({ action: 'enable', on: target.checked });
+    else if (action === 'dev-phone-askcode') await phone({ action: 'ask-code', on: target.checked });
     else if (action === 'dev-phone-approve') { await phone({ action: 'approve', device: target.dataset.device, code: target.dataset.code }); toast(t('Phone approved.')); }
     else if (action === 'dev-phone-deny') await phone({ action: 'deny', device: target.dataset.device });
     else if (action === 'dev-phone-forget') await phone({ action: 'forget', device: target.dataset.device });
