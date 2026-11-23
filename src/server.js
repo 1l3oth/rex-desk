@@ -1256,7 +1256,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/uploads/file' && request.method === 'GET') {
         const uploads = path.resolve(store.media('uploads')); let file = path.resolve(String(url.searchParams.get('path') || ''));
         // A chat restored from the backup into another data folder (a reinstall, a new computer) still names the old folder.
-        const moved = /[\\/]uploads[\\/]([^\\/]+)[\\/]([^\\/]+)$/.exec(String(url.searchParams.get('path') || ''));
+        // Its two last parts must stay inside this uploads folder (no "..": the backup fallback never serves a file outside it).
+        const named = /[\\/]uploads[\\/]([^\\/]+)[\\/]([^\\/]+)$/.exec(String(url.searchParams.get('path') || ''));
+        const moved = named && !named.slice(1, 3).some(part => part === '.' || part === '..') && path.resolve(uploads, named[1], named[2]).toLowerCase().startsWith(`${uploads.toLowerCase()}${path.sep}`) ? named : null;
         // Deleted in Settings, Storage: the chat shows "File removed" instead of fetching a copy back.
         if (moved && desk.storage.gone(`data/uploads/${moved[1]}/${moved[2]}`)) { response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }); return response.end('This file was deleted.'); }
         if (moved && !file.toLowerCase().startsWith(`${uploads.toLowerCase()}${path.sep}`)) { const here = path.join(uploads, moved[1], moved[2]); if (existsSync(here)) file = here; }

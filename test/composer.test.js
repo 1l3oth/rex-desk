@@ -90,3 +90,16 @@ test('a chat upload missing here is fetched from the backup before the chat says
     assert.equal(deleted.status, 404); assert.equal(await deleted.text(), 'This file was deleted.');
   } finally { await app.close(); }
 });
+
+test('the chat uploads route never serves a file outside the uploads folder, even through the backup fallback', async () => {
+  const app = await createApp({ dataDirectory: temporary('upload-escape'), port: 0 });
+  try {
+    writeFileSync(path.join(app.store.directory, 'secret.txt'), 'secret');
+    const asked = []; app.store.cloud.files = { fetchOne: async key => { asked.push(key); return false; } };
+    for (const name of ['C:/old/uploads/../secret.txt', 'C:/old/uploads/./secret.txt']) {
+      const answer = await fetch(`${app.address}/api/uploads/file?path=${encodeURIComponent(name)}`);
+      assert.equal(answer.status, 404, name); assert.doesNotMatch(await answer.text(), /secret/);
+    }
+    assert.deepEqual(asked, [], 'nothing outside the uploads folder is fetched');
+  } finally { await app.close(); }
+});
