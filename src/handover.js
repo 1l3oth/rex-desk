@@ -3,7 +3,7 @@
 // commit on its own branch, and that branch travels as a git bundle. The new computer unpacks it into a worktree of its own and
 // the agent carries on there. Each step is an event in the agent's chat ("move-step": saved, committed, moved, picked-up; or
 // failed); when a step fails the agent stays where it is.
-import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { workFolder } from './work-folder.js';
@@ -13,6 +13,8 @@ import { git as runGit, slug } from './processes.js';
 // Branches work is never committed on.
 const PROTECTED = /^(master|main|develop|trunk|release\/.+|global\/.+)$/i;
 export const BUNDLE_LIMIT = 15 * 1024 * 1024;
+// A file's own edit is written a moment after its tool event is saved.
+const EDIT_SLACK_MS = 5000;
 const same = (left, right) => Boolean(left && right) && path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase();
 
 // On the computer the agent leaves: save its work and pack its branch.
@@ -40,20 +42,31 @@ async function saveShared({ project, agentName, to, ownFiles }, git) {
   if (!project || !existsSync(project)) return { nothing: true };
   // Changed tracked files (deleted ones too) and new untracked ones, NUL-separated so odd names stay whole.
   const list = async args => (await git(project, args).catch(() => '')).split(String.fromCharCode(0)).filter(Boolean);
-  const changed = [...new Set([...await list(['diff', '--name-only', '--no-renames', '-z', 'HEAD']), ...await list(['ls-files', '--others', '--exclude-standard', '-z'])])];
+  // The commit sits on the remote's main line, not on this folder's branch, so commits made here by others (not pushed
+  // yet) never travel in the bundle. Changes are read against that line too, so the agent's own committed files still go, whole.
+  let base = '';
+  for (const main of ['origin/HEAD', 'origin/master', 'origin/main']) { base = await git(project, ['merge-base', 'HEAD', main]).catch(() => ''); if (base) break; }
+  base ||= 'HEAD';
+  const changed = [...new Set([...await list(['diff', '--name-only', '--no-renames', '-z', base]), ...await list(['ls-files', '--others', '--exclude-standard', '-z'])])];
   if (!changed.length) return { nothing: true };
+  // ownFiles: names, or { file, at } with the time of the agent's last edit of it. A file changed after that edit (or
+  // deleted, which its own edits never do) may hold someone else's later work, so it stays here like theirs.
   const key = file => path.resolve(project, file).toLowerCase();
-  const mine = new Set(ownFiles.map(file => path.resolve(project, String(file)).toLowerCase()));
-  const files = changed.filter(file => mine.has(key(file)));
+  const mine = new Map(ownFiles.map(item => typeof item === 'string' ? { file: item } : item).map(item => [path.resolve(project, String(item.file)).toLowerCase(), item.at ? Date.parse(item.at) : 0]));
+  const untouched = file => {
+    const at = mine.get(key(file)); if (!at) return true;
+    try { return statSync(path.resolve(project, file)).mtimeMs <= at + EDIT_SLACK_MS; } catch { return false; }
+  };
+  const files = changed.filter(file => mine.has(key(file)) && untouched(file));
   const others = changed.length - files.length;
   if (!files.length) return { nothing: true, others };
   const branch = `rex-handover/${slug(agentName, 40)}`, index = path.join(os.tmpdir(), `rex-handover-${randomUUID()}.index`), env = { GIT_INDEX_FILE: index };
   try {
-    await git(project, ['read-tree', 'HEAD'], { env });
+    await git(project, ['read-tree', base], { env });
     await git(project, ['add', '-A', '--', ...files], { env });
     const tree = await git(project, ['write-tree'], { env });
     const who = await git(project, ['config', 'user.email']).catch(() => '') ? {} : { GIT_AUTHOR_NAME: 'Rex Desk', GIT_AUTHOR_EMAIL: 'desk@rexdesk.invalid', GIT_COMMITTER_NAME: 'Rex Desk', GIT_COMMITTER_EMAIL: 'desk@rexdesk.invalid' };
-    const committed = await git(project, ['commit-tree', tree, '-p', 'HEAD', '-m', `WIP: ${agentName} moves to ${to} (saved by Rex Desk, its own ${files.length === 1 ? 'file' : 'files'} only)`], { env: who });
+    const committed = await git(project, ['commit-tree', tree, '-p', base, '-m', `WIP: ${agentName} moves to ${to} (saved by Rex Desk, its own ${files.length === 1 ? 'file' : 'files'} only)`], { env: who });
     await git(project, ['update-ref', `refs/heads/${branch}`, committed]);
     return { ...await pack(project, branch, agentName, git), committed, files, others };
   } finally { rmSync(index, { force: true }); }
@@ -124,11 +137,15 @@ export class Handover {
   }
   // The files this agent's own chats (personal and room sessions) edited or wrote here, from their tool events.
   ownFiles(agent) {
-    const files = new Set();
+    const files = new Map();
     for (const runId of [agent.runId, ...Object.values(agent.roomRuns || {})].filter(Boolean)) {
-      for (const event of this.store.events(runId, { limit: 100000 })) if (event.kind === 'agent-tool' && event.change?.file) files.add(String(event.change.file));
+      for (const event of this.store.events(runId, { limit: 100000 })) {
+        if (event.kind !== 'agent-tool' || !event.change?.file) continue;
+        const file = String(event.change.file), at = String(event.createdAt || '');
+        if (!files.has(file) || at > files.get(file)) files.set(file, at);
+      }
     }
-    return [...files];
+    return [...files].map(([file, at]) => ({ file, at }));
   }
   pickUp(input) { return pickUp(input); }
   directoryFor(agent, branch, project = '') { return path.join(workFolder(project, this.store.directory, this.store.config?.().repositories || []), 'worktrees', `${slug(agent.slug || agent.name, 40)}-${slug(branch, 60)}`); }

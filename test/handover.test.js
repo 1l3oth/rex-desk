@@ -70,6 +70,17 @@ test('an agent with no worktree carries only the files it changed itself, and th
   assert.equal(readFileSync(path.join(directory, 'app.txt'), 'utf8'), 'one\n', 'someone else\'s change did not travel');
 });
 
+test('a file changed after the agent\'s last edit, and others\' unpushed commits in the shared folder, never travel', async () => {
+  const { home } = await setup();
+  writeFileSync(path.join(home, 'theirs.txt'), 'their commit\n'); await git(home, ['add', 'theirs.txt']); await git(home, ['commit', '-qm', 'someone else, not pushed']);
+  writeFileSync(path.join(home, 'mine.txt'), 'written by Desky\n'); writeFileSync(path.join(home, 'shared.txt'), 'Desky, then someone else\n');
+  const edited = new Date(Date.now() - 60000).toISOString(), justNow = new Date().toISOString();
+  const saved = await saveWork({ worktree: '', project: home, agentName: 'Desky', ownFiles: [{ file: path.join(home, 'mine.txt'), at: justNow }, { file: path.join(home, 'shared.txt'), at: edited }] });
+  assert.deepEqual(saved.files, ['mine.txt'], 'shared.txt changed a minute after Desky\'s last edit, so it stays'); assert.equal(saved.others, 2, 'shared.txt and the unpushed theirs.txt stay');
+  assert.deepEqual((await git(home, ['diff', '--name-only', 'origin/master', saved.head])).split('\n'), ['mine.txt'], 'the commit sits on origin/master, without the unpushed commit');
+  assert.equal(saved.base, await git(home, ['rev-parse', 'origin/master']));
+});
+
 test('work is never committed on master or a release branch: the move stops with a reason and nothing is committed', async () => {
   const { home, worktree } = await setup();
   // Its worktree on a protected branch (master, main, release/...) with changes.
