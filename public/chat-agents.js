@@ -54,12 +54,14 @@ export function agentStage(ctx, id = (ctx.ui.profileId || ctx.ui.view.id)) {
   const loopBox = group(t('Own loop'), row(t('Check tasks by itself'), toggle('data-loop-on', loop.on, t('Own loop')), t`${esc(agent.name)} looks at its tasks and starts work on its own.`)
       + `<div class="agp-fold${loop.on ? '' : ' off'}">`
       + row(t('How often'), `<div class="agp-seg" role="radiogroup" aria-label="${t`How often`}">${[15, 30, 60, 120, 240, 1440].map(minutes => `<label title="${everyLabel(minutes)}"><input type="radio" name="loop-every-${esc(agent.id)}" value="${minutes}" data-loop-every ${Number(loop.every) === minutes ? 'checked' : ''}><span>${STEP[minutes]}</span></label>`).join('')}</div>`)
-      + row(t('Work hours'), toggle('data-loop-hours-on', hours.on, t('Work hours')), t('Checks only during these hours, and stops when they end.'))
-      + (hours.on ? row(t('Hours'), `<div class="agp-time"><input type="time" data-loop-hours="start" value="${esc(hours.start)}" aria-label="${t`Starts at`}"><span>${t`to`}</span><input type="time" data-loop-hours="end" value="${esc(hours.end)}" aria-label="${t`Ends at`}"></div>`)
-        + row(t('Days'), `<div class="agp-seg agp-days" role="group" aria-label="${t`Work days`}">${[1, 2, 3, 4, 5, 6, 0].map(day => `<label><input type="checkbox" data-loop-day="${day}" ${hours.days.includes(day) ? 'checked' : ''}><span>${esc(dayName(day))}</span></label>`).join('')}</div>`) : '')
       + block(`<label class="agp-blabel" for="lp-prompt-${esc(agent.id)}">${t`On each check`}</label><textarea id="lp-prompt-${esc(agent.id)}" class="agp-text" data-loop-prompt rows="2" maxlength="2000" placeholder="${t`Optional. For example: pick up QA issues first and test them in the browser.`}">${esc(loop.prompt || '')}</textarea>`)
       + row(`${loop.on ? `<i class="agp-dot${offDuty ? ' rest' : ' on'}"></i>` : ''}${status}`, `<button type="button" class="btn small" data-action="spec-loop-now">${t`Check now`}</button>`, last, ' agp-status')
       + '</div>');
+  // Work hours are the agent's whole shift, not just the loop's: off-shift, the loop pauses and scheduled messages wait.
+  const hoursBox = group(t('Work hours'), row(t('Keep to work hours'), toggle('data-loop-hours-on', hours.on, t('Work hours')), t('During these hours the agent works. Off hours its loop pauses and scheduled messages wait.'))
+      + (hours.on ? row(t('Hours'), `<div class="agp-time"><input type="time" data-loop-hours="start" value="${esc(hours.start)}" aria-label="${t`Starts at`}"><span>${t`to`}</span><input type="time" data-loop-hours="end" value="${esc(hours.end)}" aria-label="${t`Ends at`}"></div>`)
+        + row(t('Days'), `<div class="agp-seg agp-days" role="group" aria-label="${t`Work days`}">${[1, 2, 3, 4, 5, 6, 0].map(day => `<label><input type="checkbox" data-loop-day="${day}" ${hours.days.includes(day) ? 'checked' : ''}><span>${esc(dayName(day))}</span></label>`).join('')}</div>`) : ''),
+    hours.on && offDuty ? t`Off duty now until ${esc(hours.start)}.` : '');
   // The page is a decision surface: who the agent is and what it is doing at the top, then one tab at a time.
   const tabId = ['about', 'notes', 'work', 'setup'].includes(ui.agentTab) ? ui.agentTab : 'about';
   const where = [agent.projectSlug ? `<a href="#" data-open="project" data-id="${esc(agent.projectSlug)}">${esc(agent.projectSlug)}</a>` : esc(t('No project')), agent.device ? `${esc(agent.device)}${agent.remote ? '' : ` <span class="agp-faint">${t`(this computer)`}</span>`}` : ''].filter(Boolean).join('<span class="agp-sep" aria-hidden="true">·</span>');
@@ -93,7 +95,7 @@ export function agentStage(ctx, id = (ctx.ui.profileId || ctx.ui.view.id)) {
       + row(t('Model'), pickerHtml(ctx, { id: 'sp-model', label: t('Model'), value: agent.model || '', items: models })), t('Switching starts fresh with a summary of the chat.'))
     + (followRows || agent.remote || agent.noCloud ? group(t('Where it works'), `${followRows}${agent.remote && !agent.pinned ? row(t('Move'), `<button class="btn small" data-action="spec-move">${t`Move to this computer`}</button>`) : ''}${agent.noCloud ? row(t('Cloud'), `<span class="agp-value">${t`Kept out of the cloud`}</span>`) : ''}`, agent.pinned ? t('Set in Settings, Projects.') : '') : '')
     + group('', row(t`Remove ${esc(agent.name)}`, `<button class="btn small danger" data-action="spec-remove">${t`Remove`}</button>`, t`Created by ${esc(agent.createdBy || t('you'))}${origin ? t`, copied from ${esc(origin.name)}` : ''}.`));
-  const work = taskSources + loopBox + scheduleBox(ctx, agent, { row, block, group, toggle });
+  const work = taskSources + loopBox + hoursBox + scheduleBox(ctx, agent, { row, block, group, toggle });
   const body = tabId === 'notes' ? notesSection(ctx, agent) : tabId === 'work' ? work : tabId === 'setup' ? setup : about;
   // The side card: where and how it works, at a glance (the controls are in the Setup and Work tabs).
   const fact = (label, value) => `<div class="agp-fact"><span>${label}</span><b>${value}</b></div>`;
@@ -142,8 +144,8 @@ export function wireLoop(ctx) {
     if (event.target.matches?.('[data-loop-on]')) void save({ on: event.target.checked });
     else if (event.target.matches?.('[data-loop-every]')) void save({ every: Number(event.target.value) });
     else if (event.target.matches?.('[data-loop-hours-on], [data-loop-hours], [data-loop-day]')) {
-      const box = event.target.closest('.lp-hours'), value = name => box.querySelector(`[data-loop-hours="${name}"]`).value;
-      void save({ hours: { on: box.querySelector('[data-loop-hours-on]').checked, start: value('start'), end: value('end'), days: [...box.querySelectorAll('[data-loop-day]:checked')].map(input => Number(input.dataset.loopDay)) } });
+      const box = event.target.closest('.agp-grp') || document, value = name => box.querySelector(`[data-loop-hours="${name}"]`)?.value || '';
+      void save({ hours: { on: box.querySelector('[data-loop-hours-on]').checked, start: value('start') || '08:00', end: value('end') || '17:00', days: [...box.querySelectorAll('[data-loop-day]:checked')].map(input => Number(input.dataset.loopDay)) } });
     } else if (event.target.matches?.('[data-agent-follow]')) void agentAction(ctx, 'spec-follow', { dataset: { agentId: event.target.dataset.agentFollow || '' } }).catch(error => ctx.toast(error.message, true));
     else if (event.target.matches?.('[data-sched-on]')) void ctx.api(`/schedules/${event.target.dataset.schedOn}`, { method: 'PUT', data: { on: event.target.checked } }).then(() => ctx.refresh(), error => ctx.toast(error.message, true));
   });

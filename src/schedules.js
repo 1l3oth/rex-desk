@@ -1,6 +1,7 @@
 // Scheduled messages: the person sets up a message for one agent, once or on repeat ("every weekday at 9:00: check Orbit"),
 // and Rex Desk sends it into that agent's personal chat at that time, as if the person typed it.
 import { randomUUID } from 'node:crypto';
+import { inHours } from './specialists.js';
 
 export const REPEATS = ['once', 'daily', 'weekdays', 'weekly'];
 const clock = value => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || '')) ? String(value) : '';
@@ -51,6 +52,9 @@ export class Schedules {
   async tick(at = new Date()) {
     // Only the computer the agent works on sends it, so two computers never send the same message twice.
     for (const item of this.list().filter(entry => entry.on && entry.nextAt && Date.parse(entry.nextAt) <= at.getTime() && (entry.agentId === 'main' || this.desk.peers?.owns?.(entry.agentId) !== false))) {
+      // Work hours are the agent's whole shift: a message due off-shift waits, and is sent once the shift is back.
+      const hours = this.store.get('specialist', item.agentId)?.loop?.hours;
+      if (hours?.on && !inHours(hours, at)) continue;
       const next = item.repeat === 'once' ? null : nextRun(item, at);
       this.store.put('schedmsg', item.id, { ...item, lastAt: at.toISOString(), on: Boolean(next), nextAt: next ? next.toISOString() : item.nextAt });
       if (!this.store.get('specialist', item.agentId) && item.agentId !== 'main') { this.store.delete('schedmsg', item.id); continue; }

@@ -109,3 +109,15 @@ test('scheduled messages: next time by repeat, sent once when due, repeating one
   assert.equal(desk.snapshot().schedules.length, 2);
   desk.schedules.remove(once.id); assert.equal(desk.schedules.list().length, 1);
 });
+
+test('work hours hold a scheduled message off-shift, then send it once the shift is back', async () => {
+  const { store, desk, agent, sent } = setup();
+  desk.specialists.update(agent.id, { loop: { on: true, hours: { on: true, start: '08:00', end: '17:00', days: [1, 2, 3, 4, 5] } } });
+  const daily = desk.schedules.create(agent.id, { text: 'Check Orbit', time: '07:00', repeat: 'daily' }, at(0, '06:00'));
+  await desk.schedules.tick(at(0, '07:00'));
+  assert.equal(sent.length, 0, 'due before the shift: held, not sent');
+  assert.equal(store.get('schedmsg', daily.id).nextAt, daily.nextAt, 'held message keeps its due time');
+  await desk.schedules.tick(at(0, '08:00'));
+  assert.equal(sent.length, 1, 'sent once the shift starts');
+  assert.equal(new Date(store.get('schedmsg', daily.id).nextAt).getDate(), at(1, '07:00').getDate(), 'then rolls to the next day');
+});

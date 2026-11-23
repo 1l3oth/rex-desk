@@ -3,7 +3,6 @@ import { aiId, aiName, aiChoices, confirmAiSwitch } from './ai-names.js';
 // A small profile card for an agent, opened by clicking its picture or name in a chat: who it is, what it is doing,
 // and the settings people change most (AI, model, account, its own loop, its name), saved as soon as they change.
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-const EVERY = [[15, t('Every 15 min')], [30, t('Every 30 min')], [60, t('Every hour')], [120, t('Every 2 hours')], [240, t('Every 4 hours')], [1440, t('Once a day')]];
 let card = null, current = '';
 
 function close() { card?.remove(); card = null; current = ''; }
@@ -17,7 +16,7 @@ function html(ctx, agent) {
   const { ui } = ctx, provider = aiId(agent.provider);
   const models = ui.snap.choices?.providers?.[provider]?.models || ui.snap.choices?.models || [], efforts = ui.snap.choices?.providers?.[provider]?.efforts || [];
   const accounts = (ui.accounts?.[provider]?.profiles || []).filter(item => item.loggedIn);
-  const loop = { on: true, every: 60, ...(agent.loop || {}) }, status = agent.status || {};
+  const status = agent.status || {};
   const select = (name, value, options) => `<select data-card="${name}">${options.map(([key, label]) => `<option value="${esc(key)}" ${String(value ?? '') === String(key) ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>`;
   return `<div class="pc-head">${ctx.avatar({ name: agent.name })}<div class="pc-who"><div class="pc-name"><b>${esc(agent.name)}</b><button type="button" class="pc-edit" data-card-act="rename" title="${t`Rename`}" aria-label="${t`Rename ${esc(agent.name)}`}">&#9998;</button></div><small>@${esc(agent.slug || '')}${agent.projectSlug ? ` · ${esc(agent.projectSlug)}` : ''}${agent.device ? ` · ${esc(agent.device)}` : ''}</small>${agent.projectPath ? `<small class="pc-path" title="${esc(agent.projectPath)}">${esc(agent.projectPath)}</small>` : ''}<span class="pc-state ${esc(status.state || '')}"><i></i>${esc(status.label || t('Idle'))}</span></div><button type="button" class="pc-x" data-card-act="close" aria-label="${t`Close`}">&#215;</button></div>
     ${agent.purpose ? `<p class="pc-about">${esc(agent.purpose)}</p>` : ''}
@@ -26,16 +25,15 @@ function html(ctx, agent) {
       <label><span>${t`Model`}</span>${select('model', agent.model || '', [['', t('Default')], ...models.map(model => [model.id, model.label])])}</label>
       <label><span>${t`Effort`}</span>${select('effort', agent.effort || '', [['', t('Chat picks')], ...efforts.map(level => [level, ({ low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') })[level] || level])])}</label>
       <label><span>${t`Account`}</span>${select('profile', agent.profile || '', [['', t('Same as everyone')], ...accounts.map(item => [item.profile, item.account || item.label])])}</label>
-      <label><span>${t`Own loop`}</span>${select('loop', loop.on === false ? 'off' : String(loop.every), [['off', t('Off')], ...EVERY.map(([minutes, label]) => [String(minutes), label])])}</label>
     </div>
     <div class="pc-acts"><button type="button" class="btn small primary" data-card-act="chat">${t`Message`}</button><button type="button" class="btn small" data-card-act="card">${t`Full card`}</button></div>`;
 }
 async function save(ctx, agent, field, value) {
   const { api, toast, refresh } = ctx;
-  const data = field === 'loop' ? { loop: value === 'off' ? { on: false } : { on: true, every: Number(value) } } : field === 'model' ? { rules: agent.rules, unsure: agent.unsure || [], model: value } : { [field]: value };
+  const data = field === 'model' ? { rules: agent.rules, unsure: agent.unsure || [], model: value } : { [field]: value };
   try {
     await api(`/specialists/${agent.id}`, { method: 'PUT', data });
-    toast({ provider: t`${agent.name} now runs on ${aiName(value)}.`, model: t('Model saved.'), effort: t('Effort saved.'), profile: value ? t`${agent.name} now uses that account.` : t`${agent.name} uses the same account as everyone.`, loop: value === 'off' ? t('Its loop is off.') : t('Loop saved.') }[field]);
+    toast({ provider: t`${agent.name} now runs on ${aiName(value)}.`, model: t('Model saved.'), effort: t('Effort saved.'), profile: value ? t`${agent.name} now uses that account.` : t`${agent.name} uses the same account as everyone.` }[field]);
     await refresh({ full: true }); redraw(ctx);
   } catch (error) { toast(error.message, true); }
 }
