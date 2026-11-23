@@ -150,11 +150,11 @@ export class CodexRunner {
       if (item.type === 'agentMessage' && item.text) { this.text = `${this.text || ''}${item.text}\n`; this.lastMessage = item.text; this.event('agent-text', { text: item.text }); }
       if (item.type === 'commandExecution') this.event('agent-tool-result', { id: item.id, text: String(item.aggregatedOutput || '').slice(-6000), failed: item.status === 'failed' || Boolean(item.exitCode) });
       if (item.type === 'mcpToolCall' && item.status === 'failed') this.event('agent-tool-result', { id: item.id, text: item.error?.message || 'MCP tool failed.', failed: true });
-      const news = this.inbox?.();
-      // Taken only once Codex accepts the steer; a refused one goes back to the queue for the next turn.
+      // One hand-over, by its id: taken only once Codex accepts this steer; a refused one goes back to the queue for the next turn.
+      const got = this.inbox?.({ withId: true }), news = typeof got === 'string' ? got : got?.text || '', handover = typeof got === 'string' ? null : got?.id ?? null;
       if (news && this.turnId) void this.client.request('turn/steer', { threadId: this.threadId, expectedTurnId: this.turnId, input: [{ type: 'text', text: news }] })
-        .then(() => this.event('prompt-accepted', { steer: true, text: news }), error => { this.requeue?.(news); this.event('error', { message: error.message }); });
-      else if (news) this.requeue?.(news);
+        .then(() => this.event('prompt-accepted', { steer: true, handover }), error => { this.requeue?.(news, handover); this.event('error', { message: error.message }); });
+      else if (news) this.requeue?.(news, handover);
     }
     if (method === 'account/rateLimits/updated' && params?.rateLimits) this.event('rate-limit', { codex: params.rateLimits });
     if (method === 'thread/tokenUsage/updated') {

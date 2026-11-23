@@ -282,12 +282,17 @@ export class Desk {
   setDelivery(id, patch) { const item = this.store.get('delivery', id); if (item) this.store.put('delivery', id, { ...item, ...patch }); }
   // Waiting tickets of this run's agent. Only the agent's personal chat (the main agent's own chat, or a specialist's) carries
   // scheduled messages; rooms and team sessions never do. A turn that starts takes them all (the message reaches it as its
-  // follow-up, its first instructions or the chat so far, not always word for word); a queue handed over mid-turn takes only
-  // those whose text is in it (text, null for all).
-  waitingDeliveries(run, text) {
+  // follow-up, its first instructions or the chat so far, not always word for word); a queue handed over mid-turn takes one
+  // ticket per queue entry that is its text word for word (entries, null for all), never by part of the text, so "Ping" never
+  // takes the ticket of "Ping the team".
+  waitingDeliveries(run, entries) {
     const agentId = !run || run.roomAgent || run.roomOf || run.teamOf ? '' : run.role === 'coordinator' && run.main ? 'main' : run.role === 'specialist' ? run.specialistId || '' : '';
-    if (!agentId || (text !== null && !String(text || '').trim())) return [];
-    return this.store.list('delivery').filter(item => item.state === 'waiting' && item.agentId === agentId && (text === null || (item.text && String(text).includes(item.text))));
+    if (!agentId) return [];
+    const waiting = this.store.list('delivery').filter(item => item.state === 'waiting' && item.agentId === agentId);
+    if (entries === null) return waiting;
+    const picked = [];
+    for (const entry of entries) { const item = waiting.find(ticket => ticket.text && ticket.text === String(entry ?? '').trim() && !picked.includes(ticket)); if (item) picked.push(item); }
+    return picked;
   }
   deliveryState(id, runId) {
     const item = this.store.get('delivery', id); if (!item) return 'lost';
@@ -297,13 +302,17 @@ export class Desk {
     if (run && (this.live.has(run.id) || ['queued', 'starting'].includes(run.state))) return 'waiting';
     // Nothing will hand it to the agent any more (the run stopped or failed with it still queued): it comes out of the queue,
     // so a later turn never sends it as well as the retry.
-    if (run?.queued?.some(entry => String(entry).includes(item.text))) this.store.put('run', run.id, { ...run, queued: run.queued.filter(entry => !String(entry).includes(item.text)) });
+    // Only its own entry, matched word for word: losing "Ping" never takes "Ping the team" out of the queue.
+    const at = run?.queued?.findIndex(entry => String(entry ?? '').trim() === item.text) ?? -1;
+    if (at >= 0) this.store.put('run', run.id, { ...run, queued: run.queued.filter((entry, index) => index !== at) });
     this.setDelivery(id, { state: 'lost' }); return 'lost';
   }
   // Messages the agent was handed but never read (they came just as its reply ended) go back to the front of its queue.
+  // text: one message, or the entries of one hand-over, which go back one by one so each stays a queue entry of its own.
   requeue(runId, text) {
-    const run = this.store.get('run', runId); if (!run || !String(text || '').trim()) return;
-    this.store.put('run', runId, { ...run, queued: [String(text), ...(run.queued || [])] });
+    const back = (Array.isArray(text) ? text : [text]).map(entry => String(entry ?? '')).filter(entry => entry.trim());
+    const run = this.store.get('run', runId); if (!run || !back.length) return;
+    this.store.put('run', runId, { ...run, queued: [...back, ...(run.queued || [])] });
     this.store.event(runId, 'inbox-returned', {});
     // The turn already ended: the message starts the next one now.
     const waiting = this.store.get('run', runId);
@@ -701,18 +710,17 @@ export class Desk {
     // says so (prompt-accepted, after the turn's prompt or after a message handed over mid-turn, like a Codex steer that was
     // accepted) or the turn ends cleanly. A hand-over the runner gives back (requeue) waits again; any other end loses them.
     const bound = new Set();
-    // Each mid-turn hand-over (one inbox drain, like one Codex steer) keeps the exact text it went out as and its own tickets.
-    // An acknowledgment with text (an accepted steer) settles only that hand-over, so an overlapping steer that is refused keeps
-    // its own, even when one message's words sit inside the other's. Without text (the turn's prompt, or the model's next real
-    // output) every ticket in flight is settled.
-    const handed = [];
-    const takeHanded = text => { const at = text === null ? -1 : handed.findIndex(hand => hand.text === String(text)); return at < 0 ? null : handed.splice(at, 1)[0]; };
-    const markLaunched = (text = null) => {
-      const tickets = text === null ? [...bound] : takeHanded(text)?.tickets || [];
-      for (const ticket of tickets) { if (!bound.has(ticket)) continue; this.setDelivery(ticket, { state: 'taken' }); bound.delete(ticket); }
-      if (text === null) handed.length = 0;
+    // Each mid-turn hand-over (one inbox drain, like one Codex steer) gets its own id and keeps its queue entries and the ids of
+    // the tickets it carries. An acknowledgment for one hand-over (an accepted steer, by its id) settles only those tickets, and
+    // a hand-over given back (a refused steer) returns only those, even when two steers have the same words or resolve out of
+    // order. Without one (the turn's prompt, or the model's next real output) every ticket in flight is settled.
+    const handed = new Map(); let handSeq = 0;
+    const markLaunched = (handover = null) => {
+      const tickets = handover === null ? [...bound] : handed.get(handover)?.tickets || [];
+      for (const ticket of tickets) { if (!bound.delete(ticket)) continue; this.setDelivery(ticket, { state: 'taken' }); }
+      if (handover === null) handed.clear(); else handed.delete(handover);
     };
-    const bind = (text, whole = false) => { const tickets = []; for (const item of this.waitingDeliveries(this.store.get('run', runId), whole ? null : text)) { bound.add(item.id); tickets.push(item.id); this.setDelivery(item.id, { state: 'turn', runId }); } return tickets; };
+    const bind = (entries, whole = false) => { const tickets = []; for (const item of this.waitingDeliveries(this.store.get('run', runId), whole ? null : entries)) { bound.add(item.id); tickets.push(item.id); this.setDelivery(item.id, { state: 'turn', runId }); } return tickets; };
     // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
     const turnAt = new Date().toISOString();
     try {
@@ -811,16 +819,25 @@ export class Desk {
         mcpOff: [...toolsOff(this.store, runAgentId(run))].filter(key => key.startsWith('mcp:')).map(key => key.slice(4)),
         mcpUrl: this.mcpUrl, model: run.modelFallback ? (run.provider === 'codex' || run.provider === 'gemini' || run.provider === 'openrouter' ? modelList(this.store, run.provider)[0]?.id : undefined) : run.model || (this.saverModel(run) || modelName(run.provider, this.store.config().models[run.provider])), controller, signal: controller.signal, agentEnv: { ...this.agents.environmentFor(run.provider, this.accountFor(run)), ...this.javaEnv(run), ...this.workTemp(workProject) }, javaEnv: this.javaEnv(run),
         artifactDirectory: this.evidence.directory(runId),
-        ask: request => this.ask(runId, request), inbox: () => { const text = this.takeInbox(runId), tickets = bind(text); if (tickets.length) handed.push({ text, tickets }); return text; },
-        requeue: text => {
-          // A hand-over given back whole (a refused steer) returns only its own tickets; other text (a host's unread note) is matched by words.
-          const hand = takeHanded(text), back = hand ? hand.tickets.filter(id => bound.has(id)) : this.store.list('delivery').filter(entry => entry.runId === runId && entry.state === 'turn' && String(text || '').includes(entry.text)).map(entry => entry.id);
-          for (const id of back) { bound.delete(id); this.setDelivery(id, { state: 'waiting' }); }
-          this.requeue(runId, text);
+        ask: request => this.ask(runId, request), // withId: the runner (Codex) acknowledges or gives back this hand-over by its id; others get just the text.
+        inbox: ({ withId = false } = {}) => {
+          const entries = [...(this.store.get('run', runId)?.queued || [])], text = this.takeInbox(runId);
+          if (!text) return withId ? { text: '', id: null } : '';
+          const id = ++handSeq; handed.set(id, { entries, tickets: bind(entries) });
+          return withId ? { text, id } : text;
+        },
+        // A hand-over given back by its id (a refused steer): only its own tickets wait again, and its entries go back to the
+        // queue one by one. Other text (a cancel note) carries no ticket and just goes back to the queue.
+        requeue: (text, handover = null) => {
+          const hand = handover === null ? null : handed.get(handover);
+          if (!hand) return this.requeue(runId, text);
+          handed.delete(handover);
+          for (const id of hand.tickets) if (bound.delete(id)) this.setDelivery(id, { state: 'waiting' });
+          this.requeue(runId, hand.entries);
         }, extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
           // Only the runner knows when its prompt was really taken (Codex: turn/start accepted; Claude: the model's first real
           // words or step). A session opening, a sign-in error written as a reply, or a result before an error check prove nothing.
-          if (kind === 'prompt-accepted') { markLaunched(typeof data?.text === 'string' ? data.text : null); return; }
+          if (kind === 'prompt-accepted') { markLaunched(data?.handover ?? null); return; }
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
           // The quiet turn that reads Voice mode's report is not said: Rex Desk has welcomed the person already.
           const reading = this.store.get('run', runId)?.voice?.reading;
