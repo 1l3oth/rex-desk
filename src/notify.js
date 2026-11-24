@@ -41,8 +41,8 @@ function macNotice(title, body, sound) {
 // A Windows toast goes out only when Rex Desk is not the window they are looking at; a chat that is open on screen is read at once.
 // Muted chats still keep their notifications, read and quiet.
 export class Notifier {
-  constructor(store, { show = windowsToast, focused = () => false, viewing = () => '', enabled = () => true, minGapMs = 2500 } = {}) {
-    Object.assign(this, { store, show, focused, viewing, enabled, minGapMs }); this.states = new Map(); this.seen = new Set(); this.lastAt = 0; this.roomToast = new Map(); this.started = false;
+  constructor(store, { show = windowsToast, focused = () => false, viewing = () => '', enabled = () => true, minGapMs = 2500, copyWins = null } = {}) {
+    Object.assign(this, { store, show, focused, viewing, enabled, minGapMs, copyWins }); this.states = new Map(); this.seen = new Set(); this.lastAt = 0; this.roomToast = new Map(); this.started = false;
   }
   start() {
     if (this.started) return this; this.started = true;
@@ -104,9 +104,10 @@ export class Notifier {
       this.notify({ kind: 'ask', title: `${['approval', 'review'].includes(item.kind) ? 'Needs your OK' : 'Needs your answer'} · ${this.runTitle(this.store.get('run', item.runId))}`, body: item.title, target: { type: 'inbox', id: '' } });
     } else if (kind === 'chatcopy') {
       // An agent on another computer asks: its question comes here only inside the synced copy of its chat, never as an
-      // interaction of this computer, so it needs its own pop-up and sound. The copies of this computer's own chats are skipped.
+      // interaction of this computer, so it needs its own pop-up and sound. Only a copy that wins over the local chat counts, the
+      // same rule as the inbox (Peers.copyWins): an agent that moved to another computer still alerts though its old chat stays here.
       const copy = this.store.get('chatcopy', id);
-      if (!copy || this.store.get('run', id)) return;
+      if (!copy || !(this.copyWins ? this.copyWins(copy) : !this.store.get('run', id))) return;
       for (const ask of copy.asks || []) {
         if (!ask?.id || this.seen.has(ask.id) || (ask.state && ask.state !== 'pending') || this.store.get('interaction', ask.id)) continue;
         this.seen.add(ask.id);

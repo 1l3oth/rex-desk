@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store, now } from '../src/store.js';
 import { Notifier } from '../src/notify.js';
+import { Peers } from '../src/peers.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 function setup(options = {}) {
@@ -96,4 +97,18 @@ test('a question from an agent on another computer, synced in its chat copy, tel
   store.put('chatcopy', 'r1', { id: 'r1', run: { id: 'r1' }, events: [], asks: [{ ...ask, id: 'lq1', runId: 'r1' }], at: now() });
   store.put('chatcopy', 'remote1', { id: 'remote1', agentId: 'sp1', run: { id: 'remote1' }, events: [], asks: [{ ...ask, id: 'rq2', state: 'answered' }], at: now() });
   assert.equal(shown.length, 1, 'the copy of a local chat and an answered ask make no pop-up');
+});
+
+test('an agent that moved to another computer still alerts, though its old chat stays here; the inbox rule decides', () => {
+  let store = null;
+  const peers = Object.create(Peers.prototype, { store: { get: () => store }, settings: { value: () => ({}) } });
+  const setupDone = setup({ copyWins: copy => peers.copyWins(copy) }), shown = setupDone.shown;
+  store = setupDone.store;
+  store.put('specialist', 'sp1', { id: 'sp1', name: 'Sokha', kind: 'specialist', node: 'there' });
+  store.put('run', 'old1', { id: 'old1', title: 'Sokha chat', specialistId: 'sp1', state: 'finished', createdAt: now() });
+  const ask = { id: 'mq1', runId: 'old1', kind: 'question', title: 'Which branch?', state: 'pending', createdAt: now() };
+  store.put('chatcopy', 'old1', { id: 'old1', node: 'there', agentId: 'sp1', run: { id: 'old1' }, events: [], asks: [ask], at: now() });
+  assert.equal(shown.length, 1); assert.match(shown[0][0], /Needs your answer · Sokha/);
+  store.put('chatcopy', 'r1', { id: 'r1', node: store.nodeId, run: { id: 'r1' }, events: [], asks: [{ ...ask, id: 'own1', runId: 'r1' }], at: now() });
+  assert.equal(shown.length, 1, 'the copy this computer wrote of its own chat stays quiet');
 });
