@@ -24,10 +24,13 @@ export function readTrackers(back, state) {
   }
 }
 
+// The projects and people of a connection: the ones loaded just now in this Settings window, else the last ones the page has.
+const directoryOf = (ui, state, id) => state.directories?.[id] || (ui.snap?.directories || []).find(item => item.sourceId === id);
+
 export function trackersHtml({ ui, esc }, state, cfg = ui.snap.config) {
   const repositories = cfg?.repositories || [];
   const card = source => {
-    const id = source.id, directory = (ui.snap.directories || []).find(item => item.sourceId === id), chosen = accounts(source.userId), busy = state.trackerBusy === id;
+    const id = source.id, directory = directoryOf(ui, state, id), chosen = accounts(source.userId), busy = state.trackerBusy === id;
     const projects = directory?.projects || [], people = directory?.employees || [];
     const projectList = projects.length
       ? `<input type="search" class="st-tr-search" data-tr-search="${id}" placeholder="${t`Search projects`}" aria-label="${t`Search projects`}"><div class="st-tr-projects">${projects.map(project => `<label class="st-tr-project" data-tr-name="${esc(String(project.name).toLowerCase())}"><input type="checkbox" data-tr-project="${id}" value="${esc(project.id)}" ${source.projectIds.includes(String(project.id)) ? 'checked' : ''}><span>${esc(project.name)}<small>${esc(project.id)}</small></span></label>`).join('')}</div>`
@@ -83,8 +86,11 @@ export async function trackerClick({ ui, api, toast, refresh }, state, target, b
     try {
       const result = await api(agent ? '/sources/setup-agent' : '/sources/connect', { method: 'POST', data: agent ? { source, provider: 'claude' } : source });
       Object.assign(source, { hasKey: result.source.hasKey, apiKey: '', clearKey: false });
+      // Keep the projects and people the server just loaded on the card: a page refresh already on its way carries the state from
+      // before, and the card stayed on 'Load the projects'.
+      if (result.directory) (state.directories ||= {})[id] = result.directory;
       await refresh();
-      const directory = (ui.snap.directories || []).find(item => item.sourceId === id);
+      const directory = directoryOf(ui, state, id);
       if (!agent && !source.projectIds.length && directory?.projects?.length === 1) source.projectIds = [String(directory.projects[0].id)];
       toast(agent ? t('An agent is looking them up. Its questions come to you in the chat.') : t('Connected. Pick the projects and people.'));
     } finally { state.trackerBusy = ''; draw(); }

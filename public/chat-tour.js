@@ -71,9 +71,11 @@ const OTHER_ICON = {
   other: '<circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/>',
 };
 const HEARD_NAME = { friend: t('A friend or colleague'), search: t('A search engine'), other: t('Somewhere else') };
+// Set once the tour is finished here: a refresh already on its way still carries the old settings and would open it again.
+let tourFinished = false;
 export function maybeStartTour(ctx) {
   const config = ctx.ui.snap?.config;
-  if (!config || config.tourDismissed || (config.repositories || []).length || document.querySelector('.tour-back')) return;
+  if (!config || tourFinished || config.tourDismissed || (config.repositories || []).length || document.querySelector('.tour-back')) return;
   startTour(ctx, { firstRun: true });
 }
 
@@ -118,7 +120,7 @@ export function startTour(ctx, { firstRun = false } = {}) {
       ${connecting ? '' : picture(step)}<div class="tour-body">${body[step]()}</div>
       <div class="tour-foot">${left}<span class="spacer"></span>${connecting ? '' : `<button type="button" class="btn primary" data-tour-next>${step === 'done' ? t('Start') : step === 'project' && !(ui.snap.config?.repositories || []).length ? t('Skip for now') : t('Next')}</button>`}</div></div>`;
   };
-  const finish = async () => { back.remove(); try { ui.snap.config = await api('/config', { method: 'PUT', data: { ...ui.snap.config, tourDismissed: true } }); } catch (error) { toast(error.message, true); } void refresh(); };
+  const finish = async () => { tourFinished = true; back.remove(); try { ui.snap.config = await api('/config', { method: 'PUT', data: { ...ui.snap.config, tourDismissed: true } }); } catch (error) { toast(error.message, true); } void refresh(); };
   const saveName = async () => {
     const name = back.querySelector('[data-tour-name]')?.value.trim();
     if (name && name !== ui.snap.config?.name) ui.snap.config = await api('/config', { method: 'PUT', data: { ...ui.snap.config, name } });

@@ -89,8 +89,10 @@ const runnerFactory = options => ({
     await client.connect(new StreamableHTTPClientTransport(new URL(options.mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${options.token}` } } }));
     const call = async (name, args = {}) => {
       const result = await client.callTool({ name, arguments: args }, undefined, { timeout: 120000 });
-      const data = JSON.parse(result.content[0].text);
-      if (result.isError) throw new Error(data.error); return data;
+      // desk_browser is one of Rex Desk's less-common tools, reached through desk_run.
+      const text = result.content[0].text;
+      if (result.isError) throw new Error(`${name}: ${(() => { try { return JSON.parse(text).error; } catch { return text; } })()}`);
+      return JSON.parse(text);
     };
     try {
       const task = (await call('desk_task', { taskId: options.run.taskId })).task;
@@ -103,13 +105,13 @@ const runnerFactory = options => ({
         await new Promise(resolve => setTimeout(resolve, 250));
       }
       assert.equal(response.answer.content.answer, 'Keep the current project selected');
-      await call('desk_browser', { action: 'open' });
-      await call('desk_browser', { action: 'assertText', selector: '#result', expected: 'Not fixed' });
+      await call('desk_run', { use: 'desk_browser', input: { action: 'open' } });
+      await call('desk_run', { use: 'desk_browser', input: { action: 'assertText', selector: '#result', expected: 'Not fixed' } });
       writeFileSync(path.join(options.cwd, 'page.html'), '<!doctype html><html><title>QA fixture</title><h1>Preview works</h1><p id="result">Fixed and verified</p></html>');
       await git(options.cwd, ['add', 'page.html']); await git(options.cwd, ['commit', '-m', 'Fix synthetic preview fixture']);
-      await call('desk_browser', { action: 'navigate', url: '/' });
-      await call('desk_browser', { action: 'assertText', selector: '#result', expected: 'Fixed and verified' });
-      await call('desk_browser', { action: 'screenshot', value: 'Verified preview fixture' });
+      await call('desk_run', { use: 'desk_browser', input: { action: 'navigate', url: '/' } });
+      await call('desk_run', { use: 'desk_browser', input: { action: 'assertText', selector: '#result', expected: 'Fixed and verified' } });
+      await call('desk_run', { use: 'desk_browser', input: { action: 'screenshot', value: 'Verified preview fixture' } });
       const verification = await call('desk_verify'); assert.equal(verification.passed, true);
       const finished = await call('desk_finish', { summary: `Synthetic test only: reproduced and fixed ${task.title}. Regression test and recorded browser assertion passed.`,
         risk: { score: 2, requiresHumanReview: false, reason: 'One static fixture line changed; the regression command and browser assertion cover it.' } });
@@ -139,10 +141,11 @@ try {
   };
   const save = async () => { await page.keyboard.press('Tab'); await page.waitForTimeout(1500); };
 
-  // A new person gets the setup tour: name, AI sign-in, where things are kept, first project, done.
+  // A new person gets the short first-run tour: name, two welcome questions, then "Connect your AI", which cannot be skipped.
   const tour = page.getByRole('dialog', { name: 'Set up Rex Desk' });
   await tour.getByRole('heading', { name: 'Welcome to Rex Desk' }).waitFor();
   await page.screenshot({ path: path.join(screenshots, 'tour-welcome.png') });
+  assert.equal(await tour.locator('[data-tour-skip]').count(), 0, 'The first run cannot be skipped');
   await tour.locator('[data-tour-name]').fill('Synthetic Tester');
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
   // Two welcome questions, answered here: an age range and where the person heard about Rex Desk.
@@ -152,24 +155,24 @@ try {
   await tour.locator('[data-tour-other]').fill('A meetup');
   await page.screenshot({ path: path.join(screenshots, 'tour-about.png') });
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
-  await tour.getByRole('heading', { name: 'Choose your AI' }).waitFor({ timeout: 30000 });
-  await tour.getByRole('button', { name: 'Next', exact: true }).click();
-  await tour.getByRole('heading', { name: 'Where things are kept' }).waitFor();
-  await tour.locator('.st-folder', { hasText: 'Files from agents' }).locator('code').first().waitFor();
-  assert.match(await tour.locator('.st-folder', { hasText: 'Rex Desk data' }).locator('code').first().innerText(), /data/);
-  await page.screenshot({ path: path.join(screenshots, 'tour-folders.png') });
-  await tour.getByRole('button', { name: 'Next', exact: true }).click();
-  // The first project is added in the tour; its commands come from the project's own files.
-  await tour.locator('[data-tour-repo]').fill(repository);
-  await tour.locator('[data-tour-add]').click();
-  await tour.locator('.tour-ok', { hasText: 'source' }).waitFor({ timeout: 30000 });
-  await tour.getByRole('button', { name: 'Next', exact: true }).click();
-  await tour.getByRole('heading', { name: 'You are ready' }).waitFor();
-  await tour.getByRole('button', { name: 'Start', exact: true }).click();
-  await tour.waitFor({ state: 'detached' });
+  // Connect your AI: Claude already says it is signed in here, so picking it goes straight to the green tick and Rex Agent opens.
+  await tour.getByRole('heading', { name: 'Connect your AI' }).waitFor({ timeout: 30000 });
+  const claudeCard = tour.locator('[data-fr-pick="claude"]');
+  await claudeCard.locator('.fr-good', { hasText: 'Ready on this computer' }).waitFor({ timeout: 30000 });
+  await page.screenshot({ path: path.join(screenshots, 'tour-connect.png') });
+  await claudeCard.click();
+  await tour.getByText('Claude is connected').waitFor();
+  await tour.waitFor({ state: 'detached', timeout: 15000 });
   assert.equal(app.store.config().name, 'Synthetic Tester');
+  assert.equal(app.store.config().provider, 'claude', 'The AI picked in the tour is the one new agents use');
   assert.equal(app.store.config().tourDismissed, true, 'The tour does not come back once finished');
   assert.deepEqual(((({ age, heard, other }) => ({ age, heard, other }))(app.store.get('survey', 'main') || {})), { age: '25 to 34', heard: ['youtube', 'other'], other: 'A meetup' }, 'the welcome answers are kept');
+
+  // The first project is added in Settings, Projects; its commands come from the project's own files.
+  await openSection('projects');
+  await settings.locator('[data-st-repo-path]').fill(repository);
+  await settings.locator('[data-st-repo-add]').click();
+  await settings.locator('.st-repo summary', { hasText: 'source' }).waitFor({ timeout: 30000 });
   assert.equal(app.store.config().repositories.length, 1);
 
   // Settings, Projects lists it, with GitHub accounts below.
@@ -183,7 +186,8 @@ try {
 
   // Task sources: a Morningmate connection is made, its projects load, and people are added by name.
   await openSection('sources');
-  await settings.getByRole('button', { name: '+ Add a connection', exact: true }).click();
+  await settings.locator('[data-cn-add]').click();
+  await settings.locator('[data-tr-add="morningmate"]').click();
   const card = settings.locator('.st-tracker').first();
   await card.locator('input[name$=".name"]').fill('Morningmate synthetic QA');
   await card.locator('input[name$=".apiKey"]').fill('synthetic-key-for-test-only');
@@ -212,6 +216,7 @@ try {
 
   // Test sign-ins and the Jev key save, and secrets never come back to the page.
   await openSection('signins');
+  await settings.locator('summary', { hasText: 'Test sign-ins' }).click();
   await settings.getByRole('button', { name: '+ Add a sign-in' }).click();
   await settings.locator('input[name="ta.0.site"]').fill('127.0.0.1');
   await settings.locator('input[name="ta.0.username"]').fill('qa@example.invalid');
@@ -221,6 +226,7 @@ try {
   await save();
   assert.equal(app.store.testAccounts().length, 1, 'An empty sign-in row is not saved');
   await openSection('jev');
+  await settings.locator('summary', { hasText: 'Advanced' }).click();
   await settings.locator('input[name="jev.apiKey"]').fill('synthetic-openrouter-key');
   await save();
   assert.ok(!/synthetic-key-|synthetic-openrouter-key|synthetic-test-password/.test(await page.content()), 'Saved secrets never return to the page');
@@ -229,13 +235,16 @@ try {
   // Rank my issues now and Run it now live in Settings.
   await app.desk.sources.sync();
   assert.equal(app.store.list('task').filter(task => task.active && !task.local).length, 3, 'Feedback tasks stay out of the default Request and In progress sync');
+  // Saving redraws the page, which folds Advanced again.
+  if (await settings.locator('details.st-adv-top[open]').count() === 0) await settings.locator('details.st-adv-top > summary').click();
   await settings.getByRole('button', { name: 'Rank my issues now', exact: true }).click();
   await page.getByText(/Jev rated|already rated/).last().waitFor({ timeout: 15000 });
   assert.ok(jevRequests.length >= 3 && jevRequests.every(item => item.url === 'https://openrouter.ai/api/v1/systemone' && item.authorization === 'Bearer synthetic-openrouter-key'));
   await openSection('schedule');
   await settings.getByRole('button', { name: 'Run it now', exact: true }).waitFor();
-  await openSection('backup');
-  await settings.getByRole('heading', { name: 'App updates', exact: true }).waitFor();
+  // App updates live in About now; a copy run from source says it updates with Git.
+  await openSection('about');
+  await settings.getByText('Development copy').waitFor();
   await page.screenshot({ path: path.join(screenshots, 'settings-desktop.png') });
 
   // The phone layout of Settings does not overflow sideways.

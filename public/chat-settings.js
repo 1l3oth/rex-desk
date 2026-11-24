@@ -231,7 +231,8 @@ export function openSettings(ctx, section = 'general', extra = {}) {
     const before = state.extra.github?.login?.state;
     try { state.extra.github = await api('/github'); } catch (error) { state.extra.github = { installed: true, accounts: [], login: { state: 'failed', error: error.message } }; }
     if (!document.body.contains(back)) return;
-    if (has('projects')) draw();
+    // Keep what is typed in Test sign-ins: this redraw comes whenever GitHub answers, often mid-typing.
+    if (has('projects')) { readSignins(); draw(); }
     const now = state.extra.github.login?.state;
     clearTimeout(githubTimer); if (['waiting', 'starting'].includes(now)) githubTimer = setTimeout(loadGithub, 2000);
     else if (now === 'done' && before && before !== 'done') toast((state.extra.github.login.account ? t`Signed in to GitHub as ${state.extra.github.login.account}.` : t('Signed in to GitHub.')));
@@ -449,7 +450,7 @@ export function openSettings(ctx, section = 'general', extra = {}) {
       if (target.closest('[data-st-about-refresh]')) { state.extra.about = null; draw(); await loadAbout(true); return; }
       const copyPath = target.closest('[data-st-copy-path]'); if (copyPath) { await navigator.clipboard.writeText(copyPath.dataset.stCopyPath); toast(t('Copied.')); return; }
       if (await connectorsClick(ctx, state, target, back, draw)) return;
-      if (await trackerClick(ctx, state, target, back, draw)) { if (target.closest('[data-tr-remove]') && has('sources')) await save(true); return; }
+      if (await trackerClick(ctx, state, target, back, draw)) { if (target.closest('[data-tr-remove], [data-tr-unperson]') && has('sources')) await save(true); return; }
       if (await folderClick(ctx, state, target, draw)) return;
       if (has('localai') && await localAiClick(ctx, state, target, draw)) return;
       if (has('storage') && await storageClick(ctx, state, target, draw)) return;
@@ -562,7 +563,9 @@ export function openSettings(ctx, section = 'general', extra = {}) {
     const el = event.target;
     if (!el.matches?.('input,select,textarea') || !el.closest('[data-st-panel]') || ownSave(el) || !PARTS[state.section].some(part => SAVE_PARTS.includes(part))) return;
     clearTimeout(autoTimer); pendingSave = true;
-    autoTimer = setTimeout(() => { pendingSave = false; if (document.body.contains(back)) save(true).catch(error => toast(error.message, true)); afterSave(); }, event.type === 'input' ? 700 : 150);
+    // A new OpenRouter key brings the Rank button: draw again once it is saved (a quiet save does not redraw).
+    const newKey = el.name === 'jev.apiKey' && Boolean(el.value.trim());
+    autoTimer = setTimeout(() => { pendingSave = false; if (document.body.contains(back)) save(true).then(() => { if (newKey && has('jev') && document.body.contains(back)) draw(); }).catch(error => toast(error.message, true)); afterSave(); }, event.type === 'input' ? 700 : 150);
   };
   back.addEventListener('input', event => { if (event.target.matches?.('input:not([type=checkbox],[type=radio],[type=range]),textarea')) autoSave(event); });
   back.addEventListener('change', autoSave);
