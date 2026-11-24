@@ -2663,5 +2663,8 @@
  "Reject": "បដិសេធ",
  "Nothing waiting.": "គ្មានអ្វីរង់ចាំទេ។",
  "Feature requests": "សំណើមុខងារ",
- "task made": "បានបង្កើតកិច្ចការ"
+ "task made": "បានបង្កើតកិច្ចការ",
+ "Ask Rex Agent to set up my phone": "សុំ Rex Agent រៀបចំទូរស័ព្ទរបស់ខ្ញុំ",
+ "Rex Agent checks what is done, does what it can, and walks you through the rest. No terminal.": "Rex Agent ពិនិត្យអ្វីដែលធ្វើរួច ធ្វើអ្វីដែលធ្វើបាន ហើយណែនាំអ្នកធ្វើផ្នែកដែលនៅសល់។ មិនចាំបាច់ terminal ទេ។",
+ "Help me set up Rex Desk on my phone. Follow the rex-setup-phone skill: check what is already set up, do what you can for me, and walk me through the rest in plain words with no terminal, then test it end to end before telling me it works.": "ជួយខ្ញុំរៀបចំ Rex Desk នៅលើទូរស័ព្ទរបស់ខ្ញុំ។ ធ្វើតាមជំនាញ rex-setup-phone៖ ពិនិត្យអ្វីដែលបានរៀបចំរួច ធ្វើអ្វីដែលធ្វើបានជំនួសខ្ញុំ ហើយណែនាំខ្ញុំពីផ្នែកដែលនៅសល់ជាពាក្យសាមញ្ញ ដោយមិនប្រើ terminal បន្ទាប់មកសាកល្បងពីដើមដល់ចប់ មុននឹងប្រាប់ខ្ញុំថាវាដំណើរការ។"
 }

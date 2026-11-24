@@ -13,13 +13,15 @@ import { render as renderSimply, cleanSvg } from '../skills/rex-eli5/scripts/ren
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 const selfContained = html => { assert.doesNotMatch(html, /https?:\/\//i, 'no link to the internet'); assert.doesNotMatch(html, /<script|<link|<img|@import/i, 'nothing loaded from outside'); };
 
-test('the two explain skills ship with Rex Desk and are found by their plain names', () => {
-  for (const name of ['rex-code-explainer', 'rex-eli5']) assert.ok(existsSync(path.join(SKILLS, name, 'SKILL.md')), name);
+test('the built-in skills ship with Rex Desk and are found by their plain names', () => {
+  for (const name of ['rex-code-explainer', 'rex-eli5', 'rex-desk-guide', 'rex-setup-phone']) assert.ok(existsSync(path.join(SKILLS, name, 'SKILL.md')), name);
   const skills = listSkills([SKILLS]);
-  assert.deepEqual(skills.map(skill => skill.name).sort(), ['rex-code-explainer', 'rex-eli5', 'rex-setup-orchestration', 'rex-setup-playbook']);
+  assert.deepEqual(skills.map(skill => skill.name).sort(), ['rex-code-explainer', 'rex-desk-guide', 'rex-eli5', 'rex-setup-orchestration', 'rex-setup-phone', 'rex-setup-playbook']);
   assert.ok(skills.every(skill => skill.description && !skill.error));
   assert.equal(rank(skills, 'explain my changes')[0].name, 'rex-code-explainer');
   assert.equal(rank(skills, 'explain it simply')[0].name, 'rex-eli5');
+  assert.equal(rank(skills, 'set up my phone')[0].name, 'rex-setup-phone');
+  assert.equal(rank(skills, 'where is the setting in Rex Desk')[0].name, 'rex-desk-guide');
   assert.match(ELI5_RULE, /rex-eli5[\\/]SKILL\.md/);
 });
 

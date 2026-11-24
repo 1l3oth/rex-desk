@@ -46,11 +46,14 @@ function phoneRelayCard(ctx) {
   const asks = relay.pending.map(item => `<li class="dv-row">${phoneAskHtml(ctx, item)}</li>`).join('');
   const when = value => new Date(value).toLocaleDateString(locale(), { month: 'short', day: 'numeric' });
   const phones = relay.devices.map(item => `<li class="dv-row"><span class="dv-ic">${ICON.phone}</span><div class="dv-who"><b>${esc(item.name)}</b></div><span class="dv-state">${t`Approved ${esc(when(item.at))}`}</span><button class="ag-x" data-action="dev-phone-forget" data-device="${esc(item.id)}" title="${t`Remove this phone`}" aria-label="${t`Remove ${esc(item.name)}`}">${X}</button></li>`).join('');
-  return `<section class="dv-group dv-relay"><h2>${t`Phone`}</h2><ul class="dv-list">${toggle}${asks}${phones}</ul></section>`;
+  const askAgent = `<div class="dv-ask-agent"><button class="btn small" data-action="dev-ask-phone">${t`Ask Rex Agent to set up my phone`}</button><small class="dv-foot">${t`Rex Agent checks what is done, does what it can, and walks you through the rest. No terminal.`}</small></div>`;
+  return `<section class="dv-group dv-relay"><h2>${t`Phone`}</h2><ul class="dv-list">${toggle}${asks}${phones}</ul>${askAgent}</section>`;
 }
 export async function devicesAction(ctx, action, target) {
   const { api, toast, refresh } = ctx, value = id => document.getElementById(id)?.value || '';
   const post = data => api('/peers', { method: 'POST', data });
+  // One click hands phone setup to Rex Agent, who follows the rex-setup-phone skill (checks, does what it can, guides the rest).
+  if (action === 'dev-ask-phone') { await ctx.askMain(t('Help me set up Rex Desk on my phone. Follow the rex-setup-phone skill: check what is already set up, do what you can for me, and walk me through the rest in plain words with no terminal, then test it end to end before telling me it works.')); return; }
   if (action === 'dev-rename') { await post({ action: 'rename', name: value('dev-name') }); toast(t('Renamed.')); }
   else if (action === 'dev-remote') await post({ action: 'remote', on: target.checked });
   else if (action === 'dev-show') { const box = document.getElementById('dev-key'); if (box) box.type = box.type === 'password' ? 'text' : 'password'; return; }
