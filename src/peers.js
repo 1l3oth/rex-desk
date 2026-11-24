@@ -628,8 +628,8 @@ export class Peers {
       // cost of a fast poll when idle. store.list is cached, so this check is cheap on every tick.
       if ((this.timers.get('turso') || 0) <= Date.now()) { this.timers.set('turso', Date.now() + (this.inFlight() ? 1500 : 5000)); await bounded(() => this.pullTurso()); this.timers.set('turso', Date.now() + (this.inFlight() ? 1500 : 5000)); }
       // Chat messages: about every second while an agent works or a message is on its way, every 5 seconds otherwise.
-      if ((this.timers.get('chat') || 0) <= Date.now()) { this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); await bounded(() => this.pullChats()); this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); }
-      if ((this.timers.get('chatpush') || 0) <= Date.now()) { this.timers.set('chatpush', Date.now() + 60000); try { this.desk.chatSplits?.settleAll(); this.desk.chatSplits?.detect(); this.pushChats(); } catch { /* tried again in a minute */ } }
+      if ((this.timers.get('chat') || 0) <= Date.now()) { this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); await bounded(() => this.pullChats()); doing(''); this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); }
+      if ((this.timers.get('chatpush') || 0) <= Date.now()) { this.timers.set('chatpush', Date.now() + 60000); try { doing('sync: settling split chats'); this.desk.chatSplits?.settleAll(); doing('sync: detecting split chats'); this.desk.chatSplits?.detect(); doing('sync: pushing chat messages'); this.pushChats(); } catch { /* tried again in a minute */ } finally { doing(''); } }
       // Rex Desk tasks from another computer: a number both computers gave out is settled (LocalTasks.settle).
       if (this.tasksArrived || (this.timers.get('tasks') || 0) <= Date.now()) { this.tasksArrived = false; this.timers.set('tasks', Date.now() + 60000); await bounded(() => this.desk.localTasks?.settle()); }
       if ((this.timers.get('commands') || 0) <= Date.now()) { this.timers.set('commands', Date.now() + 3000); this.pendingCommands(); }
