@@ -34,9 +34,10 @@ function teamFlow(ctx) {
     { who: t`Rex`, say: t`Sees the screenshots and says push`, cls: 'gate' },
     { who: t`App`, say: t`Pushes to master and builds with notes`, cls: '' },
   ];
-  const card = step => `<div class="pb-step${step.cls ? ` ${step.cls}` : ''}"><span class="pb-who">${esc(step.who)}</span><span class="pb-do">${esc(step.say)}</span></div>`;
-  const cells = steps.map((step, index) => `${index ? '<span class="pb-arr" aria-hidden="true"></span>' : ''}${card(step)}`).join('');
-  return `<div class="pb-flow" role="img" aria-label="${t`How a task flows through the Rex Desk team`}">${cells}</div>`;
+  // One ordered list: a single aligned row on a wide pane, a straight column on a narrow one; the arrows are drawn by the CSS
+  // between cards, so a wrap can never leave a loose arrow at the end of a line.
+  const card = step => `<li class="pb-step${step.cls ? ` ${step.cls}` : ''}"><span class="pb-who">${esc(step.who)}</span><span class="pb-do">${esc(step.say)}</span></li>`;
+  return `<ol class="pb-flow" aria-label="${t`How a task flows through the Rex Desk team`}">${steps.map(card).join('')}</ol>`;
 }
 
 // The playbook in use: the Rex Agent team, shown live, the flow a task moves through, and the rules it follows.
@@ -56,7 +57,7 @@ function playbookPanel(ctx) {
     t`Nothing on drive C: worktrees, temp and test data live next to the project on its drive.`,
     t`No paid services without Rex's OK.`,
   ];
-  const list = items => `<ul class="exp-list">${items.map(line => `<li>${line}</li>`).join('')}</ul>`;
+  const list = items => `<ul class="exp-list">${items.map(line => `<li>${esc(line)}</li>`).join('')}</ul>`;
   return `<div class="page exp"><article class="exp-doc">
     <section class="exp-sec exp-orch">
       <h3>${t`The Rex Desk team`}</h3>
