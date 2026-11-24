@@ -183,16 +183,16 @@ html[data-skin=waterfest] :is(.rex-core,.brand-logo){filter:hue-rotate(198deg) s
 /* ---------- Water Festival (Bon Om Touk): night on the Tonle Sap. Deep river navy and lantern gold, dragon boats and
    a full moon. The living scene is Three.js in .skin-fx; the CSS paints the night sky behind it and keeps every panel
    a strongly dimmed, readable surface over the motion. ---------- */
-html[data-skin=waterfest]{--bg:#0a1626;--panel:#102238;--raised:#173049;--line:rgba(130,170,210,.16);--ink:#eaf1fa;--muted:#9db3cc;--accent:#e9b949;--accent-ink:#1a1206;--mine:rgba(233,185,73,.14);--good:#6fd3a0;--warn:#efc15a;--bad:#ff8a7a;--orn:#e9b949;--canvas:#06101d;--glass:rgba(16,34,56,.9);--solid:#102238;--glass-edge:rgba(233,185,73,.2);--glass-shadow:0 24px 60px rgba(0,0,0,.55);--glow-a:rgba(233,185,73,.26);--glow-b:rgba(74,163,196,.22);--glow-c:rgba(255,157,77,.2);scrollbar-color:rgba(233,185,73,.35) transparent}
+html[data-skin=waterfest]{--bg:#0a1626;--panel:#102238;--raised:#173049;--line:rgba(130,170,210,.16);--ink:#eaf1fa;--muted:#9db3cc;--accent:#e9b949;--accent-ink:#1a1206;--mine:rgba(233,185,73,.14);--good:#6fd3a0;--warn:#efc15a;--bad:#ff8a7a;--orn:#e9b949;--canvas:#06101d;--glass:color-mix(in srgb,#0f2138 var(--solid-mix),rgba(16,34,56,.48));--wf-frame:color-mix(in srgb,#0a1a30 var(--solid-mix),rgba(9,22,40,.5));--wf-stage:color-mix(in srgb,#0b1c33 var(--solid-mix),rgba(9,22,40,.3));--solid:#102238;--glass-edge:rgba(233,185,73,.2);--glass-shadow:0 24px 60px rgba(0,0,0,.55);--glow-a:rgba(233,185,73,.26);--glow-b:rgba(74,163,196,.22);--glow-c:rgba(255,157,77,.2);scrollbar-color:rgba(233,185,73,.35) transparent}
 html[data-skin=waterfest] ::selection{background:rgba(233,185,73,.3)}
 html[data-skin=waterfest] .skin-fx{background:radial-gradient(42% 30% at 70% 16%,rgba(200,218,240,.14),transparent 70%),linear-gradient(180deg,#09182f 0%,#0a1c34 44%,#0c2740 62%,#0f2f4a 100%)}
 html[data-skin=waterfest] .wf-canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 /* Panels: a dimmed river-glass surface over the scene. Chat stays at .9 for readable text; the empty home shows the festival. */
 html[data-skin=waterfest] :is(.rail,.stage-main,.stage>.side){border-radius:16px;border:1px solid var(--line);background:var(--glass);backdrop-filter:blur(16px);box-shadow:var(--glass-shadow)}
-html[data-skin=waterfest] .stage-main:has(.welcome){background:rgba(9,22,40,.5)}
+html[data-skin=waterfest] .stage-main:has(.welcome){background:var(--wf-stage)}
 html[data-skin=waterfest] .feed{background:transparent}
-html[data-skin=waterfest] .stage-head{background:rgba(9,22,40,.72);backdrop-filter:blur(16px);border-bottom:1px solid var(--line)}
-html[data-skin=waterfest] .composer{background:rgba(9,22,40,.72);backdrop-filter:blur(16px);border-top:1px solid var(--line)}
+html[data-skin=waterfest] .stage-head{background:var(--wf-frame);backdrop-filter:blur(16px);border-bottom:1px solid var(--line)}
+html[data-skin=waterfest] .composer{background:var(--wf-frame);backdrop-filter:blur(16px);border-top:1px solid var(--line)}
 html[data-skin=waterfest] :is(.stage-head h1,.st-nav h1,.dialog h2,.welcome h2){font-family:'Moul',var(--sans);font-weight:400;color:#f2d586;letter-spacing:.02em}
 html[data-skin=waterfest] .rail h3,html[data-skin=waterfest] .sec-head{color:#b89766;letter-spacing:.1em}
 /* Welcome: the festival shows behind, so the greeting carries a soft glow for contrast. */
@@ -216,12 +216,12 @@ html[data-skin=waterfest] .item{border-radius:9px}html[data-skin=waterfest] .ite
 /* Section head mark: a hanging festival lantern. */
 html[data-skin=waterfest] .sec-head>:first-child{display:inline-flex;align-items:center;gap:6px}html[data-skin=waterfest] .sec-head>:first-child::before{content:'';width:12px;height:12px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M6 1V2.4' stroke='%23e9b949' stroke-width='1' stroke-linecap='round'/%3E%3Crect x='3.4' y='2.4' width='5.2' height='6.4' rx='2.4' fill='%23e9b949'/%3E%3Cpath d='M4.6 2.4h2.8M4.6 8.8h2.8' stroke='%23cf9a2e' stroke-width='.8'/%3E%3Cpath d='M6 8.8v2' stroke='%23e9b949' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center}
 /* ---------- Water Festival by day: dawn on the river, pale sky, deeper gold on light. The night scene stays faintly behind. ---------- */
-html[data-skin=waterfest][data-theme=light]{--bg:#eef4fb;--panel:#ffffff;--raised:#eaf1f8;--line:rgba(30,70,110,.16);--ink:#12263a;--muted:#53708c;--accent:#b8831a;--accent-ink:#ffffff;--mine:rgba(184,131,26,.12);--good:#2f8a5a;--warn:#a46a12;--bad:#c63a3a;--orn:#b8831a;--canvas:#dbe7f3;--glass:rgba(255,255,255,.92);--solid:#ffffff;--glass-edge:rgba(184,131,26,.22);--glass-shadow:0 20px 50px rgba(30,70,110,.16);--glow-a:rgba(184,131,26,.2);--glow-b:rgba(74,163,196,.18);--glow-c:rgba(255,157,77,.16);scrollbar-color:rgba(184,131,26,.35) transparent}
+html[data-skin=waterfest][data-theme=light]{--bg:#eef4fb;--panel:#ffffff;--raised:#eaf1f8;--line:rgba(30,70,110,.16);--ink:#12263a;--muted:#53708c;--accent:#b8831a;--accent-ink:#ffffff;--mine:rgba(184,131,26,.12);--good:#2f8a5a;--warn:#a46a12;--bad:#c63a3a;--orn:#b8831a;--canvas:#dbe7f3;--glass:color-mix(in srgb,#ffffff var(--solid-mix),rgba(255,255,255,.5));--wf-frame:color-mix(in srgb,#f8fbfe var(--solid-mix),rgba(248,251,254,.5));--wf-stage:color-mix(in srgb,#ecf4fb var(--solid-mix),rgba(236,244,251,.32));--solid:#ffffff;--glass-edge:rgba(184,131,26,.22);--glass-shadow:0 20px 50px rgba(30,70,110,.16);--glow-a:rgba(184,131,26,.2);--glow-b:rgba(74,163,196,.18);--glow-c:rgba(255,157,77,.16);scrollbar-color:rgba(184,131,26,.35) transparent}
 html[data-skin=waterfest][data-theme=light] ::selection{background:rgba(184,131,26,.2)}
 html[data-skin=waterfest][data-theme=light] .skin-fx{background:radial-gradient(40% 30% at 70% 16%,rgba(255,236,190,.5),transparent 70%),linear-gradient(180deg,#cfe0f2 0%,#d8e7f3 48%,#cbe0ec 100%)}
 html[data-skin=waterfest][data-theme=light] .wf-canvas{opacity:.5}
-html[data-skin=waterfest][data-theme=light] .stage-main:has(.welcome){background:rgba(236,244,251,.6)}
-html[data-skin=waterfest][data-theme=light] .stage-head,html[data-skin=waterfest][data-theme=light] .composer{background:rgba(248,251,254,.82)}
+html[data-skin=waterfest][data-theme=light] .stage-main:has(.welcome){background:var(--wf-stage)}
+html[data-skin=waterfest][data-theme=light] .stage-head,html[data-skin=waterfest][data-theme=light] .composer{background:var(--wf-frame)}
 html[data-skin=waterfest][data-theme=light] :is(.stage-head h1,.st-nav h1,.dialog h2,.welcome h2){color:#8a5f12}
 html[data-skin=waterfest][data-theme=light] .welcome h2{text-shadow:0 1px 10px rgba(255,255,255,.9)}
 html[data-skin=waterfest][data-theme=light] .welcome h2::before{color:#b8831a;text-shadow:0 1px 8px rgba(255,255,255,.9)}

@@ -24,32 +24,24 @@ setLevel(level(), false);
 setPane('rail', read('rex-rail-off', '') === '1', false);
 setPane('side', read('rex-side-off', '') === '1', false);
 
-function openSlider(anchor) {
-  document.querySelector('.glass-pop')?.remove();
-  const pop = document.createElement('div'); pop.className = 'glass-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', t('Glass'));
-  pop.innerHTML = `<h3>${t`Glass`} <output>${level()}%</output></h3><p>${t`How see-through Rex Desk is.`}</p>
-    <input type="range" min="0" max="100" step="1" value="${level()}" aria-label="${t`Transparency`}">
-    <div class="glass-ends"><span>${t`Solid`}</span><span>${t`Clear`}</span></div>
-    <div class="glass-row"><button type="button" data-glass="0">${t`Solid`}</button><button type="button" data-glass="${DEFAULT}">${t`Default`}</button><button type="button" data-glass="100">${t`Clear`}</button></div>`;
-  document.body.append(pop);
-  const box = anchor.getBoundingClientRect(), width = 264;
-  pop.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, box.left))}px`;
-  pop.style.bottom = `${Math.max(12, innerHeight - box.top + 8)}px`;
-  const range = pop.querySelector('input'), output = pop.querySelector('output');
-  // Dragging changes one CSS variable and nothing else: no script draws anything again, so it follows the pointer.
-  range.addEventListener('input', () => { setLevel(Number(range.value)); output.textContent = `${range.value}%`; });
-  pop.addEventListener('click', event => { const preset = event.target.closest('[data-glass]'); if (!preset) return; range.value = preset.dataset.glass; range.dispatchEvent(new Event('input')); });
-  const close = event => {
-    if (event.type === 'keydown' ? event.key !== 'Escape' : pop.contains(event.target) || event.target.closest('[data-glass-open]')) return;
-    pop.remove(); removeEventListener('pointerdown', close, true); removeEventListener('keydown', close, true);
-  };
-  addEventListener('pointerdown', close, true); addEventListener('keydown', close, true);
-  range.focus();
+// Settings > General: the Glass control, next to the theme picker. One slider and three presets change the whole app
+// live while you drag; the choice is remembered on this computer. Dragging changes one CSS variable and nothing else.
+export function glassSlider() {
+  const value = level();
+  return `<div class="st-glass" data-glass-box>
+    <span class="glass-track"><input type="range" min="0" max="100" step="1" value="${value}" data-glass-set aria-label="${t`Transparency`}"><output data-glass-value>${value}%</output></span>
+    <div class="glass-row"><button type="button" data-glass="0">${t`Solid`}</button><button type="button" data-glass="${DEFAULT}">${t`Default`}</button><button type="button" data-glass="100">${t`Clear`}</button></div>
+  </div>`;
 }
 
+document.addEventListener('input', event => {
+  const set = event.target.closest?.('[data-glass-set]'); if (!set) return;
+  setLevel(Number(set.value));
+  const out = set.closest('[data-glass-box]')?.querySelector('[data-glass-value]'); if (out) out.textContent = `${set.value}%`;
+});
 document.addEventListener('click', event => {
-  const open = event.target.closest('[data-glass-open]');
-  if (open) { const shown = document.querySelector('.glass-pop'); if (shown) shown.remove(); else openSlider(open); return; }
+  const preset = event.target.closest('[data-glass]');
+  if (preset) { const set = preset.closest('[data-glass-box]')?.querySelector('[data-glass-set]'); if (set) { set.value = preset.dataset.glass; set.dispatchEvent(new Event('input', { bubbles: true })); } return; }
   const toggle = event.target.closest('[data-pane]');
   if (toggle) setPane(toggle.dataset.pane, !paneOff(toggle.dataset.pane));
 });

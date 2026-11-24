@@ -99,19 +99,24 @@ select option,select optgroup{background:var(--solid);color:var(--ink)}
 .pane-toggle[aria-pressed=true]{color:var(--accent)}
 .pane-toggle svg rect.fill{transition:opacity .2s}.pane-toggle[aria-pressed=false] svg rect.fill{opacity:.15}
 
-/* Glass slider: a small sheet above the button; dragging it changes the whole app as you move. */
-.glass-pop{position:fixed;z-index:70;width:264px;padding:14px 16px 12px;border:1px solid var(--line);border-radius:16px;background:var(--glass);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-edge);animation:glass-pop-in .2s cubic-bezier(.22,1,.36,1)}
-@keyframes glass-pop-in{from{opacity:0;transform:translateY(8px) scale(.98)}}
-.glass-pop h3{margin:0 0 2px;font-size:13.5px;display:flex;justify-content:space-between;align-items:baseline}.glass-pop h3 output{font:600 12px/1 var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
-.glass-pop p{margin:0 0 10px;font-size:12px;color:var(--muted)}
-.glass-pop input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:28px;margin:0;background:none;cursor:pointer}
-.glass-pop input[type=range]::-webkit-slider-runnable-track{height:8px;border-radius:8px;border:1px solid var(--line);background:linear-gradient(90deg,var(--solid),color-mix(in srgb,var(--accent) 55%,transparent))}
-.glass-pop input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:50%;border:1px solid var(--line);background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.35)}
-.glass-pop input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
-.glass-pop .glass-ends{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:2px}
-.glass-pop .glass-row{display:flex;gap:6px;margin-top:10px}.glass-pop .glass-row button{flex:1;padding:5px 0;border:1px solid var(--line);border-radius:8px;background:var(--raised);font-size:12px}
-.glass-pop .glass-row button:hover{border-color:var(--accent)}
-@media (prefers-reduced-motion:reduce){.chat-shell,.rail,.stage>.side.on{transition:none!important}.glass-pop{animation:none}}
+/* Glass control in Settings, General: a slider and three presets change how see-through the whole app is as you drag. */
+.st-glass{display:flex;flex-direction:column;gap:10px;max-width:420px}
+.st-glass .glass-track{display:flex;align-items:center;gap:12px}
+.st-glass input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:28px;margin:0;background:none;cursor:pointer}
+.st-glass input[type=range]::-webkit-slider-runnable-track{height:8px;border-radius:8px;border:1px solid var(--line);background:linear-gradient(90deg,var(--solid),color-mix(in srgb,var(--accent) 55%,transparent))}
+.st-glass input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;margin-top:-7px;border-radius:50%;border:1px solid var(--line);background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.st-glass input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+.st-glass output{min-width:40px;font:600 12px/1 var(--mono);color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+.st-glass .glass-row{display:flex;gap:6px}.st-glass .glass-row button{flex:1;padding:6px 0;border:1px solid var(--line);border-radius:8px;background:var(--raised);color:var(--ink);font-size:12px}
+.st-glass .glass-row button:hover{border-color:var(--accent)}
+@media (prefers-reduced-motion:reduce){.chat-shell,.rail,.stage>.side.on{transition:none!important}}
+
+/* Footer light/dark toggle: a sun or moon for the mode now, with the word beside it; one click switches and the icon follows. */
+.rail-theme{display:inline-flex;align-items:center;gap:6px}
+.rail-theme svg{flex:none}
+.rail-theme .ti-moon,.rail-theme [data-dark]{display:none}
+html[data-theme=dark] .rail-theme .ti-sun,html[data-theme=dark] .rail-theme [data-light]{display:none}
+html[data-theme=dark] .rail-theme .ti-moon,html[data-theme=dark] .rail-theme [data-dark]{display:inline}
 
 /* AI accounts: the providers sit in one row, however many there are, instead of stacking two by two. */
 .acct-tabs{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}
