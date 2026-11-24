@@ -153,6 +153,8 @@ export class FileBackup {
       let data; try { data = readFileSync(item.file); } catch { continue; }
       try { await this.sync.account.putFile(this.remoteKey(item.key), Buffer.from(store.encryptBytes(data), 'base64')); }
       catch (error) {
+        // A late error for the old account never pauses uploads or marks a file as skipped for the new one.
+        if (moved()) { this.saveIndex(index); return { uploaded, skipped: 'The Rex Desk account changed, so this backup stopped.' }; }
         // One file the account service will not take (too big for it) is skipped and remembered, never mistaken for a full space.
         // Recorded as skipped, not as backed up: it is tried again only when it changes, and is never counted as in the cloud.
         if (error.code === 'too_big') { (index.skipped ||= {})[item.key] = item.stamp; continue; }

@@ -136,6 +136,31 @@ test('a backup batch stops when the account changes during an upload, and the re
   assert.equal(again.uploaded, 2, 'the new account gets every file');
 });
 
+for (const [label, error] of [['quota', { code: 'quota', message: 'Your cloud space is full.' }], ['too_big', { code: 'too_big', message: 'Too big.' }]]) {
+  test(`a late ${label} error for the old account never changes the backup of the new one`, async () => {
+    const fake = service();
+    let release, first = true; const gate = new Promise(resolve => { release = resolve; });
+    const fetcher = async (url, options = {}) => {
+      if (options.method === 'PUT' && first) { first = false; await gate; fake.calls.push('PUT late'); return reply(413, { error }); }
+      return fake.fetcher(url, options);
+    };
+    const { store, account, files } = home({ fake: { ...fake, fetcher }, saveUrl: URL_DB });
+    const folder = path.join(store.media('artifacts'), 'run-1'); mkdirSync(folder, { recursive: true });
+    writeFileSync(path.join(folder, 'one.png'), 'one'); writeFileSync(path.join(folder, 'two.png'), 'two');
+    const running = files.backup();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    account.save({ token: 'session-2', expiresAt: new Date(Date.now() + 86400000).toISOString(), user: { id: 'u2' } }, { url: URL_DB });
+    release();
+    const result = await running;
+    assert.match(result.skipped, /account changed/);
+    assert.notEqual(files.full, true, 'uploads are not paused for the new account');
+    const index = JSON.parse(readFileSync(files.indexFile, 'utf8'));
+    assert.deepEqual(index.skipped || {}, {}, 'no file is marked as skipped for the new account');
+    const again = await files.backup();
+    assert.equal(again.uploaded, 2, 'the new account gets every file');
+  });
+}
+
 test('a file that does not come says why: not in the backup, too big, failed, not connected, or left out', async () => {
   let fake = service(), setup = home({ fake });
   assert.equal(await setup.files.fetchOne(KEY), false);
