@@ -103,6 +103,20 @@ test('a fresh key looked up for an account that was switched meanwhile is droppe
   assert.equal(account.saved?.token, 'session-2', 'the new sign-in stays');
 });
 
+test('a file request whose sign-in ended after the account was switched never signs out the new account', async () => {
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  const fetcher = async () => { await gate; return reply(401, { error: { code: 'unauthorized', message: 'Signed out.' } }); };
+  const store = new Store(temporary('files-401'));
+  const account = new AccountLink(store, { fetcher, base: API });
+  account.save({ token: 'session', user: { id: 'u1' } }, { url: URL_DB });
+  const asking = account.putFile('w1/a.txt', Buffer.from('a'));
+  account.save({ token: 'session-2', user: { id: 'u2' } }, { url: URL_DB });
+  release();
+  await assert.rejects(asking);
+  assert.equal(account.saved?.token, 'session-2', 'the new sign-in stays');
+  assert.equal(account.ended, undefined);
+});
+
 test('a file that does not come says why: not in the backup, too big, failed, not connected, or left out', async () => {
   let fake = service(), setup = home({ fake });
   assert.equal(await setup.files.fetchOne(KEY), false);

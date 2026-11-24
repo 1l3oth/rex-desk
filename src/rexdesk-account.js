@@ -82,12 +82,14 @@ export class AccountLink {
   // The account's private file folder on the account service (users/<id>/ in a private bucket). The bytes are already
   // encrypted on this computer; the service only ever stores them.
   async fileCall(method, pathname, body) {
+    // The sign-in this request is for: a late 401 for an account that was switched meanwhile never clears the new one.
+    const asked = this.saved;
     let response;
-    try { response = await this.fetcher(`${this.base}/v1/files${pathname}`, { method, headers: { authorization: `Bearer ${this.saved?.token || ''}`, ...(body ? { 'content-type': 'application/octet-stream' } : {}) }, ...(body ? { body } : {}), signal: AbortSignal.timeout(120000) }); }
+    try { response = await this.fetcher(`${this.base}/v1/files${pathname}`, { method, headers: { authorization: `Bearer ${asked?.token || ''}`, ...(body ? { 'content-type': 'application/octet-stream' } : {}) }, ...(body ? { body } : {}), signal: AbortSignal.timeout(120000) }); }
     catch { throw new Error('Rex Desk could not reach its account service to back up files.'); }
     if (response.ok) return response;
     const data = await response.json().catch(() => ({}));
-    if (response.status === 401) { this.clear(); this.ended = 'Your Rex Desk account sign-in ended. Sign in again in Settings to keep cloud backup running.'; }
+    if (response.status === 401 && this.saved === asked) { this.clear(); this.ended = 'Your Rex Desk account sign-in ended. Sign in again in Settings to keep cloud backup running.'; }
     throw Object.assign(new Error(data.error?.message || `The Rex Desk account service answered ${response.status}.`), { status: response.status, code: data.error?.code || '' });
   }
   static filePath = key => `/${key.split('/').map(encodeURIComponent).join('/')}`;
