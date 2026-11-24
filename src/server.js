@@ -41,9 +41,19 @@ import { Voice } from './voice.js';
 import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
 // How long a voice message waits for the on-computer model to load before another engine answers.
 export const LOCAL_VOICE_WAIT_MS = 20000;
+// ffmpeg is used only to turn a Telegram voice note (Ogg/Opus) into WAV for the speech engine. It is not bundled; this finds
+// it from REX_FFMPEG or PATH, or returns '' (then voice notes are posted as audio, not transcribed).
+let ffmpegChecked;
+function ffmpegPath() {
+  if (ffmpegChecked !== undefined) return ffmpegChecked;
+  const candidate = process.env.REX_FFMPEG || 'ffmpeg';
+  try { execFileSync(candidate, ['-version'], { stdio: 'ignore' }); ffmpegChecked = candidate; } catch { ffmpegChecked = ''; }
+  return ffmpegChecked;
+}
 import { ORBIT_URL, orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { catalog as connectorCatalog, connections as connectionList, connector as connectorOf } from './connectors.js';
 import { loadCatalog, catalogItem, probe as probeConnector, saveConnector, catalogConnections, removeCatalogConnection } from './connector-catalog.js';
+import { TelegramBridge } from './telegram.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
 import { Awake, keepInMemory } from './awake.js';
@@ -248,6 +258,26 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     desk.a2aRelay = new A2aRelay(desk); desk.a2aRelay.start();
     // The phone, through api.rexdesk.dev (paid accounts, turned on in Settings): see phone-relay.js.
     desk.phoneRelay = new PhoneRelay(desk); if (!process.env.NODE_TEST_CONTEXT) desk.phoneRelay.start();
+    // Two-way Telegram: agents text the person and their desk_ask questions appear there; the person's replies flow back
+    // into the agent's chat. Long polling while the app runs. Voice notes transcribe only when a transcoder (ffmpeg) and a
+    // ready speech engine are present and need no new keys; otherwise the audio is posted as-is.
+    const transcribeVoiceNote = async (ogg, language) => {
+      const ffmpeg = ffmpegPath(); if (!ffmpeg) return null;
+      const tmp = path.join(dataRoot, 'telegram', `t-${Date.now()}`);
+      mkdirSync(path.dirname(tmp), { recursive: true });
+      const inFile = `${tmp}.oga`, wavFile = `${tmp}.wav`;
+      try {
+        writeFileSync(inFile, ogg);
+        execFileSync(ffmpeg, ['-y', '-i', inFile, '-ar', '16000', '-ac', '1', '-f', 'wav', wavFile], { stdio: 'ignore' });
+        const wav = readFileSync(wavFile);
+        if (voice.status().installed) return await voice.transcribe(wav, language);
+        if (desk.jev.apiKey()) return await transcribeGemini(wav, language, desk.jev.apiKey());
+        return null;
+      } catch { return null; }
+      finally { for (const file of [inFile, wavFile]) try { unlinkSync(file); } catch { /* ignore */ } }
+    };
+    desk.telegram = new TelegramBridge(desk, { transcribe: transcribeVoiceNote });
+    if (!process.env.NODE_TEST_CONTEXT) desk.telegram.start();
     // Agents from before avatars each get their own picture (this computer's agents only; the others get theirs at home).
     try { desk.specialists.ensureAvatars(store.nodeId); } catch (error) { store.event('', 'avatar-error', { message: error.message }); }
     desk.peers.onRemoteChange = () => { remoteAt = '-'; remoteOpen(); }; remoteOpen();
@@ -987,6 +1017,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (!probed.ok) return json(response, 400, { error: probed.error || 'It did not connect, so nothing was saved.', probe: probed });
         const saved = await saveConnector(item, input, { toolbox: desk.toolbox, store, probed }); notify();
         return json(response, 200, { saved, probe: probed });
+      }
+      // Telegram: after the bot token is saved, link the one chat that pressed Start (reads getUpdates, saves the chat id locally).
+      if (url.pathname === '/api/connectors/catalog/telegram/link' && request.method === 'POST') {
+        const input = await body(request).catch(() => ({}));
+        try { const result = await desk.telegram.link(input.id || ''); if (result.linked) notify(); return json(response, 200, result); }
+        catch (error) { return json(response, 400, { error: error.message }); }
       }
       const linkMatch = url.pathname.match(/^\/api\/connectors\/links\/([a-z0-9-]+)$/);
       if (linkMatch && request.method === 'DELETE') { const removed = await removeCatalogConnection(linkMatch[1], { toolbox: desk.toolbox, store }); notify(); return json(response, 200, removed); }

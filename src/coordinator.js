@@ -1158,6 +1158,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const run = this.run(runId);
     const interaction = { id: id(), runId, ...request, ...(parked ? { parked: true } : {}), state: 'pending', resumeState: run.state, createdAt: now() };
     this.store.put('interaction', interaction.id, interaction);
+    // A desk_ask question or approval also goes to the person's linked Telegram chat, with answer buttons (best-effort).
+    void this.telegram?.onAsk(interaction).catch(() => {});
     if (parked) return { id: interaction.id, promise: null };
     this.patchRun(runId, { state: 'waiting' });
     const promise = new Promise((resolve, reject) => { this.waiters.set(interaction.id, { resolve, reject }); });

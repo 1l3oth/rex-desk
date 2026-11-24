@@ -42,6 +42,7 @@ export const DEFERRED_TOOLS = new Set([
   'desk_set_profile_photo', 'desk_second_brain', 'desk_set_task_sources', 'desk_confirm_workflow', 'desk_source_catalog',
   'desk_browser', 'desk_run_for_me',
   'desk_categorize',
+  'desk_telegram',
   'desk_tell_run', 'desk_close_run', 'desk_stop_run', 'desk_move_to_chat',
   'desk_meeting_join', 'desk_meeting_leave',
 ]);
@@ -315,6 +316,15 @@ export function createMcp(desk, scope) {
     });
   tool('desk_specialists', 'List the specialist agents (one per project) with their identity cards: name, project, rules, and what they are still unsure about.', {}, () => desk.specialists.list().map(({ id, name, projectSlug, purpose, rules, unsure, provider, model, cloneOf }) => ({ id, name, project: projectSlug, purpose, rules, unsure, provider, model, duplicateOf: cloneOf || undefined })), true);
   const author = () => { const agent = agentOf(); const run = scope.runId && desk.store.get('run', scope.runId); return agent?.name || (run?.main ? 'Rex Agent' : 'agent'); };
+  tool('desk_telegram', 'Text the person on Telegram, when they have linked their Telegram bot (Settings → Connectors → Telegram). Send one short plain-text message; it is prefixed with your agent name so they know it is from you. The person can reply on Telegram and their reply comes into this chat as their message. Use it to reach the person while they are away from the app. It errors clearly if Telegram is not connected or not linked yet. Never send secrets, keys or tokens.',
+    { text: z.string().min(1).max(4000).describe('Plain text to send to the person.') },
+    async input => {
+      requireEnglish(input.text, 'this message');
+      if (!desk.telegram) throw new Error('Telegram is not available on this Rex Desk.');
+      const run = scope.runId ? desk.store.get('run', scope.runId) : null;
+      const agentId = run?.roomAgent || run?.specialistId || 'main';
+      return desk.telegram.sendFromAgent(agentId, author(), input.text);
+    });
   tool('desk_create_task', 'Create a Rex Desk task (kept here, not in a tracker): for personal projects, work the person describes in chat, or a piece you split off your own task. Returns its number, like #L4. Only when the person wants the work tracked as a task: when they just ask you to do something, do it in the chat without a task. Ask the person before creating more than three at once.',
     { title: z.string().min(1).max(200), description: z.string().max(20000).optional(), project: z.string().optional().describe('Project slug from desk_memory index. Defaults to your own project.'), status: z.enum(['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done']).optional(), priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(), dueDate: z.string().optional().describe('YYYY-MM-DD'), tags: z.array(z.string()).optional(), checklist: z.array(z.string()).optional(), parentTaskId: z.string().optional(), blockedBy: z.array(z.string()).optional(), assignTo: z.string().optional().describe('Agent name or handle.') },
     async input => { requireEnglish(input.title, 'the title'); const task = await desk.localTasks.create({ ...input, project: input.project || agentOf()?.projectSlug || '', assignee: input.assignTo }, { by: author() });

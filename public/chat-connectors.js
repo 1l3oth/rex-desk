@@ -65,9 +65,14 @@ export function connectorsHtml(ctx, state, cfg, { trackers = '', syncField = '' 
   const items = new Map((data.catalog?.items || []).map(item => [item.id, item]));
   for (const link of data.links || []) {
     const kind = items.get(link.connectorId); if (!kind) continue;
-    const sub = link.error ? `<span class="tb-status bad"><i aria-hidden="true"></i>${esc(link.error)}</span>` : `<span>${esc(howLine(kind, true))}</span>`;
+    // Telegram needs a second step after the token: the person presses Start in the bot, then links that one chat.
+    const tg = link.connectorId === 'telegram';
+    const sub = link.error ? `<span class="tb-status bad"><i aria-hidden="true"></i>${esc(link.error)}</span>`
+      : tg ? `<span>${link.linked ? esc(t`Linked to ${link.linkedName || t('your chat')}`) : esc(t`Open your bot, press Start, then tap Link.`)}</span>`
+      : `<span>${esc(howLine(kind, true))}</span>`;
+    const linkBtn = tg ? `<button type="button" class="btn small${link.linked ? ' quiet' : ' primary'}" data-cn-tg-link="${esc(link.id)}">${link.linked ? t`Relink` : t`Link`}</button>` : '';
     (rows[kind.group] ||= []).push(`<li class="tb-row cx-row">${logoHtml(kind, esc)}<div class="tb-text"><span class="mk-name"><b>${esc(link.name)}</b><span class="mk-tag">${esc(tagOf(kind))}</span></span>${sub}</div>
-      <button type="button" class="btn small quiet danger" data-cn-unlink="${esc(link.id)}" aria-label="${esc(t`Remove ${link.name}`)}">${t`Remove`}</button></li>`);
+      ${linkBtn}<button type="button" class="btn small quiet danger" data-cn-unlink="${esc(link.id)}" aria-label="${esc(t`Remove ${link.name}`)}">${t`Remove`}</button></li>`);
   }
   const hasTrackers = Boolean(trackers);
   const groups = (data.catalog?.groups || data.types).map(type => {
@@ -180,6 +185,15 @@ export async function connectorsClick(ctx, state, target, back, draw) {
       else state.extra.cnProbe = await api(`/connectors/catalog/${encodeURIComponent(id)}/probe`, { method: 'POST', data: state.extra.cnValues });
     } catch (error) { state.extra.cnProbe = { ok: false, error: error.message }; }
     state.extra.connectorBusy = ''; if (saving) await reload(); else draw(); return true;
+  }
+  const tgLink = hit('cn-tg-link');
+  if (tgLink) {
+    state.extra.connectorBusy = 'catalog'; draw();
+    try {
+      const result = await api('/connectors/catalog/telegram/link', { method: 'POST', data: { id: tgLink.dataset.cnTgLink } });
+      if (result.linked) toast(t`Linked to ${result.name}.`); else toast(result.hint || t`Open your bot, press Start, then tap Link.`, true);
+    } catch (error) { toast(error.message, true); }
+    state.extra.connectorBusy = ''; await reload(); return true;
   }
   const unlink = hit('cn-unlink');
   if (unlink) {

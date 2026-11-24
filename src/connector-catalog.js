@@ -125,7 +125,13 @@ export async function saveConnector(item, input, { toolbox, store, probed }) {
 export function catalogConnections({ toolbox, store }, catalog = loadCatalog()) {
   let servers = {}; try { servers = toolbox.servers(); } catch { /* no config */ }
   const mcp = catalog.items.filter(item => item.tier === 'mcp' && servers[item.id]).map(item => ({ id: item.id, connectorId: item.id, name: item.name, kind: 'mcp', server: item.id, error: toolbox.failed.get(item.id)?.error || '' }));
-  const links = (store.list('connector') || []).map(({ id, connectorId, name, kind }) => ({ id, connectorId, name, kind }));
+  const links = (store.list('connector') || []).map(({ id, connectorId, name, kind }) => {
+    const link = { id, connectorId, name, kind };
+    // Telegram carries whether a chat is linked yet and that chat's display name, so the card can show "Linked to <name>".
+    // The chat id itself stays in the encrypted secret and is never exposed.
+    if (connectorId === 'telegram') { const secret = store.get('secret', `connector:${id}`); if (secret) { try { const values = JSON.parse(store.decrypt(secret)); link.linked = Boolean(values.chatId); link.linkedName = values.chatName || ''; } catch { /* ignore */ } } }
+    return link;
+  });
   return [...mcp, ...links];
 }
 export async function removeCatalogConnection(id, { toolbox, store }) {
