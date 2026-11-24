@@ -128,8 +128,8 @@ export function catalogConnections({ toolbox, store }, catalog = loadCatalog()) 
   const links = (store.list('connector') || []).map(({ id, connectorId, name, kind }) => {
     const link = { id, connectorId, name, kind };
     // Telegram carries whether a chat is linked yet and that chat's display name, so the card can show "Linked to <name>".
-    // The chat id itself stays in the encrypted secret and is never exposed.
-    if (connectorId === 'telegram') { const secret = store.get('secret', `connector:${id}`); if (secret) { try { const values = JSON.parse(store.decrypt(secret)); link.linked = Boolean(values.chatId); link.linkedName = values.chatName || ''; } catch { /* ignore */ } } }
+    // The chat id itself stays in the encrypted secret and is never exposed. pairCode: the one-time code to send to the bot, while one is waiting.
+    if (connectorId === 'telegram') { const secret = store.get('secret', `connector:${id}`); if (secret) { try { const values = JSON.parse(store.decrypt(secret)); link.linked = Boolean(values.chatId); link.linkedName = values.chatName || ''; link.pairCode = values.pairCode && Number(values.pairUntil) > Date.now() ? values.pairCode : ''; } catch { /* ignore */ } } }
     return link;
   });
   return [...mcp, ...links];

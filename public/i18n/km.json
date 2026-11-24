@@ -2593,7 +2593,6 @@
  "After an agent changes code, it makes a page of the change with plain notes and asks you to OK it. With a code reviewer on the team, it asks after the reviewer approves.": "ក្រោយភ្នាក់ងារផ្លាស់ប្ដូរកូដ វាធ្វើទំព័រមួយនៃការផ្លាស់ប្ដូរ ជាមួយកំណត់ចំណាំងាយៗ ហើយសុំឲ្យអ្នកយល់ព្រម។ បើក្រុមមានអ្នកពិនិត្យកូដ វាសុំក្រោយអ្នកពិនិត្យយល់ព្រមរួច។",
  "Linked to {0}": "បានភ្ជាប់ជាមួយ {0}",
  "your chat": "ការជជែករបស់អ្នក",
- "Open your bot, press Start, then tap Link.": "បើក bot របស់អ្នក ចុច Start រួចចុច Link។",
  "Relink": "ភ្ជាប់ឡើងវិញ",
  "Link": "ភ្ជាប់",
  "Linked to {0}.": "បានភ្ជាប់ជាមួយ {0}។",
@@ -2627,5 +2626,7 @@
  "A2A": "A2A",
  "Rex Agent team playbook": "playbook ក្រុម Rex Agent",
  "{0} · Sign in with your {1} account": "{0} · ចូលដោយគណនី {1} របស់អ្នក",
- "{0}: {1}": "{0}: {1}"
+ "{0}: {1}": "{0}: {1}",
+ "Send {0} to your bot in Telegram, then tap Link.": "ផ្ញើ {0} ទៅ bot របស់អ្នកក្នុង Telegram រួចចុច Link។",
+ "Tap Link to get a code to send to your bot.": "ចុច Link ដើម្បីយកលេខកូដសម្រាប់ផ្ញើទៅ bot របស់អ្នក។"
 }

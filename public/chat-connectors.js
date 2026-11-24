@@ -68,7 +68,7 @@ export function connectorsHtml(ctx, state, cfg, { trackers = '', syncField = '' 
     // Telegram needs a second step after the token: the person presses Start in the bot, then links that one chat.
     const tg = link.connectorId === 'telegram';
     const sub = link.error ? `<span class="tb-status bad"><i aria-hidden="true"></i>${esc(link.error)}</span>`
-      : tg ? `<span>${link.linked ? esc(t`Linked to ${link.linkedName || t('your chat')}`) : esc(t`Open your bot, press Start, then tap Link.`)}</span>`
+      : tg ? `<span>${link.pairCode ? esc(t`Send ${link.pairCode} to your bot in Telegram, then tap Link.`) : link.linked ? esc(t`Linked to ${link.linkedName || t('your chat')}`) : esc(t`Tap Link to get a code to send to your bot.`)}</span>`
       : `<span>${esc(howLine(kind, true))}</span>`;
     const linkBtn = tg ? `<button type="button" class="btn small${link.linked ? ' quiet' : ' primary'}" data-cn-tg-link="${esc(link.id)}">${link.linked ? t`Relink` : t`Link`}</button>` : '';
     (rows[kind.group] ||= []).push(`<li class="tb-row cx-row">${logoHtml(kind, esc)}<div class="tb-text"><span class="mk-name"><b>${esc(link.name)}</b><span class="mk-tag">${esc(tagOf(kind))}</span></span>${sub}</div>
@@ -191,7 +191,7 @@ export async function connectorsClick(ctx, state, target, back, draw) {
     state.extra.connectorBusy = 'catalog'; draw();
     try {
       const result = await api('/connectors/catalog/telegram/link', { method: 'POST', data: { id: tgLink.dataset.cnTgLink } });
-      if (result.linked) toast(t`Linked to ${result.name}.`); else toast(result.hint || t`Open your bot, press Start, then tap Link.`, true);
+      if (result.linked) toast(t`Linked to ${result.name}.`); else if (result.code) toast(t`Send ${result.code} to your bot in Telegram, then tap Link.`); else toast(result.hint || t`Tap Link to get a code to send to your bot.`, true);
     } catch (error) { toast(error.message, true); }
     state.extra.connectorBusy = ''; await reload(); return true;
   }

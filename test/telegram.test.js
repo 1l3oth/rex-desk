@@ -51,21 +51,56 @@ function linkedStore(store, values = { botToken: 'T:tok', chatId: 555, chatName:
   store.put('secret', 'connector:telegram-1', store.encrypt(JSON.stringify(values)));
 }
 
-test('link: saves the one chat that pressed Start, and reports when no one has yet', async () => {
+test('link: only the chat that sends the one-time pairing code is linked, and the code is used up', async () => {
   const { desk, store } = makeDesk();
   linkedStore(store, { botToken: 'T:tok' }); // token saved, not linked yet
   const first = makeFetcher({ updates: [] });
   const bridge = new TelegramBridge(desk, { fetcher: first.fetcher });
-  const none = await bridge.link();
-  assert.equal(none.linked, false); assert.match(none.hint, /press Start/i);
+  const asked = await bridge.link();
+  assert.equal(asked.linked, false); assert.match(asked.code, /^[A-Z2-9]{6}$/);
+  assert.equal(first.sent.length, 0, 'the first press only makes a code');
 
-  const second = makeFetcher({ updates: [{ update_id: 7, message: { message_id: 1, chat: { id: 555, type: 'private', first_name: 'Rex' }, text: '/start' } }] });
-  bridge.fetcher = second.fetcher;
+  // A stranger pressing Start (or guessing) is not linked, even if their message is the newest.
+  const stranger = makeFetcher({ updates: [
+    { update_id: 7, message: { message_id: 1, chat: { id: 555, type: 'private', first_name: 'Rex' }, text: `/start ${asked.code}` } },
+    { update_id: 8, message: { message_id: 2, chat: { id: 666, type: 'private', first_name: 'Stranger' }, text: '/start' } },
+    { update_id: 9, message: { message_id: 3, chat: { id: 777, type: 'private', first_name: 'Guess' }, text: 'ABC234' } },
+  ] });
+  bridge.fetcher = stranger.fetcher;
   const done = await bridge.link();
   assert.deepEqual([done.linked, done.name], [true, 'Rex']);
   const values = JSON.parse(store.decrypt(store.get('secret', 'connector:telegram-1')));
   assert.equal(values.chatId, 555); assert.equal(values.chatName, 'Rex');
-  assert.equal(store.get('telegram', 'state').offset, 8, 'offset skips past the /start');
+  assert.equal(values.pairCode, undefined, 'the code is used up');
+  assert.equal(store.get('telegram', 'state').offset, 10, 'offset skips past the code');
+});
+
+test('link: no code match means no link; an expired code is replaced', async () => {
+  const { desk, store } = makeDesk();
+  linkedStore(store, { botToken: 'T:tok', pairCode: 'OLDOLD', pairUntil: Date.now() - 1000 });
+  const only = makeFetcher({ updates: [{ update_id: 1, message: { message_id: 1, chat: { id: 666, type: 'private', first_name: 'Stranger' }, text: '/start OLDOLD' } }] });
+  const bridge = new TelegramBridge(desk, { fetcher: only.fetcher });
+  const fresh = await bridge.link();
+  assert.equal(fresh.linked, false); assert.notEqual(fresh.code, 'OLDOLD');
+  const again = await bridge.link();
+  assert.equal(again.linked, false, 'the stranger sent the expired code, not the new one');
+  assert.equal(JSON.parse(store.get('secret', 'connector:telegram-1')).chatId, undefined);
+});
+
+test('relink while polling: the pending code in the running loop moves the link; other chats are still ignored', async () => {
+  const { desk, store, turns } = makeDesk();
+  linkedStore(store);
+  const { fetcher, sent } = makeFetcher();
+  const bridge = new TelegramBridge(desk, { fetcher });
+  const { code } = await bridge.link();
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 666, type: 'private', first_name: 'Stranger' }, text: '/start' } }, telegramLink(store));
+  assert.equal(JSON.parse(store.get('secret', 'connector:telegram-1')).chatId, 555);
+  assert.equal(turns.length, 0);
+  await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 888, type: 'private', first_name: 'New' }, text: code.toLowerCase() } }, telegramLink(store));
+  const values = JSON.parse(store.get('secret', 'connector:telegram-1'));
+  assert.deepEqual([values.chatId, values.chatName, values.pairCode], [888, 'New', undefined]);
+  assert.equal(sent.at(-1).body.chat_id, 888);
+  assert.equal(turns.length, 0, 'the code is never routed to an agent');
 });
 
 test('an agent texts the person: the message is prefixed with the agent name and recorded for reply routing', async () => {
@@ -110,8 +145,32 @@ test('a desk_ask with choices goes to Telegram as answer buttons, and a button p
   assert.deepEqual([asked.interactionId, asked.field], ['i1', 'choice']);
 
   const found = telegramLink(store);
-  await bridge.handleCallback({ id: 'cb1', data: 'i1:o:1', message: { chat: { id: 555 }, message_id: 900 } }, found);
+  await bridge.handleCallback({ id: 'cb1', data: 'i1:o:1', message: { chat: { id: 555 }, message_id: Number(asked.id) } }, found);
   assert.deepEqual(answered, [{ id: 'i1', answer: { action: 'accept', content: { choice: 'Not yet' } } }]);
+});
+
+test('a button press counts only from the linked chat, on the message that carried that question', async () => {
+  const { desk, store, answered } = makeDesk();
+  linkedStore(store);
+  store.put('run', 'r1', { id: 'r1', main: true });
+  const approval = id => ({ id, runId: 'r1', kind: 'approval', method: 'desk', title: `Push ${id}?`, state: 'pending', request: { requestedSchema: { type: 'object', properties: {} } } });
+  store.put('interaction', 'a1', approval('a1')); store.put('interaction', 'a2', approval('a2'));
+  const { fetcher } = makeFetcher();
+  const bridge = new TelegramBridge(desk, { fetcher });
+  await bridge.onAsk(approval('a1')); await bridge.onAsk(approval('a2'));
+  const msgOf = id => Number(store.list('tgmsg').find(item => item.interactionId === id).id);
+  const found = telegramLink(store);
+  // From another chat: ignored.
+  await bridge.handleCallback({ id: 'x1', data: 'a1:accept', message: { chat: { id: 999 }, message_id: msgOf('a1') } }, found);
+  // No original message: ignored.
+  await bridge.handleCallback({ id: 'x2', data: 'a1:accept' }, found);
+  // Forged data: a1's answer pressed on a2's message, or on a message Rex Desk never sent.
+  await bridge.handleCallback({ id: 'x3', data: 'a1:accept', message: { chat: { id: 555 }, message_id: msgOf('a2') } }, found);
+  await bridge.handleCallback({ id: 'x4', data: 'a1:accept', message: { chat: { id: 555 }, message_id: 4242 } }, found);
+  assert.deepEqual(answered, []);
+  // The real button on the real message in the linked chat.
+  await bridge.handleCallback({ id: 'ok', data: 'a1:accept', message: { chat: { id: 555 }, message_id: msgOf('a1') } }, found);
+  assert.deepEqual(answered.map(item => item.id), ['a1']);
 });
 
 test('a plain desk_ask gets no buttons and a text reply to it answers it', async () => {
