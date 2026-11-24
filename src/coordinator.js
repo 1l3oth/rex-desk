@@ -726,7 +726,9 @@ export class Desk {
   async execute(runId, controller, { attach = null } = {}) {
     // handedOn: this turn ended by queueing the next one (another account, the default model). That turn owns the run's
     // browser, tools, questions and room reply now, so this one's clean-up leaves them alone.
-    let run = this.run(runId), token, handedOn = false;
+    // heldResult: the final reply of a Telegram turn, sent once the turn really ended (see finally), never before the
+    // usage-limit check: Claude can report its result and then fail on the limit, and the retry answers instead.
+    let run = this.run(runId), token, handedOn = false, heldResult = null;
     // Scheduled message tickets this turn carries (see deliveryState), in flight until the agent really took them: the runner
     // says so (prompt-accepted, after the turn's prompt or after a message handed over mid-turn, like a Codex steer that was
     // accepted) or the turn ends cleanly. A hand-over the runner gives back (requeue) waits again; any other end loses them.
@@ -906,7 +908,8 @@ export class Desk {
           if (kind === 'agent-text' && !reading) this.store.emit('partial', { runId, text: String(data.text || ''), done: true, eventId });
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           // A turn a Telegram message started sends its final reply back to that Telegram chat (src/telegram.js).
-          if (kind === 'agent-result') void this.telegram?.onTurnResult?.(runId, data.result)?.catch?.(() => {});
+          // An open Claude-app session goes on after a reply, so its reply goes now; any other turn's waits for its end.
+          if (kind === 'agent-result') { if (remoteOn) void this.telegram?.onTurnResult?.(runId, data.result)?.catch?.(() => {}); else heldResult = data.result; }
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
       // Local AI, light mode (the default): the model on this computer is talked to directly, with a short instruction, the
@@ -1014,6 +1017,8 @@ ${message}` : message;
       if (run.role === 'helper') this.helperDone(runId, friendlyDiskError(error.message));
     } finally {
       // The Telegram reply destination ends with this turn; a turn handed on to the next one passes it on.
+      // Its reply goes now, unless the turn was handed on (another account or model): then the retry answers on Telegram.
+      if (heldResult !== null && !handedOn) void this.telegram?.onTurnResult?.(runId, heldResult)?.catch?.(() => {});
       { const replyBack = this.telegram?.onTurnEnd?.(runId, turnKey); if (handedOn && replyBack) this.patchRun(runId, { replyTo: replyBack }); }
       // Tickets whose prompt was never taken: a turn handed on to the next one keeps them waiting for it; any other end loses them.
       for (const ticket of bound) this.setDelivery(ticket, { state: handedOn ? 'waiting' : 'lost' });

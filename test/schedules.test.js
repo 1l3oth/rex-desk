@@ -723,10 +723,10 @@ test('a Telegram turn that fails, then a resume from the app: the app reply stay
   assert.deepEqual(sent, ['Desky\nTelegram answer.']);
 });
 
-test('a Telegram turn cut off by a usage limit: the retry on the next account still answers on Telegram, and a message queued meanwhile is kept and answered', async () => {
+test('a Telegram turn cut off by a usage limit (its result reported before the error): the retry on the next account still answers on Telegram, and a message queued meanwhile is kept and answered', async () => {
   const { TelegramBridge, telegramLink } = await import('../src/telegram.js');
   const t = deskWith((options, launch) => ({ async start() {
-    if (launch === 1) { await t.desk.telegram.routeToAgent(t.agent.id, 'and the docs?', telegramLink(t.store)); options.event('agent-text', { text: 'Claude AI usage limit reached. Your limit resets at 5pm.' }); return; }
+    if (launch === 1) { await t.desk.telegram.routeToAgent(t.agent.id, 'and the docs?', telegramLink(t.store)); options.event('agent-result', { result: 'Claude AI usage limit reached. Your limit resets at 5pm.' }); throw new Error('Claude AI usage limit reached. Your limit resets at 5pm.'); }
     options.event('agent-result', { result: launch === 2 ? 'Shipped.' : 'Docs too.' });
   }, interrupt() {}, close() {} }));
   t.store.delete('schedmsg', t.once.id);
