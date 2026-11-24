@@ -10,6 +10,8 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { findTask as findLocalTask } from './local-tasks.js';
 import { toolsOff, runAgentId, useIsOff } from './market.js';
+import { browserChoice, OBSCURA_TOOLS } from './agent-browser.js';
+import { rank } from './toolbox.js';
 
 const runId = z.string().optional().describe('Run ID. Omit when using a run-scoped agent connection.');
 const reply = value => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] });
@@ -497,6 +499,11 @@ export function createMcp(desk, scope) {
       if (off.size) result.found = (result.found || []).filter(item => !useIsOff(off, item.use));
       // Rex Desk's own deferred tools are not skills, so they only join a tool-or-any search.
       if (kind !== 'skill') { const natives = findDeferred(input.query, input.limit); if (natives.length) { result.found = [...natives, ...(result.found || [])]; result.searched = `${result.searched}; plus ${deferred.size} built-in Rex Desk tools`; } }
+      // The Obscura browser, when it is the browser for agents: its tools are offered here only, never loaded into every agent.
+      if (kind !== 'skill' && browserChoice(desk.store) === 'obscura') {
+        const pages = rank(OBSCURA_TOOLS.map(item => ({ ...item, server: 'obscura' })), input.query, Math.min(6, input.limit || 8));
+        if (pages.length) { result.found = [...pages.map((item, index) => ({ use: `obscura/${item.name}`, kind: 'tool', description: clipText(item.description, 400), ...(index < 4 ? { input: item.inputSchema } : { input: 'Search again with its name to see its input.' }) })), ...(result.found || [])]; result.searched = `${result.searched}; plus the Obscura browser (${OBSCURA_TOOLS.length} tools, downloaded on first use after the person says yes)`; }
+      }
       return result;
     }, true);
   tool('desk_run', 'Use one tool or skill found with desk_find. For an MCP tool or a built-in Rex Desk tool, Rex Desk calls it with your input and gives back its answer. For a skill (use "skill:name"), it gives back the skill\'s instructions: follow them.',
@@ -516,6 +523,10 @@ export function createMcp(desk, scope) {
       }
       // In a mode that asks before acting, a tool that changes things waits for the person's yes, like any other tool would.
       if (useIsOff(toolsOff(desk.store, runAgentId(run)), input.use)) throw new Error('The person switched this off for you on the Market page.');
+      if (String(input.use).startsWith('obscura/') && !desk.toolbox.servers(project).obscura) {
+        if (!scope.runId) throw new Error('Only an agent in a chat can use the browser.');
+        return desk.agentBrowser.call(scope.runId, String(input.use).slice('obscura/'.length), input.input);
+      }
       const target = await desk.toolbox.resolve(input.use, project);
       if (target.kind === 'tool' && !target.tool.readOnly && run && !['bypassPermissions', 'acceptEdits', 'auto', ''].includes(run.permissionMode || '')) {
         const answer = await desk.ask(scope.runId, { kind: 'approval', title: `Approve ${input.use}`, request: { tool: input.use, input: input.input }, method: 'claude-permission' });

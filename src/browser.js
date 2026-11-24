@@ -6,6 +6,7 @@ import { now } from './store.js';
 import { flowPreview } from './flow-runtime.js';
 import { electronLaunch } from './electron-runtime.js';
 import { effectiveRepository } from './project-detect.js';
+import { privateHost } from './agent-browser.js';
 import { siteEnvironment, releasedToProduction, testSites, accountForSite } from './sites.js';
 
 const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -51,10 +52,16 @@ export class Evidence {
     }
     this.previews.delete(runId);
     const { chromium } = await import('playwright');
+    // The Chromium agents use (Settings, Agents, Browser for agents), downloaded the first time after the person says yes.
+    let launch;
+    try { launch = await this.chromiumFor(runId); } catch (error) { stopTree(process.child); throw error; }
+    if (launch.off) { stopTree(process.child); throw new Error(launch.off); }
     let browser;
-    try { browser = await chromium.launch({ headless: true }); }
-    catch (error) { stopTree(process.child); throw new Error(`Browser could not start. Run "npx playwright install chromium". ${error.message}`); }
+    try { browser = await chromium.launch({ headless: true, ...(launch.exe ? { executablePath: launch.exe } : {}) }); }
+    catch (error) { stopTree(process.child); throw new Error(`The browser for agents could not start. ${error.message}`); }
+    // A fresh, in-memory profile per recording (closed with it), and no requests to this computer's network except the preview.
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, recordVideo: { dir: directory, size: { width: 1440, height: 900 } }, ...(resume?.state ? { storageState: resume.state } : {}) });
+    await context.route('**/*', route => { let target = null; try { target = new URL(route.request().url()); } catch { /* data: and the like */ } return target && /^https?:$/.test(target.protocol) && target.origin !== baseUrl && privateHost(target.hostname) ? route.abort('blockedbyclient') : route.continue(); });
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
     const page = await context.newPage();
     page.on('pageerror', error => this.emit(runId, 'browser-error', { message: error.message }));
@@ -63,6 +70,18 @@ export class Evidence {
     this.sessions.set(runId, session); this.resumes.delete(runId);
     await page.goto(resume?.url && resume.url.startsWith(baseUrl) ? resume.url : baseUrl + repository.browserPath, { waitUntil: 'domcontentloaded', timeout: 30000 });
     return session;
+  }
+  // Which Chromium a recording starts: the one Rex Desk downloads (asked first) when Chromium is the browser for agents.
+  // With Obscura chosen, a Chromium already on this computer (Playwright's own) still records; without one, the agent is told.
+  async chromiumFor(runId) {
+    const browsers = this.agentBrowser?.(); if (!browsers) return {};
+    const choice = browsers.choice();
+    if (choice === 'chromium') return browsers.ensure(runId, 'chromium');
+    if (choice === 'off') return { off: browsers.offText() };
+    const ready = browsers.installed('chromium'); if (ready) return { exe: ready };
+    const { chromium } = await import('playwright');
+    try { if (existsSync(chromium.executablePath())) return {}; } catch { /* none */ }
+    return { off: 'Recorded proof needs Chromium, and the browser for agents is Obscura. Use the Obscura browser tools through desk_find (no video), or tell the person in one line that Settings, Agents, Browser for agents can be set to Chromium.' };
   }
   async proofPrint(runId) { const run = this.getRun(runId); return run.worktree ? fingerprint(run.worktree) : ''; }
   // Desktop runs record the app's own window; its profile, logs, updater, and protocol handlers stay isolated per run.

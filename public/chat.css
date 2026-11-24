@@ -2733,10 +2733,10 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .settings-pop .ab-status.new{color:var(--ink)}
 .settings-pop .st-account .si-avatar{background:var(--raised);color:var(--muted);border:1px solid var(--line)}
 @media (min-width:761px){
-  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit){display:grid;grid-template-columns:minmax(0,1fr) minmax(200px,300px);column-gap:24px;row-gap:2px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
-  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit)>span:not(.st-unit){grid-column:1;grid-row:1}
-  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit)>small{grid-column:1;grid-row:2}
-  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit)>:not(span:not(.st-unit)):not(small){grid-column:2;grid-row:1/span 2}
+  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit,>.pick2){display:grid;grid-template-columns:minmax(0,1fr) minmax(200px,300px);column-gap:24px;row-gap:2px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit,>.pick2)>span:not(.st-unit,.pick2){grid-column:1;grid-row:1}
+  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit,>.pick2)>small{grid-column:1;grid-row:2}
+  .settings-pop .st-field:has(>input:not([type=checkbox]),>select,>.st-unit,>.pick2)>:not(span:not(.st-unit,.pick2)):not(small){grid-column:2;grid-row:1/span 2}
 }
 .settings-pop .lang-pick{border-radius:8px;padding:2px;background:var(--raised);gap:0}
 .settings-pop .lang-pick button{border-radius:6px;padding:5px 16px}
@@ -2771,7 +2771,7 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 .settings-pop .st-box>*{margin:0;border:0;border-radius:0;background:none;box-shadow:none;padding:11px 14px;box-sizing:border-box;width:100%}
 .settings-pop .st-box>*+*{border-top:1px solid var(--line)}
 .settings-pop .st-box>.st-actions{padding:10px 14px;justify-content:flex-end}
-.settings-pop .st-box .st-field:has(>input:not([type=checkbox]),>select,>.st-unit){padding:10px 14px;border-bottom:0;column-gap:20px;grid-template-columns:minmax(0,1fr) minmax(150px,240px)}
+.settings-pop .st-box .st-field:has(>input:not([type=checkbox]),>select,>.st-unit,>.pick2){padding:10px 14px;border-bottom:0;column-gap:20px;grid-template-columns:minmax(0,1fr) minmax(150px,240px)}
 .settings-pop .st-box .st-field>span{font-size:13px;font-weight:400}
 .settings-pop .st-box .st-field small,.settings-pop .st-box .st-check small{font-size:11.5px;line-height:1.4}
 .settings-pop .st-box input:not([type=checkbox]):not([type=radio]),.settings-pop .st-box select{min-height:30px;padding:4px 10px;border-radius:7px;font-size:13px}
@@ -2795,7 +2795,7 @@ button.wh-pill:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)
 @media (max-width:760px){
   .settings-pop .st-panel{padding:16px 16px 28px}
   .settings-pop .st-nav button[data-st-section]{padding:10px 10px}
-  .settings-pop .st-box .st-field:has(>input:not([type=checkbox]),>select,>.st-unit){grid-template-columns:minmax(0,1fr) minmax(110px,45%)}
+  .settings-pop .st-box .st-field:has(>input:not([type=checkbox]),>select,>.st-unit,>.pick2){grid-template-columns:minmax(0,1fr) minmax(110px,45%)}
 }
 .settings-pop .st-box:has(>.btn:only-child){background:none;border:0;overflow:visible;align-items:flex-start}
 .settings-pop .st-box>.btn:only-child{width:auto;padding:3px 12px;border:1px solid var(--line);background:var(--panel)}

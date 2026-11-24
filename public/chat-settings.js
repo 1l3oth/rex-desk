@@ -268,6 +268,17 @@ export function openSettings(ctx, section = 'general', extra = {}) {
   // Test sign-ins are edited as a working copy: a new empty row has no user name yet, which the server would drop if saved at once.
   const signins = () => (state.signins ||= (config().testAccounts || []).map(account => ({ ...account, password: account.password || '' })));
   const readSignins = () => signins().forEach((account, index) => { for (const key of ['site', 'username', 'password']) { const input = back.querySelector(`[name="ta.${index}.${key}"]`); if (input) account[key] = input.value; } });
+  // The browser agents use to open web pages (src/agent-browser.js). Nothing is downloaded until an agent needs it and you say yes.
+  const browserFieldHtml = () => {
+    const status = ui.snap.agentBrowser || { choice: config().agentBrowser || 'obscura', tools: {} }, mb = bytes => Math.round((bytes || 0) / 1048576);
+    const hint = id => { const tool = status.tools?.[id]; if (!tool) return ''; if (!tool.available) return t('Not available on this computer'); if (tool.installed) return t`Downloaded, version ${tool.version}`; if (tool.downloading) return t('Downloading now'); return t`${mb(tool.size)} MB download, asked first`; };
+    const items = [
+      { value: 'obscura', label: t('Obscura: light and fast'), hint: hint('obscura') },
+      { value: 'chromium', label: t('Chromium: full browser, recorded videos'), hint: hint('chromium') },
+      { value: 'off', label: t('Off: agents do not open web pages') },
+    ];
+    return field(t('Browser for agents'), pickerHtml(ctx, { id: 'st-agent-browser', name: 'agentBrowser', label: t('Browser for agents'), value: status.choice, items }), t('The first time an agent needs it, Needs you asks before it downloads. The download is checked and kept in the Rex Desk data folder.'));
+  };
   const panels = {
     about: () => aboutHtml(state.extra.about, ui.snap.update || {}, state.extra.checking),
     general: () => `<h2>${t`General`}</h2>
@@ -290,7 +301,8 @@ export function openSettings(ctx, section = 'general', extra = {}) {
       ${check('autonomy', config().autonomy !== false, t('Let agents act on their own'), t('They start work and open draft pull requests without asking you each time. Nothing is ever merged. Off: they ask first.'))}
       ${check('showChanges', config().showChanges !== false, t('Show code changes after each change'), t('After an agent changes code, it makes a page of the change with plain notes and asks you to OK it. With a code reviewer on the team, it asks after the reviewer approves.'))}
       ${check('saver', config().saver !== false, t('Save my Claude usage'), t('Room chat and Away mode check-ins run on Sonnet, which uses much less of your Claude plan. Code changes, personal chats and Rex Agent keep the model you chose. An agent with its own model always uses it.'))}
-      ${field(t('Start a fresh chat at'), `<select name="handoffTokens">${[[150000, '150k'], [200000, '200k'], [300000, '300k'], [0, t('Off')]].map(([value, label]) => `<option value="${value}"${Number(config().handoffTokens ?? 200000) === value ? ' selected' : ''}>${label}</option>`).join('')}</select>`, t('When a chat holds this many tokens, the agent writes a short handoff and carries on in a fresh chat. Every step re-sends the whole chat, so smaller uses much less of your plan.'))}`,
+      ${field(t('Start a fresh chat at'), `<select name="handoffTokens">${[[150000, '150k'], [200000, '200k'], [300000, '300k'], [0, t('Off')]].map(([value, label]) => `<option value="${value}"${Number(config().handoffTokens ?? 200000) === value ? ' selected' : ''}>${label}</option>`).join('')}</select>`, t('When a chat holds this many tokens, the agent writes a short handoff and carries on in a fresh chat. Every step re-sends the whole chat, so smaller uses much less of your plan.'))}
+      ${browserFieldHtml()}`,
     accounts: () => `<h2>${t`AI accounts`}</h2>${field(t('Default model'), pickerHtml(ctx, { id: 'st-model', name: 'model', label: t('Default model'), value: config().models?.claude || '', items: [{ value: '', label: t('Claude Code default') }, ...(ui.snap.choices?.models || []).map(model => ({ value: model.id, label: model.label }))] }), t('An agent can have its own model on its card.'))}<p class="muted">${t`The AI your agents think with. Press Set up or Sign in on one: Rex Desk installs what is missing, then opens the sign-in in your browser. Use this picks the one new agents use.`}</p>${aiListHtml(ctx, state)}
       <h3>${t`More accounts`}</h3><p class="muted">${t`Add a second account of the same AI, switch between them, and see how much of each plan is used.`}</p>${tip('accounts', t('One account is enough to start. Add a second only if you often hit the usage limit.'))}<button type="button" class="btn" data-st-open="accounts">${t`Manage accounts`}</button>`,
     localai: () => `<h2>${t`Local AI`}</h2>${localAiHtml(ctx, state)}`,
@@ -446,7 +458,7 @@ export function openSettings(ctx, section = 'general', extra = {}) {
     const base = JSON.parse(JSON.stringify(config())), v = values(), next = { ...base };
     let autostart = null;
     if (has('general')) { next.name = v.name; window.rexTheme?.set(v.theme); autostart = checked('autostart'); }
-    if (has('agents')) Object.assign(next, { defaultMode: v.defaultMode, reportToOrbit: back.querySelector('[name="reportToOrbit"]') ? checked('reportToOrbit') : Boolean(base.reportToOrbit), saver: checked('saver'), showChanges: checked('showChanges'), handoffTokens: Number(v.handoffTokens ?? base.handoffTokens ?? 200000), autonomy: checked('autonomy') });
+    if (has('agents')) Object.assign(next, { defaultMode: v.defaultMode, reportToOrbit: back.querySelector('[name="reportToOrbit"]') ? checked('reportToOrbit') : Boolean(base.reportToOrbit), saver: checked('saver'), showChanges: checked('showChanges'), handoffTokens: Number(v.handoffTokens ?? base.handoffTokens ?? 200000), autonomy: checked('autonomy'), agentBrowser: v.agentBrowser || base.agentBrowser || 'obscura' });
     if (has('accounts') && back.querySelector('#st-model')) next.models = { ...base.models, claude: back.querySelector('#st-model').value };
     if (has('projects') && back.querySelector('[name="branchPrefix"]')) next.branchPrefix = v.branchPrefix;
     if (has('projects')) next.repositories = base.repositories.map((repo, index) => ({ ...repo, ...Object.fromEntries(['baseBranch', 'targetBranch', 'setupCommand', 'devCommand', 'testCommand', 'workFolder', 'push'].map(key => [key, v[`repo.${index}.${key}`] ?? repo[key]])) }));

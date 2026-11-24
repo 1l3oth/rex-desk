@@ -2666,5 +2666,14 @@
  "task made": "បានបង្កើតកិច្ចការ",
  "Ask Rex Agent to set up my phone": "សុំ Rex Agent រៀបចំទូរស័ព្ទរបស់ខ្ញុំ",
  "Rex Agent checks what is done, does what it can, and walks you through the rest. No terminal.": "Rex Agent ពិនិត្យអ្វីដែលធ្វើរួច ធ្វើអ្វីដែលធ្វើបាន ហើយណែនាំអ្នកធ្វើផ្នែកដែលនៅសល់។ មិនចាំបាច់ terminal ទេ។",
- "Help me set up Rex Desk on my phone. Follow the rex-setup-phone skill: check what is already set up, do what you can for me, and walk me through the rest in plain words with no terminal, then test it end to end before telling me it works.": "ជួយខ្ញុំរៀបចំ Rex Desk នៅលើទូរស័ព្ទរបស់ខ្ញុំ។ ធ្វើតាមជំនាញ rex-setup-phone៖ ពិនិត្យអ្វីដែលបានរៀបចំរួច ធ្វើអ្វីដែលធ្វើបានជំនួសខ្ញុំ ហើយណែនាំខ្ញុំពីផ្នែកដែលនៅសល់ជាពាក្យសាមញ្ញ ដោយមិនប្រើ terminal បន្ទាប់មកសាកល្បងពីដើមដល់ចប់ មុននឹងប្រាប់ខ្ញុំថាវាដំណើរការ។"
+ "Help me set up Rex Desk on my phone. Follow the rex-setup-phone skill: check what is already set up, do what you can for me, and walk me through the rest in plain words with no terminal, then test it end to end before telling me it works.": "ជួយខ្ញុំរៀបចំ Rex Desk នៅលើទូរស័ព្ទរបស់ខ្ញុំ។ ធ្វើតាមជំនាញ rex-setup-phone៖ ពិនិត្យអ្វីដែលបានរៀបចំរួច ធ្វើអ្វីដែលធ្វើបានជំនួសខ្ញុំ ហើយណែនាំខ្ញុំពីផ្នែកដែលនៅសល់ជាពាក្យសាមញ្ញ ដោយមិនប្រើ terminal បន្ទាប់មកសាកល្បងពីដើមដល់ចប់ មុននឹងប្រាប់ខ្ញុំថាវាដំណើរការ។",
+ "Browser for agents": "កម្មវិធីរុករកសម្រាប់ភ្នាក់ងារ",
+ "Not available on this computer": "មិនមាននៅលើកុំព្យូទ័រនេះទេ",
+ "Downloaded, version {0}": "បានទាញយករួច កំណែ {0}",
+ "Downloading now": "កំពុងទាញយក",
+ "{0} MB download, asked first": "ទាញយក {0} MB សួរអ្នកជាមុន",
+ "Obscura: light and fast": "Obscura៖ ស្រាល និងលឿន",
+ "Chromium: full browser, recorded videos": "Chromium៖ កម្មវិធីរុករកពេញលេញ ថតវីដេអូបាន",
+ "Off: agents do not open web pages": "បិទ៖ ភ្នាក់ងារមិនបើកទំព័រវេបទេ",
+ "The first time an agent needs it, Needs you asks before it downloads. The download is checked and kept in the Rex Desk data folder.": "ពេលភ្នាក់ងារត្រូវការវាលើកដំបូង Needs you សួរអ្នកមុនទាញយក។ ឯកសារទាញយកត្រូវបានពិនិត្យ ហើយរក្សាទុកក្នុងថតទិន្នន័យ Rex Desk។"
 }
