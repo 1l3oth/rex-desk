@@ -940,7 +940,11 @@ export class Desk {
       const memoryDue = reopened && chat && this.store.get('run', runId)?.memoryDue;
       if (this.store.get('run', runId)?.memoryDue) this.patchRun(runId, { memoryDue: undefined });
       const memoryReminder = memoryDue ? MEMORY_REMINDER : '';
-      const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, lessonsUpdate, notesUpdate, styleReminder, memoryReminder].filter(Boolean).join('\n\n'), message = reopened ? run.followUp : [this.prompt(run), run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
+      const digest = [this.sessionDigest(run), personUpdate, workflowUpdate, lessonsUpdate, notesUpdate, styleReminder, memoryReminder].filter(Boolean).join('\n\n'), base = reopened ? '' : this.prompt(run),
+        // With no session to reopen (Local AI light mode gives none) the turn starts from the full prompt, and the new message
+        // must still be in it: the first instructions do not hold a later message, which was then lost and retried.
+        latest = !reopened && !run.handoffFile && run.followUp && !base.includes(String(run.followUp).trim()) ? `The person's new message:\n${run.followUp}` : '',
+        message = reopened ? run.followUp : [base, latest, run.handoffFile ? `Your earlier conversation was cleared to give you a fresh start. First read the handoff ${run.handoffFile} with the Read tool, then answer this:\n${run.followUp || '(no new message: say in one line that you read the handoff and are ready)'}` : ''].filter(Boolean).join('\n\n');
       // The handoff is used up only by a turn that really ran: a turn that fails to start reads it next time.
       // An open Claude-app session starts with no message: it waits for the person to write, there or here.
       const sending = remoteOn ? '' : digest ? `${digest}

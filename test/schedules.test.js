@@ -644,3 +644,15 @@ test('a turn\'s start binds only the scheduled messages its prompt carries: one 
   assert.equal(t.store.get('delivery', 'elsewhere').state, 'waiting', 'a message not in the prompt is not claimed by this turn');
   assert.equal(t.store.get('delivery', 'elsewhere').runId, '', 'and not tied to it');
 });
+test('an agent with no session (Local AI light mode) gets each new scheduled message in its prompt, so the second one is not lost', async () => {
+  const prompts = [];
+  const t = deskWith(() => ({ async start(prompt) { prompts.push(prompt); }, interrupt() {}, close() {} }));
+  const later = t.desk.schedules.create(t.agent.id, { text: 'Check the build', time: '10:00', repeat: 'once' }, at(0, '08:00'));
+  await t.desk.schedules.tick(at(0, '09:00')); await t.settled(); await t.desk.schedules.tick(at(0, '09:05'));
+  assert.equal(t.item().on, false, 'the first message was sent');
+  assert.equal(t.runOf().sessionId, undefined, 'the runner never gave a session');
+  await t.desk.schedules.tick(at(0, '10:00')); await t.settled(); await t.desk.schedules.tick(at(0, '10:05')); await t.settled();
+  assert.equal(prompts.length, 2, 'one turn per message, no retry');
+  assert.match(prompts[0], /Ping/); assert.match(prompts[1], /Check the build/, 'the second turn carries the second message');
+  assert.equal(t.store.get('schedmsg', later.id).on, false, 'the second message counts as sent');
+});
