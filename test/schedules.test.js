@@ -657,50 +657,49 @@ test('an agent with no session (Local AI light mode) gets each new scheduled mes
   assert.equal(t.store.get('schedmsg', later.id).on, false, 'the second message counts as sent');
 });
 
-test('a Telegram message steered into a Codex turn arms the Telegram reply only once Codex accepts the steer', async () => {
+test('a Telegram message never joins a running app turn: it waits and starts its own turn, one chat at a time, and only that reply goes to Telegram', async () => {
   const { TelegramBridge, telegramLink } = await import('../src/telegram.js');
-  for (const steer of ['pending then refused', 'accepted']) {
-    let notify, finish, starts = 0, acceptSteer, refuseSteer;
-    const clientFactory = options => ({ open: async () => {}, close() {}, request: async method => {
-      if (method === 'account/read') return { account: { type: 'chatgpt' } };
-      if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: THREAD } };
-      if (method === 'turn/start') {
-        const id = `u${++starts}`;
-        if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }
-        else setTimeout(() => { options.onNotification('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Shipped.' } }); options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }, 5);
-        return { turn: { id } };
-      }
-      if (method === 'turn/steer') return new Promise((done, fail) => { acceptSteer = () => done({}); refuseSteer = () => fail(new Error('turn/steer refused: no active turn')); });
-      return {};
-    } });
-    const t = deskWith(options => new CodexRunner({ ...options, clientFactory }), 'codex');
-    t.store.delete('schedmsg', t.once.id);
-    t.store.put('connector', 'telegram-1', { id: 'telegram-1', connectorId: 'telegram', name: 'Telegram @rexbot', kind: 'token', at: '2026-11-24T00:00:00.000Z' });
-    t.store.put('secret', 'connector:telegram-1', t.store.encrypt(JSON.stringify({ botToken: 'T:tok', chatId: 555, chatName: 'Rex' })));
-    const sent = [];
-    const fetcher = async (url, options) => { const body = JSON.parse(options?.body || '{}'); if (url.endsWith('/sendMessage')) sent.push(body.text); return { ok: true, json: async () => ({ ok: true, result: { message_id: 100 + sent.length } }) }; };
-    t.desk.telegram = new TelegramBridge(t.desk, { fetcher });
-    void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' }); await new Promise(done => setTimeout(done, 100));
-    assert.equal(t.desk.live.size, 1, `${steer}: Codex is mid-turn on an app message`);
-    await t.desk.telegram.routeToAgent(t.agent.id, 'ship it?', telegramLink(t.store));
-    assert.ok(t.runOf().queued.length, 'the Telegram message waits in the queue');
-    // Codex finishes a step: the queue goes over as a steer, which Codex has not answered yet.
-    notify('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Reading the logs.' } });
-    await new Promise(done => setTimeout(done, 30));
-    assert.ok(!t.store.get('tgturn', t.runOf().id), `${steer}: not armed while the steer is pending`);
-    if (steer === 'accepted') {
-      acceptSteer(); await new Promise(done => setTimeout(done, 30));
-      assert.ok(t.store.get('tgturn', t.runOf().id), 'armed once Codex accepted it');
-      finish(); await t.settled(); await new Promise(done => setTimeout(done, 30));
-      assert.deepEqual(sent, ['Desky\nReading the logs.'], 'the turn that took it answers on Telegram');
-      continue;
+  let notify, finish, starts = 0;
+  const steered = [], prompts = [];
+  const clientFactory = options => ({ open: async () => {}, close() {}, request: async (method, params) => {
+    if (method === 'account/read') return { account: { type: 'chatgpt' } };
+    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: THREAD } };
+    if (method === 'turn/start') {
+      const id = `u${++starts}`; prompts.push(params.input.map(item => item.text).join(''));
+      if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }
+      else setTimeout(() => { options.onNotification('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: `Answer ${starts}.` } }); options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }, 5);
+      return { turn: { id } };
     }
-    // The app turn ends with the steer still pending: its reply stays in the app.
-    finish(); await new Promise(done => setTimeout(done, 30));
-    assert.deepEqual(sent, [], 'the app turn reply never reaches Telegram');
-    // Codex then refuses the steer: the message goes back and the next turn takes it and answers on Telegram.
-    refuseSteer(); await new Promise(done => setTimeout(done, 50)); await t.settled(); await new Promise(done => setTimeout(done, 30));
-    assert.equal(starts, 2, 'the next turn took it');
-    assert.deepEqual(sent, ['Desky\nShipped.']);
-  }
+    if (method === 'turn/steer') { steered.push(params.input.map(item => item.text).join('')); return {}; }
+    return {};
+  } });
+  const t = deskWith(options => new CodexRunner({ ...options, clientFactory }), 'codex');
+  t.store.delete('schedmsg', t.once.id);
+  const link = chatId => { t.store.put('connector', 'telegram-1', { id: 'telegram-1', connectorId: 'telegram', name: 'Telegram @rexbot', kind: 'token', at: '2026-11-24T00:00:00.000Z' }); t.store.put('secret', 'connector:telegram-1', t.store.encrypt(JSON.stringify({ botToken: 'T:tok', chatId, chatName: 'Rex' }))); };
+  link(555);
+  const sent = [];
+  const fetcher = async (url, options) => { const body = JSON.parse(options?.body || '{}'); if (url.endsWith('/sendMessage')) sent.push({ chat: body.chat_id, text: body.text }); return { ok: true, json: async () => ({ ok: true, result: { message_id: 100 + sent.length } }) }; };
+  t.desk.telegram = new TelegramBridge(t.desk, { fetcher });
+  void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' }); await new Promise(done => setTimeout(done, 100));
+  assert.equal(t.desk.live.size, 1, 'Codex is mid-turn on an app message');
+  // While the app turn runs: a Telegram message from chat 555, an app message, then (after a relink) one from chat 777.
+  await t.desk.telegram.routeToAgent(t.agent.id, 'ship it?', telegramLink(t.store));
+  await t.desk.specialistTurn(t.agent.id, { prompt: 'Also check the build' });
+  link(777);
+  await t.desk.telegram.routeToAgent(t.agent.id, 'and from here?', telegramLink(t.store));
+  assert.equal(t.runOf().queued.length, 3);
+  // Codex finishes a step: only the app message is steered in; the Telegram ones keep waiting.
+  notify('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Reading the logs.' } });
+  await new Promise(done => setTimeout(done, 30));
+  assert.deepEqual(steered, ['Also check the build']);
+  assert.equal(t.runOf().queued.length, 2, 'both Telegram messages still wait');
+  assert.ok(!t.store.get('tgturn', t.runOf().id), 'the app turn is not marked');
+  // The app turn ends: its reply stays in the app. Each Telegram message then gets a turn of its own, chat 555 first.
+  finish(); await new Promise(done => setTimeout(done, 50)); await t.settled(); await new Promise(done => setTimeout(done, 50)); await t.settled();
+  assert.equal(starts, 3, 'one turn per chat');
+  assert.match(prompts[1], /ship it\?/); assert.doesNotMatch(prompts[1], /from here|check the build/);
+  assert.match(prompts[2], /and from here\?/); assert.doesNotMatch(prompts[2], /ship it/);
+  // Chat 555 is no longer linked, so its reply is dropped; chat 777 gets only its own turn's answer.
+  assert.deepEqual(sent, [{ chat: 777, text: 'Desky\nAnswer 3.' }]);
+  assert.equal(t.store.list('tgqueued').length, 0);
 });

@@ -410,15 +410,24 @@ export class TelegramBridge {
     }
     this.noteLastAgent(found, agentId);
   }
-  // The coordinator handed queued messages to a turn of this run (mid-turn, or as the next turn): when one of them came from
-  // Telegram, that turn's final reply goes back to Telegram.
+  // The coordinator asks these so a Telegram message never joins a running turn (src/coordinator.js takeInbox): the chat a
+  // queued entry came from ('' for the app), and the chat the run's current turn answers ('' for an app turn).
+  queuedChat(runId, entry) {
+    const text = String(entry ?? '').trim();
+    const item = this.store.list('tgqueued').find(record => record.runId === runId && record.text === text);
+    return item ? String(item.chatId ?? '') || 'telegram' : '';
+  }
+  turnChat(runId) { const turn = this.store.get('tgturn', runId); return turn ? String(turn.chatId ?? '') || 'telegram' : ''; }
+  // The coordinator started a turn of this run with queued messages, all from one place (nextQueuedBatch): when they came
+  // from a Telegram chat, that turn's final reply goes back to that chat, and only that turn's.
   onDelivered(runId, entries = []) {
     const texts = new Set(entries.map(entry => String(entry ?? '').trim()));
     const mine = this.store.list('tgqueued').filter(item => item.runId === runId && texts.has(item.text));
-    if (!mine.length) return;
-    const first = mine[0], old = this.store.get('tgturn', runId);
+    // An app batch: a mark left by an earlier Telegram turn that ended without a result never makes this turn answer there.
+    if (!mine.length) { this.store.delete('tgturn', runId); return; }
+    const first = mine[0];
     this.store.put('tgturn', runId, { id: runId, agentId: first.agentId, linkId: first.linkId, chatId: first.chatId, at: new Date().toISOString(), sent: false,
-      texts: [...(old?.texts || []), ...mine.map(item => item.text)], direct: Boolean(old?.direct) });
+      texts: mine.map(item => item.text), direct: false });
     for (const item of mine) this.store.delete('tgqueued', item.id);
   }
   // Messages handed over but given back unread go back to waiting: the turn they armed no longer answers them.
