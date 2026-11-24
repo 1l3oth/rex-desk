@@ -323,7 +323,7 @@ export function createMcp(desk, scope) {
       if (!desk.telegram) throw new Error('Telegram is not available on this Rex Desk.');
       const run = scope.runId ? desk.store.get('run', scope.runId) : null;
       const agentId = run?.roomAgent || run?.specialistId || 'main';
-      return desk.telegram.sendFromAgent(agentId, author(), input.text);
+      return desk.telegram.sendFromAgent(agentId, author(), input.text, { runId: scope.runId || '' });
     });
   tool('desk_create_task', 'Create a Rex Desk task (kept here, not in a tracker): for personal projects, work the person describes in chat, or a piece you split off your own task. Returns its number, like #L4. Only when the person wants the work tracked as a task: when they just ask you to do something, do it in the chat without a task. Ask the person before creating more than three at once.',
     { title: z.string().min(1).max(200), description: z.string().max(20000).optional(), project: z.string().optional().describe('Project slug from desk_memory index. Defaults to your own project.'), status: z.enum(['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done']).optional(), priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(), dueDate: z.string().optional().describe('YYYY-MM-DD'), tags: z.array(z.string()).optional(), checklist: z.array(z.string()).optional(), parentTaskId: z.string().optional(), blockedBy: z.array(z.string()).optional(), assignTo: z.string().optional().describe('Agent name or handle.') },

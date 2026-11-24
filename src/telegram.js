@@ -140,13 +140,15 @@ export class TelegramBridge {
 
   // ---- Outgoing: an agent texts the person ----
   // agentId/name identify the sender; the message is prefixed with the agent name so the person knows who wrote.
-  async sendFromAgent(agentId, name, text) {
+  // runId: the chat the agent sent it from (desk_telegram passes it). Only after Telegram took the message is that chat's
+  // Telegram turn marked as answered, so a failed send still leaves the automatic reply to go out at the end of the turn.
+  async sendFromAgent(agentId, name, text, { runId = '' } = {}) {
     const found = telegramLink(this.store);
     if (!found) throw new Error('Telegram is not connected. Add it in Settings -> Connectors.');
     if (!found.values.chatId) throw new Error('Telegram is connected but not linked yet. Open the bot, press Start, and tap Link in Settings.');
-    // The agent wrote to Telegram itself during a Telegram turn: its final reply is not sent again.
-    for (const turn of this.store.list('tgturn')) if (turn.agentId === agentId && !turn.sent) this.store.put('tgturn', turn.id, { ...turn, sent: true });
     await this.sendParts(found, agentId, name, text);
+    const turn = runId ? this.store.get('tgturn', runId) : null;
+    if (turn && !turn.sent) this.store.put('tgturn', runId, { ...turn, sent: true });
     return { sent: true };
   }
   // Send an agent's words in one message (or a few clean parts when long), each recorded so a Reply on it reaches that agent,

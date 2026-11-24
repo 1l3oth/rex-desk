@@ -405,7 +405,7 @@ test('a turn started from Telegram sends its final reply back once; app turns an
   // The agent texted the person itself during the Telegram turn: the final reply is not sent again.
   await bridge.sendFromAgent('web', 'Web Agent', 'hi');
   await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: 'status?' } }, found);
-  await bridge.sendFromAgent('web', 'Web Agent', 'Deploying now.');
+  await bridge.sendFromAgent('web', 'Web Agent', 'Deploying now.', { runId: 'run-web' });
   await bridge.onTurnResult('run-web', 'Deploying now.');
   assert.deepEqual(texts().slice(1), ['Web Agent\nhi', 'Web Agent\nDeploying now.']);
   // A long reply is split cleanly into Telegram-sized parts, never cut mid-word.
@@ -539,4 +539,28 @@ test('/agents shows buttons; a press on that message picks who gets the next pla
   await bridge.handleCallback({ id: 'c4', data: 'agent=gone', message: { chat: { id: 555 }, message_id: menuId } }, found);
   await bridge.handleUpdate({ update_id: 4, message: { chat: { id: 555 }, text: 'still you?' } }, found);
   assert.equal(turns.at(-1).agentId, 'web');
+});
+
+test('an explicit send that fails keeps the automatic reply; only a send that worked, from that chat, replaces it', async () => {
+  const { desk, store } = makeDesk();
+  linkedStore(store);
+  store.put('specialist', 'web', { id: 'web', name: 'Web Agent' });
+  const { fetcher, sent } = makeFetcher();
+  let failNext = false;
+  const flaky = async (urlString, options) => {
+    if (failNext && urlString.endsWith('/sendMessage')) { failNext = false; return { ok: true, json: async () => ({ ok: false, description: 'Too Many Requests' }) }; }
+    return fetcher(urlString, options);
+  };
+  const bridge = new TelegramBridge(desk, { fetcher: flaky });
+  const found = telegramLink(store);
+  const texts = () => sent.filter(call => call.method === 'sendMessage').map(call => call.body.text);
+  store.put('tgmsg', '1', { id: '1', kind: 'agent', agentId: 'web', linkId: found.link.id });
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'status?', reply_to_message: { message_id: 1 } } }, found);
+  failNext = true;
+  await assert.rejects(bridge.sendFromAgent('web', 'Web Agent', 'Deploying now.', { runId: 'run-web' }));
+  // A message from another chat of the same agent, or with no chat (the bug bot report), does not count for this turn.
+  await bridge.sendFromAgent('web', 'Web Agent', 'from a room', { runId: 'room-run' });
+  await bridge.sendFromAgent('web', 'Bug bot', 'morning report');
+  await bridge.onTurnResult('run-web', 'Deployed.');
+  assert.deepEqual(texts(), ['Web Agent\nfrom a room', 'Bug bot\nmorning report', 'Web Agent\nDeployed.'], 'the final reply still went out');
 });
