@@ -8,7 +8,7 @@
 // report. A per-person rate limit, duplicate merging and a mute for repeat spammers keep the groups clean.
 //
 // The bot token stays server-side (encrypted in the connector secret); agents never see it and it never appears in logs.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { askJev, jevQuestions, severityLabels } from './jev.js';
 
 const API = 'https://api.telegram.org';
@@ -177,8 +177,11 @@ export class BugBot {
   }
 
   // ---- saved state ----
-  offsetFor(linkId) { const state = this.store.get('bugbot', 'state'); return state?.linkId === linkId ? Number(state.offset) || 0 : 0; }
-  saveOffset(linkId, offset) { this.store.put('bugbot', 'state', { id: 'state', linkId, offset }); }
+  // The polling offset belongs to one bot: the saved connection and a fingerprint of its token (never the token itself). A
+  // replaced token starts again from 0, so the new bot's first updates are not skipped by the old bot's offset.
+  botKey(found) { return `${found.link.id}:${createHash('sha256').update(String(found.values.botToken || '')).digest('hex').slice(0, 16)}`; }
+  offsetFor(found) { const state = this.store.get('bugbot', 'state'); return state?.bot === this.botKey(found) ? Number(state.offset) || 0 : 0; }
+  saveOffset(found, offset) { this.store.put('bugbot', 'state', { id: 'state', bot: this.botKey(found), offset }); }
   reports() { return this.store.list('bugreport'); }
   groups(values) { return (values || bugBotLink(this.store)?.values || {}).groups || []; }
   nextNum() { return Math.max(0, ...this.reports().map(report => Number(report.num) || 0)) + 1; }
@@ -192,10 +195,12 @@ export class BugBot {
     if (!token) throw new Error('Paste the bot token from @BotFather.');
     const me = await this.call(token, 'getMe').catch(() => { throw new Error('Telegram does not know that bot token. Copy it again from @BotFather.'); });
     const existing = bugBotLink(this.store);
-    const values = { ...(existing?.values || {}), botToken, botUsername: me?.username || '', botId: me?.id || '' };
+    const values = { ...(existing?.values || {}), botToken: token, botUsername: me?.username || '', botId: me?.id || '' };
     const id = existing?.link?.id || `${CONNECTOR}-${Date.now().toString(36)}`;
     if (!existing) this.store.put('connector', id, { id, connectorId: CONNECTOR, name: me?.username ? `Bug bot @${me.username}` : 'Bug bot', kind: 'token', at: new Date().toISOString() });
     this.saveValues(id, values);
+    // A different bot: drop the old bot's offset and cut off a poll still waiting on the old token, so its batch is never used.
+    if (existing?.values?.botToken !== token) { this.store.delete('bugbot', 'state'); this.abort?.abort(); }
     this.kick();
     return { connected: true, botUsername: values.botUsername };
   }
@@ -245,17 +250,18 @@ export class BugBot {
         try { const me = await this.call(found.values.botToken, 'getMe'); this.saveValues(found.link.id, { ...found.values, botUsername: me?.username || '', botId: me?.id || '' }); continue; } catch { /* retry next loop */ }
       }
       try {
-        const offset = this.offsetFor(found.link.id);
+        const offset = this.offsetFor(found);
         this.abort = new AbortController();
         const updates = await this.call(found.values.botToken, 'getUpdates',
           { offset, timeout: 45, allowed_updates: ['message', 'callback_query', 'my_chat_member'] },
           { timeoutMs: 55000, signal: this.abort.signal });
         for (const update of updates) {
           if (!this.running) break;
+          // The bot changed while this batch was in flight (another token, or a removed link): drop the rest of it.
           const current = bugBotLink(this.store);
-          if (current?.link?.id !== found.link.id) break;
+          if (!current || this.botKey(current) !== this.botKey(found)) break;
           try { await this.handleUpdate(update, current); } catch (error) { this.store.event?.('', 'bugbot-error', { message: error.message }, true); }
-          this.saveOffset(found.link.id, Math.max(offset, update.update_id + 1));
+          this.saveOffset(found, Math.max(offset, update.update_id + 1));
         }
       } catch (error) {
         if (!this.running) break;

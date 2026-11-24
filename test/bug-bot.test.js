@@ -262,3 +262,34 @@ test('picker: a button only attaches the held text for its own reporter, group a
   assert.match(store.get('bugreport', 'bug-2').adds[0].text, /held secret detail/);
   assert.equal(store.list('bugpick').length, 0);
 });
+
+test('polling: a replaced bot token starts from offset 0 and a batch from the old bot is dropped', async () => {
+  const { desk, store, calls } = makeDesk({ groups: [{ id: '-100' }] });
+  const seen = [];
+  let bot;
+  const fetcher = async (url, options) => {
+    const body = options?.body ? JSON.parse(options.body) : {};
+    const [, token, method] = /\/bot([^/]+)\/(\w+)$/.exec(String(url));
+    calls.push({ method, token, body });
+    if (method === 'getMe') return { ok: true, json: async () => ({ ok: true, result: { id: 555, username: 'newbot' } }) };
+    if (method === 'getUpdates') {
+      seen.push({ token, offset: body.offset });
+      if (token === 'TKN') {
+        // The old bot's batch comes back after the token was replaced: none of it may be handled or move the offset.
+        await bot.connect('NEWTKN');
+        return { ok: true, json: async () => ({ ok: true, result: [{ update_id: 500, message: { message_id: 1, chat: { id: -100, type: 'supergroup' }, from: { id: 42 }, text: '@rexbugbot old' } }] }) };
+      }
+      bot.running = false;
+      return { ok: true, json: async () => ({ ok: true, result: [] }) };
+    }
+    return { ok: true, json: async () => ({ ok: true, result: {} }) };
+  };
+  bot = new BugBot(desk, { fetcher });
+  bot.saveOffset(bugBotLink(store), 900);
+  bot.sleep = async () => {};
+  bot.running = true;
+  await bot.loop();
+  assert.deepEqual(seen, [{ token: 'TKN', offset: 900 }, { token: 'NEWTKN', offset: 0 }]);
+  assert.equal(store.list('bugreport').length, 0);
+  assert.equal(store.get('bugbot', 'state'), null);
+});
