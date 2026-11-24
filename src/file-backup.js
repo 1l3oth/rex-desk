@@ -145,7 +145,10 @@ export class FileBackup {
     const { store } = this.sync;
     const index = this.index() || { files: {} }; let uploaded = 0;
     if (this.full) return { uploaded: 0, skipped: 'Your cloud space is full; files wait here until there is room.' };
+    // The sign-in this batch is for: when the account signs out or switches mid-batch, the rest is never sent to the new one.
+    const signIn = this.sync.account.saved, moved = () => this.sync.account.saved !== signIn;
     for (const item of this.walk()) {
+      if (moved()) { this.saveIndex(index); return { uploaded, skipped: 'The Rex Desk account changed, so this backup stopped.' }; }
       if (index.files[item.key] === item.stamp || index.skipped?.[item.key] === item.stamp) continue;
       let data; try { data = readFileSync(item.file); } catch { continue; }
       try { await this.sync.account.putFile(this.remoteKey(item.key), Buffer.from(store.encryptBytes(data), 'base64')); }
@@ -158,6 +161,8 @@ export class FileBackup {
         this.full = true; this.error = error.message; this.saveIndex(index); this.sync.notify?.();
         return { uploaded, skipped: error.message };
       }
+      // A file that went up for the old account is not counted as backed up for the new one.
+      if (moved()) { this.saveIndex(index); return { uploaded, skipped: 'The Rex Desk account changed, so this backup stopped.' }; }
       index.files[item.key] = item.stamp; uploaded += 1;
       if (uploaded % 20 === 0) this.saveIndex(index);
     }

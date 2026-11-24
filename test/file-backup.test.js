@@ -117,6 +117,25 @@ test('a file request whose sign-in ended after the account was switched never si
   assert.equal(account.ended, undefined);
 });
 
+test('a backup batch stops when the account changes during an upload, and the rest never goes to the new account', async () => {
+  const fake = service();
+  let release, first = true; const gate = new Promise(resolve => { release = resolve; });
+  const fetcher = async (url, options = {}) => { if (options.method === 'PUT' && first) { first = false; await gate; } return fake.fetcher(url, options); };
+  const { store, account, files } = home({ fake: { ...fake, fetcher }, saveUrl: URL_DB });
+  const folder = path.join(store.media('artifacts'), 'run-1'); mkdirSync(folder, { recursive: true });
+  writeFileSync(path.join(folder, 'one.png'), 'one'); writeFileSync(path.join(folder, 'two.png'), 'two');
+  const running = files.backup();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  account.save({ token: 'session-2', expiresAt: new Date(Date.now() + 86400000).toISOString(), user: { id: 'u2' } }, { url: URL_DB });
+  release();
+  const result = await running;
+  assert.equal(result.uploaded, 0);
+  assert.match(result.skipped, /account changed/);
+  assert.equal(fake.calls.filter(call => call.startsWith('PUT ')).length, 1, 'only the upload already under way was sent');
+  const again = await files.backup();
+  assert.equal(again.uploaded, 2, 'the new account gets every file');
+});
+
 test('a file that does not come says why: not in the backup, too big, failed, not connected, or left out', async () => {
   let fake = service(), setup = home({ fake });
   assert.equal(await setup.files.fetchOne(KEY), false);
