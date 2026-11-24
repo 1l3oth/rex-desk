@@ -440,3 +440,24 @@ test('voice note: the audio is always saved and its path given; a download blip 
   await down.handleUpdate({ update_id: 3, message: { message_id: 42, chat: { id: 555 }, voice: { file_id: 'v3' } } }, telegramLink(store));
   assert.match(turns.at(-1).prompt, /could not be saved, the download from Telegram failed \(fetch failed: ECONNRESET\)/);
 });
+
+test('photos and files are downloaded into the uploads folder and posted to the agent as attachments with the caption', async () => {
+  const directory = tempDir();
+  const { desk, store, turns } = makeDesk({ directory });
+  linkedStore(store);
+  const { fetcher } = makeFetcher({ file: { file_path: 'photos/file_9.jpg' }, fileBytes: Buffer.from('JPEG') });
+  const bridge = new TelegramBridge(desk, { fetcher });
+  await bridge.handleUpdate({ update_id: 1, message: { message_id: 50, chat: { id: 555 }, caption: 'the save button is grey', photo: [{ file_id: 'small', file_size: 10 }, { file_id: 'big', file_size: 99 }] } }, telegramLink(store));
+  let prompt = turns.at(-1).prompt;
+  assert.match(prompt, /^\[Telegram\] The person sent a photo with this caption: the save button is grey\.\n\nAttached files \(read them from these paths\):\n- /);
+  const photo = /\n- (.+)$/.exec(prompt)[1];
+  assert.equal(readFileSync(photo, 'utf8'), 'JPEG');
+  assert.match(photo, /photo-50\.jpg$/);
+  // A document keeps its own name; one over 20 MB is not downloaded and the agent is told.
+  await bridge.handleUpdate({ update_id: 2, message: { message_id: 51, chat: { id: 555 }, document: { file_id: 'd1', file_name: 'log.txt', file_size: 10 } } }, telegramLink(store));
+  prompt = turns.at(-1).prompt;
+  assert.match(prompt, /sent a file \(no caption\)\.\n\nAttached files/);
+  assert.match(prompt, /log\.txt$/);
+  await bridge.handleUpdate({ update_id: 3, message: { message_id: 52, chat: { id: 555 }, document: { file_id: 'd2', file_name: 'big.zip', file_size: 30 * 1024 * 1024 } } }, telegramLink(store));
+  assert.match(turns.at(-1).prompt, /could not be saved: it is over 20 MB/);
+});

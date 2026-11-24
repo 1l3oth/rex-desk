@@ -268,6 +268,7 @@ export class TelegramBridge {
     // Only the one linked chat is ever accepted; anything else is ignored.
     if (String(message.chat?.id) !== String(found.values.chatId)) return;
     if (message.voice || message.audio) return this.handleVoice(message, found);
+    if (message.photo || message.document || message.video || message.animation) return this.handleFile(message, found);
     const text = String(message.text || '').trim();
     if (!text) return;
     const context = this.sentMessage(found, message.reply_to_message?.message_id);
@@ -358,6 +359,20 @@ export class TelegramBridge {
     const root = this.store.media ? this.store.media('uploads') : path.join(this.store.directory, 'uploads');
     const dir = path.join(root, randomUUID()); mkdirSync(dir, { recursive: true });
     const out = path.join(dir, safeName(name)); writeFileSync(out, buffer); return out;
+  }
+
+  // Photos, files and short videos: downloaded and posted into the agent's chat as attachments, with the caption.
+  async handleFile(message, found) {
+    const agentId = this.targetFor(message, found);
+    const photo = Array.isArray(message.photo) && message.photo.length ? message.photo[message.photo.length - 1] : null;
+    const item = photo || message.document || message.video || message.animation;
+    const kind = photo ? 'a photo' : message.document ? 'a file' : 'a video';
+    const name = photo ? `photo-${message.message_id || Date.now()}.jpg` : item.file_name || `${message.document ? 'file' : 'video'}-${message.message_id || Date.now()}`;
+    const saved = await this.download(found, item.file_id, name, item.file_size || 0);
+    const caption = String(message.caption || '').trim();
+    const said = `The person sent ${kind}${caption ? ` with this caption: ${caption}` : ' (no caption)'}.`;
+    const prompt = saved.path ? `${said}${attachedBlock([saved.path])}` : `${said} It could not be saved: ${saved.error}.`;
+    return this.routeToAgent(agentId, prompt, found);
   }
 
   // Voice notes: saved into the uploads folder (the agent always gets the file path), transcribed when a transcriber is ready,
