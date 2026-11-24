@@ -277,3 +277,52 @@ test('stop while idling (not linked yet) resolves at once', async () => {
   const started = Date.now(); await bridge.stop();
   assert.ok(Date.now() - started < 1000, 'the 8 s idle sleep is woken by stop');
 });
+
+test('a removed or replaced bot connection: its queued updates are dropped and its offset is not reused', async () => {
+  const { desk, store, turns } = makeDesk();
+  linkedStore(store);
+  store.put('telegram', 'state', { id: 'state', linkId: 'telegram-1', offset: 500 });
+  const offsets = []; let polls = 0;
+  const fetcher = async (urlString, options) => {
+    const body = JSON.parse(options.body); polls += 1;
+    if (polls === 1) {
+      offsets.push(body.offset);
+      // While this long poll waits, the person removes the connection and adds a new bot.
+      store.delete('connector', 'telegram-1'); store.delete('secret', 'connector:telegram-1');
+      store.put('connector', 'telegram-2', { id: 'telegram-2', connectorId: 'telegram', name: 'Telegram @newbot', kind: 'token', at: '2026-11-24T01:00:00.000Z' });
+      store.put('secret', 'connector:telegram-2', JSON.stringify({ botToken: 'T:new', chatId: 555 }));
+      return { ok: true, json: async () => ({ ok: true, result: [{ update_id: 501, message: { chat: { id: 555 }, text: 'from the old bot' } }] }) };
+    }
+    offsets.push(body.offset);
+    await new Promise((resolve, reject) => options.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
+  };
+  const bridge = new TelegramBridge(desk, { fetcher });
+  bridge.start();
+  for (let i = 0; i < 50 && polls < 2; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  await bridge.stop();
+  assert.deepEqual(turns, [], 'nothing from the old bot reaches an agent');
+  assert.deepEqual(offsets, [500, 0], 'the new bot starts from its own offset, not the old one');
+  assert.notEqual(store.get('telegram', 'state').linkId, 'telegram-2', 'the dropped batch saved nothing for the new bot');
+});
+
+test('a reply or button on a message sent through an old connection is not acted on', async () => {
+  const { desk, store, answered, turns } = makeDesk();
+  linkedStore(store);
+  store.put('run', 'r1', { id: 'r1', main: true });
+  store.put('specialist', 'web', { id: 'web', name: 'Web Agent' });
+  const approval = { id: 'a1', runId: 'r1', kind: 'approval', method: 'desk', title: 'Push?', state: 'pending', request: { requestedSchema: { type: 'object', properties: {} } } };
+  store.put('interaction', 'a1', approval);
+  const bridge = new TelegramBridge(desk, { fetcher: makeFetcher().fetcher });
+  await bridge.onAsk(approval); await bridge.sendFromAgent('web', 'Web Agent', 'ready?');
+  const askId = Number(store.list('tgmsg').find(item => item.kind === 'ask').id), agentId = Number(store.list('tgmsg').find(item => item.kind === 'agent').id);
+  // The connection is replaced by a new bot linked to the same chat; the new bot reuses message numbers.
+  store.delete('connector', 'telegram-1');
+  store.put('connector', 'telegram-2', { id: 'telegram-2', connectorId: 'telegram', name: 'Telegram @newbot', kind: 'token', at: '2026-11-24T01:00:00.000Z' });
+  store.put('secret', 'connector:telegram-2', JSON.stringify({ botToken: 'T:new', chatId: 555 }));
+  const found = telegramLink(store);
+  await bridge.handleCallback({ id: 'cb', data: 'a1:accept', message: { chat: { id: 555 }, message_id: askId } }, found);
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'yes', reply_to_message: { message_id: askId } } }, found);
+  await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: 'go', reply_to_message: { message_id: agentId } } }, found);
+  assert.deepEqual(answered, [], 'the old approval is not answered');
+  assert.ok(!turns.some(turn => turn.agentId === 'web'), 'a reply to the old agent message does not reach that agent');
+});

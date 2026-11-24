@@ -35,6 +35,11 @@ function saveValues(store, linkId, values) {
   store.put('secret', `connector:${linkId}`, store.encrypt(JSON.stringify(values)));
 }
 
+// The getUpdates offset belongs to one connection (one bot). A removed or replaced connection's offset is never reused, so
+// the new bot starts from what Telegram still holds for it, and nothing queued for the old bot is ever read again.
+const offsetFor = (store, linkId) => { const state = store.get('telegram', 'state'); return state?.linkId === linkId ? Number(state.offset) || 0 : 0; };
+const saveOffset = (store, linkId, offset) => store.put('telegram', 'state', { id: 'state', linkId, offset });
+
 export class TelegramBridge {
   // desk: the coordinator (desk.store, desk.answer, desk.specialistTurn, desk.specialists...). options.fetcher and
   // options.transcribe are injectable for tests. transcribe(oggBuffer, language) -> { text } | null (null = could not).
@@ -78,7 +83,7 @@ export class TelegramBridge {
     const name = this.pair(link.id, values, message.chat);
     // Skip past the code so the loop never treats it as a reply.
     const lastId = updates.length ? updates[updates.length - 1].update_id : 0;
-    this.store.put('telegram', 'state', { id: 'state', offset: lastId + 1 });
+    saveOffset(this.store, link.id, lastId + 1);
     this.kick();
     return { linked: true, name };
   }
@@ -101,7 +106,7 @@ export class TelegramBridge {
     if (!found.values.chatId) throw new Error('Telegram is connected but not linked yet. Open the bot, press Start, and tap Link in Settings.');
     const body = `${name}\n${String(text || '').trim()}`;
     const message = await this.call(found.values.botToken, 'sendMessage', { chat_id: found.values.chatId, text: clip(body) });
-    if (message?.message_id) this.store.put('tgmsg', String(message.message_id), { id: String(message.message_id), kind: 'agent', agentId, at: new Date().toISOString() });
+    if (message?.message_id) this.store.put('tgmsg', String(message.message_id), { id: String(message.message_id), kind: 'agent', agentId, linkId: found.link.id, at: new Date().toISOString() });
     return { sent: true };
   }
 
@@ -122,7 +127,7 @@ export class TelegramBridge {
         chat_id: found.values.chatId, text: clip(`${head}\n${interaction.title}${foot}`),
         ...(buttons.length ? { reply_markup: { inline_keyboard: buttons } } : {}),
       });
-      if (message?.message_id) this.store.put('tgmsg', String(message.message_id), { id: String(message.message_id), kind: 'ask', interactionId: interaction.id, field: this.answerField(schema), at: new Date().toISOString() });
+      if (message?.message_id) this.store.put('tgmsg', String(message.message_id), { id: String(message.message_id), kind: 'ask', interactionId: interaction.id, field: this.answerField(schema), linkId: found.link.id, at: new Date().toISOString() });
     } catch { /* the app's Needs you still has the question; Telegram is a bonus channel */ }
   }
 
@@ -152,14 +157,17 @@ export class TelegramBridge {
       // Idle (no getUpdates) until a chat is linked, so the Link button's one-shot getUpdates never hits a 409 conflict.
       if (!found?.values?.chatId) { await this.sleep(8000); continue; }
       try {
-        const offset = this.store.get('telegram', 'state')?.offset || 0;
+        const offset = offsetFor(this.store, found.link.id);
         this.abort = new AbortController();
         const updates = await this.callAbortable(found.values.botToken, 'getUpdates', { offset, timeout: 45, allowed_updates: ['message', 'callback_query'] }, 55000, this.abort.signal);
         for (const update of updates) {
           if (!this.running) break;
           // Read the link fresh for each update: a Relink code or a new linked chat may have been saved during the long poll.
-          try { await this.handleUpdate(update, telegramLink(this.store) || found); } catch (error) { this.store.event?.('', 'telegram-error', { message: error.message }, true); }
-          this.store.put('telegram', 'state', { id: 'state', offset: Math.max(offset, update.update_id + 1) });
+          // When the connection was removed or replaced meanwhile, the rest of this batch came from the old bot: drop it.
+          const current = telegramLink(this.store);
+          if (current?.link?.id !== found.link.id) break;
+          try { await this.handleUpdate(update, current); } catch (error) { this.store.event?.('', 'telegram-error', { message: error.message }, true); }
+          saveOffset(this.store, found.link.id, Math.max(offset, update.update_id + 1));
         }
       } catch (error) {
         if (!this.running) break;
@@ -178,6 +186,13 @@ export class TelegramBridge {
     return data.result;
   }
 
+  // A message Rex Desk sent through this connection (a reply or button on it can be acted on), or null. Records from a
+  // removed or replaced connection never match: another bot reuses the same message numbers.
+  sentMessage(found, messageId) {
+    const record = messageId == null ? null : this.store.get('tgmsg', String(messageId));
+    return record && record.linkId === found.link.id ? record : null;
+  }
+
   async handleUpdate(update, found) {
     if (update.callback_query) return this.handleCallback(update.callback_query, found);
     const message = update.message || update.edited_message;
@@ -193,7 +208,7 @@ export class TelegramBridge {
     if (message.voice || message.audio) return this.handleVoice(message, found);
     const text = String(message.text || '').trim();
     if (!text) return;
-    const context = message.reply_to_message ? this.store.get('tgmsg', String(message.reply_to_message.message_id)) : null;
+    const context = this.sentMessage(found, message.reply_to_message?.message_id);
     if (context?.kind === 'ask') return this.answerAsk(context.interactionId, context.field, text, found, message.message_id);
     if (context?.kind === 'agent') return this.routeToAgent(context.agentId, text);
     // A plain message (not a reply, not a command) goes to Rex Agent, the main agent.
@@ -210,7 +225,7 @@ export class TelegramBridge {
     // message, and the message must be the one that carried this question.
     const origin = query.message;
     if (!origin || String(origin.chat?.id) !== String(found.values.chatId)) return ack();
-    const sentAsk = this.store.get('tgmsg', String(origin.message_id));
+    const sentAsk = this.sentMessage(found, origin.message_id);
     if (sentAsk?.kind !== 'ask' || sentAsk.interactionId !== interactionId) return ack();
     const interaction = this.store.get('interaction', interactionId);
     if (!interaction || interaction.state !== 'pending') { await ack('Already answered'); return this.clearButtons(query, token); }
@@ -248,7 +263,7 @@ export class TelegramBridge {
   // Voice notes: download the audio, transcribe it if a transcriber is available (no new keys), and post the text (plus the
   // audio) into the target agent's chat. With no transcoder, post the audio and say it was not transcribed.
   async handleVoice(message, found) {
-    const context = message.reply_to_message ? this.store.get('tgmsg', String(message.reply_to_message.message_id)) : null;
+    const context = this.sentMessage(found, message.reply_to_message?.message_id);
     const agentId = context?.kind === 'agent' ? context.agentId : 'main';
     const fileId = (message.voice || message.audio).file_id;
     let buffer = null, saved = '';
