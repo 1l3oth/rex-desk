@@ -262,8 +262,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     // Two-way Telegram: agents text the person and their desk_ask questions appear there; the person's replies flow back
     // into the agent's chat. Long polling while the app runs. Voice notes transcribe only when a transcoder (ffmpeg) and a
     // ready speech engine are present and need no new keys; otherwise the audio is posted as-is.
+    // It answers { text } or { error } with the plain reason, which the agent is told.
     const transcribeVoiceNote = async (ogg, language) => {
-      const ffmpeg = ffmpegPath(); if (!ffmpeg) return null;
+      const ffmpeg = ffmpegPath(); if (!ffmpeg) return { error: 'ffmpeg is not installed on this computer; it is needed to turn a Telegram voice note (OGG) into sound a voice engine can read' };
       const tmp = path.join(dataRoot, 'telegram', `t-${Date.now()}`);
       mkdirSync(path.dirname(tmp), { recursive: true });
       const inFile = `${tmp}.oga`, wavFile = `${tmp}.wav`;
@@ -273,8 +274,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const wav = readFileSync(wavFile);
         if (voice.status().installed) return await voice.transcribe(wav, language);
         if (desk.jev.apiKey()) return await transcribeGemini(wav, language, desk.jev.apiKey());
-        return null;
-      } catch { return null; }
+        return { error: 'no voice engine is ready; install the voice model on this computer, or add an OpenRouter key in Settings, Jev and voice' };
+      } catch (error) { return { error: `transcription failed: ${error.message}` }; }
       finally { for (const file of [inFile, wavFile]) try { unlinkSync(file); } catch { /* ignore */ } }
     };
     desk.telegram = new TelegramBridge(desk, { transcribe: transcribeVoiceNote });

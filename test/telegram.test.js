@@ -415,3 +415,28 @@ test('a turn started from Telegram sends its final reply back once; app turns an
   assert.equal(parts.join('\n\n').replace('Web Agent\n', ''), long);
   assert.ok(splitReply('x'.repeat(20000)).length <= 4);
 });
+
+test('voice note: the audio is always saved and its path given; a download blip is retried; a missing transcriber is said plainly', async () => {
+  const directory = tempDir();
+  const { desk, store, turns } = makeDesk({ directory });
+  linkedStore(store);
+  const { fetcher } = makeFetcher({ failFiles: 1, fileBytes: Buffer.from('OggS-voice') });
+  const bridge = new TelegramBridge(desk, { fetcher, transcribe: async () => ({ error: 'ffmpeg is not installed on this computer' }) });
+  bridge.retryMs = 1;
+  await bridge.handleUpdate({ update_id: 1, message: { message_id: 40, chat: { id: 555 }, voice: { file_id: 'v1', file_size: 9 } } }, telegramLink(store));
+  const prompt = turns.at(-1).prompt;
+  assert.match(prompt, /^\[Telegram\] The person sent a voice note\. It was not transcribed: ffmpeg is not installed on this computer\./);
+  const saved = /Attached files \(read them from these paths\):\n- (.+)$/.exec(prompt)[1];
+  assert.equal(readFileSync(saved, 'utf8'), 'OggS-voice');
+  assert.ok(saved.startsWith(path.join(directory, 'uploads')), 'saved in the uploads folder');
+  assert.match(saved, /voice-40\.oga$/);
+  // Transcribed: the words and the audio path both reach the agent.
+  const ok = new TelegramBridge(desk, { fetcher: makeFetcher().fetcher, transcribe: async () => ({ text: 'please deploy' }) });
+  await ok.handleUpdate({ update_id: 2, message: { message_id: 41, chat: { id: 555 }, voice: { file_id: 'v2' } } }, telegramLink(store));
+  assert.match(turns.at(-1).prompt, /transcribed\): please deploy\n\nAttached files/);
+  // Telegram down for good: the agent is told why, with the cause.
+  const down = new TelegramBridge(desk, { fetcher: makeFetcher({ failFiles: 9 }).fetcher, transcribe: async () => ({ text: 'x' }) });
+  down.retryMs = 1;
+  await down.handleUpdate({ update_id: 3, message: { message_id: 42, chat: { id: 555 }, voice: { file_id: 'v3' } } }, telegramLink(store));
+  assert.match(turns.at(-1).prompt, /could not be saved, the download from Telegram failed \(fetch failed: ECONNRESET\)/);
+});
