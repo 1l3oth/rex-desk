@@ -54,6 +54,7 @@ import { ORBIT_URL, orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { catalog as connectorCatalog, connections as connectionList, connector as connectorOf } from './connectors.js';
 import { loadCatalog, catalogItem, probe as probeConnector, saveConnector, catalogConnections, removeCatalogConnection } from './connector-catalog.js';
 import { TelegramBridge } from './telegram.js';
+import { BugBot } from './bug-bot.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
 import { Awake, keepInMemory } from './awake.js';
@@ -278,6 +279,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     };
     desk.telegram = new TelegramBridge(desk, { transcribe: transcribeVoiceNote });
     if (!process.env.NODE_TEST_CONTEXT) desk.telegram.start();
+    // The bug-report group bot: a separate bot added to customer groups that only files bug reports (src/bug-bot.js).
+    desk.bugBot = new BugBot(desk);
+    if (!process.env.NODE_TEST_CONTEXT) desk.bugBot.start();
     // Agents from before avatars each get their own picture (this computer's agents only; the others get theirs at home).
     try { desk.specialists.ensureAvatars(store.nodeId); } catch (error) { store.event('', 'avatar-error', { message: error.message }); }
     desk.peers.onRemoteChange = () => { remoteAt = '-'; remoteOpen(); }; remoteOpen();
@@ -297,7 +301,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     const { desk, store, id } = session; session = null;
     if (forget) accounts?.forget(id);
     // Telegram polling writes the update offset to the store, so it is stopped (and its loop awaited) before the store closes.
-    desk.phoneRelay?.stop(); await desk.telegram?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
+    desk.phoneRelay?.stop(); await desk.telegram?.stop(); await desk.bugBot?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
   }
   const speakerOf = () => (session.speaker ||= new Speaker(session.store));
   const role = () => accounts ? accounts.role(session?.email) : 'superadmin';
@@ -1025,6 +1029,21 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         try { const result = await desk.telegram.link(input.id || ''); if (result.linked) notify(); return json(response, 200, result); }
         catch (error) { return json(response, 400, { error: error.message }); }
       }
+      // The bug-report group bot (a separate bot, src/bug-bot.js): its own setup screen connects the token, allows groups,
+      // sets the morning-report time, and approves or rejects queued bugs. All server-side; the token never leaves here.
+      if (url.pathname.startsWith('/api/bugbot')) {
+        if (url.pathname === '/api/bugbot' && request.method === 'GET') return json(response, 200, desk.bugBot.status());
+        const input = await body(request).catch(() => ({}));
+        try {
+          if (url.pathname === '/api/bugbot/connect' && request.method === 'POST') { const result = await desk.bugBot.connect(input.botToken); notify(); return json(response, 200, result); }
+          if (url.pathname === '/api/bugbot/disconnect' && request.method === 'POST') { const result = desk.bugBot.disconnect(); notify(); return json(response, 200, result); }
+          if (url.pathname === '/api/bugbot/report-time' && request.method === 'POST') { const result = desk.bugBot.setReportTime(input.at); notify(); return json(response, 200, result); }
+          if (url.pathname === '/api/bugbot/groups' && request.method === 'POST') { const result = desk.bugBot.allowGroup(input.id, input.title); notify(); return json(response, 200, result); }
+          if (url.pathname === '/api/bugbot/groups/remove' && request.method === 'POST') { const result = desk.bugBot.removeGroup(input.id); notify(); return json(response, 200, result); }
+          if (url.pathname === '/api/bugbot/approve' && request.method === 'POST') { const result = desk.bugBot.approve(input.id); notify(); return json(response, 200, result); }
+          if (url.pathname === '/api/bugbot/reject' && request.method === 'POST') { const result = desk.bugBot.reject(input.id); notify(); return json(response, 200, result); }
+        } catch (error) { return json(response, 400, { error: error.message }); }
+      }
       const linkMatch = url.pathname.match(/^\/api\/connectors\/links\/([a-z0-9-]+)$/);
       if (linkMatch && request.method === 'DELETE') { const removed = await removeCatalogConnection(linkMatch[1], { toolbox: desk.toolbox, store }); notify(); return json(response, 200, removed); }
       const connectionMatch = url.pathname.match(/^\/api\/connectors\/([^/]+)(\/sync)?$/);
@@ -1483,6 +1502,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     void desk.resumeTick().catch(error => store.event('', 'resume-error', { message: error.message }, true));
     try { desk.storage.historyTick(); } catch (error) { store.event('', 'history-clean-error', { message: error.message }, true); }
     void desk.schedules.tick().catch(error => store.event('', 'schedule-message-error', { message: error.message }, true));
+    void desk.bugBot?.dailyTick().catch(error => store.event('', 'bugbot-error', { message: error.message }, true));
     if (++ticks % 8 === 0) void desk.findPullRequests();
     if (ticks % 4 === 0) remoteOpen(); // Tailscale may start after Rex Desk
     if (ticks % 4 === 0) void desk.worktrees.scan().catch(() => {});

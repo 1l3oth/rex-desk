@@ -77,8 +77,8 @@ const SECTIONS = [
   ['about', t('About'), t('Version and updates')],
 ];
 // Each section is one or more panels. The old section names still open the right page.
-const PARTS = { general: ['general'], notify: ['notify'], jev: ['jev'], ai: ['accounts', 'localai'], agents: ['agents'], projects: ['projects', 'signins'], connectors: ['sources', 'schedule'], backup: ['backup'], storage: ['storage', 'folders'], about: ['about'] };
-const ALIAS = { accounts: 'ai', localai: 'ai', signins: 'projects', tasks: 'connectors', sources: 'connectors', schedule: 'connectors', plan: 'backup', devices: 'backup', folders: 'storage' };
+const PARTS = { general: ['general'], notify: ['notify'], jev: ['jev'], ai: ['accounts', 'localai'], agents: ['agents'], projects: ['projects', 'signins'], connectors: ['sources', 'schedule', 'bugbot'], backup: ['backup'], storage: ['storage', 'folders'], about: ['about'] };
+const ALIAS = { accounts: 'ai', localai: 'ai', signins: 'projects', tasks: 'connectors', sources: 'connectors', schedule: 'connectors', bugbot: 'connectors', plan: 'backup', devices: 'backup', folders: 'storage' };
 const SAVE_PARTS = ['general', 'agents', 'accounts', 'projects', 'sources', 'jev', 'schedule', 'signins'];
 const GROUPS = [
   [t('You'), ['general', 'notify', 'jev']],
@@ -106,6 +106,7 @@ const ST_ICON = {
   sources: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/>',
   jev: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
   schedule: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  bugbot: '<path d="M9 7a3 3 0 0 1 6 0M8 11h8M12 7v10M6 10l-2-1M6 14l-2 1M18 10l2-1M18 14l2 1"/><rect x="8" y="7" width="8" height="11" rx="4"/>',
   signins: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
   devices: '<rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1"/>',
   plan: '<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M6.5 15h4"/>',
@@ -245,6 +246,25 @@ export function openSettings(ctx, section = 'general', extra = {}) {
     const copy = target.closest('[data-st-gh-copy]'); if (copy) { await navigator.clipboard.writeText(copy.dataset.stGhCopy); toast(t('Copied.')); return true; }
     return false;
   };
+  // The bug-report bot setup: connect the token, allow or drop groups, set the report time, approve or reject queued bugs.
+  const reloadBugBot = async () => { try { state.extra.bugbot = await api('/bugbot'); } catch (error) { state.extra.bugbot = { connected: false, error: error.message }; } if (document.body.contains(back) && has('bugbot')) draw(); };
+  const bugBotClick = async target => {
+    if (target.closest('[data-bb-connect]')) {
+      const token = back.querySelector('[name="bbToken"]')?.value.trim(); if (!token) return true;
+      state.extra.bugbotBusy = true; draw();
+      try { await api('/bugbot/connect', { method: 'POST', data: { botToken: token } }); toast(t('Bug bot connected.')); await reloadBugBot(); }
+      catch (error) { toast(error.message, true); } finally { state.extra.bugbotBusy = false; if (document.body.contains(back)) draw(); }
+      return true;
+    }
+    if (target.closest('[data-bb-disconnect]')) { if (!await askConfirm(t('Disconnect the bug bot?'), { danger: true })) return true; await api('/bugbot/disconnect', { method: 'POST' }); toast(t('Disconnected.')); await reloadBugBot(); return true; }
+    if (target.closest('[data-bb-time]')) { const at = back.querySelector('[name="bbReportAt"]')?.value || '09:00'; await api('/bugbot/report-time', { method: 'POST', data: { at } }); toast(t('Saved.')); await reloadBugBot(); return true; }
+    if (target.closest('[data-bb-add]')) { const id = back.querySelector('[data-bb-gid]')?.value.trim(); const title = back.querySelector('[data-bb-gtitle]')?.value.trim(); if (!id) return true; try { await api('/bugbot/groups', { method: 'POST', data: { id, title } }); toast(t('Group allowed.')); await reloadBugBot(); } catch (error) { toast(error.message, true); } return true; }
+    const allow = target.closest('[data-bb-allow]'); if (allow) { await api('/bugbot/groups', { method: 'POST', data: { id: allow.dataset.bbAllow, title: allow.dataset.bbTitle } }); toast(t('Group allowed.')); await reloadBugBot(); return true; }
+    const removeGroup = target.closest('[data-bb-remove]'); if (removeGroup) { await api('/bugbot/groups/remove', { method: 'POST', data: { id: removeGroup.dataset.bbRemove } }); await reloadBugBot(); return true; }
+    const approve = target.closest('[data-bb-approve]'); if (approve) { await api('/bugbot/approve', { method: 'POST', data: { id: approve.dataset.bbApprove } }); toast(t('Approved. A task goes to the App Agent.')); await reloadBugBot(); return true; }
+    const reject = target.closest('[data-bb-reject]'); if (reject) { await api('/bugbot/reject', { method: 'POST', data: { id: reject.dataset.bbReject } }); await reloadBugBot(); return true; }
+    return false;
+  };
   // Test sign-ins are edited as a working copy: a new empty row has no user name yet, which the server would drop if saved at once.
   const signins = () => (state.signins ||= (config().testAccounts || []).map(account => ({ ...account, password: account.password || '' })));
   const readSignins = () => signins().forEach((account, index) => { for (const key of ['site', 'username', 'password']) { const input = back.querySelector(`[name="ta.${index}.${key}"]`); if (input) account[key] = input.value; } });
@@ -332,6 +352,34 @@ export function openSettings(ctx, section = 'general', extra = {}) {
       <fieldset class="st-days"><legend>${t`Days`}</legend>${DAYS.map((day, index) => `<label><input type="checkbox" name="schedule.days" value="${index}" ${days.includes(index) ? 'checked' : ''}><span>${day}</span></label>`).join('')}</fieldset>
       ${hasTracker() ? check('schedule.fix', schedule.fix !== false, t('Start runs for the top-ranked issues'), t('Jev ranks the Flow or Morningmate issues; the top ones start first. Needs a project for them.')) : ''}
       <div class="st-actions"><button type="button" class="btn small" data-st-schedule-run ${state.extra.scheduling ? 'disabled' : ''}>${state.extra.scheduling ? t('Starting…') : t('Run it now')}</button></div>`; },
+    bugbot: () => {
+      if (state.extra.connectorPick) return '';
+      const data = state.extra.bugbot;
+      const note = `<div class="bb-note" role="note"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>${t`Telegram keeps unread messages for 24 hours only. If Rex Desk is closed longer than that, older group messages are lost. Run it on the computer that is on the most.`}</span></div>`;
+      const head = `<h2>${t`Bug report bot`}</h2><p class="muted">${t`A separate Telegram bot you add to customer groups. It only files bug reports, and never reaches your agents or runs anything. Members @mention it or reply to its "Got it, #N" message to report a problem.`}</p>`;
+      if (!data) return `${head}<p class="muted">${t`Loading…`}</p>`;
+      if (!data.connected) {
+        return `${head}${note}
+          ${field(t('Bot token'), input('bbToken', '', `spellcheck="false" placeholder="123456:ABC-..." autocomplete="off"`), t('Make a second bot with @BotFather, different from your personal Telegram bot, and paste its token here.'))}
+          <div class="st-actions"><button type="button" class="btn small primary" data-bb-connect ${state.extra.bugbotBusy ? 'disabled' : ''}>${state.extra.bugbotBusy ? t('Connecting…') : t('Connect bot')}</button></div>`;
+      }
+      const groupRow = group => `<li class="bb-row"><div class="bb-text"><b>${esc(group.title || t('Group'))}</b><small>${esc(String(group.id))}</small></div><button type="button" class="btn small quiet danger" data-bb-remove="${esc(String(group.id))}">${t`Remove`}</button></li>`;
+      const pendRow = group => `<li class="bb-row"><div class="bb-text"><b>${esc(group.title || t('Group'))}</b><small>${esc(String(group.id))}</small></div><button type="button" class="btn small" data-bb-allow="${esc(String(group.id))}" data-bb-title="${esc(group.title || '')}">${t`Allow`}</button></li>`;
+      const reportRow = (report, actions) => `<li class="bb-row bb-report"><div class="bb-text"><b>#${report.num} ${esc(report.severityLabel || report.kind || '')}</b><small>${esc(report.text || '')} · ${esc(report.groupTitle || '')} · ${esc(report.reporterName || '')}</small></div>${actions}</li>`;
+      const groups = data.groups || [], pending = data.pending || [], queue = data.queue || [], features = data.features || [], approved = data.approved || [];
+      return `${head}${note}
+        <div class="st-account bb-conn"><span class="si-avatar">B</span><span><b>${data.botUsername ? `@${esc(data.botUsername)}` : t('Connected')}</b><small>${t`Filing bug reports from your allowed groups.`}</small></span><button type="button" class="btn small" data-bb-disconnect>${t`Disconnect`}</button></div>
+        ${field(t('Morning report time'), input('bbReportAt', data.reportAt || '09:00', 'type="time"'), t('When you get a summary of the queue through your personal Telegram link.'))}
+        <div class="st-actions"><button type="button" class="btn small" data-bb-time>${t`Save time`}</button></div>
+        <h3>${t`Allowed groups`}</h3><p class="muted">${t`The bot works only in these groups and leaves any other. Add the bot to a group, then allow it here by its id.`}</p>
+        ${groups.length ? `<ul class="bb-list">${groups.map(groupRow).join('')}</ul>` : `<p class="muted">${t`No groups yet.`}</p>`}
+        ${pending.length ? `<h3>${t`Waiting to be allowed`}</h3><p class="muted">${t`The bot was added to these groups but is not allowed in yet.`}</p><ul class="bb-list">${pending.map(pendRow).join('')}</ul>` : ''}
+        <div class="st-add"><input data-bb-gid placeholder="${t`Group id, like -1001234567890`}" spellcheck="false" aria-label="${t`Group id`}"><input data-bb-gtitle placeholder="${t`Name (optional)`}" aria-label="${t`Group name`}"><button type="button" class="btn small primary" data-bb-add>${t`Allow`}</button></div>
+        <h3>${t`Waiting for your OK`}</h3><p class="muted">${t`Bugs stay hidden here until you approve them. Approving makes a task for the App Agent.`}</p>
+        ${queue.length ? `<ul class="bb-list">${queue.map(report => reportRow(report, `<button type="button" class="btn small primary" data-bb-approve="${esc(report.id)}">${t`Approve`}</button><button type="button" class="btn small quiet danger" data-bb-reject="${esc(report.id)}">${t`Reject`}</button>`)).join('')}</ul>` : `<p class="muted">${t`Nothing waiting.`}</p>`}
+        ${features.length ? `<h3>${t`Feature requests`}</h3><ul class="bb-list">${features.map(report => reportRow(report, '')).join('')}</ul>` : ''}
+        ${approved.length ? `<h3>${t`Approved`}</h3><ul class="bb-list">${approved.map(report => reportRow(report, report.taskId ? `<span class="muted">${t`task made`}</span>` : '')).join('')}</ul>` : ''}`;
+    },
     signins: () => `<details class="st-adv"><summary>${t`Test sign-ins`}</summary><p class="muted">${t`An agent can sign in to a preview it starts with these, without ever seeing the password. Never used on a live production site.`}</p>
       ${tip('signins', t('Add a test account for your app, so agents can sign in to their preview and check their own fix on screen.'))}
       ${signins().map((account, index) => `<div class="st-signin"><input name="ta.${index}.site" value="${esc(account.site || '')}" placeholder="${t`Site, like localhost or staging.example.com`}" aria-label="${t`Site`}"><input name="ta.${index}.username" value="${esc(account.username || '')}" placeholder="${t`User name or email`}" aria-label="${t`User name`}"><input type="password" name="ta.${index}.password" value="${esc(account.password || '')}" placeholder="${account.hasPassword ? t('Saved') : t('Password')}" aria-label="${t`Password`}" autocomplete="new-password"><button type="button" class="ag-x" data-st-signin-remove="${index}" aria-label="${t`Remove this sign-in`}">×</button></div>`).join('')}
@@ -353,6 +401,7 @@ export function openSettings(ctx, section = 'general', extra = {}) {
   const draw = () => {
     if (has('backup') && !state.extra.billing && !state.extra.billingLoading) { state.extra.billingLoading = true; void api('/billing').then(data => { state.extra.billing = data; state.extra.billingLoading = false; draw(); }).catch(() => { state.extra.billing = { signedIn: false }; state.extra.billingLoading = false; draw(); }); }
     if (has('sources') && !state.extra.connectors) void loadConnectors(ctx, state, draw);
+    if (has('bugbot') && !state.extra.bugbot && !state.extra.bugbotLoading) { state.extra.bugbotLoading = true; void api('/bugbot').then(data => { state.extra.bugbot = data; state.extra.bugbotLoading = false; draw(); }).catch(error => { state.extra.bugbot = { connected: false, error: error.message }; state.extra.bugbotLoading = false; draw(); }); }
     // A redraw of the same section keeps the place the person scrolled to (ticking a box used to jump back to the top).
     // The list of sections on the left always keeps its place: picking one lower down used to jump the list back to the top.
     const keep = back.dataset.section === state.section ? back.querySelector('.st-panel')?.scrollTop || 0 : 0, keepNav = back.querySelector('.st-nav')?.scrollTop || 0;
@@ -468,6 +517,7 @@ export function openSettings(ctx, section = 'general', extra = {}) {
         try { const result = await api('/jev/prioritize', { method: 'POST', data: { force: event.shiftKey } }); await refresh(); toast(result.failed ? t`Jev rated ${result.done - result.failed} of ${result.total}; ${result.failed} failed: ${result.error}` : result.total ? (result.total === 1 ? t`Jev rated ${result.total} issue.` : t`Jev rated ${result.total} issues.`) : t('Every issue is already rated. Shift-click to check them all again.'), Boolean(result.failed)); }
         finally { state.extra.ranking = false; draw(); } return;
       }
+      if (has('bugbot') && await bugBotClick(target)) return;
       if (target.closest('[data-st-schedule-run]')) {
         state.extra.scheduling = true; draw();
         try { const result = await api('/schedule/run', { method: 'POST' }); toast(result.state === 'started' ? (result.issues === 1 ? t`Started Rex Agent on ${result.issues} new issue.` : t`Started Rex Agent on ${result.issues} new issues.`) : result.reason, result.state !== 'started'); await refresh(); }
