@@ -12,13 +12,22 @@ There are two ways a phone reaches the desk. Pick one, do not set up both at onc
 1. **Account (web.rexdesk.app), the easy way.** The phone opens `web.rexdesk.app`, signs in to the same Rex Desk account, and loads the desk through the relay. Works from anywhere, no Tailscale. Needs a Rex Desk account signed in on this computer and a plan that includes the phone.
 2. **Tailscale, the free/local way.** The phone joins the same Tailscale network and opens this computer's address (or scans the QR). No account plan needed, but both devices need the Tailscale app on the same Tailscale login.
 
-Ask the person which they want only if it is unclear. If they just want it to work and already have (or will start) a Rex Desk account, prefer the account way.
+## First: is the account way open to this person?
+
+Check this before choosing, so you never steer a free user toward an upgrade:
+- Is a Rex Desk account signed in here? (Settings, Account and backup.)
+- Does their plan include the relay? Read the phone status in Devices, Phone (the app's /api/phone-relay state). "Your plan does not include this" (state not-paid) means the plan excludes the relay.
+
+Then pick:
+- Signed in and the plan includes the relay: use the account way.
+- Not signed in, or the plan excludes the relay: use the Tailscale way. It is free and needs no plan. Do not suggest upgrading; mention the account way only if the person asks about using the phone without Tailscale, and then say plainly it needs a plan that includes it (rexdesk.app). Never try to buy anything.
+
+Ask the person which they want only if both ways are open and it is unclear.
 
 ## Before you start: check what is already done
 
 Read the state instead of assuming. For the account way:
-- Is a Rex Desk account signed in here? (Settings, Account and backup.) If not, that is the first thing; sign-in is in Settings, Account and backup.
-- Does the plan include the phone? If the phone switch shows "Your plan does not include this", the person upgrades on rexdesk.app. Say so plainly; do not try to buy anything.
+- The account is signed in and the plan includes the relay (checked above).
 - Is the "Use Rex Desk on your phone" switch on? (Devices, Phone.)
 
 For the Tailscale way:
