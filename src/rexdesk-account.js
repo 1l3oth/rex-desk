@@ -115,9 +115,12 @@ export class AccountLink {
   async adoptDatabase(connection, now = Date.now()) {
     if (!this.signedIn || this.saved.url || !connection?.url || now - (this.lastAdopt || 0) < WAIT) return false;
     this.lastAdopt = now;
+    // The sign-in this lookup is for: when the account is signed out or switched while it runs, the answer belongs to the
+    // old account and is dropped, so a new sign-in never gets the old account's database (and its files never go there).
+    const asked = this.saved;
     try {
-      const database = await accountDatabase(this.saved.token, this);
-      if (database.url !== connection.url) return false;
+      const database = await accountDatabase(asked.token, this);
+      if (this.saved !== asked || database.url !== connection.url) return false;
       this.saved = { ...this.saved, url: database.url, keyExpiresAt: database.expiresAt };
       writeFileSync(this.file, this.store.encrypt(JSON.stringify(this.saved)), { mode: 0o600 });
       return true;
@@ -126,15 +129,16 @@ export class AccountLink {
   // A fresh key for the same database, or null when it could not be had right now.
   async freshKey(now = Date.now()) {
     this.lastTry = now;
+    const asked = this.saved;
     try {
-      const database = await accountDatabase(this.saved.token, this);
-      if (database.url !== this.saved.url) return null;
+      const database = await accountDatabase(asked.token, this);
+      if (this.saved !== asked || database.url !== this.saved.url) return null;
       this.saved.keyExpiresAt = database.expiresAt;
       writeFileSync(this.file, this.store.encrypt(JSON.stringify(this.saved)), { mode: 0o600 });
       return database.authToken;
     } catch (error) {
       // The sign-in itself ended (signed out everywhere, or the account was deleted): stop asking.
-      if (error.status === 401) { this.clear(); this.ended = 'Your Rex Desk account sign-in ended. Sign in again in Settings to keep cloud backup running.'; }
+      if (error.status === 401 && this.saved === asked) { this.clear(); this.ended = 'Your Rex Desk account sign-in ended. Sign in again in Settings to keep cloud backup running.'; }
       return null;
     }
   }

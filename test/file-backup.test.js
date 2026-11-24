@@ -65,6 +65,44 @@ test('a database of the person\'s own is never adopted as the account one', asyn
   assert.equal(fake.calls.filter(call => call === 'POST /v1/sync/database').length, 1);
 });
 
+test('a sign-in that changes while the database is looked up never gets the old account\'s database, and no file goes up', async () => {
+  const fake = service();
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  const fetcher = async (url, options = {}) => {
+    if (String(url).endsWith('/v1/sync/database')) await gate;
+    return fake.fetcher(url, options);
+  };
+  const { store, account, files } = home({ fake: { ...fake, fetcher } });
+  mkdirSync(path.join(store.media('artifacts'), 'run-1'), { recursive: true });
+  writeFileSync(path.join(store.media('artifacts'), 'run-1', 'screen-all.png'), 'picture');
+  const running = files.backup();
+  await new Promise(resolve => setImmediate(resolve));
+  // Another account signs in while the old one's database is being looked up.
+  account.save({ token: 'session-2', expiresAt: new Date(Date.now() + 86400000).toISOString(), user: { id: 'u2' } }, { url: '' });
+  release();
+  const result = await running;
+  assert.equal(result.uploaded, 0);
+  assert.equal(account.saved.token, 'session-2');
+  assert.equal(account.saved.url, '', 'the old account\'s database was not attached to the new sign-in');
+  assert.equal(files.hosted(), false);
+  assert.equal(fake.calls.filter(call => call.startsWith('PUT ')).length, 0, 'no file was uploaded');
+  const reread = new AccountLink(store, { fetcher, base: API });
+  assert.equal(reread.saved.token, 'session-2'); assert.equal(reread.saved.url, '', 'nor written to disk');
+});
+
+test('a fresh key looked up for an account that was switched meanwhile is dropped, and its sign-in end never signs out the new one', async () => {
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  const fetcher = async () => { await gate; return reply(401, { error: { code: 'unauthorized', message: 'Signed out.' } }); };
+  const store = new Store(temporary('files-key'));
+  const account = new AccountLink(store, { fetcher, base: API });
+  account.save({ token: 'session', user: { id: 'u1' } }, { url: URL_DB });
+  const asking = account.freshKey();
+  account.save({ token: 'session-2', user: { id: 'u2' } }, { url: URL_DB });
+  release();
+  assert.equal(await asking, null);
+  assert.equal(account.saved?.token, 'session-2', 'the new sign-in stays');
+});
+
 test('a file that does not come says why: not in the backup, too big, failed, not connected, or left out', async () => {
   let fake = service(), setup = home({ fake });
   assert.equal(await setup.files.fetchOne(KEY), false);
