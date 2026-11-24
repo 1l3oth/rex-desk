@@ -308,7 +308,7 @@ body.live-replying #feed-inner .bubble.typing{display:none}
 .foot .pick2:nth-of-type(2) .pick2-label{color:var(--muted)}
 .members .pick2-btn{border-style:dashed;color:var(--muted);padding:3px 10px;border-radius:999px;font-size:13px}.members .pick2-btn:hover{color:var(--accent)}
 .assign .pick2,.dialog .pick2{display:flex}.assign .pick2-btn,.dialog .pick2-btn{width:100%}
-.pop{position:fixed;z-index:60;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 40px rgba(0,0,0,.45);overflow:hidden;outline:0}
+.pop{position:fixed;z-index:85;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 40px rgba(0,0,0,.45);overflow:hidden;outline:0}
 .pop-search{margin:8px 8px 4px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-size:14px;outline:0}.pop-search:focus{border-color:var(--accent)}
 .pop-list{overflow:auto;padding:6px;display:flex;flex-direction:column;gap:2px}
 .pop-item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:0;background:none;border-radius:9px;padding:8px 10px;color:var(--ink)}
