@@ -4,7 +4,10 @@ import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { TelegramBridge, telegramLink, splitReply } from '../src/telegram.js';
+import { TelegramBridge as Bridge, telegramLink, splitReply } from '../src/telegram.js';
+
+// The bridge the coordinator would hold (desk.telegram), so the fake desk can start turns the way the coordinator does.
+class TelegramBridge extends Bridge { constructor(desk, options) { super(desk, options); desk.telegram = this; } }
 
 // A tiny in-memory stand-in for the store and coordinator the bridge talks to. encrypt/decrypt are identity, so the saved
 // connector secret round-trips as JSON. desk.answer and desk.specialistTurn just record what the bridge asked them to do.
@@ -24,7 +27,13 @@ function makeDesk({ directory } = {}) {
   const desk = {
     store,
     answer: (id, answer) => { const it = store.get('interaction', id); if (!it || it.state !== 'pending') throw new Error('This question is no longer waiting for an answer.'); store.put('interaction', id, { ...it, state: 'answered', answer }); answered.push({ id, answer }); return { answered: true }; },
-    specialistTurn: async (agentId, { prompt }) => { turns.push({ agentId, prompt }); return { id: `run-${agentId}` }; },
+    // As the coordinator does: the turn starts with its Telegram destination (onTurnStart). The prompt is recorded with its
+    // [Telegram #id] mark shown as [Telegram], since the id is random.
+    specialistTurn: async (agentId, { prompt, telegram }) => {
+      turns.push({ agentId, prompt: prompt.replace(/^\[Telegram #[0-9a-f]{12}\]/, '[Telegram]') });
+      desk.telegram?.onTurnStart(`run-${agentId}`, `turn-${turns.length}`, telegram);
+      return { id: `run-${agentId}` };
+    },
     specialists: { ensureMain: () => {}, get: id => store.get('specialist', id) },
   };
   return { desk, store, answered, turns };
@@ -565,67 +574,68 @@ test('an explicit send that fails keeps the automatic reply; only a send that wo
   assert.deepEqual(texts(), ['Web Agent\nfrom a room', 'Bug bot\nmorning report', 'Web Agent\nDeployed.'], 'the final reply still went out');
 });
 
-test('a Telegram message queued behind an app turn: the app reply stays in the app, the turn that takes it answers on Telegram', async () => {
+test('queued Telegram messages are told apart by their own id: the same words from two chats across a relink stay two messages', async () => {
   const { desk, store } = makeDesk();
   linkedStore(store);
   store.put('specialist', 'web', { id: 'web', name: 'Web Agent' });
   store.put('run', 'run-web', { id: 'run-web', queued: [] });
-  // The Web Agent is busy with a turn from the app: the message waits in its queue, as coordinator.say does.
+  // The Web Agent is busy with a turn from the app: messages wait in its queue, as coordinator.say does.
   desk.specialistTurn = async (agentId, { prompt }) => { const run = store.get('run', 'run-web'); store.put('run', 'run-web', { ...run, queued: [...run.queued, prompt] }); return { id: 'run-web' }; };
   const { fetcher, sent } = makeFetcher();
   const bridge = new TelegramBridge(desk, { fetcher });
-  const found = telegramLink(store);
-  const texts = () => sent.filter(call => call.method === 'sendMessage').map(call => call.body.text);
-  store.put('tgmsg', '1', { id: '1', kind: 'agent', agentId: 'web', linkId: found.link.id });
-  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'ship it?', reply_to_message: { message_id: 1 } } }, found);
-  assert.equal(store.get('tgturn', 'run-web'), null, 'the running app turn is not marked');
+  const texts = () => sent.filter(call => call.method === 'sendMessage').map(call => ({ chat: call.body.chat_id, text: call.body.text }));
+  await bridge.routeToAgent('web', 'ship it?', telegramLink(store));
+  linkedStore(store, { botToken: 'T:tok', chatId: 777, chatName: 'Other' });
+  await bridge.routeToAgent('web', 'ship it?', telegramLink(store));
+  const [first, second] = store.get('run', 'run-web').queued;
+  assert.notEqual(first, second, 'each entry has its own id');
+  assert.equal(bridge.queuedChat('run-web', first), 'telegram-1:555');
+  assert.equal(bridge.queuedChat('run-web', second), 'telegram-1:777');
+  assert.equal(bridge.queuedChat('run-web', 'ship it?'), '', 'an app message with the same words is the app');
+  assert.equal(bridge.turnChat('run-web'), '', 'the running app turn is not marked');
   await bridge.onTurnResult('run-web', 'private app answer');
-  assert.deepEqual(texts(), [], 'the app turn reply never reaches Telegram');
-  // The queued message is handed to a turn, then given back unread: that turn does not answer on Telegram either.
-  const queued = store.get('run', 'run-web').queued;
-  bridge.onDelivered('run-web', queued);
-  bridge.onRequeued('run-web', queued);
-  await bridge.onTurnResult('run-web', 'another app answer');
-  assert.deepEqual(texts(), []);
-  // The turn that really takes it in answers on Telegram, once.
-  bridge.onDelivered('run-web', ['an app note', ...queued]);
+  // The turn for the second entry answers chat 777, the new chat, and only it; the first entry still waits for its own turn.
+  const replyTo = bridge.batchReplyTo('run-web', [second]);
+  assert.equal(replyTo.chatId, '777');
+  bridge.onTurnStart('run-web', 'turn-2', replyTo);
+  assert.ok(store.get('tgqueued', replyTo.keys[0]) === null && bridge.queuedChat('run-web', first) === 'telegram-1:555');
   await bridge.onTurnResult('run-web', 'Shipped.');
-  await bridge.onTurnResult('run-web', 'later app turn');
-  assert.deepEqual(texts(), ['Web Agent\nShipped.']);
-  assert.equal(store.list('tgqueued').length, 0);
+  assert.deepEqual(texts(), [{ chat: 777, text: 'Web Agent\nShipped.' }]);
+});
+
+test('the Telegram reply belongs to one turn: a failed, stopped or stale Telegram turn never makes the next app turn answer there', async () => {
+  const { desk, store } = makeDesk();
+  linkedStore(store);
+  const { fetcher, sent } = makeFetcher();
+  const bridge = new TelegramBridge(desk, { fetcher });
+  const texts = () => sent.filter(call => call.method === 'sendMessage').map(call => call.body.text);
+  // A Telegram turn fails (or is stopped): its end clears the destination; another turn's end leaves it alone.
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'what is up' } }, telegramLink(store));
+  assert.equal(bridge.onTurnEnd('run-main', 'turn-other'), null);
+  assert.equal(bridge.onTurnEnd('run-main', 'turn-1').chatId, '555');
+  // The person resumes the chat from the app: that turn has no destination, so its reply stays in the app.
+  bridge.onTurnStart('run-main', 'turn-app', null);
+  await bridge.onTurnResult('run-main', 'app answer');
+  // A destination left by a turn that never reported its end (a crash) is cleared by the next app turn's start too.
+  await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: 'again' } }, telegramLink(store));
+  bridge.onTurnStart('run-main', 'turn-app-2', null);
+  await bridge.onTurnResult('run-main', 'another app answer');
+  assert.deepEqual(texts(), []);
+  // A turn Rex Desk follows again after a restart keeps its destination, and its reply still goes out.
+  await bridge.handleUpdate({ update_id: 3, message: { chat: { id: 555 }, text: 'third' } }, telegramLink(store));
+  bridge.onTurnStart('run-main', 'turn-followed', null, { attach: true });
+  await bridge.onTurnResult('run-main', 'Here.');
+  assert.deepEqual(texts(), ['Rex Agent\nHere.']);
 });
 
 test('a pending Telegram reply goes only to the chat it came from: after a relink to another chat it is not sent', async () => {
   const { desk, store } = makeDesk();
   linkedStore(store);
-  store.put('specialist', 'web', { id: 'web', name: 'Web Agent' });
-  store.put('run', 'run-web', { id: 'run-web', queued: [] });
   const { fetcher, sent } = makeFetcher();
   const bridge = new TelegramBridge(desk, { fetcher });
-  const texts = () => sent.filter(call => call.method === 'sendMessage').map(call => ({ chat: call.body.chat_id, text: call.body.text }));
-  let found = telegramLink(store);
-  // A direct turn from chat 555, then a relink (same connection) to chat 777 before the reply is ready.
-  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'what is up' } }, found);
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'what is up' } }, telegramLink(store));
   assert.equal(store.get('tgturn', 'run-main').chatId, '555');
   linkedStore(store, { botToken: 'T:tok', chatId: 777, chatName: 'Someone else' });
   await bridge.onTurnResult('run-main', 'private answer');
-  assert.deepEqual(texts(), [], 'the new chat never gets the old chat reply');
-  // A message queued behind an app turn keeps its chat too, through hand-over and give-back.
-  linkedStore(store);
-  found = telegramLink(store);
-  desk.specialistTurn = async (agentId, { prompt }) => { const run = store.get('run', 'run-web'); store.put('run', 'run-web', { ...run, queued: [...run.queued, prompt] }); return { id: 'run-web' }; };
-  store.put('tgmsg', '1', { id: '1', kind: 'agent', agentId: 'web', linkId: found.link.id });
-  await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: 'ship it?', reply_to_message: { message_id: 1 } } }, found);
-  const queued = store.get('run', 'run-web').queued;
-  bridge.onDelivered('run-web', queued); bridge.onRequeued('run-web', queued); bridge.onDelivered('run-web', queued);
-  assert.equal(store.get('tgturn', 'run-web').chatId, '555');
-  linkedStore(store, { botToken: 'T:tok', chatId: 777, chatName: 'Someone else' });
-  await bridge.onTurnResult('run-web', 'Shipped.');
-  assert.deepEqual(texts(), []);
-  // Still linked to the same chat: the reply goes out as before.
-  linkedStore(store);
-  await bridge.handleUpdate({ update_id: 3, message: { chat: { id: 555 }, text: 'and now?', reply_to_message: { message_id: 1 } } }, telegramLink(store));
-  bridge.onDelivered('run-web', store.get('run', 'run-web').queued);
-  await bridge.onTurnResult('run-web', 'Done.');
-  assert.deepEqual(texts(), [{ chat: 555, text: 'Web Agent\nDone.' }]);
+  assert.deepEqual(sent.filter(call => call.method === 'sendMessage'), [], 'the new chat never gets the old chat reply');
 });

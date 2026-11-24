@@ -317,7 +317,6 @@ export class Desk {
     const run = this.store.get('run', runId); if (!run || !back.length) return;
     this.store.put('run', runId, { ...run, queued: [...back, ...(run.queued || [])] });
     this.store.event(runId, 'inbox-returned', {});
-    this.telegram?.onRequeued?.(runId, back);
     // The turn already ended: the message starts the next one now.
     const waiting = this.store.get('run', runId);
     if (!this.live.has(runId) && !this.closed && ['needs_evidence', 'finished'].includes(waiting.state)) this.resumeQueued(runId, waiting);
@@ -616,9 +615,9 @@ export class Desk {
   }
   // The main agent is the first thing the person talks to. It gets to know the projects one by one, asks what it cannot tell from their files,
   // and creates a specialist agent for each. Starting it from the chat sends the person's first message with it.
-  async startMain({ prompt = '', ...picked } = {}) {
+  async startMain({ prompt = '', telegram, ...picked } = {}) {
     if (this.store.list('run').some(run => run.role === 'coordinator' && (!run.main || run.computer === thisComputer()) && !terminalStates.has(run.state))) throw new Error('The main agent is already running. Talk to it in its chat.');
-    const run = { id: id(), role: 'coordinator', main: true, computer: thisComputer(), title: 'Rex Agent', provider: aiProvider(picked.provider || this.store.get('specialist', 'main')?.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'headless', ...runOptions({ ...picked, provider: picked.provider || this.store.get('specialist', 'main')?.provider || this.store.config().provider }, this.store) };
+    const run = { id: id(), role: 'coordinator', main: true, computer: thisComputer(), title: 'Rex Agent', provider: aiProvider(picked.provider || this.store.get('specialist', 'main')?.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'headless', ...(telegram ? { replyTo: telegram } : {}), ...runOptions({ ...picked, provider: picked.provider || this.store.get('specialist', 'main')?.provider || this.store.config().provider }, this.store) };
     this.store.put('run', run.id, run);
     if (run.prompt) this.store.event(run.id, 'human-message', { text: run.prompt, via: 'rex' }, true);
     void this.drain(); return this.run(run.id);
@@ -749,6 +748,10 @@ export class Desk {
     const bind = entries => { const tickets = []; for (const item of this.waitingDeliveries(this.store.get('run', runId), entries)) { bound.add(item.id); tickets.push(item.id); this.setDelivery(item.id, { state: 'turn', runId, handedOver: undefined }); } return tickets; };
     // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
     const turnAt = new Date().toISOString();
+    // This turn's Telegram reply destination (src/telegram.js): taken from the run as the turn starts, so it belongs to this
+    // turn only and goes when it ends, whatever the end.
+    const turnKey = id();
+    { const replyTo = attach ? null : this.store.get('run', runId)?.replyTo || null; if (replyTo) this.patchRun(runId, { replyTo: undefined }); this.telegram?.onTurnStart?.(runId, turnKey, replyTo, { attach: Boolean(attach) }); }
     try {
       // A nearly full drive makes the agent fail half way with "ENOSPC"; say so before it starts instead.
       const noRoom = lowDiskMessage([this.store.directory, os.tmpdir()], { min: this.minFreeBytes }); if (noRoom) throw new Error(noRoom);
@@ -1007,6 +1010,8 @@ ${message}` : message;
       }
       if (run.role === 'helper') this.helperDone(runId, friendlyDiskError(error.message));
     } finally {
+      // The Telegram reply destination ends with this turn; a turn handed on to the next one passes it on.
+      { const replyBack = this.telegram?.onTurnEnd?.(runId, turnKey); if (handedOn && replyBack) this.patchRun(runId, { replyTo: replyBack }); }
       // Tickets whose prompt was never taken: a turn handed on to the next one keeps them waiting for it; any other end loses them.
       for (const ticket of bound) this.setDelivery(ticket, { state: handedOn ? 'waiting' : 'lost' });
       bound.clear(); unconfirmed.clear(); delivered.clear();
@@ -1587,16 +1592,16 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     finally { this.namingBusy = false; }
   }
   // One turn in an agent's own session: a group chat message, or anything else that needs the agent. The session is made the first time and kept after that.
-  async specialistTurn(agentId, { prompt, roomId = '', messageId = '', quiet = false, greeting = false }) {
+  async specialistTurn(agentId, { prompt, roomId = '', messageId = '', quiet = false, greeting = false, telegram }) {
     const agent = this.specialists.get(agentId), turn = roomId ? { roomId, messageId } : null;
     this.projectRules.guard(agent);
     // Every agent has a personal chat with the person and its own session in each group chat. A group chat never sees what was said
     // in another one: one shared session made agents carry one room's talk into the next, and a reply could land in the wrong room.
     if (!roomId && agent.kind === 'main') {
       const main = latestLocalMain(this.store.list('run'));
-      if (!main) return this.startMain({ prompt });
+      if (!main) return this.startMain({ prompt, telegram });
       if (this.live.has(main.id)) { await this.say(main.id, prompt, {}, { raw: true }); return main; }
-      await this.resume(main.id, { prompt, silent: true }); return this.run(main.id);
+      await this.resume(main.id, { prompt, silent: true, telegram }); return this.run(main.id);
     }
     const runId = roomId ? agent.roomRuns?.[roomId] : agent.runId, run = runId ? this.store.get('run', runId) : null;
     if (!run) {
@@ -1604,14 +1609,14 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       const model = this.specialists.cleanModel(agent.model, { provider: agent.provider });
       const created = { id: id(), role: agent.kind === 'main' ? 'coordinator' : 'specialist', ...(agent.kind === 'main' ? {} : { specialistId: agent.id }), ...(roomId ? { roomAgent: agent.id, roomOf: roomId } : {}),
         title: roomId ? `${agent.name} · ${this.rooms.room(roomId)?.name || 'group chat'}` : agent.name, provider: aiProvider(agent.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home,
-        projectPath: this.specialists.folder(agent), repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}), cardModel: model };
+        projectPath: this.specialists.folder(agent), repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}), cardModel: model, ...(telegram ? { replyTo: telegram } : {}) };
       this.store.put('run', created.id, created); const fresh = this.specialists.get(agentId); this.store.put('specialist', agent.id, roomId ? { ...fresh, roomRuns: { ...(fresh.roomRuns || {}), [roomId]: created.id } } : { ...fresh, runId: created.id });
       if (!roomId && !quiet) this.store.event(created.id, 'human-message', { text: String(prompt).trim(), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
       void this.drain(); return created;
     }
     if (this.live.has(run.id)) { this.store.put('run', run.id, { ...run, roomTurn: turn || run.roomTurn, ...(turn ? { roomPosted: false } : {}) }); await this.say(run.id, prompt, {}, { raw: true }); return run; }
     // The card's model reaches the chat at the turn start (Specialists.syncRuns), so a model picked in the chat itself stays.
-    await this.resume(run.id, { provider: agent.provider, prompt, silent: Boolean(roomId) || quiet, roomTurn: turn, greeting }); return this.run(run.id);
+    await this.resume(run.id, { provider: agent.provider, prompt, silent: Boolean(roomId) || quiet, roomTurn: turn, greeting, telegram }); return this.run(run.id);
   }
   // A manager's team session: where reports and questions from the agents it gave tasks to land, and it acts on them. It is a
   // session of its own (like a room session, with no room), so the person's chat with the manager stays free and quiet.
@@ -1868,15 +1873,16 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   resumeQueued(runId, waiting) {
     const taken = this.nextQueuedBatch(runId, waiting.queued);
     this.store.put('run', runId, { ...waiting, queued: waiting.queued.slice(taken.length) });
-    // A Telegram chat's message starts this turn: its final reply goes back to that chat (src/telegram.js).
-    this.telegram?.onDelivered?.(runId, taken);
-    void this.resume(runId, { prompt: taken.join('\n'), silent: true }).catch(error => {
+    // A Telegram chat's messages start this turn: its final reply goes back to that chat (src/telegram.js). Their records stay
+    // until the turn really starts, so a failed resume puts them back as they were.
+    const telegram = this.telegram?.batchReplyTo?.(runId, taken) || undefined;
+    void this.resume(runId, { prompt: taken.join('\n'), silent: true, telegram }).catch(error => {
       const current = this.store.get('run', runId); if (current) this.store.put('run', runId, { ...current, queued: [...taken, ...(current.queued || [])] });
-      this.telegram?.onRequeued?.(runId, taken);
       this.store.event(runId, 'error', { message: error.message }, true);
     });
   }
-  async resume(runId, { prompt = '', targetBranch, execution, silent = false, roomTurn, greeting = false, ...picked } = {}) {
+  // telegram: the Telegram chat this turn answers (src/telegram.js); every other resume, one from the app too, answers in the app.
+  async resume(runId, { prompt = '', targetBranch, execution, silent = false, roomTurn, greeting = false, telegram, ...picked } = {}) {
     let run = this.run(runId);
     const provider = aiProvider(picked.provider || run.provider || this.store.config().provider);
     if (run.external) throw new Error('Reconnect this conversation from the external AI using desk_connect.');
@@ -1898,10 +1904,10 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: keepLines(prompt), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
     // After /clear the next message starts a fresh session that reads the handoff; the message itself goes in as it is.
     if (run.handoffFile && !run.sessionId) {
-      this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), execution: 'headless' });
+      this.patchRun(runId, { modelFallback: undefined, replyTo: telegram || undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), execution: 'headless' });
       void this.drain(); return this.run(runId);
     }
-    this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', cardModel: undefined, modelPicked: undefined, profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}),
+    this.patchRun(runId, { modelFallback: undefined, replyTo: telegram || undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', cardModel: undefined, modelPicked: undefined, profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}),
       ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}),
       instructions: run.role === 'specialist' ? `${run.instructions || ''}${carried}` : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
       ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });

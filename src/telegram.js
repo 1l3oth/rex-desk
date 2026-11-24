@@ -32,7 +32,9 @@ export function splitReply(text, size = 3800, maxParts = 4) {
 }
 // What a message from Telegram looks like in the agent's chat: marked, so the agent knows its final reply goes back there.
 export const TELEGRAM_MARK = '[Telegram]';
-const fromTelegram = text => `${TELEGRAM_MARK} ${text}`;
+const fromTelegram = (text, key) => `[Telegram #${key}] ${text}`;
+// The id in a queue entry's mark, or '' for a message that did not come from Telegram.
+export const telegramKey = entry => String(entry ?? '').match(/^\[Telegram #([0-9a-f]{12})\]/)?.[1] || '';
 // Telegram lets a bot download files up to 20 MB.
 const MAX_DOWNLOAD = 20 * 1024 * 1024;
 // A turn started from Telegram sends its final reply back for this long; a turn that never ends does not hold the mark forever.
@@ -394,51 +396,49 @@ export class TelegramBridge {
     catch (error) { return this.call(found.values.botToken, 'sendMessage', { chat_id: found.values.chatId, text: clip(`Could not use that answer: ${error.message}`), reply_to_message_id: replyToId }).catch(() => {}); }
   }
 
-  // Start (or join) the agent's turn with the message marked as from Telegram, and mark that turn so its final reply is sent
-  // back to Telegram by itself. When the agent is busy with a turn from the app, the message waits in its queue: then only the
-  // queued message is marked (tgqueued), and the turn that takes it in is marked when it does (onDelivered). The app turn
-  // running now keeps its reply in the app.
+  // Start the agent's turn with the message marked as from Telegram, its reply going back to the chat it came from. Each
+  // message gets its own id in its mark ([Telegram #id]) and a record of where it came from (tgqueued), made before the
+  // turn is asked for, so two messages with the same words from two chats are never mixed up. When the agent is busy, the
+  // message waits in its queue and starts a turn of its own afterwards (src/coordinator.js resumeQueued).
   async routeToAgent(agentId, text, found = telegramLink(this.store)) {
     if (agentId === 'main') this.desk.specialists.ensureMain();
-    const prompt = fromTelegram(text);
-    const run = await this.desk.specialistTurn(agentId, { prompt });
-    if (run?.id && found) {
-      const at = new Date().toISOString(), queued = (this.store.get('run', run.id)?.queued || []).some(entry => String(entry ?? '').trim() === prompt.trim());
-      const chatId = String(found.values.chatId);
-      if (queued) { const key = randomUUID(); this.store.put('tgqueued', key, { id: key, runId: run.id, text: prompt.trim(), agentId, linkId: found.link.id, chatId, at }); }
-      else this.store.put('tgturn', run.id, { id: run.id, agentId, linkId: found.link.id, chatId, at, sent: false, texts: [], direct: true });
-    }
+    const key = randomUUID().replaceAll('-', '').slice(0, 12), prompt = fromTelegram(text, key);
+    const replyTo = found?.values?.chatId ? { agentId, linkId: found.link.id, chatId: String(found.values.chatId), at: new Date().toISOString(), keys: [key] } : null;
+    if (replyTo) this.store.put('tgqueued', key, { id: key, ...replyTo, keys: undefined });
+    try { await this.desk.specialistTurn(agentId, { prompt, ...(replyTo ? { telegram: replyTo } : {}) }); }
+    catch (error) { this.store.delete('tgqueued', key); throw error; }
     this.noteLastAgent(found, agentId);
   }
-  // The coordinator asks these so a Telegram message never joins a running turn (src/coordinator.js takeInbox): the chat a
-  // queued entry came from ('' for the app), and the chat the run's current turn answers ('' for an app turn).
+  // Where a queue entry came from: '' for the app, else its link and chat. Matched by the id in its mark, never by its words.
   queuedChat(runId, entry) {
-    const text = String(entry ?? '').trim();
-    const item = this.store.list('tgqueued').find(record => record.runId === runId && record.text === text);
-    return item ? String(item.chatId ?? '') || 'telegram' : '';
+    const key = telegramKey(entry), item = key ? this.store.get('tgqueued', key) : null;
+    return item ? `${item.linkId}:${item.chatId}` : '';
   }
-  turnChat(runId) { const turn = this.store.get('tgturn', runId); return turn ? String(turn.chatId ?? '') || 'telegram' : ''; }
-  // The coordinator started a turn of this run with queued messages, all from one place (nextQueuedBatch): when they came
-  // from a Telegram chat, that turn's final reply goes back to that chat, and only that turn's.
-  onDelivered(runId, entries = []) {
-    const texts = new Set(entries.map(entry => String(entry ?? '').trim()));
-    const mine = this.store.list('tgqueued').filter(item => item.runId === runId && texts.has(item.text));
-    // An app batch: a mark left by an earlier Telegram turn that ended without a result never makes this turn answer there.
-    if (!mine.length) { this.store.delete('tgturn', runId); return; }
-    const first = mine[0];
-    this.store.put('tgturn', runId, { id: runId, agentId: first.agentId, linkId: first.linkId, chatId: first.chatId, at: new Date().toISOString(), sent: false,
-      texts: mine.map(item => item.text), direct: false });
-    for (const item of mine) this.store.delete('tgqueued', item.id);
+  // The chat the run's current turn answers ('' for an app turn): a Telegram turn takes nothing in mid-turn.
+  turnChat(runId) { const turn = this.store.get('tgturn', runId); return turn ? `${turn.linkId}:${turn.chatId}` : ''; }
+  // The reply destination of a queued batch (all from one chat, see nextQueuedBatch), or null for an app batch.
+  batchReplyTo(runId, entries = []) {
+    const items = entries.map(telegramKey).filter(Boolean).map(key => this.store.get('tgqueued', key)).filter(Boolean);
+    if (!items.length) return null;
+    const { agentId, linkId, chatId, at } = items[0];
+    return { agentId, linkId, chatId, at, keys: items.map(item => item.id) };
   }
-  // Messages handed over but given back unread go back to waiting: the turn they armed no longer answers them.
-  onRequeued(runId, entries = []) {
-    const turn = this.store.get('tgturn', runId); if (!turn?.texts?.length) return;
-    const back = new Set(entries.map(entry => String(entry ?? '').trim())), returned = turn.texts.filter(text => back.has(text));
-    if (!returned.length) return;
-    for (const text of returned) { const key = randomUUID(); this.store.put('tgqueued', key, { id: key, runId, text, agentId: turn.agentId, linkId: turn.linkId, chatId: turn.chatId, at: turn.at }); }
-    const left = turn.texts.filter(text => !back.has(text));
-    if (left.length || turn.direct) this.store.put('tgturn', runId, { ...turn, texts: left });
-    else this.store.delete('tgturn', runId);
+  // A turn of the run starts (src/coordinator.js execute). The reply destination belongs to that one turn: a turn with no
+  // destination (an app message, a resume from the app) clears any left from an earlier turn that failed or was stopped.
+  // attach: Rex Desk follows a turn that was already running (after a restart); its destination stays, under the new turn.
+  onTurnStart(runId, turnId, replyTo, { attach = false } = {}) {
+    const old = this.store.get('tgturn', runId);
+    if (attach) { if (old) this.store.put('tgturn', runId, { ...old, turnId }); return; }
+    if (!replyTo?.chatId) { if (old) this.store.delete('tgturn', runId); return; }
+    for (const key of replyTo.keys || []) this.store.delete('tgqueued', key);
+    this.store.put('tgturn', runId, { id: runId, turnId, agentId: replyTo.agentId, linkId: replyTo.linkId, chatId: String(replyTo.chatId), at: new Date().toISOString(), sent: false });
+  }
+  // The turn ended, however it ended: its destination goes with it. Returned so a turn handed on to the next one (another
+  // account or model) can pass it on.
+  onTurnEnd(runId, turnId) {
+    const turn = this.store.get('tgturn', runId); if (!turn || turn.turnId !== turnId) return null;
+    this.store.delete('tgturn', runId);
+    return { agentId: turn.agentId, linkId: turn.linkId, chatId: turn.chatId, at: turn.at, keys: [] };
   }
 
   // Download one Telegram file (getFile, then the file itself) into Rex Desk's uploads folder, so the agent can read it and

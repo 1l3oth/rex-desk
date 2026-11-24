@@ -703,3 +703,22 @@ test('a Telegram message never joins a running app turn: it waits and starts its
   assert.deepEqual(sent, [{ chat: 777, text: 'Desky\nAnswer 3.' }]);
   assert.equal(t.store.list('tgqueued').length, 0);
 });
+
+test('a Telegram turn that fails, then a resume from the app: the app reply stays in the app; the next Telegram message answers there', async () => {
+  const { TelegramBridge, telegramLink } = await import('../src/telegram.js');
+  const results = ['', 'App answer.', 'Telegram answer.'];
+  const t = deskWith((options, launch) => ({ async start() { if (launch === 1) throw new Error('The agent stopped working.'); options.event('agent-result', { result: results[launch - 1] }); }, interrupt() {}, close() {} }));
+  t.store.delete('schedmsg', t.once.id);
+  t.store.put('connector', 'telegram-1', { id: 'telegram-1', connectorId: 'telegram', name: 'Telegram @rexbot', kind: 'token', at: '2026-11-24T00:00:00.000Z' });
+  t.store.put('secret', 'connector:telegram-1', t.store.encrypt(JSON.stringify({ botToken: 'T:tok', chatId: 555, chatName: 'Rex' })));
+  const sent = [];
+  const fetcher = async (url, options) => { const body = JSON.parse(options?.body || '{}'); if (url.endsWith('/sendMessage')) sent.push(body.text); return { ok: true, json: async () => ({ ok: true, result: { message_id: 100 + sent.length } }) }; };
+  t.desk.telegram = new TelegramBridge(t.desk, { fetcher });
+  await t.desk.telegram.routeToAgent(t.agent.id, 'ship it?', telegramLink(t.store)); await t.settled(); await new Promise(done => setTimeout(done, 30));
+  assert.equal(t.runOf().state, 'failed', 'the Telegram turn failed');
+  assert.ok(!t.store.get('tgturn', t.runOf().id) && !t.runOf().replyTo, 'its destination went with it');
+  await t.desk.resume(t.runOf().id, { prompt: 'try again' }); await t.settled(); await new Promise(done => setTimeout(done, 30));
+  assert.deepEqual(sent, [], 'the app resume answers in the app');
+  await t.desk.telegram.routeToAgent(t.agent.id, 'and now?', telegramLink(t.store)); await t.settled(); await new Promise(done => setTimeout(done, 30));
+  assert.deepEqual(sent, ['Desky\nTelegram answer.']);
+});
