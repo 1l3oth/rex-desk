@@ -722,3 +722,27 @@ test('a Telegram turn that fails, then a resume from the app: the app reply stay
   await t.desk.telegram.routeToAgent(t.agent.id, 'and now?', telegramLink(t.store)); await t.settled(); await new Promise(done => setTimeout(done, 30));
   assert.deepEqual(sent, ['Desky\nTelegram answer.']);
 });
+
+test('a Telegram turn cut off by a usage limit: the retry on the next account still answers on Telegram, and a message queued meanwhile is kept and answered', async () => {
+  const { TelegramBridge, telegramLink } = await import('../src/telegram.js');
+  const t = deskWith((options, launch) => ({ async start() {
+    if (launch === 1) { await t.desk.telegram.routeToAgent(t.agent.id, 'and the docs?', telegramLink(t.store)); options.event('agent-text', { text: 'Claude AI usage limit reached. Your limit resets at 5pm.' }); return; }
+    options.event('agent-result', { result: launch === 2 ? 'Shipped.' : 'Docs too.' });
+  }, interrupt() {}, close() {} }));
+  t.store.delete('schedmsg', t.once.id);
+  t.store.put('connector', 'telegram-1', { id: 'telegram-1', connectorId: 'telegram', name: 'Telegram @rexbot', kind: 'token', at: '2026-11-24T00:00:00.000Z' });
+  t.store.put('secret', 'connector:telegram-1', t.store.encrypt(JSON.stringify({ botToken: 'T:tok', chatId: 555, chatName: 'Rex' })));
+  const sent = [];
+  const fetcher = async (url, options) => { const body = JSON.parse(options?.body || '{}'); if (url.endsWith('/sendMessage')) sent.push(body.text); return { ok: true, json: async () => ({ ok: true, result: { message_id: 100 + sent.length } }) }; };
+  t.desk.telegram = new TelegramBridge(t.desk, { fetcher });
+  const first = temporary('claude1'), second = temporary('claude2');
+  t.store.saveConfig({ ...t.store.publicConfig(), agentProfiles: { claude: first } });
+  t.desk.agents.alternative = async (provider, current) => current === second ? null : { profile: second, label: 'claude2', account: 'second@example.com' };
+  await t.desk.telegram.routeToAgent(t.agent.id, 'ship it?', telegramLink(t.store));
+  for (let step = 0; step < 100 && (t.launches.length < 3 || t.desk.live.size); step++) await new Promise(done => setTimeout(done, 20));
+  await new Promise(done => setTimeout(done, 30));
+  assert.ok(t.store.events(t.runOf().id, { limit: 100 }).some(event => event.kind === 'account-switched'), 'it switched accounts');
+  assert.equal(t.launches.length, 3, 'the retry ran, then the queued message got a turn of its own');
+  assert.deepEqual(sent, ['Desky\nShipped.', 'Desky\nDocs too.']);
+  assert.equal(t.store.list('tgqueued').length, 0);
+});

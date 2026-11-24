@@ -405,7 +405,7 @@ export class Desk {
       await this.resume(run.id, { prompt: 'You were cut off by a usage limit. Continue exactly where you left off.' }).catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
     }
   }
-  async switchIfLimited(runId, message = '') {
+  async switchIfLimited(runId, message = '', turnKey = '') {
     const run = this.store.get('run', runId), provider = run?.provider || 'claude'; if (!run || !['claude', 'codex'].includes(provider)) return false;
     const title = providerTitle(provider);
     const since = Date.parse(run.turnStartedAt || 0) || 0;
@@ -438,7 +438,10 @@ export class Desk {
     // If a Claude session has accumulated heavy context, start fresh with a handoff to prevent burning hundreds of thousands of tokens.
     const bloated = Number(run.contextUsed || 0) > 50000;
     if (provider !== 'claude' || bloated) { this.live.delete(runId); await this.freshStart(runId, { reason: `because the ${title} account hit its usage limit and the chat moved to another account`, notice: `${title} account hit its usage limit. Switched to ${next.account || next.label}${next.plan ? ` (${next.plan})` : ''} and continuing.` }); }
-    this.patchRun(runId, { accountSwitchedAt: now(), state: 'queued', queued: [], followUp: 'You were cut off by a usage limit. Continue exactly where you left off.' });
+    // The ended turn's Telegram reply destination passes to the retry before the retry can start, and messages still waiting
+    // in the queue (from the app or a Telegram chat) stay there for their own turns.
+    const replyBack = turnKey ? this.telegram?.onTurnEnd?.(runId, turnKey) : null;
+    this.patchRun(runId, { accountSwitchedAt: now(), state: 'queued', ...(replyBack ? { replyTo: replyBack } : {}), followUp: 'You were cut off by a usage limit. Continue exactly where you left off.' });
     this.live.delete(runId); void this.drain(); return true;
   }
   // A background job for an agent (desk_background): a quick helper on Claude Haiku does one task in a run of its own, so the
@@ -981,7 +984,7 @@ ${message}` : message;
       if (remoteOn) this.seenMarks?.delete(runId); else this.saveSeenMark(runId);
       if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
       }
-      if (await this.switchIfLimited(runId)) { handedOn = true; return; }
+      if (await this.switchIfLimited(runId, '', turnKey)) { handedOn = true; return; }
       const current = this.run(runId);
       if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' || run.role === 'helper' || run.role === 'net' || this.personalRun(run) ? 'finished' : 'needs_evidence', endedAt: now() });
       if (run.role === 'helper') this.helperDone(runId);
@@ -989,7 +992,7 @@ ${message}` : message;
       const voiceAfter = this.store.get('run', runId)?.voice; if (voiceAfter?.reading) this.patchRun(runId, { voice: { ...voiceAfter, reading: false } });
       void this.nudgeMemory(runId).catch(() => {});
     } catch (error) {
-      if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) { handedOn = true; return; }
+      if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message, turnKey)) { handedOn = true; return; }
       // The chosen model is not available on this Claude account: the turn runs again once on the account's default model, and the agent stops asking for that model.
       if (!controller.signal.aborted && MODEL_MISSING.test(error.message) && !run.modelFallback && !isLocalModel(run.model)) {
         const agentId = run.roomAgent || run.specialistId, agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
