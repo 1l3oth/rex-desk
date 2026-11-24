@@ -270,8 +270,8 @@ test('a message for an agent that is working is handed to it between steps, once
   await desk.rooms.post(room.id, { text: '@vanna stop, use Sydney not Seoul' });
   await waitFor(() => (store.get('run', 'vanna-room').queued || []).length === 1);
   assert.equal(store.get('run', 'vanna-room').queued[0], '[Room "Checkout bug"] The person → you: @vanna stop, use Sydney not Seoul');
-  assert.match(desk.takeInbox('vanna-room'), /use Sydney not Seoul/);
-  assert.equal(desk.takeInbox('vanna-room'), '', 'handed over once, not again when the turn ends');
+  assert.match(desk.takeInbox('vanna-room').join('\n\n'), /use Sydney not Seoul/);
+  assert.deepEqual(desk.takeInbox('vanna-room'), [], 'handed over once, not again when the turn ends');
   assert.deepEqual(store.get('run', 'vanna-room').queued, []);
   desk.live.delete('vanna-room');
 });
