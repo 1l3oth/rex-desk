@@ -58,6 +58,7 @@ import { seedFlowWorktree, runtimeProfile } from './flow-runtime.js';
 import { assessRisk, automaticPrAllowed } from './risk.js';
 import { pullLiveCheckout } from './live-checkout.js';
 import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from './processes.js';
+import { hideTelegramTag } from './telegram.js';
 
 const exec = promisify(execFile);
 const EVIDENCE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.pdf': 'application/pdf', '.txt': 'text/plain', '.log': 'text/plain', '.json': 'application/json', '.html': 'text/html', '.zip': 'application/zip' };
@@ -514,7 +515,7 @@ export class Desk {
     if (this.live.has(runId)) {
       this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), ...(picked.model ? { modelPicked: true } : {}), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
       // A message typed on another computer is already in the shared chat: the agent gets it, the chat does not show it twice.
-      if (!picked.echoed) this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
+      if (!picked.echoed) this.store.event(runId, 'human-message', { text: hideTelegramTag(line), via: 'rex', queued: true }, true);
       return { queued: true };
     }
     await this.resume(runId, { provider: picked.provider || run.provider, prompt: text, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });
@@ -622,7 +623,7 @@ export class Desk {
     if (this.store.list('run').some(run => run.role === 'coordinator' && (!run.main || run.computer === thisComputer()) && !terminalStates.has(run.state))) throw new Error('The main agent is already running. Talk to it in its chat.');
     const run = { id: id(), role: 'coordinator', main: true, computer: thisComputer(), title: 'Rex Agent', provider: aiProvider(picked.provider || this.store.get('specialist', 'main')?.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'headless', ...(telegram ? { replyTo: telegram } : {}), ...runOptions({ ...picked, provider: picked.provider || this.store.get('specialist', 'main')?.provider || this.store.config().provider }, this.store) };
     this.store.put('run', run.id, run);
-    if (run.prompt) this.store.event(run.id, 'human-message', { text: run.prompt, via: 'rex' }, true);
+    if (run.prompt) this.store.event(run.id, 'human-message', { text: hideTelegramTag(run.prompt), via: 'rex' }, true);
     void this.drain(); return this.run(run.id);
   }
   // The main agent adds a project folder the person named: it becomes a source repository in Settings and a project in memory, so it can get its own agent.
@@ -1619,7 +1620,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
         title: roomId ? `${agent.name} · ${this.rooms.room(roomId)?.name || 'group chat'}` : agent.name, provider: aiProvider(agent.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home,
         projectPath: this.specialists.folder(agent), repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}), cardModel: model, ...(telegram ? { replyTo: telegram } : {}) };
       this.store.put('run', created.id, created); const fresh = this.specialists.get(agentId); this.store.put('specialist', agent.id, roomId ? { ...fresh, roomRuns: { ...(fresh.roomRuns || {}), [roomId]: created.id } } : { ...fresh, runId: created.id });
-      if (!roomId && !quiet) this.store.event(created.id, 'human-message', { text: String(prompt).trim(), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
+      if (!roomId && !quiet) this.store.event(created.id, 'human-message', { text: hideTelegramTag(String(prompt).trim()), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
       void this.drain(); return created;
     }
     if (this.live.has(run.id)) { this.store.put('run', run.id, { ...run, roomTurn: turn || run.roomTurn, ...(turn ? { roomPosted: false } : {}) }); await this.say(run.id, prompt, {}, { raw: true }); return run; }
@@ -1909,7 +1910,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const carriedTokens = carried ? Math.round(carried.length / 4) : 0;
     if (!sameProvider) this.store.event(runId, 'provider-switch', { text: `Switched from ${providerLabel(run.provider)} to ${providerLabel(provider)}. The earlier conversation was handed over.`, from: run.provider, to: provider, ...(carriedTokens ? { usage: { input: carriedTokens } } : {}) }, true);
     // The follow-up is part of the conversation: it shows in the chat the moment it is sent.
-    if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: keepLines(prompt), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
+    if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: hideTelegramTag(keepLines(prompt)), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
     // After /clear the next message starts a fresh session that reads the handoff; the message itself goes in as it is.
     if (run.handoffFile && !run.sessionId) {
       this.patchRun(runId, { modelFallback: undefined, replyTo: telegram || undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), execution: 'headless' });

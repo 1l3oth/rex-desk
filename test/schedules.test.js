@@ -746,3 +746,18 @@ test('a Telegram turn cut off by a usage limit (its result reported before the e
   assert.deepEqual(sent, ['Desky\nShipped.', 'Desky\nDocs too.']);
   assert.equal(t.store.list('tgqueued').length, 0);
 });
+
+test('a Telegram message gives the agent its chat and tag, while the app chat shows the message as before', async () => {
+  const { TelegramBridge, telegramLink } = await import('../src/telegram.js');
+  const prompts = [];
+  const t = deskWith(() => ({ async start(prompt) { prompts.push(prompt); }, interrupt() {}, close() {} }));
+  t.store.delete('schedmsg', t.once.id);
+  t.store.put('connector', 'telegram-1', { id: 'telegram-1', connectorId: 'telegram', name: 'Telegram @rexbot', kind: 'token', at: '2026-11-24T00:00:00.000Z' });
+  t.store.put('secret', 'connector:telegram-1', t.store.encrypt(JSON.stringify({ botToken: 'T:tok', chatId: 555, chatName: 'Rex' })));
+  t.desk.telegram = new TelegramBridge(t.desk, { fetcher: async () => ({ ok: true, json: async () => ({ ok: true, result: { message_id: 1 } }) }) });
+  await t.desk.telegram.routeToAgent(t.agent.id, 'ship it?', telegramLink(t.store)); await t.settled();
+  assert.match(prompts.join('\n'), /\[Telegram #[0-9a-f]{12}\] Telegram, Rex \(tg:1\)\nship it\?/, 'the agent gets the source and tag line');
+  const shown = t.store.events(t.runOf().id, { limit: 50 }).filter(event => event.kind === 'human-message').map(event => event.text);
+  assert.equal(shown.length, 1);
+  assert.match(shown[0], /^\[Telegram #[0-9a-f]{12}\] ship it\?$/, 'the app chat never shows the tag line');
+});

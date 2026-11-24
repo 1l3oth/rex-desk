@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { TelegramBridge as Bridge, telegramLink, splitReply } from '../src/telegram.js';
+import { TelegramBridge as Bridge, telegramLink, splitReply, hideTelegramTag } from '../src/telegram.js';
 
 // The bridge the coordinator would hold (desk.telegram), so the fake desk can start turns the way the coordinator does.
 class TelegramBridge extends Bridge { constructor(desk, options) { super(desk, options); desk.telegram = this; } }
@@ -30,7 +30,8 @@ function makeDesk({ directory } = {}) {
     // As the coordinator does: the turn starts with its Telegram destination (onTurnStart). The prompt is recorded with its
     // [Telegram #id] mark shown as [Telegram], since the id is random.
     specialistTurn: async (agentId, { prompt, telegram }) => {
-      turns.push({ agentId, prompt: prompt.replace(/^\[Telegram #[0-9a-f]{12}\]/, '[Telegram]') });
+      // prompt: as the app chat shows it (the hidden source and tag line taken out); sent: what the agent really gets.
+      turns.push({ agentId, prompt: hideTelegramTag(prompt).replace(/^\[Telegram #[0-9a-f]{12}\]/, '[Telegram]') }); (desk.prompts ||= []).push(prompt);
       desk.telegram?.onTurnStart(`run-${agentId}`, `turn-${turns.length}`, telegram);
       return { id: `run-${agentId}` };
     },
@@ -638,4 +639,35 @@ test('a pending Telegram reply goes only to the chat it came from: after a relin
   linkedStore(store, { botToken: 'T:tok', chatId: 777, chatName: 'Someone else' });
   await bridge.onTurnResult('run-main', 'private answer');
   assert.deepEqual(sent.filter(call => call.method === 'sendMessage'), [], 'the new chat never gets the old chat reply');
+});
+
+test('each Telegram message tells the agent its chat and tag on the first line; desk_telegram with that tag texts exactly that chat', async () => {
+  const { desk, store, turns } = makeDesk();
+  linkedStore(store);
+  const { fetcher, sent } = makeFetcher();
+  const bridge = new TelegramBridge(desk, { fetcher });
+  const texts = () => sent.filter(call => call.method === 'sendMessage').map(call => ({ chat: call.body.chat_id, text: call.body.text }));
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'hello' } }, telegramLink(store));
+  await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: 'again' } }, telegramLink(store));
+  assert.match(desk.prompts[0], /^\[Telegram #[0-9a-f]{12}\] Telegram, Rex \(tg:1\)\nhello$/);
+  assert.match(desk.prompts[1], /\(tg:1\)\nagain$/, 'the same chat keeps its tag');
+  assert.deepEqual(turns.map(turn => turn.prompt), ['[Telegram] hello', '[Telegram] again'], 'the app chat shows the message as before');
+  // Another chat linked later gets its own tag; the old tag no longer sends anywhere.
+  linkedStore(store, { botToken: 'T:tok', chatId: 777, chatName: 'Dara' });
+  await bridge.handleUpdate({ update_id: 3, message: { chat: { id: 777 }, text: 'hi' } }, telegramLink(store));
+  assert.match(desk.prompts[2], /Telegram, Dara \(tg:2\)\nhi$/);
+  await bridge.sendFromAgent('main', 'Rex Agent', 'To you.', { tag: 'tg:2' });
+  await assert.rejects(bridge.sendFromAgent('main', 'Rex Agent', 'Old chat.', { tag: 'tg:1' }), /tg:1 is no longer linked/);
+  await assert.rejects(bridge.sendFromAgent('main', 'Rex Agent', 'Nobody.', { tag: 'tg:9' }), /no Telegram chat tagged tg:9/);
+  // Without a tag it goes to the linked chat, as before.
+  await bridge.sendFromAgent('main', 'Rex Agent', 'Plain.');
+  assert.deepEqual(texts(), [{ chat: 777, text: 'Rex Agent\nTo you.' }, { chat: 777, text: 'Rex Agent\nPlain.' }]);
+});
+
+test('the hidden tag line is taken out of what the app chat shows, and nothing else is', () => {
+  const key = '0123456789ab';
+  assert.equal(hideTelegramTag(`[Telegram #${key}] Telegram, Rex (tg:3)\nship it?`), `[Telegram #${key}] ship it?`);
+  assert.equal(hideTelegramTag(`[Telegram #${key}] Telegram, Rex (tg:3)\na\n[Telegram #${key}] Telegram, Rex (tg:3)\nb`), `[Telegram #${key}] a\n[Telegram #${key}] b`);
+  assert.equal(hideTelegramTag('Telegram, Rex (tg:3)\nwritten in the app'), 'Telegram, Rex (tg:3)\nwritten in the app');
+  assert.equal(hideTelegramTag(`[Telegram #${key}] plain`), `[Telegram #${key}] plain`);
 });

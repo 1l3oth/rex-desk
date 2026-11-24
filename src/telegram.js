@@ -32,7 +32,11 @@ export function splitReply(text, size = 3800, maxParts = 4) {
 }
 // What a message from Telegram looks like in the agent's chat: marked, so the agent knows its final reply goes back there.
 export const TELEGRAM_MARK = '[Telegram]';
-const fromTelegram = (text, key) => `[Telegram #${key}] ${text}`;
+// The mark's line also says where it came from and the chat's own tag (tg:N), which the agent can pass to desk_telegram to
+// text exactly that chat. The app chat never shows that line (hideTelegramTag): it shows the message as before.
+const fromTelegram = (text, key, source = '') => source ? `[Telegram #${key}] ${source}\n${text}` : `[Telegram #${key}] ${text}`;
+// A message as the app chat shows it: the hidden source and tag line taken out, the mark and the words kept.
+export const hideTelegramTag = text => String(text ?? '').replace(/^(\[Telegram #[0-9a-f]{12}\]) Telegram, [^\n]*\(tg:\d+\)\n/gm, '$1 ');
 // The id in a queue entry's mark, or '' for a message that did not come from Telegram.
 export const telegramKey = entry => String(entry ?? '').match(/^\[Telegram #([0-9a-f]{12})\]/)?.[1] || '';
 // Telegram lets a bot download files up to 20 MB.
@@ -144,8 +148,15 @@ export class TelegramBridge {
   // agentId/name identify the sender; the message is prefixed with the agent name so the person knows who wrote.
   // runId: the chat the agent sent it from (desk_telegram passes it). Only after Telegram took the message is that chat's
   // Telegram turn marked as answered, so a failed send still leaves the automatic reply to go out at the end of the turn.
-  async sendFromAgent(agentId, name, text, { runId = '' } = {}) {
+  // tag: a chat's tag (tg:N) from the line on its messages; the message goes to exactly that chat, or not at all when that chat
+  // is no longer the linked one. Without a tag it goes to the linked chat, as before.
+  async sendFromAgent(agentId, name, text, { runId = '', tag = '' } = {}) {
     const found = telegramLink(this.store);
+    if (tag) {
+      const wanted = String(tag).trim().toLowerCase(), chat = this.store.list('tgchat').find(item => item.tag === wanted);
+      if (!chat) throw new Error(`There is no Telegram chat tagged ${tag}.`);
+      if (!found?.values?.chatId || found.link.id !== chat.linkId || String(found.values.chatId) !== chat.chatId) throw new Error(`The Telegram chat ${chat.tag} is no longer linked, so nothing was sent.`);
+    }
     if (!found) throw new Error('Telegram is not connected. Add it in Settings -> Connectors.');
     if (!found.values.chatId) throw new Error('Telegram is connected but not linked yet. Open the bot, press Start, and tap Link in Settings.');
     await this.sendParts(found, agentId, name, text);
@@ -402,12 +413,21 @@ export class TelegramBridge {
   // message waits in its queue and starts a turn of its own afterwards (src/coordinator.js resumeQueued).
   async routeToAgent(agentId, text, found = telegramLink(this.store)) {
     if (agentId === 'main') this.desk.specialists.ensureMain();
-    const key = randomUUID().replaceAll('-', '').slice(0, 12), prompt = fromTelegram(text, key);
+    const tag = found?.values?.chatId ? this.chatTag(found.link.id, found.values.chatId) : '';
+    const key = randomUUID().replaceAll('-', '').slice(0, 12), prompt = fromTelegram(text, key, tag ? `Telegram, ${String(found.values.chatName || 'the person').replace(/\s+/g, ' ').slice(0, 40)} (${tag})` : '');
     const replyTo = found?.values?.chatId ? { agentId, linkId: found.link.id, chatId: String(found.values.chatId), at: new Date().toISOString(), keys: [key] } : null;
     if (replyTo) this.store.put('tgqueued', key, { id: key, ...replyTo, keys: undefined });
     try { await this.desk.specialistTurn(agentId, { prompt, ...(replyTo ? { telegram: replyTo } : {}) }); }
     catch (error) { this.store.delete('tgqueued', key); throw error; }
     this.noteLastAgent(found, agentId);
+  }
+  // The short tag of one Telegram chat (tg:N): made the first time that chat writes, the same every time after.
+  chatTag(linkId, chatId) {
+    const id = `${linkId}:${chatId}`, saved = this.store.get('tgchat', id); if (saved?.tag) return saved.tag;
+    const next = Number(this.store.get('telegram', 'tags')?.next) || 1;
+    this.store.put('telegram', 'tags', { id: 'tags', next: next + 1 });
+    this.store.put('tgchat', id, { id, tag: `tg:${next}`, linkId, chatId: String(chatId) });
+    return `tg:${next}`;
   }
   // Where a queue entry came from: '' for the app, else its link and chat. Matched by the id in its mark, never by its words.
   queuedChat(runId, entry) {
