@@ -55,6 +55,19 @@ code,pre{font-family:var(--mono);font-size:12px}
 .boot .boot-why{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--bad);background:var(--raised);border:1px solid var(--line);border-radius:8px;padding:8px 10px;word-break:break-word;text-align:left}
 .boot .boot-actions{display:flex;justify-content:center;align-items:center;gap:12px;margin-top:6px}
 @media (prefers-reduced-motion:reduce){.boot-mark,.boot-bar::after{animation:none}}
+/* Water Festival loading: a night river with lanterns rising. */
+html[data-skin=waterfest] .boot{overflow:hidden;background:radial-gradient(56% 38% at 50% 10%,rgba(200,218,240,.14),transparent 70%),linear-gradient(180deg,#09182f,#0c2740 68%,#102f4a)}
+html[data-skin=waterfest] .boot>*{position:relative;z-index:1}
+html[data-skin=waterfest] .boot::before,html[data-skin=waterfest] .boot::after{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background-repeat:no-repeat}
+html[data-skin=waterfest] .boot::before{background-image:radial-gradient(circle 3px at 16% 100%,#ffcf7a,transparent 62%),radial-gradient(circle 2px at 32% 100%,#e9b949,transparent 62%),radial-gradient(circle 2.5px at 68% 100%,#ff9d4d,transparent 62%),radial-gradient(circle 2px at 84% 100%,#ffd98a,transparent 62%);animation:wf-rise 8s linear infinite}
+html[data-skin=waterfest] .boot::after{background-image:radial-gradient(circle 2px at 24% 100%,#e9b949,transparent 62%),radial-gradient(circle 3px at 50% 100%,#ffcf7a,transparent 62%),radial-gradient(circle 2px at 76% 100%,#ff9d4d,transparent 62%);animation:wf-rise 11s linear infinite;animation-delay:-4s;opacity:.8}
+@keyframes wf-rise{0%{transform:translateY(0);opacity:0}8%{opacity:.85}92%{opacity:.85}100%{transform:translateY(-106vh);opacity:0}}
+@media (prefers-reduced-motion:reduce){html[data-skin=waterfest] .boot::before,html[data-skin=waterfest] .boot::after{animation:none;opacity:.5}}
+/* The loading night river stays dark in both looks, so in light mode its text and bar read light, not the dark light-mode ink. */
+html[data-skin=waterfest][data-theme=light] .boot{color:rgba(233,240,250,.82)}
+html[data-skin=waterfest][data-theme=light] .boot h2{color:#f3ead2}
+html[data-skin=waterfest][data-theme=light] .boot-bar{background:rgba(233,240,250,.2)}
+html[data-skin=waterfest][data-theme=light] .boot-bar::after{background:#e9b949}
 .hidden{display:none!important}
 
 .chat-shell{display:grid;grid-template-columns:300px minmax(0,1fr);height:100dvh}

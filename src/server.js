@@ -148,7 +148,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   }
   if (!dataDirectory) await followMemoryMove({ log: message => console.log(message) });
   // A folder that exists already (even a drive root such as F:\, where mkdir fails with EPERM) is used as it is.
-  if (!existsSync(dataRoot)) mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
+  // A brand-new install is the one launch that first creates this data folder. We drop a durable "new-install" marker then,
+  // so the first launch opens on the Water Festival look; a returning or signed-out person whose data folder already exists
+  // is never treated as new, whatever browser or phone they are on. The marker is cleared the first time the UI reads it.
+  const freshInstall = !existsSync(dataRoot);
+  if (freshInstall) mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
+  const newInstallMarker = path.join(dataRoot, 'new-install');
+  if (freshInstall) { try { writeFileSync(newInstallMarker, '1', { mode: 0o600 }); } catch {} }
   const lockPath = path.join(dataRoot, 'runtime.lock');
   if (existsSync(lockPath)) {
     const owner = Number(readFileSync(lockPath, 'utf8'));
@@ -1389,6 +1395,20 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       // The Settings tours: their steps in public/guides, and the voice of each step in public/guides/voice.
       const file = publicFiles[url.pathname] || (/^\/(?:guides\/)?[a-z0-9-]+\.(?:js|css)$/.test(url.pathname) || /^\/guides\/voice\/[a-z0-9-]+\.m4a$/.test(url.pathname) ? url.pathname.slice(1) : '');
       if (!file || !existsSync(path.join(root, 'public', file))) return json(response, 404, { error: 'Page not found.' });
+      // The first launch of a brand-new install opens on the Water Festival look; anyone who has used Rex Desk before keeps
+      // their look. "New or not" is the durable new-install marker dropped when this desk's data folder was first created
+      // (by the desktop launcher, or by this server in a checkout), never browser storage, so an existing person on a fresh
+      // browser profile or on their phone is not treated as new. We carry the flag in a data attribute on <html> (the app's
+      // CSP blocks an inline script); theme.js reads it and saves the default only when it is true. Consumed on first read.
+      if (file.endsWith('.html')) {
+        let fresh = false;
+        try { fresh = existsSync(newInstallMarker); } catch {}
+        if (fresh) { try { unlinkSync(newInstallMarker); } catch {} }
+        const page = readFileSync(path.join(root, 'public', file), 'utf8')
+          .replace('<html lang="en"', `<html lang="en" data-rex-new="${fresh ? 'true' : 'false'}"`);
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        return response.end(page);
+      }
       return serveFile(request, response, path.join(root, 'public', file));
     } catch (error) { if (!response.headersSent) json(response, 400, { error: error.message }); else response.end(); }
   };

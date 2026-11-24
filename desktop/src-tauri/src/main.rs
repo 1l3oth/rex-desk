@@ -410,7 +410,14 @@ fn hidden(command: &mut Command) -> &mut Command {
 
 // The server outlives the window so closing it never interrupts running agents.
 fn start_server(runtime: &Runtime) -> std::io::Result<Child> {
+    // A brand-new install is the launch that first creates this data folder. We drop a durable "new-install" marker then,
+    // before the folder exists, so the server opens the first UI on the Water Festival look. A folder that already exists
+    // is an existing person and never gets the marker. The server reads and consumes the marker on the first page.
+    let fresh_install = !runtime.data.exists();
     fs::create_dir_all(&runtime.data)?;
+    if fresh_install {
+        let _ = fs::write(runtime.data.join("new-install"), "1");
+    }
     let mut command = Command::new(&runtime.node);
     command
         .arg("src/server.js")
