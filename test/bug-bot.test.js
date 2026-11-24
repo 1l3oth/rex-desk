@@ -293,3 +293,17 @@ test('polling: a replaced bot token starts from offset 0 and a batch from the ol
   assert.equal(store.list('bugreport').length, 0);
   assert.equal(store.get('bugbot', 'state'), null);
 });
+
+test('sorting: Jev only ever sees the redacted text, never the raw email, number or key', async () => {
+  const { desk, store, calls } = makeDesk({ groups: [{ id: '-100' }] });
+  const sent = [];
+  const jevFetcher = desk.jev.fetcher;
+  desk.jev.fetcher = async (url, options) => { sent.push(String(options?.body || '')); return jevFetcher(url, options); };
+  const bot = new BugBot(desk, { fetcher: await mkFetcher(calls) });
+  await bot.handleUpdate(groupMsg({ text: '@rexbugbot login fails for dara@example.com +855 12 345 678 key fakekey_abcdefghijklmnopqrstuvwxyz', entities: [{ type: 'mention', offset: 0, length: 10 }] }), bugBotLink(store));
+  assert.ok(sent.length > 0, 'Jev was asked');
+  for (const body of sent) {
+    assert.doesNotMatch(body, /dara@example\.com|345 678|fakekey_abcdefghij/);
+    assert.match(body, /hidden email/);
+  }
+});

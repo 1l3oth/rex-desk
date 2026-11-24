@@ -330,7 +330,7 @@ export class BugBot {
     const dup = findDuplicate(this.reports(), { groupId: chat.id, reporterId, text: body });
     if (dup) return this.appendToReport(found, dup, { text: body, media: mediaRef, message, duplicate: true });
 
-    // Sort it with Jev. No key or a Jev failure files it as an unsorted bug so nothing is lost.
+    // Sort it with Jev. Only the redacted text leaves this computer. No key or a Jev failure files it as an unsorted bug so nothing is lost.
     const sort = await this.sort(body).catch(() => ({ kind: 'bug', severity: null, severityLabel: '' }));
     if (sort.kind === 'chat') return; // small talk is ignored, no report, no reply
     if (sort.kind === 'feature') {
@@ -378,7 +378,7 @@ export class BugBot {
     const apiKey = this.desk.jev?.apiKey?.() || '';
     if (!apiKey || !body) return { kind: 'bug', severity: null, severityLabel: '' };
     const model = this.store.config().jev?.model || undefined;
-    const state = { text: clip(body, 4000) };
+    const state = { text: clip(redact(body), 4000) }; // redacted before it is sent to OpenRouter
     const result = await askJev({ apiKey, model, state, questions: bugBotQuestions, fetcher: this.desk.jev.fetcher });
     return sortReport(result.answers);
   }
