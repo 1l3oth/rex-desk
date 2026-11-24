@@ -182,7 +182,8 @@ export function wireNet(ctx) {
   const { api, toast, ui } = ctx;
   const reload = async () => { await loadNet(ctx); ctx.render(); };
   // While the page is open it follows the conversations, unless the person is typing in it.
-  setInterval(() => { if (ui.view?.type === 'net' && !document.hidden && !document.activeElement?.closest?.('.page.na :is(input,textarea)')) void reload().catch(() => {}); }, 5000);
+  const netOpen = () => ui.view?.type === 'net' || (ui.view?.type === 'exp' && ui.expTab === 'a2a');
+  setInterval(() => { if (netOpen() && !document.hidden && !document.activeElement?.closest?.('.page.na :is(input,textarea)')) void reload().catch(() => {}); }, 5000);
   // Enter searches; picking another of the person's agents reloads which results are linked.
   document.addEventListener('keydown', event => { if (event.key === 'Enter' && event.target.matches?.('.na-search input')) { event.preventDefault(); event.target.closest('.na-search').querySelector('[data-net-act="find"]')?.click(); } });
   document.addEventListener('change', event => { if (!event.target.matches?.('[data-net-as]')) return; ui.netFind = { ...(ui.netFind || {}), as: event.target.value }; event.target.blur(); void search(ctx, ui.netFind.q || '').then(() => ctx.render(), error => toast(error.message, true)); });
