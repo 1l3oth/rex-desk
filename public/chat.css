@@ -164,7 +164,7 @@ body.live-replying #feed-inner .bubble.typing{display:none}
 
 /* ---- chat input ---- */
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.composer{padding:10px 20px 12px}
+.composer{padding:10px 20px 12px;container:composer / inline-size}
 .composer .box2{position:relative;display:flex;align-items:flex-end;gap:6px;background:var(--raised);border:1px solid var(--line);border-radius:18px;padding:8px 8px 8px 6px}
 .composer .box2:focus-within{border-color:var(--accent)}
 .composer textarea{flex:1;min-height:34px;max-height:200px;resize:none;border:0;outline:0;background:transparent;padding:7px 4px;font-size:15px;line-height:1.5}
@@ -174,7 +174,9 @@ body.live-replying #feed-inner .bubble.typing{display:none}
 .send-btn.wide{width:auto;height:36px;border-radius:18px;padding:0 18px;font-weight:600;font-size:14px}
 .send-btn:hover{filter:brightness(1.08)}
 .composer .foot{display:flex;align-items:center;gap:4px;padding:6px 6px 0;font-size:12px;color:var(--muted)}
-.composer .foot .spacer{flex:1}.composer .foot .hint{font-size:12px}
+.composer .foot .spacer{flex:1}.composer .foot .hint{font-size:12px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.composer .foot .pick2{min-width:0}.composer .foot .pick2-btn{max-width:100%}
+@container composer (max-width:560px){.composer .foot .hint{display:none}}
 .pick select{appearance:none;border:0;background:transparent;color:var(--ink);font-size:13px;padding:3px 6px;border-radius:8px;cursor:pointer}
 .pick:nth-of-type(2) select{color:var(--muted)}.pick select:hover{background:var(--raised)}
 .ring{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);margin-left:6px}.ring.busy{border-color:var(--line);border-top-color:var(--accent);animation:spin 1s linear infinite}
