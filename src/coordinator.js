@@ -886,6 +886,8 @@ export class Desk {
           // The finished block carries its saved message's id, so the chat drops the live copy exactly when that message is drawn.
           if (kind === 'agent-text' && !reading) this.store.emit('partial', { runId, text: String(data.text || ''), done: true, eventId });
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
+          // A turn a Telegram message started sends its final reply back to that Telegram chat (src/telegram.js).
+          if (kind === 'agent-result') void this.telegram?.onTurnResult?.(runId, data.result)?.catch?.(() => {});
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
       // Local AI, light mode (the default): the model on this computer is talked to directly, with a short instruction, the

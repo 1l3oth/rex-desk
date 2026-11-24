@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { TelegramBridge, telegramLink } from '../src/telegram.js';
+import { readFileSync } from 'node:fs';
+import { TelegramBridge, telegramLink, splitReply } from '../src/telegram.js';
 
 // A tiny in-memory stand-in for the store and coordinator the bridge talks to. encrypt/decrypt are identity, so the saved
 // connector secret round-trips as JSON. desk.answer and desk.specialistTurn just record what the bridge asked them to do.
@@ -23,18 +24,18 @@ function makeDesk({ directory } = {}) {
   const desk = {
     store,
     answer: (id, answer) => { const it = store.get('interaction', id); if (!it || it.state !== 'pending') throw new Error('This question is no longer waiting for an answer.'); store.put('interaction', id, { ...it, state: 'answered', answer }); answered.push({ id, answer }); return { answered: true }; },
-    specialistTurn: async (agentId, { prompt }) => { turns.push({ agentId, prompt }); },
+    specialistTurn: async (agentId, { prompt }) => { turns.push({ agentId, prompt }); return { id: `run-${agentId}` }; },
     specialists: { ensureMain: () => {}, get: id => store.get('specialist', id) },
   };
   return { desk, store, answered, turns };
 }
 
 // A fake Telegram server. Records every outgoing call; sendMessage returns incrementing message ids.
-function makeFetcher({ updates = [], file = null, fileBytes = Buffer.from('audio') } = {}) {
+function makeFetcher({ updates = [], file = null, fileBytes = Buffer.from('audio'), failFiles = 0 } = {}) {
   const sent = []; let nextId = 100;
   const fetcher = async (urlString, options) => {
     const url = new URL(urlString);
-    if (url.pathname.includes('/file/bot')) return { ok: true, arrayBuffer: async () => fileBytes };
+    if (url.pathname.includes('/file/bot')) { sent.push({ method: 'file', path: url.pathname }); if (failFiles > 0) { failFiles -= 1; throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }); } return { ok: true, arrayBuffer: async () => fileBytes }; }
     const method = url.pathname.split('/').pop();
     const body = options?.body ? JSON.parse(options.body) : {};
     sent.push({ method, body });
@@ -207,17 +208,17 @@ test('a reply to an agent message goes into that agent chat; a message from a di
   assert.equal(turns.length, 0, 'a message from an unlinked chat is never routed');
   // Right chat, reply to the agent message: routed to that agent.
   await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: 'go ahead', reply_to_message: { message_id: agentMsgId } } }, found);
-  assert.deepEqual(turns, [{ agentId: 'web', prompt: 'go ahead' }]);
+  assert.deepEqual(turns, [{ agentId: 'web', prompt: '[Telegram] go ahead' }]);
 });
 
-test('a plain non-reply message goes to Rex Agent (main)', async () => {
+test('a plain non-reply message goes to Rex Agent (main) when no agent has written on Telegram yet', async () => {
   const { desk, store, turns } = makeDesk();
   linkedStore(store);
   const { fetcher } = makeFetcher();
   const bridge = new TelegramBridge(desk, { fetcher });
   const found = telegramLink(store);
   await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'what is up' } }, found);
-  assert.deepEqual(turns, [{ agentId: 'main', prompt: 'what is up' }]);
+  assert.deepEqual(turns, [{ agentId: 'main', prompt: '[Telegram] what is up' }]);
   // A bot command is not routed.
   await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: '/start' } }, found);
   assert.equal(turns.length, 1);
@@ -353,4 +354,64 @@ test('link: a pairing code far back in a long queue is found by moving through t
   assert.deepEqual(reads, [0, 1100, 1200, 1250]);
   reads.length = 0; await other.link();
   assert.deepEqual(reads, [1250], 'a second press does not reread the old batches');
+});
+
+// ---------- personal chat: no Reply needed, replies come back, voice and files ----------
+
+const tempDir = () => mkdtempSync(path.join(os.tmpdir(), 'rex-tg-'));
+
+test('plain message with no Reply goes to the agent that last wrote on Telegram; a Reply still picks that message agent', async () => {
+  const { desk, store, turns } = makeDesk();
+  linkedStore(store);
+  store.put('specialist', 'web', { id: 'web', name: 'Web Agent' });
+  store.put('specialist', 'qa', { id: 'qa', name: 'QA Agent' });
+  const bridge = new TelegramBridge(desk, { fetcher: makeFetcher().fetcher });
+  const found = telegramLink(store);
+  await bridge.sendFromAgent('web', 'Web Agent', 'build is ready');
+  const webMsg = Number(store.list('tgmsg').find(item => item.agentId === 'web').id);
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'nice, ship it' } }, found);
+  assert.equal(turns.at(-1).agentId, 'web', 'no Reply: the agent that last wrote gets it');
+  // A question from the QA Agent makes it the last one that wrote.
+  store.put('run', 'qa-run', { id: 'qa-run', specialistId: 'qa' });
+  await bridge.onAsk({ id: 'i1', runId: 'qa-run', method: 'desk', kind: 'question', title: 'Which build?', request: { requestedSchema: {} } });
+  await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: 'how is the test going' } }, found);
+  assert.equal(turns.at(-1).agentId, 'qa');
+  // A Reply on the older Web Agent message still goes to the Web Agent.
+  await bridge.handleUpdate({ update_id: 3, message: { chat: { id: 555 }, text: 'and you?', reply_to_message: { message_id: webMsg } } }, found);
+  assert.equal(turns.at(-1).agentId, 'web');
+  // An agent that was removed: back to Rex Agent.
+  store.delete('specialist', 'web');
+  await bridge.handleUpdate({ update_id: 4, message: { chat: { id: 555 }, text: 'anyone?' } }, found);
+  assert.equal(turns.at(-1).agentId, 'main');
+});
+
+test('a turn started from Telegram sends its final reply back once; app turns and agents that already texted are not sent', async () => {
+  const { desk, store } = makeDesk();
+  linkedStore(store);
+  store.put('specialist', 'web', { id: 'web', name: 'Web Agent' });
+  const { fetcher, sent } = makeFetcher();
+  const bridge = new TelegramBridge(desk, { fetcher });
+  const found = telegramLink(store);
+  const texts = () => sent.filter(call => call.method === 'sendMessage').map(call => call.body.text);
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'what is up' } }, found);
+  await bridge.onTurnResult('run-main', 'All good here.');
+  await bridge.onTurnResult('run-main', 'All good here.');
+  assert.deepEqual(texts(), ['Rex Agent\nAll good here.'], 'sent once, with the agent name');
+  // A turn started in the app (no Telegram mark) never goes to Telegram.
+  await bridge.onTurnResult('run-web', 'app only');
+  assert.equal(texts().length, 1);
+  // The agent texted the person itself during the Telegram turn: the final reply is not sent again.
+  await bridge.sendFromAgent('web', 'Web Agent', 'hi');
+  await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: 'status?' } }, found);
+  await bridge.sendFromAgent('web', 'Web Agent', 'Deploying now.');
+  await bridge.onTurnResult('run-web', 'Deploying now.');
+  assert.deepEqual(texts().slice(1), ['Web Agent\nhi', 'Web Agent\nDeploying now.']);
+  // A long reply is split cleanly into Telegram-sized parts, never cut mid-word.
+  await bridge.handleUpdate({ update_id: 3, message: { chat: { id: 555 }, text: 'long one please' } }, found);
+  const long = Array.from({ length: 120 }, (_, index) => `Paragraph ${index} has some words in it to make it long enough.`).join('\n\n');
+  await bridge.onTurnResult('run-web', long);
+  const parts = texts().slice(3);
+  assert.ok(parts.length >= 2 && parts.every(part => part.length <= 3800));
+  assert.equal(parts.join('\n\n').replace('Web Agent\n', ''), long);
+  assert.ok(splitReply('x'.repeat(20000)).length <= 4);
 });
