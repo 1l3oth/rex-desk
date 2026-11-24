@@ -141,8 +141,9 @@ export class TelegramBridge {
   answerField(schema) { const keys = Object.keys(schema.properties || {}); return keys[0] || 'answer'; }
 
   // ---- Incoming: the long-poll loop ----
-  start() { if (this.running) return; this.running = true; void this.loop(); }
-  stop() { this.running = false; this.abort?.abort(); }
+  start() { if (this.running) return; this.running = true; this.loopDone = this.loop(); }
+  // Stops polling and resolves once the loop has ended, so the store can be closed safely afterwards.
+  async stop() { this.running = false; this.abort?.abort(); this.wake?.(); await this.loopDone; this.loopDone = null; }
   kick() { /* wake an idling loop promptly after a link */ this.wake?.(); }
 
   async loop() {
@@ -154,13 +155,12 @@ export class TelegramBridge {
         const offset = this.store.get('telegram', 'state')?.offset || 0;
         this.abort = new AbortController();
         const updates = await this.callAbortable(found.values.botToken, 'getUpdates', { offset, timeout: 45, allowed_updates: ['message', 'callback_query'] }, 55000, this.abort.signal);
-        let highest = offset - 1;
         for (const update of updates) {
-          highest = Math.max(highest, update.update_id);
+          if (!this.running) break;
           // Read the link fresh for each update: a Relink code or a new linked chat may have been saved during the long poll.
           try { await this.handleUpdate(update, telegramLink(this.store) || found); } catch (error) { this.store.event?.('', 'telegram-error', { message: error.message }, true); }
+          this.store.put('telegram', 'state', { id: 'state', offset: Math.max(offset, update.update_id + 1) });
         }
-        if (updates.length) this.store.put('telegram', 'state', { id: 'state', offset: highest + 1 });
       } catch (error) {
         if (!this.running) break;
         // 409 (another getUpdates in flight) or a network blip: back off and retry.

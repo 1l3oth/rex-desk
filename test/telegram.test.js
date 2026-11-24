@@ -244,3 +244,36 @@ test('voice note: transcribed when a transcriber is available, posted as audio w
   assert.equal(noStt.turns.at(-1).agentId, 'main');
   assert.match(noStt.turns.at(-1).prompt, /not transcribed/);
 });
+
+test('stop waits for the poll loop, so nothing writes to the store after it resolves', async () => {
+  const { desk, store } = makeDesk();
+  linkedStore(store);
+  let polls = 0, inTurn;
+  const turnStarted = new Promise(resolve => { inTurn = resolve; });
+  // The agent turn for the message is slow; stop is called in the middle of it.
+  desk.specialistTurn = async () => { inTurn(); await new Promise(resolve => setTimeout(resolve, 50)); };
+  const fetcher = async (urlString, options) => {
+    polls += 1;
+    if (polls === 1) return { ok: true, json: async () => ({ ok: true, result: [{ update_id: 41, message: { chat: { id: 555 }, text: 'hi' } }] }) };
+    await new Promise((resolve, reject) => options.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
+  };
+  const bridge = new TelegramBridge(desk, { fetcher });
+  bridge.start();
+  await turnStarted;
+  let closed = false; const writes = [];
+  const put = store.put; store.put = (...args) => { if (closed) writes.push(args[0]); return put(...args); };
+  await bridge.stop(); closed = true;
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(store.get('telegram', 'state').offset, 42, 'the handled update is saved before stop resolves');
+  assert.deepEqual(writes, [], 'nothing is written after stop resolves');
+  assert.equal(polls, 1, 'no new poll after stop');
+});
+
+test('stop while idling (not linked yet) resolves at once', async () => {
+  const { desk, store } = makeDesk();
+  linkedStore(store, { botToken: 'T:tok' });
+  const bridge = new TelegramBridge(desk, { fetcher: makeFetcher().fetcher });
+  bridge.start();
+  const started = Date.now(); await bridge.stop();
+  assert.ok(Date.now() - started < 1000, 'the 8 s idle sleep is woken by stop');
+});

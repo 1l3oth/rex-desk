@@ -296,7 +296,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (!session) return;
     const { desk, store, id } = session; session = null;
     if (forget) accounts?.forget(id);
-    desk.phoneRelay?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
+    // Telegram polling writes the update offset to the store, so it is stopped (and its loop awaited) before the store closes.
+    desk.phoneRelay?.stop(); await desk.telegram?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
   }
   const speakerOf = () => (session.speaker ||= new Speaker(session.store));
   const role = () => accounts ? accounts.role(session?.email) : 'superadmin';
