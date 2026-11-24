@@ -2588,5 +2588,7 @@
  "Older messages are deleted on their own, here and in the cloud. Agent memory, tasks and pinned items stay.": "សារចាស់ៗត្រូវបានលុបដោយខ្លួនឯង ទាំងនៅទីនេះ និងក្នុងពពក។ ការចងចាំរបស់ភ្នាក់ងារ កិច្ចការ និងធាតុដែលបានខ្ទាស់ នៅដដែល។",
  "Keep chat history for {0}? Messages older than that are deleted now and from then on, here and in the cloud. Agent memory, tasks and pinned items stay.": "រក្សាប្រវត្តិជជែករយៈពេល {0}? សារដែលចាស់ជាងនេះនឹងត្រូវលុបឥឡូវ និងតទៅទៀត ទាំងនៅទីនេះ និងក្នុងពពក។ ការចងចាំរបស់ភ្នាក់ងារ កិច្ចការ និងធាតុដែលបានខ្ទាស់ នៅដដែល។",
  "Saved. 1 old message deleted.": "បានរក្សាទុក។ សារចាស់ ១ ត្រូវបានលុប។",
- "Saved. {0} old messages deleted.": "បានរក្សាទុក។ សារចាស់ {0} ត្រូវបានលុប។"
+ "Saved. {0} old messages deleted.": "បានរក្សាទុក។ សារចាស់ {0} ត្រូវបានលុប។",
+ "Show code changes after each change": "បង្ហាញការផ្លាស់ប្ដូរកូដ ក្រោយការផ្លាស់ប្ដូរនីមួយៗ",
+ "After an agent changes code, it makes a page of the change with plain notes and asks you to OK it. With a code reviewer on the team, it asks after the reviewer approves.": "ក្រោយភ្នាក់ងារផ្លាស់ប្ដូរកូដ វាធ្វើទំព័រមួយនៃការផ្លាស់ប្ដូរ ជាមួយកំណត់ចំណាំងាយៗ ហើយសុំឲ្យអ្នកយល់ព្រម។ បើក្រុមមានអ្នកពិនិត្យកូដ វាសុំក្រោយអ្នកពិនិត្យយល់ព្រមរួច។"
 }

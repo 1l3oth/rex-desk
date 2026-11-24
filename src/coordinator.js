@@ -1098,7 +1098,7 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const project = this.projectOf(run), workflow = project ? this.memory.workflowText(project) : '';
     // The first task an agent finishes on a project ends with the person checking the workflow it followed, once.
     const review = project && !this.memory.workflowConfirmed(project) ? `${firstTaskReview(project)}\n` : '';
-    return `${common}\n${who}${EVIDENCE_RULE}\n${workflow ? `${workflow}\n` : ''}${review}${WORKFLOW_RULE}\n${this.taskPrompt(run, task, lessons)}`;
+    return `${common}\n${who}${EVIDENCE_RULE}\n${this.specialists.explainText(this.store.get('specialist', run.specialistId || '') || { projectSlug: project })}\n${workflow ?`${workflow}\n` : ''}${review}${WORKFLOW_RULE}\n${this.taskPrompt(run, task, lessons)}`;
   }
   // What an agent is told when an issue is fired at it: the issue itself, where its code lives, and that the job is to
   // find the cause and report it. Fixing comes after the human reads that report and says so.

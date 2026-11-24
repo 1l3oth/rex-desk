@@ -7,7 +7,10 @@ import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync } from 'node:f
 import path from 'node:path';
 import os from 'node:os';
 import { findProjectLogo } from './project-logo.js';
-const EXPLAINER = path.join(os.homedir(), '.agents', 'skills', 'code-explainer-page');
+import { fileURLToPath } from 'node:url';
+// The skills that ship with Rex Desk (skills/ next to src/, also in the desktop app): every agent of every person has them.
+export const SKILLS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills');
+const skillFile = name => path.join(SKILLS, name, 'SKILL.md');
 // Explaining an idea, a cause or how something works: a picture page in eli5 style, the way the person likes to learn.
 export const LOOP_EVERY = [15, 30, 60, 120, 240, 1440];
 const LOOP_DEFAULT = { on: true, every: 60, prompt: '', hours: { on: false, start: '08:00', end: '17:00', days: [1, 2, 3, 4, 5] } };
@@ -25,16 +28,19 @@ export function inHours(hours, date = new Date()) {
   return at >= start ? hours.days.includes(date.getDay()) : at < end && hours.days.includes((date.getDay() + 6) % 7);
 }
 const cleanLoop = loop => ({ ...(loop.hours !== undefined ? { hours: cleanHours(loop.hours) } : {}), ...(loop.on !== undefined ? { on: Boolean(loop.on) } : {}), ...(loop.every !== undefined ? { every: LOOP_EVERY.includes(Number(loop.every)) ? Number(loop.every) : 60 } : {}), ...(loop.prompt !== undefined ? { prompt: String(loop.prompt || '').slice(0, 2000) } : {}) });
-export const ELI5_RULE = 'When you explain to the person how something works, why something broke, what a choice means, or anything longer than a few lines, explain like they are five: big pictures, few words. Make one self-contained HTML page named eli5-<short-topic>.html in your work folder (inline CSS and inline SVG drawings only, no external files, no emoji; a few numbered picture steps, each with one or two plain sentences; light and dark friendly), never open it yourself, and show it with desk_show_page beside a two or three line answer in the chat. For your own code changes use the code explainer page instead. Short answers and yes/no questions stay plain chat.';
-// When the person asks what you changed, they get a page to read, not a wall of text.
-const EXPLAIN_RULE = existsSync(path.join(EXPLAINER, 'scripts', 'render.mjs'))
-  ? ` When the person asks what you changed or to explain your changes or the code, make a code explainer page: follow ${path.join(EXPLAINER, 'SKILL.md')} (read it first), render the page with \`node "${path.join(EXPLAINER, 'scripts', 'render.mjs')}" <spec.json> --out <folder>/code-explainer-<slug>.html\` (never --open), then show it with desk_show_page and write two or three plain lines beside it.`
-  : ' When the person asks what you changed or to explain your changes or the code, make one self-contained HTML page (inline CSS and JS, no internet) with the changed code, plain notes beside the lines and a short picture of the idea, then show it with desk_show_page and write two or three plain lines beside it.';
+export const ELI5_RULE = `When you explain how something works, why something broke or what a choice means (anything longer than a few lines), use the rex-eli5 skill: read ${skillFile('rex-eli5')} and follow it.`;
+// After each code change the person gets a page of it to read and OK (Settings, Agents, "Show code changes after each change").
+// With a code reviewer on the team the page waits for the reviewer's approval; without one it goes to the person at once.
+export function explainRule({ on = true, reviewer = '' } = {}) {
+  const how = `use the rex-code-explainer skill: read ${skillFile('rex-code-explainer')} and follow it`;
+  if (!on) return `When the person asks what you changed or to explain code, ${how}.`;
+  return `After you change code, always ${how}, then show the page with desk_show_page and needsOk: true, ${reviewer ? `only once ${reviewer} (the team's code reviewer) has approved the change` : 'right away, asking the person to OK the change'}.`;
+}
 // Short standing rules every chat agent gets (L62: the start prompt stays small; the long versions were re-sent on every step).
 export const NOTICE_RULE = 'Notice what the person likes and dislikes from how they react (corrections, praise, frustration, repeats) and save it with desk_learn_person (pass replaces when it changes an old note); what they say now wins over old notes.';
 export const LEARN_RULE = 'When the person corrects you or tells you how they want something done, save one short, general lesson with desk_learn, then follow it. Never save secrets.';
 export const WORKFLOW_RULE = 'When the person tells you how work on a project is done (branch, pull request target, testing, sign-in, review, what never to touch) or corrects a step, save it at once as one short rule with desk_learn_workflow (pass replaces when it changes an old rule). Check those rules before asking the person how something is done.';
-export const EVIDENCE_RULE = 'Whenever you test something (run the tests, check it in a browser or the app), share the proof with desk_share_evidence: a screenshot or a short screen recording of what you saw, or the test output file, marked passed or failed, with one line on what you tested. It is posted in the chat you are talking in and kept on the task, so the person can check your work without asking.' + EXPLAIN_RULE;
+export const EVIDENCE_RULE = 'Whenever you test something (run the tests, check it in a browser or the app), share the proof with desk_share_evidence: a screenshot or a short screen recording of what you saw, or the test output file, marked passed or failed, with one line on what you tested. It is posted in the chat you are talking in and kept on the task, so the person can check your work without asking.';
 
 const now = () => new Date().toISOString();
 const slugOf = name => String(name).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 40);
@@ -302,6 +308,12 @@ export class Specialists {
     return this.store.list('task').filter(task => !task.demo && (task.active || task.local) && task.status !== 'done')
       .filter(task => task.local ? sources.includes('local') && (task.assignee === agent.id || (!task.assignee && (!task.projectSlug || task.projectSlug === agent.projectSlug))) : sources.includes(task.sourceId));
   }
+  // The code reviewer on this agent's team: another agent of the same project whose name or purpose says it reviews code.
+  reviewerOf(agent) {
+    if (!agent?.projectSlug) return '';
+    return this.list().find(item => item.id !== agent.id && item.projectSlug === agent.projectSlug && /review/i.test(`${item.name} ${item.purpose || ''}`))?.name || '';
+  }
+  explainText(agent) { return explainRule({ on: this.store.config().showChanges !== false, reviewer: this.reviewerOf(agent) }); }
   identity(agent) {
     const folder = this.folder(agent);
     const who = agent.projectSlug ? `the specialist agent for the project "${agent.projectSlug}"${folder ? ` at ${folder}` : ''}`
@@ -310,7 +322,7 @@ export class Specialists {
       agent.purpose && agent.projectSlug ? `What the project is for: ${agent.purpose}` : '', agent.rules ? `Rules from the person:\n${agent.rules}` : '', agent.unsure?.length ? `Still unsure about: ${agent.unsure.join('; ')}` : '', this.tasksText(agent),
       this.memory.chatStyle(), this.memory.personBrief(), this.lessonsText(agent.id), this.desk.notes?.contextText(agent.id) || '', NOTICE_RULE, this.memory.secondBrainPointer(),
       LEARN_RULE,
-      EVIDENCE_RULE,
+      EVIDENCE_RULE, this.explainText(agent),
       this.memory.workflowText(agent.projectSlug), WORKFLOW_RULE,
       `${agent.projectSlug ? `Read your project's memory first: desk_memory("${agent.projectSlug}"). You work in this project the way the person asks: read it, answer, change it, test it and send it out.` : 'You work the way the person asks.'} Always call a task by its English name. Do what the person asks; when widening the scope (sub-tasks, related tasks, other projects) is not clearly what they want, ask first. Use desk_rooms and desk_room_history to read any group chat you are in.`].filter(Boolean).join('\n');
   }
