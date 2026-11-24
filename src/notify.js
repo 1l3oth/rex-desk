@@ -49,6 +49,7 @@ export class Notifier {
     for (const run of this.store.list('run')) this.states.set(run.id, run.state);
     for (const item of this.store.list('interaction')) this.seen.add(item.id);
     for (const item of this.store.list('roommsg')) this.seen.add(`msg:${item.id}`);
+    for (const copy of this.store.list('chatcopy')) for (const ask of copy.asks || []) this.seen.add(ask.id);
     this.store.on('change', event => { try { this.onChange(event); } catch { /* a notification never breaks the app */ } });
     return this;
   }
@@ -101,6 +102,17 @@ export class Notifier {
       if (!item || item.state !== 'pending' || this.seen.has(id)) return;
       this.seen.add(id);
       this.notify({ kind: 'ask', title: `${['approval', 'review'].includes(item.kind) ? 'Needs your OK' : 'Needs your answer'} · ${this.runTitle(this.store.get('run', item.runId))}`, body: item.title, target: { type: 'inbox', id: '' } });
+    } else if (kind === 'chatcopy') {
+      // An agent on another computer asks: its question comes here only inside the synced copy of its chat, never as an
+      // interaction of this computer, so it needs its own pop-up and sound. The copies of this computer's own chats are skipped.
+      const copy = this.store.get('chatcopy', id);
+      if (!copy || this.store.get('run', id)) return;
+      for (const ask of copy.asks || []) {
+        if (!ask?.id || this.seen.has(ask.id) || (ask.state && ask.state !== 'pending') || this.store.get('interaction', ask.id)) continue;
+        this.seen.add(ask.id);
+        const agent = (copy.agentId && this.store.get('specialist', copy.agentId)?.name) || copy.run?.title || 'An agent';
+        this.notify({ kind: 'ask', title: `${['approval', 'review'].includes(ask.kind) ? 'Needs your OK' : 'Needs your answer'} · ${agent}`, body: ask.title || 'An agent is waiting for you.', target: { type: 'inbox', id: '' }, from: agent });
+      }
     } else if (kind === 'run') {
       const run = this.store.get('run', id); if (!run) return;
       const before = this.states.get(id); this.states.set(id, run.state);

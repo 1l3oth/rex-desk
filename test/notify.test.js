@@ -84,3 +84,16 @@ test('a phone push goes to the private ntfy topic with the title and priority, o
   assert.equal(sent[0].options.body, '어느 브랜치?');
   notifier.setPrefs({ push: { newTopic: true } }); assert.notEqual(notifier.prefs().push.topic, topic);
 });
+
+test('a question from an agent on another computer, synced in its chat copy, tells the person once; copies of local chats stay quiet', () => {
+  const { store, shown } = setup();
+  store.put('specialist', 'sp1', { id: 'sp1', name: 'Sokha' });
+  const ask = { id: 'rq1', runId: 'remote1', kind: 'review', title: 'Check the new pop-up', state: 'pending', createdAt: now() };
+  store.put('chatcopy', 'remote1', { id: 'remote1', agentId: 'sp1', run: { id: 'remote1', title: 'Sokha chat' }, events: [], asks: [ask], at: now() });
+  store.put('chatcopy', 'remote1', { id: 'remote1', agentId: 'sp1', run: { id: 'remote1', title: 'Sokha chat' }, events: [], asks: [ask], at: now() });
+  assert.equal(shown.length, 1);
+  assert.match(shown[0][0], /Needs your OK · Sokha/); assert.match(shown[0][1], /Check the new pop-up/);
+  store.put('chatcopy', 'r1', { id: 'r1', run: { id: 'r1' }, events: [], asks: [{ ...ask, id: 'lq1', runId: 'r1' }], at: now() });
+  store.put('chatcopy', 'remote1', { id: 'remote1', agentId: 'sp1', run: { id: 'remote1' }, events: [], asks: [{ ...ask, id: 'rq2', state: 'answered' }], at: now() });
+  assert.equal(shown.length, 1, 'the copy of a local chat and an answered ask make no pop-up');
+});

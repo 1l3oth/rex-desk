@@ -25,7 +25,13 @@ let audio = null;
 export function playTone(tone = 'chime', kind = 'reply', volume = 0.6) {
   try {
     audio ||= new (window.AudioContext || window.webkitAudioContext)();
-    if (audio.state === 'suspended') void audio.resume();
+    // A sound started while the context is still suspended was lost: play only once resume() has finished.
+    if (audio.state === 'suspended') { audio.resume().then(() => playNotes(tone, kind, volume), () => {}); return; }
+    playNotes(tone, kind, volume);
+  } catch { /* no sound on this device */ }
+}
+function playNotes(tone, kind, volume) {
+  try {
     const notes = kind === 'ask' || kind === 'mention' ? [[784, 0], [988, 0.11], [1319, 0.22]] : kind === 'failed' ? [[392, 0], [294, 0.16]]
       : { chime: [[880, 0], [1319, 0.12]], soft: [[660, 0]], pop: [[520, 0], [780, 0.06]], bell: [[1047, 0], [1568, 0.02]] }[tone] || [[880, 0]];
     const start = audio.currentTime + 0.01, master = audio.createGain(); master.gain.value = Math.max(0, Math.min(1, volume)) * 0.35; master.connect(audio.destination);
@@ -36,6 +42,14 @@ export function playTone(tone = 'chime', kind = 'reply', volume = 0.6) {
       osc.connect(gain); gain.connect(master); osc.start(start + offset); osc.stop(start + offset + length + 0.05);
     }
   } catch { /* no sound on this device */ }
+}
+
+// Browsers and the desktop window keep page sound locked until the person clicks or types once: unlock it on that first
+// gesture, so a later Needs you chime is heard even if nothing has played yet.
+if (typeof window !== 'undefined') {
+  const unlock = () => { try { audio ||= new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === 'suspended') void audio.resume().catch(() => {}); } catch { /* no sound */ } };
+  window.addEventListener('pointerdown', unlock, { once: true, capture: true });
+  window.addEventListener('keydown', unlock, { once: true, capture: true });
 }
 
 // ---------- the list, a dropdown under the bell ----------

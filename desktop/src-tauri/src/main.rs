@@ -131,7 +131,7 @@ fn badge_dot() -> &'static [u8] {
 }
 
 // Wry's default flags stay. Pop-ups share the main window's browser, so they get the same flags.
-const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
 
 // Windows (WebView2): the window never showed the microphone prompt, so voice failed with NotAllowedError. For the
 // microphone on Rex Desk's own page (127.0.0.1:4317) in the main window, Rex Desk asks itself with a Windows Yes/No box;
