@@ -178,7 +178,8 @@ export class TelegramBridge {
     this.store.delete('tgturn', runId);
     if (turn.sent || Date.now() - Date.parse(turn.at) > TURN_TTL_MS || !String(text || '').trim()) return;
     const found = telegramLink(this.store);
-    if (!found?.values?.chatId || found.link.id !== turn.linkId) return;
+    // Only to the chat the message came from: a Relink keeps the connection but may link another chat, which never gets it.
+    if (!found?.values?.chatId || found.link.id !== turn.linkId || String(found.values.chatId) !== String(turn.chatId ?? '')) return;
     const name = turn.agentId === 'main' ? 'Rex Agent' : this.store.get('specialist', turn.agentId)?.name || 'Agent';
     try { await this.sendParts(found, turn.agentId, name, text); }
     catch (error) { this.store.event?.('', 'telegram-error', { message: `reply: ${error.message}` }, true); }
@@ -403,8 +404,9 @@ export class TelegramBridge {
     const run = await this.desk.specialistTurn(agentId, { prompt });
     if (run?.id && found) {
       const at = new Date().toISOString(), queued = (this.store.get('run', run.id)?.queued || []).some(entry => String(entry ?? '').trim() === prompt.trim());
-      if (queued) { const key = randomUUID(); this.store.put('tgqueued', key, { id: key, runId: run.id, text: prompt.trim(), agentId, linkId: found.link.id, at }); }
-      else this.store.put('tgturn', run.id, { id: run.id, agentId, linkId: found.link.id, at, sent: false, texts: [], direct: true });
+      const chatId = String(found.values.chatId);
+      if (queued) { const key = randomUUID(); this.store.put('tgqueued', key, { id: key, runId: run.id, text: prompt.trim(), agentId, linkId: found.link.id, chatId, at }); }
+      else this.store.put('tgturn', run.id, { id: run.id, agentId, linkId: found.link.id, chatId, at, sent: false, texts: [], direct: true });
     }
     this.noteLastAgent(found, agentId);
   }
@@ -415,7 +417,7 @@ export class TelegramBridge {
     const mine = this.store.list('tgqueued').filter(item => item.runId === runId && texts.has(item.text));
     if (!mine.length) return;
     const first = mine[0], old = this.store.get('tgturn', runId);
-    this.store.put('tgturn', runId, { id: runId, agentId: first.agentId, linkId: first.linkId, at: new Date().toISOString(), sent: false,
+    this.store.put('tgturn', runId, { id: runId, agentId: first.agentId, linkId: first.linkId, chatId: first.chatId, at: new Date().toISOString(), sent: false,
       texts: [...(old?.texts || []), ...mine.map(item => item.text)], direct: Boolean(old?.direct) });
     for (const item of mine) this.store.delete('tgqueued', item.id);
   }
@@ -424,7 +426,7 @@ export class TelegramBridge {
     const turn = this.store.get('tgturn', runId); if (!turn?.texts?.length) return;
     const back = new Set(entries.map(entry => String(entry ?? '').trim())), returned = turn.texts.filter(text => back.has(text));
     if (!returned.length) return;
-    for (const text of returned) { const key = randomUUID(); this.store.put('tgqueued', key, { id: key, runId, text, agentId: turn.agentId, linkId: turn.linkId, at: turn.at }); }
+    for (const text of returned) { const key = randomUUID(); this.store.put('tgqueued', key, { id: key, runId, text, agentId: turn.agentId, linkId: turn.linkId, chatId: turn.chatId, at: turn.at }); }
     const left = turn.texts.filter(text => !back.has(text));
     if (left.length || turn.direct) this.store.put('tgturn', runId, { ...turn, texts: left });
     else this.store.delete('tgturn', runId);

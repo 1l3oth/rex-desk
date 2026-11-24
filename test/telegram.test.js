@@ -594,3 +594,38 @@ test('a Telegram message queued behind an app turn: the app reply stays in the a
   assert.deepEqual(texts(), ['Web Agent\nShipped.']);
   assert.equal(store.list('tgqueued').length, 0);
 });
+
+test('a pending Telegram reply goes only to the chat it came from: after a relink to another chat it is not sent', async () => {
+  const { desk, store } = makeDesk();
+  linkedStore(store);
+  store.put('specialist', 'web', { id: 'web', name: 'Web Agent' });
+  store.put('run', 'run-web', { id: 'run-web', queued: [] });
+  const { fetcher, sent } = makeFetcher();
+  const bridge = new TelegramBridge(desk, { fetcher });
+  const texts = () => sent.filter(call => call.method === 'sendMessage').map(call => ({ chat: call.body.chat_id, text: call.body.text }));
+  let found = telegramLink(store);
+  // A direct turn from chat 555, then a relink (same connection) to chat 777 before the reply is ready.
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'what is up' } }, found);
+  assert.equal(store.get('tgturn', 'run-main').chatId, '555');
+  linkedStore(store, { botToken: 'T:tok', chatId: 777, chatName: 'Someone else' });
+  await bridge.onTurnResult('run-main', 'private answer');
+  assert.deepEqual(texts(), [], 'the new chat never gets the old chat reply');
+  // A message queued behind an app turn keeps its chat too, through hand-over and give-back.
+  linkedStore(store);
+  found = telegramLink(store);
+  desk.specialistTurn = async (agentId, { prompt }) => { const run = store.get('run', 'run-web'); store.put('run', 'run-web', { ...run, queued: [...run.queued, prompt] }); return { id: 'run-web' }; };
+  store.put('tgmsg', '1', { id: '1', kind: 'agent', agentId: 'web', linkId: found.link.id });
+  await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: 'ship it?', reply_to_message: { message_id: 1 } } }, found);
+  const queued = store.get('run', 'run-web').queued;
+  bridge.onDelivered('run-web', queued); bridge.onRequeued('run-web', queued); bridge.onDelivered('run-web', queued);
+  assert.equal(store.get('tgturn', 'run-web').chatId, '555');
+  linkedStore(store, { botToken: 'T:tok', chatId: 777, chatName: 'Someone else' });
+  await bridge.onTurnResult('run-web', 'Shipped.');
+  assert.deepEqual(texts(), []);
+  // Still linked to the same chat: the reply goes out as before.
+  linkedStore(store);
+  await bridge.handleUpdate({ update_id: 3, message: { chat: { id: 555 }, text: 'and now?', reply_to_message: { message_id: 1 } } }, telegramLink(store));
+  bridge.onDelivered('run-web', store.get('run', 'run-web').queued);
+  await bridge.onTurnResult('run-web', 'Done.');
+  assert.deepEqual(texts(), [{ chat: 555, text: 'Web Agent\nDone.' }]);
+});
