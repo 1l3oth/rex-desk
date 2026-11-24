@@ -317,16 +317,24 @@ test('a slow voice engine load cannot overwrite a newer voice save in the cache'
     // Open once so the cache holds the voice lists, then hold back the next load with its old answer.
     await openJev(page); await page.waitForTimeout(1500);
     await page.evaluate(() => document.querySelector('.settings-pop [data-st-close]').click());
-    let release = () => {}, held = false;
+    let release = () => {}, held = false, answered = null;
     const gate = new Promise(done => { release = done; });
-    await page.route('**/api/speak/engine', async route => { if (route.request().method() !== 'GET') return route.continue(); const reply = await route.fetch(); held = true; await gate; await route.fulfill({ response: reply }); });
+    const oldAnswer = new Promise(done => { answered = done; });
+    await page.route('**/api/speak/engine', async route => { if (route.request().method() !== 'GET') return route.continue(); const reply = await route.fetch(); held = true; await gate; await route.fulfill({ response: reply }); answered(); });
     await openJev(page);
     for (let i = 0; i < 100 && !held; i++) await page.waitForTimeout(50);
     assert.ok(held, 'test setup: the first load holds an old answer');
+    // Waits on what really happens, not on fixed times: a slow CI runner once took longer than the old 5 s and 1 s sleeps,
+    // so the old answer was let go before the newer save had landed and the check read the cache too early.
+    const saved = page.waitForResponse(response => response.url().endsWith('/api/speak/engine') && response.request().method() === 'POST', { timeout: 30000 });
     await pickEngine(page, 'fish');
+    assert.equal((await (await saved).json()).engine, 'fish', 'test setup: the newer save answered');
     const cachedEngine = () => page.evaluate(() => JSON.parse(localStorage.getItem('rex-desk-speak-cache') || '{}').tts?.engine);
-    for (let i = 0; i < 50 && await cachedEngine() !== 'fish'; i++) await page.waitForTimeout(100);
-    release(); await page.waitForTimeout(1000);
+    for (let i = 0; i < 300 && await cachedEngine() !== 'fish'; i++) await page.waitForTimeout(100);
+    assert.equal(await cachedEngine(), 'fish', 'test setup: the newer save is in the cache before the old answer comes');
+    release(); await oldAnswer;
+    // The page has read the old answer once its fetch resolved; give its handler a moment to (wrongly) write it.
+    await page.evaluate(() => new Promise(done => setTimeout(done, 300)));
     assert.equal(await cachedEngine(), 'fish', 'the cache keeps the newer save');
     assert.equal(await page.locator('.settings-pop [data-st-tts="engine"]').inputValue(), 'fish', 'the screen keeps the newer save');
     // The next load fails: the tab shows the saved engine from the cache.
