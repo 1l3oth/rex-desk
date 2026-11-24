@@ -43,7 +43,6 @@ function teamFlow(ctx) {
 // The example playbook: a generic team, the flow a task moves through, and the rules it follows.
 function playbookPanel(ctx) {
   const esc = ctx.esc;
-  const total = EXAMPLE_TEAM.length;
   const mateRows = EXAMPLE_TEAM
     .map(agent => `<li class="exp-mate"><span class="exp-mate-name">${esc(agent.name)}</span><span class="exp-mate-bio">${esc(agent.job)}</span></li>`).join('');
   const rules = [
@@ -60,7 +59,6 @@ function playbookPanel(ctx) {
   return `<div class="page exp"><article class="exp-doc">
     <section class="exp-sec exp-orch">
       <h3>${t`An example team`}</h3>
-      <p class="exp-quiet">${total ? t`${total} agents, each with one job.` : ''}</p>
       <p class="exp-flow-cap">${t`How a task flows`}</p>
       ${teamFlow(ctx)}
       ${mateRows ? `<ul class="exp-team">${mateRows}</ul>` : ''}
