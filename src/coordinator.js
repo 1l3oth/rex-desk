@@ -317,6 +317,7 @@ export class Desk {
     const run = this.store.get('run', runId); if (!run || !back.length) return;
     this.store.put('run', runId, { ...run, queued: [...back, ...(run.queued || [])] });
     this.store.event(runId, 'inbox-returned', {});
+    this.telegram?.onRequeued?.(runId, back);
     // The turn already ended: the message starts the next one now.
     const waiting = this.store.get('run', runId);
     if (!this.live.has(runId) && !this.closed && ['needs_evidence', 'finished'].includes(waiting.state)) this.resumeQueued(runId, waiting);
@@ -325,6 +326,8 @@ export class Desk {
     const run = this.store.get('run', runId); if (!run?.queued?.length) return '';
     this.store.put('run', runId, { ...run, queued: [] });
     this.store.event(runId, 'inbox-delivered', { count: run.queued.length });
+    // A message from Telegram among them: this turn's final reply goes back there (src/telegram.js).
+    this.telegram?.onDelivered?.(runId, run.queued);
     return run.queued.join('\n\n');
   }
   // The person's Orbit account, when connected: every agent can search and read their goals, notes and knowledge.
@@ -1854,8 +1857,10 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // during it waits for the turn after; when resume fails they go back in front, so no report is lost.
   resumeQueued(runId, waiting) {
     const taken = waiting.queued; this.store.put('run', runId, { ...waiting, queued: [] });
+    this.telegram?.onDelivered?.(runId, taken);
     void this.resume(runId, { prompt: taken.join('\n'), silent: true }).catch(error => {
       const current = this.store.get('run', runId); if (current) this.store.put('run', runId, { ...current, queued: [...taken, ...(current.queued || [])] });
+      this.telegram?.onRequeued?.(runId, taken);
       this.store.event(runId, 'error', { message: error.message }, true);
     });
   }

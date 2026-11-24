@@ -564,3 +564,33 @@ test('an explicit send that fails keeps the automatic reply; only a send that wo
   await bridge.onTurnResult('run-web', 'Deployed.');
   assert.deepEqual(texts(), ['Web Agent\nfrom a room', 'Bug bot\nmorning report', 'Web Agent\nDeployed.'], 'the final reply still went out');
 });
+
+test('a Telegram message queued behind an app turn: the app reply stays in the app, the turn that takes it answers on Telegram', async () => {
+  const { desk, store } = makeDesk();
+  linkedStore(store);
+  store.put('specialist', 'web', { id: 'web', name: 'Web Agent' });
+  store.put('run', 'run-web', { id: 'run-web', queued: [] });
+  // The Web Agent is busy with a turn from the app: the message waits in its queue, as coordinator.say does.
+  desk.specialistTurn = async (agentId, { prompt }) => { const run = store.get('run', 'run-web'); store.put('run', 'run-web', { ...run, queued: [...run.queued, prompt] }); return { id: 'run-web' }; };
+  const { fetcher, sent } = makeFetcher();
+  const bridge = new TelegramBridge(desk, { fetcher });
+  const found = telegramLink(store);
+  const texts = () => sent.filter(call => call.method === 'sendMessage').map(call => call.body.text);
+  store.put('tgmsg', '1', { id: '1', kind: 'agent', agentId: 'web', linkId: found.link.id });
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: 'ship it?', reply_to_message: { message_id: 1 } } }, found);
+  assert.equal(store.get('tgturn', 'run-web'), null, 'the running app turn is not marked');
+  await bridge.onTurnResult('run-web', 'private app answer');
+  assert.deepEqual(texts(), [], 'the app turn reply never reaches Telegram');
+  // The queued message is handed to a turn, then given back unread: that turn does not answer on Telegram either.
+  const queued = store.get('run', 'run-web').queued;
+  bridge.onDelivered('run-web', queued);
+  bridge.onRequeued('run-web', queued);
+  await bridge.onTurnResult('run-web', 'another app answer');
+  assert.deepEqual(texts(), []);
+  // The turn that really takes it in answers on Telegram, once.
+  bridge.onDelivered('run-web', ['an app note', ...queued]);
+  await bridge.onTurnResult('run-web', 'Shipped.');
+  await bridge.onTurnResult('run-web', 'later app turn');
+  assert.deepEqual(texts(), ['Web Agent\nShipped.']);
+  assert.equal(store.list('tgqueued').length, 0);
+});

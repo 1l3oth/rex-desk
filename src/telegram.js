@@ -394,12 +394,40 @@ export class TelegramBridge {
   }
 
   // Start (or join) the agent's turn with the message marked as from Telegram, and mark that turn so its final reply is sent
-  // back to Telegram by itself.
+  // back to Telegram by itself. When the agent is busy with a turn from the app, the message waits in its queue: then only the
+  // queued message is marked (tgqueued), and the turn that takes it in is marked when it does (onDelivered). The app turn
+  // running now keeps its reply in the app.
   async routeToAgent(agentId, text, found = telegramLink(this.store)) {
     if (agentId === 'main') this.desk.specialists.ensureMain();
-    const run = await this.desk.specialistTurn(agentId, { prompt: fromTelegram(text) });
-    if (run?.id && found) this.store.put('tgturn', run.id, { id: run.id, agentId, linkId: found.link.id, at: new Date().toISOString(), sent: false });
+    const prompt = fromTelegram(text);
+    const run = await this.desk.specialistTurn(agentId, { prompt });
+    if (run?.id && found) {
+      const at = new Date().toISOString(), queued = (this.store.get('run', run.id)?.queued || []).some(entry => String(entry ?? '').trim() === prompt.trim());
+      if (queued) { const key = randomUUID(); this.store.put('tgqueued', key, { id: key, runId: run.id, text: prompt.trim(), agentId, linkId: found.link.id, at }); }
+      else this.store.put('tgturn', run.id, { id: run.id, agentId, linkId: found.link.id, at, sent: false, texts: [], direct: true });
+    }
     this.noteLastAgent(found, agentId);
+  }
+  // The coordinator handed queued messages to a turn of this run (mid-turn, or as the next turn): when one of them came from
+  // Telegram, that turn's final reply goes back to Telegram.
+  onDelivered(runId, entries = []) {
+    const texts = new Set(entries.map(entry => String(entry ?? '').trim()));
+    const mine = this.store.list('tgqueued').filter(item => item.runId === runId && texts.has(item.text));
+    if (!mine.length) return;
+    const first = mine[0], old = this.store.get('tgturn', runId);
+    this.store.put('tgturn', runId, { id: runId, agentId: first.agentId, linkId: first.linkId, at: new Date().toISOString(), sent: false,
+      texts: [...(old?.texts || []), ...mine.map(item => item.text)], direct: Boolean(old?.direct) });
+    for (const item of mine) this.store.delete('tgqueued', item.id);
+  }
+  // Messages handed over but given back unread go back to waiting: the turn they armed no longer answers them.
+  onRequeued(runId, entries = []) {
+    const turn = this.store.get('tgturn', runId); if (!turn?.texts?.length) return;
+    const back = new Set(entries.map(entry => String(entry ?? '').trim())), returned = turn.texts.filter(text => back.has(text));
+    if (!returned.length) return;
+    for (const text of returned) { const key = randomUUID(); this.store.put('tgqueued', key, { id: key, runId, text, agentId: turn.agentId, linkId: turn.linkId, at: turn.at }); }
+    const left = turn.texts.filter(text => !back.has(text));
+    if (left.length || turn.direct) this.store.put('tgturn', runId, { ...turn, texts: left });
+    else this.store.delete('tgturn', runId);
   }
 
   // Download one Telegram file (getFile, then the file itself) into Rex Desk's uploads folder, so the agent can read it and
