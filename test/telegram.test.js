@@ -254,6 +254,7 @@ test('stop waits for the poll loop, so nothing writes to the store after it reso
   // The agent turn for the message is slow; stop is called in the middle of it.
   desk.specialistTurn = async () => { inTurn(); await new Promise(resolve => setTimeout(resolve, 50)); };
   const fetcher = async (urlString, options) => {
+    if (urlString.endsWith('/setMyCommands')) return { ok: true, json: async () => ({ ok: true, result: true }) };
     polls += 1;
     if (polls === 1) return { ok: true, json: async () => ({ ok: true, result: [{ update_id: 41, message: { chat: { id: 555 }, text: 'hi' } }] }) };
     await new Promise((resolve, reject) => options.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
@@ -285,6 +286,7 @@ test('a removed or replaced bot connection: its queued updates are dropped and i
   store.put('telegram', 'state', { id: 'state', linkId: 'telegram-1', offset: 500 });
   const offsets = []; let polls = 0;
   const fetcher = async (urlString, options) => {
+    if (urlString.endsWith('/setMyCommands')) return { ok: true, json: async () => ({ ok: true, result: true }) };
     const body = JSON.parse(options.body); polls += 1;
     if (polls === 1) {
       offsets.push(body.offset);
@@ -460,4 +462,81 @@ test('photos and files are downloaded into the uploads folder and posted to the 
   assert.match(prompt, /log\.txt$/);
   await bridge.handleUpdate({ update_id: 3, message: { message_id: 52, chat: { id: 555 }, document: { file_id: 'd2', file_name: 'big.zip', file_size: 30 * 1024 * 1024 } } }, telegramLink(store));
   assert.match(turns.at(-1).prompt, /could not be saved: it is over 20 MB/);
+});
+
+// ---------- command menu: /agents, /status, /help ----------
+
+test('command menu: set once when the linked loop starts, with /agents, /status and /help', async () => {
+  const { desk, store } = makeDesk();
+  linkedStore(store);
+  const commands = []; let polls = 0;
+  const fetcher = async (urlString, options) => {
+    const body = options?.body ? JSON.parse(options.body) : {};
+    if (urlString.endsWith('/setMyCommands')) { commands.push(body.commands.map(item => item.command)); return { ok: true, json: async () => ({ ok: true, result: true }) }; }
+    polls += 1;
+    if (polls < 3) return { ok: true, json: async () => ({ ok: true, result: [] }) };
+    await new Promise((resolve, reject) => options.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
+  };
+  const bridge = new TelegramBridge(desk, { fetcher });
+  bridge.start();
+  for (let i = 0; i < 50 && polls < 3; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  await bridge.stop();
+  assert.deepEqual(commands, [['agents', 'status', 'help']], 'set once, not on every poll');
+});
+
+test('/help and /start answer with the help, /status lists the team, and no command reaches an agent', async () => {
+  const { desk, store, turns } = makeDesk();
+  linkedStore(store);
+  store.put('specialist', 'web', { id: 'web', name: 'Web Agent', runId: 'run-web' });
+  store.put('specialist', 'qa', { id: 'qa', name: 'QA Agent' });
+  store.put('team-task', 't1', { id: 't1', workerId: 'qa', state: 'working' });
+  store.put('team-task', 't2', { id: 't2', workerId: 'qa', state: 'done' });
+  store.put('interaction', 'i1', { id: 'i1', state: 'pending' });
+  desk.live = new Set(['run-web']);
+  const { fetcher, sent } = makeFetcher();
+  const bridge = new TelegramBridge(desk, { fetcher });
+  const found = telegramLink(store);
+  const said = () => sent.filter(call => call.method === 'sendMessage').at(-1).body.text;
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: '/help' } }, found);
+  assert.match(said(), /\/agents/);
+  await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: '/start' } }, found);
+  assert.match(said(), /Just send a message/);
+  await bridge.handleUpdate({ update_id: 3, message: { chat: { id: 555 }, text: '/status@rexbot' } }, found);
+  const status = said();
+  assert.match(status, /Rex Agent: free/);
+  assert.match(status, /Web Agent: working/);
+  assert.match(status, /QA Agent: free, 1 open task(?!s)/);
+  assert.match(status, /1 question waits for you/);
+  await bridge.handleUpdate({ update_id: 4, message: { chat: { id: 555 }, text: '/nope' } }, found);
+  assert.match(said(), /do not know that command/);
+  assert.deepEqual(turns, []);
+});
+
+test('/agents shows buttons; a press on that message picks who gets the next plain message, other presses do nothing', async () => {
+  const { desk, store, turns } = makeDesk();
+  linkedStore(store);
+  store.put('specialist', 'web', { id: 'web', name: 'Web Agent' });
+  const { fetcher, sent } = makeFetcher();
+  const bridge = new TelegramBridge(desk, { fetcher });
+  const found = telegramLink(store);
+  await bridge.handleUpdate({ update_id: 1, message: { chat: { id: 555 }, text: '/agents' } }, found);
+  const menu = sent.filter(call => call.method === 'sendMessage').at(-1);
+  const buttons = menu.body.reply_markup.inline_keyboard.flat();
+  assert.deepEqual(buttons.map(button => button.callback_data), ['agent=main', 'agent=web']);
+  assert.match(buttons[0].text, /^\* Rex Agent/, 'the current agent is marked');
+  const menuId = Number(store.list('tgmsg').find(item => item.kind === 'agents').id);
+  // A press from another chat, or on another message, changes nothing.
+  await bridge.handleCallback({ id: 'c1', data: 'agent=web', message: { chat: { id: 999 }, message_id: menuId } }, found);
+  await bridge.handleCallback({ id: 'c2', data: 'agent=web', message: { chat: { id: 555 }, message_id: 12345 } }, found);
+  await bridge.handleUpdate({ update_id: 2, message: { chat: { id: 555 }, text: 'hello' } }, found);
+  assert.equal(turns.at(-1).agentId, 'main');
+  // A real press picks the Web Agent and the menu message says so.
+  await bridge.handleCallback({ id: 'c3', data: 'agent=web', message: { chat: { id: 555 }, message_id: menuId } }, found);
+  assert.ok(sent.some(call => call.method === 'editMessageText' && /Web Agent/.test(call.body.text)));
+  await bridge.handleUpdate({ update_id: 3, message: { chat: { id: 555 }, text: 'build it' } }, found);
+  assert.equal(turns.at(-1).agentId, 'web');
+  // An agent that no longer exists cannot be picked.
+  await bridge.handleCallback({ id: 'c4', data: 'agent=gone', message: { chat: { id: 555 }, message_id: menuId } }, found);
+  await bridge.handleUpdate({ update_id: 4, message: { chat: { id: 555 }, text: 'still you?' } }, found);
+  assert.equal(turns.at(-1).agentId, 'web');
 });

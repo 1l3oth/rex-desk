@@ -38,6 +38,17 @@ const MAX_DOWNLOAD = 20 * 1024 * 1024;
 // A turn started from Telegram sends its final reply back for this long; a turn that never ends does not hold the mark forever.
 const TURN_TTL_MS = 2 * 60 * 60 * 1000;
 const attachedBlock = files => (files.length ? `\n\nAttached files (read them from these paths):\n${files.map(file => `- ${file}`).join('\n')}` : '');
+// The command menu Telegram shows next to the message box once the personal bot is linked.
+export const BOT_COMMANDS = [
+  { command: 'agents', description: 'Pick which agent you talk to' },
+  { command: 'status', description: 'See what the team is doing' },
+  { command: 'help', description: 'How this chat works' },
+];
+const HELP_TEXT = ['Rex Desk on Telegram', '',
+  'Just send a message: it goes to the agent you last talked with (Rex Agent at first), and its answer comes back here.',
+  'Reply to an agent message to answer that agent. Voice notes, photos and files are passed on too.', '',
+  '/agents  pick which agent you talk to', '/status  see what the team is doing', '/help  this message'].join('\n');
+const OPEN_TEAM_STATES = new Set(['queued', 'working', 'needs-manager']);
 const safeName = name => path.basename(String(name || 'file')).replace(/[^\p{L}\p{N}._ -]+/gu, '_').slice(0, 120) || 'file';
 
 // The newest saved Telegram connector and its decrypted values ({ botToken, chatId?, chatName? }), or null when none is saved.
@@ -218,6 +229,7 @@ export class TelegramBridge {
       const found = telegramLink(this.store);
       // Idle (no getUpdates) until a chat is linked, so the Link button's one-shot getUpdates never hits a 409 conflict.
       if (!found?.values?.chatId) { await this.sleep(8000); continue; }
+      await this.ensureCommands(found);
       try {
         const offset = offsetFor(this.store, found.link.id);
         this.abort = new AbortController();
@@ -238,6 +250,15 @@ export class TelegramBridge {
       }
     }
     this.polling = false;
+  }
+
+  // The command menu (/agents, /status, /help) is set once per linked bot each time the app starts or a chat is linked. A
+  // failure is logged and tried again on the next app start; chatting works without it.
+  async ensureCommands(found) {
+    if (this.commandsFor === found.link.id) return;
+    this.commandsFor = found.link.id;
+    try { await this.call(found.values.botToken, 'setMyCommands', { commands: BOT_COMMANDS }); }
+    catch (error) { this.store.event?.('', 'telegram-error', { message: `command menu: ${error.message}` }, true); }
   }
 
   sleep(ms) { return new Promise(resolve => { const timer = setTimeout(resolve, ms); timer.unref?.(); this.wake = () => { clearTimeout(timer); this.wake = null; resolve(); }; }); }
@@ -273,7 +294,7 @@ export class TelegramBridge {
     if (!text) return;
     const context = this.sentMessage(found, message.reply_to_message?.message_id);
     if (context?.kind === 'ask') return this.answerAsk(context.interactionId, context.field, text, found, message.message_id);
-    if (text.startsWith('/')) return; // bot commands like /start are not routed
+    if (text.startsWith('/')) return this.handleCommand(text, found); // commands are answered here, never routed to an agent
     return this.routeToAgent(this.targetFor(message, found), text, found);
   }
 
@@ -285,9 +306,55 @@ export class TelegramBridge {
     return this.lastAgent(found);
   }
 
+  // ---- Commands: /agents, /status, /help (and /start shows the help) ----
+  async handleCommand(text, found) {
+    const command = text.slice(1).split(/[\s@]/)[0].toLowerCase();
+    const say = (body, extra = {}) => this.call(found.values.botToken, 'sendMessage', { chat_id: found.values.chatId, text: clip(body), ...extra });
+    if (command === 'help' || command === 'start') return say(HELP_TEXT).catch(() => {});
+    if (command === 'status') return say(this.statusText()).catch(() => {});
+    if (command === 'agents') {
+      const agents = this.agentChoices(), current = this.lastAgent(found);
+      const buttons = agents.map(agent => [{ text: `${agent.id === current ? '* ' : ''}${agent.name}`.slice(0, 60), callback_data: `agent=${agent.id}`.slice(0, 64) }]);
+      const message = await say(`You are talking with ${this.agentName(current)}. Pick who gets your next messages:`, { reply_markup: { inline_keyboard: buttons } }).catch(() => null);
+      if (message?.message_id) this.store.put('tgmsg', String(message.message_id), { id: String(message.message_id), kind: 'agents', linkId: found.link.id, at: new Date().toISOString() });
+      return;
+    }
+    return say('I do not know that command. Send /help to see what I can do.').catch(() => {});
+  }
+  // Rex Agent first, then every agent on this desk by name.
+  agentChoices() {
+    const others = this.store.list('specialist').filter(agent => agent.id !== 'main' && agent.kind !== 'main' && agent.name)
+      .sort((left, right) => String(left.name).localeCompare(String(right.name)));
+    return [{ id: 'main', name: 'Rex Agent' }, ...others.map(agent => ({ id: agent.id, name: agent.name }))];
+  }
+  agentName(agentId) { return agentId === 'main' ? 'Rex Agent' : this.store.get('specialist', agentId)?.name || 'Rex Agent'; }
+  // One line per agent: working or free, its open team tasks, and how many questions wait for the person.
+  statusText() {
+    const live = this.desk.live, teamTasks = this.store.list('team-task').filter(item => OPEN_TEAM_STATES.has(item.state));
+    const lines = this.agentChoices().map(agent => {
+      const record = agent.id === 'main' ? this.store.get('specialist', 'main') : this.store.get('specialist', agent.id);
+      const busy = Boolean(record?.runId && live?.has?.(record.runId));
+      const open = teamTasks.filter(item => item.workerId === agent.id).length;
+      return `${agent.name}: ${busy ? 'working' : 'free'}${open ? `, ${open} open ${open === 1 ? 'task' : 'tasks'}` : ''}`;
+    });
+    const waiting = this.store.list('interaction').filter(item => item.state === 'pending').length;
+    return ['Team status', ...lines, waiting ? `${waiting} ${waiting === 1 ? 'question waits' : 'questions wait'} for you in Needs you.` : 'Nothing waits for you.'].join('\n');
+  }
+  // A press on an /agents button: only from the linked chat, on the bot's own /agents message, for an agent that exists.
+  async pickAgent(query, found, agentId, ack) {
+    const origin = query.message;
+    if (!origin || String(origin.chat?.id) !== String(found.values.chatId)) return ack();
+    if (this.sentMessage(found, origin.message_id)?.kind !== 'agents') return ack();
+    if (agentId !== 'main' && !this.store.get('specialist', agentId)) return ack('That agent is gone');
+    this.noteLastAgent(found, agentId);
+    await ack(`Now talking with ${this.agentName(agentId)}`);
+    await this.call(found.values.botToken, 'editMessageText', { chat_id: origin.chat.id, message_id: origin.message_id, text: `You are talking with ${this.agentName(agentId)}. Your next messages go there.`, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  }
+
   async handleCallback(query, found) {
     const data = String(query.data || ''), token = found.values.botToken;
     const ack = (text = '') => this.call(token, 'answerCallbackQuery', { callback_query_id: query.id, ...(text ? { text } : {}) }).catch(() => {});
+    if (data.startsWith('agent=')) return this.pickAgent(query, found, data.slice(6), ack);
     const colon = data.indexOf(':'); if (colon < 0) return ack();
     const interactionId = data.slice(0, colon), rest = data.slice(colon + 1);
     // Only a button on the question Rex Desk sent to the linked chat counts: the press must come from that chat, on that
