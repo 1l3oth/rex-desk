@@ -206,6 +206,8 @@ function deskWith(makeRunner, provider = 'claude') {
   const runOf = () => store.get('run', store.get('specialist', agent.id).runId);
   return { store, desk, agent, once, launches, settled, runOf, item: () => store.get('schedmsg', once.id) };
 }
+// Session ids as the CLIs really give them (UUIDs), so a later turn reopens the session and its prompt is the new message.
+const THREAD = '22222222-2222-2222-2222-222222222222', SESSION = '33333333-3333-3333-3333-333333333333';
 // A stand-in for the Agent SDK: each launch replays its own messages (or throws).
 const claudeSdk = script => { let launch = 0; return { query: () => { const messages = script(++launch); if (messages instanceof Error) throw messages; return Object.assign((async function* replay() { for (const message of messages) yield message; })(), { interrupt: async () => {}, close: () => {} }); } }; };
 const reply = (text, model = 'claude-opus-5-5') => [{ type: 'system', subtype: 'init', session_id: '11111111-1111-1111-1111-111111111111', apiKeySource: 'none' }, { type: 'assistant', message: { model, content: [{ type: 'text', text }] } }, { type: 'result', subtype: 'success', result: text, usage: {} }];
@@ -237,17 +239,17 @@ test('path 3, session opens then the submit fails (Codex): the open thread does 
   let submits = 0;
   const clientFactory = options => ({ open: async () => {}, close() {}, request: async method => {
     if (method === 'account/read') return { account: { type: 'chatgpt' } };
-    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: 'thread-1' } };
+    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: THREAD } };
     if (method === 'turn/start') {
       if (++submits === 1) throw new Error('turn/start failed: connection closed');
-      setTimeout(() => { options.onNotification('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Done: pinged.' } }); options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id: 'u2', status: 'completed' } }); }, 5);
+      setTimeout(() => { options.onNotification('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Done: pinged.' } }); options.onNotification('turn/completed', { threadId: THREAD, turn: { id: 'u2', status: 'completed' } }); }, 5);
       return { turn: { id: 'u2' } };
     }
     return {};
   } });
   const t = deskWith(options => new CodexRunner({ ...options, clientFactory }), 'codex');
   await t.desk.schedules.tick(at(0, '09:00')); await t.settled();
-  assert.equal(t.runOf().state, 'failed'); assert.equal(t.runOf().sessionId, 'thread-1', 'the session opened before the submit failed');
+  assert.equal(t.runOf().state, 'failed'); assert.equal(t.runOf().sessionId, THREAD, 'the session opened before the submit failed');
   assert.equal(t.store.list('delivery')[0]?.state, 'lost');
   await t.desk.schedules.tick(at(0, '09:05')); await t.settled(); await t.desk.schedules.tick(at(0, '09:10'));
   assert.equal(submits, 2, 'submitted again'); assert.equal(t.item().on, false, 'sent once Codex accepted the turn');
@@ -258,7 +260,7 @@ test('path 4, queued behind an agent waiting for an answer: not sent while queue
     let release;
     const t = deskWith((options, launch) => ({
       async start() {
-        options.event('prompt-accepted', {});
+        options.event('session', { sessionId: SESSION }); options.event('prompt-accepted', {});
         if (launch === 1) {
           await new Promise(done => { release = done; options.signal.addEventListener('abort', () => done(), { once: true }); });
           if (options.signal.aborted) throw new Error('Run stopped.');
@@ -334,11 +336,11 @@ test('path 8, queued then handed to Codex mid-turn as a steer: counts only once 
     let notify, finish, starts = 0;
     const clientFactory = options => ({ open: async () => {}, close() {}, request: async (method, params) => {
       if (method === 'account/read') return { account: { type: 'chatgpt' } };
-      if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: 'thread-1' } };
+      if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: THREAD } };
       if (method === 'turn/start') {
         const id = `u${++starts}`;
-        if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }
-        else setTimeout(() => { options.onNotification('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Done: pinged.' } }); options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }, 5);
+        if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }
+        else setTimeout(() => { options.onNotification('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Done: pinged.' } }); options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }, 5);
         return { turn: { id } };
       }
       if (method === 'turn/steer') { if (steer === 'refused') throw new Error('turn/steer refused: no active turn'); return {}; }
@@ -352,7 +354,7 @@ test('path 8, queued then handed to Codex mid-turn as a steer: counts only once 
     await t.desk.schedules.tick(at(0, '09:00'));
     assert.ok(t.runOf().queued.some(text => text.includes('Ping')), 'queued for Codex');
     // Codex finishes a step: Rex Desk hands the queue over as a steer.
-    notify('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Reading the logs.' } });
+    notify('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Reading the logs.' } });
     await new Promise(done => setTimeout(done, 50));
     const ticket = () => t.store.list('delivery')[0];
     if (steer === 'accepted') {
@@ -386,11 +388,11 @@ test('path 10, two Codex steers overlap: the first accepted settles only its own
   let notify, finish, starts = 0, steers = 0, acceptFirst, refuseSecond;
   const clientFactory = options => ({ open: async () => {}, close() {}, request: async (method) => {
     if (method === 'account/read') return { account: { type: 'chatgpt' } };
-    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: 'thread-1' } };
+    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: THREAD } };
     if (method === 'turn/start') {
       const id = `u${++starts}`;
-      if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }
-      else setTimeout(() => { options.onNotification('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Done.' } }); options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }, 5);
+      if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }
+      else setTimeout(() => { options.onNotification('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Done.' } }); options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }, 5);
       return { turn: { id } };
     }
     // Both steers are in flight at once: Codex accepts the first, then refuses the second.
@@ -403,10 +405,10 @@ test('path 10, two Codex steers overlap: the first accepted settles only its own
   const second = t.desk.schedules.create(t.agent.id, { text: 'Second ping', time: '09:01', repeat: 'once' }, at(0, '08:00'));
   void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' }); await new Promise(done => setTimeout(done, 100));
   await t.desk.schedules.tick(at(0, '09:00'));
-  notify('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Step one.' } });
+  notify('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Step one.' } });
   await new Promise(done => setTimeout(done, 30));
   await t.desk.schedules.tick(at(0, '09:01'));
-  notify('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Step two.' } });
+  notify('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Step two.' } });
   await new Promise(done => setTimeout(done, 30));
   acceptFirst(); await new Promise(done => setTimeout(done, 30));
   refuseSecond(); await new Promise(done => setTimeout(done, 30));
@@ -423,11 +425,11 @@ test('path 11, "Ping the team" accepted and "Ping" refused at the same set time:
   let notify, finish, starts = 0, steers = 0, acceptFirst, refuseSecond;
   const clientFactory = options => ({ open: async () => {}, close() {}, request: async (method) => {
     if (method === 'account/read') return { account: { type: 'chatgpt' } };
-    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: 'thread-1' } };
+    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: THREAD } };
     if (method === 'turn/start') {
       const id = `u${++starts}`;
-      if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }
-      else setTimeout(() => { options.onNotification('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Done.' } }); options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }, 5);
+      if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }
+      else setTimeout(() => { options.onNotification('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Done.' } }); options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }, 5);
       return { turn: { id } };
     }
     if (method === 'turn/steer') return ++steers === 1 ? new Promise(done => { acceptFirst = () => done({}); }) : new Promise((done, fail) => { refuseSecond = () => fail(new Error('turn/steer refused')); });
@@ -438,12 +440,12 @@ test('path 11, "Ping the team" accepted and "Ping" refused at the same set time:
   const team = t.desk.schedules.create(t.agent.id, { text: 'Ping the team', time: '09:00', repeat: 'once' }, at(0, '08:00'));
   void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' }); await new Promise(done => setTimeout(done, 100));
   await t.desk.schedules.tick(at(0, '09:00'));
-  notify('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Step one.' } });
+  notify('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Step one.' } });
   await new Promise(done => setTimeout(done, 30));
   // A second schedule for the same time, whose text is the start of the first one's.
   const ping = t.desk.schedules.create(t.agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
   await t.desk.schedules.tick(at(0, '09:00'));
-  notify('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Step two.' } });
+  notify('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Step two.' } });
   await new Promise(done => setTimeout(done, 30));
   acceptFirst(); await new Promise(done => setTimeout(done, 30));
   refuseSecond(); await new Promise(done => setTimeout(done, 30));
@@ -470,11 +472,11 @@ test('path 13, two steers with the same words resolve out of order: each acknowl
   let notify, finish, starts = 0; const steers = [];
   const clientFactory = options => ({ open: async () => {}, close() {}, request: async (method) => {
     if (method === 'account/read') return { account: { type: 'chatgpt' } };
-    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: 'thread-1' } };
+    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: THREAD } };
     if (method === 'turn/start') {
       const id = `u${++starts}`;
-      if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }
-      else setTimeout(() => { options.onNotification('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Done.' } }); options.onNotification('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }); }, 5);
+      if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }
+      else setTimeout(() => { options.onNotification('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Done.' } }); options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }, 5);
       return { turn: { id } };
     }
     if (method === 'turn/steer') return new Promise((done, fail) => steers.push({ accept: () => done({}), refuse: () => fail(new Error('turn/steer refused')) }));
@@ -485,11 +487,11 @@ test('path 13, two steers with the same words resolve out of order: each acknowl
   const first = t.desk.schedules.create(t.agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
   void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' }); await new Promise(done => setTimeout(done, 100));
   await t.desk.schedules.tick(at(0, '09:00'));
-  notify('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Step one.' } });
+  notify('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Step one.' } });
   await new Promise(done => setTimeout(done, 30));
   const second = t.desk.schedules.create(t.agent.id, { text: 'Ping', time: '09:00', repeat: 'once' }, at(0, '08:00'));
   await t.desk.schedules.tick(at(0, '09:00'));
-  notify('item/completed', { threadId: 'thread-1', item: { type: 'agentMessage', text: 'Step two.' } });
+  notify('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Step two.' } });
   await new Promise(done => setTimeout(done, 30));
   assert.equal(steers.length, 2, 'two steers in flight');
   // Codex answers the second steer first (accepted), then refuses the first.
@@ -519,7 +521,7 @@ test('path 14, an agent in its own process leaves a scheduled message unread: it
   async function hostTurns() {
   void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' });
   await waitFor(() => hosts[0]?.state?.journal, 'the agent process started');
-  journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
+  journal(0, { type: 'event', kind: 'session', data: { sessionId: SESSION } }); journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
   await t.desk.schedules.tick(at(0, '09:00'));
   await waitFor(() => posted.some(item => item.text.includes('Ping')), 'the message went over to the agent process');
   assert.ok(posted[0].handover?.tickets?.length, 'it went with its handover');
@@ -553,7 +555,7 @@ test('path 15, a hand-over still on its way to an agent in its own process when 
   async function hostTurns() {
   void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' });
   await waitFor(() => hosts[0]?.state?.journal, 'the agent process started');
-  journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
+  journal(0, { type: 'event', kind: 'session', data: { sessionId: SESSION } }); journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
   await t.desk.schedules.tick(at(0, '09:00'));
   await waitFor(() => refuse, 'the message is on its way to the agent process');
   // The process ends its reply while the hand-over is still open, then refuses it.
@@ -587,7 +589,7 @@ test('path 16, a hand-over an agent in its own process never confirms (its send 
   async function hostTurns() {
   void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' });
   await waitFor(() => hosts[0]?.state?.journal, 'the agent process started');
-  journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
+  journal(0, { type: 'event', kind: 'session', data: { sessionId: SESSION } }); journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
   await t.desk.schedules.tick(at(0, '09:00'));
   await waitFor(() => tried, 'the hand-over was tried');
   journal(0, { type: 'done' });
@@ -617,7 +619,7 @@ test('path 17, an agent in its own process took a scheduled message into its inb
   await waitFor(() => posted.length, 'the message went over to the agent process');
   await new Promise(done => setTimeout(done, 100)); // the process took it into its inbox
   // The acknowledgment of the turn's own prompt comes now, before the agent read its inbox.
-  journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
+  journal(0, { type: 'event', kind: 'session', data: { sessionId: SESSION } }); journal(0, { type: 'event', kind: 'prompt-accepted', data: {} });
   await new Promise(done => setTimeout(done, 150));
   assert.notEqual(t.store.list('delivery')[0]?.state, 'taken', 'a general acknowledgment does not count the hand-over');
   journal(0, { type: 'unread', text: posted[0].text, items: [{ text: posted[0].text, handover: posted[0].handover }] });
@@ -630,4 +632,15 @@ test('path 17, an agent in its own process took a scheduled message into its inb
   await t.settled(); await t.desk.schedules.tick(at(0, '09:05'));
   assert.equal(t.item().on, false, 'sent once the next turn took it'); assert.equal(hosts.length, 2, 'sent once');
   }
+});
+test('a turn\'s start binds only the scheduled messages its prompt carries: one not in it stays waiting for the turn that sends it', async () => {
+  const prompts = [];
+  const t = deskWith(() => ({ async start(prompt) { prompts.push(prompt); }, interrupt() {}, close() {} }));
+  t.desk.expectDelivery('in-prompt', { agentId: t.agent.id, text: 'Scheduled message from the person (set for 09:00):\nLook at the logs' });
+  t.desk.expectDelivery('elsewhere', { agentId: t.agent.id, text: 'Scheduled message from the person (set for 09:30):\nCheck the build' });
+  await t.desk.specialistTurn(t.agent.id, { prompt: 'Scheduled message from the person (set for 09:00):\nLook at the logs' }); await t.settled();
+  assert.equal(prompts.length, 1, 'the turn ran');
+  assert.equal(t.store.get('delivery', 'in-prompt').state, 'taken', 'the message in the prompt was taken');
+  assert.equal(t.store.get('delivery', 'elsewhere').state, 'waiting', 'a message not in the prompt is not claimed by this turn');
+  assert.equal(t.store.get('delivery', 'elsewhere').runId, '', 'and not tied to it');
 });

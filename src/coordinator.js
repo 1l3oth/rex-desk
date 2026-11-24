@@ -290,6 +290,9 @@ export class Desk {
     if (!agentId) return [];
     const waiting = this.store.list('delivery').filter(item => item.state === 'waiting' && item.agentId === agentId);
     if (entries === null) return waiting;
+    // A turn's starting prompt (one string): only the tickets whose message is really in it. A message still in the queue, or
+    // one that came after the prompt was built, is not this turn's: it waits for the hand-over or the turn that carries it.
+    if (typeof entries === 'string') return waiting.filter(ticket => ticket.text && entries.includes(ticket.text));
     const picked = [];
     for (const entry of entries) { const item = waiting.find(ticket => ticket.text && ticket.text === String(entry ?? '').trim() && !picked.includes(ticket)); if (item) picked.push(item); }
     return picked;
@@ -727,7 +730,7 @@ export class Desk {
       const tickets = handover === null ? [...bound].filter(ticket => !unconfirmed.has(ticket) && (final || !delivered.has(ticket))) : handovers(handover).flatMap(item => item.tickets || []);
       for (const ticket of tickets) if (inTurn(ticket)) this.setDelivery(ticket, { state: 'taken' });
     };
-    const bind = (entries, whole = false) => { const tickets = []; for (const item of this.waitingDeliveries(this.store.get('run', runId), whole ? null : entries)) { bound.add(item.id); tickets.push(item.id); this.setDelivery(item.id, { state: 'turn', runId, handedOver: undefined }); } return tickets; };
+    const bind = entries => { const tickets = []; for (const item of this.waitingDeliveries(this.store.get('run', runId), entries)) { bound.add(item.id); tickets.push(item.id); this.setDelivery(item.id, { state: 'turn', runId, handedOver: undefined }); } return tickets; };
     // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
     const turnAt = new Date().toISOString();
     try {
@@ -944,7 +947,8 @@ export class Desk {
 
 ${message}` : message;
       // Whatever the agent was handed before this turn (its follow-up, its first instructions, the chat so far) goes in now.
-      if (!remoteOn) bind(sending, true);
+      // Only the tickets whose message is in this prompt: one still queued (or sent after the prompt was built) is handed over later.
+      if (!remoteOn) bind(String(sending || ''));
       await runner.start(sending);
       // A turn that ended without a start error took its prompt, even if the runner never said so on the way.
       markLaunched(null, { final: true });
