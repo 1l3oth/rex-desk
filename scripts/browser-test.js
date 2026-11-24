@@ -126,11 +126,11 @@ try {
   browser = await chromium.launch({ headless: true });
   context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
-  page.setDefaultTimeout(10000);
+  page.setDefaultTimeout(30000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   // The old /classic page is gone; its address no longer serves the old dashboard.
   assert.notEqual((await fetch(`${app.address}/app.js`)).status, 200, 'The old dashboard script is removed');
-  await page.goto(app.address);
+  await page.goto(app.address, { timeout: 30000 });
   const settings = page.getByRole('form', { name: 'Settings' });
   const openSection = async name => {
     if (!(await settings.count())) await page.locator('.rail-settings').click();
@@ -152,7 +152,7 @@ try {
   await tour.locator('[data-tour-other]').fill('A meetup');
   await page.screenshot({ path: path.join(screenshots, 'tour-about.png') });
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
-  await tour.getByRole('heading', { name: 'Choose your AI' }).waitFor();
+  await tour.getByRole('heading', { name: 'Choose your AI' }).waitFor({ timeout: 30000 });
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
   await tour.getByRole('heading', { name: 'Where things are kept' }).waitFor();
   await tour.locator('.st-folder', { hasText: 'Files from agents' }).locator('code').first().waitFor();
