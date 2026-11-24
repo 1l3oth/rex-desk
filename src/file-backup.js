@@ -85,21 +85,41 @@ export class FileBackup {
   // A database of the person's own (set up by hand) keeps them in the database, as before.
   // One file, fetched the moment someone opens it, from the account's private folder or the database: a new device does not wait
   // for every picture and page to come down before it opens, and a page from the other computer shows when it is clicked.
+  // When it cannot, why stays in missing (see why), so the chat can say so instead of waiting forever.
   async fetchOne(key) {
-    const file = this.local(key); if (!file) return false;
+    const file = this.local(key);
+    if (!file) return this.miss(key, this.sync.store.backupOff('files') ? 'off' : 'not-kept');
     if (existsSync(file)) return true;
     const { store, client, workspace, account } = this.sync;
-    if (!this.sync.ready) return false;
-    try {
-      if (this.hosted()) {
+    if (!this.sync.ready) return this.miss(key, 'not-connected');
+    let failed = null;
+    // The account's folder is asked whenever the account is signed in, even when its sign-in was saved without the database
+    // (hosted() false): the file is read only, and a folder the service keeps closed just answers with an error.
+    if (account?.signedIn) {
+      if (!this.hosted()) await account.adoptDatabase?.(this.sync.connection).catch(() => false);
+      try {
         const bytes = await account.getFile(this.remoteKey(key));
-        if (bytes) { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, store.decryptBytes(bytes.toString('base64'))); return true; }
-      }
+        if (bytes) return this.save(key, file, () => store.decryptBytes(bytes.toString('base64')));
+      } catch (error) { failed = error; }
+    }
+    try {
       const got = await client.execute({ sql: 'SELECT data FROM rex_files WHERE workspace=? AND path=?', args: [workspace, key] });
-      if (!got.rows[0]) return false;
-      mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, store.decryptBytes(String(got.rows[0].data))); return true;
-    } catch { return false; }
+      if (got.rows[0]) return this.save(key, file, () => store.decryptBytes(String(got.rows[0].data)));
+    } catch (error) { failed ||= error; }
+    // The account service will not hand over a file this big: said as such, not as a passing failure.
+    if (failed?.code === 'too_big') return this.miss(key, 'too-big', failed.message);
+    return failed ? this.miss(key, 'failed', failed.message || String(failed)) : this.miss(key, 'not-in-backup');
   }
+  save(key, file, open) {
+    let data; try { data = open(); } catch { return this.miss(key, 'failed', 'It could not be unlocked with this workspace key.'); }
+    try { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, data); } catch (error) { return this.miss(key, 'failed', error.message); }
+    this.missing?.delete(key); return true;
+  }
+  miss(key, reason, detail = '') { (this.missing ||= new Map()).set(key, { reason, detail: String(detail).slice(0, 200) }); return false; }
+  // Why the last fetch of this file did not bring it: off (pictures and files left out of the backup), not-kept (not a file the
+  // backup keeps), not-connected (cloud backup not open here), not-in-backup, too-big (the account service will not hand it
+  // over), or failed (with the error). Null when unknown.
+  why(key) { return this.missing?.get(key) || null; }
   hosted() { const { account, connection } = this.sync; return Boolean(account?.signedIn && connection?.url && account.saved?.url === connection.url); }
   remoteKey(key) { return `${this.sync.workspace}/${key}`; }
   // A workspace that kept its files in the database before moves them to the private folder once, then empties them
@@ -120,17 +140,19 @@ export class FileBackup {
   // Files go only to the Rex Desk account's private folder, never into a database: a backup to a Turso database of the
   // person's own keeps the chats and settings, and leaves pictures and files on this computer (files made a database big).
   async backup() {
+    if (!this.hosted()) await this.sync.account?.adoptDatabase?.(this.sync.connection).catch(() => false);
     if (!this.hosted()) return { uploaded: 0, skipped: 'Files are kept only with a Rex Desk account backup.' };
     const { store } = this.sync;
     const index = this.index() || { files: {} }; let uploaded = 0;
     if (this.full) return { uploaded: 0, skipped: 'Your cloud space is full; files wait here until there is room.' };
     for (const item of this.walk()) {
-      if (index.files[item.key] === item.stamp) continue;
+      if (index.files[item.key] === item.stamp || index.skipped?.[item.key] === item.stamp) continue;
       let data; try { data = readFileSync(item.file); } catch { continue; }
       try { await this.sync.account.putFile(this.remoteKey(item.key), Buffer.from(store.encryptBytes(data), 'base64')); }
       catch (error) {
         // One file the account service will not take (too big for it) is skipped and remembered, never mistaken for a full space.
-        if (error.code === 'too_big') { index.files[item.key] = item.stamp; continue; }
+        // Recorded as skipped, not as backed up: it is tried again only when it changes, and is never counted as in the cloud.
+        if (error.code === 'too_big') { (index.skipped ||= {})[item.key] = item.stamp; continue; }
         if (error.code !== 'quota' && error.status !== 413) throw error;
         // Full: stop here; what went up stays recorded, the rest waits. Chats keep syncing, they are not files.
         this.full = true; this.error = error.message; this.saveIndex(index); this.sync.notify?.();

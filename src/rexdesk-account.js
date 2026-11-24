@@ -109,6 +109,20 @@ export class AccountLink {
     if (!this.signedIn || !connection || connection.url !== this.saved.url || now - this.lastTry < WAIT) return false;
     return failing || !this.saved.keyExpiresAt || new Date(this.saved.keyExpiresAt).getTime() - now < SOON;
   }
+  // A sign-in saved without its database (signing in to the app saves only the account) while this workspace syncs to the
+  // account's own database: the database is looked up once and recorded, so files go to and come from the account's folder.
+  // Only for a connection that is already there, at most once every ten minutes; a database of the person's own never matches.
+  async adoptDatabase(connection, now = Date.now()) {
+    if (!this.signedIn || this.saved.url || !connection?.url || now - (this.lastAdopt || 0) < WAIT) return false;
+    this.lastAdopt = now;
+    try {
+      const database = await accountDatabase(this.saved.token, this);
+      if (database.url !== connection.url) return false;
+      this.saved = { ...this.saved, url: database.url, keyExpiresAt: database.expiresAt };
+      writeFileSync(this.file, this.store.encrypt(JSON.stringify(this.saved)), { mode: 0o600 });
+      return true;
+    } catch { return false; }
+  }
   // A fresh key for the same database, or null when it could not be had right now.
   async freshKey(now = Date.now()) {
     this.lastTry = now;
