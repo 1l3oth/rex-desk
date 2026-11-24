@@ -139,6 +139,10 @@ export class Store extends EventEmitter {
     if (!columns.includes('pushed')) this.db.exec('ALTER TABLE events ADD COLUMN pushed INTEGER');
     this.db.prepare("UPDATE events SET uid = ? || '.' || sequence WHERE uid IS NULL").run(this.nodeId);
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS event_uid ON events(uid)');
+    // Which messages are still to send: uid and pushed sit after the (large) value in each row, so finding them by scanning a
+    // chat read every row's whole value. This small index holds only the unsent visible ones, with their id, so the
+    // once-a-minute check (unsentEvents, ChatSplits.ownUnshared) reads a few rows instead of the whole chat.
+    this.db.exec('CREATE INDEX IF NOT EXISTS event_unsent ON events(run_id, sequence, uid) WHERE visible=1 AND pushed IS NULL');
     if (!this.get('meta', 'changes-backfilled')) {
       this.transaction(() => {
         for (const kind of SHARED) for (const row of this.db.prepare('SELECT id, value FROM records WHERE kind=?').all(kind)) {
@@ -180,12 +184,22 @@ export class Store extends EventEmitter {
   // record each time was the main cost that grew with use. The cache is dropped for a kind whenever one of its records is
   // written or removed (put/delete, including changes pulled from another computer, which go through them). A copy is
   // returned so a caller that sorts or trims the list in place can never disturb the cache.
+  // One record changing no longer drops the cache: put and delete patch it (cacheSet/cacheDrop), so a kind with big records
+  // (chatfile, hundreds of MB) is read and parsed from the database once, not again after every change.
   list(kind) {
     this.lists ??= new Map();
     let cached = this.lists.get(kind);
-    if (!cached) { cached = this.db.prepare('SELECT value FROM records WHERE kind=?').all(kind).map(row => JSON.parse(row.value)); this.lists.set(kind, cached); }
-    return cached.slice();
+    if (!cached) { cached = { rows: new Map(this.db.prepare('SELECT id, value FROM records WHERE kind=?').all(kind).map(row => [row.id, JSON.parse(row.value)])), sorted: true }; this.lists.set(kind, cached); }
+    // A record added since the read goes last in the map; the database returns them by id, so put them in that order again.
+    if (!cached.sorted) { cached.rows = new Map([...cached.rows].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))); cached.sorted = true; }
+    return [...cached.rows.values()];
   }
+  cacheSet(kind, key, text) {
+    const cached = this.lists?.get(kind); if (!cached) return;
+    if (!cached.rows.has(key)) cached.sorted = false;
+    cached.rows.set(key, JSON.parse(text));
+  }
+  cacheDrop(kind, key) { this.lists?.get(kind)?.rows.delete(key); }
   // Drop the whole list cache. Code that writes records with raw SQL instead of put/delete (a cloud restore loading many
   // records at once) must call this after, so a later list() does not read a stale copy.
   clearListCache() { this.lists?.clear(); }
@@ -198,7 +212,7 @@ export class Store extends EventEmitter {
     if (this.inTransaction) return callback();
     this.db.exec('BEGIN IMMEDIATE'); this.inTransaction = true;
     try { const result = callback(); this.inTransaction = false; this.db.exec('COMMIT'); return result; }
-    catch (error) { this.inTransaction = false; this.db.exec('ROLLBACK'); throw error; }
+    catch (error) { this.inTransaction = false; this.db.exec('ROLLBACK'); this.lists?.clear(); throw error; }
   }
   // A version that sorts by time, then by computer, so the newest change wins on every computer.
   stamp() { this.clock = (this.clock + 1) % 1679616; return `${Date.now().toString(36).padStart(9, '0')}.${this.clock.toString(36).padStart(4, '0')}.${this.nodeId}`; }
@@ -279,15 +293,16 @@ export class Store extends EventEmitter {
     if (shared(kind, key) && !this.remote && this.nodeId) value = { ...value, node: value.node || this.nodeId, _v: this.stamp() };
     this.transaction(() => {
       this.logChange(kind, key);
-      this.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value').run(kind, key, JSON.stringify(value));
+      const text = JSON.stringify(value);
+      this.db.prepare('INSERT INTO records(kind,id,value) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value').run(kind, key, text);
       this.cloud?.record(kind, key, value);
+      this.cacheSet(kind, key, text);
     });
-    this.lists?.delete(kind);
     this.cloud?.schedule();
     this.emit('change', { kind, id: key });
     return value;
   }
-  delete(kind, key) { if (kind === 'specialist') this.privateAgents = null; this.transaction(() => { this.db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(kind, key); this.logChange(kind, key, true); this.cloud?.remove(kind, key); }); this.lists?.delete(kind); this.cloud?.schedule(); this.emit('change', { kind, id: key }); }
+  delete(kind, key) { if (kind === 'specialist') this.privateAgents = null; this.transaction(() => { this.db.prepare('DELETE FROM records WHERE kind=? AND id=?').run(kind, key); this.logChange(kind, key, true); this.cloud?.remove(kind, key); this.cacheDrop(kind, key); }); this.cloud?.schedule(); this.emit('change', { kind, id: key }); }
   // A message id: this computer, its number here, and a random part, so two computers that once numbered alike under one
   // id (a restored copy) can never write the same id again.
   newUid(sequence) { return `${this.nodeId}.${sequence}.${randomBytes(4).toString('hex')}`; }
@@ -364,7 +379,7 @@ export class Store extends EventEmitter {
   }
   // This computer's own messages of a chat that have not gone to the other computers yet.
   unsentEvents(runId, limit = 2000) {
-    return this.db.prepare("SELECT * FROM events WHERE run_id=? AND visible=1 AND pushed IS NULL AND uid LIKE ? || '.%' ORDER BY sequence LIMIT ?").all(runId, this.nodeId, limit);
+    return this.db.prepare("SELECT * FROM events INDEXED BY event_unsent WHERE run_id=? AND visible=1 AND pushed IS NULL AND uid LIKE ? || '.%' ORDER BY sequence LIMIT ?").all(runId, this.nodeId, limit);
   }
   encrypt(text) {
     const nonce = randomBytes(12);

@@ -8,7 +8,7 @@ export class ChatSplits {
   get self() { return this.desk.peers.self.id; }
   // Messages of this chat written here that the computer running the agent never got: this computer's own story.
   ownUnshared(agent) {
-    return this.store.db.prepare("SELECT sequence, kind, value, created_at FROM events WHERE run_id=? AND pushed IS NULL AND visible=1 AND uid LIKE ? || '.%' ORDER BY sequence")
+    return this.store.db.prepare("SELECT sequence, kind, value, created_at FROM events INDEXED BY event_unsent WHERE run_id=? AND pushed IS NULL AND visible=1 AND uid LIKE ? || '.%' ORDER BY sequence")
       .all(agent.runId, this.self);
   }
   side(rows, node) {
