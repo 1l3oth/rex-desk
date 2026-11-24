@@ -343,10 +343,13 @@ export class Desk {
     const name = agent?.name || (owner === 'main' ? 'Rex Agent' : run.title || 'an agent');
     const about = agent ? `You look after ${agent.projectSlug || 'a project'}: ${String(agent.purpose || '').slice(0, 300)}` : owner === 'main' ? 'You know every project and agent on this computer, and help the person decide who does what.' : '';
     const said = this.store.events(run.id, { visible: true, limit: 80 }).filter(event => ['human-message', 'agent-text', 'message'].includes(event.kind) && (event.text || '').trim());
-    const lastPerson = [...said].reverse().find(event => event.kind === 'human-message');
-    const history = withoutRepeats(said.filter(event => event !== lastPerson)
-      .map(event => ({ role: event.kind === 'human-message' ? 'user' : 'assistant', content: String(event.text).slice(0, 1500) })), lastPerson?.text || '').slice(-10);
-    return { local: { server, model: localModel.model }, history, lastPersonMessage: lastPerson?.text || '',
+    // The turn's own new message (a silent resume, like a scheduled message, leaves no chat line) goes to the model as it is;
+    // the person's last chat message is the question only when the turn has none, and stays in the history otherwise.
+    const newMessage = String(run.followUp || '').trim();
+    const lastPerson = [...said].reverse().find(event => event.kind === 'human-message'), asked = newMessage || lastPerson?.text || '';
+    const history = withoutRepeats(said.filter(event => !(event === lastPerson && String(event.text).trim() === asked.trim()))
+      .map(event => ({ role: event.kind === 'human-message' ? 'user' : 'assistant', content: String(event.text).slice(0, 1500) })), asked).slice(-10);
+    return { local: { server, model: localModel.model }, history, newMessage, lastPersonMessage: lastPerson?.text || '',
       system: lightSystem({ name, about, person: String(this.memory.person() || '').slice(0, 800), voice: Boolean(run.voice), report: true }),
       // The same code-made report Voice mode uses (agents, chats, waiting questions, tasks), kept short for a small model.
       // It goes next to the newest message, not in the instruction at the top: a small model reads what is nearest the

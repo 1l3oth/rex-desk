@@ -40,8 +40,10 @@ export class LocalRunner {
     // message (a first turn arrives wrapped in Rex Desk's long instructions, which are not for a small model).
     // A resumed turn wraps the person's message in Rex Desk's lessons and reply style, which a small model takes for the
     // question: when the message is inside the prompt, the message alone is sent.
-    const text = String(prompt || '').trim(), mine = String(this.lastPersonMessage || '').trim();
-    const input = mine && text.includes(mine) ? mine : text.length <= 6000 ? text : (mine || text.slice(-2000));
+    // newMessage: the turn's own new message, handed over directly, so a silent turn (a scheduled message) is never answered
+    // with the person's earlier chat message in its place.
+    const text = String(prompt || '').trim(), mine = String(this.lastPersonMessage || '').trim(), fresh = String(this.newMessage || '').trim();
+    const input = fresh || (mine && text.includes(mine) ? mine : text.length <= 6000 ? text : (mine || text.slice(-2000)));
     const messages = [{ role: 'system', content: this.system }, ...(this.history || []),
       ...(this.report ? [{ role: 'system', content: `Rex Desk right now (current; earlier replies in this chat may be out of date):\n${this.report}` }] : []),
       { role: 'user', content: input || 'Hello' }];

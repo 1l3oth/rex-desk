@@ -5,7 +5,7 @@ import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/server.js';
-import { now } from '../src/store.js';
+import { now, thisComputer } from '../src/store.js';
 import { LocalRunner, LIGHT_TOOLS, withoutRepeats } from '../src/local-runner.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
@@ -61,4 +61,31 @@ test('Local AI light mode: earlier tries at the same question, and the replies t
     { role: 'user', content: 'Make a group chat with Leo' }, { role: 'assistant', content: 'Done.' },
     { role: 'user', content: 'which agents do I have, and what is each one doing?' }, { role: 'assistant', content: 'Rex Agent, and maybe others.' }];
   assert.deepEqual(withoutRepeats(history, 'Which agents do I have, and what is each one doing?').map(message => message.content), ['hi', 'Hi!', 'Make a group chat with Leo', 'Done.']);
+});
+
+test('Local AI light mode: a scheduled message to the main agent (a silent resume) is what reaches the model, not the earlier chat message', async () => {
+  const asked = [];
+  const ollama = http.createServer((request, response) => {
+    let body = ''; request.on('data', chunk => { body += chunk; }); request.on('end', () => {
+      asked.push(JSON.parse(body));
+      response.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+      response.end(`${JSON.stringify({ message: { role: 'assistant', content: 'On it.' }, done: true, prompt_eval_count: 100, eval_count: 3 })}\n`);
+    });
+  });
+  await new Promise(resolve => ollama.listen(0, '127.0.0.1', resolve));
+  const app = await createApp({ dataDirectory: temporary('light-sched'), port: 0 });
+  try {
+    const server = { id: 'ollama', kind: 'ollama', name: 'Ollama', url: `http://127.0.0.1:${ollama.address().port}` };
+    app.desk.localAi.server = () => server;
+    app.store.put('run', 'rex', { id: 'rex', role: 'coordinator', main: true, state: 'finished', provider: 'claude', model: 'local:ollama/qwen3:1.7b', computer: thisComputer(), createdAt: now(), startedAt: now(), prompt: 'Which agents do I have?' });
+    app.store.event('rex', 'human-message', { text: 'Which agents do I have?' }, true);
+    app.store.event('rex', 'agent-text', { text: 'You have none yet.' }, true);
+    const scheduled = 'Scheduled message from the person (set for 09:00):\nCheck the build';
+    await app.desk.specialistTurn('main', { prompt: scheduled });
+    for (let step = 0; step < 250 && (!asked.length || app.desk.live.size); step++) await new Promise(done => setTimeout(done, 20));
+    assert.equal(asked.length, 1, 'the model was asked once');
+    assert.equal(asked[0].messages.at(-1).role, 'user');
+    assert.equal(asked[0].messages.at(-1).content, scheduled, 'the new scheduled message is the question the model gets');
+    assert.ok(asked[0].messages.some(message => message.role === 'user' && message.content === 'Which agents do I have?'), 'the earlier message stays in the chat history');
+  } finally { await app.close(); ollama.close(); }
 });
