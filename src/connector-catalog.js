@@ -8,7 +8,9 @@ import { connectServer, plainError } from './toolbox.js';
 
 const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'connectors', 'catalog.json');
 let cached = null;
-export function loadCatalog(file = FILE) { if (!cached || file !== FILE) { const data = JSON.parse(readFileSync(file, 'utf8')); if (file !== FILE) return data; cached = data; } return cached; }
+// An item marked "hidden" is left out everywhere (picker, Market, check and save) until it can really connect: Flow and
+// Morningmate's MCP servers need an OAuth sign-in that Rex Desk's own MCP client does not do yet.
+export function loadCatalog(file = FILE) { if (!cached || file !== FILE) { const raw = JSON.parse(readFileSync(file, 'utf8')), data = { ...raw, items: (raw.items || []).filter(item => !item.hidden) }; if (file !== FILE) return data; cached = data; } return cached; }
 export const catalogItem = (id, catalog = loadCatalog()) => catalog.items.find(item => item.id === id) || null;
 
 const FIELD = /^[a-zA-Z]+\??$/;

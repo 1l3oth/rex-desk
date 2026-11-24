@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadCatalog, catalogItem, probe, serverConfig, readValues } from '../src/connector-catalog.js';
@@ -9,10 +9,12 @@ import { createApp } from '../src/server.js';
 const catalog = loadCatalog();
 const fakeClient = tools => async () => ({ listTools: async () => ({ tools: Array.from({ length: tools }, (_, i) => ({ name: `t${i}` })) }), close: async () => {} });
 
-test('the catalog: a version, task trackers are Orbit, Flow and Morningmate (with their MCP servers), every item says how it connects and where that is written', () => {
+test('the catalog: a version, task trackers are only Orbit, Flow and Morningmate (their MCP servers stay hidden until OAuth works), every item says how it connects and where that is written', () => {
   assert.ok(Number(catalog.version) >= 1);
   const groups = new Set(catalog.groups.map(group => group.id));
-  assert.deepEqual(catalog.items.filter(item => item.group === 'tasks').map(item => item.id), ['orbit', 'flow', 'morningmate', 'flow-mcp', 'morningmate-mcp']);
+  assert.deepEqual(catalog.items.filter(item => item.group === 'tasks').map(item => item.id), ['orbit', 'flow', 'morningmate']);
+  for (const id of ['flow-mcp', 'morningmate-mcp']) assert.equal(catalogItem(id), null, `${id} is hidden: not in the picker, Market, check or save`);
+  assert.ok(Array.isArray(JSON.parse(readFileSync(new URL('../public/connectors/catalog.json', import.meta.url), 'utf8')).items.find(item => item.id === 'flow-mcp')?.connect?.fields), 'the hidden entry is kept in the file for when OAuth works');
   assert.deepEqual(catalog.items.filter(item => item.tier === 'native').map(item => item.id), ['orbit', 'flow', 'morningmate']);
   assert.equal(new Set(catalog.items.map(item => item.id)).size, catalog.items.length);
   for (const item of catalog.items) {

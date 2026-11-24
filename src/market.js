@@ -88,6 +88,7 @@ export function marketList(desk) {
   const orbitServers = [{ name: 'Goal', url: `${ORBIT_URL}/api/mcp` }, { name: 'Brain', url: `${ORBIT_URL}/api/mcp-server` }];
   const orbit = [{ kind: 'mcp', name: 'Orbit', orbit: { signedIn, goals: goals.length, servers: orbitServers }, fixed: true }];
   // Flow and Morningmate also run their own MCP servers (OAuth sign-in). Until one is linked it shows here with a Connect button.
+  // Both are hidden in the catalog for now (Rex Desk's MCP client cannot finish their OAuth yet), so this list is empty until then.
   let catalog = []; try { catalog = loadCatalog().items; } catch { /* no catalog */ }
   const remote = catalog.filter(item => ['flow-mcp', 'morningmate-mcp'].includes(item.id) && !servers[item.id])
     .map(item => ({ kind: 'mcp', name: item.name, description: item.connect.url, remote: item.id, fixed: true }));
