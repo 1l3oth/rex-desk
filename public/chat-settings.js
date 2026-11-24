@@ -565,9 +565,10 @@ export function openSettings(ctx, section = 'general', extra = {}) {
     const el = event.target;
     if (!el.matches?.('input,select,textarea') || !el.closest('[data-st-panel]') || ownSave(el) || !PARTS[state.section].some(part => SAVE_PARTS.includes(part))) return;
     clearTimeout(autoTimer); pendingSave = true;
-    // A new OpenRouter key brings the Rank button: draw again once it is saved (a quiet save does not redraw).
+    // A new OpenRouter key brings the Rank button: draw again once it is saved (a quiet save does not redraw). A key typed
+    // while that save was on its way is newer: no redraw then, its own save draws once it lands, so the new key is not wiped.
     const newKey = el.name === 'jev.apiKey' && Boolean(el.value.trim());
-    autoTimer = setTimeout(() => { pendingSave = false; if (document.body.contains(back)) save(true).then(() => { if (newKey && has('jev') && document.body.contains(back)) draw(); }).catch(error => toast(error.message, true)); afterSave(); }, event.type === 'input' ? 700 : 150);
+    autoTimer = setTimeout(() => { pendingSave = false; const typed = el.value; if (document.body.contains(back)) save(true).then(() => { if (newKey && !pendingSave && el.value === typed && has('jev') && document.body.contains(back)) draw(); }).catch(error => toast(error.message, true)); afterSave(); }, event.type === 'input' ? 700 : 150);
   };
   back.addEventListener('input', event => { if (event.target.matches?.('input:not([type=checkbox],[type=radio],[type=range]),textarea')) autoSave(event); });
   back.addEventListener('change', autoSave);

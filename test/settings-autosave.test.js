@@ -596,3 +596,37 @@ test('a failed newer voice save does not hide an earlier save that worked', asyn
     assert.equal(await page.locator('.settings-pop [data-st-tts="engine"]').inputValue(), 'fish', 'and shown');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// An OpenRouter key typed again while the first key's save is still on its way must not be wiped by the redraw that brings the Rank button.
+test('a replacement OpenRouter key typed during the first save is kept and saved', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false });
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    const sent = []; let first = true, release = () => {};
+    await page.route('**/api/config', async route => {
+      if (route.request().method() !== 'PUT') return route.continue();
+      sent.push(JSON.parse(route.request().postData() || '{}').jev?.apiKey || '');
+      if (first) { first = false; await new Promise(resolve => { release = resolve; }); }
+      return route.continue();
+    });
+    await page.goto(`http://127.0.0.1:${app.server.address().port}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click());
+    await page.locator('.settings-pop').waitFor({ timeout: 30000 });
+    for (let i = 0; i < 5; i++) {
+      await page.evaluate(() => document.querySelector('.settings-pop [data-st-section="jev"]')?.click());
+      try { await page.locator('.settings-pop [name="jev.apiKey"]').waitFor({ timeout: 10000 }); break; } catch { /* clicked during a redraw */ }
+    }
+    // The key sits in a folded group: type into it the way an input event does.
+    const type = value => page.evaluate(text => { const box = document.querySelector('.settings-pop [name="jev.apiKey"]'); box.value = text; box.dispatchEvent(new Event('input', { bubbles: true })); }, value);
+    await type('sk-or-first');
+    for (let i = 0; i < 50 && !sent.length; i++) await page.waitForTimeout(100);
+    assert.equal(sent[0], 'sk-or-first', 'the first key goes out');
+    // The first save lands right after the second key is typed, so that key's own autosave is still waiting when the Rank redraw comes.
+    await type('sk-or-second'); release();
+    await page.waitForTimeout(3000);
+    assert.equal(sent.at(-1), 'sk-or-second', 'the newer key is saved, not wiped by the redraw of the first save');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});
