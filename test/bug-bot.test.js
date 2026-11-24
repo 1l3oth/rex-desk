@@ -252,11 +252,13 @@ test('picker: a button only attaches the held text for its own reporter, group a
   const [held] = store.list('bugpick');
   assert.deepEqual(held.nums.sort(), [1, 2]);
   const button = num => `pick:${held.id}:${num}`;
-  const press = (data, from = 42, chatId = -100) => bot.handleUpdate({ callback_query: { id: 'q', data, from: { id: from }, message: { message_id: 9, chat: { id: chatId } } } }, bugBotLink(store));
+  assert.ok(held.promptId, 'the picker remembers the bot message that carries its buttons');
+  const press = (data, from = 42, chatId = -100, messageId = held.promptId) => bot.handleUpdate({ callback_query: { id: 'q', data, from: { id: from }, message: { message_id: messageId, chat: { id: chatId } } } }, bugBotLink(store));
   await press(button(1), 77); // someone else presses the button
   await press(button(3)); // a report the picker never offered
   await press(button(4), 42, -200); // the same reporter's report in another group
   await press('pick:1'); // an old-style button with no picker id
+  await press(button(2), 42, -100, held.promptId + 1); // the right data, but from another message
   for (const num of [1, 2, 3, 4]) assert.equal(store.get('bugreport', `bug-${num}`).adds, undefined, `#${num} untouched`);
   await press(button(2));
   assert.match(store.get('bugreport', 'bug-2').adds[0].text, /held secret detail/);
@@ -345,4 +347,16 @@ test('atLeastVersion compares dotted numbers', () => {
   assert.equal(atLeastVersion('0.1.0', '0.0.999'), true);
   assert.equal(atLeastVersion('0.0.99', '0.0.115'), false);
   assert.equal(atLeastVersion('dev', '0.0.115'), false);
+});
+
+test('picker: an old button stops working once its group is removed from the allowlist', async () => {
+  const { desk, store, calls } = makeDesk({ groups: [{ id: '-100' }] });
+  const bot = new BugBot(desk, { fetcher: await mkFetcher(calls) });
+  for (const num of [1, 2]) store.put('bugreport', `bug-${num}`, { id: `bug-${num}`, num, groupId: '-100', reporterId: '42', status: 'queued', text: `report ${num}`, media: [], createdAt: `2026-01-0${num}` });
+  await bot.handleUpdate(groupMsg({ text: 'held detail' }), bugBotLink(store));
+  const [held] = store.list('bugpick');
+  bot.removeGroup('-100');
+  await bot.handleUpdate({ callback_query: { id: 'q', data: `pick:${held.id}:1`, from: { id: 42 }, message: { message_id: held.promptId, chat: { id: -100 } } } }, bugBotLink(store));
+  assert.equal(store.get('bugreport', 'bug-1').adds, undefined);
+  assert.ok(store.get('bugpick', held.id), 'nothing was attached');
 });

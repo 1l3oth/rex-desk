@@ -382,7 +382,10 @@ export class BugBot {
       messageId: message.message_id, reporterId: String(message.from?.id), nums: offered.map(report => report.num),
       text: redact(text), media: media || [], at: new Date().toISOString() });
     const buttons = offered.map(report => [{ text: clip(`#${report.num} ${report.text || report.kind}`, 60), callback_data: `pick:${pickId}:${report.num}` }]);
-    await this.call(found.values.botToken, 'sendMessage', { chat_id: message.chat.id, reply_to_message_id: message.message_id, text: 'Which report is this about?', reply_markup: { inline_keyboard: buttons } }).catch(() => {});
+    const sent = await this.call(found.values.botToken, 'sendMessage', { chat_id: message.chat.id, reply_to_message_id: message.message_id, text: 'Which report is this about?', reply_markup: { inline_keyboard: buttons } }).catch(() => null);
+    // Remember the bot message that carries the buttons: a press only counts from that very message. No message, no picker.
+    if (sent?.message_id) this.store.put('bugpick', pickId, { ...this.store.get('bugpick', pickId), promptId: sent.message_id });
+    else this.store.delete('bugpick', pickId);
   }
 
   // Jev sort. Returns { kind, severity, severityLabel }.
@@ -440,8 +443,11 @@ export class BugBot {
     if (!match) return ack();
     const pickId = match[1], num = Number(match[2]), held = this.store.get('bugpick', pickId);
     const groupId = String(query.message?.chat?.id ?? '');
+    // Bound to this bot, a group still on the allowlist, the bot message that carried the buttons, the reporter and the
+    // reports it offered. A group removed since then, or a press from any other message, attaches nothing.
     const bound = held && held.linkId === found.link.id && held.botId === String(found.values.botId || '')
-      && held.groupId === groupId && String(held.reporterId) === String(query.from?.id) && (held.nums || []).includes(num);
+      && held.groupId === groupId && isAllowedGroup(this.groups(found.values), groupId)
+      && held.promptId != null && String(held.promptId) === String(query.message?.message_id ?? '') && String(held.reporterId) === String(query.from?.id) && (held.nums || []).includes(num);
     if (held && held.reporterId !== String(query.from?.id)) return ack('Only the person who wrote it can choose.');
     if (!bound) return ack('That report is gone.');
     const report = this.reports().find(item => item.num === num && String(item.groupId) === held.groupId && String(item.reporterId) === held.reporterId && OPEN_STATUSES.has(item.status));
