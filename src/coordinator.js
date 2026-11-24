@@ -322,12 +322,13 @@ export class Desk {
     const waiting = this.store.get('run', runId);
     if (!this.live.has(runId) && !this.closed && ['needs_evidence', 'finished'].includes(waiting.state)) this.resumeQueued(runId, waiting);
   }
-  takeInbox(runId) {
+  // arm: false when the runner still has to accept the hand-over (a Codex steer): Telegram is armed only on its acknowledgment.
+  takeInbox(runId, { arm = true } = {}) {
     const run = this.store.get('run', runId); if (!run?.queued?.length) return '';
     this.store.put('run', runId, { ...run, queued: [] });
     this.store.event(runId, 'inbox-delivered', { count: run.queued.length });
     // A message from Telegram among them: this turn's final reply goes back there (src/telegram.js).
-    this.telegram?.onDelivered?.(runId, run.queued);
+    if (arm) this.telegram?.onDelivered?.(runId, run.queued);
     return run.queued.join('\n\n');
   }
   // The person's Orbit account, when connected: every agent can search and read their goals, notes and knowledge.
@@ -730,6 +731,8 @@ export class Desk {
     // inbox (delivered), at the clean end, after every unread record and open hand-over was handled. One never confirmed
     // (still in flight, refused late, timed out) stays due.
     const unconfirmed = new Set(), delivered = new Set();
+    // The runner reported this turn's result: hand-overs acknowledged after it no longer arm a Telegram reply.
+    let resulted = false;
     const inTurn = ticket => { unconfirmed.delete(ticket); delivered.delete(ticket); return bound.delete(ticket) || (this.store.get('delivery', ticket)?.state === 'turn' && this.store.get('delivery', ticket)?.runId === runId); };
     // final: the turn ended cleanly (the runner's start or attach resolved), the only point where delivered hand-overs count.
     const markLaunched = (handover = null, { final = false } = {}) => {
@@ -838,7 +841,7 @@ export class Desk {
         ask: request => this.ask(runId, request), // withId: the runner (Codex, an agent's own process) acknowledges or gives back this hand-over with its handover; others
         // get just the text.
         inbox: ({ withId = false } = {}) => {
-          const entries = [...(this.store.get('run', runId)?.queued || [])], text = this.takeInbox(runId);
+          const entries = [...(this.store.get('run', runId)?.queued || [])], text = this.takeInbox(runId, { arm: !withId });
           if (!text) return withId ? { text: '', handover: null } : '';
           const handover = { entries, tickets: bind(entries) };
           if (withId) for (const ticket of handover.tickets) { unconfirmed.add(ticket); this.setDelivery(ticket, { handedOver: 'sent' }); }
@@ -854,10 +857,14 @@ export class Desk {
         }, extraMcp: this.orbitAccountMcp(), gateway: this.store.config().toolGateway !== false, event: (kind, data) => {
           // Only the runner knows when its prompt was really taken (Codex: turn/start accepted; Claude: the model's first real
           // words or step). A session opening, a sign-in error written as a reply, or a result before an error check prove nothing.
-          if (kind === 'prompt-accepted') { markLaunched(data?.handover ?? null); return; }
+          // A hand-over the runner accepted (a Codex steer) or took into its inbox: a Telegram message in it now makes this turn
+          // answer on Telegram. Not before: a turn can end while the steer is still pending, and its reply stays in the app.
+          // Not after the turn's result either: a late acceptance never arms the next, unrelated turn.
+          const armTelegram = handover => { if (!resulted) for (const item of handovers(handover)) this.telegram?.onDelivered?.(runId, item.entries || []); };
+          if (kind === 'prompt-accepted') { markLaunched(data?.handover ?? null); armTelegram(data?.handover); return; }
           // An agent's own process took a hand-over into its inbox: the agent reads it, or it comes back unread, before its reply
           // ends. Its tickets stay in the turn (so an unread one still goes back), and the clean end may now settle them.
-          if (kind === 'handover-delivered') { for (const ticket of handovers(data?.handover).flatMap(item => item.tickets || [])) if (unconfirmed.delete(ticket)) { delivered.add(ticket); this.setDelivery(ticket, { handedOver: 'delivered' }); } return; }
+          if (kind === 'handover-delivered') { armTelegram(data?.handover); for (const ticket of handovers(data?.handover).flatMap(item => item.tickets || [])) if (unconfirmed.delete(ticket)) { delivered.add(ticket); this.setDelivery(ticket, { handedOver: 'delivered' }); } return; }
           // Words as they are written go straight to the open windows (Voice mode speaks them); they are not saved.
           // The quiet turn that reads Voice mode's report is not said: Rex Desk has welcomed the person already.
           const reading = this.store.get('run', runId)?.voice?.reading;
@@ -890,6 +897,7 @@ export class Desk {
           if (kind === 'agent-text' && !reading) this.store.emit('partial', { runId, text: String(data.text || ''), done: true, eventId });
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
           // A turn a Telegram message started sends its final reply back to that Telegram chat (src/telegram.js).
+          if (kind === 'agent-result') resulted = true;
           if (kind === 'agent-result') void this.telegram?.onTurnResult?.(runId, data.result)?.catch?.(() => {});
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };

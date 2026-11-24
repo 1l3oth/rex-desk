@@ -656,3 +656,51 @@ test('an agent with no session (Local AI light mode) gets each new scheduled mes
   assert.match(prompts[0], /Ping/); assert.match(prompts[1], /Check the build/, 'the second turn carries the second message');
   assert.equal(t.store.get('schedmsg', later.id).on, false, 'the second message counts as sent');
 });
+
+test('a Telegram message steered into a Codex turn arms the Telegram reply only once Codex accepts the steer', async () => {
+  const { TelegramBridge, telegramLink } = await import('../src/telegram.js');
+  for (const steer of ['pending then refused', 'accepted']) {
+    let notify, finish, starts = 0, acceptSteer, refuseSteer;
+    const clientFactory = options => ({ open: async () => {}, close() {}, request: async method => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } };
+      if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: THREAD } };
+      if (method === 'turn/start') {
+        const id = `u${++starts}`;
+        if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }
+        else setTimeout(() => { options.onNotification('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Shipped.' } }); options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }, 5);
+        return { turn: { id } };
+      }
+      if (method === 'turn/steer') return new Promise((done, fail) => { acceptSteer = () => done({}); refuseSteer = () => fail(new Error('turn/steer refused: no active turn')); });
+      return {};
+    } });
+    const t = deskWith(options => new CodexRunner({ ...options, clientFactory }), 'codex');
+    t.store.delete('schedmsg', t.once.id);
+    t.store.put('connector', 'telegram-1', { id: 'telegram-1', connectorId: 'telegram', name: 'Telegram @rexbot', kind: 'token', at: '2026-11-24T00:00:00.000Z' });
+    t.store.put('secret', 'connector:telegram-1', t.store.encrypt(JSON.stringify({ botToken: 'T:tok', chatId: 555, chatName: 'Rex' })));
+    const sent = [];
+    const fetcher = async (url, options) => { const body = JSON.parse(options?.body || '{}'); if (url.endsWith('/sendMessage')) sent.push(body.text); return { ok: true, json: async () => ({ ok: true, result: { message_id: 100 + sent.length } }) }; };
+    t.desk.telegram = new TelegramBridge(t.desk, { fetcher });
+    void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' }); await new Promise(done => setTimeout(done, 100));
+    assert.equal(t.desk.live.size, 1, `${steer}: Codex is mid-turn on an app message`);
+    await t.desk.telegram.routeToAgent(t.agent.id, 'ship it?', telegramLink(t.store));
+    assert.ok(t.runOf().queued.length, 'the Telegram message waits in the queue');
+    // Codex finishes a step: the queue goes over as a steer, which Codex has not answered yet.
+    notify('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Reading the logs.' } });
+    await new Promise(done => setTimeout(done, 30));
+    assert.ok(!t.store.get('tgturn', t.runOf().id), `${steer}: not armed while the steer is pending`);
+    if (steer === 'accepted') {
+      acceptSteer(); await new Promise(done => setTimeout(done, 30));
+      assert.ok(t.store.get('tgturn', t.runOf().id), 'armed once Codex accepted it');
+      finish(); await t.settled(); await new Promise(done => setTimeout(done, 30));
+      assert.deepEqual(sent, ['Desky\nReading the logs.'], 'the turn that took it answers on Telegram');
+      continue;
+    }
+    // The app turn ends with the steer still pending: its reply stays in the app.
+    finish(); await new Promise(done => setTimeout(done, 30));
+    assert.deepEqual(sent, [], 'the app turn reply never reaches Telegram');
+    // Codex then refuses the steer: the message goes back and the next turn takes it and answers on Telegram.
+    refuseSteer(); await new Promise(done => setTimeout(done, 50)); await t.settled(); await new Promise(done => setTimeout(done, 30));
+    assert.equal(starts, 2, 'the next turn took it');
+    assert.deepEqual(sent, ['Desky\nShipped.']);
+  }
+});
