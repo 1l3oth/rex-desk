@@ -326,3 +326,31 @@ test('a reply or button on a message sent through an old connection is not acted
   assert.deepEqual(answered, [], 'the old approval is not answered');
   assert.ok(!turns.some(turn => turn.agentId === 'web'), 'a reply to the old agent message does not reach that agent');
 });
+
+test('link: a pairing code far back in a long queue is found by moving through the batches', async () => {
+  const { desk, store } = makeDesk();
+  linkedStore(store, { botToken: 'T:tok' });
+  const bridge = new TelegramBridge(desk, { fetcher: makeFetcher().fetcher });
+  const { code } = await bridge.link();
+  // 250 messages from other chats, then the code. The fake honours offset and limit like Telegram.
+  const queue = Array.from({ length: 250 }, (_, i) => ({ update_id: 1000 + i, message: { message_id: i, chat: { id: 9000 + i, type: 'private', first_name: 'Noise' }, text: 'hi' } }));
+  queue.push({ update_id: 1250, message: { message_id: 999, chat: { id: 555, type: 'private', first_name: 'Rex' }, text: `/start ${code}` } });
+  const asked = [];
+  bridge.fetcher = async (urlString, options) => {
+    const body = JSON.parse(options.body); asked.push(body.offset || 0);
+    const result = queue.filter(update => update.update_id >= (body.offset || 0)).slice(0, body.limit || 100);
+    return { ok: true, json: async () => ({ ok: true, result }) };
+  };
+  const done = await bridge.link();
+  assert.deepEqual([done.linked, done.name], [true, 'Rex']);
+  assert.deepEqual(asked, [0, 1100, 1200], 'each batch starts after the last one; the same batch is never read twice');
+  assert.equal(store.get('telegram', 'state').offset, 1251);
+  // With no code in the queue, the next press starts after what was already read.
+  const empty = makeDesk(); linkedStore(empty.store, { botToken: 'T:tok', pairCode: 'ZZZZZZ', pairUntil: Date.now() + 60000 });
+  const reads = [];
+  const other = new TelegramBridge(empty.desk, { fetcher: async (u, o) => { const b = JSON.parse(o.body); reads.push(b.offset || 0); const result = queue.slice(0, 250).filter(x => x.update_id >= (b.offset || 0)).slice(0, b.limit); return { ok: true, json: async () => ({ ok: true, result }) }; } });
+  assert.equal((await other.link()).linked, false);
+  assert.deepEqual(reads, [0, 1100, 1200, 1250]);
+  reads.length = 0; await other.link();
+  assert.deepEqual(reads, [1250], 'a second press does not reread the old batches');
+});

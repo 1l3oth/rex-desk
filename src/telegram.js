@@ -10,6 +10,7 @@ import path from 'node:path';
 const API = 'https://api.telegram.org';
 // One-time pairing code: only the chat that sends it to the bot can be linked, so a stranger who happens to press Start on the
 // bot is never linked. No look-alike letters; good for 10 minutes; cleared once used.
+const LINK_PAGES = 20;
 const PAIR_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', PAIR_LENGTH = 6, PAIR_TTL_MS = 10 * 60 * 1000;
 const newPairCode = () => Array.from({ length: PAIR_LENGTH }, () => PAIR_ALPHABET[randomInt(PAIR_ALPHABET.length)]).join('');
 // The code a message carries: "/start CODE" (from a t.me/<bot>?start=CODE link) or the code typed on its own.
@@ -76,16 +77,23 @@ export class TelegramBridge {
       return waiting(code);
     }
     if (values.chatId) return waiting(code);
-    const updates = await this.call(values.botToken, 'getUpdates', { timeout: 0, limit: 50 }, { timeoutMs: 10000 });
-    const message = [...updates].reverse().map(update => update.message || update.edited_message)
-      .find(item => item?.chat?.type === 'private' && codeIn(item.text) === code);
-    if (!message) return waiting(code);
-    const name = this.pair(link.id, values, message.chat);
-    // Skip past the code so the loop never treats it as a reply.
-    const lastId = updates.length ? updates[updates.length - 1].update_id : 0;
-    saveOffset(this.store, link.id, lastId + 1);
-    this.kick();
-    return { linked: true, name };
+    // Read the queue a batch at a time, moving the offset past each batch, until the code turns up or the queue is empty.
+    // Nothing is linked yet, so the skipped messages are never routed anywhere; a capped number of pages per press.
+    let offset = offsetFor(this.store, link.id);
+    for (let page = 0; page < LINK_PAGES; page++) {
+      const updates = await this.call(values.botToken, 'getUpdates', { offset, timeout: 0, limit: 100 }, { timeoutMs: 10000 });
+      if (!updates.length) break;
+      const message = updates.map(update => update.message || update.edited_message)
+        .find(item => item?.chat?.type === 'private' && codeIn(item.text) === code);
+      offset = updates[updates.length - 1].update_id + 1;
+      saveOffset(this.store, link.id, offset);
+      if (message) {
+        const name = this.pair(link.id, values, message.chat);
+        this.kick();
+        return { linked: true, name };
+      }
+    }
+    return waiting(code);
   }
 
   // Save the chat that sent the code as the one linked chat, and use the code up.
