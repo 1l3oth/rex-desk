@@ -111,6 +111,16 @@ export function sortReport(answers = {}) {
   return { kind, severity, severityLabel: severity === null ? '' : severityLabels[severity] };
 }
 
+// ---- versions ----
+// Is version a newer than b? Compares dotted numbers (0.0.115 > 0.0.99); anything unreadable is never newer.
+export function newerVersion(a, b) {
+  const parts = value => String(value || '').replace(/^v/i, '').split(/[.+-]/).slice(0, 3).map(Number);
+  const left = parts(a), right = parts(b);
+  if (left.length < 3 || right.length < 3 || [...left, ...right].some(Number.isNaN)) return false;
+  for (let index = 0; index < 3; index += 1) if (left[index] !== right[index]) return left[index] > right[index];
+  return false;
+}
+
 // ---- per-person rate limit, mute, duplicate merge ----
 export const RATE = { windowMs: 10 * 60 * 1000, max: 5, muteMs: 24 * 60 * 60 * 1000, strikesToMute: 3 };
 // Decide whether to accept this person's message now. Keeps the last window of send times; over the limit earns a strike, and
@@ -488,14 +498,30 @@ export class BugBot {
     this.store.put('bugbot', 'daily', { id: 'daily', lastDate: today });
     await this.sendMorningReport().catch(() => {});
   }
+  // The version this Rex Desk runs: the installed app's own version, else the desk's.
+  runningVersion() { return String(this.desk.version || process.env.REX_DESK_VERSION || this.store.config().version || ''); }
+  // The version a done report's fix shipped in, or '' while that is not confirmed. A task may name it (shippedVersion);
+  // otherwise the first time the task is seen done the running version is noted, and the fix counts as shipped only once
+  // this desk runs a newer version than that, i.e. a build made after the fix was done is out.
+  shippedVersion(report, task) {
+    if (task.shippedVersion) return String(task.shippedVersion);
+    const running = this.runningVersion();
+    if (!running) return '';
+    if (!report.doneSeenVersion) { this.store.put('bugreport', report.id, { ...report, doneSeenVersion: running, updatedAt: new Date().toISOString() }); return ''; }
+    return newerVersion(running, report.doneSeenVersion) ? running : '';
+  }
   async notifyFixed(found) {
-    // A report whose task is done and carries a shipped version, not yet announced, gets a group reply crediting the fix.
+    // A report whose task is done and whose fix is in a shipped version gets one group reply crediting the fix. It counts as
+    // announced only once Telegram accepted that message; a failed send is tried again on the next tick.
     for (const report of this.reports().filter(item => item.taskId && !item.fixedAnnounced && item.status !== 'rejected')) {
       const task = this.store.get('task', report.taskId);
-      if (!task || !['done', 'in_review'].includes(task.status)) continue;
-      const version = this.store.config().version || this.desk.version || '';
-      await this.reply(found, report.groupId, undefined, `Good news: #${report.num} is fixed${version ? ` in version ${version}` : ''}. Thanks for reporting it.`).catch(() => {});
-      this.store.put('bugreport', report.id, { ...report, fixedAnnounced: true, fixedVersion: version, status: 'done', updatedAt: new Date().toISOString() });
+      if (task?.status !== 'done') continue;
+      const version = this.shippedVersion(report, task);
+      if (!version) continue;
+      const sent = await this.reply(found, report.groupId, undefined, `Good news: #${report.num} is fixed in version ${version}. Thanks for reporting it.`).catch(() => null);
+      if (!sent?.message_id) continue;
+      const fresh = this.store.get('bugreport', report.id) || report;
+      this.store.put('bugreport', report.id, { ...fresh, fixedAnnounced: true, fixedVersion: version, status: 'done', updatedAt: new Date().toISOString() });
     }
   }
   async sendMorningReport() {

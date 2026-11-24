@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BugBot, bugBotLink, isAllowedGroup, mentionsBot, parseRef, extractMedia, safetyVerdict, redact,
-  sortReport, rateCheck, RATE, findDuplicate, linkTarget, openReportsFor, MAX_MEDIA_BYTES,
+  sortReport, rateCheck, RATE, findDuplicate, linkTarget, openReportsFor, MAX_MEDIA_BYTES, newerVersion,
 } from '../src/bug-bot.js';
 
 // A tiny in-memory store + coordinator, like test/telegram.test.js. encrypt/decrypt are identity so the connector secret
@@ -306,4 +306,37 @@ test('sorting: Jev only ever sees the redacted text, never the raw email, number
     assert.doesNotMatch(body, /dara@example\.com|345 678|fakekey_abcdefghij/);
     assert.match(body, /hidden email/);
   }
+});
+
+test('fixed notice: only for a done task in a newer shipped version, and only marked announced once Telegram accepts it', async () => {
+  const { desk, store, calls } = makeDesk({ groups: [{ id: '-100' }] });
+  let failSend = true;
+  const base = await mkFetcher(calls);
+  const fetcher = async (url, options) => (failSend && String(url).endsWith('/sendMessage') ? { ok: true, json: async () => ({ ok: false, description: 'Forbidden' }) } : base(url, options));
+  const bot = new BugBot(desk, { fetcher });
+  const found = bugBotLink(store);
+  store.put('bugreport', 'bug-1', { id: 'bug-1', num: 1, groupId: '-100', reporterId: '42', status: 'approved', text: 'x', taskId: 'local:1' });
+  store.put('task', 'local:1', { id: 'local:1', status: 'in_review' });
+  await bot.notifyFixed(found);
+  assert.equal(store.get('bugreport', 'bug-1').fixedAnnounced, undefined, 'in review is not fixed');
+  store.put('task', 'local:1', { id: 'local:1', status: 'done' });
+  await bot.notifyFixed(found);
+  assert.equal(store.get('bugreport', 'bug-1').doneSeenVersion, '0.0.115');
+  assert.equal(store.get('bugreport', 'bug-1').fixedAnnounced, undefined, 'not shipped until a newer version runs');
+  desk.version = '0.0.116';
+  await bot.notifyFixed(found);
+  assert.equal(store.get('bugreport', 'bug-1').fixedAnnounced, undefined, 'a failed send is not marked announced');
+  failSend = false;
+  await bot.notifyFixed(found);
+  const report = store.get('bugreport', 'bug-1');
+  assert.equal(report.fixedAnnounced, true);
+  assert.equal(report.fixedVersion, '0.0.116');
+  assert.ok(calls.find(c => c.method === 'sendMessage' && /fixed in version 0\.0\.116/.test(c.body.text)));
+});
+
+test('newerVersion compares dotted numbers', () => {
+  assert.equal(newerVersion('0.0.116', '0.0.115'), true);
+  assert.equal(newerVersion('0.1.0', '0.0.999'), true);
+  assert.equal(newerVersion('0.0.115', '0.0.115'), false);
+  assert.equal(newerVersion('dev', '0.0.115'), false);
 });
