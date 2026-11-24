@@ -2625,5 +2625,7 @@
  "Experimental": "សាកល្បង",
  "Playbook": "Playbook",
  "A2A": "A2A",
- "Rex Agent team playbook": "playbook ក្រុម Rex Agent"
+ "Rex Agent team playbook": "playbook ក្រុម Rex Agent",
+ "{0} · Sign in with your {1} account": "{0} · ចូលដោយគណនី {1} របស់អ្នក",
+ "{0}: {1}": "{0}: {1}"
 }

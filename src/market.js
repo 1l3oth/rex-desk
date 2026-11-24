@@ -4,6 +4,8 @@
 import { readdirSync } from 'node:fs';
 import { agentTools } from './agent-tools.js';
 import { connections, connector } from './connectors.js';
+import { loadCatalog } from './connector-catalog.js';
+import { ORBIT_URL } from './orbit.js';
 
 export const TOOL_KINDS = ['skill', 'command', 'mcp'];
 export const toolKey = (kind, name) => `${kind}:${name}`;
@@ -82,10 +84,16 @@ export function marketList(desk) {
   const connectorsList = linked.filter(item => item.connectorId !== 'orbit').map(item => ({ kind: 'connector', name: item.name || connector(item.connectorId)?.name || item.connectorId, description: connector(item.connectorId)?.name || item.connectorId, enabled: item.enabled, id: item.id }));
   let signedIn = false; try { signedIn = Boolean(desk.orbitAccount?.()?.token); } catch { /* no account */ }
   // Always listed: it left the Connectors picker, so this row is also how a new person connects Orbit.
-  const orbit = [{ kind: 'mcp', name: 'Orbit', orbit: { signedIn, goals: goals.length }, fixed: true }];
+  // Orbit has two MCP servers: Goal (one goal's tasks and notes, a goal key) and Brain (your goals, notes and knowledge, the account sign-in).
+  const orbitServers = [{ name: 'Goal', url: `${ORBIT_URL}/api/mcp` }, { name: 'Brain', url: `${ORBIT_URL}/api/mcp-server` }];
+  const orbit = [{ kind: 'mcp', name: 'Orbit', orbit: { signedIn, goals: goals.length, servers: orbitServers }, fixed: true }];
+  // Flow and Morningmate also run their own MCP servers (OAuth sign-in). Until one is linked it shows here with a Connect button.
+  let catalog = []; try { catalog = loadCatalog().items; } catch { /* no catalog */ }
+  const remote = catalog.filter(item => ['flow-mcp', 'morningmate-mcp'].includes(item.id) && !servers[item.id])
+    .map(item => ({ kind: 'mcp', name: item.name, description: item.connect.url, remote: item.id, fixed: true }));
   const hooks = (desk.toolbox.listHooks?.() || []).map(hook => ({ kind: 'hook', name: hook.matcher ? `${hook.event} · ${hook.matcher}` : hook.event, description: hook.command, id: hook.id, fixed: true }));
   const main = desk.store.get('specialist', 'main');
   const agents = [...(main ? [{ id: 'main', name: main.name || 'Rex Agent' }] : []), ...desk.specialists.list().map(agent => ({ id: agent.id, name: agent.name }))]
     .map(agent => ({ ...agent, off: [...toolsOff(desk.store, agent.id)] }));
-  return { items: [...items, ...orbit, ...hooks, ...connectorsList], agents, computer: desk.toolbox.computer?.() || '' };
+  return { items: [...items, ...orbit, ...remote, ...hooks, ...connectorsList], agents, computer: desk.toolbox.computer?.() || '' };
 }

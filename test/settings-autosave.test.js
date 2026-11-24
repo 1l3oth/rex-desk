@@ -503,10 +503,10 @@ test('a failed Orbit sync stays on its row, Paste a new key opens that connectio
     await page.locator('.settings-pop').waitFor({ timeout: 30000 });
     await page.evaluate(() => document.querySelector('.settings-pop [data-st-section="connectors"]').click());
     await page.locator('.settings-pop [data-cn-add]').waitFor({ timeout: 30000 });
-    // Orbit speaks only MCP: it is not on the Connectors list or in its picker, but on its own page that Market opens.
-    assert.equal(await page.locator(`.settings-pop [data-cn-sync="${saved.source.id}"]`).count(), 0, 'no Orbit row under Connectors');
+    // Orbit shows under Connectors (its goal row and its picker card) and in Market under MCP; both open the same Orbit page.
+    assert.equal(await page.locator(`.settings-pop [data-cn-sync="${saved.source.id}"]`).count(), 1, 'the Orbit goal row is under Connectors');
     await page.locator('.settings-pop [data-cn-add]').click();
-    assert.equal(await page.locator('.settings-pop [data-cn-pick="orbit"]').count(), 0, 'no Orbit in the connector picker');
+    assert.equal(await page.locator('.settings-pop [data-cn-pick="orbit"]').count(), 1, 'Orbit is in the connector picker');
     await page.evaluate(() => window.__rexCtx.openSettings('connectors', { connectorPick: 'orbit' }));
     const row = page.locator(`.settings-pop .cx-row:has([data-cn-sync="${saved.source.id}"])`);
     await row.waitFor({ timeout: 30000 });

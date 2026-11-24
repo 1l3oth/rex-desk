@@ -59,12 +59,16 @@ test('Market labels each item: Orbit is an MCP server, never a connector; one-fi
   const named = name => items.find(item => item.name === name);
   assert.equal(named('notes').file, true);
   assert.equal(named('deploy').file, undefined);
-  assert.deepEqual(named('Orbit').orbit, { signedIn: true, goals: 1 });
+  assert.deepEqual(named('Orbit').orbit, { signedIn: true, goals: 1, servers: [{ name: 'Goal', url: 'https://orbit.vongpichdaraboth.com/api/mcp' }, { name: 'Brain', url: 'https://orbit.vongpichdaraboth.com/api/mcp-server' }] });
   assert.equal(named('Orbit').kind, 'mcp');
   // A new person (no Orbit account, no goal) still finds Orbit here: it is no longer in the Connectors picker.
   memory.put('config', 'main', { ...memory.config(), sources: [] });
   const fresh = marketList({ ...desk, orbitAccount: () => null }).items.find(item => item.name === 'Orbit');
-  assert.deepEqual(fresh?.orbit, { signedIn: false, goals: 0 });
+  assert.deepEqual(fresh?.orbit, { signedIn: false, goals: 0, servers: [{ name: 'Goal', url: 'https://orbit.vongpichdaraboth.com/api/mcp' }, { name: 'Brain', url: 'https://orbit.vongpichdaraboth.com/api/mcp-server' }] });
+  // Flow and Morningmate run their own MCP servers: until linked, each is listed under MCP with its address and opens its Connectors form.
+  assert.deepEqual(items.filter(item => item.remote).map(item => [item.remote, item.kind, item.description]), [['flow-mcp', 'mcp', 'https://flow.team/ai/mcp'], ['morningmate-mcp', 'mcp', 'https://morningmate.com/ai/mcp']]);
+  assert.ok(items.some(item => item.kind === 'connector' && item.name === 'Flow'), 'the Flow API connection is still listed');
+  assert.ok(!marketList({ ...desk, toolbox: { ...desk.toolbox, servers: () => ({ 'flow-mcp': { type: 'http', url: 'https://flow.team/ai/mcp' } }) } }).items.some(item => item.remote === 'flow-mcp'), 'a linked Flow MCP shows as its own server, not again');
   assert.ok(!items.some(item => item.kind === 'connector' && item.name === 'Goal'), 'an Orbit goal is not listed as a connector');
   assert.equal(named('Stop').kind, 'hook');
   assert.equal(named('Stop').id, 'Stop:0:0');

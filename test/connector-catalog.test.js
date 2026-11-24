@@ -9,10 +9,10 @@ import { createApp } from '../src/server.js';
 const catalog = loadCatalog();
 const fakeClient = tools => async () => ({ listTools: async () => ({ tools: Array.from({ length: tools }, (_, i) => ({ name: `t${i}` })) }), close: async () => {} });
 
-test('the catalog: a version, task trackers are only Orbit, Flow and Morningmate, every item says how it connects and where that is written', () => {
+test('the catalog: a version, task trackers are Orbit, Flow and Morningmate (with their MCP servers), every item says how it connects and where that is written', () => {
   assert.ok(Number(catalog.version) >= 1);
   const groups = new Set(catalog.groups.map(group => group.id));
-  assert.deepEqual(catalog.items.filter(item => item.group === 'tasks').map(item => item.id), ['orbit', 'flow', 'morningmate']);
+  assert.deepEqual(catalog.items.filter(item => item.group === 'tasks').map(item => item.id), ['orbit', 'flow', 'morningmate', 'flow-mcp', 'morningmate-mcp']);
   assert.deepEqual(catalog.items.filter(item => item.tier === 'native').map(item => item.id), ['orbit', 'flow', 'morningmate']);
   assert.equal(new Set(catalog.items.map(item => item.id)).size, catalog.items.length);
   for (const item of catalog.items) {

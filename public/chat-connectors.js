@@ -52,12 +52,12 @@ export function connectorsHtml(ctx, state, cfg, { trackers = '', syncField = '' 
   if (pick && pick !== 'all') return catalogFormHtml(ctx, state, data);
   if (pick) return pickerHtml(ctx, data);
   const rows = {};
-  for (const item of data.connections.filter(item => byId.get(item.connectorId)?.id && !['flow', 'morningmate', 'orbit'].includes(item.connectorId))) {
+  for (const item of data.connections.filter(item => byId.get(item.connectorId)?.id && !['flow', 'morningmate'].includes(item.connectorId))) {
     const kind = byId.get(item.connectorId);
-    (rows[kind.type] ||= []).push(connectionRow(ctx, state, item, kind, t('API')));
+    (rows[kind.type] ||= []).push(connectionRow(ctx, state, item, kind, item.connectorId === 'orbit' ? t('MCP') : t('API')));
   }
-  // Orbit (goals and account) only speaks MCP, so it shows in Market under MCP servers, not here.
-  for (const account of (data.accounts || []).filter(item => item.connectorId !== 'orbit')) {
+  // Orbit (goals and account) shows here and in Market under MCP servers: both open the same Orbit page.
+  for (const account of data.accounts || []) {
     const kind = byId.get(account.connectorId); if (!kind) continue;
     (rows[kind.type] ||= []).push(`<li class="tb-row cx-row">${logoHtml(kind, esc)}<div class="tb-text"><b>${t`${esc(kind.name)} account`}</b><span>${t`Every agent can search and read your Orbit goals, notes and knowledge.`}</span></div>
       <button type="button" class="btn small quiet danger" data-cn-signout="${esc(account.connectorId)}">${t`Disconnect`}</button></li>`);
@@ -99,12 +99,12 @@ function howLine(item, after = false) {
 }
 
 // API: Rex Desk calls the app with a key you pasted and fetches its data. MCP: agents use the app's own MCP server.
-const tagOf = item => /mcp/.test(item?.connect?.kind || '') ? t('MCP') : t('API');
+const tagOf = item => item?.id === 'orbit' || /mcp/.test(item?.connect?.kind || '') ? t('MCP') : t('API');
 
 function pickerHtml({ esc }, data) {
   const linked = new Set((data.links || []).map(link => link.connectorId));
   const groups = (data.catalog?.groups || []).map(group => {
-    const items = data.catalog.items.filter(item => item.group === group.id && item.id !== 'orbit');
+    const items = data.catalog.items.filter(item => item.group === group.id);
     if (!items.length) return '';
     return `<h3>${TYPE_NAMES[group.id] || esc(group.name)}</h3><ul class="cx-grid">${items.map(item => {
       const ready = item.phase === 1, attrs = !ready ? 'disabled' : TRACKERS.includes(item.id) ? (item.id === 'orbit' ? 'data-cn-pick="orbit"' : `data-tr-add="${esc(item.id)}" data-cn-picked`) : `data-cn-pick="${esc(item.id)}"`;
