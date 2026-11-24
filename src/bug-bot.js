@@ -8,6 +8,7 @@
 // report. A per-person rate limit, duplicate merging and a mute for repeat spammers keep the groups clean.
 //
 // The bot token stays server-side (encrypted in the connector secret); agents never see it and it never appears in logs.
+import { randomBytes } from 'node:crypto';
 import { askJev, jevQuestions, severityLabels } from './jev.js';
 
 const API = 'https://api.telegram.org';
@@ -354,10 +355,16 @@ export class BugBot {
   }
 
   // Several open reports and no clear target: hold the message and ask which report it belongs to with buttons.
+  // Each picker is its own held record, bound to this bot, group, message, reporter and the report numbers it offered, so a
+  // button press can only attach that held text to one of those reports, by that reporter, in that group.
   async askWhich(found, message, { text, media, choices }) {
-    const buttons = choices.slice(0, 6).map(report => [{ text: clip(`#${report.num} ${report.text || report.kind}`, 60), callback_data: `pick:${report.num}` }]);
+    const offered = choices.slice(0, 6);
+    const pickId = randomBytes(6).toString('hex');
+    this.store.put('bugpick', pickId, { id: pickId, linkId: found.link.id, botId: String(found.values.botId || ''), groupId: String(message.chat.id),
+      messageId: message.message_id, reporterId: String(message.from?.id), nums: offered.map(report => report.num),
+      text: redact(text), media: media || [], at: new Date().toISOString() });
+    const buttons = offered.map(report => [{ text: clip(`#${report.num} ${report.text || report.kind}`, 60), callback_data: `pick:${pickId}:${report.num}` }]);
     await this.call(found.values.botToken, 'sendMessage', { chat_id: message.chat.id, reply_to_message_id: message.message_id, text: 'Which report is this about?', reply_markup: { inline_keyboard: buttons } }).catch(() => {});
-    this.store.put('bugpick', String(message.from?.id), { id: String(message.from?.id), text: redact(text), media: media || [], at: new Date().toISOString() });
   }
 
   // Jev sort. Returns { kind, severity, severityLabel }.
@@ -411,11 +418,17 @@ export class BugBot {
   async handleCallback(query, found) {
     const token = found.values.botToken, data = String(query.data || '');
     const ack = (text = '') => this.call(token, 'answerCallbackQuery', { callback_query_id: query.id, ...(text ? { text } : {}) }).catch(() => {});
-    if (!data.startsWith('pick:')) return ack();
-    const num = Number(data.slice(5)), held = this.store.get('bugpick', String(query.from?.id));
-    const report = this.reports().find(item => item.num === num);
-    if (!report || !held) return ack('That report is gone.');
-    this.store.delete('bugpick', String(query.from?.id));
+    const match = /^pick:([0-9a-f]{12}):(\d{1,6})$/.exec(data);
+    if (!match) return ack();
+    const pickId = match[1], num = Number(match[2]), held = this.store.get('bugpick', pickId);
+    const groupId = String(query.message?.chat?.id ?? '');
+    const bound = held && held.linkId === found.link.id && held.botId === String(found.values.botId || '')
+      && held.groupId === groupId && String(held.reporterId) === String(query.from?.id) && (held.nums || []).includes(num);
+    if (held && held.reporterId !== String(query.from?.id)) return ack('Only the person who wrote it can choose.');
+    if (!bound) return ack('That report is gone.');
+    const report = this.reports().find(item => item.num === num && String(item.groupId) === held.groupId && String(item.reporterId) === held.reporterId && OPEN_STATUSES.has(item.status));
+    if (!report) return ack('That report is gone.');
+    this.store.delete('bugpick', pickId);
     await this.appendToReport(found, report, { text: held.text, media: held.media, message: query.message });
     return ack('Added');
   }

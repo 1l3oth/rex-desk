@@ -241,3 +241,24 @@ async function mkFetcher(calls) {
     return { ok: true, json: async () => ({ ok: true, result: {} }) };
   };
 }
+
+test('picker: a button only attaches the held text for its own reporter, group and offered reports', async () => {
+  const { desk, store, calls } = makeDesk({ groups: [{ id: '-100' }, { id: '-200' }] });
+  const bot = new BugBot(desk, { fetcher: await mkFetcher(calls) });
+  for (const [num, reporterId, groupId] of [[1, '42', '-100'], [2, '42', '-100'], [3, '77', '-100'], [4, '42', '-200']]) {
+    store.put('bugreport', `bug-${num}`, { id: `bug-${num}`, num, groupId, reporterId, status: 'queued', text: `report ${num}`, media: [], createdAt: `2026-01-0${num}` });
+  }
+  await bot.handleUpdate(groupMsg({ text: 'held secret detail' }), bugBotLink(store));
+  const [held] = store.list('bugpick');
+  assert.deepEqual(held.nums.sort(), [1, 2]);
+  const button = num => `pick:${held.id}:${num}`;
+  const press = (data, from = 42, chatId = -100) => bot.handleUpdate({ callback_query: { id: 'q', data, from: { id: from }, message: { message_id: 9, chat: { id: chatId } } } }, bugBotLink(store));
+  await press(button(1), 77); // someone else presses the button
+  await press(button(3)); // a report the picker never offered
+  await press(button(4), 42, -200); // the same reporter's report in another group
+  await press('pick:1'); // an old-style button with no picker id
+  for (const num of [1, 2, 3, 4]) assert.equal(store.get('bugreport', `bug-${num}`).adds, undefined, `#${num} untouched`);
+  await press(button(2));
+  assert.match(store.get('bugreport', 'bug-2').adds[0].text, /held secret detail/);
+  assert.equal(store.list('bugpick').length, 0);
+});
