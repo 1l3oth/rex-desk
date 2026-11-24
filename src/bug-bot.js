@@ -112,14 +112,16 @@ export function sortReport(answers = {}) {
 }
 
 // ---- versions ----
-// Is version a newer than b? Compares dotted numbers (0.0.115 > 0.0.99); anything unreadable is never newer.
-export function newerVersion(a, b) {
+// Compare two dotted versions (0.0.115 vs 0.0.99): 1, 0 or -1, or null when either is unreadable.
+export function compareVersions(a, b) {
   const parts = value => String(value || '').replace(/^v/i, '').split(/[.+-]/).slice(0, 3).map(Number);
   const left = parts(a), right = parts(b);
-  if (left.length < 3 || right.length < 3 || [...left, ...right].some(Number.isNaN)) return false;
-  for (let index = 0; index < 3; index += 1) if (left[index] !== right[index]) return left[index] > right[index];
-  return false;
+  if (left.length < 3 || right.length < 3 || [...left, ...right].some(Number.isNaN)) return null;
+  for (let index = 0; index < 3; index += 1) if (left[index] !== right[index]) return left[index] > right[index] ? 1 : -1;
+  return 0;
 }
+// Is version a the same as or newer than b? Anything unreadable is never at least.
+export const atLeastVersion = (a, b) => { const order = compareVersions(a, b); return order !== null && order >= 0; };
 
 // ---- per-person rate limit, mute, duplicate merge ----
 export const RATE = { windowMs: 10 * 60 * 1000, max: 5, muteMs: 24 * 60 * 60 * 1000, strikesToMute: 3 };
@@ -500,15 +502,11 @@ export class BugBot {
   }
   // The version this Rex Desk runs: the installed app's own version, else the desk's.
   runningVersion() { return String(this.desk.version || process.env.REX_DESK_VERSION || this.store.config().version || ''); }
-  // The version a done report's fix shipped in, or '' while that is not confirmed. A task may name it (shippedVersion);
-  // otherwise the first time the task is seen done the running version is noted, and the fix counts as shipped only once
-  // this desk runs a newer version than that, i.e. a build made after the fix was done is out.
+  // The version a done report's fix shipped in, or '' while that is not confirmed. Only the task's own confirmed
+  // shippedVersion counts, and only once this desk runs at least that version. A task without one is never announced.
   shippedVersion(report, task) {
-    if (task.shippedVersion) return String(task.shippedVersion);
-    const running = this.runningVersion();
-    if (!running) return '';
-    if (!report.doneSeenVersion) { this.store.put('bugreport', report.id, { ...report, doneSeenVersion: running, updatedAt: new Date().toISOString() }); return ''; }
-    return newerVersion(running, report.doneSeenVersion) ? running : '';
+    const shipped = String(task.shippedVersion || '');
+    return shipped && atLeastVersion(this.runningVersion(), shipped) ? shipped : '';
   }
   async notifyFixed(found) {
     // A report whose task is done and whose fix is in a shipped version gets one group reply crediting the fix. It counts as
