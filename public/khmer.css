@@ -227,6 +227,7 @@ html[data-skin=waterfest][data-theme=light] .welcome h2{text-shadow:0 1px 10px r
 html[data-skin=waterfest][data-theme=light] .welcome h2::before{color:#b8831a;text-shadow:0 1px 8px rgba(255,255,255,.9)}
 html[data-skin=waterfest][data-theme=light] .btn.primary,html[data-skin=waterfest][data-theme=light] .send-btn{background:linear-gradient(180deg,#e0ad38,#c4901f 60%,#a9790f);color:#241905;box-shadow:inset 0 1px 0 rgba(255,245,210,.6),0 2px 10px rgba(169,121,15,.2)}
 html[data-skin=waterfest][data-theme=light] .composer .box2{background:rgba(255,255,255,.82)}
+html[data-skin=waterfest][data-theme=light] :where(.st-field,.tour-card,.dialog,.card,.si-card) :where(input:not([type=checkbox],[type=radio]),select,textarea){background:var(--bg)}
 html[data-skin=waterfest][data-theme=light] .msg.mine .bubble{border-color:rgba(184,131,26,.3);background:linear-gradient(160deg,rgba(184,131,26,.12),rgba(74,163,196,.06))}
 html[data-skin=waterfest][data-theme=light] .sugg-chip,html[data-skin=waterfest][data-theme=light] .welcome .chips button{background:rgba(255,255,255,.78)}
 html[data-skin=waterfest][data-theme=light] .card,html[data-skin=waterfest][data-theme=light] .dialog,html[data-skin=waterfest][data-theme=light] .pop,html[data-skin=waterfest][data-theme=light] .si-card{background:rgba(255,255,255,.95)}

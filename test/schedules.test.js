@@ -656,3 +656,108 @@ test('an agent with no session (Local AI light mode) gets each new scheduled mes
   assert.match(prompts[0], /Ping/); assert.match(prompts[1], /Check the build/, 'the second turn carries the second message');
   assert.equal(t.store.get('schedmsg', later.id).on, false, 'the second message counts as sent');
 });
+
+test('a Telegram message never joins a running app turn: it waits and starts its own turn, one chat at a time, and only that reply goes to Telegram', async () => {
+  const { TelegramBridge, telegramLink } = await import('../src/telegram.js');
+  let notify, finish, starts = 0;
+  const steered = [], prompts = [];
+  const clientFactory = options => ({ open: async () => {}, close() {}, request: async (method, params) => {
+    if (method === 'account/read') return { account: { type: 'chatgpt' } };
+    if (method === 'thread/start' || method === 'thread/resume') return { thread: { id: THREAD } };
+    if (method === 'turn/start') {
+      const id = `u${++starts}`; prompts.push(params.input.map(item => item.text).join(''));
+      if (starts === 1) { notify = options.onNotification; finish = () => options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }
+      else setTimeout(() => { options.onNotification('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: `Answer ${starts}.` } }); options.onNotification('turn/completed', { threadId: THREAD, turn: { id, status: 'completed' } }); }, 5);
+      return { turn: { id } };
+    }
+    if (method === 'turn/steer') { steered.push(params.input.map(item => item.text).join('')); return {}; }
+    return {};
+  } });
+  const t = deskWith(options => new CodexRunner({ ...options, clientFactory }), 'codex');
+  t.store.delete('schedmsg', t.once.id);
+  const link = chatId => { t.store.put('connector', 'telegram-1', { id: 'telegram-1', connectorId: 'telegram', name: 'Telegram @rexbot', kind: 'token', at: '2026-11-24T00:00:00.000Z' }); t.store.put('secret', 'connector:telegram-1', t.store.encrypt(JSON.stringify({ botToken: 'T:tok', chatId, chatName: 'Rex' }))); };
+  link(555);
+  const sent = [];
+  const fetcher = async (url, options) => { const body = JSON.parse(options?.body || '{}'); if (url.endsWith('/sendMessage')) sent.push({ chat: body.chat_id, text: body.text }); return { ok: true, json: async () => ({ ok: true, result: { message_id: 100 + sent.length } }) }; };
+  t.desk.telegram = new TelegramBridge(t.desk, { fetcher });
+  void t.desk.specialistTurn(t.agent.id, { prompt: 'Look at the logs' }); await new Promise(done => setTimeout(done, 100));
+  assert.equal(t.desk.live.size, 1, 'Codex is mid-turn on an app message');
+  // While the app turn runs: a Telegram message from chat 555, an app message, then (after a relink) one from chat 777.
+  await t.desk.telegram.routeToAgent(t.agent.id, 'ship it?', telegramLink(t.store));
+  await t.desk.specialistTurn(t.agent.id, { prompt: 'Also check the build' });
+  link(777);
+  await t.desk.telegram.routeToAgent(t.agent.id, 'and from here?', telegramLink(t.store));
+  assert.equal(t.runOf().queued.length, 3);
+  // Codex finishes a step: only the app message is steered in; the Telegram ones keep waiting.
+  notify('item/completed', { threadId: THREAD, item: { type: 'agentMessage', text: 'Reading the logs.' } });
+  await new Promise(done => setTimeout(done, 30));
+  assert.deepEqual(steered, ['Also check the build']);
+  assert.equal(t.runOf().queued.length, 2, 'both Telegram messages still wait');
+  assert.ok(!t.store.get('tgturn', t.runOf().id), 'the app turn is not marked');
+  // The app turn ends: its reply stays in the app. Each Telegram message then gets a turn of its own, chat 555 first.
+  finish(); await new Promise(done => setTimeout(done, 50)); await t.settled(); await new Promise(done => setTimeout(done, 50)); await t.settled();
+  assert.equal(starts, 3, 'one turn per chat');
+  assert.match(prompts[1], /ship it\?/); assert.doesNotMatch(prompts[1], /from here|check the build/);
+  assert.match(prompts[2], /and from here\?/); assert.doesNotMatch(prompts[2], /ship it/);
+  // Chat 555 is no longer linked, so its reply is dropped; chat 777 gets only its own turn's answer.
+  assert.deepEqual(sent, [{ chat: 777, text: 'Desky\nAnswer 3.' }]);
+  assert.equal(t.store.list('tgqueued').length, 0);
+});
+
+test('a Telegram turn that fails, then a resume from the app: the app reply stays in the app; the next Telegram message answers there', async () => {
+  const { TelegramBridge, telegramLink } = await import('../src/telegram.js');
+  const results = ['', 'App answer.', 'Telegram answer.'];
+  const t = deskWith((options, launch) => ({ async start() { if (launch === 1) throw new Error('The agent stopped working.'); options.event('agent-result', { result: results[launch - 1] }); }, interrupt() {}, close() {} }));
+  t.store.delete('schedmsg', t.once.id);
+  t.store.put('connector', 'telegram-1', { id: 'telegram-1', connectorId: 'telegram', name: 'Telegram @rexbot', kind: 'token', at: '2026-11-24T00:00:00.000Z' });
+  t.store.put('secret', 'connector:telegram-1', t.store.encrypt(JSON.stringify({ botToken: 'T:tok', chatId: 555, chatName: 'Rex' })));
+  const sent = [];
+  const fetcher = async (url, options) => { const body = JSON.parse(options?.body || '{}'); if (url.endsWith('/sendMessage')) sent.push(body.text); return { ok: true, json: async () => ({ ok: true, result: { message_id: 100 + sent.length } }) }; };
+  t.desk.telegram = new TelegramBridge(t.desk, { fetcher });
+  await t.desk.telegram.routeToAgent(t.agent.id, 'ship it?', telegramLink(t.store)); await t.settled(); await new Promise(done => setTimeout(done, 30));
+  assert.equal(t.runOf().state, 'failed', 'the Telegram turn failed');
+  assert.ok(!t.store.get('tgturn', t.runOf().id) && !t.runOf().replyTo, 'its destination went with it');
+  await t.desk.resume(t.runOf().id, { prompt: 'try again' }); await t.settled(); await new Promise(done => setTimeout(done, 30));
+  assert.deepEqual(sent, [], 'the app resume answers in the app');
+  await t.desk.telegram.routeToAgent(t.agent.id, 'and now?', telegramLink(t.store)); await t.settled(); await new Promise(done => setTimeout(done, 30));
+  assert.deepEqual(sent, ['Desky\nTelegram answer.']);
+});
+
+test('a Telegram turn cut off by a usage limit (its result reported before the error): the retry on the next account still answers on Telegram, and a message queued meanwhile is kept and answered', async () => {
+  const { TelegramBridge, telegramLink } = await import('../src/telegram.js');
+  const t = deskWith((options, launch) => ({ async start() {
+    if (launch === 1) { await t.desk.telegram.routeToAgent(t.agent.id, 'and the docs?', telegramLink(t.store)); options.event('agent-result', { result: 'Claude AI usage limit reached. Your limit resets at 5pm.' }); throw new Error('Claude AI usage limit reached. Your limit resets at 5pm.'); }
+    options.event('agent-result', { result: launch === 2 ? 'Shipped.' : 'Docs too.' });
+  }, interrupt() {}, close() {} }));
+  t.store.delete('schedmsg', t.once.id);
+  t.store.put('connector', 'telegram-1', { id: 'telegram-1', connectorId: 'telegram', name: 'Telegram @rexbot', kind: 'token', at: '2026-11-24T00:00:00.000Z' });
+  t.store.put('secret', 'connector:telegram-1', t.store.encrypt(JSON.stringify({ botToken: 'T:tok', chatId: 555, chatName: 'Rex' })));
+  const sent = [];
+  const fetcher = async (url, options) => { const body = JSON.parse(options?.body || '{}'); if (url.endsWith('/sendMessage')) sent.push(body.text); return { ok: true, json: async () => ({ ok: true, result: { message_id: 100 + sent.length } }) }; };
+  t.desk.telegram = new TelegramBridge(t.desk, { fetcher });
+  const first = temporary('claude1'), second = temporary('claude2');
+  t.store.saveConfig({ ...t.store.publicConfig(), agentProfiles: { claude: first } });
+  t.desk.agents.alternative = async (provider, current) => current === second ? null : { profile: second, label: 'claude2', account: 'second@example.com' };
+  await t.desk.telegram.routeToAgent(t.agent.id, 'ship it?', telegramLink(t.store));
+  for (let step = 0; step < 100 && (t.launches.length < 3 || t.desk.live.size); step++) await new Promise(done => setTimeout(done, 20));
+  await new Promise(done => setTimeout(done, 30));
+  assert.ok(t.store.events(t.runOf().id, { limit: 100 }).some(event => event.kind === 'account-switched'), 'it switched accounts');
+  assert.equal(t.launches.length, 3, 'the retry ran, then the queued message got a turn of its own');
+  assert.deepEqual(sent, ['Desky\nShipped.', 'Desky\nDocs too.']);
+  assert.equal(t.store.list('tgqueued').length, 0);
+});
+
+test('a Telegram message gives the agent its chat and tag, while the app chat shows the message as before', async () => {
+  const { TelegramBridge, telegramLink } = await import('../src/telegram.js');
+  const prompts = [];
+  const t = deskWith(() => ({ async start(prompt) { prompts.push(prompt); }, interrupt() {}, close() {} }));
+  t.store.delete('schedmsg', t.once.id);
+  t.store.put('connector', 'telegram-1', { id: 'telegram-1', connectorId: 'telegram', name: 'Telegram @rexbot', kind: 'token', at: '2026-11-24T00:00:00.000Z' });
+  t.store.put('secret', 'connector:telegram-1', t.store.encrypt(JSON.stringify({ botToken: 'T:tok', chatId: 555, chatName: 'Rex' })));
+  t.desk.telegram = new TelegramBridge(t.desk, { fetcher: async () => ({ ok: true, json: async () => ({ ok: true, result: { message_id: 1 } }) }) });
+  await t.desk.telegram.routeToAgent(t.agent.id, 'ship it?', telegramLink(t.store)); await t.settled();
+  assert.match(prompts.join('\n'), /\[Telegram #[0-9a-f]{12}\] Telegram, Rex \(tg:1\)\nship it\?/, 'the agent gets the source and tag line');
+  const shown = t.store.events(t.runOf().id, { limit: 50 }).filter(event => event.kind === 'human-message').map(event => event.text);
+  assert.equal(shown.length, 1);
+  assert.match(shown[0], /^\[Telegram #[0-9a-f]{12}\] ship it\?$/, 'the app chat never shows the tag line');
+});

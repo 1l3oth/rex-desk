@@ -82,12 +82,14 @@ export class AccountLink {
   // The account's private file folder on the account service (users/<id>/ in a private bucket). The bytes are already
   // encrypted on this computer; the service only ever stores them.
   async fileCall(method, pathname, body) {
+    // The sign-in this request is for: a late 401 for an account that was switched meanwhile never clears the new one.
+    const asked = this.saved;
     let response;
-    try { response = await this.fetcher(`${this.base}/v1/files${pathname}`, { method, headers: { authorization: `Bearer ${this.saved?.token || ''}`, ...(body ? { 'content-type': 'application/octet-stream' } : {}) }, ...(body ? { body } : {}), signal: AbortSignal.timeout(120000) }); }
+    try { response = await this.fetcher(`${this.base}/v1/files${pathname}`, { method, headers: { authorization: `Bearer ${asked?.token || ''}`, ...(body ? { 'content-type': 'application/octet-stream' } : {}) }, ...(body ? { body } : {}), signal: AbortSignal.timeout(120000) }); }
     catch { throw new Error('Rex Desk could not reach its account service to back up files.'); }
     if (response.ok) return response;
     const data = await response.json().catch(() => ({}));
-    if (response.status === 401) { this.clear(); this.ended = 'Your Rex Desk account sign-in ended. Sign in again in Settings to keep cloud backup running.'; }
+    if (response.status === 401 && this.saved === asked) { this.clear(); this.ended = 'Your Rex Desk account sign-in ended. Sign in again in Settings to keep cloud backup running.'; }
     throw Object.assign(new Error(data.error?.message || `The Rex Desk account service answered ${response.status}.`), { status: response.status, code: data.error?.code || '' });
   }
   static filePath = key => `/${key.split('/').map(encodeURIComponent).join('/')}`;
@@ -109,18 +111,36 @@ export class AccountLink {
     if (!this.signedIn || !connection || connection.url !== this.saved.url || now - this.lastTry < WAIT) return false;
     return failing || !this.saved.keyExpiresAt || new Date(this.saved.keyExpiresAt).getTime() - now < SOON;
   }
+  // A sign-in saved without its database (signing in to the app saves only the account) while this workspace syncs to the
+  // account's own database: the database is looked up once and recorded, so files go to and come from the account's folder.
+  // Only for a connection that is already there, at most once every ten minutes; a database of the person's own never matches.
+  async adoptDatabase(connection, now = Date.now()) {
+    if (!this.signedIn || this.saved.url || !connection?.url || now - (this.lastAdopt || 0) < WAIT) return false;
+    this.lastAdopt = now;
+    // The sign-in this lookup is for: when the account is signed out or switched while it runs, the answer belongs to the
+    // old account and is dropped, so a new sign-in never gets the old account's database (and its files never go there).
+    const asked = this.saved;
+    try {
+      const database = await accountDatabase(asked.token, this);
+      if (this.saved !== asked || database.url !== connection.url) return false;
+      this.saved = { ...this.saved, url: database.url, keyExpiresAt: database.expiresAt };
+      writeFileSync(this.file, this.store.encrypt(JSON.stringify(this.saved)), { mode: 0o600 });
+      return true;
+    } catch { return false; }
+  }
   // A fresh key for the same database, or null when it could not be had right now.
   async freshKey(now = Date.now()) {
     this.lastTry = now;
+    const asked = this.saved;
     try {
-      const database = await accountDatabase(this.saved.token, this);
-      if (database.url !== this.saved.url) return null;
+      const database = await accountDatabase(asked.token, this);
+      if (this.saved !== asked || database.url !== this.saved.url) return null;
       this.saved.keyExpiresAt = database.expiresAt;
       writeFileSync(this.file, this.store.encrypt(JSON.stringify(this.saved)), { mode: 0o600 });
       return database.authToken;
     } catch (error) {
       // The sign-in itself ended (signed out everywhere, or the account was deleted): stop asking.
-      if (error.status === 401) { this.clear(); this.ended = 'Your Rex Desk account sign-in ended. Sign in again in Settings to keep cloud backup running.'; }
+      if (error.status === 401 && this.saved === asked) { this.clear(); this.ended = 'Your Rex Desk account sign-in ended. Sign in again in Settings to keep cloud backup running.'; }
       return null;
     }
   }

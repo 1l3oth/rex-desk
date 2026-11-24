@@ -18,6 +18,44 @@ const codeIn = text => String(text || '').trim().replace(/^\/start(@\w+)?\s*/i, 
 export const pendingPairCode = values => (values?.pairCode && Number(values.pairUntil) > Date.now() ? values.pairCode : '');
 const chatNameOf = chat => [chat.first_name, chat.last_name].filter(Boolean).join(' ') || (chat.username ? `@${chat.username}` : String(chat.id));
 const clip = (text, size = 3800) => { const value = String(text ?? ''); return value.length > size ? `${value.slice(0, size - 1)}…` : value; };
+// A long reply cut into Telegram-sized parts at paragraph, then line, then word breaks; at most maxParts, the last one clipped.
+export function splitReply(text, size = 3800, maxParts = 4) {
+  const parts = []; let rest = String(text ?? '').trim();
+  while (rest && parts.length < maxParts) {
+    if (rest.length <= size) { parts.push(rest); break; }
+    if (parts.length === maxParts - 1) { parts.push(clip(rest, size)); break; }
+    const window = rest.slice(0, size);
+    const cut = [window.lastIndexOf('\n\n'), window.lastIndexOf('\n'), window.lastIndexOf(' ')].find(at => at > size / 2) ?? size;
+    parts.push(rest.slice(0, cut).trim()); rest = rest.slice(cut).trim();
+  }
+  return parts.filter(Boolean);
+}
+// What a message from Telegram looks like in the agent's chat: marked, so the agent knows its final reply goes back there.
+export const TELEGRAM_MARK = '[Telegram]';
+// The mark's line also says where it came from and the chat's own tag (tg:N), which the agent can pass to desk_telegram to
+// text exactly that chat. The app chat never shows that line (hideTelegramTag): it shows the message as before.
+const fromTelegram = (text, key, source = '') => source ? `[Telegram #${key}] ${source}\n${text}` : `[Telegram #${key}] ${text}`;
+// A message as the app chat shows it: the hidden source and tag line taken out, the mark and the words kept.
+export const hideTelegramTag = text => String(text ?? '').replace(/^(\[Telegram #[0-9a-f]{12}\]) Telegram, [^\n]*\(tg:\d+\)\n/gm, '$1 ');
+// The id in a queue entry's mark, or '' for a message that did not come from Telegram.
+export const telegramKey = entry => String(entry ?? '').match(/^\[Telegram #([0-9a-f]{12})\]/)?.[1] || '';
+// Telegram lets a bot download files up to 20 MB.
+const MAX_DOWNLOAD = 20 * 1024 * 1024;
+// A turn started from Telegram sends its final reply back for this long; a turn that never ends does not hold the mark forever.
+const TURN_TTL_MS = 2 * 60 * 60 * 1000;
+const attachedBlock = files => (files.length ? `\n\nAttached files (read them from these paths):\n${files.map(file => `- ${file}`).join('\n')}` : '');
+// The command menu Telegram shows next to the message box once the personal bot is linked.
+export const BOT_COMMANDS = [
+  { command: 'agents', description: 'Pick which agent you talk to' },
+  { command: 'status', description: 'See what the team is doing' },
+  { command: 'help', description: 'How this chat works' },
+];
+const HELP_TEXT = ['Rex Desk on Telegram', '',
+  'Just send a message: it goes to the agent you last talked with (Rex Agent at first), and its answer comes back here.',
+  'Reply to an agent message to answer that agent. Voice notes, photos and files are passed on too.', '',
+  '/agents  pick which agent you talk to', '/status  see what the team is doing', '/help  this message'].join('\n');
+const OPEN_TEAM_STATES = new Set(['queued', 'working', 'needs-manager']);
+const safeName = name => path.basename(String(name || 'file')).replace(/[^\p{L}\p{N}._ -]+/gu, '_').slice(0, 120) || 'file';
 
 // The newest saved Telegram connector and its decrypted values ({ botToken, chatId?, chatName? }), or null when none is saved.
 export function telegramLink(store) {
@@ -46,7 +84,7 @@ export class TelegramBridge {
   // options.transcribe are injectable for tests. transcribe(oggBuffer, language) -> { text } | null (null = could not).
   constructor(desk, { fetcher = fetch, transcribe = null } = {}) {
     this.desk = desk; this.store = desk.store; this.fetcher = fetcher; this.transcribe = transcribe;
-    this.running = false; this.polling = false;
+    this.running = false; this.polling = false; this.retryMs = 1000;
   }
 
   // ---- Telegram Bot API ----
@@ -108,14 +146,56 @@ export class TelegramBridge {
 
   // ---- Outgoing: an agent texts the person ----
   // agentId/name identify the sender; the message is prefixed with the agent name so the person knows who wrote.
-  async sendFromAgent(agentId, name, text) {
+  // runId: the chat the agent sent it from (desk_telegram passes it). Only after Telegram took the message is that chat's
+  // Telegram turn marked as answered, so a failed send still leaves the automatic reply to go out at the end of the turn.
+  // tag: a chat's tag (tg:N) from the line on its messages; the message goes to exactly that chat, or not at all when that chat
+  // is no longer the linked one. Without a tag it goes to the linked chat, as before.
+  async sendFromAgent(agentId, name, text, { runId = '', tag = '' } = {}) {
     const found = telegramLink(this.store);
+    if (tag) {
+      const wanted = String(tag).trim().toLowerCase(), chat = this.store.list('tgchat').find(item => item.tag === wanted);
+      if (!chat) throw new Error(`There is no Telegram chat tagged ${tag}.`);
+      if (!found?.values?.chatId || found.link.id !== chat.linkId || String(found.values.chatId) !== chat.chatId) throw new Error(`The Telegram chat ${chat.tag} is no longer linked, so nothing was sent.`);
+    }
     if (!found) throw new Error('Telegram is not connected. Add it in Settings -> Connectors.');
     if (!found.values.chatId) throw new Error('Telegram is connected but not linked yet. Open the bot, press Start, and tap Link in Settings.');
-    const body = `${name}\n${String(text || '').trim()}`;
-    const message = await this.call(found.values.botToken, 'sendMessage', { chat_id: found.values.chatId, text: clip(body) });
-    if (message?.message_id) this.store.put('tgmsg', String(message.message_id), { id: String(message.message_id), kind: 'agent', agentId, linkId: found.link.id, at: new Date().toISOString() });
+    await this.sendParts(found, agentId, name, text);
+    const turn = runId ? this.store.get('tgturn', runId) : null;
+    if (turn && !turn.sent) this.store.put('tgturn', runId, { ...turn, sent: true });
     return { sent: true };
+  }
+  // Send an agent's words in one message (or a few clean parts when long), each recorded so a Reply on it reaches that agent,
+  // and remember the agent as the one that last wrote, so the person's next plain message goes to it.
+  async sendParts(found, agentId, name, text) {
+    const parts = splitReply(String(text || '').trim(), 3800 - String(name).length - 1);
+    for (const [index, part] of parts.entries()) {
+      const message = await this.call(found.values.botToken, 'sendMessage', { chat_id: found.values.chatId, text: clip(index ? part : `${name}\n${part}`) });
+      if (message?.message_id) this.store.put('tgmsg', String(message.message_id), { id: String(message.message_id), kind: 'agent', agentId, linkId: found.link.id, at: new Date().toISOString() });
+    }
+    this.noteLastAgent(found, agentId);
+  }
+  noteLastAgent(found, agentId) { if (agentId && found) this.store.put('telegram', 'last', { id: 'last', agentId, linkId: found.link.id, at: new Date().toISOString() }); }
+  // The agent a plain message (no Reply) goes to: the one that last wrote to the person on Telegram, while it still exists;
+  // else Rex Agent.
+  lastAgent(found) {
+    const last = this.store.get('telegram', 'last');
+    if (!last?.agentId || last.linkId !== found.link.id) return 'main';
+    return last.agentId === 'main' || this.store.get('specialist', last.agentId) ? last.agentId : 'main';
+  }
+
+  // ---- A turn that started from Telegram answers on Telegram ----
+  // Called by the coordinator when a run's turn ends (agent-result). Only a turn a Telegram message started is sent back,
+  // once; turns started in the app never reach Telegram.
+  async onTurnResult(runId, text) {
+    const turn = this.store.get('tgturn', runId); if (!turn) return;
+    this.store.delete('tgturn', runId);
+    if (turn.sent || Date.now() - Date.parse(turn.at) > TURN_TTL_MS || !String(text || '').trim()) return;
+    const found = telegramLink(this.store);
+    // Only to the chat the message came from: a Relink keeps the connection but may link another chat, which never gets it.
+    if (!found?.values?.chatId || found.link.id !== turn.linkId || String(found.values.chatId) !== String(turn.chatId ?? '')) return;
+    const name = turn.agentId === 'main' ? 'Rex Agent' : this.store.get('specialist', turn.agentId)?.name || 'Agent';
+    try { await this.sendParts(found, turn.agentId, name, text); }
+    catch (error) { this.store.event?.('', 'telegram-error', { message: `reply: ${error.message}` }, true); }
   }
 
   // ---- Outgoing: an agent's desk_ask shows up with answer buttons ----
@@ -135,7 +215,8 @@ export class TelegramBridge {
         chat_id: found.values.chatId, text: clip(`${head}\n${interaction.title}${foot}`),
         ...(buttons.length ? { reply_markup: { inline_keyboard: buttons } } : {}),
       });
-      if (message?.message_id) this.store.put('tgmsg', String(message.message_id), { id: String(message.message_id), kind: 'ask', interactionId: interaction.id, field: this.answerField(schema), linkId: found.link.id, at: new Date().toISOString() });
+      if (message?.message_id) this.store.put('tgmsg', String(message.message_id), { id: String(message.message_id), kind: 'ask', interactionId: interaction.id, agentId: who.id, field: this.answerField(schema), linkId: found.link.id, at: new Date().toISOString() });
+      this.noteLastAgent(found, who.id);
     } catch { /* the app's Needs you still has the question; Telegram is a bonus channel */ }
   }
 
@@ -164,6 +245,7 @@ export class TelegramBridge {
       const found = telegramLink(this.store);
       // Idle (no getUpdates) until a chat is linked, so the Link button's one-shot getUpdates never hits a 409 conflict.
       if (!found?.values?.chatId) { await this.sleep(8000); continue; }
+      await this.ensureCommands(found);
       try {
         const offset = offsetFor(this.store, found.link.id);
         this.abort = new AbortController();
@@ -184,6 +266,15 @@ export class TelegramBridge {
       }
     }
     this.polling = false;
+  }
+
+  // The command menu (/agents, /status, /help) is set once per linked bot each time the app starts or a chat is linked. A
+  // failure is logged and tried again on the next app start; chatting works without it.
+  async ensureCommands(found) {
+    if (this.commandsFor === found.link.id) return;
+    this.commandsFor = found.link.id;
+    try { await this.call(found.values.botToken, 'setMyCommands', { commands: BOT_COMMANDS }); }
+    catch (error) { this.store.event?.('', 'telegram-error', { message: `command menu: ${error.message}` }, true); }
   }
 
   sleep(ms) { return new Promise(resolve => { const timer = setTimeout(resolve, ms); timer.unref?.(); this.wake = () => { clearTimeout(timer); this.wake = null; resolve(); }; }); }
@@ -214,19 +305,72 @@ export class TelegramBridge {
     // Only the one linked chat is ever accepted; anything else is ignored.
     if (String(message.chat?.id) !== String(found.values.chatId)) return;
     if (message.voice || message.audio) return this.handleVoice(message, found);
+    if (message.photo || message.document || message.video || message.animation) return this.handleFile(message, found);
     const text = String(message.text || '').trim();
     if (!text) return;
     const context = this.sentMessage(found, message.reply_to_message?.message_id);
     if (context?.kind === 'ask') return this.answerAsk(context.interactionId, context.field, text, found, message.message_id);
-    if (context?.kind === 'agent') return this.routeToAgent(context.agentId, text);
-    // A plain message (not a reply, not a command) goes to Rex Agent, the main agent.
-    if (text.startsWith('/')) return; // bot commands like /start are not routed
-    return this.routeToAgent('main', text);
+    if (text.startsWith('/')) return this.handleCommand(text, found); // commands are answered here, never routed to an agent
+    return this.routeToAgent(this.targetFor(message, found), text, found);
+  }
+
+  // Who a message is for. A Reply on an agent's message (or its question) goes to that agent; a plain message, with no Reply,
+  // goes to the agent that last wrote to the person on Telegram, else Rex Agent. The person never needs Reply.
+  targetFor(message, found) {
+    const context = this.sentMessage(found, message.reply_to_message?.message_id);
+    if (context?.agentId) return context.agentId;
+    return this.lastAgent(found);
+  }
+
+  // ---- Commands: /agents, /status, /help (and /start shows the help) ----
+  async handleCommand(text, found) {
+    const command = text.slice(1).split(/[\s@]/)[0].toLowerCase();
+    const say = (body, extra = {}) => this.call(found.values.botToken, 'sendMessage', { chat_id: found.values.chatId, text: clip(body), ...extra });
+    if (command === 'help' || command === 'start') return say(HELP_TEXT).catch(() => {});
+    if (command === 'status') return say(this.statusText()).catch(() => {});
+    if (command === 'agents') {
+      const agents = this.agentChoices(), current = this.lastAgent(found);
+      const buttons = agents.map(agent => [{ text: `${agent.id === current ? '* ' : ''}${agent.name}`.slice(0, 60), callback_data: `agent=${agent.id}`.slice(0, 64) }]);
+      const message = await say(`You are talking with ${this.agentName(current)}. Pick who gets your next messages:`, { reply_markup: { inline_keyboard: buttons } }).catch(() => null);
+      if (message?.message_id) this.store.put('tgmsg', String(message.message_id), { id: String(message.message_id), kind: 'agents', linkId: found.link.id, at: new Date().toISOString() });
+      return;
+    }
+    return say('I do not know that command. Send /help to see what I can do.').catch(() => {});
+  }
+  // Rex Agent first, then every agent on this desk by name.
+  agentChoices() {
+    const others = this.store.list('specialist').filter(agent => agent.id !== 'main' && agent.kind !== 'main' && agent.name)
+      .sort((left, right) => String(left.name).localeCompare(String(right.name)));
+    return [{ id: 'main', name: 'Rex Agent' }, ...others.map(agent => ({ id: agent.id, name: agent.name }))];
+  }
+  agentName(agentId) { return agentId === 'main' ? 'Rex Agent' : this.store.get('specialist', agentId)?.name || 'Rex Agent'; }
+  // One line per agent: working or free, its open team tasks, and how many questions wait for the person.
+  statusText() {
+    const live = this.desk.live, teamTasks = this.store.list('team-task').filter(item => OPEN_TEAM_STATES.has(item.state));
+    const lines = this.agentChoices().map(agent => {
+      const record = agent.id === 'main' ? this.store.get('specialist', 'main') : this.store.get('specialist', agent.id);
+      const busy = Boolean(record?.runId && live?.has?.(record.runId));
+      const open = teamTasks.filter(item => item.workerId === agent.id).length;
+      return `${agent.name}: ${busy ? 'working' : 'free'}${open ? `, ${open} open ${open === 1 ? 'task' : 'tasks'}` : ''}`;
+    });
+    const waiting = this.store.list('interaction').filter(item => item.state === 'pending').length;
+    return ['Team status', ...lines, waiting ? `${waiting} ${waiting === 1 ? 'question waits' : 'questions wait'} for you in Needs you.` : 'Nothing waits for you.'].join('\n');
+  }
+  // A press on an /agents button: only from the linked chat, on the bot's own /agents message, for an agent that exists.
+  async pickAgent(query, found, agentId, ack) {
+    const origin = query.message;
+    if (!origin || String(origin.chat?.id) !== String(found.values.chatId)) return ack();
+    if (this.sentMessage(found, origin.message_id)?.kind !== 'agents') return ack();
+    if (agentId !== 'main' && !this.store.get('specialist', agentId)) return ack('That agent is gone');
+    this.noteLastAgent(found, agentId);
+    await ack(`Now talking with ${this.agentName(agentId)}`);
+    await this.call(found.values.botToken, 'editMessageText', { chat_id: origin.chat.id, message_id: origin.message_id, text: `You are talking with ${this.agentName(agentId)}. Your next messages go there.`, reply_markup: { inline_keyboard: [] } }).catch(() => {});
   }
 
   async handleCallback(query, found) {
     const data = String(query.data || ''), token = found.values.botToken;
     const ack = (text = '') => this.call(token, 'answerCallbackQuery', { callback_query_id: query.id, ...(text ? { text } : {}) }).catch(() => {});
+    if (data.startsWith('agent=')) return this.pickAgent(query, found, data.slice(6), ack);
     const colon = data.indexOf(':'); if (colon < 0) return ack();
     const interactionId = data.slice(0, colon), rest = data.slice(colon + 1);
     // Only a button on the question Rex Desk sent to the linked chat counts: the press must come from that chat, on that
@@ -263,42 +407,120 @@ export class TelegramBridge {
     catch (error) { return this.call(found.values.botToken, 'sendMessage', { chat_id: found.values.chatId, text: clip(`Could not use that answer: ${error.message}`), reply_to_message_id: replyToId }).catch(() => {}); }
   }
 
-  async routeToAgent(agentId, text) {
+  // Start the agent's turn with the message marked as from Telegram, its reply going back to the chat it came from. Each
+  // message gets its own id in its mark ([Telegram #id]) and a record of where it came from (tgqueued), made before the
+  // turn is asked for, so two messages with the same words from two chats are never mixed up. When the agent is busy, the
+  // message waits in its queue and starts a turn of its own afterwards (src/coordinator.js resumeQueued).
+  async routeToAgent(agentId, text, found = telegramLink(this.store)) {
     if (agentId === 'main') this.desk.specialists.ensureMain();
-    await this.desk.specialistTurn(agentId, { prompt: text });
+    const tag = found?.values?.chatId ? this.chatTag(found.link.id, found.values.chatId) : '';
+    const key = randomUUID().replaceAll('-', '').slice(0, 12), prompt = fromTelegram(text, key, tag ? `Telegram, ${String(found.values.chatName || 'the person').replace(/\s+/g, ' ').slice(0, 40)} (${tag})` : '');
+    const replyTo = found?.values?.chatId ? { agentId, linkId: found.link.id, chatId: String(found.values.chatId), at: new Date().toISOString(), keys: [key] } : null;
+    if (replyTo) this.store.put('tgqueued', key, { id: key, ...replyTo, keys: undefined });
+    try { await this.desk.specialistTurn(agentId, { prompt, ...(replyTo ? { telegram: replyTo } : {}) }); }
+    catch (error) { this.store.delete('tgqueued', key); throw error; }
+    this.noteLastAgent(found, agentId);
+  }
+  // The short tag of one Telegram chat (tg:N): made the first time that chat writes, the same every time after.
+  chatTag(linkId, chatId) {
+    const id = `${linkId}:${chatId}`, saved = this.store.get('tgchat', id); if (saved?.tag) return saved.tag;
+    const next = Number(this.store.get('telegram', 'tags')?.next) || 1;
+    this.store.put('telegram', 'tags', { id: 'tags', next: next + 1 });
+    this.store.put('tgchat', id, { id, tag: `tg:${next}`, linkId, chatId: String(chatId) });
+    return `tg:${next}`;
+  }
+  // Where a queue entry came from: '' for the app, else its link and chat. Matched by the id in its mark, never by its words.
+  queuedChat(runId, entry) {
+    const key = telegramKey(entry), item = key ? this.store.get('tgqueued', key) : null;
+    return item ? `${item.linkId}:${item.chatId}` : '';
+  }
+  // The chat the run's current turn answers ('' for an app turn): a Telegram turn takes nothing in mid-turn.
+  turnChat(runId) { const turn = this.store.get('tgturn', runId); return turn ? `${turn.linkId}:${turn.chatId}` : ''; }
+  // The reply destination of a queued batch (all from one chat, see nextQueuedBatch), or null for an app batch.
+  batchReplyTo(runId, entries = []) {
+    const items = entries.map(telegramKey).filter(Boolean).map(key => this.store.get('tgqueued', key)).filter(Boolean);
+    if (!items.length) return null;
+    const { agentId, linkId, chatId, at } = items[0];
+    return { agentId, linkId, chatId, at, keys: items.map(item => item.id) };
+  }
+  // A turn of the run starts (src/coordinator.js execute). The reply destination belongs to that one turn: a turn with no
+  // destination (an app message, a resume from the app) clears any left from an earlier turn that failed or was stopped.
+  // attach: Rex Desk follows a turn that was already running (after a restart); its destination stays, under the new turn.
+  onTurnStart(runId, turnId, replyTo, { attach = false } = {}) {
+    const old = this.store.get('tgturn', runId);
+    if (attach) { if (old) this.store.put('tgturn', runId, { ...old, turnId }); return; }
+    if (!replyTo?.chatId) { if (old) this.store.delete('tgturn', runId); return; }
+    for (const key of replyTo.keys || []) this.store.delete('tgqueued', key);
+    this.store.put('tgturn', runId, { id: runId, turnId, agentId: replyTo.agentId, linkId: replyTo.linkId, chatId: String(replyTo.chatId), at: new Date().toISOString(), sent: false });
+  }
+  // The turn ended, however it ended: its destination goes with it. Returned so a turn handed on to the next one (another
+  // account or model) can pass it on.
+  onTurnEnd(runId, turnId) {
+    const turn = this.store.get('tgturn', runId); if (!turn || turn.turnId !== turnId) return null;
+    this.store.delete('tgturn', runId);
+    return { agentId: turn.agentId, linkId: turn.linkId, chatId: turn.chatId, at: turn.at, keys: [] };
   }
 
-  // Voice notes: download the audio, transcribe it if a transcriber is available (no new keys), and post the text (plus the
-  // audio) into the target agent's chat. With no transcoder, post the audio and say it was not transcribed.
+  // Download one Telegram file (getFile, then the file itself) into Rex Desk's uploads folder, so the agent can read it and
+  // the chat shows it. Tried three times: one network blip no longer loses a voice note. Returns { path, buffer } or { error }.
+  async download(found, fileId, name, size = 0) {
+    if (size > MAX_DOWNLOAD) return { error: 'it is over 20 MB, which Telegram does not let a bot download' };
+    let last = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const file = await this.call(found.values.botToken, 'getFile', { file_id: fileId });
+        const response = await this.fetcher(`${API}/file/bot${found.values.botToken}/${file.file_path}`, { signal: AbortSignal.timeout(60000) });
+        if (response.ok === false) throw new Error(`HTTP ${response.status}`);
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const ext = path.extname(String(file.file_path || '')), base = safeName(name);
+        return { path: this.saveFile(buffer, path.extname(base) ? base : `${base}${ext}`), buffer };
+      } catch (error) { last = error; if (attempt < 2) await new Promise(resolve => setTimeout(resolve, this.retryMs * (attempt + 1))); }
+    }
+    // The cause (like ECONNRESET) is kept; the token never is: it only sits in the URL, which is not part of the message.
+    const reason = [last?.message, last?.cause?.code || last?.cause?.message].filter(Boolean).join(': ') || 'unknown error';
+    this.store.event?.('', 'telegram-error', { message: `file download: ${reason}` }, true);
+    return { error: `the download from Telegram failed (${reason})` };
+  }
+  // The uploads folder in the files folder (like files attached in the app), one new folder per file. Falls back to the data
+  // folder when the store has no files folder.
+  saveFile(buffer, name) {
+    const root = this.store.media ? this.store.media('uploads') : path.join(this.store.directory, 'uploads');
+    const dir = path.join(root, randomUUID()); mkdirSync(dir, { recursive: true });
+    const out = path.join(dir, safeName(name)); writeFileSync(out, buffer); return out;
+  }
+
+  // Photos, files and short videos: downloaded and posted into the agent's chat as attachments, with the caption.
+  async handleFile(message, found) {
+    const agentId = this.targetFor(message, found);
+    const photo = Array.isArray(message.photo) && message.photo.length ? message.photo[message.photo.length - 1] : null;
+    const item = photo || message.document || message.video || message.animation;
+    const kind = photo ? 'a photo' : message.document ? 'a file' : 'a video';
+    const name = photo ? `photo-${message.message_id || Date.now()}.jpg` : item.file_name || `${message.document ? 'file' : 'video'}-${message.message_id || Date.now()}`;
+    const saved = await this.download(found, item.file_id, name, item.file_size || 0);
+    const caption = String(message.caption || '').trim();
+    const said = `The person sent ${kind}${caption ? ` with this caption: ${caption}` : ' (no caption)'}.`;
+    const prompt = saved.path ? `${said}${attachedBlock([saved.path])}` : `${said} It could not be saved: ${saved.error}.`;
+    return this.routeToAgent(agentId, prompt, found);
+  }
+
+  // Voice notes: saved into the uploads folder (the agent always gets the file path), transcribed when a transcriber is ready,
+  // and posted into the agent's chat. When it cannot be transcribed, the agent is told plainly why.
   async handleVoice(message, found) {
-    const context = this.sentMessage(found, message.reply_to_message?.message_id);
-    const agentId = context?.kind === 'agent' ? context.agentId : 'main';
-    const fileId = (message.voice || message.audio).file_id;
-    let buffer = null, saved = '';
-    try {
-      const file = await this.call(found.values.botToken, 'getFile', { file_id: fileId });
-      const response = await this.fetcher(`${API}/file/bot${found.values.botToken}/${file.file_path}`, { signal: AbortSignal.timeout(20000) });
-      buffer = Buffer.from(await response.arrayBuffer());
-      saved = this.saveAudio(buffer, file.file_path);
-    } catch (error) { this.store.event?.('', 'telegram-error', { message: `voice download: ${error.message}` }, true); }
-    let text = '';
-    if (buffer && this.transcribe) { try { const result = await this.transcribe(buffer, this.store.config().control?.language || 'en'); text = String(result?.text || '').trim(); } catch { /* fall back to audio-only */ } }
-    const prompt = text
-      ? `Voice note from the person (transcribed): ${text}${saved ? `\n(audio: ${saved})` : ''}`
-      : `The person sent a voice note${saved ? ` (audio saved at ${saved})` : ''}. It was not transcribed automatically.`;
-    if (agentId === 'main') this.desk.specialists.ensureMain();
-    await this.desk.specialistTurn(agentId, { prompt });
-  }
-
-  saveAudio(buffer, filePath) {
-    try {
-      if (!this.store.directory) return '';
-      const dir = path.join(this.store.directory, 'telegram');
-      mkdirSync(dir, { recursive: true });
-      const ext = (String(filePath).split('.').pop() || 'oga').replace(/[^a-z0-9]/gi, '') || 'oga';
-      const out = path.join(dir, `voice-${randomUUID().slice(0, 8)}.${ext}`);
-      writeFileSync(out, buffer); return out;
-    } catch { return ''; }
+    const agentId = this.targetFor(message, found);
+    const audio = message.voice || message.audio;
+    const saved = await this.download(found, audio.file_id, audio.file_name || `voice-${message.message_id || Date.now()}`, audio.file_size || 0);
+    let text = '', why = saved.error ? `the audio could not be saved, ${saved.error}` : '';
+    if (saved.buffer && !this.transcribe) why = 'no transcriber is set up';
+    if (saved.buffer && this.transcribe) {
+      try {
+        const result = await this.transcribe(saved.buffer, this.store.config().control?.language || 'en');
+        text = String(result?.text || '').trim();
+        if (!text) why = result?.error || 'the transcriber returned no words';
+      } catch (error) { why = error.message; }
+    }
+    const files = attachedBlock(saved.path ? [saved.path] : []);
+    const prompt = text ? `Voice note from the person (transcribed): ${text}${files}` : `The person sent a voice note. It was not transcribed: ${why}.${files}`;
+    return this.routeToAgent(agentId, prompt, found);
   }
 
   agentForRun(runId) {

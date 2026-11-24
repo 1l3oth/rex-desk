@@ -1203,7 +1203,14 @@ document.addEventListener('error', event => {
   const gone = document.createElement('span'); gone.className = 'file-gone'; gone.setAttribute('role', 'img'); gone.textContent = t('Not on this computer yet');
   const source = media.currentSrc || media.src || media.querySelector?.('source')?.src;
   (media.closest('.md-media-link, .sh-thumb') || media).replaceWith(gone);
-  if (source) fetch(source, { cache: 'no-store' }).then(answer => answer.status === 404 ? answer.text() : '').then(text => { if (/This file was deleted/.test(text)) gone.textContent = t('File removed'); }).catch(() => {});
+  if (source) fetch(source, { cache: 'no-store' }).then(async answer => {
+    if (answer.status !== 404) return;
+    if (/This file was deleted/.test(await answer.text())) { gone.textContent = t('File removed'); return; }
+    // Why the cloud backup did not bring it (src/file-backup.js why), so it never just waits forever.
+    const reason = answer.headers.get('X-Rex-Missing'), detail = decodeURIComponent(answer.headers.get('X-Rex-Missing-Detail') || '');
+    const said = { off: t('Pictures and files are left out of the cloud backup'), 'not-connected': t('Cloud backup is not connected on this computer'), 'not-in-backup': t('Not in the cloud backup yet'), 'too-big': t('Too big for the cloud backup'), failed: t('Could not download it') }[reason];
+    if (said) { gone.textContent = said; if (detail) gone.title = detail; }
+  }).catch(() => {});
 }, true);
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && ui.reply && event.target.id === 'draft' && !ui.menu) { ui.reply = null; drawReplyBar(); } });
 // Ctrl+Up in the message box replies to the message above (again: the one before it); Ctrl+Down goes back down, past the newest stops replying.

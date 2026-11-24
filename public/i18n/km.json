@@ -2683,5 +2683,10 @@
  "Video details, search and subtitles.": "ព័ត៌មានវីដេអូ ការស្វែងរក និងអក្សររត់។",
  "Repositories, issues and pull requests.": "Repository, issue និង pull request។",
  "Public posts only. Reddit often blocks reading without a sign-in.": "តែប្រកាសសាធារណៈប៉ុណ្ណោះ។ Reddit ច្រើនតែរារាំងការអានដោយមិនចូលគណនី។",
- "Any public page as plain text, read through the Jina reader service.": "ទំព័រសាធារណៈណាមួយជាអត្ថបទធម្មតា អានតាមរយៈសេវា Jina reader។"
+ "Any public page as plain text, read through the Jina reader service.": "ទំព័រសាធារណៈណាមួយជាអត្ថបទធម្មតា អានតាមរយៈសេវា Jina reader។",
+ "Pictures and files are left out of the cloud backup": "រូបភាព និងឯកសារ មិនត្រូវបានបម្រុងទុកលើ cloud ទេ",
+ "Cloud backup is not connected on this computer": "ការបម្រុងទុកលើ cloud មិនទាន់ភ្ជាប់នៅលើកុំព្យូទ័រនេះទេ",
+ "Not in the cloud backup yet": "មិនទាន់មាននៅក្នុងការបម្រុងទុកលើ cloud ទេ",
+ "Could not download it": "មិនអាចទាញយកវាបានទេ",
+ "Too big for the cloud backup": "ធំពេកសម្រាប់ការបម្រុងទុកលើ cloud"
 }

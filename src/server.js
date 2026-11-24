@@ -39,6 +39,22 @@ import { weeklyReport } from './report.js';
 import { Computer } from './computer.js';
 import { Voice } from './voice.js';
 import { transcribeGemini, transcribeElevenLabs } from './cloud-voice.js';
+// Why a file the cloud backup was asked for did not come (src/file-backup.js why), for the chat to say instead of waiting.
+const missingHeaders = (store, key) => { const why = store.cloud?.files?.why?.(key); return why ? { 'X-Rex-Missing': why.reason, ...(why.detail ? { 'X-Rex-Missing-Detail': encodeURIComponent(why.detail) } : {}) } : {}; };
+// The page a file link opens when the file is not here: it says why the cloud backup did not bring it, when that is known.
+const MISSING_SAYS = {
+  off: ['Pictures and files are left out of the cloud backup.', 'Turn them on in Settings, Cloud backup, on the computer that made it, or open it there.'],
+  'not-connected': ['Cloud backup is not connected on this computer.', 'Sign in to the same Rex Desk account here, or open it on the computer that made it.'],
+  'not-in-backup': ['This file is not in the cloud backup yet.', 'The computer that made it has not backed it up yet. Open it there, or try again later.'],
+  'too-big': ['This file is too big for the cloud backup.', 'Open it on the computer that made it.'],
+  failed: ['Rex Desk could not download this file.', 'Try again later, or open it on the computer that made it.'],
+};
+const escapeHtml = text => String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+function missingPage(response, store, key) {
+  const why = store.cloud?.files?.why?.(key), [title, body] = MISSING_SAYS[why?.reason] || ['This file is not on this computer yet.', 'It was made on your other computer. It arrives here once both computers are connected through your Rex Desk account. Open it on the computer that made it, or try again later.'];
+  response.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'", ...missingHeaders(store, key) });
+  return response.end(`<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;font:15px/1.6 system-ui,sans-serif;background:#16181d;color:#e6e8eb;text-align:center;padding:24px"><div style="max-width:440px"><p style="font-size:17px;font-weight:600;margin:0 0 8px">${escapeHtml(title)}</p><p style="margin:0;color:#9aa3b1">${escapeHtml(body)}</p>${why?.detail ? `<p style="margin:12px 0 0;color:#6b7380;font-size:13px">${escapeHtml(why.detail)}</p>` : ''}</div></body>`);
+}
 // How long a voice message waits for the on-computer model to load before another engine answers.
 export const LOCAL_VOICE_WAIT_MS = 20000;
 // ffmpeg is used only to turn a Telegram voice note (Ogg/Opus) into WAV for the speech engine. It is not bundled; this finds
@@ -262,8 +278,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     // Two-way Telegram: agents text the person and their desk_ask questions appear there; the person's replies flow back
     // into the agent's chat. Long polling while the app runs. Voice notes transcribe only when a transcoder (ffmpeg) and a
     // ready speech engine are present and need no new keys; otherwise the audio is posted as-is.
+    // It answers { text } or { error } with the plain reason, which the agent is told.
     const transcribeVoiceNote = async (ogg, language) => {
-      const ffmpeg = ffmpegPath(); if (!ffmpeg) return null;
+      const ffmpeg = ffmpegPath(); if (!ffmpeg) return { error: 'ffmpeg is not installed on this computer; it is needed to turn a Telegram voice note (OGG) into sound a voice engine can read' };
       const tmp = path.join(dataRoot, 'telegram', `t-${Date.now()}`);
       mkdirSync(path.dirname(tmp), { recursive: true });
       const inFile = `${tmp}.oga`, wavFile = `${tmp}.wav`;
@@ -273,8 +290,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const wav = readFileSync(wavFile);
         if (voice.status().installed) return await voice.transcribe(wav, language);
         if (desk.jev.apiKey()) return await transcribeGemini(wav, language, desk.jev.apiKey());
-        return null;
-      } catch { return null; }
+        return { error: 'no voice engine is ready; install the voice model on this computer, or add an OpenRouter key in Settings, Jev and voice' };
+      } catch (error) { return { error: `transcription failed: ${error.message}` }; }
       finally { for (const file of [inFile, wavFile]) try { unlinkSync(file); } catch { /* ignore */ } }
     };
     desk.telegram = new TelegramBridge(desk, { transcribe: transcribeVoiceNote });
@@ -1330,6 +1347,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           if (picture) { response.writeHead(200, { 'Content-Type': picture.picture ? mime[path.extname(picture.name).toLowerCase()] || 'application/octet-stream' : 'application/octet-stream', ...(picture.picture ? {} : { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(picture.name)}` }), 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Length': picture.data.length }); return response.end(picture.data); }
           // Not on this computer yet (a chat from the backup, a new computer): fetched now from the account's backup, only this one file.
           if (moved) { const here = path.join(uploads, moved[1], moved[2]); if (!existsSync(here)) await store.cloud.files?.fetchOne?.(`data/uploads/${moved[1]}/${moved[2]}`).catch(() => false); if (existsSync(here)) return serveFile(request, response, here, { sandbox: /\.(html?|svg)$/i.test(here), download: url.searchParams.has('download'), cache: 'private, max-age=86400' }); }
+          if (moved) { response.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...missingHeaders(store, `data/uploads/${moved[1]}/${moved[2]}`) }); return response.end(JSON.stringify({ error: 'That file is not in the chat uploads.' })); }
           return json(response, 404, { error: 'That file is not in the chat uploads.' });
         }
         return serveFile(request, response, file, { sandbox: /\.(html?|svg)$/i.test(file), download: url.searchParams.has('download'), cache: 'private, max-age=86400' });
@@ -1423,14 +1441,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           if (!existsSync(carried)) { try { desk.peers.restoreEvidence(runId, file); } catch { /* not carried with the chat */ } }
           if (!existsSync(carried)) await store.cloud.files?.fetchOne?.(`data/artifacts/${runId}/${path.basename(file)}`).catch(() => false);
           if (existsSync(carried)) return serveFile(request, response, carried, { sandbox: /\.html?$/i.test(file) ? 'scripts' : false, download: url.searchParams.has('download') });
-          const notHere = () => { response.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" }); return response.end('<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;font:15px/1.6 system-ui,sans-serif;background:#16181d;color:#e6e8eb;text-align:center;padding:24px"><div style="max-width:440px"><p style="font-size:17px;font-weight:600;margin:0 0 8px">This file is not on this computer yet.</p><p style="margin:0;color:#9aa3b1">It was made on your other computer. It arrives here once both computers are connected through your Rex Desk account. Open it on the computer that made it, or try again later.</p></div></body>'); };
+          const notHere = () => missingPage(response, store, `data/artifacts/${runId}/${path.basename(file)}`);
           return notHere();
         }
         const location = path.join(store.media('artifacts'), runId, path.basename(file));
         if (!existsSync(location)) desk.peers.restoreEvidence(runId, file);
         // Not carried with the chat: fetched now from the account's backup, only this one file.
         if (!existsSync(location)) await store.cloud.files?.fetchOne?.(`data/artifacts/${runId}/${path.basename(file)}`).catch(() => false);
-        if (!existsSync(location)) { const notHere = () => { response.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" }); return response.end('<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;font:15px/1.6 system-ui,sans-serif;background:#16181d;color:#e6e8eb;text-align:center;padding:24px"><div style="max-width:440px"><p style="font-size:17px;font-weight:600;margin:0 0 8px">This file is not on this computer yet.</p><p style="margin:0;color:#9aa3b1">It was made on your other computer. It arrives here once both computers are connected through your Rex Desk account. Open it on the computer that made it, or try again later.</p></div></body>'); }; return notHere(); }
+        if (!existsSync(location)) { const notHere = () => missingPage(response, store, `data/artifacts/${runId}/${path.basename(file)}`); return notHere(); }
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });

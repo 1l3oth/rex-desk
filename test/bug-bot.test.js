@@ -193,6 +193,18 @@ test('sorting: a bug is queued hidden with an ack, a feature gets a polite reply
   bot = new BugBot(ctx.desk, { fetcher: await mkFetcher(ctx.calls) });
   await bot.handleUpdate(groupMsg({ text: '@rexbugbot thanks team!', entities: [{ type: 'mention', offset: 0, length: 10 }] }), bugBotLink(ctx.store));
   assert.equal(ctx.store.list('bugreport').length, 0);
+  const answers = ctx.calls.filter(c => c.method === 'sendMessage');
+  assert.equal(answers.length, 1, 'an @mention sorted as small talk gets one line back');
+  assert.equal(answers[0].body.text, 'Send me what is broken and I will file it.');
+  assert.equal(answers[0].body.reply_to_message_id, 10);
+});
+
+test('sorting: small talk with a #N but no @mention files nothing and stays silent', async () => {
+  const ctx = makeDesk({ groups: [{ id: '-100' }], jevAnswers: { kind: { choice: 'chat' }, severity: { score: 0 } } });
+  const bot = new BugBot(ctx.desk, { fetcher: await mkFetcher(ctx.calls) });
+  await bot.handleUpdate(groupMsg({ text: 'haha #5 was fun' }), bugBotLink(ctx.store));
+  assert.equal(ctx.store.list('bugreport').length, 0);
+  assert.equal(ctx.calls.filter(c => c.method === 'sendMessage').length, 0, 'no mention, no reply');
 });
 
 test('reply linking: a reply to the "Got it, #N" ack adds to that report', async () => {
@@ -359,4 +371,33 @@ test('picker: an old button stops working once its group is removed from the all
   await bot.handleUpdate({ callback_query: { id: 'q', data: `pick:${held.id}:1`, from: { id: 42 }, message: { message_id: held.promptId, chat: { id: -100 } } } }, bugBotLink(store));
   assert.equal(store.get('bugreport', 'bug-1').adds, undefined);
   assert.ok(store.get('bugpick', held.id), 'nothing was attached');
+});
+
+test('polling: a failing poll is logged once per new reason, so the owner can see why reports stopped', async () => {
+  const { desk, store } = makeDesk({ groups: [{ id: '-100' }] });
+  const events = []; store.event = (runId, kind, data) => events.push({ kind, data });
+  const answers = [
+    { ok: false, description: 'Conflict: terminated by other getUpdates request' },
+    { ok: false, description: 'Conflict: terminated by other getUpdates request' },
+    { ok: false, description: 'Unauthorized' },
+    { ok: true, result: [] },
+    { ok: false, description: 'Unauthorized' },
+    { ok: true, result: [] },
+  ];
+  let bot;
+  const fetcher = async url => {
+    const method = String(url).split('/').pop();
+    if (method !== 'getUpdates') return { ok: true, json: async () => ({ ok: true, result: {} }) };
+    const data = answers.shift();
+    if (!answers.length) bot.running = false;
+    return { ok: true, json: async () => data };
+  };
+  bot = new BugBot(desk, { fetcher });
+  bot.sleep = async () => {};
+  bot.running = true;
+  await bot.loop();
+  assert.deepEqual(events.map(event => event.data.message), [
+    'poll: Conflict: terminated by other getUpdates request', 'poll: Unauthorized', 'poll: Unauthorized',
+  ], 'the same reason twice in a row is logged once; after a good poll it is logged again');
+  assert.ok(events.every(event => event.kind === 'bugbot-error' && !JSON.stringify(event).includes('TKN')), 'the token never reaches the log');
 });

@@ -60,6 +60,7 @@ import { seedFlowWorktree, runtimeProfile } from './flow-runtime.js';
 import { assessRisk, automaticPrAllowed } from './risk.js';
 import { pullLiveCheckout } from './live-checkout.js';
 import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from './processes.js';
+import { hideTelegramTag } from './telegram.js';
 
 const exec = promisify(execFile);
 const EVIDENCE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.pdf': 'application/pdf', '.txt': 'text/plain', '.log': 'text/plain', '.json': 'application/json', '.html': 'text/html', '.zip': 'application/zip' };
@@ -327,11 +328,23 @@ export class Desk {
     const waiting = this.store.get('run', runId);
     if (!this.live.has(runId) && !this.closed && ['needs_evidence', 'finished'].includes(waiting.state)) this.resumeQueued(runId, waiting);
   }
+  // Mid-turn hand-over: the queued messages this turn takes in. A Telegram message never joins a running turn: it waits and
+  // starts a turn of its own (resumeQueued), the only one whose reply goes to Telegram. A Telegram turn takes nothing in.
   takeInbox(runId) {
-    const run = this.store.get('run', runId); if (!run?.queued?.length) return '';
-    this.store.put('run', runId, { ...run, queued: [] });
-    this.store.event(runId, 'inbox-delivered', { count: run.queued.length });
-    return run.queued.join('\n\n');
+    const run = this.store.get('run', runId); if (!run?.queued?.length) return [];
+    if (this.telegram?.turnChat?.(runId)) return [];
+    const taken = run.queued.filter(entry => !this.telegram?.queuedChat?.(runId, entry));
+    if (!taken.length) return [];
+    this.store.put('run', runId, { ...run, queued: run.queued.filter(entry => !taken.includes(entry)) });
+    this.store.event(runId, 'inbox-delivered', { count: taken.length });
+    return taken;
+  }
+  // The messages the next queued turn takes: the leading ones from one place only (the app, or one Telegram chat), so a
+  // Telegram chat's turn never carries app messages or another chat's, and its reply holds only its own answer.
+  nextQueuedBatch(runId, queued) {
+    const chatOf = entry => this.telegram?.queuedChat?.(runId, entry) || '', from = chatOf(queued[0]);
+    const end = queued.findIndex(entry => chatOf(entry) !== from);
+    return end < 0 ? queued : queued.slice(0, end);
   }
   // The person's Orbit account, when connected: every agent can search and read their goals, notes and knowledge.
   // An account signed in at the old Orbit address is used at the current one.
@@ -399,7 +412,7 @@ export class Desk {
       await this.resume(run.id, { prompt: 'You were cut off by a usage limit. Continue exactly where you left off.' }).catch(error => this.store.event(run.id, 'error', { message: error.message }, true));
     }
   }
-  async switchIfLimited(runId, message = '') {
+  async switchIfLimited(runId, message = '', turnKey = '') {
     const run = this.store.get('run', runId), provider = run?.provider || 'claude'; if (!run || !['claude', 'codex'].includes(provider)) return false;
     const title = providerTitle(provider);
     const since = Date.parse(run.turnStartedAt || 0) || 0;
@@ -432,7 +445,10 @@ export class Desk {
     // If a Claude session has accumulated heavy context, start fresh with a handoff to prevent burning hundreds of thousands of tokens.
     const bloated = Number(run.contextUsed || 0) > 50000;
     if (provider !== 'claude' || bloated) { this.live.delete(runId); await this.freshStart(runId, { reason: `because the ${title} account hit its usage limit and the chat moved to another account`, notice: `${title} account hit its usage limit. Switched to ${next.account || next.label}${next.plan ? ` (${next.plan})` : ''} and continuing.` }); }
-    this.patchRun(runId, { accountSwitchedAt: now(), state: 'queued', queued: [], followUp: 'You were cut off by a usage limit. Continue exactly where you left off.' });
+    // The ended turn's Telegram reply destination passes to the retry before the retry can start, and messages still waiting
+    // in the queue (from the app or a Telegram chat) stay there for their own turns.
+    const replyBack = turnKey ? this.telegram?.onTurnEnd?.(runId, turnKey) : null;
+    this.patchRun(runId, { accountSwitchedAt: now(), state: 'queued', ...(replyBack ? { replyTo: replyBack } : {}), followUp: 'You were cut off by a usage limit. Continue exactly where you left off.' });
     this.live.delete(runId); void this.drain(); return true;
   }
   // A background job for an agent (desk_background): a quick helper on Claude Haiku does one task in a run of its own, so the
@@ -505,7 +521,7 @@ export class Desk {
     if (this.live.has(runId)) {
       this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), ...(picked.model ? { modelPicked: true } : {}), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
       // A message typed on another computer is already in the shared chat: the agent gets it, the chat does not show it twice.
-      if (!picked.echoed) this.store.event(runId, 'human-message', { text: line, via: 'rex', queued: true }, true);
+      if (!picked.echoed) this.store.event(runId, 'human-message', { text: hideTelegramTag(line), via: 'rex', queued: true }, true);
       return { queued: true };
     }
     await this.resume(runId, { provider: picked.provider || run.provider, prompt: text, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });
@@ -609,11 +625,11 @@ export class Desk {
   }
   // The main agent is the first thing the person talks to. It gets to know the projects one by one, asks what it cannot tell from their files,
   // and creates a specialist agent for each. Starting it from the chat sends the person's first message with it.
-  async startMain({ prompt = '', ...picked } = {}) {
+  async startMain({ prompt = '', telegram, ...picked } = {}) {
     if (this.store.list('run').some(run => run.role === 'coordinator' && (!run.main || run.computer === thisComputer()) && !terminalStates.has(run.state))) throw new Error('The main agent is already running. Talk to it in its chat.');
-    const run = { id: id(), role: 'coordinator', main: true, computer: thisComputer(), title: 'Rex Agent', provider: aiProvider(picked.provider || this.store.get('specialist', 'main')?.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'headless', ...runOptions({ ...picked, provider: picked.provider || this.store.get('specialist', 'main')?.provider || this.store.config().provider }, this.store) };
+    const run = { id: id(), role: 'coordinator', main: true, computer: thisComputer(), title: 'Rex Agent', provider: aiProvider(picked.provider || this.store.get('specialist', 'main')?.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), taskIds: [], prompt: String(prompt).trim().slice(0, 4000), execution: 'headless', ...(telegram ? { replyTo: telegram } : {}), ...runOptions({ ...picked, provider: picked.provider || this.store.get('specialist', 'main')?.provider || this.store.config().provider }, this.store) };
     this.store.put('run', run.id, run);
-    if (run.prompt) this.store.event(run.id, 'human-message', { text: run.prompt, via: 'rex' }, true);
+    if (run.prompt) this.store.event(run.id, 'human-message', { text: hideTelegramTag(run.prompt), via: 'rex' }, true);
     void this.drain(); return this.run(run.id);
   }
   // The main agent adds a project folder the person named: it becomes a source repository in Settings and a project in memory, so it can get its own agent.
@@ -717,7 +733,9 @@ export class Desk {
   async execute(runId, controller, { attach = null } = {}) {
     // handedOn: this turn ended by queueing the next one (another account, the default model). That turn owns the run's
     // browser, tools, questions and room reply now, so this one's clean-up leaves them alone.
-    let run = this.run(runId), token, handedOn = false;
+    // heldResult: the final reply of a Telegram turn, sent once the turn really ended (see finally), never before the
+    // usage-limit check: Claude can report its result and then fail on the limit, and the retry answers instead.
+    let run = this.run(runId), token, handedOn = false, heldResult = null;
     // Scheduled message tickets this turn carries (see deliveryState), in flight until the agent really took them: the runner
     // says so (prompt-accepted, after the turn's prompt or after a message handed over mid-turn, like a Codex steer that was
     // accepted) or the turn ends cleanly. A hand-over the runner gives back (requeue) waits again; any other end loses them.
@@ -742,6 +760,10 @@ export class Desk {
     const bind = entries => { const tickets = []; for (const item of this.waitingDeliveries(this.store.get('run', runId), entries)) { bound.add(item.id); tickets.push(item.id); this.setDelivery(item.id, { state: 'turn', runId, handedOver: undefined }); } return tickets; };
     // When this turn began: a fresh start after it (contextResetAt) makes its later context reports stale (L60).
     const turnAt = new Date().toISOString();
+    // This turn's Telegram reply destination (src/telegram.js): taken from the run as the turn starts, so it belongs to this
+    // turn only and goes when it ends, whatever the end.
+    const turnKey = id();
+    { const replyTo = attach ? null : this.store.get('run', runId)?.replyTo || null; if (replyTo) this.patchRun(runId, { replyTo: undefined }); this.telegram?.onTurnStart?.(runId, turnKey, replyTo, { attach: Boolean(attach) }); }
     try {
       // A nearly full drive makes the agent fail half way with "ENOSPC"; say so before it starts instead.
       const noRoom = lowDiskMessage([this.store.directory, os.tmpdir()], { min: this.minFreeBytes }); if (noRoom) throw new Error(noRoom);
@@ -841,7 +863,7 @@ export class Desk {
         ask: request => this.ask(runId, request), // withId: the runner (Codex, an agent's own process) acknowledges or gives back this hand-over with its handover; others
         // get just the text.
         inbox: ({ withId = false } = {}) => {
-          const entries = [...(this.store.get('run', runId)?.queued || [])], text = this.takeInbox(runId);
+          const entries = this.takeInbox(runId), text = entries.join('\n\n');
           if (!text) return withId ? { text: '', handover: null } : '';
           const handover = { entries, tickets: bind(entries) };
           if (withId) for (const ticket of handover.tickets) { unconfirmed.add(ticket); this.setDelivery(ticket, { handedOver: 'sent' }); }
@@ -892,6 +914,9 @@ export class Desk {
           // The finished block carries its saved message's id, so the chat drops the live copy exactly when that message is drawn.
           if (kind === 'agent-text' && !reading) this.store.emit('partial', { runId, text: String(data.text || ''), done: true, eventId });
           if (kind === 'agent-text') this.streamToRoom(runId, data.text);
+          // A turn a Telegram message started sends its final reply back to that Telegram chat (src/telegram.js).
+          // An open Claude-app session goes on after a reply, so its reply goes now; any other turn's waits for its end.
+          if (kind === 'agent-result') { if (remoteOn) void this.telegram?.onTurnResult?.(runId, data.result)?.catch?.(() => {}); else heldResult = data.result; }
           if ((kind === 'agent-tool' && data.tool === 'Agent' && !data.parent) || kind === 'subagent-done') this.subagentNote(runId, kind, data);
         } };
       // Local AI, light mode (the default): the model on this computer is talked to directly, with a short instruction, the
@@ -969,7 +994,7 @@ ${message}` : message;
       if (remoteOn) this.seenMarks?.delete(runId); else this.saveSeenMark(runId);
       if (run.handoffFile && !reopened) this.patchRun(runId, { handoffFile: undefined });
       }
-      if (await this.switchIfLimited(runId)) { handedOn = true; return; }
+      if (await this.switchIfLimited(runId, '', turnKey)) { handedOn = true; return; }
       const current = this.run(runId);
       if (!terminalStates.has(current.state)) this.patchRun(runId, { state: run.role === 'coordinator' || run.role === 'specialist' || run.role === 'web' || run.role === 'helper' || run.role === 'net' || this.personalRun(run) ? 'finished' : 'needs_evidence', endedAt: now() });
       if (run.role === 'helper') this.helperDone(runId);
@@ -977,7 +1002,7 @@ ${message}` : message;
       const voiceAfter = this.store.get('run', runId)?.voice; if (voiceAfter?.reading) this.patchRun(runId, { voice: { ...voiceAfter, reading: false } });
       void this.nudgeMemory(runId).catch(() => {});
     } catch (error) {
-      if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message)) { handedOn = true; return; }
+      if (!controller.signal.aborted && LIMIT.test(error.message) && await this.switchIfLimited(runId, error.message, turnKey)) { handedOn = true; return; }
       // The chosen model is not available on this Claude account: the turn runs again once on the account's default model, and the agent stops asking for that model.
       if (!controller.signal.aborted && MODEL_MISSING.test(error.message) && !run.modelFallback && !isLocalModel(run.model)) {
         const agentId = run.roomAgent || run.specialistId, agent = agentId && agentId !== 'main' ? this.store.get('specialist', agentId) : null;
@@ -998,6 +1023,10 @@ ${message}` : message;
       }
       if (run.role === 'helper') this.helperDone(runId, friendlyDiskError(error.message));
     } finally {
+      // The Telegram reply destination ends with this turn; a turn handed on to the next one passes it on.
+      // Its reply goes now, unless the turn was handed on (another account or model): then the retry answers on Telegram.
+      if (heldResult !== null && !handedOn) void this.telegram?.onTurnResult?.(runId, heldResult)?.catch?.(() => {});
+      { const replyBack = this.telegram?.onTurnEnd?.(runId, turnKey); if (handedOn && replyBack) this.patchRun(runId, { replyTo: replyBack }); }
       // Tickets whose prompt was never taken: a turn handed on to the next one keeps them waiting for it; any other end loses them.
       for (const ticket of bound) this.setDelivery(ticket, { state: handedOn ? 'waiting' : 'lost' });
       bound.clear(); unconfirmed.clear(); delivered.clear();
@@ -1578,16 +1607,16 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     finally { this.namingBusy = false; }
   }
   // One turn in an agent's own session: a group chat message, or anything else that needs the agent. The session is made the first time and kept after that.
-  async specialistTurn(agentId, { prompt, roomId = '', messageId = '', quiet = false, greeting = false }) {
+  async specialistTurn(agentId, { prompt, roomId = '', messageId = '', quiet = false, greeting = false, telegram }) {
     const agent = this.specialists.get(agentId), turn = roomId ? { roomId, messageId } : null;
     this.projectRules.guard(agent);
     // Every agent has a personal chat with the person and its own session in each group chat. A group chat never sees what was said
     // in another one: one shared session made agents carry one room's talk into the next, and a reply could land in the wrong room.
     if (!roomId && agent.kind === 'main') {
       const main = latestLocalMain(this.store.list('run'));
-      if (!main) return this.startMain({ prompt });
+      if (!main) return this.startMain({ prompt, telegram });
       if (this.live.has(main.id)) { await this.say(main.id, prompt, {}, { raw: true }); return main; }
-      await this.resume(main.id, { prompt, silent: true }); return this.run(main.id);
+      await this.resume(main.id, { prompt, silent: true, telegram }); return this.run(main.id);
     }
     const runId = roomId ? agent.roomRuns?.[roomId] : agent.runId, run = runId ? this.store.get('run', runId) : null;
     if (!run) {
@@ -1595,14 +1624,14 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       const model = this.specialists.cleanModel(agent.model, { provider: agent.provider });
       const created = { id: id(), role: agent.kind === 'main' ? 'coordinator' : 'specialist', ...(agent.kind === 'main' ? {} : { specialistId: agent.id }), ...(roomId ? { roomAgent: agent.id, roomOf: roomId } : {}),
         title: roomId ? `${agent.name} · ${this.rooms.room(roomId)?.name || 'group chat'}` : agent.name, provider: aiProvider(agent.provider || this.store.config().provider), state: 'queued', phase: 'queued', createdAt: now(), execution: 'headless', cwd: home,
-        projectPath: this.specialists.folder(agent), repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}), cardModel: model };
+        projectPath: this.specialists.folder(agent), repositoryId: agent.repositoryId || '', instructions: prompt, taskIds: [], roomTurn: turn, ...(model ? { model } : {}), cardModel: model, ...(telegram ? { replyTo: telegram } : {}) };
       this.store.put('run', created.id, created); const fresh = this.specialists.get(agentId); this.store.put('specialist', agent.id, roomId ? { ...fresh, roomRuns: { ...(fresh.roomRuns || {}), [roomId]: created.id } } : { ...fresh, runId: created.id });
-      if (!roomId && !quiet) this.store.event(created.id, 'human-message', { text: String(prompt).trim(), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
+      if (!roomId && !quiet) this.store.event(created.id, 'human-message', { text: hideTelegramTag(String(prompt).trim()), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
       void this.drain(); return created;
     }
     if (this.live.has(run.id)) { this.store.put('run', run.id, { ...run, roomTurn: turn || run.roomTurn, ...(turn ? { roomPosted: false } : {}) }); await this.say(run.id, prompt, {}, { raw: true }); return run; }
     // The card's model reaches the chat at the turn start (Specialists.syncRuns), so a model picked in the chat itself stays.
-    await this.resume(run.id, { provider: agent.provider, prompt, silent: Boolean(roomId) || quiet, roomTurn: turn, greeting }); return this.run(run.id);
+    await this.resume(run.id, { provider: agent.provider, prompt, silent: Boolean(roomId) || quiet, roomTurn: turn, greeting, telegram }); return this.run(run.id);
   }
   // A manager's team session: where reports and questions from the agents it gave tasks to land, and it acts on them. It is a
   // session of its own (like a room session, with no room), so the person's chat with the manager stays free and quiet.
@@ -1857,13 +1886,18 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // Messages that waited while the agent was busy go in as the next turn. They leave the queue as it starts, so one that comes in
   // during it waits for the turn after; when resume fails they go back in front, so no report is lost.
   resumeQueued(runId, waiting) {
-    const taken = waiting.queued; this.store.put('run', runId, { ...waiting, queued: [] });
-    void this.resume(runId, { prompt: taken.join('\n'), silent: true }).catch(error => {
+    const taken = this.nextQueuedBatch(runId, waiting.queued);
+    this.store.put('run', runId, { ...waiting, queued: waiting.queued.slice(taken.length) });
+    // A Telegram chat's messages start this turn: its final reply goes back to that chat (src/telegram.js). Their records stay
+    // until the turn really starts, so a failed resume puts them back as they were.
+    const telegram = this.telegram?.batchReplyTo?.(runId, taken) || undefined;
+    void this.resume(runId, { prompt: taken.join('\n'), silent: true, telegram }).catch(error => {
       const current = this.store.get('run', runId); if (current) this.store.put('run', runId, { ...current, queued: [...taken, ...(current.queued || [])] });
       this.store.event(runId, 'error', { message: error.message }, true);
     });
   }
-  async resume(runId, { prompt = '', targetBranch, execution, silent = false, roomTurn, greeting = false, ...picked } = {}) {
+  // telegram: the Telegram chat this turn answers (src/telegram.js); every other resume, one from the app too, answers in the app.
+  async resume(runId, { prompt = '', targetBranch, execution, silent = false, roomTurn, greeting = false, telegram, ...picked } = {}) {
     let run = this.run(runId);
     const provider = aiProvider(picked.provider || run.provider || this.store.config().provider);
     if (run.external) throw new Error('Reconnect this conversation from the external AI using desk_connect.');
@@ -1882,13 +1916,13 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     const carriedTokens = carried ? Math.round(carried.length / 4) : 0;
     if (!sameProvider) this.store.event(runId, 'provider-switch', { text: `Switched from ${providerLabel(run.provider)} to ${providerLabel(provider)}. The earlier conversation was handed over.`, from: run.provider, to: provider, ...(carriedTokens ? { usage: { input: carriedTokens } } : {}) }, true);
     // The follow-up is part of the conversation: it shows in the chat the moment it is sent.
-    if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: keepLines(prompt), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
+    if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: hideTelegramTag(keepLines(prompt)), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
     // After /clear the next message starts a fresh session that reads the handoff; the message itself goes in as it is.
     if (run.handoffFile && !run.sessionId) {
-      this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), execution: 'headless' });
+      this.patchRun(runId, { modelFallback: undefined, replyTo: telegram || undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), execution: 'headless' });
       void this.drain(); return this.run(runId);
     }
-    this.patchRun(runId, { modelFallback: undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', cardModel: undefined, modelPicked: undefined, profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}),
+    this.patchRun(runId, { modelFallback: undefined, replyTo: telegram || undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', cardModel: undefined, modelPicked: undefined, profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}),
       ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}),
       instructions: run.role === 'specialist' ? `${run.instructions || ''}${carried}` : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
       ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
