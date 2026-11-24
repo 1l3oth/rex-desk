@@ -193,6 +193,18 @@ test('sorting: a bug is queued hidden with an ack, a feature gets a polite reply
   bot = new BugBot(ctx.desk, { fetcher: await mkFetcher(ctx.calls) });
   await bot.handleUpdate(groupMsg({ text: '@rexbugbot thanks team!', entities: [{ type: 'mention', offset: 0, length: 10 }] }), bugBotLink(ctx.store));
   assert.equal(ctx.store.list('bugreport').length, 0);
+  const answers = ctx.calls.filter(c => c.method === 'sendMessage');
+  assert.equal(answers.length, 1, 'an @mention sorted as small talk gets one line back');
+  assert.equal(answers[0].body.text, 'Send me what is broken and I will file it.');
+  assert.equal(answers[0].body.reply_to_message_id, 10);
+});
+
+test('sorting: small talk with a #N but no @mention files nothing and stays silent', async () => {
+  const ctx = makeDesk({ groups: [{ id: '-100' }], jevAnswers: { kind: { choice: 'chat' }, severity: { score: 0 } } });
+  const bot = new BugBot(ctx.desk, { fetcher: await mkFetcher(ctx.calls) });
+  await bot.handleUpdate(groupMsg({ text: 'haha #5 was fun' }), bugBotLink(ctx.store));
+  assert.equal(ctx.store.list('bugreport').length, 0);
+  assert.equal(ctx.calls.filter(c => c.method === 'sendMessage').length, 0, 'no mention, no reply');
 });
 
 test('reply linking: a reply to the "Got it, #N" ack adds to that report', async () => {

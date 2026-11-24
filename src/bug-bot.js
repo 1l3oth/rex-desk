@@ -350,7 +350,12 @@ export class BugBot {
 
     // Sort it with Jev. Only the redacted text leaves this computer. No key or a Jev failure files it as an unsorted bug so nothing is lost.
     const sort = await this.sort(body).catch(() => ({ kind: 'bug', severity: null, severityLabel: '' }));
-    if (sort.kind === 'chat') return; // small talk is ignored, no report, no reply
+    // Small talk files nothing. When the bot was @mentioned it still answers in one line, so the person is not left thinking
+    // it is broken; small talk without a mention stays silent.
+    if (sort.kind === 'chat') {
+      if (isMention) await this.reply(found, chat.id, message.message_id, 'Send me what is broken and I will file it.');
+      return;
+    }
     if (sort.kind === 'feature') {
       const num = this.saveReport({ chat, reporterId, reporterName, body, media: mediaRef, sort, status: 'feature', approved: false });
       await this.reply(found, chat.id, message.message_id, `Thanks for the idea. I passed it on as request #${num}. Feature requests are reviewed by the team, not fixed right away.`);
