@@ -360,3 +360,32 @@ test('picker: an old button stops working once its group is removed from the all
   assert.equal(store.get('bugreport', 'bug-1').adds, undefined);
   assert.ok(store.get('bugpick', held.id), 'nothing was attached');
 });
+
+test('polling: a failing poll is logged once per new reason, so the owner can see why reports stopped', async () => {
+  const { desk, store } = makeDesk({ groups: [{ id: '-100' }] });
+  const events = []; store.event = (runId, kind, data) => events.push({ kind, data });
+  const answers = [
+    { ok: false, description: 'Conflict: terminated by other getUpdates request' },
+    { ok: false, description: 'Conflict: terminated by other getUpdates request' },
+    { ok: false, description: 'Unauthorized' },
+    { ok: true, result: [] },
+    { ok: false, description: 'Unauthorized' },
+    { ok: true, result: [] },
+  ];
+  let bot;
+  const fetcher = async url => {
+    const method = String(url).split('/').pop();
+    if (method !== 'getUpdates') return { ok: true, json: async () => ({ ok: true, result: {} }) };
+    const data = answers.shift();
+    if (!answers.length) bot.running = false;
+    return { ok: true, json: async () => data };
+  };
+  bot = new BugBot(desk, { fetcher });
+  bot.sleep = async () => {};
+  bot.running = true;
+  await bot.loop();
+  assert.deepEqual(events.map(event => event.data.message), [
+    'poll: Conflict: terminated by other getUpdates request', 'poll: Unauthorized', 'poll: Unauthorized',
+  ], 'the same reason twice in a row is logged once; after a good poll it is logged again');
+  assert.ok(events.every(event => event.kind === 'bugbot-error' && !JSON.stringify(event).includes('TKN')), 'the token never reaches the log');
+});

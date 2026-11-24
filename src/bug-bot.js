@@ -277,8 +277,14 @@ export class BugBot {
         }
       } catch (error) {
         if (!this.running) break;
+        // A failing poll (a wrong token, another app polling the same bot, no network) is logged once per new reason, so the
+        // owner can see why reports stop arriving; a repeat of the same reason is not logged again.
+        const reason = String(error?.message || error || 'unknown error').slice(0, 300);
+        if (reason !== this.lastPollError) { this.lastPollError = reason; this.store.event?.('', 'bugbot-error', { message: `poll: ${reason}` }, true); }
         await this.sleep(5000);
+        continue;
       }
+      this.lastPollError = '';
     }
   }
 
