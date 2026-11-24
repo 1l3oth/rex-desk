@@ -2675,5 +2675,13 @@
  "Obscura: light and fast": "Obscura៖ ស្រាល និងលឿន",
  "Chromium: full browser, recorded videos": "Chromium៖ កម្មវិធីរុករកពេញលេញ ថតវីដេអូបាន",
  "Off: agents do not open web pages": "បិទ៖ ភ្នាក់ងារមិនបើកទំព័រវេបទេ",
- "The first time an agent needs it, Needs you asks before it downloads. The download is checked and kept in the Rex Desk data folder.": "ពេលភ្នាក់ងារត្រូវការវាលើកដំបូង Needs you សួរអ្នកមុនទាញយក។ ឯកសារទាញយកត្រូវបានពិនិត្យ ហើយរក្សាទុកក្នុងថតទិន្នន័យ Rex Desk។"
+ "The first time an agent needs it, Needs you asks before it downloads. The download is checked and kept in the Rex Desk data folder.": "ពេលភ្នាក់ងារត្រូវការវាលើកដំបូង Needs you សួរអ្នកមុនទាញយក។ ឯកសារទាញយកត្រូវបានពិនិត្យ ហើយរក្សាទុកក្នុងថតទិន្នន័យ Rex Desk។",
+ "Agent Reach": "Agent Reach",
+ "Lets agents read these sites without signing in. It downloads the first time an agent needs it, after you say yes in Needs you.": "អនុញ្ញាតឱ្យភ្នាក់ងារអានគេហទំព័រទាំងនេះដោយមិនចាំបាច់ចូលគណនី។ វាទាញយកនៅពេលភ្នាក់ងារត្រូវការវាលើកដំបូង បន្ទាប់ពីអ្នកយល់ព្រមក្នុង Needs you។",
+ "YouTube": "YouTube",
+ "Web pages": "ទំព័រវេប",
+ "Video details, search and subtitles.": "ព័ត៌មានវីដេអូ ការស្វែងរក និងអក្សររត់។",
+ "Repositories, issues and pull requests.": "Repository, issue និង pull request។",
+ "Public posts only. Reddit often blocks reading without a sign-in.": "តែប្រកាសសាធារណៈប៉ុណ្ណោះ។ Reddit ច្រើនតែរារាំងការអានដោយមិនចូលគណនី។",
+ "Any public page as plain text, read through the Jina reader service.": "ទំព័រសាធារណៈណាមួយជាអត្ថបទធម្មតា អានតាមរយៈសេវា Jina reader។"
 }

@@ -91,6 +91,9 @@ export function redact(value) {
 
 // Tokens that start a fresh session: 200k unless the person picked another size; 0 turns the token limit off.
 export const handoffTokens = value => value === 0 || value === '0' ? 0 : Math.min(2000000, Math.max(50000, Math.round(Number(value) || 200000)));
+// The Agent Reach platforms agents may read (src/agent-reach.js): each on unless switched off.
+const reachPlatforms = (saved = {}) => Object.fromEntries(['youtube', 'github', 'reddit', 'web'].map(id => [id, (saved || {})[id] !== false]));
+
 export class Store extends EventEmitter {
   // A workspace opened through an account passes its unsealed key; a plain data folder keeps vault.key beside the database.
   constructor(directory, { key, auth, cloud } = {}) {
@@ -494,6 +497,9 @@ export class Store extends EventEmitter {
       // The browser agents use (src/agent-browser.js); its time marks when it changed, so a no to a download counts until then.
       agentBrowser: ['obscura', 'chromium', 'off'].includes(input.agentBrowser) ? input.agentBrowser : 'obscura',
       agentBrowserAt: (['obscura', 'chromium', 'off'].includes(input.agentBrowser) ? input.agentBrowser : 'obscura') === (this.config().agentBrowser || 'obscura') ? this.config().agentBrowserAt || '' : new Date().toISOString(),
+      // Agent Reach platforms agents may read (src/agent-reach.js); all on unless switched off. A change ends an earlier no.
+      agentReach: reachPlatforms(input.agentReach ?? this.config().agentReach),
+      agentReachAt: JSON.stringify(reachPlatforms(input.agentReach ?? this.config().agentReach)) === JSON.stringify(reachPlatforms(this.config().agentReach)) ? this.config().agentReachAt || '' : new Date().toISOString(),
       // The permission mode a new agent or chat starts in.
       defaultMode: ['bypassPermissions', 'auto', 'acceptEdits', 'manual', 'plan'].includes(input.defaultMode) ? input.defaultMode : 'auto',
       // How full a chat's context may get before it hands over to a fresh session by itself (false: never).

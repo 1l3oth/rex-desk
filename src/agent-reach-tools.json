@@ -1,0 +1,234 @@
+[
+ {
+  "name": "github_search",
+  "channel": "github",
+  "action": "search",
+  "args": [
+   {
+    "name": "query",
+    "required": true
+   },
+   {
+    "name": "limit",
+    "required": false
+   }
+  ],
+  "publicOnly": false,
+  "description": "Github: Search repositories.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "what to search for"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "max results (default 5)"
+    }
+   },
+   "required": [
+    "query"
+   ]
+  }
+ },
+ {
+  "name": "github_read",
+  "channel": "github",
+  "action": "read",
+  "args": [
+   {
+    "name": "target",
+    "required": true
+   }
+  ],
+  "publicOnly": false,
+  "description": "Github: Read a repository (with README) or an issue / PR (with comments).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "target": {
+     "type": "string",
+     "description": "owner/repo, or a repo / issue / PR link"
+    }
+   },
+   "required": [
+    "target"
+   ]
+  }
+ },
+ {
+  "name": "youtube_read",
+  "channel": "youtube",
+  "action": "read",
+  "args": [
+   {
+    "name": "target",
+    "required": true
+   }
+  ],
+  "publicOnly": false,
+  "description": "Youtube: Video title, channel, date and description.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "target": {
+     "type": "string",
+     "description": "video link or id"
+    }
+   },
+   "required": [
+    "target"
+   ]
+  }
+ },
+ {
+  "name": "youtube_search",
+  "channel": "youtube",
+  "action": "search",
+  "args": [
+   {
+    "name": "query",
+    "required": true
+   },
+   {
+    "name": "limit",
+    "required": false
+   }
+  ],
+  "publicOnly": false,
+  "description": "Youtube: Search videos.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "what to search for"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "max results (default 5)"
+    }
+   },
+   "required": [
+    "query"
+   ]
+  }
+ },
+ {
+  "name": "youtube_subtitle",
+  "channel": "youtube",
+  "action": "subtitle",
+  "args": [
+   {
+    "name": "target",
+    "required": true
+   },
+   {
+    "name": "lang",
+    "required": false
+   }
+  ],
+  "publicOnly": false,
+  "description": "Youtube: Full subtitle text of a video (manual or auto captions).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "target": {
+     "type": "string",
+     "description": "video link or id"
+    },
+    "lang": {
+     "type": "string",
+     "description": "preferred languages, comma separated (default zh-Hans,zh,en,en-orig)"
+    }
+   },
+   "required": [
+    "target"
+   ]
+  }
+ },
+ {
+  "name": "reddit_search",
+  "channel": "reddit",
+  "action": "search",
+  "args": [
+   {
+    "name": "query",
+    "required": true
+   },
+   {
+    "name": "limit",
+    "required": false
+   }
+  ],
+  "publicOnly": true,
+  "description": "Reddit: Search public posts first; --backend opencli uses site search.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "what to search for"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "max results (default 5)"
+    }
+   },
+   "required": [
+    "query"
+   ]
+  }
+ },
+ {
+  "name": "reddit_read",
+  "channel": "reddit",
+  "action": "read",
+  "args": [
+   {
+    "name": "target",
+    "required": true
+   }
+  ],
+  "publicOnly": true,
+  "description": "Reddit: Read public page text first; --backend opencli requests the post and top comments.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "target": {
+     "type": "string",
+     "description": "post link or id"
+    }
+   },
+   "required": [
+    "target"
+   ]
+  }
+ },
+ {
+  "name": "web_read",
+  "channel": "web",
+  "action": "read",
+  "args": [
+   {
+    "name": "target",
+    "required": true
+   }
+  ],
+  "publicOnly": false,
+  "description": "Web page: Read a web page as clean text.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "target": {
+     "type": "string",
+     "description": "page URL"
+    }
+   },
+   "required": [
+    "target"
+   ]
+  }
+ }
+]

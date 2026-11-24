@@ -38,7 +38,7 @@ export const TOOLS = {
     },
   },
 };
-const megabytes = bytes => `${Math.round(bytes / 1048576)} MB`;
+export const megabytes = bytes => `${Math.round(bytes / 1048576)} MB`;
 // The plain answer an agent gets when no browser is on: it says so, and never tells the person to run a command.
 export const NO_BROWSER = 'No browser is on for agents on this computer. The person can turn one on in Settings, Agents, Browser for agents. Do not install one yourself; tell the person in one line if the task needs a browser.';
 
@@ -59,7 +59,22 @@ export function fontFolders(platform = process.platform) {
 }
 // Archives open with the system's own tar (bsdtar on Windows 10+ and macOS reads zip too); on Windows the one in System32,
 // since a Git tar on the PATH cannot read zip.
-const extract = (archive, into) => new Promise((resolve, reject) => {
+// One pinned file into `file`: its size and sha256 must match, or it is thrown away and nothing is used.
+export async function downloadPinned(fetcher, build, file, name, say = () => {}) {
+  const response = await fetcher(build.url, { redirect: 'follow' });
+  if (!response.ok || !response.body) throw new Error(`${name} could not be downloaded (the server answered ${response.status}).`);
+  const hash = createHash('sha256'), out = createWriteStream(file); let got = 0, shown = 0;
+  try {
+    for await (const chunk of response.body) {
+      hash.update(chunk); got += chunk.length;
+      if (!out.write(chunk)) await new Promise(resolve => out.once('drain', resolve));
+      const percent = Math.floor(got * 100 / build.size);
+      if (build.size > 5 * 1048576 && percent >= shown + 20 && percent < 100) { shown = percent - (percent % 20); say(`Downloading ${name}: ${shown}% of ${megabytes(build.size)}.`); }
+    }
+  } finally { await new Promise(resolve => out.end(resolve)); }
+  if (got !== build.size || hash.digest('hex') !== build.sha256) { rmSync(file, { force: true }); throw new Error(`The ${name} download did not match its pinned checksum, so it was thrown away. Nothing was installed.`); }
+}
+export const extract = (archive, into) => new Promise((resolve, reject) => {
   const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
   execFile(tar, ['-xf', archive, '-C', into], { windowsHide: true, timeout: 10 * 60000 }, error => error ? reject(new Error(`The download could not be unpacked: ${error.message}`)) : resolve());
 });
@@ -118,19 +133,7 @@ export class AgentBrowser {
     const archive = path.join(folder, `${id}-${tool.version}.download`), partial = `${home}.partial`;
     rmSync(archive, { force: true }); rmSync(partial, { recursive: true, force: true });
     say(`Downloading ${tool.name} ${tool.version} for agents (${megabytes(build.size)}).`);
-    const response = await this.fetcher(build.url, { redirect: 'follow' });
-    if (!response.ok || !response.body) throw new Error(`${tool.name} could not be downloaded (the server answered ${response.status}).`);
-    const hash = createHash('sha256'), out = createWriteStream(archive); let got = 0, shown = 0;
-    try {
-      for await (const chunk of response.body) {
-        hash.update(chunk); got += chunk.length;
-        if (!out.write(chunk)) await new Promise(resolve => out.once('drain', resolve));
-        const percent = Math.floor(got * 100 / build.size);
-        if (percent >= shown + 20 && percent < 100) { shown = percent - (percent % 20); say(`Downloading ${tool.name}: ${shown}% of ${megabytes(build.size)}.`); }
-      }
-    } finally { await new Promise(resolve => out.end(resolve)); }
-    const digest = hash.digest('hex');
-    if (got !== build.size || digest !== build.sha256) { rmSync(archive, { force: true }); throw new Error(`The ${tool.name} download did not match its pinned checksum, so it was thrown away. Nothing was installed.`); }
+    await downloadPinned(this.fetcher, build, archive, tool.name, say);
     try {
       mkdirSync(partial, { recursive: true });
       await extract(archive, partial);

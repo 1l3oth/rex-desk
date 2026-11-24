@@ -11,6 +11,7 @@ import path from 'node:path';
 import { findTask as findLocalTask } from './local-tasks.js';
 import { toolsOff, runAgentId, useIsOff } from './market.js';
 import { browserChoice, OBSCURA_TOOLS } from './agent-browser.js';
+import { REACH_TOOLS, reachOn } from './agent-reach.js';
 import { rank } from './toolbox.js';
 
 const runId = z.string().optional().describe('Run ID. Omit when using a run-scoped agent connection.');
@@ -504,6 +505,12 @@ export function createMcp(desk, scope) {
         const pages = rank(OBSCURA_TOOLS.map(item => ({ ...item, server: 'obscura' })), input.query, Math.min(6, input.limit || 8));
         if (pages.length) { result.found = [...pages.map((item, index) => ({ use: `obscura/${item.name}`, kind: 'tool', description: clipText(item.description, 400), ...(index < 4 ? { input: item.inputSchema } : { input: 'Search again with its name to see its input.' }) })), ...(result.found || [])]; result.searched = `${result.searched}; plus the Obscura browser (${OBSCURA_TOOLS.length} tools, downloaded on first use after the person says yes)`; }
       }
+      // Agent Reach: read YouTube, GitHub, Reddit and web pages, only the platforms switched on in Settings, Agents.
+      if (kind !== 'skill') {
+        const on = reachOn(desk.store), reach = REACH_TOOLS.filter(item => on[item.channel]);
+        const hits = rank(reach.map(item => ({ ...item, server: 'agent-reach' })), input.query, Math.min(4, input.limit || 8));
+        if (hits.length) { result.found = [...hits.map(item => ({ use: `agent-reach/${item.name}`, kind: 'tool', description: item.description, input: item.inputSchema })), ...(result.found || [])]; result.searched = `${result.searched}; plus Agent Reach (${reach.length} read-only tools, downloaded on first use after the person says yes)`; }
+      }
       return result;
     }, true);
   tool('desk_run', 'Use one tool or skill found with desk_find. For an MCP tool or a built-in Rex Desk tool, Rex Desk calls it with your input and gives back its answer. For a skill (use "skill:name"), it gives back the skill\'s instructions: follow them.',
@@ -526,6 +533,10 @@ export function createMcp(desk, scope) {
       if (String(input.use).startsWith('obscura/') && !desk.toolbox.servers(project).obscura) {
         if (!scope.runId) throw new Error('Only an agent in a chat can use the browser.');
         return desk.agentBrowser.call(scope.runId, String(input.use).slice('obscura/'.length), input.input);
+      }
+      if (String(input.use).startsWith('agent-reach/') && !desk.toolbox.servers(project)['agent-reach']) {
+        if (!scope.runId) throw new Error('Only an agent in a chat can use Agent Reach.');
+        return desk.agentReach.call(scope.runId, String(input.use).slice('agent-reach/'.length), input.input);
       }
       const target = await desk.toolbox.resolve(input.use, project);
       if (target.kind === 'tool' && !target.tool.readOnly && run && !['bypassPermissions', 'acceptEdits', 'auto', ''].includes(run.permissionMode || '')) {
