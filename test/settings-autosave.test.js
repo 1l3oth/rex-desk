@@ -630,3 +630,31 @@ test('a replacement OpenRouter key typed during the first save is kept and saved
     assert.equal(sent.at(-1), 'sk-or-second', 'the newer key is saved, not wiped by the redraw of the first save');
   } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
 });
+
+// A key whose own wait is cut short by another Jev setting is saved by that setting's save: the page must still redraw to the saved key.
+test('a new OpenRouter key saved by another Jev setting change still brings the saved-key controls', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-st-'));
+  const app = await createApp({ dataDirectory: dir, port: 0, requireAccount: false });
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ bypassCSP: true, viewport: { width: 1440, height: 900 } })).newPage();
+    const sent = [];
+    await page.route('**/api/config', route => { if (route.request().method() === 'PUT') sent.push(JSON.parse(route.request().postData() || '{}').jev?.apiKey || ''); return route.continue(); });
+    await page.goto(`http://127.0.0.1:${app.server.address().port}/`); await page.locator('.rail-settings').waitFor({ timeout: 60000 });
+    await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' });
+    await page.evaluate(() => document.querySelector('[data-action="settings-open"], .rail-settings')?.click());
+    await page.locator('.settings-pop').waitFor({ timeout: 30000 });
+    for (let i = 0; i < 5; i++) {
+      await page.evaluate(() => document.querySelector('.settings-pop [data-st-section="jev"]')?.click());
+      try { await page.locator('.settings-pop [name="jev.apiKey"]').waitFor({ timeout: 10000 }); break; } catch { /* clicked during a redraw */ }
+    }
+    assert.equal(await page.locator('.settings-pop [name="jev.clearKey"]').count(), 0, 'no saved key yet');
+    // Type the key, then flip another Jev setting before the key's own wait ends: only the switch's save goes out, carrying the key.
+    await page.evaluate(() => {
+      const box = document.querySelector('.settings-pop [name="jev.apiKey"]'); box.value = 'sk-or-only'; box.dispatchEvent(new Event('input', { bubbles: true }));
+      const other = document.querySelector('.settings-pop [name="control.confirm"]'); other.checked = !other.checked; other.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.locator('.settings-pop [name="jev.clearKey"]').waitFor({ state: 'attached', timeout: 5000 });
+    assert.deepEqual(sent, ['sk-or-only'], 'one save carried the key');
+  } finally { await browser.close(); await app.close?.(); try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ } }
+});
