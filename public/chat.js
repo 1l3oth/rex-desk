@@ -1322,7 +1322,7 @@ function connectorsPanel(agent) {
   }
   // Keep the status fresh while this tab is open (pairing and group requests arrive from Telegram, not from a click).
   if (!ui.agentBotsTimer) ui.agentBotsTimer = setInterval(() => {
-    if (ui.chatTab !== 'connectors' || document.hidden) { clearInterval(ui.agentBotsTimer); ui.agentBotsTimer = null; return; }
+    if (ui.chatTab !== 'connectors' || document.hidden) { clearInterval(ui.agentBotsTimer); ui.agentBotsTimer = null; ui.agentBotsFor = null; ui.agentBotDraft = {}; return; }
     const open = ui.agentBotsFor; if (!open) return;
     void api(`/agents/${encodeURIComponent(open)}/telegram`).then(status => { if (JSON.stringify(status) !== JSON.stringify(ui.agentBots?.[open])) { ui.agentBots = { ...(ui.agentBots || {}), [open]: status }; if (!document.activeElement?.matches?.('[data-ab-token],[data-bb-token]')) renderAll(); } }, () => {});
     if (ui.bugBot) void api('/bugbot').then(status => { if (JSON.stringify(status) !== JSON.stringify(ui.bugBot)) { ui.bugBot = status; if (!document.activeElement?.matches?.('[data-ab-token],[data-bb-token]')) renderAll(); } }, () => {});
@@ -1352,12 +1352,13 @@ function connectorsPanel(agent) {
 // The bug-report bot lives in the App Agent's Connectors tab, since its approved reports become tasks for that agent. Its queue
 // of reports waiting for an OK is in Needs you.
 function bugBotSection(agent) {
-  if (!/app[\s_-]?agent/i.test(String(agent.name || ''))) return '';
   const data = ui.bugBot;
   if (!data) {
     if (!ui.bugBotLoading) { ui.bugBotLoading = true; void api('/bugbot').then(status => { ui.bugBot = status; }, () => { ui.bugBot = { connected: false }; }).finally(() => { ui.bugBotLoading = false; renderAll(); }); }
-    return `<section class="aps-sec"><div class="cn-head"><b>${t`Bug report bot`}</b></div><p class="cn-note">${t`Loading…`}</p></section>`;
+    return '';
   }
+  // Bound to the agent's stable id, not its name: renaming the App Agent keeps its bug bot controls.
+  if (!data.agentId || data.agentId !== agent.id) return '';
   const head = `<div class="cn-head"><b>${t`Bug report bot`}</b>${data.connected ? `<span class="cn-state"><span class="dot good"></span>${t`Connected`}</span>` : ''}</div>`;
   if (!data.connected) {
     return `<section class="aps-sec">${head}<p class="cn-note">${t`A separate Telegram bot for customer groups. It only files bug reports. Make a second bot with @BotFather and paste its token here.`}</p>

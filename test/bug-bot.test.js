@@ -242,6 +242,17 @@ test('approve: a queued bug becomes a task for the App Agent and leaves the hidd
   assert.equal(createdTasks[0].assignee, 'RexDesk_App_Agent');
 });
 
+test('the bug bot stays with its agent by id: renaming that agent changes nothing', async () => {
+  const { desk, store, calls } = makeDesk({ groups: [{ id: '-100' }] });
+  store.put('specialist', 'app', { id: 'app', name: 'RexDesk_App_Agent' });
+  const bot = new BugBot(desk, { fetcher: async () => ({ json: async () => ({ ok: true, result: { id: 5, username: 'bugs_bot' } }) }) });
+  await bot.connect('111111:AAAAAAAAAAAAAAAAAAAAAAAA');
+  assert.equal(bot.status().agentId, 'app');
+  store.put('specialist', 'app', { id: 'app', name: 'Builder' });
+  assert.equal(bot.status().agentId, 'app');
+  assert.equal(bot.appAgentName(), 'Builder');
+});
+
 // A fetcher that records Telegram calls, shared by the live-flow tests.
 async function mkFetcher(calls) {
   return async (url, options) => {

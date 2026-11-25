@@ -208,6 +208,8 @@ export class BugBot {
     const me = await this.call(token, 'getMe').catch(() => { throw new Error('Telegram does not know that bot token. Copy it again from @BotFather.'); });
     const existing = bugBotLink(this.store);
     const values = { ...(existing?.values || {}), botToken: token, botUsername: me?.username || '', botId: me?.id || '' };
+    // The agent that owns this bot is pinned by its id, so renaming that agent never hides its controls or loses its tasks.
+    values.agentId = existing?.values?.agentId || this.appAgent()?.id || '';
     const id = existing?.link?.id || `${CONNECTOR}-${Date.now().toString(36)}`;
     if (!existing) this.store.put('connector', id, { id, connectorId: CONNECTOR, name: me?.username ? `Bug bot @${me.username}` : 'Bug bot', kind: 'token', at: new Date().toISOString() });
     this.saveValues(id, values);
@@ -497,10 +499,12 @@ export class BugBot {
     this.store.put('bugreport', reportId, updated);
     return updated;
   }
-  appAgentName() {
-    const agent = this.store.list('specialist').find(item => /app[\s_-]?agent/i.test(String(item.name || '')));
-    return agent?.name || '';
+  // The agent the bug bot belongs to: the one pinned at connect time, else the first agent named like the App Agent.
+  appAgent() {
+    const pinned = bugBotLink(this.store)?.values?.agentId, kept = pinned ? this.store.get('specialist', pinned) : null;
+    return kept || this.store.list('specialist').find(item => /app[\s_-]?agent/i.test(String(item.name || ''))) || null;
   }
+  appAgentName() { return this.appAgent()?.name || ''; }
 
   // ---- daily report + fixed notices (called by the server timer) ----
   // Once a day at the report time, send Rex (through the personal Telegram link) a morning summary of the queue, and tell each
@@ -555,7 +559,7 @@ export class BugBot {
     const found = bugBotLink(this.store);
     const reports = this.reports();
     return {
-      connected: Boolean(found?.values?.botToken), botUsername: found?.values?.botUsername || '',
+      agentId: this.appAgent()?.id || '', connected: Boolean(found?.values?.botToken), botUsername: found?.values?.botUsername || '',
       reportAt: found?.values?.reportAt || '09:00', groups: this.groups(found?.values), pending: this.pending(),
       queue: reports.filter(report => report.status === 'queued').map(this.publicReport),
       features: reports.filter(report => report.status === 'feature').map(this.publicReport),
