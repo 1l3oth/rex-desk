@@ -65,7 +65,7 @@ test('the final pass only re-hears the uncommitted tail, not the whole recording
   // The live loop records where the committed words end on the recording, so the final pass can start from there.
   assert.match(composer, /recording\.liveKept = kept; recording\.liveFrom = from;/, 'each committed cut advances the live cursor on the recording');
   // The path is chosen by the shared finalPass, so the app and the QA harness pick the same one.
-  assert.match(composer, /import \{ LIVE_EVERY_MS, livePieces, finalPass, finalChunks, audioSeconds, looksTruncated \} from '\/voice-live\.js';/, 'the composer uses the shared cut, final-pass and truncation logic');
+  assert.match(composer, /import \{ LIVE_EVERY_MS, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated \} from '\/voice-live\.js';/, 'the composer uses the shared cut, final-pass and truncation logic');
   assert.match(composer, /const pass = finalPass\(recording\);/, 'finishMic asks finalPass which path to take');
   // finalPass hears only the tail after the last cut, and reports the tail-only path when there is audio after it.
   assert.match(voiceLive, /const tail = from > 0 \? recording\.chunks\.slice\(from\) : \[\];/, 'the final pass hears only the tail after the last cut');
@@ -87,8 +87,9 @@ test('the whole-recording final is heard in short windows, and a still-truncated
   const voiceLive = readFileSync(new URL('../public/voice-live.js', import.meta.url), 'utf8');
   // The windowing and the too-short check live in the shared module, so the app and the QA harness behave the same.
   assert.match(voiceLive, /export function finalChunks\(recording/, 'the shared windowing for the final pass');
-  assert.match(voiceLive, /export function looksTruncated\(text, audioSeconds\)/, 'a shared check for a suspiciously short answer');
-  assert.match(voiceLive, /MIN_WORDS_PER_S = 0\.5, MIN_CHECK_S = 8/, 'only long audio is checked, against a floor far below real speech');
+  assert.match(voiceLive, /export function looksTruncated\(text, voicedSeconds\)/, 'a shared check for a suspiciously short answer, judged against voiced speech time');
+  assert.match(voiceLive, /export function voicedSeconds\(recording\)/, 'voiced speech time ignores leading, trailing and in-between silence');
+  assert.match(voiceLive, /MIN_WORDS_PER_S = 0\.5, MIN_CHARS_PER_S = 1\.5, MIN_CHECK_S = 8/, 'word and character floors far below real speech, only long voiced spans checked');
   // hearInWindows sends one short request per window, each short enough to complete under load; a short clip stays one request.
   assert.match(composer, /async function hearInWindows\(ctx, recording\) \{/, 'the whole recording is heard in short windows');
   assert.match(composer, /const windows = finalChunks\(recording\);/, 'the windows come from the shared finalChunks');
@@ -97,8 +98,13 @@ test('the whole-recording final is heard in short windows, and a still-truncated
   // The whole-recording final uses the windows directly, not one long request.
   const wholeBlock = composer.slice(composer.indexOf('} else {', composer.indexOf("if (pass.path === 'tail')")), composer.indexOf('const seconds = audioSeconds(recording);'));
   assert.match(wholeBlock, /finalText = await hearInWindows\(ctx, recording\);/, 'the whole pass is heard in windows, never one long request');
-  // A still-too-short final errors rather than finalizing partial text, and the error clears the dictation so nothing partial can be sent.
-  assert.match(composer, /if \(looksTruncated\(finalText, seconds\)\) throw Object\.assign\(new Error\(t\('The voice model returned only part of what was said[^']*'\)\), \{ truncated: true \}\);/, 'still truncated surfaces an error instead of finalizing partial text');
+  // A suspiciously short final is re-heard once and the fuller kept; it is discarded only if it is STILL far too short
+  // for a long voiced span, so a complete or short transcript is never cleared, only a genuinely cut-off one.
+  assert.match(composer, /const voiced = voicedSeconds\(recording\);/, 'the check is against voiced speech time, not the whole recording');
+  assert.match(composer, /if \(looksTruncated\(finalText, voiced\)\) \{/, 'a short-looking answer enters the re-hear path');
+  assert.match(composer, /retry = await hearInWindows\(ctx, recording\);/, 'the suspect answer is re-heard once, the engine warm by now');
+  assert.match(composer, /if \(retry\.length > finalText\.length\) finalText = retry;/, 'whichever answer came back fuller is kept');
+  assert.match(composer, /if \(looksTruncated\(finalText, voiced\)\) throw Object\.assign\(new Error\(t\('The voice model returned only part of what was said[^']*'\)\), \{ truncated: true \}\);/, 'only a still-too-short answer surfaces an error instead of finalizing it');
   assert.match(composer, /liveShow\(ctx, live, ''\);/, 'any failed final pass clears the box so partial dictation is never left to send');
 });
 

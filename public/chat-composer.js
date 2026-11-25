@@ -11,7 +11,7 @@ const ICON = {
 import { pickerHtml } from '/chat-pick.js';
 import { micProblem, openMicrophone, startRecorder, transcribe, wavFrom } from '/recorder.js';
 import { askConfirm } from '/confirm.js';
-import { LIVE_EVERY_MS, livePieces, finalPass, finalChunks, audioSeconds, looksTruncated } from '/voice-live.js';
+import { LIVE_EVERY_MS, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated } from '/voice-live.js';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
 const MODE_HINT = { bypassPermissions: t('Runs tools without asking'), manual: t('Asks you for each tool, in the chat'), auto: t('A checker decides what is safe'), plan: t('Plans only, runs nothing'), acceptEdits: t('Edits files freely, asks for the rest') };
@@ -502,10 +502,20 @@ async function finishMic(ctx) {
       // joins them, so the whole text comes back, just slower. A short recording is still one request inside hearInWindows.
       finalText = await hearInWindows(ctx, recording);
     }
-    // Last guard: if the answer is still far too short for the audio, raise an error rather than finalize a partial one,
-    // so the person retries instead of silently losing most of what they said.
-    const seconds = audioSeconds(recording);
-    if (looksTruncated(finalText, seconds)) throw Object.assign(new Error(t('The voice model returned only part of what was said. Press the mic and try again in a moment.')), { truncated: true });
+    // Last guard against a cold engine's cut-off answer, measured against how much was actually spoken
+    // (voicedSeconds), never the whole recording, so a short phrase inside a long silence is never suspected. If
+    // the answer looks far too short, re-hear the whole recording once (the engine is warm by now) and keep
+    // whichever came back fuller. Discard (and ask the person to retry) only if it is STILL far too short for a
+    // long voiced span; any non-empty, plausible answer is kept, so a complete Khmer or short transcript is never
+    // cleared.
+    const voiced = voicedSeconds(recording);
+    if (looksTruncated(finalText, voiced)) {
+      let retry = '';
+      try { retry = await hearInWindows(ctx, recording); }
+      catch (error) { if (error.starting || /not installed|\binstall\b/i.test(error.message || '')) throw error; }
+      if (retry.length > finalText.length) finalText = retry;
+      if (looksTruncated(finalText, voiced)) throw Object.assign(new Error(t('The voice model returned only part of what was said. Press the mic and try again in a moment.')), { truncated: true });
+    }
     liveShow(ctx, live, finalText, { final: true });
   } catch (error) {
     // A failed final pass must never leave partial dictation in the box to be sent, truncated or not: clear the

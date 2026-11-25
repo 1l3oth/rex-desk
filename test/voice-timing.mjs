@@ -16,9 +16,9 @@ import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { livePieces, finalPass, finalChunks, audioSeconds, looksTruncated, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S } from '../public/voice-live.js';
+import { livePieces, finalPass, finalChunks, audioSeconds, voicedSeconds, looksTruncated, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S } from '../public/voice-live.js';
 
-export { livePieces, finalPass, finalChunks, audioSeconds, looksTruncated, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S };
+export { livePieces, finalPass, finalChunks, audioSeconds, voicedSeconds, looksTruncated, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S };
 
 // Parse a 16-bit PCM mono WAV into { rate, samples: Float32Array in -1..1 }.
 export function parseWav(buffer) {
@@ -108,13 +108,20 @@ export async function runTiming({ chunks, rate, transcribe, now = () => performa
         for (const [from, to] of windows) parts.push(await hear(from, to));
         return parts.filter(Boolean).join(' ');
       };
-      const finalText = pass.path === 'tail'
+      let finalText = pass.path === 'tail'
         ? [pass.kept, await hear(pass.from, chunks.length)].filter(Boolean).join(' ')
         : await hearWindowed();
-      const seconds = audioSeconds({ rate, chunks });
-      // The final pass is authoritative: report it, never stale live text, so a failure shows as empty + truncated.
-      shown = finalText; if (finalText && !firstWordAt) firstWordAt = now();
-      resolve({ finalAt: now(), finalStart, finalText, path: pass.path, windowedFinal: pass.path === 'whole', truncated: looksTruncated(finalText, seconds) });
+      // Judged against voiced speech time, not the whole recording. A suspiciously short answer is re-heard once
+      // and the fuller kept; it is discarded (cleared) only if it is STILL far too short for a long voiced span.
+      const voiced = voicedSeconds({ rate, chunks, levels });
+      if (looksTruncated(finalText, voiced)) {
+        const retry = await hearWindowed();
+        if (retry.length > finalText.length) finalText = retry;
+      }
+      const truncated = looksTruncated(finalText, voiced);
+      // The final pass is authoritative: report it, never stale live text, so a discarded answer shows as empty.
+      shown = truncated ? '' : finalText; if (shown && !firstWordAt) firstWordAt = now();
+      resolve({ finalAt: now(), finalStart, finalText: shown, path: pass.path, windowedFinal: pass.path === 'whole', truncated });
     }, 50);
   });
   return {

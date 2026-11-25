@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseWav, frame, levelsOf, livePieces, finalPass, finalChunks, looksTruncated, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
+import { parseWav, frame, levelsOf, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = name => readFileSync(path.join(here, 'fixtures', 'voice', name));
@@ -73,15 +73,34 @@ test('runTiming reports first-word before final-text, with a stub model', async 
   assert.equal(out.committedCuts, 0);
 });
 
-test('looksTruncated flags a tiny answer for long audio, not slow or short speech', () => {
-  // The real cold-start miss: 5 words for ~12.8s of speech.
+test('looksTruncated flags a tiny answer for a long voiced span, not slow or short speech', () => {
+  // The real cold-start miss: 5 words for ~12.8s of voiced speech.
   assert.equal(looksTruncated('Please open the project folder.', 12.8), true);
-  // The full 30-word answer for the same clip is fine.
+  // The full 30-word answer for the same span is fine.
   assert.equal(looksTruncated('Please open the project folder, pull the latest changes from the main branch, install the packages, start the development server on a free port, then run the full test suite and report any failures.', 12.8), false);
-  // Short clips are never checked, however few words.
+  // A short voiced span is never checked, however few words.
   assert.equal(looksTruncated('Open the project and run tests.', 2.8), false);
   // A genuinely slow but present dictation (one word a second) stays above the floor.
   assert.equal(looksTruncated('one two three four five six seven eight nine ten', 10), false);
+});
+
+test('looksTruncated judges a space-less script (Khmer) by characters, so a complete Khmer transcript is kept', () => {
+  // Khmer writes a whole phrase as one run with only occasional phrase spaces, so counting whitespace "words"
+  // would see a complete sentence as one or two words and wrongly flag it. It is judged by character count.
+  const complete = 'សូមបើកថតគម្រោង ទាញយកការផ្លាស់ប្ដូរចុងក្រោយ ដំឡើងកញ្ចប់ រួចរត់ការធ្វើតេស្តទាំងអស់';
+  assert.equal(looksTruncated(complete, 12.8), false, 'a full Khmer transcript is not a single truncated word');
+  // A genuinely cut-off Khmer answer (a few opening characters) is still caught.
+  assert.equal(looksTruncated('សូមបើក', 12.8), true, 'only the opening characters for a long span is truncated');
+});
+
+test('voicedSeconds counts only spoken frames, so a short phrase inside long silence is never flagged', () => {
+  const rate = 22050, per = FRAME / rate;
+  const voicedN = Math.round(2 / per), silentN = Math.round(15 / per); // ~2s of speech, ~15s of silence around it
+  const levels = [...Array(silentN).fill(0.001), ...Array(voicedN).fill(0.1), ...Array(silentN).fill(0.001)];
+  const rec = { rate, chunks: levels.map(() => 0), levels };
+  const voiced = voicedSeconds(rec);
+  assert.ok(Math.abs(voiced - 2) < 0.3, 'about 2s of voiced speech, not the ~32s of wall-clock audio');
+  assert.equal(looksTruncated('Open the file.', voiced), false, 'a short phrase in long silence is a short voiced span, never suspected');
 });
 
 test('finalChunks cuts a long recording only at confirmed pauses, covering it with short windows', () => {

@@ -86,15 +86,32 @@ export function finalChunks(recording, maxChunks = Math.floor(LIVE_PIECE_S * rec
   return windows;
 }
 
-// A cold engine can answer the first final pass with only the opening words (seen once: 5 of 30 words on
-// the first run after a restart). That is data loss, so a final answer that is far too short for the audio
-// is treated as suspect: the caller hears it once more (the engine is warm by then) and keeps the fuller
-// answer, and errors rather than finalizing a partial one. Real dictation runs 2-3 words/s; the floor here
-// (MIN_WORDS_PER_S) is far below that, and only audio past MIN_CHECK_S is checked, so slow or short speech
-// is never flagged, only a clearly cut-off answer.
-export const MIN_WORDS_PER_S = 0.5, MIN_CHECK_S = 8;
-export function looksTruncated(text, audioSeconds) {
-  if (!(audioSeconds >= MIN_CHECK_S)) return false;
-  const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
-  return words < audioSeconds * MIN_WORDS_PER_S;
+// Seconds of audio that were actually voiced: the frames at or above the speech floor. Leading, trailing and
+// in-between silence do not count, so a short phrase spoken inside a long silence is measured by how much was
+// said, not by the wall-clock length of the recording.
+export function voicedSeconds(recording) {
+  const per = FRAME / recording.rate; let voiced = 0;
+  for (const level of recording.levels) if ((level ?? 0) >= VOICE_FLOOR) voiced++;
+  return voiced * per;
+}
+
+// Does a final answer look suspiciously short for how much was actually spoken? This is only a retry HINT: a
+// cold engine can answer the first pass with just the opening words (seen once: 5 of 30 words after a restart),
+// so the caller re-hears once (the engine is warm by then), keeps the fuller answer, and discards it only if it
+// is STILL far too short for a long voiced span. It is measured against voiced speech time (voicedSeconds),
+// never the whole recording, so a short phrase wrapped in long silence is never flagged. Scripts with spaces
+// between words are measured by word count; scripts written with no spaces between words (Khmer, Chinese,
+// Japanese) by character count, so a complete Khmer transcript (one long run with few or no spaces) is never
+// mistaken for a single truncated word. The floors are far below real dictation (2-3 words/s, many more
+// chars/s), so only a clearly cut-off answer is flagged, and a non-empty plausible transcript never is.
+export const MIN_WORDS_PER_S = 0.5, MIN_CHARS_PER_S = 1.5, MIN_CHECK_S = 8;
+const SPACELESS_SCRIPT = /[ក-៿぀-ヿ㐀-䶿一-鿿]/g; // Khmer, Kana, CJK ideographs
+export function looksTruncated(text, voicedSeconds) {
+  if (!(voicedSeconds >= MIN_CHECK_S)) return false; // too little speech to judge a cut-off
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return true; // nothing came back for a long voiced span
+  const bare = trimmed.replace(/\s+/g, '');
+  const spaceless = (trimmed.match(SPACELESS_SCRIPT) || []).length * 2 >= bare.length; // mostly a no-space script
+  if (spaceless) return bare.length < voicedSeconds * MIN_CHARS_PER_S;
+  return trimmed.split(/\s+/).filter(Boolean).length < voicedSeconds * MIN_WORDS_PER_S;
 }
