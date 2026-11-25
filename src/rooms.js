@@ -138,7 +138,9 @@ export class Rooms {
     return [...new Set(targets)];
   }
   mentionsIn(room, text) {
-    const known = new Set([HUMAN, ...room.members.map(id => this.member(id).handle.toLowerCase())]);
+    // An agent is named by its handle (@rexdesk-web-agent) or its name (@RexDesk_Web_Agent): agents write either, and a name that
+    // matched nobody silently woke nobody.
+    const known = new Set([HUMAN, ...room.members.flatMap(id => [this.member(id).handle, this.member(id).name].filter(Boolean).map(name => String(name).toLowerCase()))]);
     // A mention can sit in bold (**@dev:**), brackets or after any mark, and a full stop or colon after it is not part of the name.
     const names = [...String(text).matchAll(/(?<![\p{L}\p{N}_@])@([\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/gu)].map(match => match[1].toLowerCase() === 'main' ? 'rex' : match[1]).filter(name => known.has(name.toLowerCase()));
     return this.resolveTargets(room, names);

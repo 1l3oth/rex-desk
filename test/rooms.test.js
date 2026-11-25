@@ -331,6 +331,15 @@ test('a mention counts in bold, before a colon or a full stop, and inside bracke
   assert.deepEqual(who('write to me@dara.com'), []);
 });
 
+test('an agent is woken by its name as well as its handle, so @Web_Agent reaches the agent with handle web-agent', () => {
+  const { desk, room } = setup();
+  const web = desk.specialists.create({ name: 'Web_Agent', projectSlug: 'shop' });
+  desk.rooms.addMember(room.id, web.id);
+  assert.notEqual(desk.rooms.member(web.id).handle, 'web_agent', 'the handle differs from the name');
+  assert.deepEqual(desk.rooms.mentionsIn(desk.rooms.room(room.id), 'Can you check the logs, @Web_Agent?'), [web.id]);
+  assert.deepEqual(desk.rooms.mentionsIn(desk.rooms.room(room.id), `@${desk.rooms.member(web.id).handle} hi`), [web.id]);
+});
+
 test('away check-ins skip a quiet room and wait longer each time, and room chat runs on Sonnet unless saving is off', async () => {
   const { desk, store, turns, dara, room } = setup({ replies: ['Plan done. Next check-in: 10 minutes'] });
   desk.rooms.quietSettle = 10;
