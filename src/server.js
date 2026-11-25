@@ -33,7 +33,7 @@ import { readyLines } from '../public/voice-phrases.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handleA2aHttp, a2aSettings, setA2a, A2aRelay } from './a2a.js';
 import { PhoneRelay, waitingPage } from './phone-relay.js';
-import { PeerFiles, dataFile, dataKey } from './peer-files.js';
+import { PeerFiles, dataFile, dataKey, servableFile } from './peer-files.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
 import { weeklyReport } from './report.js';
@@ -589,9 +589,12 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         // Another computer of this account asks for a file it does not have (peer-files.js). The relay names it as a desk of
         // the same account; it gets only files from this computer's own data folders, never one it would fetch from elsewhere.
         if (relayed && url.pathname === '/api/peer/file' && request.method === 'GET' && desk.phoneRelay.fromOwnDesk(request)) {
-          const key = String(url.searchParams.get('key') || ''), file = dataFile(desk.store, key);
-          if (!file || desk.storage.gone(key) || !existsSync(file) || statSync(file).isDirectory()) return json(response, 404, { error: 'That file is not on this computer.' });
-          return serveFile(request, response, file, { cache: 'private, max-age=3600' });
+          // Only a regular file whose real path (links and junctions followed) stays in this computer's data folders, and
+          // never one over the relay limit: that one is opened on this computer.
+          const key = String(url.searchParams.get('key') || ''), found = servableFile(desk.store, key);
+          if (!found || desk.storage.gone(key)) return json(response, 404, { error: 'That file is not on this computer.' });
+          if (found.size > desk.peerFiles.max) { response.setHeader('X-Rex-File-Size', String(found.size)); return json(response, 413, { error: 'That file is too large to pass to another computer.', size: found.size }); }
+          return serveFile(request, response, found.file, { cache: 'private, max-age=3600' });
         }
         if (relayed) {
           const entry = desk.phoneRelay.admit(request);

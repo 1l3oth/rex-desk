@@ -3,10 +3,10 @@
 // the account's relay (api.rexdesk.dev/v1/relay/peer/<computer>/file), the same way the phone reaches a desk: no Tailscale.
 // Small files are brought over and kept here; a big video is passed straight through to whoever asked, a range at a time, so
 // it starts playing at once instead of waiting for the whole file. When it cannot, why stays here (why), so the chat says it.
-import { createWriteStream, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { constants, copyFileSync, createWriteStream, existsSync, linkSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { ACCOUNT_API } from './rexdesk-account.js';
 import { chatFileId, evidenceId } from './peers.js';
@@ -18,6 +18,11 @@ export const PEER_FILE_MAX = 1024 * 1024 * 1024;
 const FOLDERS = ['artifacts', 'uploads', 'room-images'];
 const PASS = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag'];
 const MB = bytes => `${Math.round(bytes / 1048576)} MB`;
+// Counts the bytes as they arrive and stops the stream past max: the size the other computer reported is never trusted.
+function byteLimit(max) {
+  let seen = 0;
+  return new Transform({ transform(chunk, _encoding, done) { seen += chunk.length; if (seen > max) return done(Object.assign(new Error(`More than ${MB(max)} came.`), { code: 'TOO_BIG', seen })); done(null, chunk); } });
+}
 
 // The key a data file is known by on every computer: data/<folder>/<rest>, or '' for anything outside the data folders.
 export function dataKey(store, file) {
@@ -36,9 +41,20 @@ export function dataFile(store, key) {
   const root = path.resolve(store.media(match[1])), file = path.resolve(root, ...parts);
   return file.startsWith(root + path.sep) ? file : '';
 }
+// The file this computer may hand to another one for a key: its real path (links and Windows junctions followed) must still
+// sit inside the real data folder, and it must be a regular file. Null otherwise, so a link can never reach the rest of the disk.
+export function servableFile(store, key) {
+  const file = dataFile(store, key); if (!file) return null;
+  const folder = /^data\/([a-z-]+)\//.exec(key)[1];
+  let real, root, stat;
+  try { root = realpathSync.native(store.media(folder)); real = realpathSync.native(file); stat = statSync(real); } catch { return null; }
+  const relative = path.relative(root, real);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || !stat.isFile()) return null;
+  return { file: real, size: stat.size };
+}
 
 export class PeerFiles {
-  constructor(desk, { fetcher = (...args) => fetch(...args), base = ACCOUNT_API } = {}) { this.desk = desk; this.fetcher = fetcher; this.base = base; this.missing = new Map(); this.inflight = new Map(); }
+  constructor(desk, { fetcher = (...args) => fetch(...args), base = ACCOUNT_API, max = PEER_FILE_MAX } = {}) { this.desk = desk; this.fetcher = fetcher; this.base = base; this.max = max; this.missing = new Map(); this.inflight = new Map(); }
   get store() { return this.desk.store; }
   // The computers that may hold this file, most likely first: the one whose chat it came from, then every other computer
   // this one has heard of. This computer is never asked.
@@ -71,12 +87,14 @@ export class PeerFiles {
       catch (error) { lastError = error.message || String(error); continue; }
       if (response.status === 200 || response.status === 206) {
         const total = Number(/\/(\d+)$/.exec(response.headers.get('content-range') || '')?.[1] || response.headers.get('content-length') || 0);
-        if (total > PEER_FILE_MAX) { await response.body?.cancel?.().catch(() => {}); return this.miss(key, 'too-big', { holder: this.nameOf(node), size: total }); }
+        if (total > this.max) { await response.body?.cancel?.().catch(() => {}); return this.miss(key, 'too-big', { holder: this.nameOf(node), size: total }); }
         this.missing.delete(key); response.holder = node; response.total = total; return response;
       }
       await response.body?.cancel?.().catch(() => {});
       if (response.status === 401) return this.miss(key, 'signed-out');
       if (response.status === 402) return this.miss(key, 'not-paid');
+      // 413: the computer that has it will not pass a file over the limit through the relay.
+      if (response.status === 413) return this.miss(key, 'too-big', { holder: this.nameOf(node), size: Number(response.headers.get('x-rex-file-size')) || 0 });
       // 503: that computer's relay line is not open (it is off, asleep, or Rex Desk is closed there).
       if (response.status === 503 || response.status === 504) { offline ||= node; continue; }
       if (response.status === 416) return response;
@@ -95,15 +113,27 @@ export class PeerFiles {
       // Always as a range from the start: the relay drops Content-Length, and Content-Range still says how big the file is.
       const response = await this.ask(key, { range: 'bytes=0-' }); if (!response) return false;
       if (response.status !== 206 || !/^bytes 0-/.test(response.headers.get('content-range') || '') || response.total > limit) { await response.body?.cancel?.().catch(() => {}); return false; }
-      return this.saveBody(file, response);
+      return this.saveBody(file, response, limit);
     })().catch(error => { this.miss(key, 'failed', { detail: String(error.message || error).slice(0, 200) }); return false; }).finally(() => this.inflight.delete(key));
     this.inflight.set(key, work); return work;
   }
-  async saveBody(file, response) {
+  // Written to a temp file first, counting the bytes, then published only when no file of that name appeared here meanwhile:
+  // a file made on this computer while the copy came is never overwritten. False when more came than limit.
+  async saveBody(file, response, limit = KEEP_BYTES) {
     mkdirSync(path.dirname(file), { recursive: true });
     const partial = `${file}.${randomBytes(4).toString('hex')}.tmp`;
-    try { await pipeline(Readable.fromWeb(response.body), createWriteStream(partial)); renameSync(partial, file); return true; }
-    catch (error) { rmSync(partial, { force: true }); throw error; }
+    try {
+      try { await pipeline(Readable.fromWeb(response.body), byteLimit(Math.min(limit, this.max)), createWriteStream(partial, { flags: 'wx' })); }
+      catch (error) { if (error.code === 'TOO_BIG') return false; throw error; }
+      try { linkSync(partial, file); }
+      catch (error) {
+        if (error.code === 'EEXIST') return true;
+        // A drive without hard links: a copy that still refuses to replace an existing file.
+        if (!['EPERM', 'ENOTSUP', 'ENOSYS', 'EXDEV'].includes(error.code)) throw error;
+        try { copyFileSync(partial, file, constants.COPYFILE_EXCL); } catch (copy) { if (copy.code !== 'EEXIST') throw copy; }
+      }
+      return true;
+    } finally { rmSync(partial, { force: true }); }
   }
   // The size and kind of a file without bringing it over: the first byte, with the whole length in Content-Range.
   async peek(key) {
@@ -124,9 +154,16 @@ export class PeerFiles {
     if (download) headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(dataFile(this.store, key) || key))}`;
     response.writeHead(whole ? 200 : got.status, headers);
     if (!got.body || request.method === 'HEAD') { await got.body?.cancel?.().catch(() => {}); response.end(); return true; }
+    // Never more than the range it said it sends, and never more than the limit, whatever it reported.
+    const span = /^bytes (\d+)-(\d+)\//.exec(got.headers.get('content-range') || ''), said = span ? Number(span[2]) - Number(span[1]) + 1 : 0;
     const source = Readable.fromWeb(got.body);
     request.once?.('close', () => { if (!response.writableEnded) source.destroy(); });
-    try { await pipeline(source, response); } catch { /* the browser went away (a video seeks with a new range) */ }
+    try { await pipeline(source, byteLimit(said ? Math.min(said, this.max) : this.max), response); }
+    catch (error) {
+      // The headers are out already: cut the answer short so the browser sees it broke, and say why next time.
+      if (error.code === 'TOO_BIG') { this.miss(key, 'too-big', { holder: this.nameOf(got.holder), size: error.seen }); response.destroy?.(); }
+      // Otherwise the browser went away (a video seeks with a new range).
+    }
     return true;
   }
   // The sentence the chat shows when the file could not come, or '' when there is no reason known.
@@ -134,7 +171,7 @@ export class PeerFiles {
     const why = this.why(key); if (!why) return '';
     const where = why.holder ? `on ${why.holder}` : 'on your other computer';
     if (why.reason === 'offline') return `${name} is ${where}, which is offline. Turn that computer on with Rex Desk open, then try again.`;
-    if (why.reason === 'too-big') return `${name} is too large to open from another computer (${MB(why.size)}, the limit is ${MB(PEER_FILE_MAX)}). Open it ${where}.`;
+    if (why.reason === 'too-big') return `${name} is too large to open from another computer (${why.size ? `${MB(why.size)}, ` : ''}the limit is ${MB(this.max)}). Open it ${where}.`;
     if (why.reason === 'signed-out') return `${name} is on your other computer. Sign this computer in to your Rex Desk account to open it here.`;
     if (why.reason === 'not-paid') return `${name} is on your other computer. Opening files from another computer comes with cloud backup.`;
     if (why.reason === 'not-found') return `${name} is not on any of your computers that are on right now, and it is not in the cloud backup.`;
