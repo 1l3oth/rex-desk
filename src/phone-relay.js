@@ -11,7 +11,7 @@ const PENDING_MS = 10 * 60000, MAX_PENDING = 5, MAX_BODY = 50 * 1024 * 1024, CHU
 const RETRY_MS = [2000, 5000, 15000, 30000, 60000];
 // The desk pings the relay now and then, so an idle link is not cut as idle; a link that stays silent for DEAD_MS is dead and is dialled again.
 const REPLACED_MS = 30000, MAX_REPLACED = 3, STABLE_MS = 60000, REPLACED_SLOW_MS = 5 * 60000;
-const PING_MS = 20000, DEAD_MS = 70000;
+const PING_MS = 20000, DEAD_MS = 70000, STALL_MS = 2000;
 // Headers that belong to one hop, or that only this desk may set on a relayed request.
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-connection', 'te', 'trailer', 'content-length']);
 const OWN = /^x-rex-relay/i;
@@ -123,12 +123,17 @@ export class PhoneRelay {
     socket.addEventListener('error', event => { error = String(event?.message || event?.error?.message || 'connection error'); });
   }
   // A ping every PING_MS; if nothing at all came back for DEAD_MS the link is closed, and the close handler dials again.
+  // When this desk's own server was frozen (a long sync step), the relay's answers wait unread behind the freeze, so the
+  // silence is ours, not the link's: the time the beat came late is added back before the link is judged dead.
   keepAlive(socket) {
     // Each socket owns its own timers, so an old socket closing late never stops the heartbeat of the one that replaced it.
     this.release(socket);
+    let last = Date.now();
     const beat = setInterval(() => {
       if (this.socket !== socket) return this.release(socket);
-      if (Date.now() - this.heard > DEAD_MS) { try { socket.close(); } catch {} return; }
+      const now = Date.now(), late = now - last - PING_MS; last = now;
+      if (late > STALL_MS) this.heard += late;
+      if (now - this.heard > DEAD_MS) { try { socket.close(); } catch {} return; }
       this.send(RELAY_OP.PING, 0, json({ at: Date.now() }));
     }, PING_MS); beat.unref?.();
     this.timers.set(socket, { beat });

@@ -18,6 +18,8 @@ function fakeSocket() {
   socket.play = (op, streamId, payload) => socket.emit('message', { data: relayFrame(op, streamId, payload) });
   return socket;
 }
+// Mocked tick() moves the clock to its end before any timer runs, which looks like a freeze; this runs one heartbeat at a time.
+const beats = ms => { for (let left = ms; left > 0; left -= 20000) mock.timers.tick(Math.min(20000, left)); };
 const waitFor = async check => { for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error('timed out'); };
 
 test('the relay connection says hello with the account and plays phone requests against the desk', async () => {
@@ -207,15 +209,33 @@ test('the desk pings the relay now and then, and dials again when the link has g
   mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
   try {
     const { desk } = fakeDesk(1), socket = fakeSocket(); let closed = 0; socket.close = () => { closed++; socket.emit('close', { code: 1006 }); };
-    const relay = new PhoneRelay(desk, { socket: () => socket });
+    let dials = 0; const relay = new PhoneRelay(desk, { socket: () => (dials++, socket) });
     relay.setEnabled(true); socket.emit('open');
     mock.timers.tick(20000);
     assert.ok(socket.sent.some(frame => frame.op === RELAY_OP.PING), 'a ping went out');
-    socket.play(RELAY_OP.PONG, 0, Buffer.from('{}')); mock.timers.tick(60000);
+    socket.play(RELAY_OP.PONG, 0, Buffer.from('{}')); beats(60000);
     assert.equal(closed, 0, 'a link that answered is kept');
-    mock.timers.tick(80000);
+    beats(80000);
     assert.equal(closed, 1, 'a silent link is closed');
-    assert.equal(relay.view().state, 'offline'); assert.ok(relay.timer, 'and dialled again');
+    assert.equal(dials, 2, 'and dialled again');
+    relay.stop();
+  } finally { mock.timers.reset(); }
+});
+
+test('a freeze of this desk is not read as a dead link: only real silence closes it', () => {
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+  try {
+    const { desk } = fakeDesk(1), socket = fakeSocket(); let closed = 0; socket.close = () => { closed++; socket.emit('close', { code: 1006 }); };
+    const relay = new PhoneRelay(desk, { socket: () => socket });
+    relay.setEnabled(true); socket.emit('open');
+    mock.timers.tick(20000); socket.play(RELAY_OP.PONG, 0, Buffer.from('{}'));
+    // The event loop stalls for 75 s: no beat runs and no relay frame is read, then the late beat fires.
+    mock.timers.setTime(Date.now() + 75000); mock.timers.tick(1);
+    assert.equal(closed, 0, 'the stall itself does not close a healthy link');
+    socket.play(RELAY_OP.PONG, 0, Buffer.from('{}')); beats(60000);
+    assert.equal(closed, 0, 'and the pong read after the stall keeps it');
+    beats(80000);
+    assert.equal(closed, 1, 'a link that stays silent with the desk running is still closed');
     relay.stop();
   } finally { mock.timers.reset(); }
 });
