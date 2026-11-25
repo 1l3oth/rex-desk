@@ -1,5 +1,5 @@
 // Copies this Node runtime and the Rex Desk server into the installer payload, so the desktop app needs nothing preinstalled.
-import { cpSync, rmSync, mkdirSync, existsSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
+import { cpSync, rmSync, mkdirSync, existsSync, writeFileSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -35,7 +35,22 @@ if (process.env.REX_STAGE_FULL === '1') {
   for (const part of ['lib', 'mode', 'addon', 'package.json']) copy(`codemirror/${part}`);
   await bundle();
 }
+writeFileList();
 console.log(`Staged Node ${process.version} and Rex Desk into ${payload} (${count(app)} files)`);
+
+// Every payload file with its size, one "size|relative\path" line each. The Windows installer checks the copy it wrote
+// against this list before it marks the new version complete and drops the old one (desktop/src-tauri/windows/hooks.nsh).
+function writeFileList() {
+  const list = path.join(payload, '.rex-desk-files');
+  const lines = readdirSync(payload, { withFileTypes: true, recursive: true }).filter(entry => entry.isFile()).map(entry => {
+    const file = path.join(entry.parentPath, entry.name), relative = path.relative(payload, file).replaceAll('/', '\\');
+    // The installer reads the list as plain text: a name it could misread would fail every install, so it fails here.
+    // (NSIS reads at most 1024 characters a line.)
+    if (!/^[\x20-\x7e]+$/.test(relative) || relative.includes('|') || relative.length > 900) throw new Error(`Payload file name the installer cannot check: ${relative}`);
+    return `${statSync(file).size}|${relative}\n`;
+  });
+  writeFileSync(list, lines.join(''));
+}
 
 async function bundle() {
   const { build } = await import('esbuild');

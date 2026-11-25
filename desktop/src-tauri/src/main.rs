@@ -394,7 +394,7 @@ fn runtime_with(ask: bool) -> Option<Runtime> {
     let folder = exe.parent()?;
     // An update the installer never finished: put the old payload back before looking for it (payload_swap.rs).
     if cfg!(windows) {
-        let _ = payload_swap::recover(folder, NODE, std::time::SystemTime::now());
+        let _ = payload_swap::recover(folder, NODE);
     }
     for beside in [folder.join("payload"), folder.join("..").join("Resources").join("payload")] {
         let (node, app) = (beside.join("node").join(NODE), beside.join("app"));
