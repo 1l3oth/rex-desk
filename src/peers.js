@@ -341,19 +341,25 @@ export class Peers {
     let since = again ? '' : String(settings.chatAt || ''), newest = since, total = 0; const read = String(settings.chatAt || '');
     // Once an hour the last day is read again: a message stamped below what was already read (the writer's clock was behind,
     // or it uploaded late) would otherwise stay missing on this computer for good. Reading a message twice changes nothing.
-    const deep = !again && Date.now() - (Number(settings.chatDeepAt) || 0) > CHAT_DEEP_MS;
-    if (since) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - (deep ? CHAT_DEEP_SPAN : 120000)).toString(36).padStart(9, '0'); }
+    // A second look longer than one pull's 40 pages keeps its place (chatDeepFrom) and goes on from there next pull, until it
+    // reaches the newest row; only then is it done for the hour, so rows past the page limit are never skipped.
+    const going = !again && settings.chatDeepFrom ? String(settings.chatDeepFrom) : '';
+    const deep = !again && (Boolean(going) || Date.now() - (Number(settings.chatDeepAt) || 0) > CHAT_DEEP_MS);
+    if (going) since = going;
+    else if (since) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - (deep ? CHAT_DEEP_SPAN : 120000)).toString(36).padStart(9, '0'); }
+    let finished = false;
     for (let page = 0; page < 40; page++) {
       const rows = await this.store.cloud.pullChat(since);
-      if (!rows?.length) break;
+      if (!rows?.length) { finished = true; break; }
       total += this.store.applyChatEvents(rows);
       // Only a message newer than the last one read is a sign of life: the overlap reads the same last rows on every pull,
       // and counting those kept a computer that went off "online" forever (L26). An old message read for the first time is not either.
       for (const row of rows) { const [time, , ...node] = String(row.v).split('.'); if (String(row.v) <= read || Date.now() - (parseInt(time, 36) || 0) > CLOUD_MS) continue; this.hear(node.join('.')); }
       newest = String(rows.at(-1).v) > newest ? String(rows.at(-1).v) : newest; since = String(rows.at(-1).v);
-      if (rows.length < 500) break;
+      if (rows.length < 500) { finished = true; break; }
     }
-    if (again || deep || newest !== String(settings.chatAt || '')) this.save({ chatAt: newest, chatNode: this.self.id, chatRead: 2, ...(again || deep ? { chatDeepAt: Date.now() } : {}) });
+    const look = deep && !finished ? { chatDeepFrom: since } : again || deep ? { chatDeepAt: Date.now(), chatDeepFrom: '' } : {};
+    if (again || deep || newest !== String(settings.chatAt || '')) this.save({ chatAt: newest, chatNode: this.self.id, chatRead: 2, ...look });
     return total;
   }
   // Messages written here before chats were shared (or while offline with nothing queued) go up once.

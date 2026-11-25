@@ -202,6 +202,23 @@ test('a file attached on one computer gets its own copy on the other, and an age
   assert.equal(b.desk.peers.localFiles(gone), gone, 'a file that never arrived keeps its name');
 });
 
+test('the hourly second look at the last day goes on from where its 40 pages stopped until it reaches the newest row', async () => {
+  const { b } = account();
+  const peers = b.desk.peers, start = Date.now() - 20 * 3600000, stamp = i => `${(start + i * 1000).toString(36).padStart(9, '0')}.0000.other`;
+  const rows = Array.from({ length: 20500 }, (_, i) => ({ v: stamp(i) })), asked = [];
+  b.store.cloud.pullChat = async since => { asked.push(since); return rows.filter(row => row.v > since).slice(0, 500); };
+  b.store.applyChatEvents = list => list.length;
+  peers.save({ chatNode: peers.self.id, chatRead: 2, chatAt: stamp(20499), chatDeepAt: 0, chatDeepFrom: '' });
+  await peers.pullChats();
+  assert.equal(asked.length, 40); assert.equal(peers.settings().chatDeepFrom, stamp(19999), 'the place where it stopped is kept');
+  assert.equal(peers.settings().chatDeepAt, 0, 'not done for the hour yet');
+  asked.length = 0; await peers.pullChats();
+  assert.equal(asked[0], stamp(19999), 'goes on from there, not from a day back');
+  assert.ok(peers.settings().chatDeepAt > 0); assert.equal(peers.settings().chatDeepFrom, '', 'done once it reached the newest row');
+  asked.length = 0; await peers.pullChats();
+  assert.equal(asked.length, 1, 'then the usual short look back');
+});
+
 test('a different file already under the same upload name is never given out as the arriving one (L27)', () => {
   const { b } = account();
   const folder = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', mine = path.join(b.store.media('uploads'), folder, 'note.txt');
