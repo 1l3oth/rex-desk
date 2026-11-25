@@ -1662,7 +1662,10 @@ function earlierChats(agent) {
 
 // Messages on their way to an agent on another computer. One leaves the list when that computer's copy of the chat has it.
 function outboxHtml(run, shown) {
-  const waiting = ui.outbox?.get(run.id); if (!waiting?.length) return '';
+  // The agent is on its way from another computer (L114): the message is already saved here and goes to it once it arrives.
+  const mover = personalAgent(run), moving = mover?.move?.state === 'running';
+  const movingLine = moving ? `<div class="msg moving-here" role="status"><div class="send-state"><span class="spin" aria-hidden="true"></span>${esc(t('Moving the agent here…'))}</div></div>` : '';
+  const waiting = ui.outbox?.get(run.id); if (!waiting?.length) return movingLine;
   // The words the person sees, without the hidden voice note; a few minutes of leeway for the two computers' clocks.
   const words = text => spokenText(String(text || '').split(/\n*Attached files \(read them from these paths\):/)[0]).text.replace(/\s+/g, ' ').trim().slice(0, 200);
   const arrived = item => shown.some(event => event.kind === 'human-message' && Date.parse(event.createdAt || 0) > Date.parse(item.at) - 300000 && words(event.text).includes(words(item.text)));
@@ -1672,14 +1675,14 @@ function outboxHtml(run, shown) {
     const old = Date.now() - Date.parse(item.at) > 20000;
     // An agent on this computer: "starting"; if nothing picks it up it stays shown as kept, never lost. An agent on
     // another computer: "sending to <device>", then "still on its way" after a while.
-    const state = item.local
+    const state = moving ? t('Moving the agent here…') : item.local
       ? (old ? t('Not picked up yet. Kept here; send again if needed.') : t('Starting the agent…'))
       : (!item.sent ? t('Sending…') : off ? t`Waiting for ${where} to turn on` : Date.now() - Date.parse(item.at) > 45000 ? t`Still on its way to ${where}…` : t`Sending to ${where}…`);
-    return `<div class="msg mine sending${item.local && old ? ' stuck' : ''}"><div class="bubble">${(sent => sent.top + `<div class="md">${markdown(spokenText(sent.text).text)}</div>` + sent.html)(attachedFiles(item.text, esc))}<div class="send-state">${item.local && old ? '' : '<span class="spin" aria-hidden="true"></span>'}${esc(state)}</div></div></div>`;
-  }).join('');
+    return `<div class="msg mine sending${item.local && old && !moving ? ' stuck' : ''}"><div class="bubble">${(sent => sent.top + `<div class="md">${markdown(spokenText(sent.text).text)}</div>` + sent.html)(attachedFiles(item.text, esc))}<div class="send-state">${item.local && old && !moving ? '' : '<span class="spin" aria-hidden="true"></span>'}${esc(state)}</div></div></div>`;
+  }).join('') + movingLine;
 }
 // While a message is on its way, the screen looks again every few seconds, so "Still on its way" shows even with no news.
-setInterval(() => { if ([...(ui.outbox?.values() || [])].some(list => list.length) && ui.view.type === 'run') renderAll(); }, 5000);
+setInterval(() => { if (([...(ui.outbox?.values() || [])].some(list => list.length) || (ui.snap?.specialists || []).some(agent => agent.move?.state === 'running')) && ui.view.type === 'run') renderAll(); }, 5000);
 
 // Scrolled up through the history: a round button brings the chat back to the newest message, and says when new ones came in.
 function syncToEnd() {

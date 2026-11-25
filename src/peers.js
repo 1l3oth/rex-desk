@@ -647,7 +647,7 @@ export class Peers {
   }
   // The person writes in a chat whose agent is on another computer: straight there when it is reached directly, otherwise
   // as a command in the shared database that the agent's computer runs within seconds (or when it is back on).
-  async chatAction(copy, action, input = {}) {
+  async chatAction(copy, action, input = {}, { shown = null } = {}) {
     if (!['say', 'resume', 'stop'].includes(action)) throw new Error(`Open this chat on ${this.deviceName(copy.node)} to do that.`);
     const text = String(input.text || input.prompt || '').slice(0, 20000);
     if (action !== 'stop' && !text.trim()) throw new Error('Write a message first.');
@@ -656,8 +656,8 @@ export class Peers {
     // The message shows in this computer's copy of the shared chat at once and reaches the others with its own id; the
     // computer running the agent passes it on without writing it again.
     if (action !== 'stop' && this.store.syncedChat(copy.id)) {
-      this.store.event(copy.id, 'human-message', { text: keepLines(text), via: 'rex', from: this.self.id }, true);
-      const row = this.store.db.prepare('SELECT uid, kind, visible, value, created_at FROM events WHERE run_id=? ORDER BY sequence DESC LIMIT 1').get(copy.id);
+      if (!shown?.uid) this.store.event(copy.id, 'human-message', { text: keepLines(text), via: 'rex', from: this.self.id }, true);
+      const row = shown?.uid ? shown : this.store.db.prepare('SELECT uid, kind, visible, value, created_at FROM events WHERE run_id=? ORDER BY sequence DESC LIMIT 1').get(copy.id);
       // The message itself travels with the command, so the agent's computer shows it before the answer to it.
       if (row?.uid) { packed.uid = row.uid; packed.echo = { ...row }; }
     }

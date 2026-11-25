@@ -143,3 +143,42 @@ test('a move saves the work first and shows each step; when saving fails the age
     assert.equal(broken.state, 'failed'); assert.match(broken.error, /never committed/); assert.deepEqual(broken.steps, { saved: false, committed: false, moved: false, pickedUp: false });
   } finally { await close(); }
 });
+
+test('Send to an agent that moves here saves the message and answers at once, then starts it once when the move is done (L114)', async () => {
+  const { store, desk, agent, close } = setup();
+  try {
+    desk.peers.statusOf = () => ({ state: 'idle', label: 'Idle' }); desk.peers.online = () => true;
+    agent('mv5', { node: 'work-pc', runId: 'r13' });
+    store.put('run', 'r13', { id: 'r13', role: 'specialist', specialistId: 'mv5', provider: 'claude', state: 'finished', createdAt: new Date().toISOString() });
+    // The other computer takes its time to save the work (a slow relay): the send does not wait for it.
+    let release; const gate = new Promise(resolve => { release = resolve; }), asked = [];
+    desk.handover.request = async moving => { asked.push(moving.id); await gate; return { nothing: true }; };
+    const sent = () => store.events('r13', { visible: true, limit: 50 }).filter(event => event.kind === 'human-message').map(event => event.text);
+    const first = desk.projectRules.sendHere('r13', store.get('specialist', 'mv5'), 'resume', { prompt: 'fix the cart' });
+    assert.deepEqual(first, { queued: true, moving: true });
+    assert.deepEqual(sent(), ['fix the cart'], 'the message is saved before the move');
+    assert.equal(store.get('specialist', 'mv5').move.state, 'running', 'the chat shows the agent moving here');
+    assert.equal(desk.projectRules.movingHere('mv5'), true);
+    // A second message while it is on its way waits behind the same move: one move, nothing lost.
+    desk.projectRules.sendHere('r13', store.get('specialist', 'mv5'), 'say', { text: 'and the checkout' });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(asked.length, 1, 'the agent moves once');
+    assert.equal(store.get('run', 'r13').state, 'finished', 'nothing starts before the move is done');
+    release(); await desk.projectRules.moving.get('mv5');
+    const run = store.get('run', 'r13');
+    assert.equal(store.get('specialist', 'mv5').node, store.nodeId);
+    assert.equal(run.state, 'queued', 'the agent starts once it is here'); assert.equal(run.followUp, 'fix the cart');
+    assert.deepEqual(run.queued, ['and the checkout'], 'the second message waits for the next turn, not a second start');
+    assert.deepEqual(sent(), ['fix the cart', 'and the checkout'], 'each message shows once');
+    assert.equal(desk.projectRules.movingHere('mv5'), false);
+    // The move fails: the message still goes to the agent on the other computer, shown here once.
+    agent('mv6', { node: 'work-pc', runId: 'r14' });
+    store.put('run', 'r14', { id: 'r14', role: 'specialist', specialistId: 'mv6', provider: 'claude', state: 'finished', createdAt: new Date().toISOString() });
+    desk.handover.request = async () => { throw new Error('The relay did not answer.'); };
+    desk.projectRules.sendHere('r14', store.get('specialist', 'mv6'), 'resume', { prompt: 'still there?' });
+    await desk.projectRules.moving.get('mv6');
+    assert.equal(store.get('specialist', 'mv6').node, 'work-pc');
+    assert.ok(store.list('peercmd').some(command => command.runId === 'r14' && command.target === 'work-pc' && command.action === 'chat-say'), 'passed on to the other computer');
+    assert.deepEqual(store.events('r14', { visible: true, limit: 50 }).filter(event => event.kind === 'human-message').map(event => event.text), ['still there?']);
+  } finally { await close(); }
+});

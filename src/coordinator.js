@@ -535,19 +535,22 @@ export class Desk {
     if (run.autoContinues) this.patchRun(runId, { autoContinues: 0 });
     // In Voice mode the agent gets the briefing and how to talk; the chat shows only what the person said.
     const spoken = picked.voice ? this.spoken(runId, line) : '';
+    // echoed: the message is already in the chat (typed on another computer, or saved before the agent moved here, L114).
+    // One that comes while the run waits to start queues behind it, so the first is not replaced.
+    const busy = this.live.has(runId) || Boolean(picked.echoed && run.state === 'queued');
     if (spoken) {
-      if (this.live.has(runId)) { const current = this.store.get('run', runId); this.store.put('run', runId, { ...current, ...runOptions({ provider: current.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), ...(picked.model ? { modelPicked: true } : {}), queued: [...(current.queued || []), spoken], updatedAt: now() }); this.store.event(runId, 'human-message', { text: line, via: 'voice', queued: true }, true); return { queued: true }; }
-      this.store.event(runId, 'human-message', { text: line, via: 'voice' }, true);
+      if (busy) { const current = this.store.get('run', runId); this.store.put('run', runId, { ...current, ...runOptions({ provider: current.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), ...(picked.model ? { modelPicked: true } : {}), queued: [...(current.queued || []), spoken], updatedAt: now() }); if (!picked.echoed) this.store.event(runId, 'human-message', { text: line, via: 'voice', queued: true }, true); return { queued: true }; }
+      if (!picked.echoed) this.store.event(runId, 'human-message', { text: line, via: 'voice' }, true);
       await this.resume(runId, { provider: picked.provider || run.provider, prompt: spoken, silent: true, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });
       return { sent: true };
     }
-    if (this.live.has(runId)) {
+    if (busy) {
       this.store.put('run', runId, { ...run, ...runOptions({ provider: run.provider, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode }, this.store), ...(picked.model ? { modelPicked: true } : {}), queued: [...(run.queued || []), skillCall(line, line.startsWith('/') ? this.slashTools(run) : null)], updatedAt: now() });
       // A message typed on another computer is already in the shared chat: the agent gets it, the chat does not show it twice.
       if (!picked.echoed) this.store.event(runId, 'human-message', { text: hideTelegramTag(line), via: 'rex', queued: true }, true);
       return { queued: true };
     }
-    await this.resume(runId, { provider: picked.provider || run.provider, prompt: text, model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });
+    await this.resume(runId, { provider: picked.provider || run.provider, prompt: text, silent: Boolean(picked.echoed), model: picked.model, effort: picked.effort, permissionMode: picked.permissionMode });
     return { sent: true };
   }
   // Agents in their own process that kept working while Rex Desk restarted: follow each one again. One whose process ended
@@ -1937,9 +1940,16 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     if (run.specialistId && run.role === 'specialist') this.projectRules.guard(this.store.get('specialist', run.specialistId));
     // A Claude conversation started on another computer (an account restored from backup, an agent shared between computers) is not
     // here to reopen: the agent starts a fresh session that first reads a handoff of the chat, which this computer has in full.
-    if (run.provider === 'claude' && provider === 'claude' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && !this.runnerFactory && !conversationHere(run.sessionId)) {
-      await this.freshStart(runId, { reason: 'because its earlier conversation is on another computer', notice: 'This conversation started on another computer, so it continues here in a fresh session that first reads a handoff of this chat.' });
-      run = this.run(runId);
+    // The message shows at once and the fresh start runs after it (L114); a message sent meanwhile waits behind it.
+    const starting = this.starting?.has(runId);
+    if (starting || (run.provider === 'claude' && provider === 'claude' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && !this.runnerFactory && !conversationHere(run.sessionId))) {
+      if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: hideTelegramTag(keepLines(prompt)), via: 'rex', ...(starting ? { queued: true } : {}) }, true);
+      if (starting) { if (String(prompt).trim()) this.patchRun(runId, { queued: [...(this.run(runId).queued || []), String(prompt).trim()] }); return this.run(runId); }
+      (this.starting ||= new Set()).add(runId);
+      void this.freshStart(runId, { reason: 'because its earlier conversation is on another computer', notice: 'This conversation started on another computer, so it continues here in a fresh session that first reads a handoff of this chat.' })
+        .then(() => { this.starting.delete(runId); return this.resume(runId, { prompt, targetBranch, execution, silent: true, roomTurn, greeting, telegram, ...picked }); })
+        .catch(error => { this.starting.delete(runId); this.store.event(runId, 'error', { message: error.message }, true); });
+      return this.run(runId);
     }
     const sameProvider = run.provider === provider;
     // The other CLI cannot reopen this session, so it starts a fresh one. The recorded conversation is not lost: the run keeps its history,

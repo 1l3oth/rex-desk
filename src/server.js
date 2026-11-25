@@ -1223,12 +1223,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(messages|stop|resume|verify|publish|say|fresh|app|voice))?$/);
       if (runMatch) {
         const [, runId, action] = runMatch;
-        // The agent comes to the computer you type on (unless its project runs only on its own computer): it moves here
-        // before the message would be passed on to the other computer, so the chat carries on here.
+        // The agent comes to the computer you type on (unless its project runs only on its own computer), so the chat carries
+        // on here. The message is saved and answered at once; the move runs after it and the agent gets the message when it is
+        // here (L114). A message sent while it is on its way waits behind the same move.
         if (request.method === 'POST' && ['say', 'resume'].includes(action)) {
           const agentId = store.get('run', runId)?.specialistId || store.get('chatcopy', runId)?.run?.specialistId || store.list('specialist').find(agent => agent.runId === runId)?.id;
           const agent = agentId ? store.get('specialist', agentId) : null;
-          if (desk.peers.followsHere(agent)) await desk.projectRules.move(agent.id).catch(() => {});
+          if (agent && (desk.peers.followsHere(agent) || desk.projectRules.movingHere(agent.id))) return json(response, 200, desk.projectRules.sendHere(runId, agent, action, await body(request)));
         }
         const runOwner = !store.get('run', runId) && desk.peers.runOwner(runId);
         if (runOwner) return json(response, 200, await desk.peers.forward(runOwner, request.method, `${url.pathname}${url.search}`, request.method === 'POST' ? await body(request) : undefined));
@@ -1253,6 +1254,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           const elsewhere = !follows && homeAgent && desk.peers.isRemote(homeAgent) && (desk.peers.online(homeAgent.node) || homeAgent.pinned || Boolean(homeAgent.projectSlug && !desk.projectRules.folderHere(homeAgent.projectSlug)));
           if (elsewhere) return json(response, 200, await desk.peers.chatAction({ id: runId, node: homeAgent.node, agentId: homeAgent.id }, action, input));
           // Its computer is off and the project is here: the agent moves to this computer and carries on, shown as working here.
+          // A message is saved first and waits for the move (L114).
+          if (homeAgent && desk.peers.isRemote(homeAgent) && ['say', 'resume'].includes(action)) return json(response, 200, desk.projectRules.sendHere(runId, homeAgent, action, input));
           if (homeAgent && desk.peers.isRemote(homeAgent) && action !== 'stop') await desk.projectRules.move(homeAgent.id).catch(() => {});
           if (action === 'stop') return json(response, 200, await desk.stop(runId));
           // Continue in Claude app (on), or bring the chat back to Rex Desk only (on: false).

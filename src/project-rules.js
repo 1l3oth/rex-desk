@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { now } from './store.js';
+import { now, keepLines } from './store.js';
 
 // Two rules a person sets on a project, for every agent in it:
 //   pinned:  "Runs only on this computer". Its agents never move to another computer and never start a session elsewhere.
@@ -139,7 +139,8 @@ export class ProjectRules {
     if (local && WORKING.includes(local.state)) { step('failed', `${agent.name} is still working in its chat here.`); throw new Error(`${agent.name} is still working in its chat here. Stop it first.`); }
     if (copy?.run && copy.node !== peers.self.id) {
       // Only what this computer does not have yet is added: nothing when the chat is new here, the newer part when it was here before.
-      const last = local ? this.store.events(runId, { visible: true, limit: 1 }).at(-1)?.createdAt || '' : '';
+      // (A message saved here while the move ran, sendHere below, is newer than the copy's part and does not count.)
+      const last = local ? this.store.events(runId, { visible: true, limit: 20 }).filter(event => !event.moving).at(-1)?.createdAt || '' : '';
       const events = (copy.events || []).filter(event => !last || String(event.createdAt || '') > last);
       const { remote, cloudCopy, host, reattach, queued, ...kept } = copy.run;
       this.store.put('run', runId, { ...(local || {}), ...kept, state: 'finished', endedAt: kept.endedAt || now(), cwd: desk.specialists.homeDirectory(agent), projectPath: folder, repositoryId: repository?.id || '', worktree: local?.worktree || '', error: '' });
@@ -156,5 +157,31 @@ export class ProjectRules {
       step('picked-up', `Carrying on in ${picked.worktree} on ${picked.branch}.`, { worktree: picked.worktree, branch: picked.branch });
     } else step('picked-up', saved.branch ? `Carrying on on ${saved.branch}.` : `${agent.name} carries on here.`);
     return { moved: true, agent: moved.name, from, to: peers.self.name, folder, messages: carried, chat: Boolean(this.store.get('run', runId)), branch: picked.branch || saved.branch || '', worktree: picked.worktree || '' };
+  }
+  // The person writes to an agent that moves here first (L114). The message is saved and shown at once; the move, which can
+  // wait minutes on the other computer and the cloud, runs after it, and the message goes to the agent when the move is done
+  // (or to the other computer when the move fails). Messages sent meanwhile wait in order behind the same move, so the agent
+  // moves once and starts once, and none is lost.
+  sendHere(runId, agent, action, input = {}) {
+    const store = this.store, text = String((action === 'say' ? input.text : input.prompt) || '').trim();
+    if (!text) throw new Error('Write a message first.');
+    store.event(runId, 'human-message', { text: keepLines(text), via: input.voice ? 'voice' : 'rex', moving: true }, true);
+    const shown = store.db.prepare('SELECT uid, kind, visible, value, created_at FROM events WHERE run_id=? ORDER BY sequence DESC LIMIT 1').get(runId);
+    this.moving ||= new Map();
+    const before = this.moving.get(agent.id) || this.move(agent.id).catch(error => ({ failed: String(error.message || error) }));
+    const after = before.then(() => this.deliver(runId, agent.id, action, input, text, shown)).catch(error => { store.event(runId, 'error', { message: error.message }, true); });
+    this.moving.set(agent.id, after);
+    void after.finally(() => { if (this.moving.get(agent.id) === after) this.moving.delete(agent.id); });
+    return { queued: true, moving: true };
+  }
+  // Whether an agent is on its way here (a message to it waits for the move).
+  movingHere(agentId) { return Boolean(this.moving?.has(agentId)); }
+  async deliver(runId, agentId, action, input, text, shown) {
+    const desk = this.desk, peers = desk.peers, agent = this.store.get('specialist', agentId), run = this.store.get('run', runId);
+    const picked = { model: input.model, effort: input.effort, permissionMode: input.permissionMode, provider: input.provider, voice: input.voice };
+    // Still on the other computer (the move failed or was refused): the message goes there, shown here once already.
+    if (!run || peers.isRemote(agent)) return peers.chatAction({ id: runId, node: agent?.node || peers.chatCopy(runId)?.node, agentId }, action, input, { shown });
+    if (desk.live.has(runId) || WORKING.includes(run.state)) return desk.say(runId, text, { ...picked, echoed: true });
+    return desk.resume(runId, { ...picked, prompt: text, silent: true });
   }
 }
