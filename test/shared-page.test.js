@@ -35,9 +35,14 @@ test('a message to a chat with an agent that lives on another computer goes ther
     const post = text => fetch(`${app.address}/api/runs/${runId}/say`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-rex-desk': '1' }, body: JSON.stringify({ text }) });
     assert.equal((await post('hello')).status, 200);
     assert.deepEqual(sent.map(item => [item.copy.node, item.action, item.text]), [['other-computer', 'say', 'hello']]);
-    online = false; desk.say = async () => ({ ranHere: true });
-    assert.deepEqual(await (await post('again')).json(), { ranHere: true });
-    assert.equal(sent.length, 1);
+    // Off: the message is saved and answered at once, the agent moves here, and the message runs here (L114).
+    const here = []; online = false;
+    desk.say = async (id, text) => { here.push(text); return { ranHere: true }; };
+    desk.resume = async (id, options) => { here.push(options.prompt); return { ranHere: true }; };
+    assert.deepEqual(await (await post('again')).json(), { queued: true, moving: true });
+    await desk.projectRules.moving?.get('far');
+    assert.deepEqual(here, ['again'], 'it runs here once the agent has moved');
+    assert.equal(sent.length, 1, 'nothing more goes to the other computer');
   } finally { await app.close(); }
 });
 
