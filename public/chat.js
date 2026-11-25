@@ -1331,9 +1331,11 @@ function connectorsPanel(agent) {
   // A token typed for one agent is never shown in another agent's form.
   if (ui.agentBotsFor !== agent.id) { ui.agentBotsFor = agent.id; ui.agentBotDraft = {}; }
   const id = esc(agent.id), draft = ui.agentBotDraft || {};
+  const about = `<section class="aps-sec"><h3>${t`What this is`}</h3><p class="cn-note">${t`A connector gives ${esc(agent.name)} its own Telegram bot. People message the bot and ${esc(agent.name)} answers, like a chat in this app.`}</p>
+    <ul class="cn-note cn-steps"><li>${t`Make a bot with @BotFather and paste its token.`}</li><li>${t`Send the pairing code to the bot to make yourself its owner. Only the owner can make it text first.`}</li><li>${t`Allow the bot in groups. It answers there only when someone mentions it.`}</li></ul></section>`;
   const head = `<div class="cn-head"><b>Telegram</b>${bot.connected ? `<span class="cn-state"><span class="dot good"></span>${t`Connected`}</span>` : ''}</div>`;
   if (!bot.connected) {
-    return `<div class="side-body aps cn">
+    return `<div class="side-body aps cn">${about}
       <section class="aps-sec">${head}<p class="cn-note">${t`Give ${esc(agent.name)} its own Telegram bot, so people can talk to it there. Make one with @BotFather and paste its token here.`}</p>
         <input class="cn-input" data-ab-token data-agent="${id}" type="password" autocomplete="off" spellcheck="false" placeholder="123456:ABC-..." value="${esc(draft.token || '')}" aria-label="${t`Bot token`}">
         <button type="button" class="btn small primary cn-wide" data-action="ab-connect" data-agent="${id}" aria-label="${t`Connect agent bot`}">${bugBotSection(agent) ? t`Connect agent bot` : t`Connect bot`}</button></section>${bugBotSection(agent)}</div>`;
@@ -1345,7 +1347,7 @@ function connectorsPanel(agent) {
   const groups = `<section class="aps-sec"><h3>${t`Allow in groups`}</h3><p class="cn-note">${t`The bot works only in groups you allow, and only when someone mentions it. Add it to a group, then allow it here.`}</p>
     ${bot.pending.length ? `<ul class="cn-list">${bot.pending.map(group => groupRow(group, `<button type="button" class="btn small" data-action="ab-allow" data-agent="${id}" data-gid="${esc(String(group.id))}" data-title="${esc(group.title || '')}">${t`Allow`}</button>`)).join('')}</ul>` : ''}
     ${bot.groups.length ? `<ul class="cn-list">${bot.groups.map(group => groupRow(group, `<button type="button" class="btn small quiet danger" data-action="ab-remove" data-agent="${id}" data-gid="${esc(String(group.id))}">${t`Remove`}</button>`)).join('')}</ul>` : (bot.pending.length ? '' : `<p class="cn-note">${t`No groups yet.`}</p>`)}</section>`;
-  return `<div class="side-body aps cn">
+  return `<div class="side-body aps cn">${about}
     <section class="aps-sec">${head}<div class="aps-row"><span>${t`Bot`}</span><div>@${esc(bot.botUsername)}</div></div>${owner}
       <button type="button" class="btn small quiet danger cn-wide" data-action="ab-disconnect" data-agent="${id}">${t`Disconnect`}</button></section>
     ${groups}${bugBotSection(agent)}</div>`;
