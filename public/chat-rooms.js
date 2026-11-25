@@ -439,7 +439,7 @@ function localTaskStage(ctx, task) {
     ${field(t('Status'), pickerHtml(ctx, { id: 'lt-status', label: t('Status'), value: task.status, items: STATUS.map(([value, label]) => ({ value, label })) }))}
     ${field(t('Priority'), pickerHtml(ctx, { id: 'lt-priority', label: t('Priority'), value: task.priority || 'normal', items: PRIORITY.map(([value, label]) => ({ value, label })) }))}
     ${field(t('Agent'), pickerHtml(ctx, { id: 'lt-assignee', label: t('Agent'), value: task.assignee || '', items: [{ value: '', label: t('Nobody yet') }, ...agents.map(agent => ({ value: agent.id, label: agent.name, hint: agent.projectSlug }))] }))}
-    ${field(t('Project'), pickerHtml(ctx, { id: 'lt-project', label: t('Project'), value: task.projectSlug || '', items: [{ value: '', label: t('No project') }, ...projects.map(project => ({ value: project.slug, label: project.slug }))] }))}
+    ${field(t('Project'), pickerHtml(ctx, { id: 'lt-project', label: t('Project'), value: task.projectSlug || '', items: [{ value: '', label: t('No project') }, ...projects.map(project => ({ value: project.slug, label: project.slug })), ...(task.projectSlug && !projects.some(project => project.slug === task.projectSlug) ? [{ value: task.projectSlug, label: task.projectSlug }] : [])] }))}
     ${field(t('Due'), `<input id="lt-due" type="date" value="${esc(task.dueDate || '')}">`)}
     ${field(t('Tags'), `<input id="lt-tags" type="text" value="${esc((task.tags || []).join(', '))}" placeholder="${t`ui, bug`}" autocomplete="off" title="${t`Separate tags with commas`}">`)}
     <p class="lt-made">${t`Made by ${esc(task.createdBy || 'you')} · ${esc(when(task.createdAt))}`}</p>
