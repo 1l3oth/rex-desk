@@ -505,9 +505,14 @@ export class Peers {
   saveUpload(item) {
     const sent = /[\\/]uploads[\\/]([0-9a-f-]{36})[\\/][^\\/]+$/i.exec(String(item?.path || ''));
     if (!sent || !item.data) return '';
-    const target = path.join(this.store.media('uploads'), sent[1], path.basename(String(item.name || '')).replace(/[^\p{L}\p{N}._ -]+/gu, '_') || 'file');
-    if (existsSync(target)) return target;
-    try { mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, Buffer.from(item.data, 'base64'), { flag: 'wx' }); return target; } catch { return existsSync(target) ? target : ''; }
+    const name = path.basename(String(item.name || '')).replace(/[^\p{L}\p{N}._ -]+/gu, '_') || 'file', data = Buffer.from(item.data, 'base64');
+    // A different file already under that name is never handed out as this one: the incoming bytes get a folder of their own,
+    // named by their content, so asking again finds the same copy.
+    const same = file => { try { return readFileSync(file).equals(data); } catch { return false; } };
+    let target = path.join(this.store.media('uploads'), sent[1], name);
+    if (existsSync(target) && !same(target)) target = path.join(this.store.media('uploads'), `${sent[1]}-${createHash('sha256').update(data).digest('hex').slice(0, 12)}`, name);
+    if (existsSync(target)) return same(target) ? target : '';
+    try { mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, data, { flag: 'wx' }); return target; } catch { return same(target) ? target : ''; }
   }
   // A room message and its attached files sync as separate rows: before an agent here starts on it, the files that are not here
   // yet are waited for (one shared deadline for all of them), so the agent never starts with the other computer's path only.

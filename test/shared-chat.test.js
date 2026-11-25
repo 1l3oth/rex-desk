@@ -202,6 +202,17 @@ test('a file attached on one computer gets its own copy on the other, and an age
   assert.equal(b.desk.peers.localFiles(gone), gone, 'a file that never arrived keeps its name');
 });
 
+test('a different file already under the same upload name is never given out as the arriving one (L27)', () => {
+  const { b } = account();
+  const folder = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', mine = path.join(b.store.media('uploads'), folder, 'note.txt');
+  mkdirSync(path.dirname(mine), { recursive: true }); writeFileSync(mine, 'my own file');
+  const item = { path: `F:/x/uploads/${folder}/note.txt`, name: 'note.txt', data: Buffer.from('their file').toString('base64') };
+  const saved = b.desk.peers.saveUpload(item);
+  assert.notEqual(saved, mine); assert.equal(readFileSync(saved, 'utf8'), 'their file'); assert.equal(readFileSync(mine, 'utf8'), 'my own file', 'mine is untouched');
+  assert.equal(b.desk.peers.saveUpload(item), saved, 'asking again finds the same copy');
+  assert.equal(b.desk.peers.saveUpload({ ...item, data: Buffer.from('my own file').toString('base64') }), mine, 'the same bytes use the file already here');
+});
+
 test('an agent waits for a file attached on the other computer before it starts, and is told when one never came (L27)', async () => {
   const { a, b, records } = account();
   const folder = '7c1e2d3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f', sent = path.join(a.store.media('uploads'), folder, 'late.png');
