@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import net from 'node:net';
+import os from 'node:os';
 
 // Voice commands are transcribed on this computer, for free and offline: llama.cpp's llama-server runs Qwen3-ASR.
 // Khmer uses a Khmer fine-tune (seanghay/Qwen3-ASR-0.6B-Khmer, about 2% character error); English and Korean use the base model.
@@ -17,6 +18,12 @@ export const voiceModels = {
   base: { repo: 'ggml-org/Qwen3-ASR-0.6B-GGUF', model: 'Qwen3-ASR-0.6B-Q8_0.gguf', mmproj: 'mmproj-Qwen3-ASR-0.6B-Q8_0.gguf' },
 };
 const modelFor = language => language === 'km' ? 'km' : 'base';
+// Threads for llama-server. With no flag llama-server grabs every logical CPU; on a hyper-threaded laptop (e.g. the
+// i7-8750H: 6 cores, 12 threads) that oversubscribes the real cores and, next to a busy desktop app, slows every
+// transcription through context switching. Half the logical count tracks the physical cores on the common
+// hyper-threaded hardware, never oversubscribes, and leaves headroom for the rest of the app, which is what matters on
+// a loaded machine. At least one thread; at least two when there is more than one core.
+export const voiceThreads = (logical = os.cpus().length || 1) => Math.max(logical > 1 ? 2 : 1, Math.ceil(logical / 2));
 // Qwen3-ASR writes "language Korean<asr_text>" before the words; only the words are wanted.
 export const cleanTranscript = text => String(text || '').replace(/^[\s\S]*?<asr_text>/, '').replace(/<\/?asr_text>/g, '').trim();
 
@@ -94,8 +101,9 @@ export class Voice {
       const files = voiceModels[key], port = await freePort();
       entry.url = `http://127.0.0.1:${port}`;
       // --load-mode none reads the model in one go (older builds called it --no-mmap); memory-mapping it crawled page by page on a Windows laptop short of free memory.
+      const threads = String(voiceThreads());
       const child = entry.child = spawn(executable, ['-m', path.join(this.modelDirectory, files.model), '--mmproj', path.join(this.modelDirectory, files.mmproj),
-        '--host', '127.0.0.1', '--port', String(port), '-c', '4096', '--load-mode', 'none', '--no-webui'], { cwd: path.dirname(executable), windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+        '--host', '127.0.0.1', '--port', String(port), '-c', '4096', '--threads', threads, '--threads-batch', threads, '--load-mode', 'none', '--no-webui'], { cwd: path.dirname(executable), windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
       child.stderr.on('data', chunk => { entry.log = (entry.log + chunk).slice(-3000); });
       child.on('exit', () => { if (this.servers.get(key) === entry) this.servers.delete(key); });
       if (entry.stopped) child.kill();

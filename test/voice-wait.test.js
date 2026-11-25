@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtempSync, readFileSync } from 'node:fs';
-import { Voice } from '../src/voice.js';
+import { Voice, voiceThreads } from '../src/voice.js';
 
 test('when the free on-computer voice is not set up, the mic offers to set it up here (no silent wait, no "go to Settings" dead end)', () => {
   const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
@@ -43,6 +43,20 @@ test('the server waits about 20 seconds for the local model, then says it is sti
   assert.match(source, /LOCAL_VOICE_WAIT_MS = 20000/);
   assert.match(source, /still starting\. Try again in a moment/);
   assert.doesNotMatch(source, /is still starting, so/);
+});
+
+test('the on-computer voice engine is pinned to half the logical CPUs, so it never oversubscribes a hyper-threaded machine', () => {
+  // Half the logical count matches the physical cores on common hyper-threaded hardware and leaves headroom for the
+  // rest of the app; it never exceeds the real cores, which is what slows every transcription on a loaded laptop.
+  assert.equal(voiceThreads(12), 6, 'the 6-core/12-thread i7-8750H gets its 6 physical cores');
+  assert.equal(voiceThreads(8), 4);
+  assert.equal(voiceThreads(16), 8);
+  assert.equal(voiceThreads(4), 2);
+  assert.equal(voiceThreads(2), 2, 'a 2-thread machine keeps both');
+  assert.equal(voiceThreads(1), 1, 'a single-core machine gets one thread, not zero');
+  // The engine actually receives the thread count (and the same for batch), rather than letting llama grab every logical CPU.
+  const source = readFileSync(new URL('../src/voice.js', import.meta.url), 'utf8');
+  assert.match(source, /'--threads', threads, '--threads-batch', threads/, 'both --threads and --threads-batch are passed');
 });
 
 test('microphone errors keep their real name', async () => {
