@@ -76,15 +76,16 @@ for (const [label, viewport] of [['desktop', { width: 1440, height: 900 }], ['ph
       await page.route('**/api/runs/*/resume', route => { sent.push({ run: route.request().url().split('/runs/')[1].split('/')[0], ...route.request().postDataJSON() }); return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }); });
       const value = id => page.locator(`#${id}`).inputValue();
       const open = async id => { await page.goto(`${base}/#/run/${id}`); await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' }); await page.waitForSelector('#opt-mode', { state: 'attached', timeout: 15000 }); };
-      const go = async id => { await page.evaluate(h => { location.hash = h; }, `#/run/${id}`); await page.waitForTimeout(600); };
+      const go = async id => { await page.evaluate(h => { location.hash = h; }, `#/run/${id}`); await page.waitForFunction(title => document.querySelector('.stage-head .head-title h1')?.textContent === title, id === 'chat-a' ? 'Chat A' : 'Chat B', { timeout: 15000 }); await page.waitForTimeout(600); };
+      // Opens a picker and picks an item. A slow runner can redraw the composer right after the click, which closes the menu, so it opens it again, at most twice more.
+      const choose = async (pick, text) => { for (let tries = 0; ; tries++) { await page.locator(`.composer [data-pick="${pick}"] .pick2-btn`).click(); const item = page.locator('.pop .pop-item', { hasText: text }); try { await item.waitFor({ timeout: 5000 }); await item.click(); return; } catch (error) { if (tries >= 2) throw error; } } };
       const sendOn = async (text, count) => { await page.locator('#draft').fill(text); await page.locator('[data-action="send"]').click(); for (let i = 0; i < 50 && sent.length < count; i++) await page.waitForTimeout(100); return sent[count - 1]; };
 
       await open('chat-b');
       const defaultMode = await value('opt-mode');
       assert.notEqual(defaultMode, 'bypassPermissions');
       await go('chat-a');
-      await page.locator('.composer [data-pick="opt-mode"] .pick2-btn').click();
-      await page.locator('.pop .pop-item', { hasText: 'Dangerous' }).click();
+      await choose('opt-mode', 'Dangerous');
       assert.equal(await value('opt-mode'), 'bypassPermissions');
       // Chat B, same page and after a reload: not Dangerous, and its message goes out without it.
       await go('chat-b');
@@ -96,8 +97,7 @@ for (const [label, viewport] of [['desktop', { width: 1440, height: 900 }], ['ph
       // Chat A has a session: switching to Codex asks first. Cancel it: the old AI is back and the message goes out on it.
       await go('chat-a');
       assert.equal(await value('opt-provider'), 'claude');
-      await page.locator('.composer [data-pick="opt-provider"] .pick2-btn').click();
-      await page.locator('.pop .pop-item', { hasText: 'Codex' }).click();
+      await choose('opt-provider', 'Codex');
       await page.locator('[data-confirm="no"]').click();
       await page.waitForTimeout(300);
       assert.equal(await value('opt-provider'), 'claude', 'a canceled switch puts the old AI back');
