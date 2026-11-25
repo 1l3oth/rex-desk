@@ -306,12 +306,14 @@ export class Rooms {
     // The tokens this reply used go on the agent's last message of the turn, so the room shows them under it.
     const tokens = this.store.get('run', runId)?.lastTokens;
     if (tokens && run.roomPosted) { const since = run.turnStartedAt || ''; const last = this.messages(turn.roomId).filter(item => item.from.id === agentId && item.at >= since).at(-1); if (last && !last.tokens) this.store.put('roommsg', last.id, { ...this.store.get('roommsg', last.id), tokens }); }
-    this.store.put('run', runId, { ...this.store.get('run', runId), roomTurn: null, roomPosted: false });
+    this.store.put('run', runId, { ...this.store.get('run', runId), roomTurn: null, roomPosted: false, roomTurnAt: undefined });
     if (run.roomPosted && run.state !== 'failed') return;
     if (run.state === 'failed') return this.system(turn.roomId, `${this.member(agentId).name} could not reply: ${clip(run.error, 200)}`);
-    const since = Date.parse(run.turnStartedAt || 0) || 0, said = [];
+    // Only text written since this room message was given: a message handed over mid-turn must not post again the answer
+    // already streamed for the earlier one (that was Rex Agent answering one message twice).
+    const handed = run.roomTurnAt ? Date.parse(run.roomTurnAt) || 0 : 0, since = handed || (Date.parse(run.turnStartedAt || 0) || 0) - 1000, said = [];
     for (const event of this.store.events(runId, { visible: true, limit: 200 })) {
-      if (!['agent-text', 'message'].includes(event.kind) || Date.parse(event.createdAt) < since - 1000) continue;
+      if (!['agent-text', 'message'].includes(event.kind) || Date.parse(event.createdAt) < since) continue;
       const text = String(event.text || event.message || '').trim(); if (text && !said.includes(text)) said.push(text);
     }
     if (!said.length) return this.system(turn.roomId, `${this.member(agentId).name} had nothing to add.`);

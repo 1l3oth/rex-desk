@@ -1629,7 +1629,8 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
       if (!roomId && !quiet) this.store.event(created.id, 'human-message', { text: hideTelegramTag(String(prompt).trim()), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
       void this.drain(); return created;
     }
-    if (this.live.has(run.id)) { this.store.put('run', run.id, { ...run, roomTurn: turn || run.roomTurn, ...(turn ? { roomPosted: false } : {}) }); await this.say(run.id, prompt, {}, { raw: true }); return run; }
+    // A message handed over mid-turn starts a new room reply: what was already posted for the earlier message is not posted again for it.
+    if (this.live.has(run.id)) { this.store.put('run', run.id, { ...run, roomTurn: turn || run.roomTurn, ...(turn ? { roomPosted: false, roomTurnAt: now() } : {}) }); await this.say(run.id, prompt, {}, { raw: true }); return run; }
     // The card's model reaches the chat at the turn start (Specialists.syncRuns), so a model picked in the chat itself stays.
     await this.resume(run.id, { provider: agent.provider, prompt, silent: Boolean(roomId) || quiet, roomTurn: turn, greeting, telegram }); return this.run(run.id);
   }

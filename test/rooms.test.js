@@ -749,3 +749,24 @@ test('a Korean study tip block never goes into a room reply', async () => {
   const said = desk.rooms.messages(room.id).find(item => item.from.id === dara.id);
   assert.equal(said.text, 'The total is wrong after tax.');
 });
+
+test('a message handed to an agent mid-turn does not post again the answer it already gave to the earlier message', async () => {
+  const { desk, store, vanna, room } = setup();
+  desk.rooms.quietSettle = 10;
+  const first = await desk.rooms.post(room.id, { text: 'hello', to: [] });
+  store.put('run', 'vanna-room', { id: 'vanna-room', role: 'specialist', specialistId: vanna.id, roomAgent: vanna.id, state: 'running', createdAt: now(), turnStartedAt: now(), roomTurn: { roomId: room.id, messageId: first.id } });
+  store.put('specialist', vanna.id, { ...store.get('specialist', vanna.id), roomRuns: { [room.id]: 'vanna-room' } });
+  desk.live.set('vanna-room', { runner: { interrupt() {} } });
+  store.event('vanna-room', 'agent-text', { text: 'The total skips the discount.' }, true);
+  desk.streamToRoom('vanna-room', 'The total skips the discount.');
+  await waitFor(() => desk.rooms.messages(room.id).filter(item => item.from.type === 'agent').length === 1);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  await desk.rooms.post(room.id, { text: '@vanna thanks, carry on' });
+  await waitFor(() => (store.get('run', 'vanna-room').queued || []).length === 1);
+  desk.live.delete('vanna-room');
+  store.put('run', 'vanna-room', { ...store.get('run', 'vanna-room'), state: 'finished' });
+  await desk.rooms.turnFinished('vanna-room');
+  const replies = desk.rooms.messages(room.id).filter(item => item.from.type === 'agent');
+  assert.equal(replies.length, 1, 'one message, one reply');
+  assert.ok(desk.rooms.messages(room.id).some(item => /Vanna had nothing to add/.test(item.text)));
+});
