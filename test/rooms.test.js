@@ -730,6 +730,9 @@ test('a reply that only acknowledges wakes no other agent, a request still does'
   assert.ok(!ackOnly('OK, @vanna please check the tax rate.'), 'a request wakes');
   assert.ok(!ackOnly('Agreed, but what about refunds?'), 'a question wakes');
   assert.ok(!ackOnly('The discount is applied after tax, so the total is wrong.'), 'a real answer is not an acknowledgement');
+  assert.ok(!ackOnly('Thanks, @vanna, update the docs.'), 'a request after thanks wakes');
+  assert.ok(!ackOnly('Noted. Vanna, rename the column.'), 'any request in the reply wakes');
+  assert.ok(ackOnly('Thanks for the update, standing by.'));
   const { desk, turns, dara, vanna, room } = setup({ replies: ['Understood. Holding, @vanna nothing to do for now.', 'Agreed.'] });
   await desk.rooms.post(room.id, { text: '@dara hold the cart work' });
   await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id));

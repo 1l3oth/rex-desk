@@ -9,11 +9,13 @@ import path from 'node:path';
 export const WRAP_UP_HOPS = 12;
 // A reply that only acknowledges (holding, agreed, ok, thanks, no action) wakes nobody, even when it names agents: agents kept
 // waking each other with one-line acknowledgements, each a full turn. A request ("please", a question) still wakes them.
-const ACK = /^\W*(holding|on hold|agreed|agree|ok(ay)?|thanks|thank you|noted|understood|got it|will do|paused|no action|nothing (more |else )?to add|sounds good|confirmed|standing by|acknowledged)\b/i;
+// The whole reply must be acknowledgement: every clause holds an acknowledging word, so "Thanks, @vanna, update the docs." wakes.
+const ACK = /\b(holding|on hold|agreed|agree|ok(ay)?|thanks|thank you|noted|understood|got it|will do|paused|no action|nothing (more |else )?to (add|do|report)|nothing pushed|waiting|sounds good|confirmed|standing by|acknowledged)\b/i;
 const ASKS = /\?|\b(please|can you|could you|would you|need you|go ahead|start|check|test|review|fix|build|push|deploy|send)\b/i;
 export function ackOnly(text) {
   const plain = String(text || '').replace(/```[\s\S]*?```/g, ' ').replace(/(?<![\p{L}\p{N}_])@[\p{L}\p{N}_.-]+/gu, ' ').replace(/\s+/g, ' ').trim();
-  return plain.length <= 200 && ACK.test(plain) && !ASKS.test(plain);
+  const clauses = plain.split(/[.,;:!\n]+/).map(part => part.replace(/[^\p{L}\p{N}]+/gu, ' ').trim()).filter(Boolean);
+  return plain.length <= 200 && clauses.length > 0 && clauses.every(part => ACK.test(part)) && !ASKS.test(plain);
 }
 // English only on Rex Desk: a study tip block an agent appends to its reply (KOREAN TIP ...) never goes into a room.
 export const withoutStudyTip = text => String(text || '').replace(/\n*```[^\n]*\n\s*KOREAN TIP[\s\S]*?```/gi, '').replace(/\n*^KOREAN TIP\b[\s\S]*$/im, '').trim();
