@@ -160,3 +160,28 @@ test('a reply whose id another message already uses still arrives, and arriving 
   assert.equal(a.store.applyChatEvents([reply]), 0, 'Reading it again adds nothing');
   assert.deepEqual(a.store.db.prepare("SELECT run_id FROM events WHERE uid LIKE 'shared.1000041697%' ORDER BY run_id").all().map(row => row.run_id), ['run-new', 'run-old']);
 });
+
+test('a reply written after the other computer read past it still arrives: a clock set back, or a message stamped late', async () => {
+  const { hub, a, b, records } = account();
+  const dara = a.desk.specialists.create({ name: 'Dara', projectSlug: 'shop' });
+  await a.desk.specialistTurn(dara.id, { prompt: 'Fix the refund bug' });
+  const runId = a.store.get('specialist', dara.id).runId;
+  await idle(a.desk, runId);
+  records(b, a); await b.desk.peers.pullChats();
+  assert.deepEqual(texts(b.store, runId), texts(a.store, runId));
+  // The laptop's clock goes back ten minutes (it woke from sleep and synced its time): its next reply is stamped no lower.
+  const realNow = Date.now; Date.now = () => realNow() - 600000;
+  try { a.store.event(runId, 'agent-text', { text: 'Fixed after the clock went back.' }, true); } finally { Date.now = realNow; }
+  await b.desk.peers.pullChats();
+  assert.equal(texts(b.store, runId).at(-1), 'Fixed after the clock went back.', 'a stamp never goes below one already read');
+  // A message another computer stamped long before it reached the cloud: the hourly second look brings it in.
+  const late = { uid: `${a.store.nodeId}.999.late`, run_id: runId, kind: 'agent-text', visible: 1, value: JSON.stringify({ text: 'Uploaded late.' }), created_at: new Date().toISOString(), v: `${(Date.now() - 3600000).toString(36).padStart(9, '0')}.0000.${a.store.nodeId}`, node: a.store.nodeId, deleted: 0 };
+  hub.chat.set(late.uid, late);
+  await b.desk.peers.pullChats();
+  assert.ok(!texts(b.store, runId).includes('Uploaded late.'), 'the usual two-minute look back does not reach it');
+  b.desk.peers.save({ chatDeepAt: Date.now() - 2 * 3600000 });
+  await b.desk.peers.pullChats();
+  assert.equal(texts(b.store, runId).filter(text => text === 'Uploaded late.').length, 1, 'the hourly look at the last day brings it, once');
+  await b.desk.peers.pullChats();
+  assert.equal(texts(b.store, runId).filter(text => text === 'Uploaded late.').length, 1);
+});

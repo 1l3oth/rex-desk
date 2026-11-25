@@ -17,6 +17,8 @@ import { execFile } from 'node:child_process';
 
 const now = () => new Date().toISOString();
 const STALE_CHAT_MS = 24 * 3600000;
+// The hourly second look at the last day of chat messages (Peers.pullChats).
+const CHAT_DEEP_MS = 3600000, CHAT_DEEP_SPAN = 24 * 3600000;
 // How often the other computers' agent states are read while one of them is on (a 2 s old "Replying..." is near enough).
 const LOOK_MS = 2000;
 // What an agent is doing, without what changes on its own (warm-cache times), so only a real change counts.
@@ -336,7 +338,10 @@ export class Peers {
     // chatRead 2: read everything once more, so messages dropped by an id clash (see Store.applyChatEvents) come in.
     const settings = this.settings(), again = settings.chatNode !== this.self.id || settings.chatRead !== 2;
     let since = again ? '' : String(settings.chatAt || ''), newest = since, total = 0; const read = String(settings.chatAt || '');
-    if (since) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - 120000).toString(36).padStart(9, '0'); }
+    // Once an hour the last day is read again: a message stamped below what was already read (the writer's clock was behind,
+    // or it uploaded late) would otherwise stay missing on this computer for good. Reading a message twice changes nothing.
+    const deep = !again && Date.now() - (Number(settings.chatDeepAt) || 0) > CHAT_DEEP_MS;
+    if (since) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - (deep ? CHAT_DEEP_SPAN : 120000)).toString(36).padStart(9, '0'); }
     for (let page = 0; page < 40; page++) {
       const rows = await this.store.cloud.pullChat(since);
       if (!rows?.length) break;
@@ -347,7 +352,7 @@ export class Peers {
       newest = String(rows.at(-1).v) > newest ? String(rows.at(-1).v) : newest; since = String(rows.at(-1).v);
       if (rows.length < 500) break;
     }
-    if (again || newest !== String(settings.chatAt || '')) this.save({ chatAt: newest, chatNode: this.self.id, chatRead: 2 });
+    if (again || deep || newest !== String(settings.chatAt || '')) this.save({ chatAt: newest, chatNode: this.self.id, chatRead: 2, ...(again || deep ? { chatDeepAt: Date.now() } : {}) });
     return total;
   }
   // Messages written here before chats were shared (or while offline with nothing queued) go up once.

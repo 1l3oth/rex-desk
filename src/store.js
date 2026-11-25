@@ -215,7 +215,9 @@ export class Store extends EventEmitter {
     catch (error) { this.inTransaction = false; this.db.exec('ROLLBACK'); this.lists?.clear(); throw error; }
   }
   // A version that sorts by time, then by computer, so the newest change wins on every computer.
-  stamp() { this.clock = (this.clock + 1) % 1679616; return `${Date.now().toString(36).padStart(9, '0')}.${this.clock.toString(36).padStart(4, '0')}.${this.nodeId}`; }
+  // Never earlier than the last stamp: a clock set back (a laptop waking from sleep, a time sync) would stamp new messages
+  // below what the other computers already read past, and they would never fetch them.
+  stamp() { this.clock = (this.clock + 1) % 1679616; this.stampAt = Math.max(Date.now(), this.stampAt || 0); return `${this.stampAt.toString(36).padStart(9, '0')}.${this.clock.toString(36).padStart(4, '0')}.${this.nodeId}`; }
   logChange(kind, key, deleted = false) {
     if (!shared(kind, key) || !this.nodeId) return;
     this.db.prepare('DELETE FROM changes WHERE kind=? AND id=?').run(kind, key);
