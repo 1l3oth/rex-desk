@@ -764,12 +764,30 @@ test('a message handed to an agent mid-turn does not post again the answer it al
   desk.streamToRoom('vanna-room', 'The total skips the discount.');
   await waitFor(() => desk.rooms.messages(room.id).filter(item => item.from.type === 'agent').length === 1);
   await new Promise(resolve => setTimeout(resolve, 20));
-  await desk.rooms.post(room.id, { text: '@vanna thanks, carry on' });
+  const second = await desk.rooms.post(room.id, { text: '@vanna thanks, carry on' });
   await waitFor(() => (store.get('run', 'vanna-room').queued || []).length === 1);
+  // Queued, not read yet: the answer still coming belongs to the first message, and the second keeps its own target.
+  assert.equal(store.get('run', 'vanna-room').roomTurn.messageId, first.id);
+  assert.equal(store.get('run', 'vanna-room').queuedTurns[0].turn.messageId, second.id);
   desk.live.delete('vanna-room');
   store.put('run', 'vanna-room', { ...store.get('run', 'vanna-room'), state: 'finished' });
   await desk.rooms.turnFinished('vanna-room');
   const replies = desk.rooms.messages(room.id).filter(item => item.from.type === 'agent');
   assert.equal(replies.length, 1, 'one message, one reply');
-  assert.ok(desk.rooms.messages(room.id).some(item => /Vanna had nothing to add/.test(item.text)));
+  assert.equal(store.get('run', 'vanna-room').queuedTurns[0].turn.messageId, second.id, 'the follow-up still knows its room message');
+});
+
+test('a queued room message becomes the reply target only when the agent reads it, and goes back with it when unread', async () => {
+  const { desk, store, vanna, room } = setup();
+  const first = await desk.rooms.post(room.id, { text: 'hello', to: [] }), second = await desk.rooms.post(room.id, { text: 'again', to: [] });
+  const target = { roomId: room.id, messageId: first.id }, next = { roomId: room.id, messageId: second.id };
+  store.put('run', 'vanna-room', { id: 'vanna-room', role: 'specialist', specialistId: vanna.id, roomAgent: vanna.id, state: 'running', createdAt: now(), roomTurn: target, roomPosted: true, queued: ['again'], queuedTurns: [{ entry: 'again', turn: next }] });
+  assert.deepEqual(desk.takeInbox('vanna-room'), ['again']);
+  let run = store.get('run', 'vanna-room');
+  assert.equal(run.roomTurn.messageId, second.id); assert.equal(run.roomPosted, false); assert.ok(run.roomTurnAt); assert.equal(run.queuedTurns, undefined);
+  desk.live.set('vanna-room', {});
+  desk.requeue('vanna-room', ['again']);
+  run = store.get('run', 'vanna-room'); desk.live.delete('vanna-room');
+  assert.equal(run.roomTurn.messageId, first.id, 'given back unread: the turn answers the first message again');
+  assert.deepEqual(run.queued, ['again']); assert.equal(run.queuedTurns[0].turn.messageId, second.id);
 });
