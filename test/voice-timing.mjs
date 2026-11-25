@@ -96,25 +96,24 @@ export async function runTiming({ chunks, rate, transcribe, now = () => performa
       clearInterval(waitStop); clearInterval(timer);
       while (busy) await new Promise(r => setTimeout(r, 20));
       const finalStart = now();
-      // finishMic on stop: the shared finalPass picks the tail-only or the whole-recording pass.
+      // finishMic on stop: the shared finalPass picks the tail-only or the whole-recording pass. The whole-recording
+      // pass is heard in short windows (finalChunks), since on a fully loaded machine one long request stays correct but
+      // turns very slow and can be cut off by the request timeout; short windows each complete in a few seconds.
       const pass = finalPass({ rate, chunks, levels, liveFrom, liveKept });
-      let finalText = pass.path === 'tail'
-        ? [pass.kept, await hear(pass.from, chunks.length)].filter(Boolean).join(' ')
-        : await hear(0, chunks.length);
-      // Same guard as finishMic: a final answer far too short for the audio is heard once more in short windows
-      // (finalChunks), which complete under load where one long request would stop early; the fuller one is kept.
-      const seconds = audioSeconds({ rate, chunks });
-      let retriedFinal = false;
-      if (looksTruncated(finalText, seconds)) {
-        retriedFinal = true;
+      const hearWindowed = async () => {
         const windows = finalChunks({ rate, chunks, levels });
+        if (windows.length <= 1) return hear(0, chunks.length);
         const parts = [];
         for (const [from, to] of windows) parts.push(await hear(from, to));
-        const whole = parts.filter(Boolean).join(' ');
-        if (whole.length > finalText.length) finalText = whole;
-      }
-      if (finalText) { shown = finalText; if (!firstWordAt) firstWordAt = now(); }
-      resolve({ finalAt: now(), finalStart, finalText, path: pass.path, retriedFinal, truncated: looksTruncated(finalText, seconds) });
+        return parts.filter(Boolean).join(' ');
+      };
+      const finalText = pass.path === 'tail'
+        ? [pass.kept, await hear(pass.from, chunks.length)].filter(Boolean).join(' ')
+        : await hearWindowed();
+      const seconds = audioSeconds({ rate, chunks });
+      // The final pass is authoritative: report it, never stale live text, so a failure shows as empty + truncated.
+      shown = finalText; if (finalText && !firstWordAt) firstWordAt = now();
+      resolve({ finalAt: now(), finalStart, finalText, path: pass.path, windowedFinal: pass.path === 'whole', truncated: looksTruncated(finalText, seconds) });
     }, 50);
   });
   return {
@@ -123,7 +122,7 @@ export async function runTiming({ chunks, rate, transcribe, now = () => performa
     finalTextMs: Math.round(final.finalAt - (t0 + audioMs)),
     finalPath: final.path,
     committedCuts,
-    retriedFinal: final.retriedFinal,
+    windowedFinal: final.windowedFinal,
     truncated: final.truncated,
     text: shown,
   };
@@ -147,7 +146,7 @@ async function main() {
   const transcribe = async wav => (await voice.transcribe(wav, language)).text || '';
   const out = await runTiming({ chunks, rate, transcribe });
   console.log(JSON.stringify({ wav: path.basename(wavPath), language, ...out }, null, 2));
-  process.stderr.write(`Final pass: ${out.finalPath === 'tail' ? 'tail only (a pause committed live)' : 'whole recording (no pause committed)'}; ${out.committedCuts} live cut(s)${out.retriedFinal ? '; final re-heard once (first answer looked truncated)' : ''}${out.truncated ? '; STILL TRUNCATED after retry' : ''}.\n`);
+  process.stderr.write(`Final pass: ${out.finalPath === 'tail' ? 'tail only (a pause committed live)' : 'whole recording in short windows'}; ${out.committedCuts} live cut(s)${out.truncated ? '; STILL TRUNCATED (final was too short for the audio)' : ''}.\n`);
   voice.stopAll();
 }
 

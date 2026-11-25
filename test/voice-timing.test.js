@@ -97,10 +97,10 @@ test('finalChunks splits a long recording into short windows that cover it and c
   assert.equal(windows[0][1], g1, 'the first cut snaps to the quiet gap');
 });
 
-test('under load a long final truncates to the first words, but the windowed re-hear brings the whole text back', async () => {
-  // The real cause: one long whole-recording request stops early under a fully loaded machine (returns only the
-  // opening words at HTTP 200); short requests always complete. The stub models exactly that: any request over 6s of
-  // audio comes back as just the first two words, shorter ones return the full words for their slice.
+test('the whole-recording final is heard in short windows, so a long request that would stop early never happens', async () => {
+  // Under a fully loaded machine one long request stays correct but slow and can be cut off; short requests complete.
+  // The stub models that: any request over 6s of audio comes back as just the first two words; shorter ones return the
+  // full words for their slice. Because the whole pass now always windows, no single request ever exceeds a window.
   const rate = 22050, per = FRAME / rate, count = Math.round(13 / per);
   const chunks = Array.from({ length: count }, () => new Float32Array(FRAME).fill(0.1)); // continuous, no pause -> whole path
   const transcribe = async wav => {
@@ -111,8 +111,8 @@ test('under load a long final truncates to the first words, but the windowed re-
   let clock = 0; const now = () => (clock += 40);
   const out = await runTiming({ chunks, rate, transcribe, now, everyMs: 1 });
   assert.equal(out.finalPath, 'whole', 'continuous speech: the whole-recording final path');
-  assert.equal(out.retriedFinal, true, 'the too-short final triggers the windowed re-hear');
-  assert.equal(out.truncated, false, 'after the windowed re-hear the answer is no longer truncated');
+  assert.equal(out.windowedFinal, true, 'the whole pass is heard window by window');
+  assert.equal(out.truncated, false, 'every window is short enough to complete, so the whole text comes back');
   assert.ok(out.text.trim().split(/\s+/).length > 10, 'the whole text comes back, not just the first two words');
 });
 

@@ -73,31 +73,33 @@ test('the final pass only re-hears the uncommitted tail, not the whole recording
   assert.doesNotMatch(composer, /tailSeconds/, 'the old 300 ms skip is gone');
   assert.match(composer, /finalText = \[pass\.kept, tailText\]\.filter\(Boolean\)\.join\(' '\);/, 'the committed words and the fresh tail make the final text');
   assert.match(composer, /liveShow\(ctx, live, finalText, \{ final: true \}\);/, 'the final text is shown once, after the truncation guard');
-  // A recording that never committed anything is still heard whole.
-  assert.match(composer, /finalText = String\(\(await hearWords\(ctx, recording\.wav\(\)\)\)\.text \|\| ''\)\.trim\(\);/, 'nothing-committed recordings keep the whole-recording pass');
+  // A recording that never committed anything is heard whole, in short windows.
+  assert.match(composer, /finalText = await hearInWindows\(ctx, recording\);/, 'nothing-committed recordings hear the whole recording in windows');
   // Model-not-ready still bubbles so the install/online offer runs.
   assert.ok(composer.includes("if (error.starting || /not installed|\\binstall\\b/i.test(error.message || '')) throw error;"), 'not-ready errors still bubble to the install/online offer');
   // A tail that fails for any other reason never finalizes partial text: the whole recording is heard instead.
   const tailBlock = composer.slice(composer.indexOf("if (pass.path === 'tail') {"), composer.indexOf('const seconds = audioSeconds(recording);'));
-  assert.match(tailBlock, /finalText = String\(\(await hearWords\(ctx, recording\.wav\(\)\)\)\.text \|\| ''\)\.trim\(\);/, 'a failed tail falls back to the whole recording, not the committed words alone');
+  assert.match(tailBlock, /finalText = await hearInWindows\(ctx, recording\);/, 'a failed tail falls back to the whole recording (in windows), not the committed words alone');
 });
 
-test('a load-truncated final is re-heard in short windows, kept only if fuller, and errors rather than finalize partial', () => {
+test('the whole-recording final is heard in short windows, and a still-truncated final errors without saving partial text', () => {
   const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
   const voiceLive = readFileSync(new URL('../public/voice-live.js', import.meta.url), 'utf8');
-  // The guard and the windowing live in the shared module, so the app and the QA harness behave the same.
+  // The windowing and the too-short check live in the shared module, so the app and the QA harness behave the same.
+  assert.match(voiceLive, /export function finalChunks\(recording/, 'the shared windowing for the final pass');
   assert.match(voiceLive, /export function looksTruncated\(text, audioSeconds\)/, 'a shared check for a suspiciously short answer');
   assert.match(voiceLive, /MIN_WORDS_PER_S = 0\.5, MIN_CHECK_S = 8/, 'only long audio is checked, against a floor far below real speech');
-  assert.match(voiceLive, /export function finalChunks\(recording/, 'the shared windowing for the final pass');
-  // The windowed re-hear sends one short request per window, each short enough to complete under load.
-  assert.match(composer, /async function hearInWindows\(ctx, recording\) \{/, 'the whole recording can be heard in short windows');
+  // hearInWindows sends one short request per window, each short enough to complete under load; a short clip stays one request.
+  assert.match(composer, /async function hearInWindows\(ctx, recording\) \{/, 'the whole recording is heard in short windows');
   assert.match(composer, /const windows = finalChunks\(recording\);/, 'the windows come from the shared finalChunks');
+  assert.match(composer, /if \(windows\.length <= 1\) return String\(\(await hearWords\(ctx, recording\.wav\(\)\)\)\.text \|\| ''\)\.trim\(\);/, 'a short recording is still one request');
   assert.match(composer, /wavFrom\(recording\.chunks\.slice\(from, to\), recording\.rate\)/, 'each window is sent as its own short request');
-  // finishMic catches a too-short final, re-hears it in windows, keeps the fuller one, then errors if still truncated.
-  assert.match(composer, /if \(looksTruncated\(finalText, seconds\)\) \{/, 'a suspiciously short final is caught');
-  assert.match(composer, /const whole = await hearInWindows\(ctx, recording\);/, 'it is re-heard in short windows that complete under load');
-  assert.match(composer, /if \(whole\.length > finalText\.length\) finalText = whole;/, 'the fuller answer wins');
-  assert.match(composer, /throw Object\.assign\(new Error\(t\('The voice model returned only part of what was said[^']*'\)\), \{ truncated: true \}\);/, 'still truncated surfaces an error instead of finalizing partial text');
+  // The whole-recording final uses the windows directly, not one long request.
+  const wholeBlock = composer.slice(composer.indexOf('} else {', composer.indexOf("if (pass.path === 'tail')")), composer.indexOf('const seconds = audioSeconds(recording);'));
+  assert.match(wholeBlock, /finalText = await hearInWindows\(ctx, recording\);/, 'the whole pass is heard in windows, never one long request');
+  // A still-too-short final errors rather than finalizing partial text, and the error clears the dictation so nothing partial can be sent.
+  assert.match(composer, /if \(looksTruncated\(finalText, seconds\)\) throw Object\.assign\(new Error\(t\('The voice model returned only part of what was said[^']*'\)\), \{ truncated: true \}\);/, 'still truncated surfaces an error instead of finalizing partial text');
+  assert.match(composer, /liveShow\(ctx, live, error\.truncated \? '' : \(live\?\.said \|\| ''\)\);/, 'a truncated error clears the box so partial text is never left to send');
 });
 
 test('microphone errors keep their real name', async () => {

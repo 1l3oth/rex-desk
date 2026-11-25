@@ -491,27 +491,25 @@ async function finishMic(ctx) {
         // Model-not-ready still bubbles up (so the install/online offer runs). Any other failure must not quietly
         // finalize only the committed words and drop the tail: the whole recording is heard instead, so no words are lost.
         if (error.starting || /not installed|\binstall\b/i.test(error.message || '')) throw error;
-        finalText = String((await hearWords(ctx, recording.wav())).text || '').trim();
+        finalText = await hearInWindows(ctx, recording);
       }
       if (finalText === undefined) finalText = [pass.kept, tailText].filter(Boolean).join(' ');
     } else {
-      // Nothing committed (short recording, or no pause to cut at), so the whole recording is heard.
-      finalText = String((await hearWords(ctx, recording.wav())).text || '').trim();
+      // Nothing committed (short recording, or no pause to cut at), so the whole recording is heard in short windows.
+      // On a fully loaded machine the on-computer engine stays correct but turns very slow: one request for a long
+      // recording can take a minute or two and be cut off by the request timeout, leaving only the opening words.
+      // hearInWindows sends one short request per window (each completes in a handful of seconds even under load) and
+      // joins them, so the whole text comes back, just slower. A short recording is still one request inside hearInWindows.
+      finalText = await hearInWindows(ctx, recording);
     }
-    // Under a fully loaded machine, one whole-recording request can come back with only the opening words: the engine
-    // stops early under contention (short requests always complete). An answer far too short for the audio is heard once
-    // more in short windows (hearInWindows), which complete even under load, and the fuller one wins. If it is still
-    // truncated, raise an error rather than finalize a partial answer, so the person retries instead of silently losing
-    // most of what they said.
+    // Last guard: if the answer is still far too short for the audio, raise an error rather than finalize a partial one,
+    // so the person retries instead of silently losing most of what they said.
     const seconds = audioSeconds(recording);
-    if (looksTruncated(finalText, seconds)) {
-      const whole = await hearInWindows(ctx, recording);
-      if (whole.length > finalText.length) finalText = whole;
-      if (looksTruncated(finalText, seconds)) throw Object.assign(new Error(t('The voice model returned only part of what was said. Press the mic and try again in a moment.')), { truncated: true });
-    }
+    if (looksTruncated(finalText, seconds)) throw Object.assign(new Error(t('The voice model returned only part of what was said. Press the mic and try again in a moment.')), { truncated: true });
     liveShow(ctx, live, finalText, { final: true });
   } catch (error) {
-    liveShow(ctx, live, live?.said || '');
+    // A truncated/failed final must never leave partial dictation in the box to be sent: clear it and show the error.
+    liveShow(ctx, live, error.truncated ? '' : (live?.said || ''));
     clearTimeout(slow);
     // The free on-computer voice is not set up yet: offer to set it up here. If they would rather use an online voice they
     // already connected, that is offered next. Never a silent wait, never a "go to Settings".
