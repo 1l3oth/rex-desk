@@ -1322,7 +1322,8 @@ function connectorsPanel(agent) {
   }
   // Keep the status fresh while this tab is open (pairing and group requests arrive from Telegram, not from a click).
   if (!ui.agentBotsTimer) ui.agentBotsTimer = setInterval(() => {
-    if (ui.chatTab !== 'connectors' || document.hidden) { clearInterval(ui.agentBotsTimer); ui.agentBotsTimer = null; ui.agentBotsFor = null; ui.agentBotDraft = {}; return; }
+    if (ui.chatTab !== 'connectors') { clearInterval(ui.agentBotsTimer); ui.agentBotsTimer = null; ui.agentBotsFor = null; ui.agentBotDraft = {}; return; }
+    if (document.hidden) return;
     const open = ui.agentBotsFor; if (!open) return;
     void api(`/agents/${encodeURIComponent(open)}/telegram`).then(status => { if (JSON.stringify(status) !== JSON.stringify(ui.agentBots?.[open])) { ui.agentBots = { ...(ui.agentBots || {}), [open]: status }; if (!document.activeElement?.matches?.('[data-ab-token],[data-bb-token]')) renderAll(); } }, () => {});
     if (ui.bugBot) void api('/bugbot').then(status => { if (JSON.stringify(status) !== JSON.stringify(ui.bugBot)) { ui.bugBot = status; if (!document.activeElement?.matches?.('[data-ab-token],[data-bb-token]')) renderAll(); } }, () => {});
@@ -1362,7 +1363,7 @@ function bugBotSection(agent) {
   const head = `<div class="cn-head"><b>${t`Bug report bot`}</b>${data.connected ? `<span class="cn-state"><span class="dot good"></span>${t`Connected`}</span>` : ''}</div>`;
   if (!data.connected) {
     return `<section class="aps-sec">${head}<p class="cn-note">${t`A separate Telegram bot for customer groups. It only files bug reports. Make a second bot with @BotFather and paste its token here.`}</p>
-      <input class="cn-input" data-bb-token type="password" autocomplete="off" spellcheck="false" placeholder="123456:ABC-..." aria-label="${t`Bot token`}">
+      <input class="cn-input" data-bb-token type="password" autocomplete="off" spellcheck="false" placeholder="123456:ABC-..." aria-label="${t`Bug bot token`}">
       <button type="button" class="btn small primary cn-wide" data-action="bb-connect" aria-label="${t`Connect bug bot`}">${t`Connect bug bot`}</button></section>`;
   }
   const row = (group, button) => `<li class="cn-row"><span class="cn-text"><b>${esc(group.title || t('Group'))}</b><small>${esc(String(group.id))}</small></span>${button}</li>`;
@@ -1391,6 +1392,8 @@ document.addEventListener('click', async event => {
     }
   } catch (error) { target.disabled = false; toast(error.message, true); }
 }, true);
+// Coming back to the window while the Connectors tab is open: show what changed meanwhile, and the polling carries on.
+document.addEventListener('visibilitychange', () => { if (!document.hidden && ui.chatTab === 'connectors') { ui.agentBots = {}; ui.bugBot = null; renderAll(); } });
 document.addEventListener('input', event => { if (event.target.matches?.('[data-ab-token]')) ui.agentBotDraft = { token: event.target.value }; ui.agentBotsFor = event.target.dataset.agent || ui.agentBotsFor; });
 document.addEventListener('click', async event => {
   const target = event.target.closest?.('[data-action^="ab-"]'); if (!target) return;
