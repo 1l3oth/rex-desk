@@ -106,12 +106,26 @@ export function voicedSeconds(recording) {
 // chars/s), so only a clearly cut-off answer is flagged, and a non-empty plausible transcript never is.
 export const MIN_WORDS_PER_S = 0.5, MIN_CHARS_PER_S = 1.5, MIN_CHECK_S = 8;
 const SPACELESS_SCRIPT = /[ក-៿぀-ヿ㐀-䶿一-鿿]/g; // Khmer, Kana, CJK ideographs
+// Seconds-equivalent "reach" of a transcript: how much voiced speech its length could plausibly cover, by the
+// guard's per-script measure (characters for space-less scripts like Khmer/CJK, words otherwise). It is the one
+// measure used both to flag a cut-off (reach below the voiced span) and to compare two candidate answers, so a
+// longer string is never mistaken for a fuller transcript (more words can be fewer characters, and vice versa).
+export function transcriptReach(text) {
+  const trimmed = String(text || '').trim(), bare = trimmed.replace(/\s+/g, '');
+  if (!bare) return 0;
+  const spaceless = (trimmed.match(SPACELESS_SCRIPT) || []).length * 2 >= bare.length; // mostly a no-space script
+  return spaceless ? bare.length / MIN_CHARS_PER_S : trimmed.split(/\s+/).filter(Boolean).length / MIN_WORDS_PER_S;
+}
 export function looksTruncated(text, voicedSeconds) {
   if (!(voicedSeconds >= MIN_CHECK_S)) return false; // too little speech to judge a cut-off
-  const trimmed = String(text || '').trim();
-  if (!trimmed) return true; // nothing came back for a long voiced span
-  const bare = trimmed.replace(/\s+/g, '');
-  const spaceless = (trimmed.match(SPACELESS_SCRIPT) || []).length * 2 >= bare.length; // mostly a no-space script
-  if (spaceless) return bare.length < voicedSeconds * MIN_CHARS_PER_S;
-  return trimmed.split(/\s+/).filter(Boolean).length < voicedSeconds * MIN_WORDS_PER_S;
+  return transcriptReach(text) < voicedSeconds; // far too short for how much was actually spoken
+}
+// Choose the final transcript from the first answer and the re-heard retry. Prefer a candidate that passes the
+// guard (looksTruncated false) for the voiced span; if both pass or both fail, keep the one with the greater
+// reach by the guard's own measure, the retry winning a tie since the engine is warmer by then. The caller still
+// decides whether to discard the result, so a passing retry with more words but fewer characters is never lost.
+export function pickFinal(first, retry, voicedSeconds) {
+  const firstBad = looksTruncated(first, voicedSeconds), retryBad = looksTruncated(retry, voicedSeconds);
+  if (firstBad !== retryBad) return firstBad ? retry : first;
+  return transcriptReach(retry) >= transcriptReach(first) ? retry : first;
 }

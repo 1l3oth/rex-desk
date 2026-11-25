@@ -11,7 +11,7 @@ const ICON = {
 import { pickerHtml } from '/chat-pick.js';
 import { micProblem, openMicrophone, startRecorder, transcribe, wavFrom } from '/recorder.js';
 import { askConfirm } from '/confirm.js';
-import { LIVE_EVERY_MS, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated } from '/voice-live.js';
+import { LIVE_EVERY_MS, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal } from '/voice-live.js';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
 const MODE_HINT = { bypassPermissions: t('Runs tools without asking'), manual: t('Asks you for each tool, in the chat'), auto: t('A checker decides what is safe'), plan: t('Plans only, runs nothing'), acceptEdits: t('Edits files freely, asks for the rest') };
@@ -504,16 +504,17 @@ async function finishMic(ctx) {
     }
     // Last guard against a cold engine's cut-off answer, measured against how much was actually spoken
     // (voicedSeconds), never the whole recording, so a short phrase inside a long silence is never suspected. If
-    // the answer looks far too short, re-hear the whole recording once (the engine is warm by now) and keep
-    // whichever came back fuller. Discard (and ask the person to retry) only if it is STILL far too short for a
-    // long voiced span; any non-empty, plausible answer is kept, so a complete Khmer or short transcript is never
-    // cleared.
+    // the answer looks far too short, re-hear the whole recording once (the engine is warm by now) and let
+    // pickFinal keep the candidate that passes the guard (or the one with the greater reach by its own measure),
+    // so a valid retry with more words but fewer characters is never dropped. Discard (and ask the person to
+    // retry) only if the chosen answer is STILL far too short for a long voiced span; any non-empty, plausible
+    // answer is kept, so a complete Khmer or short transcript is never cleared.
     const voiced = voicedSeconds(recording);
     if (looksTruncated(finalText, voiced)) {
       let retry = '';
       try { retry = await hearInWindows(ctx, recording); }
       catch (error) { if (error.starting || /not installed|\binstall\b/i.test(error.message || '')) throw error; }
-      if (retry.length > finalText.length) finalText = retry;
+      finalText = pickFinal(finalText, retry, voiced);
       if (looksTruncated(finalText, voiced)) throw Object.assign(new Error(t('The voice model returned only part of what was said. Press the mic and try again in a moment.')), { truncated: true });
     }
     liveShow(ctx, live, finalText, { final: true });

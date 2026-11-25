@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseWav, frame, levelsOf, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
+import { parseWav, frame, levelsOf, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = name => readFileSync(path.join(here, 'fixtures', 'voice', name));
@@ -91,6 +91,20 @@ test('looksTruncated judges a space-less script (Khmer) by characters, so a comp
   assert.equal(looksTruncated(complete, 12.8), false, 'a full Khmer transcript is not a single truncated word');
   // A genuinely cut-off Khmer answer (a few opening characters) is still caught.
   assert.equal(looksTruncated('សូមបើក', 12.8), true, 'only the opening characters for a long span is truncated');
+});
+
+test('pickFinal keeps a passing retry even when it has fewer characters than the first answer', () => {
+  const voiced = 12.8;
+  // First answer: two very long "words", so it is truncated by word count yet longer in characters.
+  const first = 'antidisestablishmentarianism supercalifragilisticexpialidocious';
+  // Retry: more words but fewer characters, enough words to pass the guard.
+  const retry = 'go to the main page and open it right now';
+  assert.equal(looksTruncated(first, voiced), true, 'the first answer is far too few words for the span');
+  assert.equal(looksTruncated(retry, voiced), false, 'the retry has enough words to pass');
+  assert.ok(retry.length < first.length, 'the retry is shorter in characters, so a length-based pick would drop it');
+  assert.equal(pickFinal(first, retry, voiced), retry, 'pickFinal keeps the retry that passes the guard, not the longer string');
+  // When both pass, the fuller by the guard measure wins (the retry on a tie).
+  assert.equal(pickFinal('one two three four five six seven', 'a b c d e f g h i j k', voiced), 'a b c d e f g h i j k', 'the fuller answer wins when both pass');
 });
 
 test('voicedSeconds counts only spoken frames, so a short phrase inside long silence is never flagged', () => {
