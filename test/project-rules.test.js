@@ -182,3 +182,28 @@ test('Send to an agent that moves here saves the message and answers at once, th
     assert.deepEqual(store.events('r14', { visible: true, limit: 50 }).filter(event => event.kind === 'human-message').map(event => event.text), ['still there?']);
   } finally { await close(); }
 });
+
+test('a chat whose conversation is on another computer shows the message first, starts after the fresh start, and a message sent meanwhile waits for the next turn (L114)', async () => {
+  const { store, desk, close } = setup();
+  try {
+    store.put('run', 'r15', { id: 'r15', role: 'specialist', provider: 'claude', state: 'finished', sessionId: '0f3a8d71-d78d-409a-9a84-91fb162c1be4', createdAt: new Date().toISOString() });
+    // The real path runs only without a test runner (the session would be looked for on disk): it is cleared for this test.
+    const runnerFactory = desk.runnerFactory; desk.runnerFactory = null;
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    const facts = desk.handoffFacts.bind(desk); desk.handoffFacts = async (...args) => { await gate; return facts(...args); };
+    const shown = () => store.events('r15', { visible: true, limit: 50 }).filter(event => event.kind === 'human-message').map(event => event.text);
+    await desk.resume('r15', { prompt: 'fix the cart' });
+    assert.deepEqual(shown(), ['fix the cart'], 'the message shows before the fresh start is done');
+    assert.equal(store.get('run', 'r15').state, 'finished', 'the agent has not started yet');
+    await desk.say('r15', 'and the checkout');
+    assert.deepEqual(store.get('run', 'r15').queued, ['and the checkout']);
+    release();
+    for (let tries = 0; tries < 100 && store.get('run', 'r15').state !== 'queued'; tries++) await new Promise(resolve => setTimeout(resolve, 20));
+    const run = store.get('run', 'r15');
+    assert.equal(run.state, 'queued', 'the agent starts once the fresh start is done'); assert.equal(run.sessionId, undefined); assert.ok(run.handoffFile);
+    assert.equal(run.followUp, 'fix the cart'); assert.deepEqual(run.queued, ['and the checkout'], 'the second message waits for the next turn');
+    assert.deepEqual(shown(), ['fix the cart', 'and the checkout'], 'each message shows once');
+    assert.equal(desk.starting.has('r15'), false);
+    desk.runnerFactory = runnerFactory;
+  } finally { await close(); }
+});
