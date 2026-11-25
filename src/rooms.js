@@ -206,9 +206,10 @@ export class Rooms {
     const seq = this.room(roomId).seq + 1;
     const message = { id: randomUUID(), roomId, seq, threadId: parent ? (parent.threadId || parent.id) : '', replyTo, from, text: body, to: paused ? targets.filter(target => target === HUMAN) : (targets.length ? targets : [HUMAN]),
       tasks: this.tasksIn(body), hops, paused, at: now(), ...(instruction ? { instruction: String(instruction).slice(0, 4000) } : {}) };
-    this.store.put('room', roomId, { ...this.room(roomId), seq }); this.store.put('roommsg', message.id, message);
-    // Files attached in a room travel with it, so they open on the person's other computers too (L27).
+    // Files attached in a room travel with it, so they open on the person's other computers too (L27). They are put before the
+    // message, so they sync no later than it does.
     if (from.type === 'human') try { this.desk.peers?.sharePictures([{ text: body }]); } catch { /* a file that cannot be read stays here */ }
+    this.store.put('room', roomId, { ...this.room(roomId), seq }); this.store.put('roommsg', message.id, message);
     // The person naming agents and a task in one message gives them that task: the first one named leads, the rest work on it with them.
     const named = !fromAgentId && !system ? message.to.filter(target => target !== HUMAN && target !== 'main' && this.desk.store.get('specialist', target)) : [];
     if (named.length && message.tasks.length && this.desk.shareTask) for (const taskId of message.tasks) await this.desk.shareTask({ taskId, add: named, roomId, quiet: true }).catch(() => {});
@@ -277,7 +278,7 @@ export class Rooms {
       const sender = message.from.type === 'human' ? 'The person' : message.from.label;
       const asked = working ? `[Room "${room.name}"] ${sender} → you: ${message.instruction || message.text}` : this.promptFor(this.room(room.id), message, agentId);
       // A file attached on another computer is named by this computer's own copy of it (L27).
-      const prompt = peers?.localFiles ? peers.localFiles(asked) : asked;
+      const prompt = peers?.arrivedFiles ? await peers.arrivedFiles(asked) : peers?.localFiles ? peers.localFiles(asked) : asked;
       // The agent has now seen the room up to this message, whatever else happens with its turn.
       this.store.put('specialist', agentId, { ...agent, roomSeen: { ...(agent.roomSeen || {}), [room.id]: message.seq } });
       await this.desk.specialistTurn(agentId, { prompt, roomId: room.id, messageId: message.id }).catch(error => this.system(room.id, `${this.member(agentId).name} could not take the message: ${error.message}`));

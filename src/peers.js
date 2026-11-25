@@ -509,6 +509,16 @@ export class Peers {
     if (existsSync(target)) return target;
     try { mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, Buffer.from(item.data, 'base64'), { flag: 'wx' }); return target; } catch { return existsSync(target) ? target : ''; }
   }
+  // A room message and its attached files sync as separate rows: before an agent here starts on it, the files that are not here
+  // yet are waited for (one shared deadline for all of them), so the agent never starts with the other computer's path only.
+  // One that still has not come (over 2 MB, or the other computer went away) is said so in the prompt.
+  async arrivedFiles(text, { wait = 15000, step = 500 } = {}) {
+    const missing = () => [...String(text ?? '').matchAll(/^- (.+)$/gm)].map(match => match[1].trim())
+      .filter(file => /[\\/]uploads[\\/][0-9a-f-]{36}[\\/][^\\/]+$/i.test(file) && !existsSync(file) && ![chatFileId(file), legacyFileId(file)].some(id => this.store.get('chatfile', id)?.data));
+    for (const until = Date.now() + wait; missing().length && Date.now() < until;) await new Promise(resolve => setTimeout(resolve, step));
+    const late = new Set(missing());
+    return this.localFiles(text).replace(/^- (.+)$/gm, (line, named) => late.has(named.trim()) ? `${line} (this file did not arrive from the other computer)` : line);
+  }
   // What an agent here reads names this computer's copy of each attached file, not the path on the computer it was attached on.
   localFiles(text) {
     return String(text ?? '').replace(/^- (.+)$/gm, (line, named) => {

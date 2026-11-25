@@ -201,3 +201,17 @@ test('a file attached on one computer gets its own copy on the other, and an age
   const gone = `- ${windows('F:', 'nowhere', 'uploads', '0e1d2c3b-4a59-4687-9a8b-7c6d5e4f3a21', 'gone.png')}`;
   assert.equal(b.desk.peers.localFiles(gone), gone, 'a file that never arrived keeps its name');
 });
+
+test('an agent waits for a file attached on the other computer before it starts, and is told when one never came (L27)', async () => {
+  const { a, b, records } = account();
+  const folder = '7c1e2d3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f', sent = path.join(a.store.media('uploads'), folder, 'late.png');
+  mkdirSync(path.dirname(sent), { recursive: true }); writeFileSync(sent, Buffer.from('late bytes'));
+  const windows = (...parts) => parts.join(String.fromCharCode(92));
+  const other = windows('F:', 'daraboth', 'Rex Desk', 'uploads', folder, 'late.png'), copy = path.join(b.store.media('uploads'), folder, 'late.png');
+  // The message is here, its file comes a moment later.
+  const waiting = b.desk.peers.arrivedFiles(`Look\n- ${other}`, { wait: 3000, step: 20 });
+  setTimeout(() => { a.desk.peers.sharePictures([{ text: `Look\n- ${sent}` }]); records(b, a); }, 100);
+  assert.equal(await waiting, `Look\n- ${copy}`, 'started only once the file was here, with the local copy');
+  const gone = windows('F:', 'nowhere', 'uploads', '0e1d2c3b-4a59-4687-9a8b-7c6d5e4f3a21', 'gone.png');
+  assert.equal(await b.desk.peers.arrivedFiles(`- ${gone}`, { wait: 60, step: 20 }), `- ${gone} (this file did not arrive from the other computer)`);
+});
