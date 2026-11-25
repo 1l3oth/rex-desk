@@ -92,6 +92,11 @@ export function inboxStage(ctx, helpers) {
   let current = entries.find(entry => entry.item.id === ui.nySelected);
   if (!current) { current = entries[0]; ui.nyOpen = false; }
   ui.nySelected = current.item.id;
+  // A Telegram message is counted read as soon as it is the one on show, not only when picked, so it does not stay unread.
+  if (current.tg && !current.tg.read) {
+    ui.tgSeen ||= new Set();
+    if (!ui.tgSeen.has(current.tg.id)) { ui.tgSeen.add(current.tg.id); ctx.api('/telegram/inbox/read', { method: 'POST', data: { id: current.tg.id } }).then(() => ctx.refresh?.()).catch(() => {}); }
+  }
   const sections = new Map();
   for (const entry of entries) {
     const label = group === 'agent' ? entry.who.name : group === 'project' ? entry.who.project || t('No project') : '';
