@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store, now } from '../src/store.js';
-import { Desk } from '../src/coordinator.js';
+import { Desk, roomEntry } from '../src/coordinator.js';
 import { WRAP_UP_HOPS, ackOnly, withoutStudyTip } from '../src/rooms.js';
 import { mainLooks } from '../src/runners.js';
 
@@ -279,9 +279,9 @@ test('a message for an agent that is working is handed to it between steps, once
   store.put('specialist', vanna.id, { ...store.get('specialist', vanna.id), roomRuns: { [room.id]: 'vanna-room' } });
   desk.live.set('vanna-room', { runner: { interrupt() {} } });
   desk.rooms.quietSettle = 10;
-  await desk.rooms.post(room.id, { text: '@vanna stop, use Sydney not Seoul' });
+  const sent = await desk.rooms.post(room.id, { text: '@vanna stop, use Sydney not Seoul' });
   await waitFor(() => (store.get('run', 'vanna-room').queued || []).length === 1);
-  assert.equal(store.get('run', 'vanna-room').queued[0], '[Room "Checkout bug"] The person → you: @vanna stop, use Sydney not Seoul');
+  assert.equal(store.get('run', 'vanna-room').queued[0], roomEntry(sent.id, '[Room "Checkout bug"] The person → you: @vanna stop, use Sydney not Seoul'));
   assert.match(desk.takeInbox('vanna-room').join('\n\n'), /use Sydney not Seoul/);
   assert.deepEqual(desk.takeInbox('vanna-room'), [], 'handed over once, not again when the turn ends');
   assert.deepEqual(store.get('run', 'vanna-room').queued, []);
@@ -768,26 +768,38 @@ test('a message handed to an agent mid-turn does not post again the answer it al
   await waitFor(() => (store.get('run', 'vanna-room').queued || []).length === 1);
   // Queued, not read yet: the answer still coming belongs to the first message, and the second keeps its own target.
   assert.equal(store.get('run', 'vanna-room').roomTurn.messageId, first.id);
-  assert.equal(store.get('run', 'vanna-room').queuedTurns[0].turn.messageId, second.id);
+  assert.equal(desk.roomTarget(store.get('run', 'vanna-room').queued).messageId, second.id);
   desk.live.delete('vanna-room');
   store.put('run', 'vanna-room', { ...store.get('run', 'vanna-room'), state: 'finished' });
   await desk.rooms.turnFinished('vanna-room');
   const replies = desk.rooms.messages(room.id).filter(item => item.from.type === 'agent');
   assert.equal(replies.length, 1, 'one message, one reply');
-  assert.equal(store.get('run', 'vanna-room').queuedTurns[0].turn.messageId, second.id, 'the follow-up still knows its room message');
+  assert.equal(desk.roomTarget(store.get('run', 'vanna-room').queued).messageId, second.id, 'the follow-up still knows its room message');
 });
 
 test('a queued room message becomes the reply target only when the agent reads it, and goes back with it when unread', async () => {
   const { desk, store, vanna, room } = setup();
   const first = await desk.rooms.post(room.id, { text: 'hello', to: [] }), second = await desk.rooms.post(room.id, { text: 'again', to: [] });
-  const target = { roomId: room.id, messageId: first.id }, next = { roomId: room.id, messageId: second.id };
-  store.put('run', 'vanna-room', { id: 'vanna-room', role: 'specialist', specialistId: vanna.id, roomAgent: vanna.id, state: 'running', createdAt: now(), roomTurn: target, roomPosted: true, queued: ['again'], queuedTurns: [{ entry: 'again', turn: next }] });
-  assert.deepEqual(desk.takeInbox('vanna-room'), ['again']);
+  const target = { roomId: room.id, messageId: first.id }, entry = roomEntry(second.id, 'again');
+  store.put('run', 'vanna-room', { id: 'vanna-room', role: 'specialist', specialistId: vanna.id, roomAgent: vanna.id, state: 'running', createdAt: now(), roomTurn: target, roomPosted: true, queued: [entry] });
+  assert.deepEqual(desk.takeInbox('vanna-room'), [entry]);
   let run = store.get('run', 'vanna-room');
-  assert.equal(run.roomTurn.messageId, second.id); assert.equal(run.roomPosted, false); assert.ok(run.roomTurnAt); assert.equal(run.queuedTurns, undefined);
+  assert.equal(run.roomTurn.messageId, second.id); assert.equal(run.roomPosted, false); assert.ok(run.roomTurnAt);
   desk.live.set('vanna-room', {});
-  desk.requeue('vanna-room', ['again']);
+  desk.requeue('vanna-room', [entry]);
   run = store.get('run', 'vanna-room'); desk.live.delete('vanna-room');
   assert.equal(run.roomTurn.messageId, first.id, 'given back unread: the turn answers the first message again');
-  assert.deepEqual(run.queued, ['again']); assert.equal(run.queuedTurns[0].turn.messageId, second.id);
+  assert.deepEqual(run.queued, [entry]); assert.equal(desk.roomTarget(run.queued).messageId, second.id);
+});
+
+test('two room messages handed over at once each keep their own reply target in their own queue entry', async () => {
+  const { desk, store, vanna, room } = setup();
+  const first = await desk.rooms.post(room.id, { text: 'one', to: [] }), second = await desk.rooms.post(room.id, { text: 'two', to: [] }), third = await desk.rooms.post(room.id, { text: 'three', to: [] });
+  store.put('run', 'vanna-room', { id: 'vanna-room', role: 'specialist', specialistId: vanna.id, roomAgent: vanna.id, state: 'running', createdAt: now(), roomTurn: { roomId: room.id, messageId: first.id } });
+  store.put('specialist', vanna.id, { ...store.get('specialist', vanna.id), roomRuns: { [room.id]: 'vanna-room' } });
+  desk.live.set('vanna-room', { runner: { interrupt() {} } });
+  await Promise.all([desk.specialistTurn(vanna.id, { prompt: 'two', roomId: room.id, messageId: second.id }), desk.specialistTurn(vanna.id, { prompt: 'three', roomId: room.id, messageId: third.id })]);
+  const queued = store.get('run', 'vanna-room').queued; desk.live.delete('vanna-room');
+  assert.equal(queued.length, 2);
+  assert.deepEqual(queued.map(entry => desk.roomTarget([entry]).messageId), [second.id, third.id]);
 });
