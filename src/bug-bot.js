@@ -250,7 +250,9 @@ export class BugBot {
   saveValues(linkId, values) { this.store.put('secret', `connector:${linkId}`, this.store.encrypt(JSON.stringify(values))); this.store.emit?.('change', { kind: 'connector' }); }
 
   // ---- the long-poll loop ----
-  start() { if (this.running) return; this.running = true; this.loopDone = this.loop(); }
+  // Pin the owner agent's id as soon as the app starts, before anyone can rename that agent.
+  pinAgent() { this.appAgent(); }
+  start() { if (this.running) return; this.pinAgent(); this.running = true; this.loopDone = this.loop(); }
   async stop() { this.running = false; this.abort?.abort(); this.wake?.(); await this.loopDone; this.loopDone = null; }
   kick() { this.wake?.(); }
   sleep(ms) { return new Promise(resolve => { const timer = setTimeout(resolve, ms); timer.unref?.(); this.wake = () => { clearTimeout(timer); this.wake = null; resolve(); }; }); }

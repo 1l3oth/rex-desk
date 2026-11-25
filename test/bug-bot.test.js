@@ -263,6 +263,15 @@ test('a bug bot connected before ids were kept is pinned on first use, so a late
   assert.equal(bot.status().agentId, 'app');
 });
 
+test('starting the bug bot pins its agent id, so a rename right after an upgrade changes nothing', async () => {
+  const { desk, store } = makeDesk({ groups: [{ id: '-100' }] });
+  store.put('specialist', 'app', { id: 'app', name: 'RexDesk_App_Agent' });
+  const bot = new BugBot(desk, { fetcher: async () => ({ json: async () => ({ ok: false }) }) });
+  bot.start(); await bot.stop();
+  store.put('specialist', 'app', { id: 'app', name: 'Builder' });
+  assert.equal(bot.status().agentId, 'app');
+});
+
 // A fetcher that records Telegram calls, shared by the live-flow tests.
 async function mkFetcher(calls) {
   return async (url, options) => {
