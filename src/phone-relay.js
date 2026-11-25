@@ -10,7 +10,7 @@ export const RELAY_URL = 'wss://api.rexdesk.dev/v1/relay/desk';
 const PENDING_MS = 10 * 60000, MAX_PENDING = 5, MAX_BODY = 50 * 1024 * 1024, CHUNK = 64 * 1024;
 const RETRY_MS = [2000, 5000, 15000, 30000, 60000];
 // The desk pings the relay now and then, so an idle link is not cut as idle; a link that stays silent for DEAD_MS is dead and is dialled again.
-const REPLACED_MS = 30000, MAX_REPLACED = 3, STABLE_MS = 60000;
+const REPLACED_MS = 30000, MAX_REPLACED = 3, STABLE_MS = 60000, REPLACED_SLOW_MS = 5 * 60000;
 const PING_MS = 20000, DEAD_MS = 70000;
 // Headers that belong to one hop, or that only this desk may set on a relayed request.
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-connection', 'te', 'trailer', 'content-length']);
@@ -150,10 +150,14 @@ export class PhoneRelay {
     try { socket?.close(); } catch {} this.state = 'off';
   }
   // "replaced" is often this desk's own older link (after a freeze or a network change), so it dials again after a pause. A few
-  // tries only: if another computer really holds the line, they would otherwise take it from each other for ever.
+  // quick tries, then one every REPLACED_SLOW_MS for as long as the switch is on: two computers that really share the line take
+  // it from each other only that slowly, and a desk whose own old link was the cause is never left offline for good.
+  // A "not paid" or "signed out" close never comes here, and start() stops by itself once the sign-in is gone.
   retryReplaced() {
-    if (!this.settings().enabled || this.desk.closed || this.timer || this.replacedTries >= MAX_REPLACED) return;
-    this.replacedTries++; this.timer = setTimeout(() => { this.timer = null; this.start(); }, REPLACED_MS); this.timer.unref?.();
+    if (!this.settings().enabled || this.desk.closed || this.timer) return;
+    const wait = this.replacedTries < MAX_REPLACED ? REPLACED_MS : REPLACED_SLOW_MS;
+    this.replacedTries = Math.min(this.replacedTries + 1, MAX_REPLACED);
+    this.timer = setTimeout(() => { this.timer = null; this.start(); }, wait); this.timer.unref?.();
   }
   retry() {
     if (!this.settings().enabled || this.desk.closed || this.timer) return;

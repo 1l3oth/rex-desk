@@ -220,7 +220,7 @@ test('the desk pings the relay now and then, and dials again when the link has g
   } finally { mock.timers.reset(); }
 });
 
-test('after "replaced" the desk dials again a few times, then waits for the switch', () => {
+test('after "replaced" the desk dials again a few times quickly, then every five minutes for as long as the switch is on', () => {
   mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
   try {
     const { desk } = fakeDesk(1), sockets = [];
@@ -228,7 +228,11 @@ test('after "replaced" the desk dials again a few times, then waits for the swit
     relay.setEnabled(true);
     for (let i = 0; i < 3; i++) { sockets.at(-1).emit('close', { code: 4001 }); mock.timers.tick(30000); assert.equal(sockets.length, i + 2, 'dialled again'); }
     sockets.at(-1).emit('close', { code: 4001 }); mock.timers.tick(120000);
-    assert.equal(sockets.length, 4, 'and then it stops'); assert.equal(relay.view().state, 'replaced');
+    assert.equal(sockets.length, 4, 'the quick tries are used up'); assert.equal(relay.view().state, 'replaced');
+    mock.timers.tick(180000); assert.equal(sockets.length, 5, 'five minutes after the last close it dials again');
+    for (let i = 0; i < 2; i++) { sockets.at(-1).emit('close', { code: 4001 }); mock.timers.tick(299000); assert.equal(sockets.length, 5 + i, 'not before five minutes'); mock.timers.tick(1000); assert.equal(sockets.length, 6 + i, 'and again every five minutes'); }
+    sockets.at(-1).emit('close', { code: 4001 }); relay.setEnabled(false); mock.timers.tick(600000);
+    assert.equal(sockets.length, 7, 'turning the switch off stops it');
     relay.stop();
   } finally { mock.timers.reset(); }
 });
@@ -257,7 +261,7 @@ test('being welcomed for a moment does not give back the replaced retries; a sta
     for (let i = 0; i < 3; i++) { welcome(sockets.at(-1)); mock.timers.tick(5000); sockets.at(-1).emit('close', { code: 4001 }); mock.timers.tick(30000); }
     assert.equal(sockets.length, 4, 'three retries, each welcomed briefly');
     welcome(sockets.at(-1)); mock.timers.tick(5000); sockets.at(-1).emit('close', { code: 4001 }); mock.timers.tick(120000);
-    assert.equal(sockets.length, 4, 'a brief welcome did not reset the cap, so it stops');
+    assert.equal(sockets.length, 4, 'a brief welcome did not reset the quick tries, so it waits the slow five minutes');
     relay.replacedTries = 0; relay.setEnabled(false); relay.setEnabled(true);
     welcome(sockets.at(-1)); relay.replacedTries = 2; mock.timers.tick(60000);
     assert.equal(relay.replacedTries, 0, 'a minute up gives the retries back');
