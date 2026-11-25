@@ -20,8 +20,8 @@ const PASS = ['content-type', 'content-length', 'content-range', 'accept-ranges'
 const MB = bytes => `${Math.round(bytes / 1048576)} MB`;
 // Counts the bytes as they arrive and stops the stream past max: the size the other computer reported is never trusted.
 function byteLimit(max) {
-  let seen = 0;
-  return new Transform({ transform(chunk, _encoding, done) { seen += chunk.length; if (seen > max) return done(Object.assign(new Error(`More than ${MB(max)} came.`), { code: 'TOO_BIG', seen })); done(null, chunk); } });
+  const counter = new Transform({ transform(chunk, _encoding, done) { counter.seen += chunk.length; if (counter.seen > max) return done(Object.assign(new Error(`More than ${MB(max)} came.`), { code: 'TOO_BIG', seen: counter.seen })); done(null, chunk); } });
+  counter.seen = 0; return counter;
 }
 
 // The key a data file is known by on every computer: data/<folder>/<rest>, or '' for anything outside the data folders.
@@ -41,15 +41,17 @@ export function dataFile(store, key) {
   const root = path.resolve(store.media(match[1])), file = path.resolve(root, ...parts);
   return file.startsWith(root + path.sep) ? file : '';
 }
-// The file this computer may hand to another one for a key: its real path (links and Windows junctions followed) must still
-// sit inside the real data folder, and it must be a regular file. Null otherwise, so a link can never reach the rest of the disk.
+const within = (root, full) => { const relative = path.relative(root, full); return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative); };
+// The file this computer may hand to another one for a key: with links and Windows junctions followed, the media folder must
+// still sit inside the real data folder (a junction at artifacts itself counts too) and the file inside that media folder, and
+// it must be a regular file. Null otherwise, so a link can never reach the rest of the disk. The size is checked again on the
+// opened file when it is served.
 export function servableFile(store, key) {
   const file = dataFile(store, key); if (!file) return null;
-  const folder = /^data\/([a-z-]+)\//.exec(key)[1];
-  let real, root, stat;
-  try { root = realpathSync.native(store.media(folder)); real = realpathSync.native(file); stat = statSync(real); } catch { return null; }
-  const relative = path.relative(root, real);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || !stat.isFile()) return null;
+  const folder = /^data\/([a-z-]+)\//.exec(key)[1], media = store.media(folder);
+  let data, root, real, stat;
+  try { data = realpathSync.native(store.filesFolder?.() || path.dirname(media)); root = realpathSync.native(media); real = realpathSync.native(file); stat = statSync(real); } catch { return null; }
+  if (!within(data, root) || !within(root, real) || !stat.isFile()) return null;
   return { file: real, size: stat.size };
 }
 
@@ -78,7 +80,8 @@ export class PeerFiles {
   async ask(key, { range = '' } = {}) {
     const token = this.desk.net?.token?.();
     if (!token) return this.miss(key, 'signed-out');
-    const holders = this.holders(key); if (!holders.length) return this.miss(key, 'not-found');
+    // No other computer is known to ask: nothing to say beyond the cloud backup's own reason.
+    const holders = this.holders(key); if (!holders.length) { this.missing.delete(key); return null; }
     let offline = '', lastError = '';
     for (const node of holders) {
       const url = `${this.base}/v1/relay/peer/${encodeURIComponent(node)}/file?key=${encodeURIComponent(key)}&from=${encodeURIComponent(this.store.nodeId || '')}`;
@@ -112,19 +115,24 @@ export class PeerFiles {
     const work = (async () => {
       // Always as a range from the start: the relay drops Content-Length, and Content-Range still says how big the file is.
       const response = await this.ask(key, { range: 'bytes=0-' }); if (!response) return false;
-      if (response.status !== 206 || !/^bytes 0-/.test(response.headers.get('content-range') || '') || response.total > limit) { await response.body?.cancel?.().catch(() => {}); return false; }
-      return this.saveBody(file, response, limit);
+      // Kept only when the answer is the whole file (bytes 0 to its last byte): a part of it is never saved as the file.
+      const span = /^bytes 0-(\d+)\/(\d+)$/.exec(response.headers.get('content-range') || ''), total = Number(span?.[2]);
+      if (response.status !== 206 || !span || !total || Number(span[1]) !== total - 1 || total > limit) { await response.body?.cancel?.().catch(() => {}); return false; }
+      return this.saveBody(file, response, limit, total);
     })().catch(error => { this.miss(key, 'failed', { detail: String(error.message || error).slice(0, 200) }); return false; }).finally(() => this.inflight.delete(key));
     this.inflight.set(key, work); return work;
   }
   // Written to a temp file first, counting the bytes, then published only when no file of that name appeared here meanwhile:
   // a file made on this computer while the copy came is never overwritten. False when more came than limit.
-  async saveBody(file, response, limit = KEEP_BYTES) {
+  // expected: the exact byte count it must have; a shorter or longer body is dropped, never published.
+  async saveBody(file, response, limit = KEEP_BYTES, expected = 0) {
     mkdirSync(path.dirname(file), { recursive: true });
     const partial = `${file}.${randomBytes(4).toString('hex')}.tmp`;
     try {
-      try { await pipeline(Readable.fromWeb(response.body), byteLimit(Math.min(limit, this.max)), createWriteStream(partial, { flags: 'wx' })); }
+      const counter = byteLimit(Math.min(limit, this.max, expected || Infinity));
+      try { await pipeline(Readable.fromWeb(response.body), counter, createWriteStream(partial, { flags: 'wx' })); }
       catch (error) { if (error.code === 'TOO_BIG') return false; throw error; }
+      if (expected && counter.seen !== expected) return false;
       try { linkSync(partial, file); }
       catch (error) {
         if (error.code === 'EEXIST') return true;

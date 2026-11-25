@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Writable } from 'node:stream';
-import { createApp } from '../src/server.js';
+import { createApp, serveFile } from '../src/server.js';
 import { PhoneRelay } from '../src/phone-relay.js';
 import { relayFrame, readRelayFrame, RELAY_OP } from '../src/phone-relay-frame.js';
 import { PeerFiles, servableFile } from '../src/peer-files.js';
@@ -43,6 +43,16 @@ test('the holding computer serves only regular files inside its data folders, ne
     assert.equal((await ask(`data/artifacts/${RUN}/sub`)).status, 404, 'a folder is not a file');
     assert.equal(servableFile(desk.store, `data/artifacts/${RUN}/escape/secret.txt`), null);
 
+    // A junction at a media folder itself (uploads pointing out of the data folder) is refused too.
+    const uploads = desk.store.media('uploads'); rmdirSync(uploads);
+    mkdirSync(path.join(outside, RUN)); writeFileSync(path.join(outside, RUN, 'secret.txt'), 'not for other computers');
+    link(outside, uploads, 'dir');
+    try {
+      const media = await ask(`data/uploads/${RUN}/secret.txt`); assert.equal(media.status, 404, 'a junction at the uploads folder is refused');
+      assert.doesNotMatch(await media.text(), /not for other computers/);
+      assert.equal(servableFile(desk.store, `data/uploads/${RUN}/secret.txt`), null);
+    } finally { rmdirSync(uploads); }
+
     desk.desk.peerFiles.max = 3;
     const big = await ask(`data/artifacts/${RUN}/ok.txt`);
     assert.equal(big.status, 413, 'over the limit is refused before any byte is served'); assert.equal(big.headers.get('x-rex-file-size'), '4');
@@ -51,6 +61,28 @@ test('the holding computer serves only regular files inside its data folders, ne
     if (memory === undefined) delete process.env.REX_DESK_MEMORY; else process.env.REX_DESK_MEMORY = memory;
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ }
   }
+});
+
+test('a served file stops at the size checked on its opened handle, even when it grows meanwhile', async () => {
+  const dir = tempDir('rex-peer-grow-');
+  try {
+    const file = path.join(dir, 'growing.mp4'); writeFileSync(file, '0123456789');
+    const sent = [], head = {}; let done;
+    const finished = new Promise(resolve => { done = resolve; });
+    const sink = new Writable({ write(chunk, _e, next) { sent.push(chunk); next(); }, final(next) { next(); done(); } });
+    sink.writeHead = (status, headers) => Object.assign(head, { status, headers });
+    serveFile({ headers: {} }, sink, file, { max: 1000 });
+    // The file grows right after the check, before the stream has read anything.
+    appendFileSync(file, 'MORE BYTES THAT WERE NEVER CHECKED');
+    await finished;
+    assert.equal(head.status, 200); assert.equal(head.headers['Content-Length'], 10);
+    assert.equal(Buffer.concat(sent).toString(), '0123456789', 'only the checked 10 bytes went out');
+    // Over max on the opened handle: refused before any byte.
+    const big = []; let ended; const over = new Promise(resolve => { ended = resolve; });
+    const refuse = { statusCode: 0, headers: {}, setHeader(name, value) { this.headers[name.toLowerCase()] = value; }, writeHead(status) { this.statusCode = status; }, end(body) { big.push(body); ended(); } };
+    serveFile({ headers: {} }, refuse, file, { max: 5 }); await over;
+    assert.equal(refuse.statusCode, 413); assert.equal(refuse.headers['x-rex-file-size'], '44');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // A PeerFiles of a computer that has no files, asking one other computer through a fetcher the test plays.
@@ -101,6 +133,13 @@ test('a copy that arrives after a file of the same name was made here never over
     assert.equal(await keeping, true, 'the file is here');
     assert.equal(readFileSync(file, 'utf8'), 'made here', 'the local file wins');
     assert.deepEqual(readdirSync(path.dirname(file)), ['same.png'], 'the temp copy is gone');
+    // Only part of the file (a 206 for bytes 0-2 of 6) is never saved as the whole file.
+    const part = asker(dir, async () => new Response('rem', { status: 206, headers: { 'content-range': 'bytes 0-2/6' } }), 1000);
+    assert.equal(await part.keep(`data/uploads/${RUN}/part.png`), false); assert.equal(existsSync(path.join(path.dirname(file), 'part.png')), false);
+    // Says the whole 6 bytes, sends 3: the byte count does not match, nothing is published.
+    const short = asker(dir, async () => new Response('rem', { status: 206, headers: { 'content-range': 'bytes 0-5/6' } }), 1000);
+    assert.equal(await short.keep(`data/uploads/${RUN}/short.png`), false); assert.equal(existsSync(path.join(path.dirname(file), 'short.png')), false);
+    assert.deepEqual(readdirSync(path.dirname(file)), ['same.png'], 'no partial or temp file is left');
     // And with nothing in the way, the copy is published.
     const fresh = asker(dir, async () => new Response('remote', { status: 206, headers: { 'content-range': 'bytes 0-5/6' } }), 1000);
     assert.equal(await fresh.keep(`data/uploads/${RUN}/new.png`), true);

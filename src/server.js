@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { installedServer } from './disk.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, openSync, createReadStream, createWriteStream, rmSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync, openSync, closeSync, fstatSync, createReadStream, createWriteStream, rmSync, statSync } from 'node:fs';
 import { Store } from './store.js';
 import { Accounts, cleanEmail } from './accounts.js';
 import { findCloudWorkspace } from './turso.js';
@@ -120,8 +120,14 @@ async function body(request, limit = 2 * 1024 * 1024) {
 }
 // How many messages of a chat to send: the newest 500 (200 for a group chat) unless the page asks for more, like "Show in chat" of an old pin.
 const historyLimit = (url, fallback = 500) => Math.min(20000, Math.max(1, Number(url.searchParams.get('limit')) || fallback));
-function serveFile(request, response, file, { sandbox = false, download = false, cache = 'no-store', frame = false, type: forced = '' } = {}) {
-  const stat = statSync(file), type = forced || mime[path.extname(file).toLowerCase()] || 'application/octet-stream';
+// The file is opened once and its size read from that open handle; every stream reads through the handle and stops at that
+// size, so a file that grows (or is swapped) after the check never sends more than was checked. max refuses a bigger file (413).
+export function serveFile(request, response, file, { sandbox = false, download = false, cache = 'no-store', frame = false, type: forced = '', max = Infinity } = {}) {
+  let fd; try { fd = openSync(file, 'r'); } catch (error) { if (error.code === 'EISDIR') return json(response, 404, { error: 'That is a folder, not a file.' }); throw error; }
+  let stat; try { stat = fstatSync(fd); } catch (error) { closeSync(fd); throw error; }
+  if (!stat.isFile()) { closeSync(fd); return json(response, 404, { error: 'That file is not on this computer.' }); }
+  if (stat.size > max) { closeSync(fd); response.setHeader('X-Rex-File-Size', String(stat.size)); return json(response, 413, { error: 'That file is too large to pass to another computer.', size: stat.size }); }
+  const type = forced || mime[path.extname(file).toLowerCase()] || 'application/octet-stream';
   const headers = { 'Content-Type': type, 'Cache-Control': cache, 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff' };
   // A page an agent made to explain its work may run its own inline script, but stays in a sandbox with no origin: it cannot reach Rex Desk or the network.
   if (sandbox === 'scripts') headers['Content-Security-Policy'] = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src data:;";
@@ -132,11 +138,13 @@ function serveFile(request, response, file, { sandbox = false, download = false,
   const range = request.headers.range?.match(/^bytes=(\d+)-(\d*)$/);
   if (range) {
     const start = Number(range[1]), end = Math.min(range[2] ? Number(range[2]) : stat.size - 1, stat.size - 1);
-    if (start > end || start >= stat.size) { response.writeHead(416, { 'Content-Range': `bytes */${stat.size}` }); response.end(); return; }
+    if (start > end || start >= stat.size) { closeSync(fd); response.writeHead(416, { 'Content-Range': `bytes */${stat.size}` }); response.end(); return; }
     response.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Content-Length': end - start + 1 });
-    createReadStream(file, { start, end }).pipe(response); return;
+    const part = createReadStream(null, { fd, start, end }); response.once?.('close', () => part.destroy()); part.pipe(response); return;
   }
-  response.writeHead(200, { ...headers, 'Content-Length': stat.size }); createReadStream(file).pipe(response);
+  response.writeHead(200, { ...headers, 'Content-Length': stat.size });
+  if (!stat.size) { closeSync(fd); response.end(); return; }
+  const whole = createReadStream(null, { fd, start: 0, end: stat.size - 1 }); response.once?.('close', () => whole.destroy()); whole.pipe(response);
 }
 
 // The installed app (it sets REX_DESK_VERSION) is the real Rex Desk on 4317. A server run from a source checkout is
@@ -593,8 +601,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           // never one over the relay limit: that one is opened on this computer.
           const key = String(url.searchParams.get('key') || ''), found = servableFile(desk.store, key);
           if (!found || desk.storage.gone(key)) return json(response, 404, { error: 'That file is not on this computer.' });
-          if (found.size > desk.peerFiles.max) { response.setHeader('X-Rex-File-Size', String(found.size)); return json(response, 413, { error: 'That file is too large to pass to another computer.', size: found.size }); }
-          return serveFile(request, response, found.file, { cache: 'private, max-age=3600' });
+          return serveFile(request, response, found.file, { cache: 'private, max-age=3600', max: desk.peerFiles.max });
         }
         if (relayed) {
           const entry = desk.phoneRelay.admit(request);
