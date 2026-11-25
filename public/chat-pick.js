@@ -1,6 +1,7 @@
 import { t } from './i18n.js';
 // Pickers: a styled list that opens as a popover, in place of the browser's own dropdown. It keeps a hidden input with the chosen value,
 // so the rest of the page reads it by id like any field. A picker with an action does something when an item is chosen instead of keeping a value.
+// A picker made with remember: false keeps no page-wide pick (ui.picks): its owner keeps the choice itself, for example per chat.
 const CHEVRON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 const CHECK = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
 const actions = {};
@@ -9,10 +10,10 @@ let state = null;
 export const setPickActions = map => Object.assign(actions, map);
 export const pickerOpen = () => Boolean(state);
 
-export function pickerHtml(ctx, { id, name = '', label = '', items, value = '', placeholder = t('Choose…'), searchable = false, action = '', compact = false }) {
-  const { ui, esc } = ctx, stored = action ? undefined : ui.picks?.[id];
+export function pickerHtml(ctx, { id, name = '', label = '', items, value = '', placeholder = t('Choose…'), searchable = false, action = '', compact = false, remember = true }) {
+  const { ui, esc } = ctx, stored = action || !remember ? undefined : ui.picks?.[id];
   const current = items.find(item => item.value === (stored ?? value)) || items.find(item => item.value === value) || null;
-  return `<span class="pick2 ${compact ? 'compact' : ''}" data-pick="${esc(id)}"><button type="button" class="pick2-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="${esc(label || placeholder)}"><span class="pick2-label ${current ? '' : 'ph'}">${esc(current ? current.label : placeholder)}</span>${CHEVRON}</button><input type="hidden" id="${esc(id)}" ${name ? `name="${esc(name)}"` : ''} value="${esc(current?.value ?? '')}" data-items="${esc(JSON.stringify(items))}" data-searchable="${searchable ? 1 : 0}" data-action-name="${esc(action)}" data-placeholder="${esc(placeholder)}"></span>`;
+  return `<span class="pick2 ${compact ? 'compact' : ''}" data-pick="${esc(id)}"><button type="button" class="pick2-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="${esc(label || placeholder)}"><span class="pick2-label ${current ? '' : 'ph'}">${esc(current ? current.label : placeholder)}</span>${CHEVRON}</button><input type="hidden" id="${esc(id)}" ${name ? `name="${esc(name)}"` : ''} value="${esc(current?.value ?? '')}" data-items="${esc(JSON.stringify(items))}" data-searchable="${searchable ? 1 : 0}" data-action-name="${esc(action)}" data-placeholder="${esc(placeholder)}" ${remember ? '' : 'data-forget="1"'}></span>`;
 }
 
 function visible() { const query = state.query.toLowerCase(); return state.items.filter(item => !query || `${item.label} ${item.hint || ''}`.toLowerCase().includes(query)); }
@@ -46,7 +47,7 @@ function choose(ctx, item) {
   if (!item || item.disabled || !state) return;
   const { input, wrapper, action } = state, id = input.id; closePicker();
   if (action) { input.value = ''; void actions[action]?.(item.value, ctx); return; }
-  input.value = item.value; ctx.ui.picks[id] = item.value;
+  input.value = item.value; if (!input.dataset.forget) ctx.ui.picks[id] = item.value;
   wrapper.querySelector('.pick2-label').textContent = item.label; wrapper.querySelector('.pick2-label').classList.remove('ph');
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
