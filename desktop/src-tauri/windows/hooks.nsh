@@ -76,6 +76,26 @@ Function RexRestoreBackup
   RMDir /r "$INSTDIR\payload.broken"
 FunctionEnd
 
+; Deletes payload.pending before a backup goes back, and makes sure it is gone: a file held open (a virus scanner) is
+; tried a few times. Left in place next to a restored copy from before the marker, it would make that copy look like an
+; unfinished first install, which the next installer deletes. $RexResult: ok or fail.
+Function RexClearPending
+  StrCpy $RexTry 0
+  ${Do}
+    Delete "$INSTDIR\payload.pending"
+    ${IfNot} ${FileExists} "$INSTDIR\payload.pending"
+      StrCpy $RexResult ok
+      Return
+    ${EndIf}
+    IntOp $RexTry $RexTry + 1
+    ${If} $RexTry >= 10
+      StrCpy $RexResult fail
+      Return
+    ${EndIf}
+    Sleep 500
+  ${Loop}
+FunctionEnd
+
 ; Checks the new payload against the list the build wrote: every file there, with its size, and the list itself whole
 ; (its last line "end|<number of files>" matches the files checked). $RexResult: ok or bad.
 Function RexCheckPayload
@@ -181,9 +201,14 @@ FunctionEnd
     ${Else}
       ; payload.pending goes first: once the old copy is back, an exit before it was cleared would leave a working copy
       ; that looks like an unfinished first install. While the backup is there, it decides on its own.
-      Delete "$INSTDIR\payload.pending"
+      Call RexClearPending
+      ${If} $RexResult != ok
+        SetErrorLevel 2
+        Abort "Rex Desk could not clear an unfinished update (a file in its folder is in use), so the update stopped and nothing was removed. Close Rex Desk and run the update again."
+      ${EndIf}
       Call RexRestoreBackup
       ${If} $RexResult != ok
+        SetErrorLevel 2
         Abort "Rex Desk could not put its last working version back (a file in its folder is in use), so the update stopped and nothing was removed. Close Rex Desk and run the update again."
       ${EndIf}
     ${EndIf}
@@ -249,8 +274,10 @@ FunctionEnd
     System::Call 'kernel32::CloseHandle(p $RexSwapLock)'
   ${Else}
     ${If} ${FileExists} "$INSTDIR\payload.old\*.*"
-      Delete "$INSTDIR\payload.pending"
-      Call RexRestoreBackup
+      Call RexClearPending
+      ${If} $RexResult == ok
+        Call RexRestoreBackup
+      ${EndIf}
       ${If} $RexResult == ok
         StrCpy $RexLine "The new version of Rex Desk did not install completely, so the last version was put back. Run the update again."
       ${Else}
