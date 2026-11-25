@@ -34,7 +34,7 @@ fn fix_size(window: &tauri::WebviewWindow) {
     let scale = window.scale_factor().unwrap_or(1.0);
     if let Ok(size) = window.inner_size() {
         let (width, height) = (size.width as f64 / scale, size.height as f64 / scale);
-        if width < 900.0 || height < 600.0 {
+        if width < 480.0 || height < 480.0 {
             let _ = window.maximize();
         }
     }
@@ -601,7 +601,7 @@ fn main() {
                 .background_color(tauri::window::Color(10, 14, 25, 255))
                 .title("Rex Desk Beta")
                 .inner_size(1440.0, 900.0)
-                .min_inner_size(900.0, 600.0)
+                .min_inner_size(480.0, 480.0)
                 .maximized(true);
             // Windows: no system title bar, our own buttons instead. Mac: the three dots stay, floating over our bar.
             #[cfg(target_os = "windows")]
