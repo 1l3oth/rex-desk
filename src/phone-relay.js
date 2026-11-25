@@ -54,6 +54,13 @@ export class PhoneRelay {
     const account = cleanId(request.headers['x-rex-relay-account']);
     return this.isRelayed(request) && Boolean(account) && account === this.account && !this.settings().askCode;
   }
+  // Another computer of this account asking for a file (peer-files.js): the relay names it desk.<its node id> and both the
+  // name and the account come from the relay's own checked Bearer sign-in, never from the caller. A phone's id is a random
+  // hex string from a signed cookie, so it can never be read as a desk. The ask-for-a-code switch is about phones, not these.
+  fromOwnDesk(request) {
+    const account = cleanId(request.headers['x-rex-relay-account']);
+    return this.isRelayed(request) && Boolean(account) && account === this.account && /^desk\.[\w-]+$/.test(cleanId(request.headers['x-rex-relay-device']));
+  }
   // A code-approved phone is known by the id the relay sends for it. That id comes from a cookie the desk cannot check, so
   // an approval also keeps the account the relay saw then: the same id under another account (or with none) needs a new code.
   // An approval from before accounts were kept has none, so it counts under no account: that phone pairs again once.

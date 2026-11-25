@@ -4,6 +4,7 @@
 import { readFileSync, writeFileSync, statSync, existsSync, openSync, readSync, closeSync } from 'node:fs';
 import { spawn, execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { dataKey } from './peer-files.js';
 
 export const TEXT_MAX = 1.8 * 1024 * 1024;
 const EXT = {
@@ -95,6 +96,9 @@ export class Files {
       if (!inside(full, root) || full === root) continue;
       const key = `data/${folder}/${path.relative(root, full).split(path.sep).join('/')}`;
       await this.desk.store.cloud?.files?.fetchOne?.(key).catch(() => false);
+      // Not in the backup (a video over its 25 MB limit, or not backed up yet): a small file comes straight from the computer
+      // that has it, through the account's relay (L112). A big one stays there and is streamed when it is played.
+      if (!existsSync(file)) await this.desk.peerFiles?.keep(key).catch(() => false);
       return existsSync(file);
     }
     return false;
@@ -102,8 +106,15 @@ export class Files {
   // Rex Desk's own folder for files from agents and attachments: a file there that is missing was made on another computer.
   fromElsewhere(file) { const full = path.resolve(file); return ['artifacts', 'uploads', 'room-images'].some(folder => inside(full, path.resolve(this.desk.store.media(folder)))); }
   async openFetched(input, runId, roomId) {
-    const { file } = this.resolve(input, runId, roomId);
-    if (!existsSync(file) && !(await this.fetchMissing(file)) && this.fromElsewhere(file)) throw new Error(`${path.basename(file)} was made on your other computer and could not be fetched. Open it there, or try again when that computer is on and backed up.`);
+    const { file, line, endLine } = this.resolve(input, runId, roomId);
+    if (!existsSync(file) && !(await this.fetchMissing(file)) && this.fromElsewhere(file)) {
+      // A picture, video, sound or PDF too big to bring over opens from the computer that has it: /api/files/raw streams it.
+      const key = dataKey(this.desk.store, file), kind = kindOf(file), peers = this.desk.peerFiles;
+      const there = key && peers && ['image', 'video', 'audio', 'pdf'].includes(kind) && path.extname(file).toLowerCase() !== '.svg' ? await peers.peek(key).catch(() => null) : null;
+      if (there) return { path: file, name: path.basename(file), ext: path.extname(file).toLowerCase(), kind, size: there.size, mtime: 0, line, endLine, formattable: false, editable: false, remote: true };
+      // The real reason when it is known (that computer is off, the file is too large, signed out); the old words otherwise.
+      throw new Error((key && peers?.say(key, path.basename(file))) || `${path.basename(file)} was made on your other computer and could not be fetched. Open it there, or try again when that computer is on and backed up.`);
+    }
     return this.open(input, runId, roomId);
   }
   open(input, runId, roomId) {

@@ -33,6 +33,7 @@ import { readyLines } from '../public/voice-phrases.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handleA2aHttp, a2aSettings, setA2a, A2aRelay } from './a2a.js';
 import { PhoneRelay, waitingPage } from './phone-relay.js';
+import { PeerFiles, dataFile, dataKey } from './peer-files.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
 import { weeklyReport } from './report.js';
@@ -49,9 +50,14 @@ const MISSING_SAYS = {
   'too-big': ['This file is too big for the cloud backup.', 'Open it on the computer that made it.'],
   failed: ['Rex Desk could not download this file.', 'Try again later, or open it on the computer that made it.'],
 };
+// A file streamed from another computer is shown like media in a frame; anything else (a page, an SVG) only in a sandbox
+// with no origin and no script, the way the same file is when it is on this computer.
+const peerSafety = file => /\.(png|jpe?g|gif|webp|bmp|avif|ico|mp4|webm|mov|m4v|ogv|mp3|wav|ogg|m4a|flac|pdf)$/i.test(String(file)) ? { 'Content-Security-Policy': "frame-ancestors 'self'" } : { 'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self';" };
 const escapeHtml = text => String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-function missingPage(response, store, key) {
-  const why = store.cloud?.files?.why?.(key), [title, body] = MISSING_SAYS[why?.reason] || ['This file is not on this computer yet.', 'It was made on your other computer. It arrives here once both computers are connected through your Rex Desk account. Open it on the computer that made it, or try again later.'];
+function missingPage(response, store, key, peerFiles = null) {
+  const why = store.cloud?.files?.why?.(key), peer = peerFiles?.say?.(key) || '';
+  // What the computer that has it said comes first: it is the real reason (that computer is off, the file is too large).
+  const [title, body] = peer ? ['This file is on your other computer.', peer] : MISSING_SAYS[why?.reason] || ['This file is not on this computer yet.', 'It was made on your other computer. It arrives here once both computers are connected through your Rex Desk account. Open it on the computer that made it, or try again later.'];
   response.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'", ...missingHeaders(store, key) });
   return response.end(`<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;font:15px/1.6 system-ui,sans-serif;background:#16181d;color:#e6e8eb;text-align:center;padding:24px"><div style="max-width:440px"><p style="font-size:17px;font-weight:600;margin:0 0 8px">${escapeHtml(title)}</p><p style="margin:0;color:#9aa3b1">${escapeHtml(body)}</p>${why?.detail ? `<p style="margin:12px 0 0;color:#6b7380;font-size:13px">${escapeHtml(why.detail)}</p>` : ''}</div></body>`);
 }
@@ -146,7 +152,7 @@ const WAITING = Symbol('waiting');
 const SIGN_IN_POLL_MS = Number(process.env.REX_SIGNIN_POLL_MS) || 20000;
 const settled = (promise, ms = SIGN_IN_POLL_MS) => Promise.race([promise, new Promise(resolve => { const timer = setTimeout(() => resolve(WAITING), ms); timer.unref?.(); })]);
 
-export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, ownDatabase = process.env.REX_DESK_OWN_DATABASE === '1', updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory } = {}) {
+export async function createApp({ dataDirectory, port = defaultPort(), runnerFactory, fetcher, agentCommand, imageFetcher = fetch, jevFetcher, namingFetcher, cloudClientFactory, accountFetcher, accountApi, requireAccount = !process.env.NODE_TEST_CONTEXT, ownDatabase = process.env.REX_DESK_OWN_DATABASE === '1', updateOptions, catchUp = false, computerFactory, voiceFactory, anywhereFactory, awakeFactory, peerFetcher } = {}) {
   // Cloud backup comes with a Rex Desk account (a paid plan later): a database address and key typed by hand, or a Turso
   // account of the person's own, are turned off unless this copy is started with REX_DESK_OWN_DATABASE=1.
   const ACCOUNT_ONLY = 'Cloud backup comes with your Rex Desk account. Turn it on in Settings, Backup and updates.';
@@ -278,6 +284,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     desk.a2aRelay = new A2aRelay(desk); desk.a2aRelay.start();
     // The phone, through api.rexdesk.dev (paid accounts, turned on in Settings): see phone-relay.js.
     desk.phoneRelay = new PhoneRelay(desk); if (!process.env.NODE_TEST_CONTEXT) desk.phoneRelay.start();
+    // A file made on another computer that the cloud backup does not have comes from that computer through the relay (L112).
+    desk.peerFiles = new PeerFiles(desk, peerFetcher ? { fetcher: peerFetcher } : {});
     // Two-way Telegram: agents text the person and their desk_ask questions appear there; the person's replies flow back
     // into the agent's chat. Long polling while the app runs. Voice notes transcribe only when a transcoder (ffmpeg) and a
     // ready speech engine are present and need no new keys; otherwise the audio is posted as-is.
@@ -578,6 +586,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         if (['/manifest.webmanifest', '/icon-180.png', '/icon-192.png', '/icon-512.png', '/favicon.svg', '/sw.js', '/offline.html'].includes(url.pathname)) return serveFile(request, response, path.join(root, 'public', url.pathname.slice(1)));
         // Through the relay the account is already checked there. A phone on this desk's own account comes straight in; any
         // other phone this desk has not seen yet waits for the person's OK here.
+        // Another computer of this account asks for a file it does not have (peer-files.js). The relay names it as a desk of
+        // the same account; it gets only files from this computer's own data folders, never one it would fetch from elsewhere.
+        if (relayed && url.pathname === '/api/peer/file' && request.method === 'GET' && desk.phoneRelay.fromOwnDesk(request)) {
+          const key = String(url.searchParams.get('key') || ''), file = dataFile(desk.store, key);
+          if (!file || desk.storage.gone(key) || !existsSync(file) || statSync(file).isDirectory()) return json(response, 404, { error: 'That file is not on this computer.' });
+          return serveFile(request, response, file, { cache: 'private, max-age=3600' });
+        }
         if (relayed) {
           const entry = desk.phoneRelay.admit(request);
           if (entry.missing) return json(response, 400, { error: 'The relay did not say which phone or account this is.' });
@@ -1274,6 +1289,10 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       if (url.pathname === '/api/files/raw' && request.method === 'GET') {
         const file = desk.files.check(url.searchParams.get('path') || ''), kind = kindOf(file);
         if (!existsSync(file)) await desk.files.fetchMissing(file);
+        // Too big to bring over: streamed from the computer that has it, a range at a time (L112).
+        const peerKey = existsSync(file) ? '' : dataKey(store, file);
+        if (peerKey && await desk.peerFiles.pipe(peerKey, request, response, { download: url.searchParams.has('download'), headers: peerSafety(file) })) return;
+        if (peerKey) return json(response, 404, { error: desk.peerFiles.say(peerKey, path.basename(file)) || 'No such file.' });
         if (!existsSync(file) || statSync(file).isDirectory()) return json(response, 404, { error: 'No such file.' });
         // HTML runs in a sandbox with no origin; SVG can carry script, so it gets the strict one; everything else may sit in a frame.
         const ext = path.extname(file).toLowerCase(), textual = !['image', 'video', 'audio', 'pdf'].includes(kind);
@@ -1357,7 +1376,9 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           const picture = desk.peers.chatPicture(String(url.searchParams.get('path') || ''));
           if (picture) { response.writeHead(200, { 'Content-Type': picture.picture ? mime[path.extname(picture.name).toLowerCase()] || 'application/octet-stream' : 'application/octet-stream', ...(picture.picture ? {} : { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(picture.name)}` }), 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Length': picture.data.length }); return response.end(picture.data); }
           // Not on this computer yet (a chat from the backup, a new computer): fetched now from the account's backup, only this one file.
-          if (moved) { const here = path.join(uploads, moved[1], moved[2]); if (!existsSync(here)) await store.cloud.files?.fetchOne?.(`data/uploads/${moved[1]}/${moved[2]}`).catch(() => false); if (existsSync(here)) return serveFile(request, response, here, { sandbox: /\.(html?|svg)$/i.test(here), download: url.searchParams.has('download'), cache: 'private, max-age=86400' }); }
+          if (moved) { const here = path.join(uploads, moved[1], moved[2]); if (!existsSync(here)) await store.cloud.files?.fetchOne?.(`data/uploads/${moved[1]}/${moved[2]}`).catch(() => false); if (!existsSync(here)) await desk.peerFiles.keep(`data/uploads/${moved[1]}/${moved[2]}`).catch(() => false); if (existsSync(here)) return serveFile(request, response, here, { sandbox: /\.(html?|svg)$/i.test(here), download: url.searchParams.has('download'), cache: 'private, max-age=86400' }); }
+          // Not in the backup (too big for it): streamed from the computer that has it (L112).
+          if (moved && await desk.peerFiles.pipe(`data/uploads/${moved[1]}/${moved[2]}`, request, response, { download: url.searchParams.has('download'), headers: peerSafety(moved[2]) })) return;
           if (moved) { response.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...missingHeaders(store, `data/uploads/${moved[1]}/${moved[2]}`) }); return response.end(JSON.stringify({ error: 'That file is not in the chat uploads.' })); }
           return json(response, 404, { error: 'That file is not in the chat uploads.' });
         }
@@ -1452,15 +1473,20 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           const carried = path.join(store.media('artifacts'), runId, path.basename(file));
           if (!existsSync(carried)) { try { desk.peers.restoreEvidence(runId, file); } catch { /* not carried with the chat */ } }
           if (!existsSync(carried)) await store.cloud.files?.fetchOne?.(`data/artifacts/${runId}/${path.basename(file)}`).catch(() => false);
+          if (!existsSync(carried)) await desk.peerFiles.keep(`data/artifacts/${runId}/${path.basename(file)}`).catch(() => false);
           if (existsSync(carried)) return serveFile(request, response, carried, { sandbox: /\.html?$/i.test(file) ? 'scripts' : false, download: url.searchParams.has('download') });
-          const notHere = () => missingPage(response, store, `data/artifacts/${runId}/${path.basename(file)}`);
+          if (await desk.peerFiles.pipe(`data/artifacts/${runId}/${path.basename(file)}`, request, response, { download: url.searchParams.has('download'), headers: peerSafety(file) })) return;
+          const notHere = () => missingPage(response, store, `data/artifacts/${runId}/${path.basename(file)}`, desk.peerFiles);
           return notHere();
         }
         const location = path.join(store.media('artifacts'), runId, path.basename(file));
         if (!existsSync(location)) desk.peers.restoreEvidence(runId, file);
         // Not carried with the chat: fetched now from the account's backup, only this one file.
         if (!existsSync(location)) await store.cloud.files?.fetchOne?.(`data/artifacts/${runId}/${path.basename(file)}`).catch(() => false);
-        if (!existsSync(location)) { const notHere = () => missingPage(response, store, `data/artifacts/${runId}/${path.basename(file)}`); return notHere(); }
+        // Not in the backup either (a video over its 25 MB limit): kept from, or streamed from, the computer that has it (L112).
+        if (!existsSync(location)) await desk.peerFiles.keep(`data/artifacts/${runId}/${path.basename(file)}`).catch(() => false);
+        if (!existsSync(location) && await desk.peerFiles.pipe(`data/artifacts/${runId}/${path.basename(file)}`, request, response, { download: url.searchParams.has('download'), headers: peerSafety(file) })) return;
+        if (!existsSync(location)) { const notHere = () => missingPage(response, store, `data/artifacts/${runId}/${path.basename(file)}`, desk.peerFiles); return notHere(); }
         return serveFile(request, response, location, { sandbox: artifact.type === 'text/html' ? (artifact.page ? 'scripts' : true) : false, download: url.searchParams.has('download') });
       }
       if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'API route not found.' });
