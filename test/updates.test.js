@@ -120,6 +120,26 @@ test('Windows: an open Rex Desk window takes the request and starts the installe
   assert.match(read(path.join(folder, 'install-update.log'), 'utf8'), /the Rex Desk window started the installer/);
 });
 
+test('Windows: a second install while the first is going is refused, so only one installer starts; a failed start frees it', async () => {
+  const data = temporary('install-twice');
+  const updates = new Updates(data, { version: '0.2.0', executable: String.raw`D:\Rex Desk\rex-desk.exe`, key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
+  assert.equal((await updates.check()).ready, true);
+  updates.freeSpace = () => 10 * 2 ** 30; updates.windowWait = 100;
+  const calls = []; updates.spawner = fakeSpawn(calls);
+  const [first, second] = await Promise.allSettled([updates.install(), updates.install()]);
+  assert.equal(first.status, 'fulfilled');
+  assert.equal(second.status, 'rejected'); assert.match(second.reason.message, /already installing/);
+  await assert.rejects(updates.install(), /already installing/, 'still refused after the installer started, until this server ends');
+  assert.equal(calls.length, 1, 'one installer only');
+  const blocked = new Updates(temporary('install-retry'), { version: '0.2.0', executable: String.raw`D:\Rex Desk\rex-desk.exe`, key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
+  assert.equal((await blocked.check()).ready, true);
+  blocked.freeSpace = () => 10 * 2 ** 30; blocked.windowWait = 100;
+  blocked.spawner = fakeSpawn([], Object.assign(new Error('spawn EPERM'), { code: 'EPERM' }));
+  await assert.rejects(blocked.install(), /did not start/);
+  blocked.spawner = fakeSpawn([]);
+  await blocked.install();
+});
+
 test('Windows: an installer that cannot start (antivirus) says so, with Install manually, and the log keeps the reason', async () => {
   const { readFileSync: read } = await import('node:fs');
   const data = temporary('install-blocked');

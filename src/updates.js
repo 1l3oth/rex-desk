@@ -156,7 +156,14 @@ export class Updates {
   // job that would end the installer with it). With no window (Rex Desk running in the background), or an older window that
   // does not know this request, this server starts the installer itself, detached, so it keeps running after this server
   // ends. Returns who started it.
+  // One install at a time, from the first request until this server ends: a second press (or the "when it finishes" timer)
+  // would share the request files and could start a second installer on the same folder. Only a failed start frees it.
   async install() {
+    if (this.installing) throw new Error('The update is already installing. Rex Desk restarts by itself when it is done.');
+    this.installing = true;
+    try { return await this.startInstall(); } catch (error) { this.installing = false; throw error; }
+  }
+  async startInstall() {
     if (!this.state.ready || !this.file) throw new Error('No checked update is ready yet.');
     // The installer unpacks in the temp folder and writes into the app's folder: both drives need room.
     for (const folder of [os.tmpdir(), this.executable ? path.dirname(this.executable) : ''].filter(Boolean)) {
