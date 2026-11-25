@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod payload_swap;
+
 use std::{
     fs,
     io::Write,
@@ -390,6 +392,10 @@ fn runtime() -> Option<Runtime> {
 fn runtime_with(ask: bool) -> Option<Runtime> {
     let exe = std::env::current_exe().ok()?;
     let folder = exe.parent()?;
+    // An update the installer never finished: put the old payload back before looking for it (payload_swap.rs).
+    if cfg!(windows) {
+        let _ = payload_swap::recover(folder, NODE, std::time::SystemTime::now());
+    }
     for beside in [folder.join("payload"), folder.join("..").join("Resources").join("payload")] {
         let (node, app) = (beside.join("node").join(NODE), beside.join("app"));
         if node.is_file() && app.join("src").join("server.js").is_file() {
