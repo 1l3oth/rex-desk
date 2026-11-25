@@ -11,6 +11,8 @@ const API = 'https://api.telegram.org';
 // One-time pairing code: only the chat that sends it to the bot can be linked, so a stranger who happens to press Start on the
 // bot is never linked. No look-alike letters; good for 10 minutes; cleared once used.
 const LINK_PAGES = 20;
+// How many recent inbound Telegram messages the Inbox (Needs you) feed keeps.
+const INBOX_MAX = 50;
 const PAIR_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', PAIR_LENGTH = 6, PAIR_TTL_MS = 10 * 60 * 1000;
 const newPairCode = () => Array.from({ length: PAIR_LENGTH }, () => PAIR_ALPHABET[randomInt(PAIR_ALPHABET.length)]).join('');
 // The code a message carries: "/start CODE" (from a t.me/<bot>?start=CODE link) or the code typed on its own.
@@ -411,7 +413,9 @@ export class TelegramBridge {
   // message gets its own id in its mark ([Telegram #id]) and a record of where it came from (tgqueued), made before the
   // turn is asked for, so two messages with the same words from two chats are never mixed up. When the agent is busy, the
   // message waits in its queue and starts a turn of its own afterwards (src/coordinator.js resumeQueued).
-  async routeToAgent(agentId, text, found = telegramLink(this.store)) {
+  // preview: the short, human-readable words shown for this message in the Inbox (Needs you). It defaults to the text, but a
+  // photo, file or voice note passes a tidy label instead of the wrapped agent prompt.
+  async routeToAgent(agentId, text, found = telegramLink(this.store), preview = text) {
     if (agentId === 'main') this.desk.specialists.ensureMain();
     const tag = found?.values?.chatId ? this.chatTag(found.link.id, found.values.chatId) : '';
     const key = randomUUID().replaceAll('-', '').slice(0, 12), prompt = fromTelegram(text, key, tag ? `Telegram, ${String(found.values.chatName || 'the person').replace(/\s+/g, ' ').slice(0, 40)} (${tag})` : '');
@@ -420,6 +424,33 @@ export class TelegramBridge {
     try { await this.desk.specialistTurn(agentId, { prompt, ...(replyTo ? { telegram: replyTo } : {}) }); }
     catch (error) { this.store.delete('tgqueued', key); throw error; }
     this.noteLastAgent(found, agentId);
+    if (found?.values?.chatId) this.noteInbox(agentId, found, tag, preview);
+  }
+
+  // ---- The Inbox (Needs you) feed: each inbound Telegram message is kept so it shows there, marked Telegram ----
+  // One row per message: who wrote (the chat's name and tag), the agent it went to, the words, and whether it has been read.
+  // Opening the row in the app goes to that agent's chat, where the message already waits; the agent texts back through the
+  // existing Telegram routing. The oldest rows are pruned so the list never grows without bound.
+  noteInbox(agentId, found, tag, text) {
+    const id = randomUUID().replaceAll('-', '').slice(0, 12);
+    const chatName = String(found.values.chatName || 'Telegram').replace(/\s+/g, ' ').slice(0, 60);
+    const words = String(text ?? '').replace(/\s+/g, ' ').trim();
+    this.store.put('tginbox', id, { id, agentId, chatName, tag: tag || '', text: clip(words, 180), at: new Date().toISOString(), read: false });
+    const rows = this.store.list('tginbox').sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    for (const row of rows.slice(0, Math.max(0, rows.length - INBOX_MAX))) this.store.delete('tginbox', row.id);
+  }
+  // The feed for the snapshot: newest first, each with the agent's current personal-chat run id so the app can open it.
+  inboxView() {
+    const mainRun = this.store.list('run').find(run => run.main);
+    const runFor = agentId => agentId === 'main' ? (mainRun?.id || '') : (this.store.get('specialist', agentId)?.runId || '');
+    return this.store.list('tginbox').sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, INBOX_MAX)
+      .map(row => ({ id: row.id, agentId: row.agentId, runId: runFor(row.agentId), chatName: row.chatName, tag: row.tag || '', text: row.text, at: row.at, read: Boolean(row.read) }));
+  }
+  // Mark one row (or all) read or unread, from the app.
+  markInboxRead(id, read = true) {
+    if (id === 'all') { for (const row of this.store.list('tginbox')) if (Boolean(row.read) !== Boolean(read)) this.store.put('tginbox', row.id, { ...row, read: Boolean(read) }); return { ok: true }; }
+    const row = this.store.get('tginbox', id); if (!row) return { ok: false };
+    this.store.put('tginbox', id, { ...row, read: Boolean(read) }); return { ok: true };
   }
   // The short tag of one Telegram chat (tg:N): made the first time that chat writes, the same every time after.
   chatTag(linkId, chatId) {
@@ -500,7 +531,8 @@ export class TelegramBridge {
     const caption = String(message.caption || '').trim();
     const said = `The person sent ${kind}${caption ? ` with this caption: ${caption}` : ' (no caption)'}.`;
     const prompt = saved.path ? `${said}${attachedBlock([saved.path])}` : `${said} It could not be saved: ${saved.error}.`;
-    return this.routeToAgent(agentId, prompt, found);
+    const label = photo ? 'Photo' : message.document ? 'File' : 'Video';
+    return this.routeToAgent(agentId, prompt, found, caption ? `${label}: ${caption}` : label);
   }
 
   // Voice notes: saved into the uploads folder (the agent always gets the file path), transcribed when a transcriber is ready,
@@ -520,7 +552,7 @@ export class TelegramBridge {
     }
     const files = attachedBlock(saved.path ? [saved.path] : []);
     const prompt = text ? `Voice note from the person (transcribed): ${text}${files}` : `The person sent a voice note. It was not transcribed: ${why}.${files}`;
-    return this.routeToAgent(agentId, prompt, found);
+    return this.routeToAgent(agentId, prompt, found, text ? `Voice note: ${text}` : 'Voice note');
   }
 
   agentForRun(runId) {
