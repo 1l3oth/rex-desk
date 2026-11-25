@@ -460,6 +460,7 @@
  "Default model": "ម៉ូដែលលំនាំដើម",
  "Delete #{0}? Its comments go with it.": "លុប #{0} ឬ?\n\nមតិយោបល់របស់វាទៅជាមួយ។",
  "Delete task": "លុបកិច្ចការ",
+ "Type a task title first.": "បញ្ចូលចំណងជើងកិច្ចការជាមុនសិន។",
  "Delete the room \"{0}\" and its messages? The agents and their own chats stay.": "លុបបន្ទប់ \"{0}\" និងសាររបស់វាឬ? ភ្នាក់ងារ និងការជជែកផ្ទាល់ខ្លួនរបស់ពួកគេនៅតែមាន។",
  "Delete the saved key": "លុបសោដែលបានរក្សាទុក",
  "Deleted": "បានលុប",

@@ -510,7 +510,7 @@ export function initLocalTasks(ctx) {
   document.addEventListener('submit', async event => {
     const form = event.target;
     if (form.matches('[data-task-add]')) {
-      event.preventDefault(); const title = form.title.value.trim(); if (!title) return;
+      event.preventDefault(); const title = form.title.value.trim(); if (!title) { toast(t('Type a task title first.'), true); form.title.focus(); return; }
       try { await api('/local-tasks', { method: 'POST', data: { title, project: ui.lastTaskProject || '' } }); form.title.value = ''; ui.taskSource = ui.taskSource === 'all' || !ui.taskSource ? ui.taskSource : 'local'; await refresh({ full: true }); keepTyping(form.title, '[data-task-add] input'); } catch (error) { toast(error.message, true); }
     } else if (form.matches('[data-lt-check-add]')) {
       event.preventDefault(); const task = current(), text = form.text.value.trim(); if (!task || !text) return;
