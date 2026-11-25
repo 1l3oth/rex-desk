@@ -276,7 +276,13 @@ async function openJev(page) {
   await page.evaluate(() => document.querySelector('.settings-pop [data-st-section="jev"]').click());
   await page.locator('.settings-pop [data-st-tts="engine"]').waitFor({ state: 'attached', timeout: 30000 });
 }
-const pickEngine = (page, value) => page.locator('.settings-pop [data-st-tts="engine"]').evaluate((select, next) => { select.value = next; select.dispatchEvent(new Event('change', { bubbles: true })); }, value);
+// The engine is picked on the select that is on screen at that very moment, found and changed in one step in the page. A
+// locator finds the element first and changes it in a second step: a background answer (/api/computer) that redraws the tab
+// in between left the change on a removed select, so no save went out and the test waited 30 s on CI.
+const pickEngine = (page, value) => page.waitForFunction(next => {
+  const select = document.querySelector('.settings-pop [data-st-tts="engine"]'); if (!select) return false;
+  select.value = next; select.dispatchEvent(new Event('change', { bubbles: true })); return true;
+}, value, { timeout: 30000 });
 
 // A voice-engine save that answers while a Jev switch change waits to save must not redraw the tab and undo that switch.
 test('a voice save answering during a pending Jev switch change keeps the switch', async () => {
