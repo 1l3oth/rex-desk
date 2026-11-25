@@ -9,13 +9,16 @@ import path from 'node:path';
 export const WRAP_UP_HOPS = 12;
 // A reply that only acknowledges (holding, agreed, ok, thanks, no action) wakes nobody, even when it names agents: agents kept
 // waking each other with one-line acknowledgements, each a full turn. A request ("please", a question) still wakes them.
-// The whole reply must be acknowledgement: every clause holds an acknowledging word, so "Thanks, @vanna, update the docs." wakes.
-const ACK = /\b(holding|on hold|agreed|agree|ok(ay)?|thanks|thank you|noted|understood|got it|will do|paused|no action|nothing (more |else )?to (add|do|report)|nothing pushed|waiting|sounds good|confirmed|standing by|acknowledged)\b/i;
+// The whole reply must be acknowledgement: once the acknowledging phrases are taken out, only small filler words may be left
+// ("for now", "on my side"). Any other word is a request or news, so "Thanks @vanna update the docs." still wakes Vanna.
+const ACK = /\b(thanks for the update|thank you for the update|thanks|thank you|holding|on hold|agreed|agree|ok(ay)?|noted|understood|got it|will do|paused|no action( needed)?|nothing (more |else )?to (add|do|report)|nothing pushed|waiting|sounds good|confirmed|standing by|acknowledged)\b/gi;
+const FILLER = new Set(['all', 'i', 'im', 'am', 'we', 'it', 'is', 'that', 'this', 'so', 'far', 'too', 'also', 'here', 'me', 'my', 'side', 'on', 'end', 'from', 'for', 'now', 'the', 'a', 'and', 'then', 'yet', 'work', 'still', 'all', 'good', 'done', 'of', 'you']);
 const ASKS = /\?|\b(please|can you|could you|would you|need you|go ahead|start|check|test|review|fix|build|push|deploy|send)\b/i;
 export function ackOnly(text) {
   const plain = String(text || '').replace(/```[\s\S]*?```/g, ' ').replace(/(?<![\p{L}\p{N}_])@[\p{L}\p{N}_.-]+/gu, ' ').replace(/\s+/g, ' ').trim();
-  const clauses = plain.split(/[.,;:!\n]+/).map(part => part.replace(/[^\p{L}\p{N}]+/gu, ' ').trim()).filter(Boolean);
-  return plain.length <= 200 && clauses.length > 0 && clauses.every(part => ACK.test(part)) && !ASKS.test(plain);
+  if (!plain || plain.length > 200 || ASKS.test(plain) || !plain.match(ACK)) return false;
+  const rest = plain.replace(ACK, ' ').toLowerCase().replace(/[’']/g, '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return rest.every(word => FILLER.has(word));
 }
 // English only on Rex Desk: a study tip block an agent appends to its reply (KOREAN TIP ...) never goes into a room.
 export const withoutStudyTip = text => String(text || '').replace(/\n*```[^\n]*\n\s*KOREAN TIP[\s\S]*?```/gi, '').replace(/\n*^KOREAN TIP\b[\s\S]*$/im, '').trim();

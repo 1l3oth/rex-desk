@@ -725,7 +725,7 @@ test('evidence shared in a personal chat without a task is never filed on a task
 });
 
 test('a reply that only acknowledges wakes no other agent, a request still does', async () => {
-  assert.ok(ackOnly('Holding. All relay work paused on my side.'));
+  assert.ok(ackOnly('Holding. All work paused on my side.'));
   assert.ok(ackOnly('Agreed.')); assert.ok(ackOnly('Understood. @vanna nothing to add from me.'));
   assert.ok(!ackOnly('OK, @vanna please check the tax rate.'), 'a request wakes');
   assert.ok(!ackOnly('Agreed, but what about refunds?'), 'a question wakes');
@@ -733,6 +733,9 @@ test('a reply that only acknowledges wakes no other agent, a request still does'
   assert.ok(!ackOnly('Thanks, @vanna, update the docs.'), 'a request after thanks wakes');
   assert.ok(!ackOnly('Noted. Vanna, rename the column.'), 'any request in the reply wakes');
   assert.ok(ackOnly('Thanks for the update, standing by.'));
+  assert.ok(!ackOnly('Thanks @vanna update the docs.'), 'no punctuation: the request still wakes');
+  assert.ok(!ackOnly('ok @vanna rename the column'), 'a request with no punctuation at all wakes');
+  assert.ok(!ackOnly('Agreed, the tax is wrong'), 'news after an acknowledgement wakes');
   const { desk, turns, dara, vanna, room } = setup({ replies: ['Understood. Holding, @vanna nothing to do for now.', 'Agreed.'] });
   await desk.rooms.post(room.id, { text: '@dara hold the cart work' });
   await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id));
