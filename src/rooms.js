@@ -7,6 +7,15 @@ import path from 'node:path';
 // Agents talking to each other decide themselves when a thread is done (Rex: no fixed stop after a number of replies).
 // The count of agent-to-agent replies is still kept on each message, so a long thread can be told to wrap up.
 export const WRAP_UP_HOPS = 12;
+// A reply that only acknowledges (holding, agreed, ok, thanks, no action) wakes nobody, even when it names agents: agents kept
+// waking each other with one-line acknowledgements, each a full turn. A request ("please", a question) still wakes them.
+const ACK = /^\W*(holding|on hold|agreed|agree|ok(ay)?|thanks|thank you|noted|understood|got it|will do|paused|no action|nothing (more |else )?to add|sounds good|confirmed|standing by|acknowledged)\b/i;
+const ASKS = /\?|\b(please|can you|could you|would you|need you|go ahead|start|check|test|review|fix|build|push|deploy|send)\b/i;
+export function ackOnly(text) {
+  const plain = String(text || '').replace(/```[\s\S]*?```/g, ' ').replace(/(?<![\p{L}\p{N}_])@[\p{L}\p{N}_.-]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  return plain.length <= 200 && ACK.test(plain) && !ASKS.test(plain);
+}
+
 const awayRules = away => `The person is away${away.until ? ` until ${away.until}` : ' until they come back'}${away.goal ? `. Goal: ${away.goal}` : ''}. Keep the work going with the other agents: @mention whoever should take the next step, and do not wait for the person or ask them questions. Make reasonable, low-risk choices yourself and say what you chose. Anything that cannot be undone or is risky (pushing or merging, deleting data, production, money, secrets, messages to other people) waits: write it under "Waiting for you" instead of doing it. Finish your turn with what you did and who is next.`;
 export const HUMAN = 'you';
 const now = () => new Date().toISOString();
@@ -176,6 +185,7 @@ export class Rooms {
     // @all (or @everyone) from the person wakes every agent in the room. Agents cannot use it, so they never wake each other all at once.
     if (!fromAgentId && to === undefined && /(?<![\p{L}\p{N}_@])@(all|everyone)\b/iu.test(body)) targets = [...new Set([...targets, ...room.members.filter(id => id !== HUMAN)])];
     targets = targets.filter(target => target !== fromAgentId);
+    if (fromAgentId && to === undefined && ackOnly(body)) targets = targets.filter(target => target === HUMAN);
     // The person talking without naming anyone is talking to the main agent, which joins the room the first time.
     if (!fromAgentId && to === undefined && !targets.some(target => target !== HUMAN)) { if (!room.members.includes('main')) { this.addMember(roomId, 'main'); room = this.room(roomId); } targets = ['main']; }
     if (!fromAgentId && !system && room.endedAt) { this.store.put('room', roomId, { ...room, endedAt: '', endedBy: '' }); room = this.room(roomId); this.system(roomId, 'You opened the meeting again.'); }

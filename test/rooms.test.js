@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store, now } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
-import { WRAP_UP_HOPS } from '../src/rooms.js';
+import { WRAP_UP_HOPS, ackOnly } from '../src/rooms.js';
 import { mainLooks } from '../src/runners.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
@@ -713,4 +713,18 @@ test('evidence shared in a personal chat without a task is never filed on a task
   // A task it took in this personal chat is used.
   store.put('task', 't2', { id: 't2', local: true, title: 'Slider', status: 'in_progress', chatWork: { agentId: dara.id, at: now() } });
   assert.equal(desk.shareEvidence('personal', { file: shot, title: 'Slider again', result: 'passed' }).taskId, 't2');
+});
+
+test('a reply that only acknowledges wakes no other agent, a request still does', async () => {
+  assert.ok(ackOnly('Holding. All relay work paused on my side.'));
+  assert.ok(ackOnly('Agreed.')); assert.ok(ackOnly('Understood. @vanna nothing to add from me.'));
+  assert.ok(!ackOnly('OK, @vanna please check the tax rate.'), 'a request wakes');
+  assert.ok(!ackOnly('Agreed, but what about refunds?'), 'a question wakes');
+  assert.ok(!ackOnly('The discount is applied after tax, so the total is wrong.'), 'a real answer is not an acknowledgement');
+  const { desk, turns, dara, vanna, room } = setup({ replies: ['Understood. Holding, @vanna nothing to do for now.', 'Agreed.'] });
+  await desk.rooms.post(room.id, { text: '@dara hold the cart work' });
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id));
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  const ack = desk.rooms.messages(room.id).find(item => item.from.id === dara.id);
+  assert.deepEqual(ack.to, ['you']); assert.ok(!turns.some(item => item.run.specialistId === vanna.id), 'Vanna was not woken by an acknowledgement');
 });
