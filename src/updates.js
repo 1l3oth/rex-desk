@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { createHash, createPublicKey, verify } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statfsSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statfsSync } from 'node:fs';
 import os from 'node:os';
 
 // Free space an install needs on the drive of the temp folder: the installer unpacks there first. On a full drive the
@@ -73,8 +73,27 @@ open "$APP"
 export class Updates {
   constructor(dataDirectory, { fetcher = fetch, version = process.env.REX_DESK_VERSION, executable = process.env.REX_DESK_EXE, key = releaseKeys, platform = `${process.platform}-${process.arch}` } = {}) {
     Object.assign(this, { fetcher, version, executable, key, platform, directory: path.join(dataDirectory, 'updates') });
-    this.state = { supported: Boolean(version && executable && updaters[platform]), current: version || '', stage: 'Beta', checkedAt: '', available: null, ready: false, error: '' };
+    this.state = { supported: Boolean(version && executable && updaters[platform]), current: version || '', stage: 'Beta', checkedAt: '', available: null, ready: false, error: '', installFailed: null };
+    this.state.installFailed = this.lastInstall();
   }
+  // The last install this copy started (install-update.json names its version). Still on an older version now means it did not
+  // take: antivirus such as Kaspersky blocks the silent installer or the helper that runs it, or removes the downloaded file.
+  // The log says how far it got. A finished install (this copy is that version or newer) is forgotten.
+  lastInstall() {
+    if (!this.state.supported) return null;
+    const settingsFile = path.join(this.directory, 'install-update.json');
+    let settings; try { settings = JSON.parse(readFileSync(settingsFile, 'utf8')); } catch { return null; }
+    if (!settings?.version || !newer(settings.version, this.version)) { rmSync(settingsFile, { force: true }); return null; }
+    let log = ''; try { log = readFileSync(path.join(this.directory, 'install-update.log'), 'utf8'); } catch { /* never written */ }
+    const installer = String(settings.installer || ''), gone = !installer || !existsSync(installer);
+    const reason = gone ? 'The downloaded installer is gone. Your antivirus may have removed it. Add the Rex Desk folder to its exclusions, then check for updates again.'
+      : !/update helper started/.test(log) ? 'The update did not start. Your antivirus may have blocked it. Add the Rex Desk folder to its exclusions, or run the installer yourself.'
+        : 'The update did not install. Your antivirus may have blocked it. Add the Rex Desk folder to its exclusions, or run the installer yourself.';
+    return { version: String(settings.version), reason, installer: gone ? '' : installer, log: log.trim().split(/\r?\n/).slice(-6).join('\n') };
+  }
+  // Writes one line to install-update.log from this server, so the log exists and says what happened even when the helper
+  // never runs (it was missing on a computer where antivirus stopped the update).
+  note(text) { try { mkdirSync(this.directory, { recursive: true }); appendFileSync(path.join(this.directory, 'install-update.log'), `${new Date().toISOString().slice(0, 19)} server: ${text}\r\n`); } catch { /* best effort */ } }
   // problem: why updating cannot go on right now, in plain words (the drive is full, the last start could not move the data
   // or get its port). The update card shows it instead of a bare "Cannot reach your computer".
   status() {
@@ -138,6 +157,9 @@ export class Updates {
   // PowerShell has no console and never starts. A WMI-created process inherits no environment, so values go as arguments.
   install(serverPid) {
     if (!this.state.ready || !this.file) throw new Error('No checked update is ready yet.');
+    this.state.installFailed = null;
+    rmSync(path.join(this.directory, 'install-update.log'), { force: true });
+    this.note(`installing ${this.state.available?.version || ''} from ${this.file}`);
     // The installer unpacks in the temp folder and writes into the app's folder: both drives need room.
     for (const folder of [os.tmpdir(), this.executable ? path.dirname(this.executable) : ''].filter(Boolean)) {
       const free = (this.freeSpace || freeSpace)(folder);
@@ -155,6 +177,8 @@ export class Updates {
     writeFileSync(helper, [
       '$settings = Get-Content -Raw (Join-Path $PSScriptRoot "install-update.json") | ConvertFrom-Json',
       '$ServerPid = [int]$settings.serverPid; $Installer = $settings.installer; $App = $settings.app; $Log = $settings.log',
+      // Any error is written to the log and the helper goes on, so it still reopens Rex Desk and the log says what went wrong.
+      'trap { try { Add-Content -Path $Log -Value "$(Get-Date -Format s) helper error: $($_.Exception.Message)" } catch {}; continue }',
       // Each step is written as it happens (a transcript is lost if the helper is cut off), so a stuck update shows where.
       // While Rex Desk is closed for the update, a small window says which step it is on and how far along, until Rex Desk
       // answers again. The window is a nicety: if it cannot be shown, the update goes on without it.
@@ -195,7 +219,9 @@ export class Updates {
       'function Step($text, $say, $percent) { Add-Content -Path $Log -Value "$(Get-Date -Format s) $text"; if ($ui -and $say) { $label.Text = $say; if ($percent -ge 0) { Set-Bar $percent }; Pump } }',
       // Started twice (Task Scheduler late, and the Explorer fallback), only the first one runs.
       '$lock = New-Object Threading.Mutex($false, "Local\\RexDeskUpdate"); if (-not $lock.WaitOne(0)) { exit }',
-      'Set-Content -Path $Log -Value "$(Get-Date -Format s) update helper started"',
+      'Add-Content -Path $Log -Value "$(Get-Date -Format s) update helper started"',
+      // Antivirus can remove the installer between the download and now.
+      'if (-not (Test-Path $Installer)) { Step "installer missing: $Installer" "The installer is gone. Your antivirus may have removed it." 10; Alert }',
       'Step "closing" "Closing Rex Desk" 5',
       '$until = (Get-Date).AddSeconds(60); while ((Get-Process -Id $ServerPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $until) { Pump; Start-Sleep -Milliseconds 200 }',
       'Step "server stopped" "Closing Rex Desk" 15',
@@ -232,7 +258,7 @@ export class Updates {
     const task = `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${helper}"`;
     if (task.length > 260) throw new Error('The update folder path is too long for Windows Task Scheduler.');
     const log = path.join(this.directory, 'install-update.log');
-    rmSync(log, { force: true });
+    const started = () => { try { return /update helper started/.test(readFileSync(log, 'utf8')); } catch { return false; } };
     // Some computers do not let an app start Task Scheduler (a security setting or antivirus: "spawnSync schtasks.exe EPERM"),
     // and on some the task is made but never runs. Then Windows Explorer starts the helper: like a double-click, it runs in the
     // person's own session, outside this server, so it keeps going when the old Rex Desk closes for the install.
@@ -240,15 +266,18 @@ export class Updates {
       const launcher = path.join(path.dirname(helper), 'rex-desk-update.cmd');
       writeFileSync(launcher, `@echo off\r\nstart "" /min ${task}\r\n`);
       spawn(path.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe'), [launcher], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      this.note('started the helper through Windows Explorer');
     };
     try {
       execFileSync('schtasks.exe', ['/Create', '/TN', 'Rex Desk update', '/TR', task, '/SC', 'ONCE', '/ST', '00:00', '/RL', 'LIMITED', '/F'], { windowsHide: true, timeout: 30000, stdio: 'ignore' });
       execFileSync('schtasks.exe', ['/Run', '/TN', 'Rex Desk update'], { windowsHide: true, timeout: 30000, stdio: 'ignore' });
+      this.note('started the helper through Task Scheduler');
     } catch (error) {
+      this.note(`Task Scheduler refused (${error.message})`);
       try { explorer(); } catch { throw new Error(`Windows did not let Rex Desk start the update (${error.message}). Close Rex Desk and run the installer in ${path.dirname(helper)} yourself.`); }
       return;
     }
-    // The helper writes its log the moment it starts; no log after a few seconds means the task never ran.
-    setTimeout(() => { if (!existsSync(log)) { try { explorer(); } catch { /* the installer is still in the updates folder */ } } }, 6000).unref?.();
+    // The helper writes "update helper started" the moment it starts; nothing after a few seconds means the task never ran.
+    setTimeout(() => { if (!started()) { this.note('the helper did not start within 6 seconds'); try { explorer(); } catch (error) { this.note(`Windows Explorer refused too (${error.message})`); } } }, 6000).unref?.();
   }
 }

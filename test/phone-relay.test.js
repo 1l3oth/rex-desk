@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createHash } from 'node:crypto';
@@ -201,4 +201,21 @@ test('the desk copies the relay\'s account into the request and drops one the ph
     assert.equal(await body(3, { account: { id: 'user-1' } }), 'user-1', 'the relay\'s account is');
     relay.stop();
   } finally { server.close(); }
+});
+
+test('the desk pings the relay now and then, and dials again when the link has gone silent', () => {
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+  try {
+    const { desk } = fakeDesk(1), socket = fakeSocket(); let closed = 0; socket.close = () => { closed++; socket.emit('close', { code: 1006 }); };
+    const relay = new PhoneRelay(desk, { socket: () => socket });
+    relay.setEnabled(true); socket.emit('open');
+    mock.timers.tick(20000);
+    assert.ok(socket.sent.some(frame => frame.op === RELAY_OP.PING), 'a ping went out');
+    socket.play(RELAY_OP.PONG, 0, Buffer.from('{}')); mock.timers.tick(60000);
+    assert.equal(closed, 0, 'a link that answered is kept');
+    mock.timers.tick(80000);
+    assert.equal(closed, 1, 'a silent link is closed');
+    assert.equal(relay.view().state, 'offline'); assert.ok(relay.timer, 'and dialled again');
+    relay.stop();
+  } finally { mock.timers.reset(); }
 });

@@ -868,6 +868,14 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       }
       if (url.pathname === '/api/schedule/run' && request.method === 'POST') return json(response, 200, await desk.runSchedule());
       if (url.pathname === '/api/update/check' && request.method === 'POST') { const status = await updates.check(); notify(); return json(response, 200, status); }
+      // The installer of an update that did not install, shown selected in its folder so the person can run it by hand.
+      if (url.pathname === '/api/update/reveal' && request.method === 'POST') {
+        const file = updates.state.installFailed?.installer || updates.file || '';
+        if (!file || !existsSync(file) || path.dirname(path.resolve(file)) !== path.resolve(updates.directory)) throw new Error('The installer is not in the updates folder any more. Check for updates to download it again.');
+        if (process.platform === 'win32') spawn('explorer.exe', [`/select,${file}`], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+        else spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [path.dirname(file)], { detached: true, stdio: 'ignore' }).unref();
+        return json(response, 200, { opened: file });
+      }
       if (url.pathname === '/api/update/install' && request.method === 'POST') {
         const input = await body(request), busy = busyAgents(store);
         // The update window takes the colours of the theme the person sees (sent by the page).

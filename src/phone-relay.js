@@ -9,6 +9,8 @@ import { relayFrame, readRelayFrame, RELAY_OP } from './phone-relay-frame.js';
 export const RELAY_URL = 'wss://api.rexdesk.dev/v1/relay/desk';
 const PENDING_MS = 10 * 60000, MAX_PENDING = 5, MAX_BODY = 50 * 1024 * 1024, CHUNK = 64 * 1024;
 const RETRY_MS = [2000, 5000, 15000, 30000, 60000];
+// The desk pings the relay now and then, so an idle link is not cut as idle; a link that stays silent for DEAD_MS is dead and is dialled again.
+const PING_MS = 20000, DEAD_MS = 70000;
 // Headers that belong to one hop, or that only this desk may set on a relayed request.
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-connection', 'te', 'trailer', 'content-length']);
 const OWN = /^x-rex-relay/i;
@@ -111,14 +113,22 @@ export class PhoneRelay {
     let socket; try { socket = this.makeSocket(this.dialUrl(), token); } catch (error) { this.failed({ error: error.message }); this.state = 'offline'; return this.retry(); }
     this.socket = socket; socket.binaryType = 'arraybuffer';
     let opened = false, error = '';
-    socket.addEventListener('open', () => opened = true);
-    socket.addEventListener('open', () => this.send(RELAY_OP.HELLO, 0, json({ token, desk: this.store.nodeId, name: this.desk.peers?.self?.name || '' })));
-    socket.addEventListener('message', event => { try { this.onFrame(readRelayFrame(Buffer.from(event.data))); } catch (error) { this.store.event('', 'phone-relay-error', { message: error.message }); } });
+    socket.addEventListener('open', () => { opened = true; this.heard = Date.now(); this.keepAlive(socket); this.send(RELAY_OP.HELLO, 0, json({ token, desk: this.store.nodeId, name: this.desk.peers?.self?.name || '' })); });
+    socket.addEventListener('message', event => { this.heard = Date.now(); try { this.onFrame(readRelayFrame(Buffer.from(event.data))); } catch (error) { this.store.event('', 'phone-relay-error', { message: error.message }); } });
     // The relay closes with 4001 when a newer connection of this desk took over, 4002 when the plan has no relay and 4003 when the sign-in
     // is no longer good. Those do not get better by dialling again, so the desk waits for the switch or a new sign-in instead.
-    socket.addEventListener('close', event => { if (this.socket !== socket) return; this.socket = null; this.account = ''; this.dropStreams(); this.failed({ code: event?.code, reason: event?.reason, error, opened }); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); });
+    socket.addEventListener('close', event => { clearInterval(this.beat); if (this.socket !== socket) return; this.socket = null; this.account = ''; this.dropStreams(); this.failed({ code: event?.code, reason: event?.reason, error, opened }); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); });
     // The error itself is kept for the close that always follows it, which says what went wrong.
     socket.addEventListener('error', event => { error = String(event?.message || event?.error?.message || 'connection error'); });
+  }
+  // A ping every PING_MS; if nothing at all came back for DEAD_MS the link is closed, and the close handler dials again.
+  keepAlive(socket) {
+    clearInterval(this.beat);
+    this.beat = setInterval(() => {
+      if (this.socket !== socket) return clearInterval(this.beat);
+      if (Date.now() - this.heard > DEAD_MS) { try { socket.close(); } catch {} return; }
+      this.send(RELAY_OP.PING, 0, json({ at: Date.now() }));
+    }, PING_MS); this.beat.unref?.();
   }
   failed(what) {
     this.problem = relayProblem(what);
@@ -126,7 +136,7 @@ export class PhoneRelay {
     this.store.event('', 'phone-relay-error', { message }); console.warn(`Phone relay: ${message}`);
   }
   stop() {
-    clearTimeout(this.timer); this.timer = null; const socket = this.socket; this.socket = null; this.account = ''; this.dropStreams();
+    clearTimeout(this.timer); clearInterval(this.beat); this.timer = null; const socket = this.socket; this.socket = null; this.account = ''; this.dropStreams();
     try { socket?.close(); } catch {} this.state = 'off';
   }
   retry() {
