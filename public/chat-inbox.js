@@ -28,7 +28,7 @@ function simple(item) {
 // The row in the list on the left.
 function listRow(ctx, entry, selected) {
   const { esc } = ctx, { who, item } = entry;
-  return `<button type="button" class="ny-item${selected ? ' on' : ''}" data-ny-pick="${esc(item.id)}" aria-current="${selected}">${entry.phone ? `<span class="av sm ny-device" aria-hidden="true">${DEVICE_ICON.phone}</span>` : avatarHtml(ctx, { name: who.name, agent: who.agent || null, size: 'sm' })}<span class="ny-item-body"><span class="ny-item-top"><b>${esc(who.name)}</b><time datetime="${esc(entry.at)}">${esc(ago(entry.at))}</time></span>${entry.sub ? `<span class="ny-item-sub">${esc(entry.sub)}</span>` : ''}<span class="ny-item-q">${esc(entry.text)}</span></span></button>`;
+  return `<button type="button" class="ny-item${selected ? ' on' : ''}${entry.unread ? ' unread' : ''}" data-ny-pick="${esc(item.id)}" aria-current="${selected}">${entry.phone ? `<span class="av sm ny-device" aria-hidden="true">${DEVICE_ICON.phone}</span>` : avatarHtml(ctx, { name: who.name, agent: who.agent || null, size: 'sm' })}<span class="ny-item-body"><span class="ny-item-top"><b>${esc(who.name)}</b><span class="ny-when"><time datetime="${esc(entry.at)}">${esc(ago(entry.at))}</time>${entry.unread ? '<i class="ny-dot" aria-hidden="true"></i>' : ''}</span></span>${entry.sub ? `<span class="ny-item-sub">${esc(entry.sub)}</span>` : ''}<span class="ny-item-q">${esc(entry.text)}</span></span></button>`;
 }
 
 // The open question on the right: who asks, the full question, then the answer.
@@ -37,6 +37,12 @@ function detail(ctx, helpers, entry) {
   const head = `<header class="ny-dhead"><button type="button" class="ny-back" data-ny-back aria-label="${t`Back to the list`}"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>${entry.phone ? `<span class="av ny-device" aria-hidden="true">${DEVICE_ICON.phone}</span>` : avatarHtml(ctx, { name: who.name, agent: who.agent || null })}<div class="ny-dwho"><b>${esc(who.name)}</b><span>${esc([entry.sub, ago(entry.at)].filter(Boolean).join(' · '))}</span></div></header>`;
   const question = `<div class="ny-dq">${esc(entry.text)}</div>`;
   if (entry.phone) return `<div class="ny-detail">${head}<div class="ny-dcard">${phoneAskHtml(ctx, entry.phone)}</div></div>`;
+  // A message that came in from Telegram: show it, with a button that opens the agent's chat, where it already waits and
+  // where a reply goes back to Telegram through the agent, as before.
+  if (entry.tg) {
+    const target = entry.tg.agentId === 'main' ? 'data-nyc-type="main" data-nyc-id=""' : `data-nyc-type="run" data-nyc-id="${esc(entry.tg.runId)}"`;
+    return `<div class="ny-detail">${head}${question}<div class="ny-dact"><button type="button" class="btn primary" data-ny-open-chat ${target} data-tg="${esc(entry.tg.id)}">${t`Open chat`}</button></div></div>`;
+  }
   if (entry.wake) {
     return `<div class="ny-detail">${head}${question}<div class="ny-dact"><button class="btn" data-action="wake-dismiss" data-id="${esc(item.id)}">${t`Dismiss`}</button><button class="btn primary" data-action="wake-approve" data-id="${esc(item.id)}">${t`Wake it up`}</button></div></div>`;
   }
@@ -66,8 +72,8 @@ function review(ctx, item, head, question) {
 }
 
 export function inboxStage(ctx, helpers) {
-  const { esc, ui } = ctx, asks = ctx.pending(), wakes = ui.snap.wakes || [], phones = ui.snap.phones?.pending || [], count = asks.length + wakes.length + phones.length;
-  if (!count) return { title: t('Needs you'), meta: '', feed: `<div class="empty"><h2>${t`All clear`}</h2><p>${t`Questions, approvals and wake-ups from your agents show up here.`}</p></div>` };
+  const { esc, ui } = ctx, asks = ctx.pending(), wakes = ui.snap.wakes || [], phones = ui.snap.phones?.pending || [], telegram = ui.snap.telegramInbox || [], count = asks.length + wakes.length + phones.length + telegram.length;
+  if (!count) return { title: t('Needs you'), meta: '', feed: `<div class="empty"><h2>${t`All clear`}</h2><p>${t`Questions, approvals and messages from your agents show up here.`}</p></div>` };
   const group = saved(), entries = [
     ...asks.map(item => { const who = asker(ctx, helpers, item.runId); return { item, who, at: item.createdAt || '', text: plain(item.title), sub: who.project }; }),
     ...wakes.map(wake => {
@@ -75,7 +81,9 @@ export function inboxStage(ctx, helpers) {
       return { item: wake, wake: true, who: { ...who, name: wake.from || who.name, agent: null }, at: wake.at || wake.createdAt || '', text: wake.text || '', sub: t`mentioned ${who.name} in ${room?.name || 'a room'}` };
     }),
     // A new phone asking to open the desk through the relay.
-    ...phones.map(phone => ({ item: { id: `phone:${phone.id}` }, phone, who: { name: t('Rex Desk'), project: '', agent: null }, at: phone.createdAt || '', text: t`${phone.name} wants to open your desk`, sub: t('Phone') }))
+    ...phones.map(phone => ({ item: { id: `phone:${phone.id}` }, phone, who: { name: t('Rex Desk'), project: '', agent: null }, at: phone.createdAt || '', text: t`${phone.name} wants to open your desk`, sub: t('Phone') })),
+    // A message that arrived from Telegram, waiting in the agent's chat.
+    ...telegram.map(row => ({ item: { id: `tg:${row.id}` }, tg: row, who: { name: row.chatName || t('Telegram'), project: '', agent: null }, at: row.at || '', text: row.text || '', sub: t('Telegram'), unread: !row.read }))
   ].sort((left, right) => String(right.at).localeCompare(String(left.at)));
   // The open question stays open until it is answered; then the newest one opens.
   let current = entries.find(entry => entry.item.id === ui.nySelected);
@@ -101,8 +109,11 @@ export function wireInbox(ctx) {
   document.addEventListener('click', event => {
     const group = event.target.closest?.('[data-ny-group]');
     if (group) { try { localStorage.setItem('rex-ny-group', group.dataset.nyGroup); } catch {} ctx.renderAll(); return; }
+    // Opening a Telegram message's chat; it is marked read on the way.
+    const openChat = event.target.closest?.('[data-ny-open-chat]');
+    if (openChat) { if (openChat.dataset.tg) ctx.api('/telegram/inbox/read', { method: 'POST', data: { id: openChat.dataset.tg } }).catch(() => {}); ctx.ui.nyOpen = false; ctx.open(openChat.dataset.nycType, openChat.dataset.nycId || ''); return; }
     const pick = event.target.closest?.('[data-ny-pick]');
-    if (pick) { ctx.ui.nySelected = pick.dataset.nyPick; ctx.ui.nyOpen = true; ctx.renderAll(); return; }
+    if (pick) { const id = pick.dataset.nyPick; ctx.ui.nySelected = id; ctx.ui.nyOpen = true; if (id.startsWith('tg:')) { ctx.api('/telegram/inbox/read', { method: 'POST', data: { id: id.slice(3) } }).then(() => ctx.refresh()).catch(() => {}); } ctx.renderAll(); return; }
     if (event.target.closest?.('[data-ny-back]')) { ctx.ui.nyOpen = false; ctx.renderAll(); return; }
     const quick = event.target.closest?.('[data-ny-quick]');
     const link = event.target.closest?.('[data-open-url]'); if (link) { window.open(link.dataset.openUrl, '_blank', 'noopener'); return; }
