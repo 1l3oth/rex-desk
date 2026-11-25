@@ -647,12 +647,15 @@ export class Peers {
   }
   // The person writes in a chat whose agent is on another computer: straight there when it is reached directly, otherwise
   // as a command in the shared database that the agent's computer runs within seconds (or when it is back on).
-  async chatAction(copy, action, input = {}, { shown = null } = {}) {
+  // sendId: a message kept while its agent moved here (L114) keeps its own id as the command's id, so passing it on again after a
+  // crash finds the command already written and does not send it twice.
+  async chatAction(copy, action, input = {}, { shown = null, sendId = '' } = {}) {
     if (!['say', 'resume', 'stop'].includes(action)) throw new Error(`Open this chat on ${this.deviceName(copy.node)} to do that.`);
     const text = String(input.text || input.prompt || '').slice(0, 20000);
     if (action !== 'stop' && !text.trim()) throw new Error('Write a message first.');
+    if (sendId && this.store.get('peercmd', `send-${sendId}`)) return { queued: true };
     if (action !== 'stop' && this.store.get('chatsplit', copy.agentId)?.open) throw new Error('This agent has two different chats on your computers. Pick the one to keep first.');
-    const id = randomUUID(), packed = action === 'stop' ? { text, files: [] } : this.packFiles(text, copy.node, copy.agentId);
+    const id = sendId ? `send-${sendId}` : randomUUID(), packed = action === 'stop' ? { text, files: [] } : this.packFiles(text, copy.node, copy.agentId);
     // The message shows in this computer's copy of the shared chat at once and reaches the others with its own id; the
     // computer running the agent passes it on without writing it again.
     if (action !== 'stop' && this.store.syncedChat(copy.id)) {

@@ -285,3 +285,42 @@ test('Rex Desk that closes during a fresh start keeps the whole batch saved, and
     desk.runnerFactory = runnerFactory;
   } finally { await close(); }
 });
+
+test('a kept message stays saved until the agent takes it in: a failed or cut-off delivery is passed on after a restart exactly once (L114 review 2)', async () => {
+  const { store, desk, agent, close } = setup();
+  try {
+    desk.peers.statusOf = () => ({ state: 'idle', label: 'Idle' }); desk.peers.online = () => true;
+    // 1. Delivery throws: the message is not lost.
+    agent('mv8', { node: store.nodeId, runId: 'r19' });
+    store.put('run', 'r19', { id: 'r19', role: 'specialist', specialistId: 'mv8', provider: 'claude', state: 'finished', createdAt: new Date().toISOString() });
+    const resume = desk.resume.bind(desk); let calls = 0;
+    desk.resume = async () => { throw new Error('The agent could not start.'); };
+    desk.projectRules.sendHere('r19', store.get('specialist', 'mv8'), 'resume', { prompt: 'fix the cart' });
+    await desk.projectRules.moving?.get('mv8');
+    assert.equal(store.list('movesend').length, 1, 'kept after the failed delivery'); assert.equal(store.list('movesend')[0].tries, 1);
+    assert.match(store.events('r19', { visible: true, limit: 50 }).filter(event => event.kind === 'error').at(-1).message, /kept and is passed on when Rex Desk opens again/);
+    desk.resume = async (...args) => { calls++; return resume(...args); };
+    let reopened = new ProjectRules(desk); desk.projectRules = reopened;
+    reopened.recoverSends(); await reopened.moving.get('mv8');
+    let run = store.get('run', 'r19');
+    assert.equal(calls, 1); assert.equal(run.state, 'queued'); assert.equal(run.followUp, 'fix the cart'); assert.equal(store.list('movesend').length, 0);
+    // 2. Rex Desk closes after the run took the message in but before the record was dropped: no second delivery.
+    store.put('run', 'r19', { ...store.get('run', 'r19'), state: 'finished', followUp: '' });
+    const id = 'kept-2';
+    store.put('movesend', id, { id, runId: 'r19', agentId: 'mv8', action: 'resume', input: { prompt: 'and the checkout' }, text: 'and the checkout', shown: null, at: new Date().toISOString(), order: 1 });
+    await reopened.deliver('r19', 'mv8', 'resume', { prompt: 'and the checkout' }, 'and the checkout', null, id);
+    assert.ok(store.get('run', 'r19').sentIds.includes(id), 'the run notes the message id in the write that takes it in');
+    reopened = new ProjectRules(desk); desk.projectRules = reopened;
+    reopened.recoverSends(); await reopened.moving.get('mv8');
+    run = store.get('run', 'r19');
+    assert.equal(calls, 2, 'delivered once, not again after the restart'); assert.equal(run.followUp, 'and the checkout'); assert.deepEqual(run.queued || [], []);
+    assert.equal(store.list('movesend').length, 0, 'the record is dropped');
+    desk.resume = resume;
+    // 3. The other computer: the command keeps the message id, so a second try writes nothing new.
+    store.put('run', 'r20', { id: 'r20', role: 'specialist', provider: 'claude', state: 'finished', createdAt: new Date().toISOString() });
+    const copy = { id: 'r20', node: 'work-pc', agentId: 'mv8' };
+    await desk.peers.chatAction(copy, 'say', { text: 'and the total' }, { sendId: 'kept-3' });
+    await desk.peers.chatAction(copy, 'say', { text: 'and the total' }, { sendId: 'kept-3' });
+    assert.equal(store.list('peercmd').filter(item => item.runId === 'r20').length, 1);
+  } finally { await close(); }
+});

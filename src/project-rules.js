@@ -174,18 +174,26 @@ export class ProjectRules {
     this.queueSend(pending);
     return { queued: true, moving: true };
   }
-  // One kept message waits behind its agent's move (one move per agent), then goes to the agent. Its record goes in the same
-  // step as it is passed on, so it is passed on once: never again after a restart.
+  // One kept message waits behind its agent's move (one move per agent), then goes to the agent. Its record stays until the
+  // agent's run (or the command to the other computer) has taken it in, and that write carries the message's id: a retry after
+  // a failure or a restart sees it arrived and only drops the record, so it is passed on once and never lost.
   queueSend(pending) {
     const store = this.store, agentId = pending.agentId;
     this.moving ||= new Map();
     const agent = store.get('specialist', agentId);
     const before = this.moving.get(agentId) || (agent && this.desk.peers.isRemote(agent) ? this.move(agentId).catch(error => ({ failed: String(error.message || error) })) : Promise.resolve());
-    const after = before.then(() => {
+    const after = before.then(async () => {
       if (!store.get('movesend', pending.id)) return null;
+      if (!this.arrived(pending)) await this.deliver(pending.runId, agentId, pending.action, pending.input || {}, pending.text, pending.shown, pending.id);
       store.delete('movesend', pending.id);
-      return this.deliver(pending.runId, agentId, pending.action, pending.input || {}, pending.text, pending.shown);
-    }).catch(error => { store.event(pending.runId, 'error', { message: error.message }, true); });
+      return null;
+    }).catch(error => {
+      // Not taken in: the record stays for the next start. After three failed tries it is dropped and the chat says so.
+      const kept = store.get('movesend', pending.id), tries = (kept?.tries || 0) + 1;
+      if (kept && tries < 3) store.put('movesend', pending.id, { ...kept, tries });
+      else if (kept) store.delete('movesend', pending.id);
+      store.event(pending.runId, 'error', { message: kept && tries < 3 ? `${error.message} Your message is kept and is passed on when Rex Desk opens again.` : error.message }, true);
+    });
     this.moving.set(agentId, after);
     void after.finally(() => { if (this.moving.get(agentId) === after) this.moving.delete(agentId); });
     return after;
@@ -201,11 +209,15 @@ export class ProjectRules {
   }
   // Whether an agent is on its way here (a message to it waits for the move).
   movingHere(agentId) { return Boolean(this.moving?.has(agentId)); }
-  async deliver(runId, agentId, action, input, text, shown) {
+  // Whether a kept message was already taken in (its id is on the run, or on the command to the other computer).
+  arrived(pending) {
+    return Boolean(this.store.get('run', pending.runId)?.sentIds?.includes(pending.id) || this.store.get('peercmd', `send-${pending.id}`));
+  }
+  async deliver(runId, agentId, action, input, text, shown, sendId = '') {
     const desk = this.desk, peers = desk.peers, agent = this.store.get('specialist', agentId), run = this.store.get('run', runId);
-    const picked = { model: input.model, effort: input.effort, permissionMode: input.permissionMode, provider: input.provider, voice: input.voice };
+    const picked = { model: input.model, effort: input.effort, permissionMode: input.permissionMode, provider: input.provider, voice: input.voice, sendId };
     // Still on the other computer (the move failed or was refused): the message goes there, shown here once already.
-    if (!run || peers.isRemote(agent)) return peers.chatAction({ id: runId, node: agent?.node || peers.chatCopy(runId)?.node, agentId }, action, input, { shown });
+    if (!run || peers.isRemote(agent)) return peers.chatAction({ id: runId, node: agent?.node || peers.chatCopy(runId)?.node, agentId }, action, input, { shown, sendId });
     if (desk.live.has(runId) || WORKING.includes(run.state)) return desk.say(runId, text, { ...picked, echoed: true });
     return desk.resume(runId, { ...picked, prompt: text, silent: true });
   }
