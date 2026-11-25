@@ -156,8 +156,10 @@ try {
   await page.screenshot({ path: path.join(screenshots, 'tour-about.png') });
   await tour.getByRole('button', { name: 'Next', exact: true }).click();
   // Connect your AI: Claude already says it is signed in here, so picking it goes straight to the green tick and Rex Agent opens.
+  // Its card and the Continue with Claude button above the cards both pick it; the card is the one clicked here.
   await tour.getByRole('heading', { name: 'Connect your AI' }).waitFor({ timeout: 30000 });
-  const claudeCard = tour.locator('[data-fr-pick="claude"]');
+  await tour.locator('.fr-actions [data-fr-pick="claude"]').waitFor({ timeout: 30000 });
+  const claudeCard = tour.locator('.fr-card[data-fr-pick="claude"]');
   await claudeCard.locator('.fr-good', { hasText: 'Ready on this computer' }).waitFor({ timeout: 30000 });
   await page.screenshot({ path: path.join(screenshots, 'tour-connect.png') });
   await claudeCard.click();
