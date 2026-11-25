@@ -507,7 +507,8 @@ export class Peers {
   }
   // A file attached on another computer gets a copy of its own here, in this computer's uploads under the same folder name,
   // as soon as it arrives in the shared database, so an agent here can open it (L27: only the other computer's F: path was known).
-  saveUpload(item) {
+  // failed (optional): gets the reason when no copy could be saved.
+  saveUpload(item, failed = {}) {
     const sent = /[\\/]uploads[\\/]([0-9a-f-]{36})[\\/][^\\/]+$/i.exec(String(item?.path || ''));
     if (!sent || !item.data) return '';
     const name = path.basename(String(item.name || '')).replace(/[^\p{L}\p{N}._ -]+/gu, '_') || 'file', data = Buffer.from(item.data, 'base64');
@@ -516,8 +517,8 @@ export class Peers {
     const same = file => { try { return readFileSync(file).equals(data); } catch { return false; } };
     let target = path.join(this.store.media('uploads'), sent[1], name);
     if (existsSync(target) && !same(target)) target = path.join(this.store.media('uploads'), `${sent[1]}-${createHash('sha256').update(data).digest('hex').slice(0, 12)}`, name);
-    if (existsSync(target)) return same(target) ? target : '';
-    try { mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, data, { flag: 'wx' }); return target; } catch { return same(target) ? target : ''; }
+    if (existsSync(target)) { if (same(target)) return target; failed.error = 'a different file is already in its place'; return ''; }
+    try { mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, data, { flag: 'wx' }); return target; } catch (error) { if (same(target)) return target; failed.error = error.code || error.message; return ''; }
   }
   // A room message and its attached files sync as separate rows: before an agent here starts on it, the files that are not here
   // yet are waited for (one shared deadline for all of them), so the agent never starts with the other computer's path only.
@@ -543,8 +544,9 @@ export class Peers {
       if (!/[\\/]uploads[\\/][0-9a-f-]{36}[\\/][^\\/]+$/i.test(file)) return line;
       const item = [chatFileId(file), legacyFileId(file)].map(id => this.store.get('chatfile', id)).find(found => found?.data);
       if (!item) return remote ? `- ${file.split(/[\\/]/).pop()} (this file did not arrive from the other computer; it is not on this one)` : line;
-      const saved = this.saveUpload({ ...item, path: file });
-      return saved ? `- ${saved}` : `${line} (this file came from the other computer but could not be saved on this one)`;
+      // A copy that could not be saved is named only by its file name and the reason: the path may hold other bytes here.
+      const failed = {}, saved = this.saveUpload({ ...item, path: file }, failed);
+      return saved ? `- ${saved}` : `- ${file.split(/[\\/]/).pop()} (this file came from the other computer but could not be saved on this one: ${failed.error || 'unknown error'})`;
     });
   }
   // Screenshots an agent saved as evidence in the chat travel with it too (up to 2 MB each).

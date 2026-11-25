@@ -243,7 +243,9 @@ test('a path that also exists here is used only when its bytes match what arrive
   const blocked = '4e5f6a7b-8c9d-4e0f-9a1b-2c3d4e5f6a7b', other = `F:/x/uploads/${blocked}/gone.txt`;
   writeFileSync(path.join(b.store.media('uploads'), blocked), 'in the way');
   b.store.put('chatfile', chatFileId(other), { id: chatFileId(other), path: other, name: 'gone.txt', size: 5, data: Buffer.from('bytes').toString('base64') });
-  assert.equal(b.desk.peers.localFiles(`- ${other}`), `- ${other} (this file came from the other computer but could not be saved on this one)`);
+  const told = b.desk.peers.localFiles(`- ${other}`);
+  assert.ok(!told.includes(other) && !told.includes(blocked), 'the path is never handed out when no copy was saved');
+  assert.match(told, /^- gone\.txt \(this file came from the other computer but could not be saved on this one: [A-Z]+\)$/);
 });
 
 test('a file in a message from another computer is never taken from a path that exists here while its bytes are still coming', async () => {
