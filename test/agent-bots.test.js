@@ -96,3 +96,10 @@ test('a turn started from a group or another chat cannot make the agent text the
   assert.equal((await agentBots.send('a1', 'ok', 'owner', { runId: 'r2' })).sent, true);
   assert.equal((await agentBots.send('a1', 'from the app', 'owner', { runId: 'r3' })).sent, true);
 });
+
+test('a failing Telegram call shows only a fixed message, never the token or Telegram text', async () => {
+  const { agentBots } = setup();
+  const leaking = new AgentBots({ store: agentBots.store, telegram: {} }, { fetcher: async url => { throw new Error(`fetch failed for ${url}`); } });
+  await assert.rejects(() => leaking.connect('a1', T1), error => /could not be reached/.test(error.message) && !error.message.includes('AAAA'));
+  await assert.rejects(() => agentBots.connect('a1', '999999:CCCCCCCCCCCCCCCCCCCCCCCC'), error => /refused getMe/.test(error.message) && !/Unauthorized|CCCC/.test(error.message));
+});
