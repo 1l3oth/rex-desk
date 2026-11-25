@@ -11,7 +11,7 @@ const ICON = {
 import { pickerHtml } from '/chat-pick.js';
 import { micProblem, openMicrophone, startRecorder, transcribe, wavFrom } from '/recorder.js';
 import { askConfirm } from '/confirm.js';
-import { LIVE_EVERY_MS, livePieces, finalPass } from '/voice-live.js';
+import { LIVE_EVERY_MS, livePieces, finalPass, audioSeconds, looksTruncated } from '/voice-live.js';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
 const MODE_HINT = { bypassPermissions: t('Runs tools without asking'), manual: t('Asks you for each tool, in the chat'), auto: t('A checker decides what is safe'), plan: t('Plans only, runs nothing'), acceptEdits: t('Edits files freely, asks for the rest') };
@@ -473,6 +473,7 @@ async function finishMic(ctx) {
     // instead of re-transcribing the whole recording. On a long dictation this turns a final pass of a minute or more into
     // a few seconds. A recording too short to have committed anything is still heard whole, which is already quick.
     const pass = finalPass(recording);
+    let finalText;
     if (pass.path === 'tail') {
       let tailText;
       try { tailText = String((await hearWords(ctx, wavFrom(pass.tail, recording.rate))).text || '').trim(); }
@@ -480,16 +481,23 @@ async function finishMic(ctx) {
         // Model-not-ready still bubbles up (so the install/online offer runs). Any other failure must not quietly
         // finalize only the committed words and drop the tail: the whole recording is heard instead, so no words are lost.
         if (error.starting || /not installed|\binstall\b/i.test(error.message || '')) throw error;
-        const heard = await hearWords(ctx, recording.wav());
-        liveShow(ctx, live, heard.text, { final: true });
-        return;
+        finalText = String((await hearWords(ctx, recording.wav())).text || '').trim();
       }
-      liveShow(ctx, live, [pass.kept, tailText].filter(Boolean).join(' '), { final: true });
+      if (finalText === undefined) finalText = [pass.kept, tailText].filter(Boolean).join(' ');
     } else {
       // Nothing committed (short recording, or no pause to cut at), so the whole recording is heard.
-      const heard = await hearWords(ctx, recording.wav());
-      liveShow(ctx, live, heard.text, { final: true });
+      finalText = String((await hearWords(ctx, recording.wav())).text || '').trim();
     }
+    // A cold engine can return only the opening words as the final answer: data loss. An answer far too short for the
+    // audio is heard once more (the engine is warm by now); the fuller one wins. If it is still truncated, raise an error
+    // rather than finalize a partial answer, so the person retries instead of silently losing most of what they said.
+    const seconds = audioSeconds(recording);
+    if (looksTruncated(finalText, seconds)) {
+      const retry = String((await hearWords(ctx, recording.wav())).text || '').trim();
+      if (retry.length > finalText.length) finalText = retry;
+      if (looksTruncated(finalText, seconds)) throw Object.assign(new Error(t('The voice model returned only part of what was said. Press the mic and try again in a moment.')), { truncated: true });
+    }
+    liveShow(ctx, live, finalText, { final: true });
   } catch (error) {
     liveShow(ctx, live, live?.said || '');
     clearTimeout(slow);

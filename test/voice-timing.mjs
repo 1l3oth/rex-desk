@@ -16,9 +16,9 @@ import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { livePieces, finalPass, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S } from '../public/voice-live.js';
+import { livePieces, finalPass, audioSeconds, looksTruncated, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S } from '../public/voice-live.js';
 
-export { livePieces, finalPass, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S };
+export { livePieces, finalPass, audioSeconds, looksTruncated, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S };
 
 // Parse a 16-bit PCM mono WAV into { rate, samples: Float32Array in -1..1 }.
 export function parseWav(buffer) {
@@ -98,11 +98,20 @@ export async function runTiming({ chunks, rate, transcribe, now = () => performa
       const finalStart = now();
       // finishMic on stop: the shared finalPass picks the tail-only or the whole-recording pass.
       const pass = finalPass({ rate, chunks, levels, liveFrom, liveKept });
-      const finalText = pass.path === 'tail'
+      let finalText = pass.path === 'tail'
         ? [pass.kept, await hear(pass.from, chunks.length)].filter(Boolean).join(' ')
         : await hear(0, chunks.length);
+      // Same cold-start guard as finishMic: a final answer far too short for the audio is heard once more and the
+      // fuller one kept, so a truncated first answer is never reported as the result.
+      const seconds = audioSeconds({ rate, chunks });
+      let retriedFinal = false;
+      if (looksTruncated(finalText, seconds)) {
+        retriedFinal = true;
+        const retry = await hear(0, chunks.length);
+        if (retry.length > finalText.length) finalText = retry;
+      }
       if (finalText) { shown = finalText; if (!firstWordAt) firstWordAt = now(); }
-      resolve({ finalAt: now(), finalStart, finalText, path: pass.path });
+      resolve({ finalAt: now(), finalStart, finalText, path: pass.path, retriedFinal, truncated: looksTruncated(finalText, seconds) });
     }, 50);
   });
   return {
@@ -111,6 +120,8 @@ export async function runTiming({ chunks, rate, transcribe, now = () => performa
     finalTextMs: Math.round(final.finalAt - (t0 + audioMs)),
     finalPath: final.path,
     committedCuts,
+    retriedFinal: final.retriedFinal,
+    truncated: final.truncated,
     text: shown,
   };
 }
@@ -133,7 +144,7 @@ async function main() {
   const transcribe = async wav => (await voice.transcribe(wav, language)).text || '';
   const out = await runTiming({ chunks, rate, transcribe });
   console.log(JSON.stringify({ wav: path.basename(wavPath), language, ...out }, null, 2));
-  process.stderr.write(`Final pass: ${out.finalPath === 'tail' ? 'tail only (a pause committed live)' : 'whole recording (no pause committed)'}; ${out.committedCuts} live cut(s).\n`);
+  process.stderr.write(`Final pass: ${out.finalPath === 'tail' ? 'tail only (a pause committed live)' : 'whole recording (no pause committed)'}; ${out.committedCuts} live cut(s)${out.retriedFinal ? '; final re-heard once (first answer looked truncated)' : ''}${out.truncated ? '; STILL TRUNCATED after retry' : ''}.\n`);
   voice.stopAll();
 }
 

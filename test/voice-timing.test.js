@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseWav, frame, levelsOf, livePieces, finalPass, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
+import { parseWav, frame, levelsOf, livePieces, finalPass, looksTruncated, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = name => readFileSync(path.join(here, 'fixtures', 'voice', name));
@@ -71,6 +71,34 @@ test('runTiming reports first-word before final-text, with a stub model', async 
   assert.ok(out.audioMs > 2000, 'audioMs reflects the ~2.7s clip');
   assert.equal(out.finalPath, 'whole', 'a short clip commits nothing, so the whole recording is the final pass');
   assert.equal(out.committedCuts, 0);
+});
+
+test('looksTruncated flags a tiny answer for long audio, not slow or short speech', () => {
+  // The real cold-start miss: 5 words for ~12.8s of speech.
+  assert.equal(looksTruncated('Please open the project folder.', 12.8), true);
+  // The full 30-word answer for the same clip is fine.
+  assert.equal(looksTruncated('Please open the project folder, pull the latest changes from the main branch, install the packages, start the development server on a free port, then run the full test suite and report any failures.', 12.8), false);
+  // Short clips are never checked, however few words.
+  assert.equal(looksTruncated('Open the project and run tests.', 2.8), false);
+  // A genuinely slow but present dictation (one word a second) stays above the floor.
+  assert.equal(looksTruncated('one two three four five six seven eight nine ten', 10), false);
+});
+
+test('a truncated cold-start final is heard again and the fuller answer kept, never reported truncated', async () => {
+  // A ~12s clip with a pause so a cut commits (tail path). A cold stub returns only a couple of words for
+  // any piece, and the full sentence only once the whole clip is re-heard (the engine warm by then), which
+  // is exactly what the guard does on a suspiciously short final.
+  const rate = 22050, per = FRAME / rate, make = seconds => Array.from({ length: Math.round(seconds / per) }, () => new Float32Array(FRAME).fill(0.1));
+  const chunks = make(12), gapAt = Math.round(3.5 / per), gap = Math.max(2, Math.ceil(0.5 / per));
+  for (let i = 0; i < gap; i++) chunks[gapAt + i] = new Float32Array(FRAME);
+  const FULL = 'Please open the project folder, pull the latest changes, install the packages, start the server, then run the tests and report back.';
+  const transcribe = async wav => ((wav.length - 44) / 2 / 16000 >= 11 ? FULL : 'ok');
+  let clock = 0; const now = () => (clock += 40);
+  const out = await runTiming({ chunks, rate, transcribe, now, everyMs: 1 });
+  assert.ok(out.committedCuts >= 1, 'the pause commits a live cut (tail path)');
+  assert.equal(out.retriedFinal, true, 'a too-short final is heard once more');
+  assert.equal(out.truncated, false, 'after the retry the answer is no longer truncated');
+  assert.equal(out.text, FULL, 'the fuller answer wins, so no words are lost');
 });
 
 test('runTiming drives the real cut and reports the tail-only pass when a clip has a pause', async () => {

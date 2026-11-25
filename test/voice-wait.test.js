@@ -65,20 +65,34 @@ test('the final pass only re-hears the uncommitted tail, not the whole recording
   // The live loop records where the committed words end on the recording, so the final pass can start from there.
   assert.match(composer, /recording\.liveKept = kept; recording\.liveFrom = from;/, 'each committed cut advances the live cursor on the recording');
   // The path is chosen by the shared finalPass, so the app and the QA harness pick the same one.
-  assert.match(composer, /import \{ LIVE_EVERY_MS, livePieces, finalPass \} from '\/voice-live\.js';/, 'the composer uses the shared cut and final-pass logic');
+  assert.match(composer, /import \{ LIVE_EVERY_MS, livePieces, finalPass, audioSeconds, looksTruncated \} from '\/voice-live\.js';/, 'the composer uses the shared cut, final-pass and truncation logic');
   assert.match(composer, /const pass = finalPass\(recording\);/, 'finishMic asks finalPass which path to take');
   // finalPass hears only the tail after the last cut, and reports the tail-only path when there is audio after it.
   assert.match(voiceLive, /const tail = from > 0 \? recording\.chunks\.slice\(from\) : \[\];/, 'the final pass hears only the tail after the last cut');
   assert.match(voiceLive, /if \(tail\.length\) return \{ path: 'tail'/, 'any non-empty tail is the tail-only pass');
   assert.doesNotMatch(composer, /tailSeconds/, 'the old 300 ms skip is gone');
-  assert.match(composer, /\[pass\.kept, tailText\]\.filter\(Boolean\)\.join\(' '\), \{ final: true \}\)/, 'the committed words and the fresh tail make the final text');
+  assert.match(composer, /finalText = \[pass\.kept, tailText\]\.filter\(Boolean\)\.join\(' '\);/, 'the committed words and the fresh tail make the final text');
+  assert.match(composer, /liveShow\(ctx, live, finalText, \{ final: true \}\);/, 'the final text is shown once, after the truncation guard');
   // A recording that never committed anything is still heard whole.
-  assert.match(composer, /const heard = await hearWords\(ctx, recording\.wav\(\)\);/, 'nothing-committed recordings keep the whole-recording pass');
+  assert.match(composer, /finalText = String\(\(await hearWords\(ctx, recording\.wav\(\)\)\)\.text \|\| ''\)\.trim\(\);/, 'nothing-committed recordings keep the whole-recording pass');
   // Model-not-ready still bubbles so the install/online offer runs.
   assert.ok(composer.includes("if (error.starting || /not installed|\\binstall\\b/i.test(error.message || '')) throw error;"), 'not-ready errors still bubble to the install/online offer');
   // A tail that fails for any other reason never finalizes partial text: the whole recording is heard instead.
-  const tailBlock = composer.slice(composer.indexOf("if (pass.path === 'tail') {"), composer.indexOf('} else {', composer.indexOf("if (pass.path === 'tail') {")));
-  assert.match(tailBlock, /const heard = await hearWords\(ctx, recording\.wav\(\)\);[\s\S]*liveShow\(ctx, live, heard\.text, \{ final: true \}\);[\s\S]*return;/, 'a failed tail falls back to the whole recording, not the committed words alone');
+  const tailBlock = composer.slice(composer.indexOf("if (pass.path === 'tail') {"), composer.indexOf('const seconds = audioSeconds(recording);'));
+  assert.match(tailBlock, /finalText = String\(\(await hearWords\(ctx, recording\.wav\(\)\)\)\.text \|\| ''\)\.trim\(\);/, 'a failed tail falls back to the whole recording, not the committed words alone');
+});
+
+test('a cold-start partial final is never finalized: a too-short answer is re-heard once, then errors rather than finalize partial', () => {
+  const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
+  const voiceLive = readFileSync(new URL('../public/voice-live.js', import.meta.url), 'utf8');
+  // The guard lives in the shared module, so the app and the QA harness judge "too short" the same way.
+  assert.match(voiceLive, /export function looksTruncated\(text, audioSeconds\)/, 'a shared check for a suspiciously short answer');
+  assert.match(voiceLive, /MIN_WORDS_PER_S = 0\.5, MIN_CHECK_S = 8/, 'only long audio is checked, against a floor far below real speech');
+  // finishMic hears the suspect answer once more and keeps the fuller one, then errors if it is still truncated.
+  assert.match(composer, /if \(looksTruncated\(finalText, seconds\)\) \{/, 'a suspiciously short final is caught');
+  assert.match(composer, /const retry = String\(\(await hearWords\(ctx, recording\.wav\(\)\)\)\.text \|\| ''\)\.trim\(\);/, 'it is heard once more (the engine warm by then)');
+  assert.match(composer, /if \(retry\.length > finalText\.length\) finalText = retry;/, 'the fuller answer wins');
+  assert.match(composer, /throw Object\.assign\(new Error\(t\('The voice model returned only part of what was said[^']*'\)\), \{ truncated: true \}\);/, 'still truncated surfaces an error instead of finalizing partial text');
 });
 
 test('microphone errors keep their real name', async () => {

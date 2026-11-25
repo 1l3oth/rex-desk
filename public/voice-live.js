@@ -44,3 +44,19 @@ export function finalPass(recording) {
   if (tail.length) return { path: 'tail', from, kept, tail };
   return { path: 'whole', from: 0, kept: '', tail: recording.chunks };
 }
+
+// Seconds of audio in a recording, from its frame count and sample rate.
+export function audioSeconds(recording) { return recording.chunks.length * FRAME / recording.rate; }
+
+// A cold engine can answer the first final pass with only the opening words (seen once: 5 of 30 words on
+// the first run after a restart). That is data loss, so a final answer that is far too short for the audio
+// is treated as suspect: the caller hears it once more (the engine is warm by then) and keeps the fuller
+// answer, and errors rather than finalizing a partial one. Real dictation runs 2-3 words/s; the floor here
+// (MIN_WORDS_PER_S) is far below that, and only audio past MIN_CHECK_S is checked, so slow or short speech
+// is never flagged, only a clearly cut-off answer.
+export const MIN_WORDS_PER_S = 0.5, MIN_CHECK_S = 8;
+export function looksTruncated(text, audioSeconds) {
+  if (!(audioSeconds >= MIN_CHECK_S)) return false;
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
+  return words < audioSeconds * MIN_WORDS_PER_S;
+}
