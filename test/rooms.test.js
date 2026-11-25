@@ -20,7 +20,7 @@ function setup({ replies = [] } = {}) {
   }
   const store = new Store(temporary('rooms')), turns = [];
   const desk = new Desk(store, { root: temporary('root'), memoryDirectory: temporary('memory'),
-    runnerFactory: options => ({ start: async prompt => { turns.push({ run: options.run, prompt }); options.event('session', { sessionId: SESSION }); const text = replies.shift(); if (text) options.event('agent-text', { text }); }, interrupt() {}, close() {} }) });
+    runnerFactory: options => ({ start: async prompt => { turns.push({ run: options.run, prompt, cwd: options.cwd }); options.event('session', { sessionId: SESSION }); const text = replies.shift(); if (text) options.event('agent-text', { text }); }, interrupt() {}, close() {} }) });
   desk.memory.scan({ roots: [projects] });
   const dara = desk.specialists.create({ name: 'Dara', projectSlug: 'shop', rules: 'Ask before schema changes.' }), vanna = desk.specialists.create({ name: 'Vanna', projectSlug: 'billing' });
   const room = desk.rooms.create('Checkout bug', [dara.id, vanna.id]);
@@ -42,6 +42,18 @@ test('a message reaches only the agents it names, with the room history and the 
   assert.match(asked.prompt, /Morning everyone/);
   assert.match(asked.prompt, /#49760 Cart total is wrong/); assert.ok(!asked.prompt.includes('장바구니'), 'the task is named in English');
   assert.match(asked.prompt, /Ask before schema changes\./);
+});
+
+test('every turn of one room session runs in the same folder, so the start of the prompt stays cached', async () => {
+  const { desk, store, turns, dara, room } = setup({ replies: ['First look.', 'Second look.'] });
+  await desk.rooms.post(room.id, { text: '@dara what is wrong with the cart?' });
+  await waitFor(() => turns.length === 1 && !desk.live.has(turns[0].run.id));
+  await desk.rooms.post(room.id, { text: '@dara and now?' });
+  await waitFor(() => turns.length === 2);
+  const session = store.get('specialist', dara.id).roomRuns[room.id];
+  assert.equal(turns[0].run.id, session); assert.equal(turns[1].run.id, session);
+  assert.ok(turns[0].cwd); assert.equal(turns[1].cwd, turns[0].cwd, 'the second turn runs in the folder of the first');
+  assert.equal(turns[0].cwd, desk.specialists.homeDirectory(dara), 'the room session works from the agent home folder, not the project');
 });
 
 test('what an agent says in its turn is posted to the room, and its session is kept for the next mention', async () => {
