@@ -41,10 +41,10 @@ The installers are **not code-signed yet**. A Certum open-source code signing ce
 
 ### If your antivirus blocks updates
 
-Some antivirus programs (Kaspersky, for example) stop the silent update. The update card then says **did not install** and has an **Open installer folder** button. Either run that installer yourself, or add these to your antivirus exclusions (trusted programs) and press **Try again**:
+Some antivirus programs (Kaspersky, for example) stop the silent update. The update card then says **did not install** and has an **Install manually** button that shows the installer in its folder. Either run that installer yourself, or add these to your antivirus exclusions (trusted programs) and press **Try again**:
 
 - The install folder, usually `%LOCALAPPDATA%\Rex Desk`, including `rex-desk.exe` in it.
-- The updates folder, `updates` inside your Rex Desk data folder (usually `%APPDATA%\Rex Desk\updates`; Settings, Folders shows where yours is). The update helper `install-update.ps1` and the downloaded `Rex-Desk-<version>-setup.exe` run from there.
+- The updates folder, `updates` inside your Rex Desk data folder (usually `%APPDATA%\Rex Desk\updates`; Settings, Folders shows where yours is). The downloaded `Rex-Desk-<version>-setup.exe` runs from there, started by Rex Desk's own `node.exe` in the install folder.
 
 What happened is written to `install-update.log` in the updates folder.
 

@@ -152,10 +152,7 @@ export class Updates {
   // There used to be a PowerShell helper started through Task Scheduler (with Windows Explorer and a .cmd file as the
   // fallback). Kaspersky took that for malware ("PDM:Exploit.Win32.Generic" on node.exe: a script written to disk and run
   // with -ExecutionPolicy Bypass through a scheduled task) and blocked every update on that computer.
-  // When the Rex Desk window is open, it starts the installer (rex-desk.exe is the program the person opened, outside any
-  // job that would end the installer with it). With no window (Rex Desk running in the background), or an older window that
-  // does not know this request, this server starts the installer itself, detached, so it keeps running after this server
-  // ends. Returns who started it.
+  // This server starts the installer itself, detached, so it keeps running after this server ends.
   // One install at a time, from the first request until this server ends: a second press (or the "when it finishes" timer)
   // would share the request files and could start a second installer on the same folder. Only a failed start frees it.
   async install() {
@@ -184,24 +181,8 @@ export class Updates {
     // Remembered for the next start: still on an older version then means the install did not take (see lastInstall).
     const folder = path.dirname(this.executable);
     writeFileSync(path.join(this.directory, 'install-update.json'), JSON.stringify({ version, installer: this.file, app: this.executable, at: new Date().toISOString() }));
-    if (await this.askWindow(folder)) return 'window';
     await this.launch(folder);
     return 'server';
-  }
-  // The window takes a request file (renames it, so only one of them starts the installer) and answers in a result file.
-  async askWindow(folder) {
-    const request = path.join(this.directory, 'install-now.txt'), result = path.join(this.directory, 'install-now.result.txt'), taken = `${request}.taken`;
-    for (const file of [result, taken]) rmSync(file, { force: true });
-    writeFileSync(request, `${this.file}\n${folder}\n`);
-    const wait = this.windowWait ?? 4000, pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-    for (let waited = 0; waited < wait && existsSync(request); waited += 100) await pause(100);
-    if (existsSync(request)) { rmSync(request, { force: true }); this.note('no Rex Desk window took the update, so the server starts the installer'); return false; }
-    // Taken: the window says within a few seconds whether the installer started.
-    for (let waited = 0; waited < 10000 && !existsSync(result); waited += 100) await pause(100);
-    const answer = existsSync(result) ? readFileSync(result, 'utf8').trim() : '';
-    if (answer === 'ok') { this.note('the Rex Desk window started the installer'); return true; }
-    this.note(`the Rex Desk window could not start the installer (${answer || 'no answer'}), so the server tries`);
-    return false;
   }
   // Started detached and outside this server's console, with the command line written as is: NSIS reads /D= only as the
   // last word, unquoted, even when the folder has spaces. Written as is, the installer's own path would lose its quotes and
