@@ -324,3 +324,26 @@ test('a kept message stays saved until the agent takes it in: a failed or cut-of
     assert.equal(store.list('peercmd').filter(item => item.runId === 'r20').length, 1);
   } finally { await close(); }
 });
+
+test('a message from the other computer is queued once when this computer restarts between queueing it and marking it done (L114 review 3)', async () => {
+  const { store, desk, close } = setup();
+  try {
+    store.put('run', 'r21', { id: 'r21', role: 'specialist', provider: 'claude', state: 'finished', createdAt: new Date().toISOString() });
+    const command = { id: 'cmd-21', target: desk.peers.self.id, node: 'work-pc', action: 'chat-say', runId: 'r21', input: { text: 'fix the cart', files: [] }, at: new Date().toISOString(), done: false };
+    store.put('peercmd', command.id, command);
+    // The computer stops right after the message is queued: the write that marks the command done never happens.
+    const put = store.put.bind(store);
+    store.put = (kind, id, value) => { if (kind === 'peercmd' && value?.done) throw new Error('closed'); return put(kind, id, value); };
+    await desk.peers.runCommand(store.get('peercmd', command.id)).catch(() => {});
+    store.put = put;
+    let run = store.get('run', 'r21');
+    assert.equal(run.state, 'queued'); assert.equal(run.followUp, 'fix the cart'); assert.ok(run.sentIds.includes('cmd-21'));
+    assert.equal(store.get('peercmd', command.id).done, false, 'not marked done before the restart');
+    // Opened again: the command runs again, sees its id on the run and is only marked done.
+    desk.peers.running = new Set();
+    await desk.peers.runCommand(store.get('peercmd', command.id));
+    run = store.get('run', 'r21');
+    assert.equal(run.followUp, 'fix the cart'); assert.deepEqual(run.queued || [], [], 'queued once');
+    assert.equal(store.get('peercmd', command.id).done, true); assert.equal(store.get('peercmd', command.id).error, '');
+  } finally { await close(); }
+});

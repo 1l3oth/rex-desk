@@ -308,7 +308,10 @@ export class Peers {
         // The message is already in the shared chat (written on the computer it was typed on): only the agent gets it.
         const echoed = Boolean(command.input?.uid);
         if (command.input?.echo?.uid) this.store.applyChatEvents([{ ...command.input.echo, run_id: run.id, deleted: 0 }]);
-        result = ['starting', 'running', 'queued', 'waiting', 'verifying'].includes(run.state) ? await this.desk.say(run.id, text, { echoed }) : await this.desk.resume(run.id, { prompt: text, silent: echoed });
+        // The command's id goes on the run in the same write that queues the message (L114). When this computer restarted after
+        // that write but before the command was marked done, the id is already there: the command is only marked done now.
+        if (run.sentIds?.includes(command.id)) result = run;
+        else result = ['starting', 'running', 'queued', 'waiting', 'verifying'].includes(run.state) ? await this.desk.say(run.id, text, { echoed, sendId: command.id }) : await this.desk.resume(run.id, { prompt: text, silent: echoed, sendId: command.id });
       }
     } catch (failure) { error = failure.message; }
     // A message that could not be delivered must never just vanish: show it in the chat so the person sees it failed,
