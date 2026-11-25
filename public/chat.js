@@ -1332,7 +1332,7 @@ function connectorsPanel(agent) {
   if (ui.agentBotsFor !== agent.id) { ui.agentBotsFor = agent.id; ui.agentBotDraft = {}; }
   const id = esc(agent.id), draft = ui.agentBotDraft || {};
   const about = `<section class="aps-sec"><h3>${t`What this is`}</h3><p class="cn-note">${t`A connector gives ${esc(agent.name)} its own Telegram bot. People message the bot and ${esc(agent.name)} answers, like a chat in this app.`}</p>
-    <ul class="cn-note cn-steps"><li>${t`Make a bot with @BotFather and paste its token.`}</li><li>${t`Send the pairing code to the bot to make yourself its owner. Only the owner can make it text first.`}</li><li>${t`Allow the bot in groups. It answers there only when someone mentions it.`}</li></ul></section>`;
+    <ul class="cn-note cn-steps"><li>${t`Make a bot with @BotFather and paste its token.`}</li><li>${t`Send the pairing code to the bot to make yourself its owner. The owner chats with it privately.`}</li><li>${t`Allow the bot in groups. Members of an allowed group can mention the bot or reply to its messages.`}</li></ul></section>`;
   const head = `<div class="cn-head"><b>Telegram</b>${bot.connected ? `<span class="cn-state"><span class="dot good"></span>${t`Connected`}</span>` : ''}</div>`;
   if (!bot.connected) {
     return `<div class="side-body aps cn">${about}
