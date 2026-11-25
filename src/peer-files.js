@@ -3,7 +3,7 @@
 // the account's relay (api.rexdesk.dev/v1/relay/peer/<computer>/file), the same way the phone reaches a desk: no Tailscale.
 // Small files are brought over and kept here; a big video is passed straight through to whoever asked, a range at a time, so
 // it starts playing at once instead of waiting for the whole file. When it cannot, why stays here (why), so the chat says it.
-import { constants, copyFileSync, createWriteStream, existsSync, linkSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { constants, copyFileSync, createWriteStream, existsSync, linkSync, mkdirSync, fstatSync, realpathSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { Readable, Transform } from 'node:stream';
@@ -53,6 +53,14 @@ export function servableFile(store, key) {
   try { data = realpathSync.native(store.filesFolder?.() || path.dirname(media)); root = realpathSync.native(media); real = realpathSync.native(file); stat = statSync(real); } catch { return null; }
   if (!within(data, root) || !within(root, real) || !stat.isFile()) return null;
   return { file: real, size: stat.size };
+}
+
+// The file opened for a key is the one inside the data folders: after the open, the key's real path is checked again and the
+// opened handle must be that very file (same volume and file id), so a link or junction swapped in between never redirects it.
+export function openedInside(store, key, fd) {
+  const found = servableFile(store, key); if (!found) return false;
+  const opened = fstatSync(fd, { bigint: true }), inside = statSync(found.file, { bigint: true });
+  return opened.isFile() && opened.ino === inside.ino && opened.dev === inside.dev && opened.ino !== 0n;
 }
 
 export class PeerFiles {

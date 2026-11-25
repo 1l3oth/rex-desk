@@ -33,7 +33,7 @@ import { readyLines } from '../public/voice-phrases.js';
 import { setupPrompt } from './setup-prompt.js';
 import { handleA2aHttp, a2aSettings, setA2a, A2aRelay } from './a2a.js';
 import { PhoneRelay, waitingPage } from './phone-relay.js';
-import { PeerFiles, dataFile, dataKey, servableFile } from './peer-files.js';
+import { PeerFiles, dataFile, dataKey, servableFile, openedInside } from './peer-files.js';
 import { handoffPrompt } from './handoff.js';
 import { cachedTaskImage, cachedTaskMedia } from './images.js';
 import { weeklyReport } from './report.js';
@@ -122,10 +122,14 @@ async function body(request, limit = 2 * 1024 * 1024) {
 const historyLimit = (url, fallback = 500) => Math.min(20000, Math.max(1, Number(url.searchParams.get('limit')) || fallback));
 // The file is opened once and its size read from that open handle; every stream reads through the handle and stops at that
 // size, so a file that grows (or is swapped) after the check never sends more than was checked. max refuses a bigger file (413).
-export function serveFile(request, response, file, { sandbox = false, download = false, cache = 'no-store', frame = false, type: forced = '', max = Infinity } = {}) {
+// verify(fd) checks the opened file itself (peer files: it must be the one inside the data folders), so a link swapped in
+// between a path check and the open never sends anything.
+export function serveFile(request, response, file, { sandbox = false, download = false, cache = 'no-store', frame = false, type: forced = '', max = Infinity, verify = null } = {}) {
   let fd; try { fd = openSync(file, 'r'); } catch (error) { if (error.code === 'EISDIR') return json(response, 404, { error: 'That is a folder, not a file.' }); throw error; }
   let stat; try { stat = fstatSync(fd); } catch (error) { closeSync(fd); throw error; }
   if (!stat.isFile()) { closeSync(fd); return json(response, 404, { error: 'That file is not on this computer.' }); }
+  let trusted = true; if (verify) { try { trusted = Boolean(verify(fd)); } catch { trusted = false; } }
+  if (!trusted) { closeSync(fd); return json(response, 404, { error: 'That file is not on this computer.' }); }
   if (stat.size > max) { closeSync(fd); response.setHeader('X-Rex-File-Size', String(stat.size)); return json(response, 413, { error: 'That file is too large to pass to another computer.', size: stat.size }); }
   const type = forced || mime[path.extname(file).toLowerCase()] || 'application/octet-stream';
   const headers = { 'Content-Type': type, 'Cache-Control': cache, 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff' };
@@ -601,7 +605,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
           // never one over the relay limit: that one is opened on this computer.
           const key = String(url.searchParams.get('key') || ''), found = servableFile(desk.store, key);
           if (!found || desk.storage.gone(key)) return json(response, 404, { error: 'That file is not on this computer.' });
-          return serveFile(request, response, found.file, { cache: 'private, max-age=3600', max: desk.peerFiles.max });
+          return serveFile(request, response, found.file, { cache: 'private, max-age=3600', max: desk.peerFiles.max, verify: fd => openedInside(desk.store, key, fd) });
         }
         if (relayed) {
           const entry = desk.phoneRelay.admit(request);

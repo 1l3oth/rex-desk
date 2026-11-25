@@ -6,7 +6,7 @@ import { Writable } from 'node:stream';
 import { createApp, serveFile } from '../src/server.js';
 import { PhoneRelay } from '../src/phone-relay.js';
 import { relayFrame, readRelayFrame, RELAY_OP } from '../src/phone-relay-frame.js';
-import { PeerFiles, servableFile } from '../src/peer-files.js';
+import { PeerFiles, servableFile, openedInside } from '../src/peer-files.js';
 
 // L112 review: the computer that holds a file must never hand out anything outside its data folders (a link or a Windows
 // junction inside them included) nor a file over the relay limit; the computer that asks must count what arrives instead of
@@ -144,5 +144,27 @@ test('a copy that arrives after a file of the same name was made here never over
     const fresh = asker(dir, async () => new Response('remote', { status: 206, headers: { 'content-range': 'bytes 0-5/6' } }), 1000);
     assert.equal(await fresh.keep(`data/uploads/${RUN}/new.png`), true);
     assert.equal(readFileSync(path.join(path.dirname(file), 'new.png'), 'utf8'), 'remote');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the file opened for another computer is checked itself: a link swapped in after the path check sends nothing (L112 review)', async () => {
+  const dir = tempDir('rex-peer-swap-');
+  try {
+    const data = path.join(dir, 'data'), store = { media: folder => path.join(data, folder), filesFolder: () => data };
+    const folder = path.join(data, 'artifacts', RUN); mkdirSync(folder, { recursive: true }); mkdirSync(path.join(dir, 'outside'));
+    writeFileSync(path.join(folder, 'ok.txt'), 'fine'); writeFileSync(path.join(dir, 'outside', 'secret.txt'), 'not for other computers');
+    const key = `data/artifacts/${RUN}/ok.txt`, verify = fd => openedInside(store, key, fd);
+    const serve = file => new Promise(resolve => {
+      const sent = [], head = {};
+      const sink = new Writable({ write(chunk, _e, next) { sent.push(chunk); next(); }, final(next) { next(); resolve({ ...head, body: Buffer.concat(sent).toString() }); } });
+      sink.writeHead = (status, headers) => Object.assign(head, { status, headers });
+      sink.setHeader = () => {}; const end = sink.end.bind(sink); sink.end = (...args) => { if (typeof args[0] === 'string') { sent.push(Buffer.from(args[0])); return end(); } return end(...args); };
+      serveFile({ headers: {} }, sink, file, { max: 1000, verify });
+    });
+    // The path checked was ok.txt, but the open landed on a file outside (a swap between the check and the open).
+    const swapped = await serve(path.join(dir, 'outside', 'secret.txt'));
+    assert.notEqual(swapped.status, 200); assert.doesNotMatch(swapped.body, /not for other computers/);
+    const fine = await serve(path.join(folder, 'ok.txt'));
+    assert.equal(fine.status, 200); assert.equal(fine.body, 'fine');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
