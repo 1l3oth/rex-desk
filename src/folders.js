@@ -5,7 +5,7 @@
 // A move copies first and switches only after the copy is complete; the old folder stays as a backup the person can delete.
 import { copyFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
-import { constants, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, statfsSync, writeFileSync } from 'node:fs';
+import { constants, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, statSync, statfsSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -114,9 +114,13 @@ export async function followDataMove(dataRoot, { home = os.homedir(), waitForOld
     writeFileSync(pendingFile, JSON.stringify({ ...plan, tries: tries + 1 }));
     await waitForOld();
     const target = checkTarget(dataRoot, plan.to);
-    copying = { target, existed: existsSync(target) };
-    await copyAll(dataRoot, target, source => [PENDING, 'runtime.lock'].includes(path.basename(source)) && path.dirname(source) === dataRoot, progress);
-    await uncompress(target);
+    // The copy is built in a staging folder this move owns, next to the target (same drive). Only that folder is ever removed on a
+    // failure, so files someone adds to the target meanwhile are never touched, and the target path is published only once the copy is whole.
+    copying = path.join(path.dirname(target), `${path.basename(target)}.moving-${process.pid}-${Date.now()}`);
+    await copyAll(dataRoot, copying, source => [PENDING, 'runtime.lock'].includes(path.basename(source)) && path.dirname(source) === dataRoot, progress);
+    await uncompress(copying);
+    if (existsSync(target)) rmdirSync(target); // only an empty folder goes (rmdir refuses one that now holds files, which fails the move)
+    renameSync(copying, target); copying = null;
     writeFileSync(path.join(dataRoot, MOVED), target);
     // The desktop app reads this pointer to find the workspace on its next launch.
     mkdirSync(pointerHome(home), { recursive: true }); writeFileSync(path.join(pointerHome(home), 'data-folder.txt'), target);
@@ -124,10 +128,9 @@ export async function followDataMove(dataRoot, { home = os.homedir(), waitForOld
     log(`Moved Rex Desk data from ${dataRoot} to ${target}. The old folder is kept as a backup.`);
     return target;
   } catch (error) {
-    // A full drive is said in plain words, and the half-made copy is removed so it does not keep the space (the folder was
-    // empty or new before the copy, so only what this move wrote is removed).
+    // A full drive is said in plain words, and the half-made copy is removed so it does not keep the space (only this move's own staging folder is removed).
     const message = error?.code === 'ENOSPC' || /ENOSPC/.test(String(error?.message)) ? `The ${drive(plan.to)} drive ran out of space while moving your data (${mb(freeOn(plan.to))} MB free). Free some space or pick another drive. Your data stays in the old folder.` : error.message;
-    if (copying) { try { if (copying.existed) for (const name of readdirSync(copying.target)) rmSync(path.join(copying.target, name), { recursive: true, force: true }); else rmSync(copying.target, { recursive: true, force: true }); } catch { /* best effort */ } }
+    if (copying) { try { rmSync(copying, { recursive: true, force: true }); } catch { /* best effort */ } }
     writeFileSync(pendingFile.replace(/\.json$/, '.failed.json'), JSON.stringify({ ...plan, error: message }));
     rmSync(pendingFile, { force: true });
     log(`Could not move Rex Desk data: ${message}`);

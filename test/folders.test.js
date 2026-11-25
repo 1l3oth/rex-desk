@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
@@ -132,4 +132,15 @@ test('a data move stops before copying when the new drive has no room, and keeps
   assert.equal(existsSync(to), false, 'nothing was written to the full drive');
   await copyAll(from, to, () => false, () => {}, () => 10 * 2 ** 30);
   assert.equal(readFileSync(path.join(to, 'desk.sqlite'), 'utf8').length, 1000);
+});
+
+test('a failed data move removes only its own staging copy: files added to the target meanwhile stay', async () => {
+  const root = temp(), data = path.join(root, 'data'), to = path.join(root, 'new'); mkdirSync(data); mkdirSync(to);
+  writeFileSync(path.join(data, 'a.txt'), 'a'); writeFileSync(path.join(data, 'b.txt'), 'b');
+  planDataMove(data, to);
+  let calls = 0;
+  const kept = await followDataMove(data, { home: path.join(root, 'home'), progress: () => { if (!calls++) writeFileSync(path.join(to, 'mine.txt'), 'keep me'); else throw new Error('disk went away'); } });
+  assert.equal(kept, data, 'the old folder stays in use');
+  assert.equal(readFileSync(path.join(to, 'mine.txt'), 'utf8'), 'keep me', 'a file added to the target is not deleted');
+  assert.deepEqual(readdirSync(root).filter(name => name.includes('.moving-')), [], 'the staging copy is gone');
 });
