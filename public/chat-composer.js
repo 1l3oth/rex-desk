@@ -10,16 +10,13 @@ const ICON = {
 };
 import { pickerHtml } from '/chat-pick.js';
 import { micProblem, openMicrophone, startRecorder, transcribe, wavFrom } from '/recorder.js';
-const KEY = 'rex-desk-input';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
 const MODE_HINT = { bypassPermissions: t('Runs tools without asking'), manual: t('Asks you for each tool, in the chat'), auto: t('A checker decides what is safe'), plan: t('Plans only, runs nothing'), acceptEdits: t('Edits files freely, asks for the rest') };
 const DEFAULT_MODE = 'auto';
 
-function saved() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } }
-function remember(patch) { try { localStorage.setItem(KEY, JSON.stringify({ ...saved(), ...patch })); } catch { /* private window */ } }
 
-// What the pickers show: the run's own choice when it has one, else what the person last picked, else the defaults.
+// What the pickers show: what was picked in this chat, else the run's own choice, else the defaults (never another chat's pick).
 // The AI a chat runs on: the one picked for it here, else the run's own, else the default in Settings.
 // Local AI is offered as an AI of its own (the models on this computer), though it runs through Claude Code: a chat on
 // a local model shows "Local AI", Claude Code's list shows only Claude's models, and the message goes out as Claude Code.
@@ -40,12 +37,12 @@ function choicesFor(ctx, provider) {
 }
 const sentProvider = provider => (provider === LOCAL ? 'claude' : provider);
 export function currentOptions(ctx) {
-  const { ui } = ctx, run = ui.view.type === 'main' ? ctx.mainRun() : ui.view.type === 'run' ? ctx.runById(ui.view.id) : null, last = saved(), provider = providerOf(ctx, run), choices = choicesFor(ctx, provider);
+  const { ui } = ctx, run = ui.view.type === 'main' ? ctx.mainRun() : ui.view.type === 'run' ? ctx.runById(ui.view.id) : null, provider = providerOf(ctx, run), choices = choicesFor(ctx, provider);
   const configured = ui.snap?.config?.models?.[sentProvider(provider)], mine = ui.composerPick?.[ctx.draftKey()] || {};
   // Only a model that is on the current list is shown and sent; anything else falls back to the first one (the recommended default).
-  const ids = choices.models.filter(item => !item.disabled).map(item => item.id), model = [mine.model, run?.model, last.model, configured].find(value => value && ids.includes(value)) || ids[0] || '';
-  const modeIds = choices.modes.map(item => item.id), wanted = ui.snap?.config?.defaultMode || DEFAULT_MODE, mode = [mine.permissionMode, run?.permissionMode, last.permissionMode, wanted].find(value => value && modeIds.includes(value)) || (modeIds.includes('manual') ? 'manual' : modeIds[0]);
-  const effort = [mine.effort, run?.effort, last.effort, 'medium'].find(value => value && choices.efforts.includes(value)) || choices.efforts[0];
+  const ids = choices.models.filter(item => !item.disabled).map(item => item.id), model = [mine.model, run?.model, configured].find(value => value && ids.includes(value)) || ids[0] || '';
+  const modeIds = choices.modes.map(item => item.id), wanted = ui.snap?.config?.defaultMode || DEFAULT_MODE, mode = [mine.permissionMode, run?.permissionMode, wanted].find(value => value && modeIds.includes(value)) || (modeIds.includes('manual') ? 'manual' : modeIds[0]);
+  const effort = [mine.effort, run?.effort, 'medium'].find(value => value && choices.efforts.includes(value)) || choices.efforts[0];
   return { provider, model, effort, permissionMode: mode };
 }
 export function pickedOptions(ctx) {
@@ -69,7 +66,7 @@ function optionPickers(ctx) {
 }
 // The message box is not redrawn while the chat updates (it would lose what is typed), so a new AI redraws only its pickers.
 function redrawOptionPickers(ctx) {
-  const ids = ['opt-model', 'opt-effort', 'opt-mode'];
+  const ids = ['opt-provider', 'opt-model', 'opt-effort', 'opt-mode'];
   const fresh = document.createElement('div'); fresh.innerHTML = optionPickers(ctx);
   for (const id of ids) { const old = document.querySelector(`.composer [data-pick="${id}"]`), next = fresh.querySelector(`[data-pick="${id}"]`); if (old && next) old.replaceWith(next); }
 }
@@ -633,9 +630,8 @@ export function initComposer(ctx) {
     // The chat keeps what was picked in it, so a redraw (or coming back to it) shows its own choice, not another chat's.
     const field = { 'opt-model': 'model', 'opt-effort': 'effort', 'opt-mode': 'permissionMode' }[event.target.id];
     if (field) { const key = ctx.draftKey(); ctx.ui.composerPick = { ...(ctx.ui.composerPick || {}), [key]: { ...(ctx.ui.composerPick?.[key] || {}), [field]: event.target.value } }; }
-    if (event.target.id === 'opt-model') { remember({ model: event.target.value }); ctx.ui.modelPick = { ...(ctx.ui.modelPick || {}), [ctx.draftKey()]: event.target.value }; }
-    if (event.target.id === 'opt-effort') remember({ effort: event.target.value });
-    if (event.target.id === 'opt-mode') { remember({ permissionMode: event.target.value }); if (event.target.value === 'bypassPermissions') ctx.toast(t('Dangerous: the agent runs tools without asking.')); }
+    if (event.target.id === 'opt-model') { ctx.ui.modelPick = { ...(ctx.ui.modelPick || {}), [ctx.draftKey()]: event.target.value }; }
+    if (event.target.id === 'opt-mode') { if (event.target.value === 'bypassPermissions') ctx.toast(t('Dangerous: the agent runs tools without asking.')); }
   });
   document.addEventListener('keydown', event => {
     if (event.target.id !== 'draft') return;
