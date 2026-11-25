@@ -73,6 +73,7 @@ export class ProjectRules {
       timer = setTimeout(() => { timer = null; try { this.sweep(); } catch { /* the next change tries again */ } }, 1500); timer.unref?.();
     });
     try { this.sweep(); } catch { /* the cloud is not ready yet */ }
+    try { this.recoverSends(); } catch { /* tried at the next start */ }
   }
   // Whether an agent may start a session on this computer: its project is not held on another computer, and its folder is here.
   guard(agent) {
@@ -161,18 +162,42 @@ export class ProjectRules {
   // The person writes to an agent that moves here first (L114). The message is saved and shown at once; the move, which can
   // wait minutes on the other computer and the cloud, runs after it, and the message goes to the agent when the move is done
   // (or to the other computer when the move fails). Messages sent meanwhile wait in order behind the same move, so the agent
-  // moves once and starts once, and none is lost.
+  // moves once and starts once, and none is lost. Each one is kept on this computer (movesend) until it is passed on, so a
+  // Rex Desk that closes during the move passes it on when it opens again (recoverSends), once.
   sendHere(runId, agent, action, input = {}) {
     const store = this.store, text = String((action === 'say' ? input.text : input.prompt) || '').trim();
     if (!text) throw new Error('Write a message first.');
     store.event(runId, 'human-message', { text: keepLines(text), via: input.voice ? 'voice' : 'rex', moving: true }, true);
     const shown = store.db.prepare('SELECT uid, kind, visible, value, created_at FROM events WHERE run_id=? ORDER BY sequence DESC LIMIT 1').get(runId);
-    this.moving ||= new Map();
-    const before = this.moving.get(agent.id) || this.move(agent.id).catch(error => ({ failed: String(error.message || error) }));
-    const after = before.then(() => this.deliver(runId, agent.id, action, input, text, shown)).catch(error => { store.event(runId, 'error', { message: error.message }, true); });
-    this.moving.set(agent.id, after);
-    void after.finally(() => { if (this.moving.get(agent.id) === after) this.moving.delete(agent.id); });
+    const id = randomUUID(), pending = { id, runId, agentId: agent.id, action, input, text, shown: shown ? { ...shown } : null, at: now(), order: Date.now() * 1000 + ((this.sent = ((this.sent || 0) + 1) % 1000)) };
+    store.put('movesend', id, pending);
+    this.queueSend(pending);
     return { queued: true, moving: true };
+  }
+  // One kept message waits behind its agent's move (one move per agent), then goes to the agent. Its record goes in the same
+  // step as it is passed on, so it is passed on once: never again after a restart.
+  queueSend(pending) {
+    const store = this.store, agentId = pending.agentId;
+    this.moving ||= new Map();
+    const agent = store.get('specialist', agentId);
+    const before = this.moving.get(agentId) || (agent && this.desk.peers.isRemote(agent) ? this.move(agentId).catch(error => ({ failed: String(error.message || error) })) : Promise.resolve());
+    const after = before.then(() => {
+      if (!store.get('movesend', pending.id)) return null;
+      store.delete('movesend', pending.id);
+      return this.deliver(pending.runId, agentId, pending.action, pending.input || {}, pending.text, pending.shown);
+    }).catch(error => { store.event(pending.runId, 'error', { message: error.message }, true); });
+    this.moving.set(agentId, after);
+    void after.finally(() => { if (this.moving.get(agentId) === after) this.moving.delete(agentId); });
+    return after;
+  }
+  // Messages kept when Rex Desk closed during a move: passed on now, oldest first, behind a move when the agent is still away.
+  recoverSends() {
+    if (this.recovered) return; this.recovered = true;
+    const waiting = this.store.list('movesend').sort((left, right) => (left.order || 0) - (right.order || 0) || String(left.at).localeCompare(String(right.at)));
+    for (const pending of waiting) {
+      if (!this.store.get('specialist', pending.agentId)) { this.store.delete('movesend', pending.id); continue; }
+      void this.queueSend(pending);
+    }
   }
   // Whether an agent is on its way here (a message to it waits for the move).
   movingHere(agentId) { return Boolean(this.moving?.has(agentId)); }

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
+import { ProjectRules } from '../src/project-rules.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
 // A desk with one project folder on "this computer" and a cloud that only records what it is asked to write.
@@ -205,5 +206,29 @@ test('a chat whose conversation is on another computer shows the message first, 
     assert.deepEqual(shown(), ['fix the cart', 'and the checkout'], 'each message shows once');
     assert.equal(desk.starting.has('r15'), false);
     desk.runnerFactory = runnerFactory;
+  } finally { await close(); }
+});
+
+test('a message kept while an agent moves here is passed on once after Rex Desk closes and opens again mid-move (L114 review)', async () => {
+  const { store, desk, agent, close } = setup();
+  try {
+    desk.peers.statusOf = () => ({ state: 'idle', label: 'Idle' }); desk.peers.online = () => true;
+    agent('mv7', { node: 'work-pc', runId: 'r16' });
+    store.put('run', 'r16', { id: 'r16', role: 'specialist', specialistId: 'mv7', provider: 'claude', state: 'finished', createdAt: new Date().toISOString() });
+    // The move never ends in this "session": Rex Desk closes while it waits.
+    desk.handover.request = () => new Promise(() => {});
+    desk.projectRules.sendHere('r16', store.get('specialist', 'mv7'), 'resume', { prompt: 'fix the cart' });
+    desk.projectRules.sendHere('r16', store.get('specialist', 'mv7'), 'say', { text: 'and the checkout' });
+    assert.equal(store.list('movesend').length, 2, 'both messages are kept on this computer');
+    // Opened again: a fresh ProjectRules (nothing in memory) finds them, moves the agent once and passes each on once.
+    let asked = 0; desk.handover.request = async () => { asked++; return { nothing: true }; };
+    const reopened = new ProjectRules(desk); desk.projectRules = reopened;
+    reopened.recoverSends(); reopened.recoverSends();
+    await reopened.moving.get('mv7');
+    const run = store.get('run', 'r16');
+    assert.equal(asked, 1, 'one move'); assert.equal(store.get('specialist', 'mv7').node, store.nodeId);
+    assert.equal(run.state, 'queued'); assert.equal(run.followUp, 'fix the cart'); assert.deepEqual(run.queued, ['and the checkout']);
+    assert.equal(store.list('movesend').length, 0, 'nothing left to pass on again');
+    assert.deepEqual(store.events('r16', { visible: true, limit: 50 }).filter(event => event.kind === 'human-message').map(event => event.text), ['fix the cart', 'and the checkout'], 'each shows once');
   } finally { await close(); }
 });
