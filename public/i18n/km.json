@@ -2727,5 +2727,7 @@
  "Keep this computer on and awake while you use the phone.": "រក្សាកុំព្យូទ័រនេះឱ្យបើក និងមិនដេក ពេលអ្នកប្រើទូរសព្ទ។",
  "No paid plan? Use Tailscale under Advanced instead.": "មិនមានគម្រោងបង់ប្រាក់? សូមប្រើ Tailscale នៅក្នុងកម្រិតខ្ពស់ជំនួស។",
  "Connected. Open the link below on your phone.": "បានភ្ជាប់។ បើកតំណខាងក្រោមនៅលើទូរសព្ទរបស់អ្នក។",
- "Install manually": "ដំឡើងដោយដៃ"
+ "Install manually": "ដំឡើងដោយដៃ",
+ "Continue with {0}": "បន្តជាមួយ {0}",
+ "{0} is ready on this computer. Carry on with it, or pick another AI.": "{0} រួចរាល់នៅលើកុំព្យូទ័រនេះហើយ។ បន្តជាមួយវា ឬជ្រើស AI ផ្សេង។"
 }

@@ -55,7 +55,10 @@ export function firstRunHtml({ ui, esc }, state) {
       const on = state.ai?.loaded && ready(ui, state, item);
       return `<button type="button" class="fr-card" data-fr-pick="${item.id}"><span class="fr-mark">${aiLogo(item.logo || item.id, 26)}</span><b>${esc(item.label)}</b><small>${on ? `<span class="fr-good">${TICK}${t`Ready on this computer`}</span>` : esc(item.plan)}</small></button>`;
     };
-    body = `<p>${t`Your agents think with the AI plan you already pay for. Which one do you use?`}</p><div class="fr-cards">${AIS.map(card).join('')}</div>
+    // An AI that is already signed in here needs no step: one button carries on with it (the chosen one first).
+    const have = state.ai?.loaded && [AIS.find(item => item.id === ui.snap.config?.provider), ...AIS].find(item => item && ready(ui, state, item));
+    const go = have ? `<div class="fr-actions"><button type="button" class="btn primary" data-fr-pick="${have.id}">${t`Continue with ${have.service}`}</button></div>` : '';
+    body = `<p>${have ? t`${have.service} is ready on this computer. Carry on with it, or pick another AI.` : t`Your agents think with the AI plan you already pay for. Which one do you use?`}</p>${go}<div class="fr-cards">${AIS.map(card).join('')}</div>
       <p class="fr-plans"><button type="button" class="linkish" data-fr-plans>${t`Don't have one? See plans`}</button>${fr.plans ? `<span>${AIS.map(item => `<a href="${item.plans}" target="_blank" rel="noopener">${esc(item.service)}</a>`).join('')}</span>` : ''}</p>`;
   } else if (fr.step === 'signin' && ai.local) {
     const job = setupJob(state), busy = job?.state === 'downloading' || fr.job?.state === 'starting', failed = job?.state === 'failed' || fr.job?.state === 'failed';
