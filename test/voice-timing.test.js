@@ -156,6 +156,33 @@ test('a whole-recording final with a window that times out shows no partial text
   assert.equal(out.text, '', 'no partial text is shown, so nothing incomplete can be sent');
 });
 
+test('the retry shares the one deadline: after a slow first pass it only gets the time left, so it cannot run on', async () => {
+  // One continuous window (no pause), over 8s voiced so the short first answer triggers a retry. The first request
+  // is slow (eats most of the 200ms budget) and comes back short; the retry would finish in 100ms on a fresh budget
+  // but has only the time left, so it is cut and the final stays truncated. A fresh-budget retry would pass instead.
+  const rate = 22050, per = FRAME / rate, count = Math.round(11 / per);
+  const chunks = Array.from({ length: count }, () => new Float32Array(FRAME).fill(0.1)); // continuous: one window
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  let call = 0;
+  const transcribe = async () => { call++; if (call === 1) { await wait(150); return 'two words'; } await wait(100); return 'one two three four five six seven eight nine ten eleven twelve'; };
+  let clock = 0; const now = () => (clock += 5000);
+  const out = await runTiming({ chunks, rate, transcribe, now, everyMs: 10_000_000, budgetMs: 200 });
+  assert.equal(out.truncated, true, 'the retry only had the time left, so it was cut and the short first answer was not rescued');
+  assert.equal(out.text, '', 'nothing partial is shown');
+});
+
+test('a single-window request that stalls is cut at the deadline and the box is cleared', async () => {
+  // A short clip is one request (the single-window path). If that one request stalls, it must still be cut at the
+  // shared deadline and the box cleared, not left waiting forever.
+  const rate = 22050, per = FRAME / rate, count = Math.round(5 / per);
+  const chunks = Array.from({ length: count }, () => new Float32Array(FRAME).fill(0.1)); // continuous: one window
+  const transcribe = () => new Promise(() => {}); // the one request never returns
+  let clock = 0; const now = () => (clock += 5000);
+  const out = await runTiming({ chunks, rate, transcribe, now, everyMs: 10_000_000, budgetMs: 120 });
+  assert.equal(out.truncated, true, 'the stalled single request is cut at the deadline');
+  assert.equal(out.text, '', 'the box is cleared, nothing is left to send');
+});
+
 test('pickFinal keeps a passing retry even when it has fewer characters than the first answer', () => {
   const voiced = 12.8;
   // First answer: two very long "words", so it is truncated by word count yet longer in characters.

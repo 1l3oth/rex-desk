@@ -461,23 +461,26 @@ It is free and works offline, Khmer included, with nothing sent online. One down
 // A windowed final gave up because the machine is too loaded to finish all its requests. Truncated so the box is
 // cleared and nothing partial is sent; the message says the computer is busy, not that the model failed.
 const tooBusy = () => Object.assign(new Error(t('This computer is too busy right now to turn all of your speech into words. Press the mic and try again in a moment.')), { truncated: true });
-// Hear the whole recording in short windows (finalChunks) and join the pieces, failing closed. One request per window
-// keeps each short enough to complete under a fully loaded machine, where a single long request would stop early. The
-// whole series shares one overall budget (WINDOWED_FINAL_BUDGET_MS): each request is raced against the time left, so a
-// slow or stalled last request is cut off at the deadline rather than keeping the box waiting. If any spoken window
-// fails, times out or comes back empty, the whole final fails (tooBusy) and the catch below clears the box: a subset
-// of the phrases is never returned as if it were complete. Used only when the one-shot final looks truncated.
-async function hearInWindows(ctx, recording) {
+// Hear one wav, capped at the time left before `deadline` (the one deadline shared by the whole final pass). A slow or
+// stalled request is cut off at the deadline and surfaces the too-busy error (truncated), which the finishMic catch
+// turns into a cleared box; model-not-ready and install errors still bubble so the setup/online offers can run.
+async function hearWavWithin(ctx, wav, deadline) {
+  const left = deadline - Date.now();
+  if (left <= 0) throw tooBusy(); // the shared budget is already spent
+  try { return String((await withinBudget(hearWords(ctx, wav), left, tooBusy)).text || '').trim(); }
+  catch (error) { if (error.truncated || error.starting || /not installed|\binstall\b/i.test(error.message || '')) throw error; throw tooBusy(); }
+}
+// Hear the whole recording in short windows (finalChunks) and join the pieces, failing closed, within the shared
+// `deadline`. One request per window keeps each short enough to complete under a fully loaded machine, where a single
+// long request would stop early. Every request (the single-window short-clip path included) is raced against the time
+// left before the deadline, so a slow or stalled request is cut off rather than keeping the box waiting. If any spoken
+// window fails, times out or comes back empty, the whole final fails (tooBusy) and the catch clears the box: a subset
+// of the phrases is never returned as if it were complete.
+async function hearInWindows(ctx, recording, deadline) {
   const windows = finalChunks(recording);
-  if (windows.length <= 1) return String((await hearWords(ctx, recording.wav())).text || '').trim();
-  const deadline = Date.now() + WINDOWED_FINAL_BUDGET_MS;
+  if (windows.length <= 1) return hearWavWithin(ctx, recording.wav(), deadline);
   const voicedOf = (from, to) => voicedSeconds({ rate: recording.rate, levels: recording.levels.slice(from, to) });
-  const hearOne = async (from, to) => {
-    const left = deadline - Date.now();
-    if (left <= 0) throw tooBusy(); // no budget left to even start this window
-    try { return (await withinBudget(hearWords(ctx, wavFrom(recording.chunks.slice(from, to), recording.rate)), left, tooBusy)).text; }
-    catch (error) { if (error.truncated || error.starting || /not installed|\binstall\b/i.test(error.message || '')) throw error; throw tooBusy(); }
-  };
+  const hearOne = (from, to) => hearWavWithin(ctx, wavFrom(recording.chunks.slice(from, to), recording.rate), deadline);
   try { return await joinWindows(windows, voicedOf, hearOne); }
   catch (error) { throw error.busy ? tooBusy() : error; }
 }
@@ -496,15 +499,18 @@ async function finishMic(ctx) {
     // instead of re-transcribing the whole recording. On a long dictation this turns a final pass of a minute or more into
     // a few seconds. A recording too short to have committed anything is still heard whole, which is already quick.
     const pass = finalPass(recording);
+    // One deadline for the WHOLE final pass: the tail hearing, the whole-recording windows, the single-window short clip
+    // and the retry below all share it, so the total can never pass WINDOWED_FINAL_BUDGET_MS, even across a retry.
+    const deadline = Date.now() + WINDOWED_FINAL_BUDGET_MS;
     let finalText;
     if (pass.path === 'tail') {
       let tailText;
-      try { tailText = String((await hearWords(ctx, wavFrom(pass.tail, recording.rate))).text || '').trim(); }
+      try { tailText = await hearWavWithin(ctx, wavFrom(pass.tail, recording.rate), deadline); }
       catch (error) {
         // Model-not-ready still bubbles up (so the install/online offer runs). Any other failure must not quietly
         // finalize only the committed words and drop the tail: the whole recording is heard instead, so no words are lost.
         if (error.starting || /not installed|\binstall\b/i.test(error.message || '')) throw error;
-        finalText = await hearInWindows(ctx, recording);
+        finalText = await hearInWindows(ctx, recording, deadline);
       }
       if (finalText === undefined) finalText = [pass.kept, tailText].filter(Boolean).join(' ');
     } else {
@@ -513,7 +519,7 @@ async function finishMic(ctx) {
       // recording can take a minute or two and be cut off by the request timeout, leaving only the opening words.
       // hearInWindows sends one short request per window (each completes in a handful of seconds even under load) and
       // joins them, so the whole text comes back, just slower. A short recording is still one request inside hearInWindows.
-      finalText = await hearInWindows(ctx, recording);
+      finalText = await hearInWindows(ctx, recording, deadline);
     }
     // Last guard against a cold engine's cut-off answer, measured against how much was actually spoken
     // (voicedSeconds), never the whole recording, so a short phrase inside a long silence is never suspected. If
@@ -525,7 +531,7 @@ async function finishMic(ctx) {
     const voiced = voicedSeconds(recording);
     if (looksTruncated(finalText, voiced)) {
       let retry = '';
-      try { retry = await hearInWindows(ctx, recording); }
+      try { retry = await hearInWindows(ctx, recording, deadline); } // the SAME deadline: the retry only gets the time left
       catch (error) { if (error.starting || /not installed|\binstall\b/i.test(error.message || '')) throw error; }
       finalText = pickFinal(finalText, retry, voiced);
       if (looksTruncated(finalText, voiced)) throw Object.assign(new Error(t('The voice model returned only part of what was said. Press the mic and try again in a moment.')), { truncated: true });

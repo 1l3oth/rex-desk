@@ -73,13 +73,13 @@ test('the final pass only re-hears the uncommitted tail, not the whole recording
   assert.doesNotMatch(composer, /tailSeconds/, 'the old 300 ms skip is gone');
   assert.match(composer, /finalText = \[pass\.kept, tailText\]\.filter\(Boolean\)\.join\(' '\);/, 'the committed words and the fresh tail make the final text');
   assert.match(composer, /liveShow\(ctx, live, finalText, \{ final: true \}\);/, 'the final text is shown once, after the truncation guard');
-  // A recording that never committed anything is heard whole, in short windows.
-  assert.match(composer, /finalText = await hearInWindows\(ctx, recording\);/, 'nothing-committed recordings hear the whole recording in windows');
+  // A recording that never committed anything is heard whole, in short windows, within the shared deadline.
+  assert.match(composer, /finalText = await hearInWindows\(ctx, recording, deadline\);/, 'nothing-committed recordings hear the whole recording in windows');
   // Model-not-ready still bubbles so the install/online offer runs.
   assert.ok(composer.includes("if (error.starting || /not installed|\\binstall\\b/i.test(error.message || '')) throw error;"), 'not-ready errors still bubble to the install/online offer');
   // A tail that fails for any other reason never finalizes partial text: the whole recording is heard instead.
-  const tailBlock = composer.slice(composer.indexOf("if (pass.path === 'tail') {"), composer.indexOf('const seconds = audioSeconds(recording);'));
-  assert.match(tailBlock, /finalText = await hearInWindows\(ctx, recording\);/, 'a failed tail falls back to the whole recording (in windows), not the committed words alone');
+  const tailBlock = composer.slice(composer.indexOf("if (pass.path === 'tail') {"), composer.indexOf('const voiced = voicedSeconds(recording);'));
+  assert.match(tailBlock, /finalText = await hearInWindows\(ctx, recording, deadline\);/, 'a failed tail falls back to the whole recording (in windows), not the committed words alone');
 });
 
 test('the whole-recording final is heard in short windows, and a still-truncated final errors without saving partial text', () => {
@@ -91,11 +91,11 @@ test('the whole-recording final is heard in short windows, and a still-truncated
   assert.match(voiceLive, /export function voicedSeconds\(recording\)/, 'voiced speech time ignores leading, trailing and in-between silence');
   assert.match(voiceLive, /MIN_WORDS_PER_S = 0\.5, MIN_CHARS_PER_S = 1\.5, MIN_CHECK_S = 8/, 'word and character floors far below real speech, only long voiced spans checked');
   // hearInWindows sends one short request per window, each short enough to complete under load; a short clip stays one request.
-  assert.match(composer, /async function hearInWindows\(ctx, recording\) \{/, 'the whole recording is heard in short windows');
+  assert.match(composer, /async function hearInWindows\(ctx, recording, deadline\) \{/, 'the whole recording is heard in short windows, within the shared deadline');
   assert.match(composer, /const windows = finalChunks\(recording\);/, 'the windows come from the shared finalChunks');
-  assert.match(composer, /if \(windows\.length <= 1\) return String\(\(await hearWords\(ctx, recording\.wav\(\)\)\)\.text \|\| ''\)\.trim\(\);/, 'a short recording is still one request');
-  assert.match(composer, /wavFrom\(recording\.chunks\.slice\(from, to\), recording\.rate\)/, 'each window is sent as its own short request');
-  // Fail closed: the windows are joined by the shared joinWindows, which skips near-silent windows and fails the whole
+  assert.match(composer, /if \(windows\.length <= 1\) return hearWavWithin\(ctx, recording\.wav\(\), deadline\);/, 'a short recording is still one request, and it goes through the shared deadline too');
+  assert.match(composer, /wavFrom\(recording\.chunks\.slice\(from, to\), recording\.rate\), deadline\)/, 'each window is sent as its own short request, within the deadline');
+  // Fail closed: the windows are joined by the shared joinWindows, which skips only a no-speech window and fails the whole
   // final if a spoken window comes back empty, so a subset of the phrases is never returned as if it were complete.
   assert.match(voiceLive, /export async function joinWindows\(windows, voicedOf, hearOne\)/, 'the shared fail-closed window join');
   assert.match(voiceLive, /if \(voicedOf\(from, to\) <= 0\) continue;/, 'only a window with no speech at all is skipped, so a short word is never dropped');
@@ -104,15 +104,19 @@ test('the whole-recording final is heard in short windows, and a still-truncated
   assert.match(voiceLive, /export function withinBudget\(promise, msLeft, expired\)/, 'a shared race that cuts an in-flight request at the time left');
   assert.match(composer, /return await joinWindows\(windows, voicedOf, hearOne\);/, 'the composer joins the windows fail-closed');
   assert.match(composer, /const tooBusy = \(\) => Object\.assign\(new Error\(t\('This computer is too busy[^']*'\)\), \{ truncated: true \}\);/, 'the failure says the computer is too busy and clears the box');
-  assert.match(composer, /await withinBudget\(hearWords\(ctx, wavFrom\(recording\.chunks\.slice\(from, to\), recording\.rate\)\), left, tooBusy\)/, 'each in-flight window request is raced against the time left in the budget, so a stalled one is cut off');
+  // One deadline for the whole final pass, computed once and threaded through the tail, the windows, the single clip and the retry.
+  assert.match(composer, /async function hearWavWithin\(ctx, wav, deadline\) \{/, 'one helper hears a wav within the shared deadline');
+  assert.match(composer, /await withinBudget\(hearWords\(ctx, wav\), left, tooBusy\)/, 'the in-flight request is raced against the time left in the budget, so a stalled one is cut off');
+  assert.match(composer, /const deadline = Date\.now\(\) \+ WINDOWED_FINAL_BUDGET_MS;/, 'the deadline is computed once when the final pass starts');
+  assert.match(composer, /retry = await hearInWindows\(ctx, recording, deadline\);/, 'the retry shares the same deadline, so it only gets the time left');
   // The whole-recording final uses the windows directly, not one long request.
   const wholeBlock = composer.slice(composer.indexOf('} else {', composer.indexOf("if (pass.path === 'tail')")), composer.indexOf('const voiced = voicedSeconds(recording);'));
-  assert.match(wholeBlock, /finalText = await hearInWindows\(ctx, recording\);/, 'the whole pass is heard in windows, never one long request');
+  assert.match(wholeBlock, /finalText = await hearInWindows\(ctx, recording, deadline\);/, 'the whole pass is heard in windows, never one long request');
   // A suspiciously short final is re-heard once and the fuller kept; it is discarded only if it is STILL far too short
   // for a long voiced span, so a complete or short transcript is never cleared, only a genuinely cut-off one.
   assert.match(composer, /const voiced = voicedSeconds\(recording\);/, 'the check is against voiced speech time, not the whole recording');
   assert.match(composer, /if \(looksTruncated\(finalText, voiced\)\) \{/, 'a short-looking answer enters the re-hear path');
-  assert.match(composer, /retry = await hearInWindows\(ctx, recording\);/, 'the suspect answer is re-heard once, the engine warm by now');
+  assert.match(composer, /retry = await hearInWindows\(ctx, recording, deadline\);/, 'the suspect answer is re-heard once, the engine warm by now, sharing the same deadline');
   assert.match(composer, /finalText = pickFinal\(finalText, retry, voiced\);/, 'pickFinal keeps the candidate that passes the guard, not merely the longer string');
   assert.match(composer, /if \(looksTruncated\(finalText, voiced\)\) throw Object\.assign\(new Error\(t\('The voice model returned only part of what was said[^']*'\)\), \{ truncated: true \}\);/, 'only a still-too-short answer surfaces an error instead of finalizing it');
   assert.match(composer, /liveShow\(ctx, live, ''\);/, 'any failed final pass clears the box so partial dictation is never left to send');

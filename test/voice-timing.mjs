@@ -105,30 +105,28 @@ export async function runTiming({ chunks, rate, transcribe, now = () => performa
       // request that timed out or failed under load) fails the whole final, so a subset is never joined as if it
       // were complete. A throw here means no usable final, mirrored as empty text (the app clears the box).
       const busyError = () => Object.assign(new Error('too busy'), { busy: true });
+      // One deadline for the WHOLE final pass: the tail hearing, the windows, the single-window clip and the retry
+      // all share it, so the total can never pass budgetMs even across the retry. Each request is raced against it.
+      const deadline = Date.now() + budgetMs;
+      const hearWithin = (from, to) => { const left = deadline - Date.now(); return left <= 0 ? Promise.reject(busyError()) : withinBudget(hear(from, to), left, busyError); };
       const hearWindowed = async () => {
         const windows = finalChunks({ rate, chunks, levels });
-        if (windows.length <= 1) return hear(0, chunks.length);
+        if (windows.length <= 1) return hearWithin(0, chunks.length);
         const voicedOf = (from, to) => voicedSeconds({ rate, levels: levels.slice(from, to) });
-        const deadline = Date.now() + budgetMs; // the whole series shares one real-time budget
-        const hearOne = (from, to) => {
-          const left = deadline - Date.now();
-          if (left <= 0) return Promise.reject(busyError());
-          return withinBudget(hear(from, to), left, busyError); // a stalled request is cut at the remaining time
-        };
-        return joinWindows(windows, voicedOf, hearOne);
+        return joinWindows(windows, voicedOf, hearWithin);
       };
-      let finalText;
+      let finalText, failed = false;
       try {
         finalText = pass.path === 'tail'
-          ? [pass.kept, await hear(pass.from, chunks.length)].filter(Boolean).join(' ')
+          ? [pass.kept, await hearWithin(pass.from, chunks.length)].filter(Boolean).join(' ')
           : await hearWindowed();
-      } catch { finalText = ''; }
+      } catch { finalText = ''; failed = true; }
       // Judged against voiced speech time, not the whole recording. A suspiciously short answer is re-heard once
-      // and pickFinal keeps whichever passes the guard (or the fuller by its measure); it is discarded (cleared)
-      // only if the chosen answer is STILL far too short for a long voiced span.
+      // (sharing the same deadline) and pickFinal keeps whichever passes the guard (or the fuller by its measure); a
+      // first pass that failed/stalled is not retried, it is already discarded. A discarded final shows as empty.
       const voiced = voicedSeconds({ rate, chunks, levels });
-      if (looksTruncated(finalText, voiced)) { let retry = ''; try { retry = await hearWindowed(); } catch { retry = ''; } finalText = pickFinal(finalText, retry, voiced); }
-      const truncated = looksTruncated(finalText, voiced);
+      if (!failed && looksTruncated(finalText, voiced)) { let retry = ''; try { retry = await hearWindowed(); } catch { retry = ''; } finalText = pickFinal(finalText, retry, voiced); }
+      const truncated = failed || looksTruncated(finalText, voiced);
       // The final pass is authoritative: report it, never stale live text, so a discarded answer shows as empty.
       shown = truncated ? '' : finalText; if (shown && !firstWordAt) firstWordAt = now();
       resolve({ finalAt: now(), finalStart, finalText: shown, path: pass.path, windowedFinal: pass.path === 'whole', truncated });
