@@ -5,6 +5,27 @@ import path from 'node:path';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { Voice } from '../src/voice.js';
 
+test('when the free on-computer voice is not set up, the mic offers to set it up here (no silent wait, no "go to Settings" dead end)', () => {
+  const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
+  // The mic asks to set up the free on-computer voice and starts the download itself, rather than only pointing at Settings.
+  assert.match(composer, /async function offerInstallVoice\(ctx\)/);
+  assert.match(composer, /ctx\.api\('\/voice\/install', \{ method: 'POST' \}\)/, 'the mic starts the install itself');
+  assert.match(composer, /if \(\/not installed\|\\binstall\\b\/i\.test\(error\.message\) && await offerInstallVoice\(ctx\)\) return;/, 'a not-installed error offers the free setup before anything else');
+  // The download does not block dictation: it watches in the background and tells the person when it is ready.
+  assert.match(composer, /function watchInstallVoice\(ctx\)/);
+  assert.match(composer, /Voice on this computer is ready/);
+  assert.doesNotMatch(composer, /Voice is not installed yet\. Install it in Settings/, 'the old Settings-only dead end is gone');
+});
+
+test('the Voice dialog says plainly that browser dictation sends voice to the browser maker, and the chosen engine is used in the app', () => {
+  const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
+  // Browser speech recognition is tried before the chosen engine (the free live path on phones), so the dialog must be
+  // explicit that, in a browser, the audio goes to the browser's own speech service, not to the picked engine.
+  assert.match(composer, /browserSpeech !== 'no' \? `<p class="muted small">/, 'the note shows only when browser speech is actually in use');
+  assert.match(composer, /sends your voice to the browser maker/, 'the dialog names where browser audio goes');
+  assert.match(composer, /The engine you pick above is used in the Rex Desk app/, 'the dialog says the chosen engine wins in the app');
+});
+
 test('a voice model that is still loading answers "still starting" quickly and keeps loading, with no engine log', async () => {
   const voice = new Voice(mkdtempSync(path.join(process.env.REX_TEST_TMP || os.tmpdir(), 'voice-wait-')));
   let loaded; const loading = new Promise(resolve => { loaded = resolve; });

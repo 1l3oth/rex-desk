@@ -437,6 +437,35 @@ Use ${name} instead? It turns speech into words online in a moment, and your voi
   finally { liveWaiting(live, false); }
   return true;
 }
+// The on-computer voice is the free route: it runs offline, costs nothing, and handles Khmer, with no key and no per-use
+// limit (online free tiers cannot: they cap requests too low for live, second-by-second pieces). It needs one download the
+// first time, so when it is not set up the mic offers to set it up right here, with progress, instead of a silent wait or a
+// "go to Settings". The download runs in the background; the person keeps working and is told when it is ready.
+let voiceWatch = null;
+function watchInstallVoice(ctx) {
+  if (voiceWatch) return;
+  voiceWatch = setInterval(async () => {
+    let info; try { info = await ctx.api('/voice/engines'); } catch { return; }
+    if (info?.available?.local) { clearInterval(voiceWatch); voiceWatch = null; ctx.toast(t('Voice on this computer is ready. Press the mic and speak.')); }
+    else if (info?.local && !info.local.installing && info.local.error) { clearInterval(voiceWatch); voiceWatch = null; ctx.toast(t`Voice setup did not finish: ${info.local.error}`, true); }
+  }, 3000);
+}
+async function offerInstallVoice(ctx) {
+  let info; try { info = await ctx.api('/voice/engines'); } catch { return false; }
+  if (info?.available?.local || info?.local?.supported === false) return false; // already set up, or not a platform it runs on
+  if (!info?.local?.installing) {
+    const yes = await askConfirm(
+      t`Set up voice on this computer?
+
+It is free and works offline, Khmer included, with nothing sent online. One download of about ${info?.local?.downloadMB || 1900} MB, once. You can keep working while it downloads.`,
+      { ok: t('Set up voice') });
+    if (!yes) return false;
+    try { await ctx.api('/voice/install', { method: 'POST' }); } catch (error) { ctx.toast(t`Could not start the voice setup: ${error.message}`, true); return true; }
+  }
+  ctx.toast(t('Setting up voice on this computer (free). Keep working; I will tell you when it is ready.'));
+  watchInstallVoice(ctx);
+  return true;
+}
 async function finishMic(ctx) {
   const recording = listening; if (!recording) return;
   // The browser's recognition puts the words in the box itself when it ends.
@@ -452,8 +481,11 @@ async function finishMic(ctx) {
   } catch (error) {
     liveShow(ctx, live, live?.said || '');
     clearTimeout(slow);
+    // The free on-computer voice is not set up yet: offer to set it up here. If they would rather use an online voice they
+    // already connected, that is offered next. Never a silent wait, never a "go to Settings".
+    if (/not installed|\binstall\b/i.test(error.message) && await offerInstallVoice(ctx)) return;
     if (await offerOnlineVoice(ctx, error, recording, live)) return;
-    ctx.toast(/not installed|install/i.test(error.message) ? t('Voice is not installed yet. Install it in Settings → Jev and voice, or connect an online voice there.') : t`Voice input: ${error.message}`, true);
+    ctx.toast(/not installed|install/i.test(error.message) ? t('Set up voice on this computer from the mic menu → Voice, or connect an online voice there.') : t`Voice input: ${error.message}`, true);
   } finally { clearTimeout(slow); liveWaiting(live, false); transcribing = false; micButton()?.classList.remove('busy'); }
 }
 async function toggleMic(ctx) {
@@ -776,6 +808,7 @@ async function voiceDialog(ctx) {
       <div class="vlang"><span>${t`I speak`}</span>${pickerHtml(ctx, { id: 'v-language', label: t('I speak'), compact: true, value: language, items: LANG.map(([value, label]) => ({ value, label })) })}</div>
       <details class="vguide"><summary>${t`How to set up voice`}</summary><ol>${(VOICE_GUIDE[language] || VOICE_GUIDE.en).map(step => `<li>${esc(step)}</li>`).join('')}</ol></details>
       <fieldset class="vengines"><legend>${t`Turn speech into text with`}</legend>${Object.entries(ENGINE).map(([key, [label, hint]]) => `<label class="${info.available[key] ? '' : 'off'}"><input type="radio" name="engine" value="${key}" ${info.engine === key ? 'checked' : ''} ${info.available[key] ? '' : 'disabled'}><span><b>${label}</b><small>${info.available[key] && !(key === 'local' && info.local?.starting?.length) ? hint : key === 'local' ? localHint() : key === 'gemini' ? t('Needs your OpenRouter key: Settings → Jev and voice.') : t('Paste a key below to use it.')}</small></span></label>`).join('')}</fieldset>
+      ${browserSpeech !== 'no' ? `<p class="muted small">${t`In a phone or web browser, dictation first uses the browser's own speech recognition, which sends your voice to the browser maker (for example Google in Chrome). The engine you pick above is used in the Rex Desk app, or when the browser has none.`}</p>` : ''}
       <label>${t`ElevenLabs API key`}<span class="vkey"><input type="password" data-v-key autocomplete="off" spellcheck="false" placeholder="${info.available.elevenlabs ? t('Saved. Paste a new key to replace it.') : t('From elevenlabs.io → Profile → API keys')}"><button type="button" class="btn small" data-v-savekey>${t`Save key`}</button>${info.available.elevenlabs ? `<button type="button" class="btn small quiet danger" data-v-dropkey>${t`Remove`}</button>` : ''}</span></label>
       <section class="vcompare"><h3>${t`Which one understands you?`}</h3><p class="muted small">${t`Press Record, say one sentence, then Stop. It goes through every engine that is ready, so you can pick the best. Online engines receive this recording.`}</p>
         <button type="button" class="btn ${recording ? 'danger' : 'primary'}" data-v-record ${busy ? 'disabled' : ''}>${recording ? t('Stop') : busy ? t('Comparing…') : t('Record a sentence')}</button>
