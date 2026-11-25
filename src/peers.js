@@ -531,13 +531,17 @@ export class Peers {
     return this.localFiles(text).replace(/^- (.+)$/gm, (line, named) => late.has(named.trim()) ? `${line} (this file did not arrive from the other computer)` : line);
   }
   // What an agent here reads names this computer's copy of each attached file, not the path on the computer it was attached on.
+  // A path that also exists here is used only when its bytes are the ones that arrived (saveUpload compares them); a file that
+  // arrived but could not be saved here is said so, never left as the other computer's path. A file with no copy in the shared
+  // database is one attached here, or one not arrived yet (arrivedFiles says so), and stays as it is.
   localFiles(text) {
     return String(text ?? '').replace(/^- (.+)$/gm, (line, named) => {
       const file = named.trim();
-      if (!/[\\/]uploads[\\/][0-9a-f-]{36}[\\/][^\\/]+$/i.test(file) || existsSync(file)) return line;
+      if (!/[\\/]uploads[\\/][0-9a-f-]{36}[\\/][^\\/]+$/i.test(file)) return line;
       const item = [chatFileId(file), legacyFileId(file)].map(id => this.store.get('chatfile', id)).find(found => found?.data);
-      const saved = item ? this.saveUpload({ ...item, path: file }) : '';
-      return saved ? `- ${saved}` : line;
+      if (!item) return line;
+      const saved = this.saveUpload({ ...item, path: file });
+      return saved ? `- ${saved}` : `${line} (this file came from the other computer but could not be saved on this one)`;
     });
   }
   // Screenshots an agent saved as evidence in the chat travel with it too (up to 2 MB each).

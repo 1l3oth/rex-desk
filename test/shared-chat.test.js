@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
+import { chatFileId } from '../src/peers.js';
 
 // One account on two computers, with a pretend cloud that holds rex_chat and the shared records (docs/design/cross-device-chat.md).
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-chat-${label}-`));
@@ -228,6 +229,21 @@ test('a different file already under the same upload name is never given out as 
   assert.notEqual(saved, mine); assert.equal(readFileSync(saved, 'utf8'), 'their file'); assert.equal(readFileSync(mine, 'utf8'), 'my own file', 'mine is untouched');
   assert.equal(b.desk.peers.saveUpload(item), saved, 'asking again finds the same copy');
   assert.equal(b.desk.peers.saveUpload({ ...item, data: Buffer.from('my own file').toString('base64') }), mine, 'the same bytes use the file already here');
+});
+
+test('a path that also exists here is used only when its bytes match what arrived, and a copy that cannot be saved is said so (L27)', () => {
+  const { b } = account();
+  const folder = '3d4e5f6a-7b8c-4d9e-8f0a-1b2c3d4e5f6a', here = path.join(b.store.media('uploads'), folder, 'same.txt');
+  mkdirSync(path.dirname(here), { recursive: true }); writeFileSync(here, 'an older file here');
+  b.store.put('chatfile', chatFileId(here), { id: chatFileId(here), path: here, name: 'same.txt', size: 5, data: Buffer.from('fresh').toString('base64') });
+  const given = b.desk.peers.localFiles(`- ${here}`).slice(2);
+  assert.notEqual(given, here, 'the same path with other bytes is not trusted');
+  assert.equal(readFileSync(given, 'utf8'), 'fresh'); assert.equal(readFileSync(here, 'utf8'), 'an older file here');
+  // The folder cannot be made here (a file is in its way): the agent is told, not given the other computer's path as if it were fine.
+  const blocked = '4e5f6a7b-8c9d-4e0f-9a1b-2c3d4e5f6a7b', other = `F:/x/uploads/${blocked}/gone.txt`;
+  writeFileSync(path.join(b.store.media('uploads'), blocked), 'in the way');
+  b.store.put('chatfile', chatFileId(other), { id: chatFileId(other), path: other, name: 'gone.txt', size: 5, data: Buffer.from('bytes').toString('base64') });
+  assert.equal(b.desk.peers.localFiles(`- ${other}`), `- ${other} (this file came from the other computer but could not be saved on this one)`);
 });
 
 test('an agent waits for a file attached on the other computer before it starts, and is told when one never came (L27)', async () => {
