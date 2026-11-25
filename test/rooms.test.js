@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store, now } from '../src/store.js';
 import { Desk } from '../src/coordinator.js';
-import { WRAP_UP_HOPS, ackOnly } from '../src/rooms.js';
+import { WRAP_UP_HOPS, ackOnly, withoutStudyTip } from '../src/rooms.js';
 import { mainLooks } from '../src/runners.js';
 
 const temporary = label => mkdtempSync(path.join(os.tmpdir(), `rex-desk-${label}-`));
@@ -727,4 +727,16 @@ test('a reply that only acknowledges wakes no other agent, a request still does'
   await new Promise(resolve => setTimeout(resolve, 1200));
   const ack = desk.rooms.messages(room.id).find(item => item.from.id === dara.id);
   assert.deepEqual(ack.to, ['you']); assert.ok(!turns.some(item => item.run.specialistId === vanna.id), 'Vanna was not woken by an acknowledgement');
+});
+
+test('a Korean study tip block never goes into a room reply', async () => {
+  const reply = 'Holding. Nothing pushed.\n\n```\nKOREAN TIP   3 days to 2026-11-28\n\n꼭   without fail\n```';
+  assert.equal(withoutStudyTip(reply), 'Holding. Nothing pushed.');
+  assert.equal(withoutStudyTip('Done.\n\nKOREAN TIP   4 days\n간단하다   to be simple'), 'Done.');
+  assert.equal(withoutStudyTip('No tip here.'), 'No tip here.');
+  const { desk, dara, room } = setup({ replies: [`The total is wrong after tax.\n\n\`\`\`\nKOREAN TIP   3 days to 2026-11-28\n\n꼭   without fail\n\`\`\``] });
+  await desk.rooms.post(room.id, { text: '@dara what is wrong with the cart?' });
+  await waitFor(() => desk.rooms.messages(room.id).some(item => item.from.id === dara.id));
+  const said = desk.rooms.messages(room.id).find(item => item.from.id === dara.id);
+  assert.equal(said.text, 'The total is wrong after tax.');
 });

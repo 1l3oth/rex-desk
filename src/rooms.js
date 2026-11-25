@@ -15,6 +15,8 @@ export function ackOnly(text) {
   const plain = String(text || '').replace(/```[\s\S]*?```/g, ' ').replace(/(?<![\p{L}\p{N}_])@[\p{L}\p{N}_.-]+/gu, ' ').replace(/\s+/g, ' ').trim();
   return plain.length <= 200 && ACK.test(plain) && !ASKS.test(plain);
 }
+// English only on Rex Desk: a study tip block an agent appends to its reply (KOREAN TIP ...) never goes into a room.
+export const withoutStudyTip = text => String(text || '').replace(/\n*```[^\n]*\n\s*KOREAN TIP[\s\S]*?```/gi, '').replace(/\n*^KOREAN TIP\b[\s\S]*$/im, '').trim();
 
 const awayRules = away => `The person is away${away.until ? ` until ${away.until}` : ' until they come back'}${away.goal ? `. Goal: ${away.goal}` : ''}. Keep the work going with the other agents: @mention whoever should take the next step, and do not wait for the person or ask them questions. Make reasonable, low-risk choices yourself and say what you chose. Anything that cannot be undone or is risky (pushing or merging, deleting data, production, money, secrets, messages to other people) waits: write it under "Waiting for you" instead of doing it. Finish your turn with what you did and who is next.`;
 export const HUMAN = 'you';
@@ -175,7 +177,7 @@ export class Rooms {
     return { deleted: true };
   }
   async post(roomId, { fromAgentId = '', text, replyTo = '', to, system = false, instruction = '' } = {}) {
-    let room = this.room(roomId); const body = String(text || '').trim().slice(0, 8000);
+    let room = this.room(roomId); const body = (fromAgentId ? withoutStudyTip(text) : String(text || '').trim()).slice(0, 8000);
     if (!body) throw new Error('Write a message first.');
     if (fromAgentId && !room.members.includes(fromAgentId)) throw new Error('This agent is not in that room.');
     let targets = to === undefined ? this.mentionsIn(room, body) : this.resolveTargets(room, to);
