@@ -4,6 +4,9 @@ import { t } from './i18n.js';
 import { avatarHtml } from '/chat-rooms.js';
 import { phoneAskHtml, ICON as DEVICE_ICON } from '/chat-devices.js';
 
+// A flat paper-plane for Telegram rows, drawn in the neutral icon disc (no gradient, no colour badge).
+const TG_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>';
+
 const GROUPS = () => [['time', t('Newest')], ['agent', t('Agent')], ['project', t('Project')]];
 const saved = () => { try { return localStorage.getItem('rex-ny-group') || 'time'; } catch { return 'time'; } };
 const plain = text => String(text || '').replace(/mcp__[a-z0-9_]+?__/gi, '');
@@ -28,7 +31,7 @@ function simple(item) {
 // The row in the list on the left.
 function listRow(ctx, entry, selected) {
   const { esc } = ctx, { who, item } = entry;
-  return `<button type="button" class="ny-item${selected ? ' on' : ''}${entry.unread ? ' unread' : ''}" data-ny-pick="${esc(item.id)}" aria-current="${selected}">${entry.phone ? `<span class="av sm ny-device" aria-hidden="true">${DEVICE_ICON.phone}</span>` : avatarHtml(ctx, { name: who.name, agent: who.agent || null, size: 'sm' })}<span class="ny-item-body"><span class="ny-item-top"><b>${esc(who.name)}</b><span class="ny-when"><time datetime="${esc(entry.at)}">${esc(ago(entry.at))}</time>${entry.unread ? '<i class="ny-dot" aria-hidden="true"></i>' : ''}</span></span>${entry.sub ? `<span class="ny-item-sub">${esc(entry.sub)}</span>` : ''}<span class="ny-item-q">${esc(entry.text)}</span></span></button>`;
+  return `<button type="button" class="ny-item${selected ? ' on' : ''}${entry.unread ? ' unread' : ''}" data-ny-pick="${esc(item.id)}" aria-current="${selected}">${entry.tg ? `<span class="av sm icon" aria-hidden="true">${TG_ICON}</span>` : entry.phone ? `<span class="av sm ny-device" aria-hidden="true">${DEVICE_ICON.phone}</span>` : avatarHtml(ctx, { name: who.name, agent: who.agent || null, size: 'sm' })}<span class="ny-item-body"><span class="ny-item-top"><b>${esc(who.name)}</b><span class="ny-when"><time datetime="${esc(entry.at)}">${esc(ago(entry.at))}</time>${entry.unread ? '<i class="ny-dot" aria-hidden="true"></i>' : ''}</span></span>${entry.sub ? `<span class="ny-item-sub">${esc(entry.sub)}</span>` : ''}<span class="ny-item-q">${esc(entry.text)}</span></span></button>`;
 }
 
 // The open question on the right: who asks, the full question, then the answer.
