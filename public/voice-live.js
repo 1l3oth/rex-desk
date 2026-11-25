@@ -86,6 +86,24 @@ export function finalChunks(recording, maxChunks = Math.floor(LIVE_PIECE_S * rec
   return windows;
 }
 
+// Join the short windows of a whole-recording final pass, failing closed. A window with less than QUIET_WINDOW_S
+// of voiced speech is a pause (or trailing silence) and is skipped, nothing to transcribe. Every other window is
+// heard by hearOne(from, to); if any spoken window comes back empty, or hearOne rejects (a request that timed out
+// or failed under load), the WHOLE final fails with a { busy } error. A subset of the phrases is never returned
+// as if it were the complete transcript, which the length guard cannot catch (a partial can read as plausible).
+// voicedOf(from, to) gives the voiced seconds of that slice; windows are [from, to) chunk-index pairs.
+export const QUIET_WINDOW_S = 0.3;
+export async function joinWindows(windows, voicedOf, hearOne) {
+  const parts = [];
+  for (const [from, to] of windows) {
+    if (voicedOf(from, to) < QUIET_WINDOW_S) continue; // a near-silent window: a pause between phrases, nothing to hear
+    const text = String(await hearOne(from, to) || '').trim();
+    if (!text) throw Object.assign(new Error('a spoken window came back empty'), { busy: true }); // never join a subset
+    parts.push(text);
+  }
+  return parts.join(' ').trim();
+}
+
 // Seconds of audio that were actually voiced: the frames at or above the speech floor. Leading, trailing and
 // in-between silence do not count, so a short phrase spoken inside a long silence is measured by how much was
 // said, not by the wall-clock length of the recording.

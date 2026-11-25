@@ -16,9 +16,9 @@ import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { livePieces, finalPass, finalChunks, audioSeconds, voicedSeconds, looksTruncated, pickFinal, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S } from '../public/voice-live.js';
+import { livePieces, finalPass, finalChunks, audioSeconds, voicedSeconds, looksTruncated, pickFinal, joinWindows, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S } from '../public/voice-live.js';
 
-export { livePieces, finalPass, finalChunks, audioSeconds, voicedSeconds, looksTruncated, pickFinal, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S };
+export { livePieces, finalPass, finalChunks, audioSeconds, voicedSeconds, looksTruncated, pickFinal, joinWindows, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S };
 
 // Parse a 16-bit PCM mono WAV into { rate, samples: Float32Array in -1..1 }.
 export function parseWav(buffer) {
@@ -101,21 +101,26 @@ export async function runTiming({ chunks, rate, transcribe, now = () => performa
       // long request stays correct but turns very slow and can be cut off by the request timeout; each short window
       // completes in a few seconds. Pause-free audio has no safe cut, so it stays one request (slower, never split).
       const pass = finalPass({ rate, chunks, levels, liveFrom, liveKept });
+      // The whole pass joins its windows failing closed (joinWindows): a spoken window that comes back empty (a
+      // request that timed out or failed under load) fails the whole final, so a subset is never joined as if it
+      // were complete. A throw here means no usable final, mirrored as empty text (the app clears the box).
       const hearWindowed = async () => {
         const windows = finalChunks({ rate, chunks, levels });
         if (windows.length <= 1) return hear(0, chunks.length);
-        const parts = [];
-        for (const [from, to] of windows) parts.push(await hear(from, to));
-        return parts.filter(Boolean).join(' ');
+        const voicedOf = (from, to) => voicedSeconds({ rate, levels: levels.slice(from, to) });
+        return joinWindows(windows, voicedOf, (from, to) => hear(from, to));
       };
-      let finalText = pass.path === 'tail'
-        ? [pass.kept, await hear(pass.from, chunks.length)].filter(Boolean).join(' ')
-        : await hearWindowed();
+      let finalText;
+      try {
+        finalText = pass.path === 'tail'
+          ? [pass.kept, await hear(pass.from, chunks.length)].filter(Boolean).join(' ')
+          : await hearWindowed();
+      } catch { finalText = ''; }
       // Judged against voiced speech time, not the whole recording. A suspiciously short answer is re-heard once
       // and pickFinal keeps whichever passes the guard (or the fuller by its measure); it is discarded (cleared)
       // only if the chosen answer is STILL far too short for a long voiced span.
       const voiced = voicedSeconds({ rate, chunks, levels });
-      if (looksTruncated(finalText, voiced)) finalText = pickFinal(finalText, await hearWindowed(), voiced);
+      if (looksTruncated(finalText, voiced)) { let retry = ''; try { retry = await hearWindowed(); } catch { retry = ''; } finalText = pickFinal(finalText, retry, voiced); }
       const truncated = looksTruncated(finalText, voiced);
       // The final pass is authoritative: report it, never stale live text, so a discarded answer shows as empty.
       shown = truncated ? '' : finalText; if (shown && !firstWordAt) firstWordAt = now();

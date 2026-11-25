@@ -11,7 +11,7 @@ const ICON = {
 import { pickerHtml } from '/chat-pick.js';
 import { micProblem, openMicrophone, startRecorder, transcribe, wavFrom } from '/recorder.js';
 import { askConfirm } from '/confirm.js';
-import { LIVE_EVERY_MS, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal } from '/voice-live.js';
+import { LIVE_EVERY_MS, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal, joinWindows } from '/voice-live.js';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
 const MODE_HINT = { bypassPermissions: t('Runs tools without asking'), manual: t('Asks you for each tool, in the chat'), auto: t('A checker decides what is safe'), plan: t('Plans only, runs nothing'), acceptEdits: t('Edits files freely, asks for the rest') };
@@ -458,15 +458,29 @@ It is free and works offline, Khmer included, with nothing sent online. One down
   watchInstallVoice(ctx);
   return true;
 }
-// Hear the whole recording in short windows (finalChunks) and join the pieces. One request per window keeps each short
-// enough to complete under a fully loaded machine, where a single long request would stop early; it is slower (more
-// requests) but loses no words. Used only when the one-shot final looks truncated, so the normal fast path is untouched.
+// The whole windowed final, run window by window in series, is given one overall budget longer than a single
+// request's engine timeout (voice.js aborts one request at 120s), so several short requests in a row are allowed
+// but a machine so busy it cannot finish them all gives up and shows the error instead of waiting forever.
+const WINDOWED_FINAL_BUDGET_MS = 180000;
+// A windowed final gave up because the machine is too loaded to finish all its requests. Truncated so the box is
+// cleared and nothing partial is sent; the message says the computer is busy, not that the model failed.
+const tooBusy = () => Object.assign(new Error(t('This computer is too busy right now to turn all of your speech into words. Press the mic and try again in a moment.')), { truncated: true });
+// Hear the whole recording in short windows (finalChunks) and join the pieces, failing closed. One request per window
+// keeps each short enough to complete under a fully loaded machine, where a single long request would stop early. If
+// any spoken window fails, times out or comes back empty, the whole final fails (tooBusy): a subset of the phrases is
+// never returned as if it were complete. Used only when the one-shot final looks truncated, so the fast path is untouched.
 async function hearInWindows(ctx, recording) {
   const windows = finalChunks(recording);
   if (windows.length <= 1) return String((await hearWords(ctx, recording.wav())).text || '').trim();
-  const parts = [];
-  for (const [from, to] of windows) parts.push(String((await hearWords(ctx, wavFrom(recording.chunks.slice(from, to), recording.rate))).text || '').trim());
-  return parts.filter(Boolean).join(' ');
+  const deadline = Date.now() + WINDOWED_FINAL_BUDGET_MS;
+  const voicedOf = (from, to) => voicedSeconds({ rate: recording.rate, levels: recording.levels.slice(from, to) });
+  const hearOne = async (from, to) => {
+    if (Date.now() > deadline) throw tooBusy(); // the series ran past its overall budget
+    try { return (await hearWords(ctx, wavFrom(recording.chunks.slice(from, to), recording.rate))).text; }
+    catch (error) { if (error.starting || /not installed|\binstall\b/i.test(error.message || '')) throw error; throw tooBusy(); }
+  };
+  try { return await joinWindows(windows, voicedOf, hearOne); }
+  catch (error) { throw error.busy ? tooBusy() : error; }
 }
 async function finishMic(ctx) {
   const recording = listening; if (!recording) return;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseWav, frame, levelsOf, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
+import { parseWav, frame, levelsOf, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal, joinWindows, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = name => readFileSync(path.join(here, 'fixtures', 'voice', name));
@@ -91,6 +91,38 @@ test('looksTruncated judges a space-less script (Khmer) by characters, so a comp
   assert.equal(looksTruncated(complete, 12.8), false, 'a full Khmer transcript is not a single truncated word');
   // A genuinely cut-off Khmer answer (a few opening characters) is still caught.
   assert.equal(looksTruncated('សូមបើក', 12.8), true, 'only the opening characters for a long span is truncated');
+});
+
+test('joinWindows fails closed: if a spoken window times out the whole final fails, no partial text is joined', async () => {
+  const windows = [[0, 10], [10, 20], [20, 30], [30, 40], [40, 50]]; // five phrase windows
+  const voicedOf = () => 1; // every window has a full second of speech
+  // Windows 4 and 5 time out under load: hear returns empty for them (a failed request reads as empty here).
+  const hearOne = async (from) => (from < 30 ? `phrase at ${from}` : '');
+  await assert.rejects(joinWindows(windows, voicedOf, hearOne), error => error.busy === true, 'the whole final fails rather than join the three phrases that came back');
+});
+
+test('joinWindows skips near-silent windows (pauses) and joins only the spoken ones', async () => {
+  const windows = [[0, 10], [10, 20], [20, 30]];
+  const voicedOf = (from) => (from === 10 ? 0.1 : 1); // the middle window is a long pause, below QUIET_WINDOW_S
+  const hearOne = async (from) => `w${from}`;
+  assert.equal(await joinWindows(windows, voicedOf, hearOne), 'w0 w20', 'the pause window is skipped, the spoken ones joined, no empty-window failure');
+});
+
+test('a whole-recording final with a window that times out shows no partial text and reports truncated', async () => {
+  // Reproduces the load case: five phrases with pauses, so the whole pass windows into five. The engine returns the
+  // first three phrases then times out on the last two (empty). The final must come back empty + truncated, not the
+  // three phrases joined as if complete. everyMs is huge so the live loop never commits: this is the whole path.
+  const rate = 22050, per = FRAME / rate, count = Math.round(16 / per);
+  const chunks = Array.from({ length: count }, () => new Float32Array(FRAME).fill(0.1));
+  const need = Math.max(2, Math.ceil(0.5 / per));
+  for (const at of [3, 5.5, 8, 10.5]) { const i0 = Math.round(at / per); for (let i = 0; i < need; i++) chunks[i0 + i] = new Float32Array(FRAME); } // four pauses -> five windows
+  let call = 0;
+  const transcribe = async () => { call++; if (call > 3) throw new Error('timed out'); return 'first open the project folder'; }; // windows 4,5 time out
+  let clock = 0; const now = () => (clock += 40);
+  const out = await runTiming({ chunks, rate, transcribe, now, everyMs: 10_000_000 });
+  assert.equal(out.finalPath, 'whole', 'the live loop never committed, so this is the whole-recording pass');
+  assert.equal(out.truncated, true, 'a lost window makes the whole final fail');
+  assert.equal(out.text, '', 'no partial text is shown, so nothing incomplete can be sent');
 });
 
 test('pickFinal keeps a passing retry even when it has fewer characters than the first answer', () => {
