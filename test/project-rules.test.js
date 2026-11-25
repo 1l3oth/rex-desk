@@ -258,3 +258,30 @@ test('a failed fresh start keeps the first message in front of the ones that wai
     desk.runnerFactory = runnerFactory;
   } finally { await close(); }
 });
+
+test('Rex Desk that closes during a fresh start keeps the whole batch saved, and the retry after it starts the agent with it once (L114 review 2)', async () => {
+  const { store, desk, close } = setup();
+  try {
+    store.put('run', 'r18', { id: 'r18', role: 'specialist', provider: 'claude', state: 'finished', sessionId: '2f3a8d71-d78d-409a-9a84-91fb162c1be6', queued: ['fix the cart', 'and the checkout'], freshRetry: true, createdAt: new Date().toISOString() });
+    const runnerFactory = desk.runnerFactory; desk.runnerFactory = null;
+    // The retry's fresh start never ends in this "session": Rex Desk closes while it runs.
+    const fresh = desk.freshStart.bind(desk); desk.freshStart = () => new Promise(() => {});
+    await desk.resume('r18', { prompt: 'and the total' });
+    let run = store.get('run', 'r18');
+    assert.deepEqual(run.freshBatch, ['fix the cart\nand the checkout\nand the total'], 'the batch is saved on the run while the fresh start runs');
+    assert.deepEqual(run.queued, []); assert.equal(run.freshRetry, undefined);
+    // Opened again: nothing in memory says a fresh start runs, and the saved batch goes back in front, ready for a retry.
+    desk.starting = new Set();
+    desk.keepFreshBatches(); desk.keepFreshBatches();
+    run = store.get('run', 'r18');
+    assert.deepEqual(run.queued, ['fix the cart\nand the checkout\nand the total'], 'kept once'); assert.equal(run.freshRetry, true); assert.equal(run.freshBatch, undefined);
+    assert.match(store.events('r18', { visible: true, limit: 50 }).filter(event => event.kind === 'error').at(-1).message, /closed while this agent was starting fresh/);
+    desk.freshStart = fresh;
+    await desk.resume('r18', { prompt: '' });
+    for (let tries = 0; tries < 100 && store.get('run', 'r18').state !== 'queued'; tries++) await new Promise(resolve => setTimeout(resolve, 20));
+    run = store.get('run', 'r18');
+    assert.equal(run.state, 'queued'); assert.equal(run.followUp, 'fix the cart\nand the checkout\nand the total', 'the whole batch, once');
+    assert.deepEqual(run.queued, []); assert.equal(run.freshBatch, undefined, 'cleared with the write that queued the agent');
+    desk.runnerFactory = runnerFactory;
+  } finally { await close(); }
+});

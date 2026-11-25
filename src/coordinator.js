@@ -565,6 +565,15 @@ export class Desk {
     // A scheduled message that was in flight when Rex Desk stopped, in a turn nobody follows now, was never confirmed taken:
     // it goes back to due (lost), so the schedule sends it again. One in a turn followed again stays with that turn.
     for (const item of this.store.list('delivery').filter(entry => entry.state === 'turn' && !this.live.has(entry.runId))) this.setDelivery(item.id, { state: 'lost' });
+    this.keepFreshBatches();
+  }
+  // Rex Desk closed during a fresh start (L114): its saved messages go back in front of the queue, ready for a retry with the
+  // next send or Resume, exactly as when the fresh start fails. Nothing is lost and nothing starts twice.
+  keepFreshBatches() {
+    for (const run of this.store.list('run').filter(item => item.freshBatch?.length && !this.starting?.has(item.id))) {
+      this.store.put('run', run.id, { ...run, queued: [...run.freshBatch, ...(run.queued || [])], freshBatch: undefined, freshRetry: true });
+      this.store.event(run.id, 'error', { message: 'Rex Desk closed while this agent was starting fresh. Your messages are kept: send again or press Resume to retry.' }, true);
+    }
   }
   authorize(scope, runId, { coordinator = false } = {}) {
     if (!scope) throw new Error('Sign in first.');
@@ -1943,21 +1952,25 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     // The message shows at once and the fresh start runs after it (L114); a message sent meanwhile waits behind it.
     const starting = this.starting?.has(runId);
     // A fresh start that failed kept its messages (first one first): the next send, or Resume, takes them all in one turn.
+    // They move from the queue to the saved batch in one write, so a Rex Desk that closes during the retry still has them.
     if (run.freshRetry && !starting) {
       if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: hideTelegramTag(keepLines(prompt)), via: 'rex' }, true);
       prompt = [...(run.queued || []), String(prompt).trim()].filter(Boolean).join('\n'); silent = true;
-      this.patchRun(runId, { queued: [], freshRetry: undefined }); run = this.run(runId);
+      this.patchRun(runId, { queued: [], freshRetry: undefined, freshBatch: [prompt] }); run = this.run(runId);
     }
     if (starting || (run.provider === 'claude' && provider === 'claude' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && !this.runnerFactory && !conversationHere(run.sessionId))) {
       if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: hideTelegramTag(keepLines(prompt)), via: 'rex', ...(starting ? { queued: true } : {}) }, true);
       if (starting) { if (String(prompt).trim()) this.patchRun(runId, { queued: [...(this.run(runId).queued || []), String(prompt).trim()] }); return this.run(runId); }
       (this.starting ||= new Set()).add(runId);
+      // The message waits on the run itself (freshBatch) until the agent is queued with it, not only in memory: a Rex Desk that
+      // closes during the fresh start keeps it for a retry (keepFreshBatches).
+      if (!run.freshBatch && String(prompt).trim()) this.patchRun(runId, { freshBatch: [String(prompt).trim()] });
       void this.freshStart(runId, { reason: 'because its earlier conversation is on another computer', notice: 'This conversation started on another computer, so it continues here in a fresh session that first reads a handoff of this chat.' })
         .then(() => { this.starting.delete(runId); return this.resume(runId, { prompt, targetBranch, execution, silent: true, roomTurn, greeting, telegram, ...picked }); })
         .catch(error => {
           // Nothing is dropped: the first message goes back in front of the ones that waited, ready for a retry.
           this.starting.delete(runId);
-          const current = this.store.get('run', runId); if (current) this.store.put('run', runId, { ...current, queued: [String(prompt).trim(), ...(current.queued || [])].filter(Boolean), freshRetry: true });
+          const current = this.store.get('run', runId); if (current) this.store.put('run', runId, { ...current, queued: [...(current.freshBatch || [String(prompt).trim()]), ...(current.queued || [])].filter(Boolean), freshBatch: undefined, freshRetry: true });
           this.store.event(runId, 'error', { message: `${error.message} Your messages are kept: send again or press Resume to retry.` }, true);
         });
       return this.run(runId);
@@ -1971,11 +1984,13 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     // The follow-up is part of the conversation: it shows in the chat the moment it is sent.
     if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: hideTelegramTag(keepLines(prompt)), via: 'rex', ...(greeting ? { greeting: true } : {}) }, true);
     // After /clear the next message starts a fresh session that reads the handoff; the message itself goes in as it is.
+    // The saved fresh-start batch is this prompt: it leaves the run in the same write that queues the agent with it.
+    const batchDone = run.freshBatch ? { freshBatch: undefined } : {};
     if (run.handoffFile && !run.sessionId) {
-      this.patchRun(runId, { modelFallback: undefined, replyTo: telegram || undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), execution: 'headless' });
+      this.patchRun(runId, { ...batchDone, modelFallback: undefined, replyTo: telegram || undefined, state: 'queued', provider, followUp: skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null), ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}), endedAt: null, ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), execution: 'headless' });
       void this.drain(); return this.run(runId);
     }
-    this.patchRun(runId, { modelFallback: undefined, replyTo: telegram || undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', cardModel: undefined, modelPicked: undefined, profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}),
+    this.patchRun(runId, { ...batchDone, modelFallback: undefined, replyTo: telegram || undefined, state: 'queued', provider, followUp: sameProvider ? skillCall(String(prompt).trim(), String(prompt).trim().startsWith('/') ? this.slashTools(run) : null) : '', sessionId: sameProvider ? run.sessionId : undefined, ...(!sameProvider ? { model: '', cardModel: undefined, modelPicked: undefined, profile: '', permissionMode: modesFor(provider).some(item => item.id === run.permissionMode) ? run.permissionMode : '' } : {}),
       ...(roomTurn !== undefined ? { roomTurn, roomPosted: false } : {}),
       instructions: run.role === 'specialist' ? `${run.instructions || ''}${carried}` : `${run.instructions || ''}${carried}\nContinue from the recorded work and evidence. ${prompt}`, targetBranch: targetBranch || run.targetBranch, endedAt: null,
       ...runOptions({ ...picked, provider }, this.store), ...(picked.model ? { modelPicked: true } : {}), ...(run.role === 'coordinator' && !roomTurn ? { prompt: `${run.prompt || ''}${carried}\n${prompt}`.trim() } : {}), execution: 'headless' });
