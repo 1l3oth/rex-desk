@@ -2444,6 +2444,7 @@ html[data-theme=light] .page.agp{--g-bg:color-mix(in srgb,var(--panel) 80%,#fff)
 .agp-time{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
 .agp input[type=time],.agp-formrow select{height:26px;padding:0 8px;border:1px solid var(--g-line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px}
 .agp input[type=time]:focus,.agp-formrow select:focus{outline:0;border-color:var(--accent)}
+html[data-theme=dark] :is(.agp .pick2-btn,.agp-text,.agp input[type=time],.agp-formrow select){background:color-mix(in srgb,var(--ink) 7%,transparent)}
 .agp .agp-rc .pick2,.agp .agp-rc [class*="pick"]>button{font-size:12.5px}
 .agp-form{display:flex;flex-direction:column;gap:8px;margin:0}
 .agp-formrow{display:flex;align-items:center;gap:6px}.agp-grow{flex:1}
