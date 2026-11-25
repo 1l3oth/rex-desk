@@ -2724,7 +2724,7 @@
  "Send the pairing code to the bot to make yourself its owner. The owner chats with it privately.": "ផ្ញើកូដផ្គូផ្គងទៅបូត ដើម្បីធ្វើជាម្ចាស់របស់វា។ ម្ចាស់ជជែកជាមួយវាជាឯកជន។",
  "Allow the bot in groups. Members of an allowed group can mention the bot or reply to its messages.": "អនុញ្ញាតបូតក្នុងក្រុម។ សមាជិកនៃក្រុមដែលបានអនុញ្ញាតអាចនិយាយដល់បូត ឬឆ្លើយតបសាររបស់វា។",
  "Allow in groups": "អនុញ្ញាតក្នុងក្រុម",
- "The bot works only in groups you allow, and only when someone mentions it. Add it to a group, then allow it here.": "បូតធ្វើការតែក្នុងក្រុមដែលអ្នកអនុញ្ញាត ហើយតែពេលមានគេនិយាយដល់វាប៉ុណ្ណោះ។ បន្ថែមវាទៅក្រុម រួចអនុញ្ញាតវានៅទីនេះ។",
+ "The bot works only in groups you allow, and only when someone mentions it or replies to its messages. Add it to a group, then allow it here.": "បូតធ្វើការតែក្នុងក្រុមដែលអ្នកអនុញ្ញាត ហើយតែពេលមានគេនិយាយដល់វា ឬឆ្លើយតបសាររបស់វាប៉ុណ្ណោះ។ បន្ថែមវាទៅក្រុម រួចអនុញ្ញាតវានៅទីនេះ។",
  "Bot": "បូត",
  "Paste the bot token first.": "សូមបិទភ្ជាប់តូខឹនបូតជាមុនសិន។",
  "Bot connected.": "បានតភ្ជាប់បូត។",
