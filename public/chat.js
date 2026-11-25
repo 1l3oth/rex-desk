@@ -1320,13 +1320,22 @@ function connectorsPanel(agent) {
     if (!ui.agentBotsLoading?.[agent.id]) { ui.agentBotsLoading = { ...(ui.agentBotsLoading || {}), [agent.id]: true }; void api(`/agents/${encodeURIComponent(agent.id)}/telegram`).then(status => { ui.agentBots = { ...(ui.agentBots || {}), [agent.id]: status }; }, () => { ui.agentBots = { ...(ui.agentBots || {}), [agent.id]: { connected: false } }; }).finally(() => { delete ui.agentBotsLoading[agent.id]; renderAll(); }); }
     return `<div class="side-body aps"><p class="muted">${t`Loading…`}</p></div>`;
   }
+  // Keep the status fresh while this tab is open (pairing and group requests arrive from Telegram, not from a click).
+  if (!ui.agentBotsTimer) ui.agentBotsTimer = setInterval(() => {
+    if (ui.chatTab !== 'connectors' || document.hidden) { clearInterval(ui.agentBotsTimer); ui.agentBotsTimer = null; return; }
+    const open = ui.agentBotsFor; if (!open) return;
+    void api(`/agents/${encodeURIComponent(open)}/telegram`).then(status => { if (JSON.stringify(status) !== JSON.stringify(ui.agentBots?.[open])) { ui.agentBots = { ...(ui.agentBots || {}), [open]: status }; if (!document.activeElement?.matches?.('[data-ab-token],[data-bb-token]')) renderAll(); } }, () => {});
+    if (ui.bugBot) void api('/bugbot').then(status => { if (JSON.stringify(status) !== JSON.stringify(ui.bugBot)) { ui.bugBot = status; if (!document.activeElement?.matches?.('[data-ab-token],[data-bb-token]')) renderAll(); } }, () => {});
+  }, 4000);
+  // A token typed for one agent is never shown in another agent's form.
+  if (ui.agentBotsFor !== agent.id) { ui.agentBotsFor = agent.id; ui.agentBotDraft = {}; }
   const id = esc(agent.id), draft = ui.agentBotDraft || {};
   const head = `<div class="cn-head"><b>Telegram</b>${bot.connected ? `<span class="cn-state"><span class="dot good"></span>${t`Connected`}</span>` : ''}</div>`;
   if (!bot.connected) {
     return `<div class="side-body aps cn">
       <section class="aps-sec">${head}<p class="cn-note">${t`Give ${esc(agent.name)} its own Telegram bot, so people can talk to it there. Make one with @BotFather and paste its token here.`}</p>
-        <input class="cn-input" data-ab-token type="password" autocomplete="off" spellcheck="false" placeholder="123456:ABC-..." value="${esc(draft.token || '')}" aria-label="${t`Bot token`}">
-        <button type="button" class="btn small primary cn-wide" data-action="ab-connect" data-agent="${id}">${t`Connect bot`}</button></section>${bugBotSection(agent)}</div>`;
+        <input class="cn-input" data-ab-token data-agent="${id}" type="password" autocomplete="off" spellcheck="false" placeholder="123456:ABC-..." value="${esc(draft.token || '')}" aria-label="${t`Bot token`}">
+        <button type="button" class="btn small primary cn-wide" data-action="ab-connect" data-agent="${id}" aria-label="${t`Connect agent bot`}">${bugBotSection(agent) ? t`Connect agent bot` : t`Connect bot`}</button></section>${bugBotSection(agent)}</div>`;
   }
   const groupRow = (group, button) => `<li class="cn-row"><span class="cn-text"><b>${esc(group.title || t('Group'))}</b><small>${esc(String(group.id))}</small></span>${button}</li>`;
   const owner = bot.ownerLinked
@@ -1353,7 +1362,7 @@ function bugBotSection(agent) {
   if (!data.connected) {
     return `<section class="aps-sec">${head}<p class="cn-note">${t`A separate Telegram bot for customer groups. It only files bug reports. Make a second bot with @BotFather and paste its token here.`}</p>
       <input class="cn-input" data-bb-token type="password" autocomplete="off" spellcheck="false" placeholder="123456:ABC-..." aria-label="${t`Bot token`}">
-      <button type="button" class="btn small primary cn-wide" data-action="bb-connect">${t`Connect bot`}</button></section>`;
+      <button type="button" class="btn small primary cn-wide" data-action="bb-connect" aria-label="${t`Connect bug bot`}">${t`Connect bug bot`}</button></section>`;
   }
   const row = (group, button) => `<li class="cn-row"><span class="cn-text"><b>${esc(group.title || t('Group'))}</b><small>${esc(String(group.id))}</small></span>${button}</li>`;
   const pending = data.pending || [], groups = data.groups || [];
@@ -1381,7 +1390,7 @@ document.addEventListener('click', async event => {
     }
   } catch (error) { target.disabled = false; toast(error.message, true); }
 }, true);
-document.addEventListener('input', event => { if (event.target.matches?.('[data-ab-token]')) ui.agentBotDraft = { token: event.target.value }; });
+document.addEventListener('input', event => { if (event.target.matches?.('[data-ab-token]')) ui.agentBotDraft = { token: event.target.value }; ui.agentBotsFor = event.target.dataset.agent || ui.agentBotsFor; });
 document.addEventListener('click', async event => {
   const target = event.target.closest?.('[data-action^="ab-"]'); if (!target) return;
   event.stopPropagation();
@@ -1461,7 +1470,7 @@ document.addEventListener('click', event => {
   const target = event.target.closest?.('[data-action="chat-tab"],[data-action="chat-shared"],[data-action="chat-info-close"],[data-action="chat-info"],[data-copy]'); if (!target) return;
   event.stopPropagation();
   if (target.dataset.copy !== undefined) { void navigator.clipboard?.writeText(target.dataset.copy).then(() => toast(t('Path copied.')), () => toast(t('Could not copy.'), true)); return; }
-  if (target.dataset.action === 'chat-tab') ui.chatTab = saveSideTab('chat', target.dataset.tab);
+  if (target.dataset.action === 'chat-tab') { ui.chatTab = saveSideTab('chat', target.dataset.tab); ui.agentBotDraft = {}; ui.agentBotsFor = ''; }
   else if (target.dataset.action === 'chat-shared') ui.chatShared = target.dataset.tab;
   else ui.chatInfo = target.dataset.action === 'chat-info';
   renderAll();

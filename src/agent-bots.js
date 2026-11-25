@@ -18,10 +18,14 @@ const nameOf = from => [from?.first_name, from?.last_name].filter(Boolean).join(
 export class AgentBots {
   constructor(desk, { fetcher = fetch } = {}) { this.desk = desk; this.store = desk.store; this.fetcher = fetcher; this.running = false; this.loops = new Map(); }
 
+  // Errors never carry Telegram's own text or the request address (both can hold the token): only a fixed message.
   async call(token, method, params = {}, timeoutMs = 15000) {
-    const response = await this.fetcher(`${API}/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params), signal: AbortSignal.timeout(timeoutMs) });
-    const data = await response.json().catch(() => ({}));
-    if (!data.ok) throw new Error(data.description || `Telegram ${method} failed`);
+    let data;
+    try {
+      const response = await this.fetcher(`${API}/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params), signal: AbortSignal.timeout(timeoutMs) });
+      data = await response.json().catch(() => ({}));
+    } catch { throw new Error('Telegram could not be reached.'); }
+    if (!data.ok) throw new Error(`Telegram refused ${method}${data.error_code ? ` (${data.error_code})` : ''}.`);
     return data.result;
   }
   agent(agentId) {
@@ -158,9 +162,12 @@ export class AgentBots {
     bridge.noteInbox(agentId, { values: { chatName: `${this.agent(agentId)?.name || 'Agent'} bot: ${who}` } }, tag, text);
   }
   // The agent starts a message itself (desk_text_person): to its owner, or to one allowed group. Only these two can ever be written to.
-  async send(agentId, text, to = 'owner') {
+  async send(agentId, text, to = 'owner', { runId = '' } = {}) {
     const record = this.record(agentId), token = this.token(agentId);
     if (!record || !token) throw new Error('This agent has no Telegram bot. Connect one in its Connectors tab.');
+    // Only the owner can make the agent write first: a turn that a group or another chat started may only be answered in that chat.
+    const turn = runId ? this.store.get('tgturn', runId) : null;
+    if (turn && !(turn.linkId === linkOf(agentId) && record.ownerChatId && String(turn.chatId) === String(record.ownerChatId))) throw new Error("Only the bot owner can ask you to text someone. Answer in the chat the message came from.");
     const body = String(text ?? '').trim(); if (!body) throw new Error('Write the message first.');
     let chatId = record.ownerChatId;
     if (to !== 'owner') {

@@ -83,3 +83,16 @@ test('the agent can text its owner or an allowed group itself, and nobody else',
   assert.equal(sent.at(-1).chat_id, '-100123');
   await assert.rejects(() => agentBots.send('a1', '  '), /Write the message/);
 });
+
+test('a turn started from a group or another chat cannot make the agent text the owner or another group', async () => {
+  const { agentBots, store } = setup();
+  const { pairCode } = await agentBots.connect('a1', T1);
+  await agentBots.handle('a1', private1(`/start ${pairCode}`));
+  agentBots.allowGroup('a1', '-100123', 'Team'); agentBots.allowGroup('a1', '-100456', 'Other');
+  store.put('tgturn', 'r1', { id: 'r1', turnId: 't', agentId: 'a1', linkId: 'agentbot:a1', chatId: '-100123' });
+  await assert.rejects(() => agentBots.send('a1', 'secret', 'owner', { runId: 'r1' }), /Only the bot owner/);
+  await assert.rejects(() => agentBots.send('a1', 'spam', 'Other', { runId: 'r1' }), /Only the bot owner/);
+  store.put('tgturn', 'r2', { id: 'r2', turnId: 't', agentId: 'a1', linkId: 'agentbot:a1', chatId: '7' });
+  assert.equal((await agentBots.send('a1', 'ok', 'owner', { runId: 'r2' })).sent, true);
+  assert.equal((await agentBots.send('a1', 'from the app', 'owner', { runId: 'r3' })).sent, true);
+});
