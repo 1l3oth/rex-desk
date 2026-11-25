@@ -1326,7 +1326,7 @@ function connectorsPanel(agent) {
     return `<div class="side-body aps cn">
       <section class="aps-sec">${head}<p class="cn-note">${t`Give ${esc(agent.name)} its own Telegram bot, so people can talk to it there. Make one with @BotFather and paste its token here.`}</p>
         <input class="cn-input" data-ab-token type="password" autocomplete="off" spellcheck="false" placeholder="123456:ABC-..." value="${esc(draft.token || '')}" aria-label="${t`Bot token`}">
-        <button type="button" class="btn small primary cn-wide" data-action="ab-connect" data-agent="${id}">${t`Connect bot`}</button></section></div>`;
+        <button type="button" class="btn small primary cn-wide" data-action="ab-connect" data-agent="${id}">${t`Connect bot`}</button></section>${bugBotSection(agent)}</div>`;
   }
   const groupRow = (group, button) => `<li class="cn-row"><span class="cn-text"><b>${esc(group.title || t('Group'))}</b><small>${esc(String(group.id))}</small></span>${button}</li>`;
   const owner = bot.ownerLinked
@@ -1338,8 +1338,49 @@ function connectorsPanel(agent) {
   return `<div class="side-body aps cn">
     <section class="aps-sec">${head}<div class="aps-row"><span>${t`Bot`}</span><div>@${esc(bot.botUsername)}</div></div>${owner}
       <button type="button" class="btn small quiet danger cn-wide" data-action="ab-disconnect" data-agent="${id}">${t`Disconnect`}</button></section>
-    ${groups}</div>`;
+    ${groups}${bugBotSection(agent)}</div>`;
 }
+// The bug-report bot lives in the App Agent's Connectors tab, since its approved reports become tasks for that agent. Its queue
+// of reports waiting for an OK is in Needs you.
+function bugBotSection(agent) {
+  if (!/app[\s_-]?agent/i.test(String(agent.name || ''))) return '';
+  const data = ui.bugBot;
+  if (!data) {
+    if (!ui.bugBotLoading) { ui.bugBotLoading = true; void api('/bugbot').then(status => { ui.bugBot = status; }, () => { ui.bugBot = { connected: false }; }).finally(() => { ui.bugBotLoading = false; renderAll(); }); }
+    return `<section class="aps-sec"><div class="cn-head"><b>${t`Bug report bot`}</b></div><p class="cn-note">${t`Loading…`}</p></section>`;
+  }
+  const head = `<div class="cn-head"><b>${t`Bug report bot`}</b>${data.connected ? `<span class="cn-state"><span class="dot good"></span>${t`Connected`}</span>` : ''}</div>`;
+  if (!data.connected) {
+    return `<section class="aps-sec">${head}<p class="cn-note">${t`A separate Telegram bot for customer groups. It only files bug reports. Make a second bot with @BotFather and paste its token here.`}</p>
+      <input class="cn-input" data-bb-token type="password" autocomplete="off" spellcheck="false" placeholder="123456:ABC-..." aria-label="${t`Bot token`}">
+      <button type="button" class="btn small primary cn-wide" data-action="bb-connect">${t`Connect bot`}</button></section>`;
+  }
+  const row = (group, button) => `<li class="cn-row"><span class="cn-text"><b>${esc(group.title || t('Group'))}</b><small>${esc(String(group.id))}</small></span>${button}</li>`;
+  const pending = data.pending || [], groups = data.groups || [];
+  return `<section class="aps-sec">${head}<div class="aps-row"><span>${t`Bot`}</span><div>@${esc(data.botUsername || '')}</div></div>
+    <div class="aps-row"><span>${t`Morning report`}</span><div><input class="cn-time" type="time" data-bb-time value="${esc(data.reportAt || '09:00')}" aria-label="${t`Morning report time`}"></div></div>
+    <button type="button" class="btn small quiet danger cn-wide" data-action="bb-disconnect">${t`Disconnect`}</button></section>
+    <section class="aps-sec"><h3>${t`Bug bot groups`}</h3><p class="cn-note">${t`It works only in allowed groups. Reports wait in Needs you until you approve them.`}</p>
+    ${pending.length ? `<ul class="cn-list">${pending.map(group => row(group, `<button type="button" class="btn small" data-action="bb-allow" data-gid="${esc(String(group.id))}" data-title="${esc(group.title || '')}">${t`Allow`}</button>`)).join('')}</ul>` : ''}
+    ${groups.length ? `<ul class="cn-list">${groups.map(group => row(group, `<button type="button" class="btn small quiet danger" data-action="bb-remove" data-gid="${esc(String(group.id))}">${t`Remove`}</button>`)).join('')}</ul>` : (pending.length ? '' : `<p class="cn-note">${t`No groups yet.`}</p>`)}</section>`;
+}
+document.addEventListener('change', async event => {
+  const input = event.target.closest?.('[data-bb-time]'); if (!input) return;
+  try { ui.bugBot = await api('/bugbot/report-time', { method: 'POST', data: { at: input.value || '09:00' } }).then(() => api('/bugbot')); toast(t('Saved.')); renderAll(); } catch (error) { toast(error.message, true); }
+});
+document.addEventListener('click', async event => {
+  const target = event.target.closest?.('[data-action^="bb-"]'); if (!target) return;
+  event.stopPropagation();
+  const reload = async () => { ui.bugBot = await api('/bugbot'); renderAll(); };
+  try {
+    switch (target.dataset.action) {
+      case 'bb-connect': { const token = document.querySelector('[data-bb-token]')?.value.trim() || ''; if (!token) return toast(t('Paste the bot token first.'), true); target.disabled = true; await api('/bugbot/connect', { method: 'POST', data: { botToken: token } }); toast(t('Bug bot connected.')); await reload(); break; }
+      case 'bb-disconnect': if (await askConfirm(t('Disconnect the bug bot?'), { ok: t('Disconnect') })) { await api('/bugbot/disconnect', { method: 'POST', data: {} }); await reload(); } break;
+      case 'bb-allow': await api('/bugbot/groups', { method: 'POST', data: { id: target.dataset.gid, title: target.dataset.title } }); toast(t('Group allowed.')); await reload(); break;
+      case 'bb-remove': await api('/bugbot/groups/remove', { method: 'POST', data: { id: target.dataset.gid } }); await reload(); break;
+    }
+  } catch (error) { target.disabled = false; toast(error.message, true); }
+}, true);
 document.addEventListener('input', event => { if (event.target.matches?.('[data-ab-token]')) ui.agentBotDraft = { token: event.target.value }; });
 document.addEventListener('click', async event => {
   const target = event.target.closest?.('[data-action^="ab-"]'); if (!target) return;

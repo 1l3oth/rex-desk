@@ -401,3 +401,12 @@ test('polling: a failing poll is logged once per new reason, so the owner can se
   ], 'the same reason twice in a row is logged once; after a good poll it is logged again');
   assert.ok(events.every(event => event.kind === 'bugbot-error' && !JSON.stringify(event).includes('TKN')), 'the token never reaches the log');
 });
+
+test('queueView lists only the reports waiting for the OK, for the Needs you list', () => {
+  const records = new Map();
+  const store = { list: kind => [...records.entries()].filter(([k]) => k.startsWith(`${kind}:`)).map(([, v]) => v), get: (kind, id) => records.get(`${kind}:${id}`) ?? null, put: (kind, id, v) => records.set(`${kind}:${id}`, v), delete: () => {}, config: () => ({}) };
+  store.put('bugreport', 'r1', { id: 'r1', num: 1, text: 'crash', status: 'queued', groupTitle: 'Team' });
+  store.put('bugreport', 'r2', { id: 'r2', num: 2, text: 'ok', status: 'approved' });
+  const bot = new BugBot({ store });
+  assert.deepEqual(bot.queueView().map(report => report.id), ['r1']);
+});

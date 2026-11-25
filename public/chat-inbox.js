@@ -46,6 +46,10 @@ function detail(ctx, helpers, entry) {
     const target = entry.tg.agentId === 'main' ? 'data-nyc-type="main" data-nyc-id=""' : `data-nyc-type="run" data-nyc-id="${esc(entry.tg.runId)}"`;
     return `<div class="ny-detail">${head}${question}<div class="ny-dact"><button type="button" class="btn primary" data-ny-open-chat ${target} data-tg="${esc(entry.tg.id)}">${t`Open chat`}</button></div></div>`;
   }
+  if (entry.bug) {
+    const bug = entry.bug;
+    return `<div class="ny-detail">${head}${question}<p class="muted">${esc([bug.severityLabel || bug.kind, bug.groupTitle, bug.reporterName].filter(Boolean).join(' · '))}</p><p class="muted">${t`Hidden until you approve it. Approving makes a task for the App Agent.`}</p><div class="ny-dact"><button class="btn quiet danger" data-bug-reject="${esc(bug.id)}">${t`Reject`}</button><button class="btn primary" data-bug-approve="${esc(bug.id)}">${t`Approve`}</button></div></div>`;
+  }
   if (entry.wake) {
     return `<div class="ny-detail">${head}${question}<div class="ny-dact"><button class="btn" data-action="wake-dismiss" data-id="${esc(item.id)}">${t`Dismiss`}</button><button class="btn primary" data-action="wake-approve" data-id="${esc(item.id)}">${t`Wake it up`}</button></div></div>`;
   }
@@ -75,7 +79,7 @@ function review(ctx, item, head, question) {
 }
 
 export function inboxStage(ctx, helpers) {
-  const { esc, ui } = ctx, asks = ctx.pending(), wakes = ui.snap.wakes || [], phones = ui.snap.phones?.pending || [], telegram = ui.snap.telegramInbox || [], count = asks.length + wakes.length + phones.length + telegram.length;
+  const { esc, ui } = ctx, asks = ctx.pending(), wakes = ui.snap.wakes || [], phones = ui.snap.phones?.pending || [], telegram = ui.snap.telegramInbox || [], bugs = ui.snap.bugQueue || [], count = asks.length + wakes.length + phones.length + telegram.length + bugs.length;
   if (!count) return { title: t('Needs you'), meta: '', feed: `<div class="empty"><h2>${t`All clear`}</h2><p>${t`Questions, approvals and messages from your agents show up here.`}</p></div>` };
   const group = saved(), entries = [
     ...asks.map(item => { const who = asker(ctx, helpers, item.runId); return { item, who, at: item.createdAt || '', text: plain(item.title), sub: who.project }; }),
@@ -85,6 +89,8 @@ export function inboxStage(ctx, helpers) {
     }),
     // A new phone asking to open the desk through the relay.
     ...phones.map(phone => ({ item: { id: `phone:${phone.id}` }, phone, who: { name: t('Rex Desk'), project: '', agent: null }, at: phone.createdAt || '', text: t`${phone.name} wants to open your desk`, sub: t('Phone') })),
+    // A bug a customer reported through the bug bot, hidden until the person approves it.
+    ...bugs.map(report => ({ item: { id: `bug:${report.id}` }, bug: report, who: { name: report.groupTitle || t('Bug bot'), project: '', agent: null }, at: report.createdAt || '', text: `#${report.num} ${report.text || ''}`, sub: t('Bug report') })),
     // A message that arrived from Telegram, waiting in the agent's chat.
     ...telegram.map(row => ({ item: { id: `tg:${row.id}` }, tg: row, who: { name: row.chatName || t('Telegram'), project: '', agent: null }, at: row.at || '', text: row.text || '', sub: t('Telegram'), unread: !row.read }))
   ].sort((left, right) => String(right.at).localeCompare(String(left.at)));
@@ -123,6 +129,8 @@ export function wireInbox(ctx) {
     const pick = event.target.closest?.('[data-ny-pick]');
     if (pick) { const id = pick.dataset.nyPick; ctx.ui.nySelected = id; ctx.ui.nyOpen = true; if (id.startsWith('tg:')) { ctx.api('/telegram/inbox/read', { method: 'POST', data: { id: id.slice(3) } }).then(() => ctx.refresh()).catch(() => {}); } ctx.renderAll(); return; }
     if (event.target.closest?.('[data-ny-back]')) { ctx.ui.nyOpen = false; ctx.renderAll(); return; }
+    const bugGo = event.target.closest?.('[data-bug-approve],[data-bug-reject]');
+    if (bugGo) { const approve = bugGo.dataset.bugApprove !== undefined; bugGo.disabled = true; ctx.api(`/bugbot/${approve ? 'approve' : 'reject'}`, { method: 'POST', data: { id: approve ? bugGo.dataset.bugApprove : bugGo.dataset.bugReject } }).then(() => { ctx.ui.nyOpen = false; return ctx.refresh?.(); }).catch(error => { bugGo.disabled = false; ctx.toast?.(error.message, true); }); return; }
     const quick = event.target.closest?.('[data-ny-quick]');
     const link = event.target.closest?.('[data-open-url]'); if (link) { window.open(link.dataset.openUrl, '_blank', 'noopener'); return; }
     if (quick) { const form = quick.closest('form'), input = form?.querySelector('.qinput'); if (!input) return; input.value = quick.dataset.nyQuick; form.requestSubmit(form.querySelector('button[value=accept]')); }

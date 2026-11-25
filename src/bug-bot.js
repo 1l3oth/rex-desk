@@ -562,5 +562,7 @@ export class BugBot {
       approved: reports.filter(report => report.status === 'approved').map(this.publicReport),
     };
   }
+  // The reports waiting for the person's OK, for the Needs you list.
+  queueView() { return this.reports().filter(report => report.status === 'queued').map(this.publicReport); }
   publicReport(report) { return { id: report.id, num: report.num, text: report.text, kind: report.kind, severityLabel: report.severityLabel, groupTitle: report.groupTitle, reporterName: report.reporterName, createdAt: report.createdAt, taskId: report.taskId }; }
 }

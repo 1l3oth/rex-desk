@@ -2740,5 +2740,12 @@
  "Bot": "បូត",
  "Paste the bot token first.": "សូមបិទភ្ជាប់តូខឹនបូតជាមុនសិន។",
  "Bot connected.": "បានតភ្ជាប់បូត។",
- "Disconnect this bot? The agent stops getting messages from it.": "ផ្ដាច់បូតនេះ? ភ្នាក់ងារឈប់ទទួលសារពីវា។"
+ "Disconnect this bot? The agent stops getting messages from it.": "ផ្ដាច់បូតនេះ? ភ្នាក់ងារឈប់ទទួលសារពីវា។",
+ "A separate Telegram bot for customer groups. It only files bug reports. Make a second bot with @BotFather and paste its token here.": "បូត Telegram ដាច់ដោយឡែកសម្រាប់ក្រុមអតិថិជន។ វាចុះបញ្ជីតែរបាយការណ៍កំហុសប៉ុណ្ណោះ។ បង្កើតបូតទីពីរជាមួយ @BotFather រួចបិទភ្ជាប់តូខឹនរបស់វានៅទីនេះ។",
+ "Morning report": "របាយការណ៍ពេលព្រឹក",
+ "Bug bot groups": "ក្រុមរបស់បូតកំហុស",
+ "It works only in allowed groups. Reports wait in Needs you until you approve them.": "វាធ្វើការតែក្នុងក្រុមដែលបានអនុញ្ញាត។ របាយការណ៍រង់ចាំក្នុង \"ត្រូវការអ្នក\" រហូតដល់អ្នកយល់ព្រម។",
+ "Bug report": "របាយការណ៍កំហុស",
+ "Hidden until you approve it. Approving makes a task for the App Agent.": "លាក់រហូតដល់អ្នកយល់ព្រម។ ការយល់ព្រមបង្កើតកិច្ចការសម្រាប់ App Agent។",
+ "Bug bot": "បូតកំហុស"
 }
