@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseWav, frame, levelsOf, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal, joinWindows, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
+import { parseWav, frame, levelsOf, livePieces, finalPass, finalChunks, voicedSeconds, looksTruncated, pickFinal, joinWindows, withinBudget, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = name => readFileSync(path.join(here, 'fixtures', 'voice', name));
@@ -101,11 +101,42 @@ test('joinWindows fails closed: if a spoken window times out the whole final fai
   await assert.rejects(joinWindows(windows, voicedOf, hearOne), error => error.busy === true, 'the whole final fails rather than join the three phrases that came back');
 });
 
-test('joinWindows skips near-silent windows (pauses) and joins only the spoken ones', async () => {
+test('joinWindows skips only a window with no speech at all, and keeps a short-word window', async () => {
   const windows = [[0, 10], [10, 20], [20, 30]];
-  const voicedOf = (from) => (from === 10 ? 0.1 : 1); // the middle window is a long pause, below QUIET_WINDOW_S
-  const hearOne = async (from) => `w${from}`;
-  assert.equal(await joinWindows(windows, voicedOf, hearOne), 'w0 w20', 'the pause window is skipped, the spoken ones joined, no empty-window failure');
+  // Middle window is pure silence (a pause): skipped, never sent, never a failure.
+  const silent = []; assert.equal(await joinWindows(windows, (from) => (from === 10 ? 0 : 1), async (from) => { silent.push(from); return `w${from}`; }), 'w0 w20');
+  assert.ok(!silent.includes(10), 'a window with no detected speech is skipped');
+  // Middle window holds one short word (a sliver of speech): it is NOT skipped, it is heard.
+  const heard = []; await joinWindows(windows, (from) => (from === 10 ? 0.15 : 1), async (from) => { heard.push(from); return `w${from}`; });
+  assert.ok(heard.includes(10), 'a window with even a little speech is heard, not dropped');
+});
+
+test('a short-word window that comes back empty fails the whole final, so the word is never silently dropped', async () => {
+  const windows = [[0, 10], [10, 20], [20, 30]];
+  const voicedOf = (from) => (from === 10 ? 0.15 : 1); // the middle window is one short word
+  const hearOne = async (from) => (from === 10 ? '' : `w${from}`); // the short word comes back empty
+  await assert.rejects(joinWindows(windows, voicedOf, hearOne), error => error.busy === true, 'the empty short-word window fails the whole final rather than returning the rest as complete');
+});
+
+test('withinBudget cuts a stalled request at the time left and lets a quick one through', async () => {
+  const stalled = new Promise(() => {}); // never resolves
+  await assert.rejects(withinBudget(stalled, 20, () => Object.assign(new Error('busy'), { truncated: true })), error => error.truncated === true, 'a stalled request is cut at the deadline');
+  assert.equal(await withinBudget(Promise.resolve('done'), 1000, () => new Error('x')), 'done', 'a request inside the budget passes through');
+});
+
+test('a stalled last window is cut at the overall deadline: no partial text, box cleared (truncated)', async () => {
+  // Five phrases with pauses -> five windows, whole path (everyMs huge, no live commit). The first three return,
+  // the fourth request stalls forever; the overall budget cuts it, so the final is empty + truncated, not a partial.
+  const rate = 22050, per = FRAME / rate, count = Math.round(16 / per);
+  const chunks = Array.from({ length: count }, () => new Float32Array(FRAME).fill(0.1));
+  const need = Math.max(2, Math.ceil(0.5 / per));
+  for (const at of [3, 5.5, 8, 10.5]) { const i0 = Math.round(at / per); for (let i = 0; i < need; i++) chunks[i0 + i] = new Float32Array(FRAME); }
+  let call = 0;
+  const transcribe = async () => { call++; if (call > 3) return new Promise(() => {}); return 'first open the project folder'; }; // window 4 onward stalls
+  let clock = 0; const now = () => (clock += 40);
+  const out = await runTiming({ chunks, rate, transcribe, now, everyMs: 10_000_000, budgetMs: 120 });
+  assert.equal(out.truncated, true, 'the stalled window is cut at the deadline and the final fails');
+  assert.equal(out.text, '', 'no partial text is left to send');
 });
 
 test('a whole-recording final with a window that times out shows no partial text and reports truncated', async () => {

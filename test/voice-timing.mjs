@@ -16,9 +16,9 @@ import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { livePieces, finalPass, finalChunks, audioSeconds, voicedSeconds, looksTruncated, pickFinal, joinWindows, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S } from '../public/voice-live.js';
+import { livePieces, finalPass, finalChunks, audioSeconds, voicedSeconds, looksTruncated, pickFinal, joinWindows, withinBudget, WINDOWED_FINAL_BUDGET_MS, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S } from '../public/voice-live.js';
 
-export { livePieces, finalPass, finalChunks, audioSeconds, voicedSeconds, looksTruncated, pickFinal, joinWindows, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S };
+export { livePieces, finalPass, finalChunks, audioSeconds, voicedSeconds, looksTruncated, pickFinal, joinWindows, withinBudget, WINDOWED_FINAL_BUDGET_MS, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S };
 
 // Parse a 16-bit PCM mono WAV into { rate, samples: Float32Array in -1..1 }.
 export function parseWav(buffer) {
@@ -67,7 +67,7 @@ export function wav16(chunks, rate) {
 // liveLocal + finishMic in public/chat-composer.js, but calls the shared livePieces and finalPass so the
 // path it reports is the path the app would take. `transcribe(wavBuffer)` resolves to the recognized text
 // for that slice. Returns the timings plus finalPath and how many live cuts committed.
-export async function runTiming({ chunks, rate, transcribe, now = () => performance.now(), everyMs = LIVE_EVERY_MS }) {
+export async function runTiming({ chunks, rate, transcribe, now = () => performance.now(), everyMs = LIVE_EVERY_MS, budgetMs = WINDOWED_FINAL_BUDGET_MS }) {
   const per = (FRAME / rate) * 1000, audioMs = chunks.length * per;
   const levels = levelsOf(chunks);
   const t0 = now();
@@ -104,11 +104,18 @@ export async function runTiming({ chunks, rate, transcribe, now = () => performa
       // The whole pass joins its windows failing closed (joinWindows): a spoken window that comes back empty (a
       // request that timed out or failed under load) fails the whole final, so a subset is never joined as if it
       // were complete. A throw here means no usable final, mirrored as empty text (the app clears the box).
+      const busyError = () => Object.assign(new Error('too busy'), { busy: true });
       const hearWindowed = async () => {
         const windows = finalChunks({ rate, chunks, levels });
         if (windows.length <= 1) return hear(0, chunks.length);
         const voicedOf = (from, to) => voicedSeconds({ rate, levels: levels.slice(from, to) });
-        return joinWindows(windows, voicedOf, (from, to) => hear(from, to));
+        const deadline = Date.now() + budgetMs; // the whole series shares one real-time budget
+        const hearOne = (from, to) => {
+          const left = deadline - Date.now();
+          if (left <= 0) return Promise.reject(busyError());
+          return withinBudget(hear(from, to), left, busyError); // a stalled request is cut at the remaining time
+        };
+        return joinWindows(windows, voicedOf, hearOne);
       };
       let finalText;
       try {

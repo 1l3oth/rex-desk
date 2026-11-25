@@ -86,17 +86,29 @@ export function finalChunks(recording, maxChunks = Math.floor(LIVE_PIECE_S * rec
   return windows;
 }
 
-// Join the short windows of a whole-recording final pass, failing closed. A window with less than QUIET_WINDOW_S
-// of voiced speech is a pause (or trailing silence) and is skipped, nothing to transcribe. Every other window is
-// heard by hearOne(from, to); if any spoken window comes back empty, or hearOne rejects (a request that timed out
-// or failed under load), the WHOLE final fails with a { busy } error. A subset of the phrases is never returned
-// as if it were the complete transcript, which the length guard cannot catch (a partial can read as plausible).
-// voicedOf(from, to) gives the voiced seconds of that slice; windows are [from, to) chunk-index pairs.
-export const QUIET_WINDOW_S = 0.3;
+// The whole windowed final, run window by window in series, gets one overall budget longer than a single request's
+// engine timeout (voice.js aborts one request at 120s), so several short requests in a row are allowed but a machine
+// so loaded it cannot finish them all gives up instead of waiting forever.
+export const WINDOWED_FINAL_BUDGET_MS = 180000;
+// Race a promise against the time left in a budget. If the budget runs out first the result rejects with expired()
+// (the caller supplies the error), so a slow or stalled in-flight request never keeps the UI waiting past the
+// deadline. The timer is cleared once the promise settles so it never leaks.
+export function withinBudget(promise, msLeft, expired) {
+  let timer;
+  const limit = new Promise((_, reject) => { timer = setTimeout(() => reject(expired()), Math.max(0, msLeft)); timer.unref?.(); });
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
+}
+
+// Join the short windows of a whole-recording final pass, failing closed. Only a window with no detected speech at
+// all (voicedOf 0) is skipped: a pause or trailing silence, nothing to transcribe. Any window with even a little
+// speech (a short word) is heard by hearOne(from, to); if it comes back empty, or hearOne rejects (a request that
+// timed out, stalled past the budget or failed under load), the WHOLE final fails with a { busy } error. A subset of
+// the phrases is never returned as if it were the complete transcript, which the length guard cannot catch (a
+// partial can read as plausible). voicedOf(from, to) gives the voiced seconds of that slice; windows are [from, to).
 export async function joinWindows(windows, voicedOf, hearOne) {
   const parts = [];
   for (const [from, to] of windows) {
-    if (voicedOf(from, to) < QUIET_WINDOW_S) continue; // a near-silent window: a pause between phrases, nothing to hear
+    if (voicedOf(from, to) <= 0) continue; // only a window with no detected speech at all is skipped
     const text = String(await hearOne(from, to) || '').trim();
     if (!text) throw Object.assign(new Error('a spoken window came back empty'), { busy: true }); // never join a subset
     parts.push(text);
