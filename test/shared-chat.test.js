@@ -246,6 +246,20 @@ test('a path that also exists here is used only when its bytes match what arrive
   assert.equal(b.desk.peers.localFiles(`- ${other}`), `- ${other} (this file came from the other computer but could not be saved on this one)`);
 });
 
+test('a file in a message from another computer is never taken from a path that exists here while its bytes are still coming', async () => {
+  const { b } = account();
+  const folder = '5f6a7b8c-9d0e-4f1a-8b2c-3d4e5f6a7b8c', here = path.join(b.store.media('uploads'), folder, 'report.txt');
+  mkdirSync(path.dirname(here), { recursive: true }); writeFileSync(here, 'unrelated bytes here');
+  const notYet = await b.desk.peers.arrivedFiles(`Look\n- ${here}`, { wait: 60, step: 20, remote: true });
+  assert.ok(!notYet.includes(here), 'the path here is not handed out by name');
+  assert.equal(notYet, 'Look\n- report.txt (this file did not arrive from the other computer; it is not on this one)');
+  // The bytes come during the wait: the agent gets a copy holding them, and the file here stays as it was.
+  const waiting = b.desk.peers.arrivedFiles(`- ${here}`, { wait: 3000, step: 20, remote: true });
+  setTimeout(() => b.store.put('chatfile', chatFileId(here), { id: chatFileId(here), path: here, name: 'report.txt', size: 6, data: Buffer.from('theirs').toString('base64') }), 100);
+  const given = (await waiting).slice(2);
+  assert.equal(readFileSync(given, 'utf8'), 'theirs'); assert.equal(readFileSync(here, 'utf8'), 'unrelated bytes here');
+});
+
 test('an agent waits for a file attached on the other computer before it starts, and is told when one never came (L27)', async () => {
   const { a, b, records } = account();
   const folder = '7c1e2d3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f', sent = path.join(a.store.media('uploads'), folder, 'late.png');

@@ -522,23 +522,27 @@ export class Peers {
   // A room message and its attached files sync as separate rows: before an agent here starts on it, the files that are not here
   // yet are waited for (one shared deadline for all of them), so the agent never starts with the other computer's path only.
   // One that still has not come (over 2 MB, or the other computer went away) is said so in the prompt.
-  async arrivedFiles(text, { wait = 15000, step = 500 } = {}) {
+  // remote: the message came from another computer. Its files are waited for by their synced bytes only: a file under that name
+  // here may be a different one, so a path is never trusted by name alone (localFiles).
+  async arrivedFiles(text, { wait = 15000, step = 500, remote = false } = {}) {
     const missing = () => [...String(text ?? '').matchAll(/^- (.+)$/gm)].map(match => match[1].trim())
-      .filter(file => /[\\/]uploads[\\/][0-9a-f-]{36}[\\/][^\\/]+$/i.test(file) && !existsSync(file) && ![chatFileId(file), legacyFileId(file)].some(id => this.store.get('chatfile', id)?.data));
+      .filter(file => /[\\/]uploads[\\/][0-9a-f-]{36}[\\/][^\\/]+$/i.test(file) && (remote || !existsSync(file)) && ![chatFileId(file), legacyFileId(file)].some(id => this.store.get('chatfile', id)?.data));
     for (const until = Date.now() + wait; missing().length && Date.now() < until;) await new Promise(resolve => setTimeout(resolve, step));
     const late = new Set(missing());
-    return this.localFiles(text).replace(/^- (.+)$/gm, (line, named) => late.has(named.trim()) ? `${line} (this file did not arrive from the other computer)` : line);
+    return this.localFiles(text, { remote }).replace(/^- (.+)$/gm, (line, named) => late.has(named.trim()) ? `${line} (this file did not arrive from the other computer)` : line);
   }
   // What an agent here reads names this computer's copy of each attached file, not the path on the computer it was attached on.
   // A path that also exists here is used only when its bytes are the ones that arrived (saveUpload compares them); a file that
   // arrived but could not be saved here is said so, never left as the other computer's path. A file with no copy in the shared
   // database is one attached here, or one not arrived yet (arrivedFiles says so), and stays as it is.
-  localFiles(text) {
+  // In a message from another computer (remote), a file whose bytes are not here is named without its path, so the agent never
+  // opens whatever file sits at that path here.
+  localFiles(text, { remote = false } = {}) {
     return String(text ?? '').replace(/^- (.+)$/gm, (line, named) => {
       const file = named.trim();
       if (!/[\\/]uploads[\\/][0-9a-f-]{36}[\\/][^\\/]+$/i.test(file)) return line;
       const item = [chatFileId(file), legacyFileId(file)].map(id => this.store.get('chatfile', id)).find(found => found?.data);
-      if (!item) return line;
+      if (!item) return remote ? `- ${file.split(/[\\/]/).pop()} (this file did not arrive from the other computer; it is not on this one)` : line;
       const saved = this.saveUpload({ ...item, path: file });
       return saved ? `- ${saved}` : `${line} (this file came from the other computer but could not be saved on this one)`;
     });

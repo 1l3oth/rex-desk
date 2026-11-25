@@ -278,14 +278,16 @@ export class Rooms {
       if (peers && !peers.owns(agentId, message)) { if (peers.isRemote(agent) && !peers.online(agent.node)) peers.offlineNote(room.id, agent); return; }
       // A file attached on another computer is waited for first (L27). Everything after the wait reads the agent afresh: a model
       // changed or a room session made meanwhile is kept, and whether it is working is decided now, not before the wait.
-      if (peers?.arrivedFiles) await peers.arrivedFiles(message.instruction || message.text);
+      // A message from another computer: its files count only once their bytes are here, never by a path that exists here.
+      const remote = Boolean(message.node && peers?.self?.id && message.node !== peers.self.id);
+      if (peers?.arrivedFiles) await peers.arrivedFiles(message.instruction || message.text, { remote });
       const fresh = this.agent(agentId); if (!fresh) return;
       // An agent already working in its room session gets the message handed to it between steps, as one short line.
       const session = fresh.roomRuns?.[room.id], working = session && this.desk.live?.has(session);
       const sender = message.from.type === 'human' ? 'The person' : message.from.label;
       const asked = working ? `[Room "${room.name}"] ${sender} → you: ${message.instruction || message.text}` : this.promptFor(this.room(room.id), message, agentId);
       // A file attached on another computer is named by this computer's own copy of it, or said not to have arrived.
-      const prompt = peers?.arrivedFiles ? await peers.arrivedFiles(asked, { wait: 0 }) : peers?.localFiles ? peers.localFiles(asked) : asked;
+      const prompt = peers?.arrivedFiles ? await peers.arrivedFiles(asked, { wait: 0, remote }) : peers?.localFiles ? peers.localFiles(asked, { remote }) : asked;
       // The agent has now seen the room up to this message, whatever else happens with its turn.
       const current = this.agent(agentId) || fresh;
       this.store.put('specialist', agentId, { ...current, roomSeen: { ...(current.roomSeen || {}), [room.id]: Math.max(message.seq, current.roomSeen?.[room.id] || 0) } });
