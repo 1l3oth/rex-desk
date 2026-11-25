@@ -59,6 +59,25 @@ test('the on-computer voice engine is pinned to half the logical CPUs, so it nev
   assert.match(source, /'--threads', threads, '--threads-batch', threads/, 'both --threads and --threads-batch are passed');
 });
 
+test('the final pass only re-hears the uncommitted tail, not the whole recording, so a long dictation finishes in a few seconds', () => {
+  const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
+  // The live loop records where the committed words end on the recording, so the final pass can start from there.
+  assert.match(composer, /recording\.liveKept = kept; recording\.liveFrom = from;/, 'each committed cut advances the live cursor on the recording');
+  // On stop, the tail from that cursor is heard, joined to the kept words, instead of recording.wav() for the whole thing.
+  assert.match(composer, /const tail = from > 0 \? recording\.chunks\.slice\(from\) : \[\];/, 'the final pass hears only the tail after the last cut');
+  // Every tail with audio is heard (no minimum length that silently drops a short tail).
+  assert.match(composer, /if \(tail\.length\) \{/, 'any non-empty tail is processed');
+  assert.doesNotMatch(composer, /tailSeconds/, 'the old 300 ms skip is gone');
+  assert.match(composer, /\[kept, tailText\]\.filter\(Boolean\)\.join\(' '\), \{ final: true \}\)/, 'the committed words and the fresh tail make the final text');
+  // A short recording that never committed anything is still heard whole.
+  assert.match(composer, /const heard = await hearWords\(ctx, recording\.wav\(\)\);/, 'nothing-committed recordings keep the whole-recording pass');
+  // Model-not-ready still bubbles so the install/online offer runs.
+  assert.ok(composer.includes("if (error.starting || /not installed|\\binstall\\b/i.test(error.message || '')) throw error;"), 'not-ready errors still bubble to the install/online offer');
+  // A tail that fails for any other reason never finalizes partial text: the whole recording is heard instead.
+  const tailBlock = composer.slice(composer.indexOf('if (tail.length) {'), composer.indexOf('} else {', composer.indexOf('if (tail.length) {')));
+  assert.match(tailBlock, /const heard = await hearWords\(ctx, recording\.wav\(\)\);[\s\S]*liveShow\(ctx, live, heard\.text, \{ final: true \}\);[\s\S]*return;/, 'a failed tail falls back to the whole recording, not the committed words alone');
+});
+
 test('microphone errors keep their real name', async () => {
   const source = readFileSync(new URL('../public/recorder.js', import.meta.url), 'utf8');
   for (const name of ['NotAllowedError', 'NotFoundError', 'NotReadableError']) assert.match(source, new RegExp(`name === '${name}'`));
@@ -159,14 +178,28 @@ test('desktop live words are heard in short pieces cut at a quiet moment, so the
   const at = composer.indexOf('const LIVE_EVERY_MS'), code = composer.slice(at, composer.indexOf('\nfunction liveLocal', at)).replace('export function', 'function');
   const livePieces = new Function(`${code}; return livePieces;`)();
   const per = 4096 / 48000, chunks = seconds => Array.from({ length: Math.round(seconds / per) }, () => 0);
+  const need = Math.max(2, Math.ceil(0.5 / per)); // a sustained pause is about half a second of chunks below the floor
+  const hush = (rec, at, count = need) => { for (let i = 0; i < count; i++) rec.levels[at + i] = 0.001; return rec; };
   const short = { rate: 48000, chunks: chunks(4), levels: chunks(4).map(() => 0.1) };
   assert.deepEqual(livePieces(short), { cut: 0, end: short.chunks.length }, 'under 5 seconds: the whole part is heard');
-  const long = { rate: 48000, chunks: chunks(7), levels: chunks(7).map(() => 0.1) }; const quiet = Math.round(4 / per); long.levels[quiet] = 0.001;
-  assert.equal(livePieces(long).cut, quiet, 'cut at the quietest moment after 2.5 seconds');
-  assert.equal(livePieces(long, quiet).cut, 0, 'the next part starts at the cut and is short again');
-  // After a slow request a long backlog waits: the cut still falls within the first 5 seconds, so the request stays short.
-  const backlog = { rate: 48000, chunks: chunks(20), levels: chunks(20).map(() => 0.1) }; backlog.levels[Math.round(18 / per)] = 0.0001;
-  assert.ok(livePieces(backlog).cut * per <= 5, 'a quiet moment near the end of a long backlog is not used');
+  // A sustained pause (half a second of silence) starting around 4 seconds commits at the start of that silence.
+  const atPause = Math.round(4 / per);
+  const long = hush({ rate: 48000, chunks: chunks(7), levels: chunks(7).map(() => 0.1) }, atPause);
+  assert.equal(livePieces(long).cut, atPause, 'cut at the start of a sustained pause after 2.5 seconds');
+  assert.equal(livePieces(long, atPause).cut, 0, 'the next part starts at the cut and is short again');
+  // Continuous speech with no pause: nothing is committed, so no cut can land mid-word and the final pass can still repair it.
+  const talky = { rate: 48000, chunks: chunks(7), levels: chunks(7).map(() => 0.1) };
+  assert.equal(livePieces(talky).cut, 0, 'no pause in the window means no mid-word commit');
+  // Quiet speech that dips below the floor for a single chunk is a soft syllable, not a pause: no commit (the reviewer's case).
+  const oneDip = { rate: 48000, chunks: chunks(7), levels: chunks(7).map(() => 0.1) }; oneDip.levels[atPause] = 0.001;
+  assert.equal(livePieces(oneDip).cut, 0, 'one low chunk in quiet speech is not a sustained pause and does not commit');
+  // A near-silent run that is still above the speech floor is not a real pause either.
+  const dip = hush({ rate: 48000, chunks: chunks(7), levels: chunks(7).map(() => 0.1) }, atPause); for (let i = 0; i < need; i++) dip.levels[atPause + i] = 0.02;
+  assert.equal(livePieces(dip).cut, 0, 'the run must be below the speech floor to count as a pause');
+  // After a slow request a long backlog waits: only a sustained pause within the first 5 seconds commits.
+  const backlog = hush({ rate: 48000, chunks: chunks(20), levels: chunks(20).map(() => 0.1) }, Math.round(18 / per));
+  assert.equal(livePieces(backlog).cut, 0, 'a pause past the first 5 seconds is not used'); hush(backlog, Math.round(3 / per));
+  assert.ok(livePieces(backlog).cut * per <= 5 && livePieces(backlog).cut > 0, 'a sustained pause inside the first 5 seconds cuts there');
   assert.match(composer, /if \(recording\.stopped \|\| words === null\) return;/, 'a failed request (engine warming up) keeps its piece for the next try');
   assert.match(composer, /wavFrom\(recording\.chunks\.slice\(start, stop\)/, 'each request sends only its own piece');
   assert.doesNotMatch(composer, /LIVE_SLOW_MS/, 'live words never give up for the rest of the turn');

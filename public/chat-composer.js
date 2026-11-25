@@ -307,23 +307,34 @@ function liveWaiting(live, on, text) {
 }
 // The on-computer engine has no live results, so the recording is turned into words piece by piece while the person talks.
 // Every 1.5 seconds only the part since the last finished piece is sent, so each request stays short however long they
-// talk. Once that part is longer than 5 seconds, it is cut at its quietest moment between 2.5 and 5 seconds in (between
-// words; never further, even when a slow request left more waiting), the words before the cut are kept, and the next
-// requests start from there. A request that fails (the engine still warming up) keeps its piece for the next try. When the person stops, the whole recording is
-// heard once more, and those words replace the live ones.
-const LIVE_EVERY_MS = 1500, LIVE_PIECE_S = 5, LIVE_CUT_S = 2.5;
+// talk. Once that part is longer than 5 seconds, it is cut at a sustained pause between words (a run of about half a
+// second below the speech floor) found between 2.5 and 5 seconds in; the words before the cut are kept and the next
+// requests start from there. Words are committed only at such a pause: one quiet chunk can be a soft syllable in quiet
+// speech, so cutting on it would split a word that the tail-only final pass can no longer repair. When no sustained pause
+// is found nothing is committed and the whole part keeps being heard (the final pass then falls back to the whole
+// recording). A request that fails (the engine still warming up) keeps its piece for the next try. When the person stops,
+// only the uncommitted tail is heard once more and replaces the live tail.
+const LIVE_EVERY_MS = 1500, LIVE_PIECE_S = 5, LIVE_CUT_S = 2.5, VOICE_FLOOR = 0.012, PAUSE_S = 0.5;
 export function livePieces(recording, from = 0) {
   const per = 4096 / recording.rate, end = recording.chunks.length;
   if ((end - from) * per <= LIVE_PIECE_S) return { cut: 0, end };
-  let cut = from + Math.ceil(LIVE_CUT_S / per);
-  const last = Math.min(end, from + Math.floor(LIVE_PIECE_S / per));
-  for (let index = cut; index < last; index++) if ((recording.levels[index] ?? 1) < (recording.levels[cut] ?? 1)) cut = index;
-  return { cut, end };
+  // A run of consecutive chunks below the speech floor, long enough (about half a second) to be a real gap between words
+  // rather than a quiet syllable. Cut at the start of the run so the kept words end right at the pause. No such run in the
+  // window means the person is still speaking: cut 0 commits nothing and keeps hearing the whole part.
+  const first = from + Math.ceil(LIVE_CUT_S / per), last = Math.min(end, from + Math.floor(LIVE_PIECE_S / per));
+  const need = Math.max(2, Math.ceil(PAUSE_S / per));
+  let run = 0;
+  for (let index = first; index < last; index++) {
+    if ((recording.levels[index] ?? 1) < VOICE_FLOOR) { if (++run >= need) return { cut: index - need + 1, end }; }
+    else run = 0;
+  }
+  return { cut: 0, end };
 }
 function liveLocal(ctx, recording) {
   const live = liveStart(ctx); recording.live = live; if (!live) return;
   if (!live.written.trim()) liveWaiting(live, true);
   let busy = false, kept = '', from = 0;
+  recording.liveKept = ''; recording.liveFrom = 0;
   const hear = async (start, stop) => {
     try {
       const heard = await transcribe(wavFrom(recording.chunks.slice(start, stop), recording.rate), voiceLanguage(ctx));
@@ -340,7 +351,7 @@ function liveLocal(ctx, recording) {
     busy = true;
     try {
       const { cut, end } = livePieces(recording, from);
-      if (cut) { const words = await hear(from, cut); if (recording.stopped || words === null) return; kept = [kept, words].filter(Boolean).join(' '); from = cut; }
+      if (cut) { const words = await hear(from, cut); if (recording.stopped || words === null) return; kept = [kept, words].filter(Boolean).join(' '); from = cut; recording.liveKept = kept; recording.liveFrom = from; }
       const words = cut ? '' : await hear(from, end);
       const text = [kept, words].filter(Boolean).join(' ');
       if (recording.stopped) return;
@@ -476,8 +487,29 @@ async function finishMic(ctx) {
   transcribing = true; micButton()?.classList.add('busy');
   const slow = setTimeout(() => ctx.toast(t('Loading the voice model. The first time after a restart takes a minute or two.')), 4000);
   try {
-    const heard = await hearWords(ctx, recording.wav());
-    liveShow(ctx, live, heard.text, { final: true });
+    // The final pass caps its own time. The live pieces already committed at quiet cuts are kept as they are, and only
+    // the uncommitted tail (one live window at most) is heard once more cleanly, instead of re-transcribing the whole
+    // recording. On a long dictation this turns a final pass of a minute or more into a few seconds. A recording too
+    // short to have committed anything is still heard whole, which is already quick.
+    const from = recording.liveFrom || 0, kept = (recording.liveKept || '').trim();
+    const tail = from > 0 ? recording.chunks.slice(from) : [];
+    if (tail.length) {
+      let tailText;
+      try { tailText = String((await hearWords(ctx, wavFrom(tail, recording.rate))).text || '').trim(); }
+      catch (error) {
+        // Model-not-ready still bubbles up (so the install/online offer runs). Any other failure must not quietly
+        // finalize only the committed words and drop the tail: the whole recording is heard instead, so no words are lost.
+        if (error.starting || /not installed|\binstall\b/i.test(error.message || '')) throw error;
+        const heard = await hearWords(ctx, recording.wav());
+        liveShow(ctx, live, heard.text, { final: true });
+        return;
+      }
+      liveShow(ctx, live, [kept, tailText].filter(Boolean).join(' '), { final: true });
+    } else {
+      // Nothing committed (short recording, or no pause to cut at), so the whole recording is heard.
+      const heard = await hearWords(ctx, recording.wav());
+      liveShow(ctx, live, heard.text, { final: true });
+    }
   } catch (error) {
     liveShow(ctx, live, live?.said || '');
     clearTimeout(slow);
