@@ -445,8 +445,9 @@ function localTaskStage(ctx, task) {
     ${field(t('Due'), `<input id="lt-due" type="date" value="${esc(task.dueDate || '')}">`)}
     ${field(t('Tags'), `<input id="lt-tags" type="text" value="${esc((task.tags || []).join(', '))}" placeholder="${t`ui, bug`}" autocomplete="off" title="${t`Separate tags with commas`}">`)}
     <p class="lt-made">${t`Made by ${esc(task.createdBy || 'you')} · ${esc(when(task.createdAt))}`}</p>
-    <button class="btn small danger" data-action="lt-delete" data-id="${esc(task.id)}">${t`Delete task`}</button>
   </aside>`;
+  // Delete sits on its own, below the fields on desktop and below the description on a phone, away from the everyday controls.
+  const del = `<div class="lt-del"><button class="btn small danger" data-action="lt-delete" data-id="${esc(task.id)}">${t`Delete task`}</button></div>`;
   const checklist = `<section class="lt-sec"><h3>${t('Checklist')}${task.checklist?.length ? ` <span>${t`${task.checklist.filter(item => item.done).length} of ${task.checklist.length}`}</span>` : ''}</h3>
     <ul class="lt-check">${(task.checklist || []).map((item, index) => `<li><label><input type="checkbox" data-lt-check="${index}" ${item.done ? 'checked' : ''}><span>${esc(item.text)}</span></label><button class="ag-x" data-action="lt-check-remove" data-index="${index}" aria-label="${t`Remove this item`}" title="${t`Remove`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>
     <form class="lt-inline" data-lt-check-add><input name="text" type="text" maxlength="300" placeholder="${t`Add a step…`}" autocomplete="off" aria-label="${t`Add a checklist step`}"></form></section>`;
@@ -466,7 +467,7 @@ function localTaskStage(ctx, task) {
     : task.assignee && agents.some(agent => agent.id === task.assignee) ? `<p class="lt-start"><button class="btn primary small" data-action="lt-start" data-id="${esc(task.id)}">${t`Start ${esc(agents.find(agent => agent.id === task.assignee).name)} on this`}</button></p>` : '';
   const main = `<div class="lt-main"><textarea id="lt-title" class="lt-title" rows="1" maxlength="200" aria-label="${t`Task title`}">${esc(task.title)}</textarea>
     ${work}<section class="lt-sec"><h3>${t`Description`}</h3><textarea id="lt-desc" class="lt-desc" placeholder="${t`What needs doing, and how to tell it is done.`}">${esc(task.description || '')}</textarea></section>${checklist}${evidenceHtml(ctx, task)}${links}${comments}</div>`;
-  return { title: `#${task.taskNumber} ${task.title}`, meta: t`Rex Desk task · ${task.statusName}`, top: true, feed: `<div class="page lt" data-lt="${esc(task.id)}">${main}${side}</div>` };
+  return { title: `#${task.taskNumber} ${task.title}`, meta: t`Rex Desk task · ${task.statusName}`, top: true, feed: `<div class="page lt" data-lt="${esc(task.id)}">${main}${side}${del}</div>` };
 }
 // After an add box is redrawn, the new box gets the cursor and anything typed while the page was saving.
 const keepTyping = (old, selector) => { const box = document.querySelector(selector); if (!box) return; if (box !== old && old.value) box.value = old.value; box.focus(); };
