@@ -48,6 +48,32 @@ export function finalPass(recording) {
 // Seconds of audio in a recording, from its frame count and sample rate.
 export function audioSeconds(recording) { return recording.chunks.length * FRAME / recording.rate; }
 
+// Split a long recording into short windows for the final pass. One whole-recording request for many
+// seconds of continuous speech can come back with only the opening words when the machine is fully loaded
+// (the engine stops early under contention; short requests always complete). So a long final is heard in
+// windows of at most maxChunks (about LIVE_PIECE_S), each cut at the quietest frame in the last ~second of
+// the window so the boundary lands in a gap between words, not mid-word. Slower (more requests) but the
+// whole text comes back under load. Returns [from, to) chunk-index pairs covering the whole recording.
+export function finalChunks(recording, maxChunks = Math.floor(LIVE_PIECE_S * recording.rate / FRAME)) {
+  const n = recording.chunks.length, windows = [];
+  const back = Math.max(1, Math.round(recording.rate / FRAME)); // ~1s of frames
+  let from = 0;
+  while (from < n) {
+    let end = Math.min(n, from + maxChunks);
+    if (end < n) {
+      let best = end, bestLevel = Infinity;
+      for (let index = Math.max(from + 1, end - back); index < end; index++) {
+        const level = recording.levels[index] ?? 1;
+        if (level < bestLevel) { bestLevel = level; best = index; }
+      }
+      end = best;
+    }
+    windows.push([from, end]);
+    from = end;
+  }
+  return windows;
+}
+
 // A cold engine can answer the first final pass with only the opening words (seen once: 5 of 30 words on
 // the first run after a restart). That is data loss, so a final answer that is far too short for the audio
 // is treated as suspect: the caller hears it once more (the engine is warm by then) and keeps the fuller

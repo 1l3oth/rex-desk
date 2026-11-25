@@ -65,7 +65,7 @@ test('the final pass only re-hears the uncommitted tail, not the whole recording
   // The live loop records where the committed words end on the recording, so the final pass can start from there.
   assert.match(composer, /recording\.liveKept = kept; recording\.liveFrom = from;/, 'each committed cut advances the live cursor on the recording');
   // The path is chosen by the shared finalPass, so the app and the QA harness pick the same one.
-  assert.match(composer, /import \{ LIVE_EVERY_MS, livePieces, finalPass, audioSeconds, looksTruncated \} from '\/voice-live\.js';/, 'the composer uses the shared cut, final-pass and truncation logic');
+  assert.match(composer, /import \{ LIVE_EVERY_MS, livePieces, finalPass, finalChunks, audioSeconds, looksTruncated \} from '\/voice-live\.js';/, 'the composer uses the shared cut, final-pass and truncation logic');
   assert.match(composer, /const pass = finalPass\(recording\);/, 'finishMic asks finalPass which path to take');
   // finalPass hears only the tail after the last cut, and reports the tail-only path when there is audio after it.
   assert.match(voiceLive, /const tail = from > 0 \? recording\.chunks\.slice\(from\) : \[\];/, 'the final pass hears only the tail after the last cut');
@@ -82,16 +82,21 @@ test('the final pass only re-hears the uncommitted tail, not the whole recording
   assert.match(tailBlock, /finalText = String\(\(await hearWords\(ctx, recording\.wav\(\)\)\)\.text \|\| ''\)\.trim\(\);/, 'a failed tail falls back to the whole recording, not the committed words alone');
 });
 
-test('a cold-start partial final is never finalized: a too-short answer is re-heard once, then errors rather than finalize partial', () => {
+test('a load-truncated final is re-heard in short windows, kept only if fuller, and errors rather than finalize partial', () => {
   const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
   const voiceLive = readFileSync(new URL('../public/voice-live.js', import.meta.url), 'utf8');
-  // The guard lives in the shared module, so the app and the QA harness judge "too short" the same way.
+  // The guard and the windowing live in the shared module, so the app and the QA harness behave the same.
   assert.match(voiceLive, /export function looksTruncated\(text, audioSeconds\)/, 'a shared check for a suspiciously short answer');
   assert.match(voiceLive, /MIN_WORDS_PER_S = 0\.5, MIN_CHECK_S = 8/, 'only long audio is checked, against a floor far below real speech');
-  // finishMic hears the suspect answer once more and keeps the fuller one, then errors if it is still truncated.
+  assert.match(voiceLive, /export function finalChunks\(recording/, 'the shared windowing for the final pass');
+  // The windowed re-hear sends one short request per window, each short enough to complete under load.
+  assert.match(composer, /async function hearInWindows\(ctx, recording\) \{/, 'the whole recording can be heard in short windows');
+  assert.match(composer, /const windows = finalChunks\(recording\);/, 'the windows come from the shared finalChunks');
+  assert.match(composer, /wavFrom\(recording\.chunks\.slice\(from, to\), recording\.rate\)/, 'each window is sent as its own short request');
+  // finishMic catches a too-short final, re-hears it in windows, keeps the fuller one, then errors if still truncated.
   assert.match(composer, /if \(looksTruncated\(finalText, seconds\)\) \{/, 'a suspiciously short final is caught');
-  assert.match(composer, /const retry = String\(\(await hearWords\(ctx, recording\.wav\(\)\)\)\.text \|\| ''\)\.trim\(\);/, 'it is heard once more (the engine warm by then)');
-  assert.match(composer, /if \(retry\.length > finalText\.length\) finalText = retry;/, 'the fuller answer wins');
+  assert.match(composer, /const whole = await hearInWindows\(ctx, recording\);/, 'it is re-heard in short windows that complete under load');
+  assert.match(composer, /if \(whole\.length > finalText\.length\) finalText = whole;/, 'the fuller answer wins');
   assert.match(composer, /throw Object\.assign\(new Error\(t\('The voice model returned only part of what was said[^']*'\)\), \{ truncated: true \}\);/, 'still truncated surfaces an error instead of finalizing partial text');
 });
 

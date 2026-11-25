@@ -11,7 +11,7 @@ const ICON = {
 import { pickerHtml } from '/chat-pick.js';
 import { micProblem, openMicrophone, startRecorder, transcribe, wavFrom } from '/recorder.js';
 import { askConfirm } from '/confirm.js';
-import { LIVE_EVERY_MS, livePieces, finalPass, audioSeconds, looksTruncated } from '/voice-live.js';
+import { LIVE_EVERY_MS, livePieces, finalPass, finalChunks, audioSeconds, looksTruncated } from '/voice-live.js';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
 const MODE_HINT = { bypassPermissions: t('Runs tools without asking'), manual: t('Asks you for each tool, in the chat'), auto: t('A checker decides what is safe'), plan: t('Plans only, runs nothing'), acceptEdits: t('Edits files freely, asks for the rest') };
@@ -458,6 +458,16 @@ It is free and works offline, Khmer included, with nothing sent online. One down
   watchInstallVoice(ctx);
   return true;
 }
+// Hear the whole recording in short windows (finalChunks) and join the pieces. One request per window keeps each short
+// enough to complete under a fully loaded machine, where a single long request would stop early; it is slower (more
+// requests) but loses no words. Used only when the one-shot final looks truncated, so the normal fast path is untouched.
+async function hearInWindows(ctx, recording) {
+  const windows = finalChunks(recording);
+  if (windows.length <= 1) return String((await hearWords(ctx, recording.wav())).text || '').trim();
+  const parts = [];
+  for (const [from, to] of windows) parts.push(String((await hearWords(ctx, wavFrom(recording.chunks.slice(from, to), recording.rate))).text || '').trim());
+  return parts.filter(Boolean).join(' ');
+}
 async function finishMic(ctx) {
   const recording = listening; if (!recording) return;
   // The browser's recognition puts the words in the box itself when it ends.
@@ -488,13 +498,15 @@ async function finishMic(ctx) {
       // Nothing committed (short recording, or no pause to cut at), so the whole recording is heard.
       finalText = String((await hearWords(ctx, recording.wav())).text || '').trim();
     }
-    // A cold engine can return only the opening words as the final answer: data loss. An answer far too short for the
-    // audio is heard once more (the engine is warm by now); the fuller one wins. If it is still truncated, raise an error
-    // rather than finalize a partial answer, so the person retries instead of silently losing most of what they said.
+    // Under a fully loaded machine, one whole-recording request can come back with only the opening words: the engine
+    // stops early under contention (short requests always complete). An answer far too short for the audio is heard once
+    // more in short windows (hearInWindows), which complete even under load, and the fuller one wins. If it is still
+    // truncated, raise an error rather than finalize a partial answer, so the person retries instead of silently losing
+    // most of what they said.
     const seconds = audioSeconds(recording);
     if (looksTruncated(finalText, seconds)) {
-      const retry = String((await hearWords(ctx, recording.wav())).text || '').trim();
-      if (retry.length > finalText.length) finalText = retry;
+      const whole = await hearInWindows(ctx, recording);
+      if (whole.length > finalText.length) finalText = whole;
       if (looksTruncated(finalText, seconds)) throw Object.assign(new Error(t('The voice model returned only part of what was said. Press the mic and try again in a moment.')), { truncated: true });
     }
     liveShow(ctx, live, finalText, { final: true });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseWav, frame, levelsOf, livePieces, finalPass, looksTruncated, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
+import { parseWav, frame, levelsOf, livePieces, finalPass, finalChunks, looksTruncated, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = name => readFileSync(path.join(here, 'fixtures', 'voice', name));
@@ -84,21 +84,36 @@ test('looksTruncated flags a tiny answer for long audio, not slow or short speec
   assert.equal(looksTruncated('one two three four five six seven eight nine ten', 10), false);
 });
 
-test('a truncated cold-start final is heard again and the fuller answer kept, never reported truncated', async () => {
-  // A ~12s clip with a pause so a cut commits (tail path). A cold stub returns only a couple of words for
-  // any piece, and the full sentence only once the whole clip is re-heard (the engine warm by then), which
-  // is exactly what the guard does on a suspiciously short final.
-  const rate = 22050, per = FRAME / rate, make = seconds => Array.from({ length: Math.round(seconds / per) }, () => new Float32Array(FRAME).fill(0.1));
-  const chunks = make(12), gapAt = Math.round(3.5 / per), gap = Math.max(2, Math.ceil(0.5 / per));
-  for (let i = 0; i < gap; i++) chunks[gapAt + i] = new Float32Array(FRAME);
-  const FULL = 'Please open the project folder, pull the latest changes, install the packages, start the server, then run the tests and report back.';
-  const transcribe = async wav => ((wav.length - 44) / 2 / 16000 >= 11 ? FULL : 'ok');
+test('finalChunks splits a long recording into short windows that cover it and cut in the quiet gaps', () => {
+  const rate = 22050, per = FRAME / rate, count = Math.round(13 / per);
+  const rec = { rate, chunks: Array.from({ length: count }, () => 0), levels: Array.from({ length: count }, () => 0.1) };
+  // A quiet gap just inside the first window (its last ~1s): the boundary should snap to it, not the hard cut.
+  const g1 = Math.round(4.3 / per); rec.levels[g1] = 0.001;
+  const windows = finalChunks(rec);
+  assert.ok(windows.length >= 3, 'a 13s clip becomes several short windows');
+  assert.equal(windows[0][0], 0); assert.equal(windows[windows.length - 1][1], count, 'the windows cover the whole recording with no gap');
+  for (let i = 1; i < windows.length; i++) assert.equal(windows[i][0], windows[i - 1][1], 'each window starts where the last ended');
+  for (const [from, to] of windows) assert.ok((to - from) * per <= LIVE_PIECE_S + 0.01, 'each window is at most the live piece length');
+  assert.equal(windows[0][1], g1, 'the first cut snaps to the quiet gap');
+});
+
+test('under load a long final truncates to the first words, but the windowed re-hear brings the whole text back', async () => {
+  // The real cause: one long whole-recording request stops early under a fully loaded machine (returns only the
+  // opening words at HTTP 200); short requests always complete. The stub models exactly that: any request over 6s of
+  // audio comes back as just the first two words, shorter ones return the full words for their slice.
+  const rate = 22050, per = FRAME / rate, count = Math.round(13 / per);
+  const chunks = Array.from({ length: count }, () => new Float32Array(FRAME).fill(0.1)); // continuous, no pause -> whole path
+  const transcribe = async wav => {
+    const seconds = (wav.length - 44) / 2 / 16000, words = Math.max(1, Math.round(seconds * 2));
+    const full = Array.from({ length: words }, (_, i) => `w${i}`).join(' ');
+    return seconds > 6 ? 'w0 w1' : full; // a long request stops early at two words
+  };
   let clock = 0; const now = () => (clock += 40);
   const out = await runTiming({ chunks, rate, transcribe, now, everyMs: 1 });
-  assert.ok(out.committedCuts >= 1, 'the pause commits a live cut (tail path)');
-  assert.equal(out.retriedFinal, true, 'a too-short final is heard once more');
-  assert.equal(out.truncated, false, 'after the retry the answer is no longer truncated');
-  assert.equal(out.text, FULL, 'the fuller answer wins, so no words are lost');
+  assert.equal(out.finalPath, 'whole', 'continuous speech: the whole-recording final path');
+  assert.equal(out.retriedFinal, true, 'the too-short final triggers the windowed re-hear');
+  assert.equal(out.truncated, false, 'after the windowed re-hear the answer is no longer truncated');
+  assert.ok(out.text.trim().split(/\s+/).length > 10, 'the whole text comes back, not just the first two words');
 });
 
 test('runTiming drives the real cut and reports the tail-only pass when a clip has a pause', async () => {

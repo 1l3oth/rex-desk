@@ -16,9 +16,9 @@ import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { livePieces, finalPass, audioSeconds, looksTruncated, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S } from '../public/voice-live.js';
+import { livePieces, finalPass, finalChunks, audioSeconds, looksTruncated, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S } from '../public/voice-live.js';
 
-export { livePieces, finalPass, audioSeconds, looksTruncated, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S };
+export { livePieces, finalPass, finalChunks, audioSeconds, looksTruncated, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S };
 
 // Parse a 16-bit PCM mono WAV into { rate, samples: Float32Array in -1..1 }.
 export function parseWav(buffer) {
@@ -101,14 +101,17 @@ export async function runTiming({ chunks, rate, transcribe, now = () => performa
       let finalText = pass.path === 'tail'
         ? [pass.kept, await hear(pass.from, chunks.length)].filter(Boolean).join(' ')
         : await hear(0, chunks.length);
-      // Same cold-start guard as finishMic: a final answer far too short for the audio is heard once more and the
-      // fuller one kept, so a truncated first answer is never reported as the result.
+      // Same guard as finishMic: a final answer far too short for the audio is heard once more in short windows
+      // (finalChunks), which complete under load where one long request would stop early; the fuller one is kept.
       const seconds = audioSeconds({ rate, chunks });
       let retriedFinal = false;
       if (looksTruncated(finalText, seconds)) {
         retriedFinal = true;
-        const retry = await hear(0, chunks.length);
-        if (retry.length > finalText.length) finalText = retry;
+        const windows = finalChunks({ rate, chunks, levels });
+        const parts = [];
+        for (const [from, to] of windows) parts.push(await hear(from, to));
+        const whole = parts.filter(Boolean).join(' ');
+        if (whole.length > finalText.length) finalText = whole;
       }
       if (finalText) { shown = finalText; if (!firstWordAt) firstWordAt = now(); }
       resolve({ finalAt: now(), finalStart, finalText, path: pass.path, retriedFinal, truncated: looksTruncated(finalText, seconds) });
