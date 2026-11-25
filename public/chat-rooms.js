@@ -274,39 +274,49 @@ function taskRow(ctx, task) {
   const source = task.local ? { type: 'local', name: t('Rex Desk') } : (ui.snap.config?.sources || []).find(item => item.id === task.sourceId) || { type: task.source || '', name: task.sourceName || '' };
   const steps = task.checklist?.length ? `<span class="tk-check" title="${t`Checklist`}">${task.checklist.filter(item => item.done).length}/${task.checklist.length}</span>` : '';
   const tags = (task.tags || []).slice(0, 3).map(tag => `<span class="tk-tag">${esc(tag)}</span>`).join('');
-  const who = on?.agent ? `<span class="tk-who working" title="${t`${esc(on.agent.name)} is working on it`}"><span class="dot working"></span>${esc(on.agent.name)}</span>` : assignee ? `<span class="tk-who">${esc(assignee.name)}</span>` : '<span class="tk-who none">—</span>';
+  const who = on?.agent ? `<span class="tk-who working" title="${t`${esc(on.agent.name)} is working on it`}"><span class="dot working"></span>${esc(on.agent.name)}</span>` : assignee ? `<span class="tk-who">${esc(assignee.name)}</span>` : '<span class="tk-who none"></span>';
+  const blocked = task.local && (task.blockedBy || []).length ? `<span class="tk-check" title="${t`Waits for other tasks`}">${t`waits for ${task.blockedBy.length}`}</span>` : '';
+  const project = task.local ? task.projectSlug || '' : task.projectName || source.name || '';
   const due = task.dueDate ? `<span class="tk-due${task.dueDate < new Date().toISOString().slice(0, 10) && task.status !== 'done' ? ' late' : ''}">${esc(new Date(`${task.dueDate}T00:00`).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }))}</span>` : '<span class="tk-due none"></span>';
   const prio = task.priority === 'urgent' || task.priority === 'high' ? `<span class="tprio ${task.priority}">${task.priority === 'urgent' ? t('Urgent') : t('High')}</span>` : '';
-  return `<button class="tk-row" data-open="task" data-id="${esc(task.id)}"><span class="tstat ${task.local ? STATUS_TONE[task.status] || '' : 'tracker'}" title="${esc(task.statusName || task.status || '')}"></span><span class="tnum">#${esc(taskNumber(task))}</span><span class="tk-title">${prio}<span class="tk-name">${esc(taskName(task))}</span>${steps}</span><span class="tk-src"><span class="src-mark mini ${esc(source.type)}" aria-hidden="true">${esc((source.name || '?')[0])}</span>${esc(task.local ? (task.projectSlug || t('Rex Desk')) : task.projectName || source.name)}</span><span class="tk-status">${esc(task.statusName || task.status || '')}</span>${who}${due}</button>`;
+  return `<button class="tk-row" data-open="task" data-id="${esc(task.id)}"><span class="tstat ${task.local ? STATUS_TONE[task.status] || '' : 'tracker'}" title="${esc(task.statusName || task.status || '')}"></span><span class="tnum">#${esc(taskNumber(task))}</span><span class="tk-title">${prio}<span class="tk-name">${esc(taskName(task))}</span>${steps}${blocked}${task.local ? '' : `<span class="tk-check">${esc(task.statusName || task.status || '')}</span>`}</span><span class="tk-src">${task.local ? '' : `<span class="src-mark mini ${esc(source.type)}" aria-hidden="true">${esc((source.name || '?')[0])}</span>`}${esc(project)}</span>${who}${due}</button>`;
 }
 export function tasksStage(ctx) {
   const { ui, esc } = ctx, everything = (ui.snap.tasks || []).filter(task => !task.demo && (task.active || task.local)), filter = String(ui.taskFilter || '').toLowerCase();
   const sources = ui.snap.config?.sources || [], syncs = new Map((ui.snap.sync || []).map(item => [item.sourceId, item]));
   const pick = ui.taskSource || 'all', inSource = task => pick === 'all' || (pick === 'local' ? task.local : task.sourceId === pick);
-  const showDone = ui.taskDone === true, all = everything.filter(inSource).filter(task => showDone || task.status !== 'done');
+  const state = ui.taskState || 'open', agentPick = ui.taskAgent || '', priorityPick = ui.taskPriority || '';
+  const inState = task => state === 'all' || (state === 'done' ? task.status === 'done' : task.status !== 'done');
+  const agentOf = task => agentOnTask(ui, task)?.agent?.id || task.assignee || '';
+  const inPicks = task => (!agentPick || (agentPick === 'none' ? !agentOf(task) : agentOf(task) === agentPick)) && (!priorityPick || (task.priority || 'normal') === priorityPick);
+  const all = everything.filter(inSource).filter(inState).filter(inPicks), filtering = Boolean(filter || agentPick || priorityPick || state !== 'open');
   const shown = all.filter(task => !filter || `${taskNumber(task)} ${taskName(task)} ${task.title} ${task.statusName || task.status || ''} ${task.projectName || ''} ${(task.tags || []).join(' ')}`.toLowerCase().includes(filter));
   ensureNames(ctx, shown.filter(task => !task.local));
-  const count = test => everything.filter(test).filter(task => showDone || task.status !== 'done').length;
+  const count = test => everything.filter(test).filter(inState).filter(inPicks).length;
   // Left: where tasks come from.
   const item = (id, mark, name, number, extra = '') => `<button class="tk-source${pick === id ? ' on' : ''}" data-action="task-source" data-source="${esc(id)}" aria-pressed="${pick === id}"><span class="src-mark mini ${esc(mark)}" aria-hidden="true">${esc(name[0])}</span><span class="tk-sname">${esc(name)}</span>${extra}<span class="tk-count">${number}</span></button>`;
   // Each tracker syncs on its own: the arrows beside it, with when it last synced.
-  const ago = at => { const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60000); return !at ? 'never synced' : minutes < 1 ? 'synced just now' : minutes < 60 ? t`synced ${minutes} min ago` : minutes < 1440 ? t`synced ${Math.round(minutes / 60)} h ago` : t`synced ${Math.round(minutes / 1440)} d ago`; };
+  const ago = at => { const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60000); return !at ? t('never synced') : minutes < 1 ? 'synced just now' : minutes < 60 ? t`synced ${minutes} min ago` : minutes < 1440 ? t`synced ${Math.round(minutes / 60)} h ago` : t`synced ${Math.round(minutes / 1440)} d ago`; };
   const connected = sources.map(source => { const sync = syncs.get(source.id), busy = ui.syncing === source.id; return `<div class="tk-srow">${item(source.id, source.type, source.name, count(task => task.sourceId === source.id), sync?.error ? `<span class="dot bad" title="${esc(sync.error)}"></span>` : '')}<button type="button" class="tk-sync${busy ? ' busy' : ''}" data-action="sync-source" data-source="${esc(source.id)}" title="${t`Sync ${esc(source.name)} now · ${esc(sync?.error ? t`last sync failed: ${sync.error}` : ago(sync?.at))}`}" aria-label="${t`Sync ${esc(source.name)}`}" ${busy ? 'disabled' : ''}><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/></svg></button></div>`; }).join('');
   const side = `<aside class="tk-side"><h3>${t`Sources`}</h3>${item('all', 'all', t('All tasks'), count(() => true))}${item('local', 'local', t('Rex Desk tasks'), count(task => task.local))}${connected}
-    <button class="btn small tk-manage" data-action="task-connect">${sources.length ? t('Manage connectors') : t('Add connector')}</button>
-    <label class="tk-donebox"><input type="checkbox" data-task-done ${showDone ? 'checked' : ''}> ${t`Show done tasks`}</label></aside>`;
+    <button class="btn small tk-manage" data-action="task-connect">${sources.length ? t('Manage connectors') : t('Add connector')}</button></aside>`;
   // Right: add, then the tasks, Rex Desk ones by status and tracker ones by source.
   const projects = ui.memory?.projects || [];
   const add = pick === 'all' || pick === 'local' ? `<form class="tadd" data-task-add><input name="title" type="text" maxlength="200" placeholder="${t`Add a task and press Enter`}" autocomplete="off" aria-label="${t`New task title`}">${projects.length ? pickerHtml(ctx, { id: 'task-add-project', label: t('Project'), value: ui.lastTaskProject || '', compact: true, items: [{ value: '', label: t('No project') }, ...projects.map(project => ({ value: project.slug, label: project.slug }))] }) : ''}<button class="btn primary small">${t`Add`}</button></form>` : '';
-  const head = `<div class="tk-head" aria-hidden="true"><span></span><span>#</span><span>${t`Task`}</span><span>${t`Project`}</span><span>${t`Status`}</span><span>${t`Agent`}</span><span>${t`Due`}</span></div>`;
+  const head = `<div class="tk-head" aria-hidden="true"><span></span><span>#</span><span>${t`Task`}</span><span>${t`Project`}</span><span>${t`Agent`}</span><span>${t`Due`}</span></div>`;
   const group = (title, list) => list.length ? `<section class="tk-group"><h3>${esc(title)} <span>${list.length}</span></h3>${list.map(task => taskRow(ctx, task)).join('')}</section>` : '';
   const local = shown.filter(task => task.local), order = (left, right) => PRIORITY.findIndex(([key]) => key === left.priority) - PRIORITY.findIndex(([key]) => key === right.priority);
   const groups = STATUS.map(([status, label]) => group(label, local.filter(task => task.status === status).sort(order))).join('')
+    + group(t('Other'), local.filter(task => !STATUS.some(([status]) => status === task.status)))
     + sources.map(source => group(source.name, shown.filter(task => task.sourceId === source.id))).join('');
-  const empty = pick === 'local' ? `<div class="empty"><h2>${t`No Rex Desk tasks yet`}</h2><p>${t`Add one above, or ask an agent to make tasks for a project.`}</p></div>` : filter ? `<div class="empty"><h2>${t`Nothing matches`}</h2><p>${t`Try other words.`}</p></div>` : `<div class="empty"><h2>${t`No tasks`}</h2><p>${t`Add one above, connect a task app on the left. Each one syncs with the arrows beside its name.`}</p></div>`;
-  return { title: t('Tasks'), meta: t`${everything.length} tasks`, top: true,
-    members: `<div class="members tbar"><input id="task-filter" type="search" placeholder="${t`Search tasks, numbers, tags…`}" value="${esc(ui.taskFilter || '')}" autocomplete="off"></div>`,
-    feed: `<div class="page tk">${side}<div class="tk-main">${add}${shown.length ? `<div class="tk-list">${head}${groups}</div>` : empty}</div></div>` };
+  const empty = pick === 'local' && !filtering ? `<div class="empty"><h2>${t`No Rex Desk tasks yet`}</h2><p>${t`Add one above, or ask an agent to make tasks for a project.`}</p></div>` : filtering ? `<div class="empty"><h2>${t`Nothing matches`}</h2><p>${t`Try other words or filters.`}</p><button class="btn small" data-action="task-filters-clear">${t`Clear filters`}</button></div>` : `<div class="empty"><h2>${t`No tasks`}</h2><p>${t`Add one above, or connect a task app on the left. Each one syncs with the arrows beside its name.`}</p></div>`;
+  const agents = ui.snap.specialists || [];
+  const filters = pickerHtml(ctx, { id: 'task-filter-state', label: t('Status'), value: state, compact: true, items: [{ value: 'open', label: t('Open tasks') }, { value: 'done', label: t('Done tasks') }, { value: 'all', label: t('All tasks') }] })
+    + pickerHtml(ctx, { id: 'task-filter-agent', label: t('Agent'), value: agentPick, compact: true, searchable: agents.length > 6, items: [{ value: '', label: t('Any agent') }, { value: 'none', label: t('No agent') }, ...agents.map(agent => ({ value: agent.id, label: agent.name, hint: agent.projectSlug }))] })
+    + pickerHtml(ctx, { id: 'task-filter-priority', label: t('Priority'), value: priorityPick, compact: true, items: [{ value: '', label: t('Any priority') }, ...PRIORITY.map(([value, label]) => ({ value, label }))] });
+  return { title: t('Tasks'), meta: everything.length === 1 ? t('1 task') : t`${everything.length} tasks`, top: true,
+    members: `<div class="members tbar tk-bar"><input id="task-filter" type="search" placeholder="${t`Search tasks, numbers, tags…`}" value="${esc(ui.taskFilter || '')}" autocomplete="off" aria-label="${t`Search tasks`}">${filters}</div>`,
+    feed: `<div class="page tk">${side}<div class="tk-main">${add}${shown.length ? `<div class="tk-list${shown.some(task => task.local ? task.projectSlug : task.projectName || task.sourceId) ? '' : ' no-project'}">${head}${groups}</div>` : empty}</div></div>` };
 }
 
 // The test evidence of one task: what agents shared and what their runs on it recorded, newest first.
@@ -431,14 +441,23 @@ function localTaskStage(ctx, task) {
     ${field(t('Agent'), pickerHtml(ctx, { id: 'lt-assignee', label: t('Agent'), value: task.assignee || '', items: [{ value: '', label: t('Nobody yet') }, ...agents.map(agent => ({ value: agent.id, label: agent.name, hint: agent.projectSlug }))] }))}
     ${field(t('Project'), pickerHtml(ctx, { id: 'lt-project', label: t('Project'), value: task.projectSlug || '', items: [{ value: '', label: t('No project') }, ...projects.map(project => ({ value: project.slug, label: project.slug }))] }))}
     ${field(t('Due'), `<input id="lt-due" type="date" value="${esc(task.dueDate || '')}">`)}
-    ${field(t('Tags'), `<input id="lt-tags" type="text" value="${esc((task.tags || []).join(', '))}" placeholder="${t`ui, bug`}" autocomplete="off">`)}
+    ${field(t('Tags'), `<input id="lt-tags" type="text" value="${esc((task.tags || []).join(', '))}" placeholder="${t`ui, bug`}" autocomplete="off" title="${t`Separate tags with commas`}">`)}
     <p class="lt-made">${t`Made by ${esc(task.createdBy || 'you')} · ${esc(when(task.createdAt))}`}</p>
     <button class="btn small danger" data-action="lt-delete" data-id="${esc(task.id)}">${t`Delete task`}</button>
   </aside>`;
   const checklist = `<section class="lt-sec"><h3>${t('Checklist')}${task.checklist?.length ? ` <span>${t`${task.checklist.filter(item => item.done).length} of ${task.checklist.length}`}</span>` : ''}</h3>
     <ul class="lt-check">${(task.checklist || []).map((item, index) => `<li><label><input type="checkbox" data-lt-check="${index}" ${item.done ? 'checked' : ''}><span>${esc(item.text)}</span></label><button class="ag-x" data-action="lt-check-remove" data-index="${index}" aria-label="${t`Remove this item`}" title="${t`Remove`}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></li>`).join('')}</ul>
     <form class="lt-inline" data-lt-check-add><input name="text" type="text" maxlength="300" placeholder="${t`Add a step…`}" autocomplete="off" aria-label="${t`Add a checklist step`}"></form></section>`;
-  const links = parent || children.length || blockers.length ? `<section class="lt-sec"><h3>${t`Linked tasks`}</h3><ul class="lt-links">${parent ? `<li>${t`Part of`} <a href="#" data-open="task" data-id="${esc(parent.id)}">#${esc(parent.taskNumber)} ${esc(parent.title)}</a></li>` : ''}${children.map(child => `<li>${t`Subtask`} <a href="#" data-open="task" data-id="${esc(child.id)}">#${esc(child.taskNumber)} ${esc(child.title)}</a> · ${esc(child.statusName)}</li>`).join('')}${blockers.map(blocker => `<li>${t`Waits for`} <a href="#" data-open="task" data-id="${esc(blocker.id)}">#${esc(blocker.taskNumber)} ${esc(blocker.title)}</a> · ${esc(blocker.statusName)}</li>`).join('')}</ul></section>` : '';
+  const x = (action, id, label) => `<button type="button" class="ag-x" data-action="${action}" data-id="${esc(id)}" aria-label="${label}" title="${label}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
+  const linkRow = (item, extra) => `<li><span class="tstat ${STATUS_TONE[item.status] || ''}" title="${esc(item.statusName || '')}"></span><a href="#" data-open="task" data-id="${esc(item.id)}"><span class="tnum">#${esc(item.taskNumber)}</span> ${esc(item.title)}</a><span class="lt-lstat">${esc(item.statusName || '')}</span>${extra}</li>`;
+  const family = new Set([task.id, ...(task.blockedBy || []), ...tasks.filter(item => item.blockedBy?.includes(task.id)).map(item => item.id)]);
+  const canBlock = tasks.filter(item => !family.has(item.id) && item.status !== 'done');
+  const linkPart = parent ? `<div class="lt-lgroup"><h4>${t`Part of`}</h4><ul class="lt-links">${linkRow(parent, x('lt-unparent', parent.id, t('Unlink from this task')))}</ul></div>` : '';
+  const linkSubs = `<div class="lt-lgroup"><h4>${t`Subtasks`}${children.length ? ` <span>${t`${children.filter(item => item.status === 'done').length} of ${children.length} done`}</span>` : ''}</h4>${children.length ? `<ul class="lt-links">${children.map(child => linkRow(child, x('lt-sub-remove', child.id, t('Unlink this subtask')))).join('')}</ul>` : ''}
+    <form class="lt-inline" data-lt-sub-add><input name="title" type="text" maxlength="200" placeholder="${t`Add a subtask…`}" autocomplete="off" aria-label="${t`Add a subtask`}"></form></div>`;
+  const linkBlocks = `<div class="lt-lgroup"><h4>${t`Waits for`}</h4>${blockers.length ? `<ul class="lt-links">${blockers.map(blocker => linkRow(blocker, x('lt-block-remove', blocker.id, t('Stop waiting for this task')))).join('')}</ul>` : ''}
+    ${canBlock.length ? pickerHtml(ctx, { id: 'lt-block-add', label: t('Add a task it waits for'), value: '', placeholder: t('Add a task it waits for…'), searchable: canBlock.length > 6, items: canBlock.map(item => ({ value: item.id, label: `#${item.taskNumber} ${item.title}`, hint: item.statusName })) }) : ''}</div>`;
+  const links = `<section class="lt-sec"><h3>${t`Linked tasks`}</h3>${linkPart}${linkSubs}${linkBlocks}</section>`;
   const comments = `<section class="lt-sec"><h3>${t`Comments`}</h3>${(task.comments || []).length ? `<ol class="lt-comments">${task.comments.map(comment => `<li><div><strong>${esc(comment.by)}</strong> <time>${esc(when(comment.at))}</time></div><div class="md">${markdown(comment.text)}</div></li>`).join('')}</ol>` : `<p class="muted small">${t`No comments yet. Agents write here what they did and found.`}</p>`}
     <form class="lt-inline" data-lt-comment><textarea name="text" rows="2" placeholder="${t`Write a comment…`}" aria-label="${t`Write a comment`}"></textarea><button class="btn small">${t`Comment`}</button></form></section>`;
   const work = on?.agent ? `<p class="assigned"><span class="dot working"></span><strong>${esc(on.agent.name)}</strong> ${t`is working on this.`} <button class="btn small" data-open="run" data-id="${esc(on.run.id)}">${t`Open the work`}</button></p>`
@@ -447,11 +466,22 @@ function localTaskStage(ctx, task) {
     ${work}<section class="lt-sec"><h3>${t`Description`}</h3><textarea id="lt-desc" class="lt-desc" placeholder="${t`What needs doing, and how to tell it is done.`}">${esc(task.description || '')}</textarea></section>${checklist}${evidenceHtml(ctx, task)}${links}${comments}</div>`;
   return { title: `#${task.taskNumber} ${task.title}`, meta: t`Rex Desk task · ${task.statusName}`, top: true, feed: `<div class="page lt" data-lt="${esc(task.id)}">${main}${side}</div>` };
 }
+// After an add box is redrawn, the new box gets the cursor and anything typed while the page was saving.
+const keepTyping = (old, selector) => { const box = document.querySelector(selector); if (!box) return; if (box !== old && old.value) box.value = old.value; box.focus(); };
 // Every change saves at once: pickers when chosen, text when you leave the field.
 export function initLocalTasks(ctx) {
   const { api, toast, refresh, ui } = ctx;
   const current = () => (ui.snap.tasks || []).find(item => item.id === ui.view.id && item.local);
-  const save = async data => { const task = current(); if (!task) return; try { await api(`/local-tasks/${encodeURIComponent(task.id)}`, { method: 'PUT', data }); await refresh(); } catch (error) { toast(error.message, true); await refresh({ full: true }); } };
+  const save = async data => {
+    const task = current(); if (!task) return;
+    try { await api(`/local-tasks/${encodeURIComponent(task.id)}`, { method: 'PUT', data }); await refresh(); }
+    catch (error) {
+      if (data.status === 'done' && /^Still open:/.test(error.message) && await askConfirm(t`${error.message.replace(/ Finish those first, or pass force\.$/, '')} Mark it done anyway?`)) return save({ ...data, force: true });
+      if (!(data.status === 'done' && /^Still open:/.test(error.message))) toast(error.message, true);
+      delete ui.picks?.['lt-status']; await refresh({ full: true });
+    }
+  };
+  const filterPick = { 'task-filter-state': 'taskState', 'task-filter-agent': 'taskAgent', 'task-filter-priority': 'taskPriority' };
   document.addEventListener('change', event => {
     const id = event.target.id, value = event.target.value;
     if (id === 'lt-status') void save({ status: value });
@@ -460,6 +490,8 @@ export function initLocalTasks(ctx) {
     else if (id === 'lt-project') void save({ project: value });
     else if (id === 'lt-due') void save({ dueDate: value });
     else if (id === 'task-add-project') ui.lastTaskProject = value;
+    else if (filterPick[id]) { ui[filterPick[id]] = value; ctx.render(); }
+    else if (id === 'lt-block-add' && value) { const task = current(); delete ui.picks?.['lt-block-add']; if (task) void save({ blockedBy: [...(task.blockedBy || []), value] }); }
     else if (event.target.dataset.ltCheck !== undefined) { const task = current(); if (task) void save({ checklist: task.checklist.map((item, index) => index === Number(event.target.dataset.ltCheck) ? { ...item, done: event.target.checked } : item) }); }
   });
   document.addEventListener('focusout', event => {
@@ -469,18 +501,21 @@ export function initLocalTasks(ctx) {
     if (event.target.id === 'lt-tags' && event.target.value !== (task.tags || []).join(', ')) void save({ tags: event.target.value });
   });
   document.addEventListener('keydown', event => {
-    if (event.target.id === 'lt-title' && event.key === 'Enter') { event.preventDefault(); event.target.blur(); }
+    if ((event.target.id === 'lt-title' || event.target.id === 'lt-tags') && event.key === 'Enter') { event.preventDefault(); event.target.blur(); }
     if (event.target.closest?.('[data-lt-comment]') && event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); event.target.form.requestSubmit(); }
   });
   document.addEventListener('submit', async event => {
     const form = event.target;
     if (form.matches('[data-task-add]')) {
       event.preventDefault(); const title = form.title.value.trim(); if (!title) return;
-      try { await api('/local-tasks', { method: 'POST', data: { title, project: ui.lastTaskProject || '' } }); form.title.value = ''; ui.taskSource = ui.taskSource === 'all' || !ui.taskSource ? ui.taskSource : 'local'; await refresh(); document.querySelector('[data-task-add] input')?.focus(); } catch (error) { toast(error.message, true); }
+      try { await api('/local-tasks', { method: 'POST', data: { title, project: ui.lastTaskProject || '' } }); form.title.value = ''; ui.taskSource = ui.taskSource === 'all' || !ui.taskSource ? ui.taskSource : 'local'; await refresh({ full: true }); keepTyping(form.title, '[data-task-add] input'); } catch (error) { toast(error.message, true); }
     } else if (form.matches('[data-lt-check-add]')) {
       event.preventDefault(); const task = current(), text = form.text.value.trim(); if (!task || !text) return;
       form.text.value = ''; await api(`/local-tasks/${encodeURIComponent(task.id)}`, { method: 'PUT', data: { checklist: [...(task.checklist || []), { text, done: false }] } }).catch(error => toast(error.message, true));
-      await refresh({ full: true }); document.querySelector('[data-lt-check-add] input')?.focus();
+      await refresh({ full: true }); keepTyping(form.text, '[data-lt-check-add] input');
+    } else if (form.matches('[data-lt-sub-add]')) {
+      event.preventDefault(); const task = current(), title = form.title.value.trim(); if (!task || !title) return;
+      try { await api('/local-tasks', { method: 'POST', data: { title, parentTaskId: task.id, project: task.projectSlug || '' } }); form.title.value = ''; await refresh({ full: true }); keepTyping(form.title, '[data-lt-sub-add] input'); } catch (error) { toast(error.message, true); }
     } else if (form.matches('[data-lt-comment]')) {
       event.preventDefault(); const task = current(), text = form.text.value.trim(); if (!task || !text) return;
       try { await api(`/local-tasks/${encodeURIComponent(task.id)}/comments`, { method: 'POST', data: { text } }); form.text.value = ''; document.activeElement?.blur(); await refresh({ full: true }); } catch (error) { toast(error.message, true); }
@@ -490,8 +525,12 @@ export function initLocalTasks(ctx) {
     const target = event.target.closest?.('[data-action]'); if (!target) return;
     const action = target.dataset.action;
     if (action === 'task-source') { event.stopPropagation(); ui.taskSource = target.dataset.source; ctx.render(); return; }
+    if (action === 'task-filters-clear') { event.stopPropagation(); ui.taskFilter = ''; ui.taskState = 'open'; ui.taskAgent = ''; ui.taskPriority = ''; for (const key of Object.keys(filterPick)) delete ui.picks?.[key]; ctx.render(); return; }
     const task = current(); if (!task) return;
     if (action === 'lt-check-remove') { event.stopPropagation(); void save({ checklist: task.checklist.filter((_, index) => index !== Number(target.dataset.index)) }); }
+    else if (action === 'lt-block-remove') { event.stopPropagation(); void save({ blockedBy: (task.blockedBy || []).filter(id => id !== target.dataset.id) }); }
+    else if (action === 'lt-unparent') { event.stopPropagation(); void save({ parentTaskId: '' }); }
+    else if (action === 'lt-sub-remove') { event.stopPropagation(); try { await api(`/local-tasks/${encodeURIComponent(target.dataset.id)}`, { method: 'PUT', data: { parentTaskId: '' } }); await refresh({ full: true }); } catch (error) { toast(error.message, true); } }
     else if (action === 'lt-delete') {
       event.stopPropagation(); if (!await askConfirm(t`Delete #${task.taskNumber} "${task.title}"? Its comments go with it.`)) return;
       try { await api(`/local-tasks/${encodeURIComponent(task.id)}`, { method: 'DELETE' }); ctx.open('tasks'); } catch (error) { toast(error.message, true); }
@@ -555,5 +594,5 @@ document.addEventListener('click', async event => {
   try { await ctx.api(`/rooms/${room.id}/away`, { method: 'PUT', data: { on: false } }); await ctx.refresh(); } catch (error) { ctx.toast(error.message, true); }
 }, true);
 
-document.addEventListener('change', event => { if (!event.target.matches?.('[data-task-done]')) return; const ctx = window.__rexCtx; if (!ctx) return; ctx.ui.taskDone = event.target.checked; ctx.render(); });
+
 

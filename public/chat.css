@@ -514,6 +514,7 @@ p.pf-stats{display:block;margin:2px 0 0;font-size:13px;color:var(--muted)}
 
 /* ---- Tasks: source filter, quick add, Rex Desk tasks by status ---- */
 .tbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.tbar #task-filter{flex:1;min-width:180px}
+.tk-bar{gap:4px}.tk-bar #task-filter{flex:0 1 380px;margin-right:6px}.tk-bar .pick2-btn{color:var(--muted)}.tk-bar .pick2-btn:hover{color:var(--ink)}
 .tsrc{display:inline-flex;gap:2px;padding:2px;border-radius:9px;background:var(--raised)}
 .tsrc button{border:0;background:none;border-radius:7px;padding:3px 10px;font-size:12.5px;color:var(--muted)}
 .tsrc button:hover{color:var(--ink)}.tsrc button.on{background:var(--panel);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
@@ -542,11 +543,17 @@ p.pf-stats{display:block;margin:2px 0 0;font-size:13px;color:var(--muted)}
 .lt-inline{display:flex;gap:8px;align-items:flex-end}
 .lt-inline input,.lt-inline textarea{flex:1;min-width:0;padding:8px 11px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink);font-size:13.5px}
 .lt-inline textarea{field-sizing:content;min-height:40px;resize:none}
-.lt-links{margin:0;padding-left:18px;font-size:13.5px;display:flex;flex-direction:column;gap:4px}
+.lt-links{list-style:none;margin:0;padding:0;font-size:13.5px;display:flex;flex-direction:column}
+.lt-links li{display:flex;align-items:center;gap:9px;min-width:0;padding:6px 4px;border-bottom:1px solid var(--line)}
+.lt-links a{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--ink)}.lt-links a:hover{color:var(--accent)}.lt-links .tnum{font-size:12px}
+.lt-lstat{flex:none;font-size:12px;color:var(--muted)}
+.lt-lgroup{display:flex;flex-direction:column;gap:6px}.lt-lgroup+.lt-lgroup{margin-top:6px}.lt-lgroup h4{margin:0;font-size:12px;font-weight:500;color:var(--muted)}.lt-lgroup h4 span{font-variant-numeric:tabular-nums}
+.lt-lgroup>.pick2,.lt-lgroup>.pick2 .pick2-btn{width:100%}.lt-lgroup>.pick2 .pick2-btn{padding:8px 11px;border-radius:9px;font-size:13.5px;background:var(--panel)}
 .lt-comments{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
 .lt-comments li{display:flex;flex-direction:column;gap:3px;font-size:13.5px}.lt-comments time{color:var(--muted);font-size:12px;margin-left:4px}
 .lt-side{display:flex;flex-direction:column;gap:12px;position:sticky;top:12px}
 .lt-field{display:flex;flex-direction:column;gap:4px}.lt-field>span{font-size:12px;color:var(--muted)}
+.lt-side .pick2,.lt-side .pick2-btn,.lt-field input{width:100%}.lt-side .pick2-btn{padding:6px 10px;border-radius:8px;font-size:13.5px}.lt-side .btn.danger{align-self:flex-start}
 .lt-field input{padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font-size:13.5px;color-scheme:inherit}
 .lt-made{margin:6px 0 0;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
 .lt-start{margin:0}
@@ -584,6 +591,7 @@ p.pf-stats{display:block;margin:2px 0 0;font-size:13px;color:var(--muted)}
 
 .feed-inner:has(> .page.ag),.feed-inner:has(> .page.lt){max-width:none;padding-left:0;padding-right:0}
 .page.lt{max-width:none;margin:0;padding-left:clamp(20px,3vw,40px);padding-right:clamp(20px,3vw,40px);grid-template-columns:minmax(0,1fr) 300px}
+@media (max-width:860px){.page.lt{grid-template-columns:minmax(0,1fr)}.page.lt .lt-side{position:static;order:-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}.page.lt .lt-made{grid-column:1/-1;margin:0;padding-top:10px}}
 
 /* ---- task sources dialog ---- */
 .src-dialog{max-width:560px;width:min(560px,94vw)}
@@ -707,10 +715,10 @@ button.cn-main{cursor:pointer}
 .src-mark.mini{width:20px;height:20px;border-radius:6px;font-size:10.5px}.src-mark.all{background:var(--raised);color:var(--muted)}
 .tk-manage{margin:10px 8px 0;align-self:flex-start}
 .tk-donebox{display:flex;align-items:center;gap:8px;margin:10px 8px 0;font-size:12.5px;color:var(--muted);cursor:pointer}
-.tk-main{min-width:0;display:flex;flex-direction:column;gap:14px}
+.tk-main{min-width:0;display:flex;flex-direction:column;gap:14px;container-type:inline-size}
 .tk-main .tadd{margin:0}
 .tk-list{display:flex;flex-direction:column}
-.tk-head,.tk-row{display:grid;grid-template-columns:14px 64px minmax(0,1fr) minmax(110px,170px) minmax(90px,130px) minmax(80px,120px) 64px;gap:12px;align-items:center}
+.tk-head,.tk-row{display:grid;grid-template-columns:14px 52px minmax(0,1fr) minmax(80px,150px) minmax(90px,150px) 56px;gap:12px;align-items:center}
 .tk-head{padding:0 10px 6px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line)}
 .tk-group h3{display:flex;gap:8px;align-items:baseline;margin:16px 10px 4px;font-size:12.5px;font-weight:600;color:var(--muted)}.tk-group h3 span{font-weight:400}
 .tk-row{width:100%;padding:9px 10px;border:0;border-bottom:1px solid var(--line);background:none;color:var(--ink);text-align:left;font-size:13.5px}
@@ -725,9 +733,10 @@ button.cn-main{cursor:pointer}
 .tk-who{display:flex;align-items:center;gap:6px;font-size:12.5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.tk-who.working{color:var(--accent)}.tk-who.none{color:var(--muted)}
 .tk-due{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}.tk-due.late{color:var(--bad);font-weight:600}
 .tstat.tracker{border-color:var(--muted);border-style:dashed}
-@media (max-width:1100px){.tk-head,.tk-row{grid-template-columns:14px 58px minmax(0,1fr) minmax(90px,130px) 64px}.tk-head span:nth-child(5),.tk-head span:nth-child(6),.tk-row .tk-status,.tk-row .tk-who{display:none}}
+.tk-list.no-project :is(.tk-head,.tk-row){grid-template-columns:14px 52px minmax(0,1fr) minmax(90px,150px) 56px}.tk-list.no-project :is(.tk-head span:nth-child(4),.tk-row .tk-src){display:none}
+@container (max-width:620px){.tk-head,.tk-row{grid-template-columns:14px 48px minmax(0,1fr) minmax(80px,120px) 56px}.tk-head span:nth-child(4),.tk-row .tk-src{display:none}}
 @media (max-width:800px){.page.tk{grid-template-columns:1fr}.tk-side{position:static;flex-direction:row;flex-wrap:wrap}.tk-side h3,.tk-donebox,.tk-manage{display:none}.tk-source,.tk-connect{width:auto}}
-.tk-title .tk-name{flex:0 1 auto;min-width:45%}.tk-title .tk-tag{flex:0 2 auto;min-width:0;max-width:110px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.tk-title .tprio,.tk-title .tk-check{flex:none}
+.tk-title .tk-name{flex:0 1 auto;min-width:0}.tk-title .tk-tag{flex:0 2 auto;min-width:0;max-width:110px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.tk-title .tprio,.tk-title .tk-check{flex:none}
 
 /* ---- Claude account switcher ---- */
 .rail-foot{align-items:center}
@@ -1562,7 +1571,8 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
   .tk-side .tk-source.on .tk-count{color:inherit;opacity:.85}
   .tk-side .tk-connect{border-style:dashed;color:var(--muted)}
   .tadd{display:flex;flex-wrap:wrap;gap:8px;padding:8px}
-  .tadd input[name=title]{flex:1 1 100%;min-height:42px}
+  .tadd input[name=title]{flex:1 1 160px;min-height:38px}
+  #members .members.tk-bar{flex-wrap:wrap!important;row-gap:4px;overflow:visible}.tk-bar #task-filter{flex:1 1 100%;margin:0}
   .tadd .pick2{flex:1}
   .tadd .btn{min-height:38px;padding:0 18px}
   .tk-head{display:none!important}
@@ -1587,9 +1597,7 @@ button.wt-task-open:hover .wt-task-name{color:var(--accent)}
   .tk-row .tk-title .tk-check{order:4;color:var(--muted)}
   .tk-row .tk-src{order:5}.tk-row .tk-who.working{order:6}.tk-row .tk-due{order:7}
 }
-/* the task title always keeps most of the row: Status and Agent columns only when there is room for them */
-.tk-head,.tk-row{grid-template-columns:14px 56px minmax(220px,1fr) minmax(90px,150px) minmax(80px,110px) minmax(70px,110px) 56px}
-@media (max-width:1500px) and (min-width:761px){.tk-head,.tk-row{grid-template-columns:14px 56px minmax(0,1fr) minmax(90px,140px) 56px}.tk-head span:nth-child(5),.tk-head span:nth-child(6),.tk-row .tk-status,.tk-row .tk-who{display:none}}
+/* the task title keeps most of the row; Project goes first when the list is narrow (container rule above) */
 
 /* ---- Settings: section icons; on a phone, a list of sections and one section at a time ---- */
 .st-navhead{display:flex;align-items:center}.st-navhead h1{flex:1}
