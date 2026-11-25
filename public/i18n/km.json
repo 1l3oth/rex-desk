@@ -2717,5 +2717,12 @@
  "Rex Desk was busy for a moment. Press Update now again.": "Rex Desk រវល់មួយភ្លែត។ សូមចុច ធ្វើបច្ចុប្បន្នភាពឥឡូវនេះ ម្ដងទៀត។",
  "Rex Desk is not answering. The drive may be full, or the old Rex Desk is still closing. Close Rex Desk, open it again, then press Update now.": "Rex Desk មិនឆ្លើយតបទេ។ ថាសអាចពេញ ឬ Rex Desk ចាស់នៅតែកំពុងបិទ។ សូមបិទ Rex Desk បើកវាម្ដងទៀត រួចចុច ធ្វើបច្ចុប្បន្នភាពឥឡូវនេះ។",
  "Not downloaded yet · you have {0}": "មិនទាន់ទាញយកនៅឡើយ · អ្នកមាន {0}",
- "Not downloaded yet": "មិនទាន់ទាញយកនៅឡើយ"
+ "Not downloaded yet": "មិនទាន់ទាញយកនៅឡើយ",
+ "Needs a paid Rex Desk plan.": "ត្រូវការគម្រោង Rex Desk ដែលបង់ប្រាក់។",
+ "How to connect your phone": "របៀបភ្ជាប់ទូរសព្ទរបស់អ្នក",
+ "Turn on the switch above.": "បើកប៊ូតុងខាងលើ។",
+ "On your phone, open this link and sign in with the same account:": "នៅលើទូរសព្ទ សូមបើកតំណនេះ ហើយចូលដោយគណនីតែមួយ៖",
+ "Keep this computer on and awake while you use the phone.": "រក្សាកុំព្យូទ័រនេះឱ្យបើក និងមិនដេក ពេលអ្នកប្រើទូរសព្ទ។",
+ "No paid plan? Use Tailscale under Advanced instead.": "មិនមានគម្រោងបង់ប្រាក់? សូមប្រើ Tailscale នៅក្នុងកម្រិតខ្ពស់ជំនួស។",
+ "Connected. Open the link below on your phone.": "បានភ្ជាប់។ បើកតំណខាងក្រោមនៅលើទូរសព្ទរបស់អ្នក។"
 }
