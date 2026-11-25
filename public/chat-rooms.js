@@ -533,7 +533,7 @@ export function initLocalTasks(ctx) {
     else if (action === 'lt-unparent') { event.stopPropagation(); void save({ parentTaskId: '' }); }
     else if (action === 'lt-sub-remove') { event.stopPropagation(); try { await api(`/local-tasks/${encodeURIComponent(target.dataset.id)}`, { method: 'PUT', data: { parentTaskId: '' } }); await refresh({ full: true }); } catch (error) { toast(error.message, true); } }
     else if (action === 'lt-delete') {
-      event.stopPropagation(); if (!await askConfirm(t`Delete #${task.taskNumber} "${task.title}"? Its comments go with it.`)) return;
+      event.stopPropagation(); if (!await askConfirm(t`Delete #${task.taskNumber}?\n\nIts comments go with it.`, { ok: t('Delete') })) return;
       try { await api(`/local-tasks/${encodeURIComponent(task.id)}`, { method: 'DELETE' }); ctx.open('tasks'); } catch (error) { toast(error.message, true); }
     } else if (action === 'lt-start') {
       event.stopPropagation();
