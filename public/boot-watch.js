@@ -7,7 +7,17 @@
   const L = (english, khmer) => (km ? khmer : english);
   const MARK = '<svg class="boot-mark" viewBox="0 0 64 64" width="44" height="44" aria-hidden="true"><defs><linearGradient id="rex-mark-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a97ff"/><stop offset="1" stop-color="#3a72e8"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="14" fill="url(#rex-mark-g)"/><g fill="#fff"><rect x="16" y="16" width="14" height="14" rx="3"/><rect x="34" y="16" width="14" height="14" rx="3"/><rect x="16" y="34" width="14" height="14" rx="3"/><rect x="34" y="34" width="14" height="14" rx="3" opacity=".47"/></g></svg>';
   let reason = '';
-  addEventListener('error', event => { reason ||= event.message ? `${event.message}${event.filename ? ` in ${event.filename.replace(location.origin, '')}${event.lineno ? `:${event.lineno}` : ''}` : ''}` : (event.target?.src ? `Could not load ${event.target.src.replace(location.origin, '')}` : ''); }, true);
+  // A page script that fails to load is asked for again twice (after 1 s, then 3 s) under a new address, so a slow or failed first answer
+  // (the phone relay can take 30 s to answer) is not cached as a failure. Only a script that still fails is shown as the reason.
+  const RETRY_AFTER = [1000, 3000];
+  function retryScript(el) {
+    const url = new URL(el.src, location.href), tries = Number(url.searchParams.get('rex-retry')) || 0;
+    if (tries >= RETRY_AFTER.length || !el.src.startsWith(location.origin)) return false;
+    url.searchParams.set('rex-retry', String(tries + 1));
+    setTimeout(() => { const again = document.createElement('script'); if (el.type) again.type = el.type; again.src = url.href; document.head.append(again); }, RETRY_AFTER[tries]);
+    return true;
+  }
+  addEventListener('error', event => { if (event.target?.tagName === 'SCRIPT' && event.target.src && retryScript(event.target)) return; reason ||= event.message ? `${event.message}${event.filename ? ` in ${event.filename.replace(location.origin, '')}${event.lineno ? `:${event.lineno}` : ''}` : ''}` : (event.target?.src ? `Could not load ${event.target.src.replace(location.origin, '')}` : ''); }, true);
   setTimeout(() => {
     // The page script started (chat.js marks the screen) and is only waiting for a slow first answer: that is not a broken page.
     const boot = document.querySelector('#app > .boot'); if (!boot || boot.querySelector('h2') || boot.dataset.started) return;
