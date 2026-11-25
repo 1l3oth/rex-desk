@@ -258,13 +258,17 @@ function answerHtml(item) {
   return bubble({ mine: true, name: t('You'), time: hhmm(item.at), html: body });
 }
 function transcript(all, runId = '') {
-  // After /clear the chat starts empty again; what came before stays one click away.
-  const cut = all.map(event => event.kind).lastIndexOf('chat-cleared');
-  const events = cut >= 0 && !ui.showEarlier?.[runId] ? all.slice(cut) : all;
+  // After /clear the chat starts empty again; what came before stays one click away. Events are kept in arrival order,
+  // so a reply synced from another computer can sit before the marker in the list yet be newer; cut by time against the
+  // newest chat-cleared marker, not by list position, or those replies would stay hidden.
+  const clearedAt = all.reduce((latest, event) => event.kind === 'chat-cleared' && String(event.createdAt || '') > latest ? String(event.createdAt) : latest, '');
+  const hideEarlier = Boolean(clearedAt) && !ui.showEarlier?.[runId];
+  const hasEarlier = hideEarlier && all.some(event => String(event.createdAt || '') < clearedAt);
+  const events = hideEarlier ? all.filter(event => String(event.createdAt || '') >= clearedAt) : all;
   const items = [], results = new Map(events.filter(event => event.kind === 'agent-tool-result').map(event => [event.id, event])), subs = new Map();
   let lastSwitch = null;
   for (const event of events) {
-    if (event.kind === 'chat-cleared') { const item = { role: 'cleared', text: event.text, at: event.createdAt, earlier: cut > 0 && !ui.showEarlier?.[runId], tokens: event.usage || event.tokens || null }; items.push(item); lastSwitch = item; continue; }
+    if (event.kind === 'chat-cleared') { const item = { role: 'cleared', text: event.text, at: event.createdAt, earlier: hasEarlier, tokens: event.usage || event.tokens || null }; items.push(item); lastSwitch = item; continue; }
     // A sub-agent shows as one card: what it was asked, its steps, and what it reported back.
     if (event.kind === 'agent-tool' && event.tool === 'Agent') { const sub = { role: 'subagent', id: event.id, input: event.input || {}, steps: [], text: '', done: false, failed: false, at: event.createdAt }; subs.set(event.id, sub); if (!subs.has(event.parent)) items.push(sub); else subs.get(event.parent).steps.push({ tool: t('Agent'), input: { description: sub.input.description } }); continue; }
     if (event.parent && subs.has(event.parent)) { const sub = subs.get(event.parent); if (event.kind === 'agent-tool') sub.steps.push(event); else if (event.kind === 'subagent-text') sub.text = event.text; continue; }
@@ -402,7 +406,7 @@ function stageModel() {
     if (agent) { setTimeout(() => agent.remote ? open('specialist', agent.id) : void openAgentChat(ctx, agent)); return emptyStage(agent.remote ? t`${esc(agent.name)}'s chat is on ${esc(agent.device || 'another computer')}.` : t`Starting a new chat with ${esc(agent.name)}…`); }
     return emptyStage(t('That run is gone.'));
   }
-  const shown = ui.events.get(run.id) || [], cleared = ui.showEarlier?.[run.id] ? '' : [...shown].reverse().find(event => event.kind === 'chat-cleared')?.createdAt || '';
+  const shown = ui.events.get(run.id) || [], cleared = ui.showEarlier?.[run.id] ? '' : shown.reduce((latest, event) => event.kind === 'chat-cleared' && String(event.createdAt || '') > latest ? String(event.createdAt) : latest, '');
   const items = [...transcript(shown, run.id), ...(ui.snap.interactions || []).filter(item => item.runId === run.id && (!cleared || String(item.createdAt || item.at || '') >= cleared) && item.state !== 'pending').flatMap(answeredItem)].sort((left, right) => String(left.at).localeCompare(String(right.at))), live = ['starting', 'running'].includes(run.state) && !run.inApp; // a chat open in the Claude app waits for the person; it is not "typing"
   const feed = (items.length ? renderItems(items, run, live) : `<div class="empty"><h2>${esc(runTitle(run))}</h2><p>${ui.events.has(run.id) ? t('Nothing recorded yet.') : t('Loading the conversation…')}</p></div>`) + outboxHtml(run, shown)
     + pending(run.id).map(item => `<div class="msg qfloat"><div class="avatar">${esc(initials(provider(run.provider)))}</div>${decisionCard(item)}</div>`).join('') + (live ? typing(provider(run.provider), run.state === 'starting' ? t('Preparing…') : '') : '')
