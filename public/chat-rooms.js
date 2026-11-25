@@ -314,7 +314,8 @@ export function tasksStage(ctx) {
   const filters = pickerHtml(ctx, { id: 'task-filter-state', label: t('Status'), value: state, compact: true, items: [{ value: 'open', label: t('Open tasks') }, { value: 'done', label: t('Done tasks') }, { value: 'all', label: t('All tasks') }] })
     + pickerHtml(ctx, { id: 'task-filter-agent', label: t('Agent'), value: agentPick, compact: true, searchable: agents.length > 6, items: [{ value: '', label: t('Any agent') }, { value: 'none', label: t('No agent') }, ...agents.map(agent => ({ value: agent.id, label: agent.name, hint: agent.projectSlug }))] })
     + pickerHtml(ctx, { id: 'task-filter-priority', label: t('Priority'), value: priorityPick, compact: true, items: [{ value: '', label: t('Any priority') }, ...PRIORITY.map(([value, label]) => ({ value, label }))] });
-  return { title: t('Tasks'), meta: everything.length === 1 ? t('1 task') : t`${everything.length} tasks`, top: true,
+  const openEverything = everything.filter(task => task.status !== 'done').length;
+  return { title: t('Tasks'), meta: openEverything === 1 ? t('1 task') : t`${openEverything} tasks`, top: true,
     members: `<div class="members tbar tk-bar"><input id="task-filter" type="search" placeholder="${t`Search tasks, numbers, tags…`}" value="${esc(ui.taskFilter || '')}" autocomplete="off" aria-label="${t`Search tasks`}">${filters}</div>`,
     feed: `<div class="page tk">${side}<div class="tk-main">${add}${shown.length ? `<div class="tk-list${shown.some(task => task.local ? task.projectSlug : task.projectName || task.sourceId) ? '' : ' no-project'}">${head}${groups}</div>` : empty}</div></div>` };
 }

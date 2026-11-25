@@ -191,6 +191,8 @@ function renderRail() {
   // No Runs list: agents work in their own chats and rooms, the way the person tells them. An old run still opens from its task.
   const snap = ui.snap, asks = pending().length;
   const main = mainRun(), agents = snap.specialists || [], tasks = (snap.tasks || []).filter(task => task.active && !task.demo), busy = agents.filter(agent => agent.status?.state === 'busy').length;
+  // The Tasks badge counts work still to do: open and waiting, never done.
+  const openTasks = snap.taskCounts ? (snap.taskCounts.open || 0) + (snap.taskCounts.waiting || 0) : tasks.filter(task => task.status !== 'done').length;
   const plus = (action, label) => `<button class="sec-add" data-action="${action}" title="${label}" aria-label="${label}">+</button>`;
   return `<div class="rail-head"><span class="brand"><img class="brand-logo" src="/favicon.svg" alt="" width="26" height="26"><strong>${t`Rex Desk`}</strong></span><span class="spacer"></span></div>${phoneHead()}<div class="rail-scroll">${phoneChats()}
     <div class="sec-body top">
@@ -198,7 +200,7 @@ function renderRail() {
       <nav class="places" aria-label="${t`Places`}">${[
         place('notices', 'bell', t('Notifications'), snap.notices?.unread || 0, true),
         place('inbox', 'inbox', t('Needs you'), asks, true),
-        place('tasks', 'tasks', t('Tasks'), busy || tasks.length, false, busy ? t`${busy} being worked on` : '', taskSummary(snap.taskCounts)),
+        place('tasks', 'tasks', t('Tasks'), busy || openTasks, false, busy ? t`${busy} being worked on` : '', taskSummary(snap.taskCounts)),
         place('person', 'person', t('Knowledge'), 0),
         place('split', 'split', t('Split view'), 0),
       ].join('')}</nav>
