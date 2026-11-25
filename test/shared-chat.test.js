@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
@@ -184,4 +184,20 @@ test('a reply written after the other computer read past it still arrives: a clo
   assert.equal(texts(b.store, runId).filter(text => text === 'Uploaded late.').length, 1, 'the hourly look at the last day brings it, once');
   await b.desk.peers.pullChats();
   assert.equal(texts(b.store, runId).filter(text => text === 'Uploaded late.').length, 1);
+});
+
+test('a file attached on one computer gets its own copy on the other, and an agent there is given that copy, not the other path (L27)', async () => {
+  const { a, b, records } = account();
+  const folder = '5b0f5c1e-8d4a-4c55-9a3e-2f7d1c9e4b21', sent = path.join(a.store.media('uploads'), folder, 'bug.png');
+  mkdirSync(path.dirname(sent), { recursive: true }); writeFileSync(sent, Buffer.from('picture bytes'));
+  a.desk.peers.sharePictures([{ text: `Look at this\n- ${sent}` }]);
+  records(b, a);
+  const copy = path.join(b.store.media('uploads'), folder, 'bug.png');
+  assert.equal(readFileSync(copy, 'utf8'), 'picture bytes', 'saved on the receiving computer as soon as it arrives');
+  // The other computer's path (an F: drive this one does not have) becomes this computer's copy in what the agent reads.
+  const windows = (...parts) => parts.join(String.fromCharCode(92));
+  const other = windows('F:', 'daraboth', 'Rex Desk', 'uploads', folder, 'bug.png');
+  assert.equal(b.desk.peers.localFiles(`Look at this\n- ${other}`), `Look at this\n- ${copy}`);
+  const gone = `- ${windows('F:', 'nowhere', 'uploads', '0e1d2c3b-4a59-4687-9a8b-7c6d5e4f3a21', 'gone.png')}`;
+  assert.equal(b.desk.peers.localFiles(gone), gone, 'a file that never arrived keeps its name');
 });

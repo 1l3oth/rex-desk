@@ -198,6 +198,7 @@ export class Peers {
       if (result.isNew && change.kind === 'roommsg') delivered.push(value);
       if (result.changed && change.kind === 'peercmd') void this.runCommand(this.store.get('peercmd', change.id));
       if (result.changed && change.kind === 'task') this.tasksArrived = true;
+      if (result.changed && change.kind === 'chatfile' && value?.data) this.saveUpload(value);
     }
     // A message for one of this computer's agents is answered here, also after this computer was off for a while.
     for (const message of delivered) {
@@ -498,6 +499,25 @@ export class Peers {
       text = text.split(file.path).join(saved);
     }
     return text;
+  }
+  // A file attached on another computer gets a copy of its own here, in this computer's uploads under the same folder name,
+  // as soon as it arrives in the shared database, so an agent here can open it (L27: only the other computer's F: path was known).
+  saveUpload(item) {
+    const sent = /[\\/]uploads[\\/]([0-9a-f-]{36})[\\/][^\\/]+$/i.exec(String(item?.path || ''));
+    if (!sent || !item.data) return '';
+    const target = path.join(this.store.media('uploads'), sent[1], path.basename(String(item.name || '')).replace(/[^\p{L}\p{N}._ -]+/gu, '_') || 'file');
+    if (existsSync(target)) return target;
+    try { mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, Buffer.from(item.data, 'base64'), { flag: 'wx' }); return target; } catch { return existsSync(target) ? target : ''; }
+  }
+  // What an agent here reads names this computer's copy of each attached file, not the path on the computer it was attached on.
+  localFiles(text) {
+    return String(text ?? '').replace(/^- (.+)$/gm, (line, named) => {
+      const file = named.trim();
+      if (!/[\\/]uploads[\\/][0-9a-f-]{36}[\\/][^\\/]+$/i.test(file) || existsSync(file)) return line;
+      const item = [chatFileId(file), legacyFileId(file)].map(id => this.store.get('chatfile', id)).find(found => found?.data);
+      const saved = item ? this.saveUpload({ ...item, path: file }) : '';
+      return saved ? `- ${saved}` : line;
+    });
   }
   // Screenshots an agent saved as evidence in the chat travel with it too (up to 2 MB each).
   shareEvidence(runId, agentId = '', artifacts = null) {

@@ -273,7 +273,9 @@ export class Rooms {
       // An agent already working in its room session gets the message handed to it between steps, as one short line.
       const session = agent.roomRuns?.[room.id], working = session && this.desk.live?.has(session);
       const sender = message.from.type === 'human' ? 'The person' : message.from.label;
-      const prompt = working ? `[Room "${room.name}"] ${sender} → you: ${message.instruction || message.text}` : this.promptFor(this.room(room.id), message, agentId);
+      const asked = working ? `[Room "${room.name}"] ${sender} → you: ${message.instruction || message.text}` : this.promptFor(this.room(room.id), message, agentId);
+      // A file attached on another computer is named by this computer's own copy of it (L27).
+      const prompt = peers?.localFiles ? peers.localFiles(asked) : asked;
       // The agent has now seen the room up to this message, whatever else happens with its turn.
       this.store.put('specialist', agentId, { ...agent, roomSeen: { ...(agent.roomSeen || {}), [room.id]: message.seq } });
       await this.desk.specialistTurn(agentId, { prompt, roomId: room.id, messageId: message.id }).catch(error => this.system(room.id, `${this.member(agentId).name} could not take the message: ${error.message}`));
