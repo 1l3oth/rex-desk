@@ -6,6 +6,11 @@
 // The installer holds a named lock (LOCK) from before it touches the payload until it is done; the app only looks while
 // it holds the same lock, so it never swaps folders under a running installer, and the installer waits for a swap the
 // app has started. Windows frees the lock when the installer dies, so a dead install is put back on the next start.
+// The app takes the lock on every start, also when there is no backup: a first install has none, and its payload can
+// already hold Node and the server before the installer has checked it. The installer leaves payload.pending next to the
+// payload from before the new files go in until the copy is checked (or the last version is back), so a payload without
+// the marker but with payload.pending is an install that never finished and is not started. A payload with neither
+// comes from a version older than the marker and still starts.
 // No dependencies, so it is tested on its own: rustc --edition 2021 --test src/payload_swap.rs
 use std::{fs, path::Path};
 
@@ -13,6 +18,8 @@ pub const BACKUP: &str = "payload.old";
 pub const BROKEN: &str = "payload.broken";
 // Written by the installer, and only after the new copy matched the file list. Never part of the build itself.
 pub const FINISHED: &str = ".rex-desk-complete";
+// Written by the installer before the new files go in, removed once the copy is checked or the last version is back.
+pub const PENDING: &str = "payload.pending";
 pub const LOCK: &str = "Local\\RexDeskPayloadSwap";
 
 #[derive(Debug, PartialEq)]
@@ -40,20 +47,35 @@ pub fn recover(folder: &Path, node: &str) -> Outcome {
 }
 
 pub fn recover_with(folder: &Path, node: &str, lock: &str) -> Outcome {
-    if !folder.join(BACKUP).is_dir() {
-        return Outcome::Nothing;
-    }
-    // An installer is still writing (or the lock cannot be checked): leave everything as it is.
+    // An installer is still writing (or the lock cannot be checked): leave everything as it is, with or without a backup.
     let Some(_held) = lock::take(lock) else {
         return Outcome::Waiting;
     };
-    recover_now(folder, node)
+    let outcome = recover_now(folder, node);
+    if matches!(outcome, Outcome::Restored | Outcome::KeptNew) {
+        // The payload in place is the checked new copy or the last one that ran: nothing is pending any more.
+        let _ = fs::remove_file(folder.join(PENDING));
+    }
+    outcome
 }
 
 fn recover_now(folder: &Path, node: &str) -> Outcome {
     let (payload, backup) = (folder.join("payload"), folder.join(BACKUP));
     if !backup.is_dir() {
-        return Outcome::Nothing;
+        let pending = folder.join(PENDING);
+        if !pending.is_file() {
+            return Outcome::Nothing;
+        }
+        if finished(&payload) {
+            // Only the clean-up after the check was lost.
+            let _ = fs::remove_file(&pending);
+            return Outcome::Nothing;
+        }
+        if !payload.exists() {
+            // Nothing to start; the missing files message follows.
+            return Outcome::Nothing;
+        }
+        return Outcome::Failed("the last install did not finish".into());
     }
     if finished(&payload) {
         // The copy finished and only the clean-up was lost: keep the new version. A backup that cannot be removed yet (a
@@ -173,6 +195,73 @@ mod tests {
         let dir = folder("none");
         payload(&dir.join("payload"), "new", true, true);
         assert_eq!(recover_with(&dir, NODE, &lock_name("none")), Outcome::Nothing);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_payload_from_before_the_marker_still_starts() {
+        let dir = folder("legacy-alone");
+        payload(&dir.join("payload"), "old", true, false);
+        assert_eq!(recover_with(&dir, NODE, &lock_name("legacy-alone")), Outcome::Nothing);
+        assert_eq!(version(&dir), "old");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_unfinished_first_install_is_not_started() {
+        let dir = folder("fresh");
+        // Node and the server are already there, but the installer never checked the copy.
+        payload(&dir.join("payload"), "new", true, false);
+        fs::write(dir.join(PENDING), "").unwrap();
+        assert!(matches!(recover_with(&dir, NODE, &lock_name("fresh")), Outcome::Failed(_)));
+        assert!(dir.join("payload").exists() && dir.join(PENDING).exists(), "nothing is moved");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_finished_first_install_that_lost_its_clean_up_starts() {
+        let dir = folder("fresh-done");
+        payload(&dir.join("payload"), "new", true, true);
+        fs::write(dir.join(PENDING), "").unwrap();
+        assert_eq!(recover_with(&dir, NODE, &lock_name("fresh-done")), Outcome::Nothing);
+        assert!(!dir.join(PENDING).exists());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn putting_the_old_version_back_clears_pending() {
+        let dir = folder("pending-restore");
+        payload(&dir.join(BACKUP), "old", true, false);
+        payload(&dir.join("payload"), "new", true, false);
+        fs::write(dir.join(PENDING), "").unwrap();
+        assert_eq!(recover_with(&dir, NODE, &lock_name("pending-restore")), Outcome::Restored);
+        assert!(!dir.join(PENDING).exists());
+        assert_eq!(recover_with(&dir, NODE, &lock_name("pending-restore")), Outcome::Nothing, "the legacy copy then starts");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_first_install_in_progress_waits_without_a_backup() {
+        use std::{sync::mpsc, thread};
+        let dir = folder("fresh-locked");
+        payload(&dir.join("payload"), "new", true, false);
+        let name = lock_name("fresh-locked");
+        let (held_tx, held_rx) = mpsc::channel();
+        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let holder = {
+            let name = name.clone();
+            thread::spawn(move || {
+                let held = lock::take(&name).expect("installer takes the lock");
+                held_tx.send(()).unwrap();
+                stop_rx.recv().unwrap();
+                drop(held);
+            })
+        };
+        held_rx.recv().unwrap();
+        assert_eq!(recover_with(&dir, NODE, &name), Outcome::Waiting, "no backup, but the installer is writing");
+        stop_tx.send(()).unwrap();
+        holder.join().unwrap();
         fs::remove_dir_all(&dir).unwrap();
     }
 

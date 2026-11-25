@@ -12,6 +12,9 @@
 ; The installer holds the named lock Local\RexDeskPayloadSwap the whole time it works on the payload, and the app takes
 ; the same lock before it puts a backup back, so the two never move folders at the same time. Windows frees the lock
 ; when the installer dies.
+; payload.pending (next to the payload) is written before the new files go in and removed once the copy is checked or
+; the last version is back. A first install has no backup to fall back on, so this is how the app (payload_swap.rs) and
+; the next installer know a payload without the marker is an install that never finished, not one from an older version.
 
 Var RexSwapLock
 Var RexResult
@@ -181,6 +184,13 @@ FunctionEnd
         Abort "Rex Desk could not put its last working version back (a file in its folder is in use), so the update stopped and nothing was removed. Close Rex Desk and run the update again."
       ${EndIf}
     ${EndIf}
+    Delete "$INSTDIR\payload.pending"
+  ${EndIf}
+  ; A first install that never finished: no backup, no marker, but still pending. Nothing in it is worth keeping.
+  ${If} ${FileExists} "$INSTDIR\payload.pending"
+  ${AndIfNot} ${FileExists} "$INSTDIR\payload.old\*.*"
+  ${AndIfNot} ${FileExists} "$INSTDIR\payload\.rex-desk-complete"
+    RMDir /r "$INSTDIR\payload"
   ${EndIf}
   ; payload.broken only ever holds a copy that failed its check.
   RMDir /r "$INSTDIR\payload.broken"
@@ -194,6 +204,14 @@ FunctionEnd
     ${If} $RexResult != ok
       Abort "Rex Desk could not move its current version aside (a file in its folder is in use), so the update stopped and the current version stays. Run the update again in a minute."
     ${EndIf}
+  ${EndIf}
+  CreateDirectory "$INSTDIR"
+  ClearErrors
+  FileOpen $RexFile "$INSTDIR\payload.pending" w
+  FileWrite $RexFile "installing"
+  FileClose $RexFile
+  ${If} ${Errors}
+    Abort "Rex Desk could not write to its install folder, so the update stopped. The current version goes back when Rex Desk next starts. Run the update again."
   ${EndIf}
   ; On a drive Windows compresses to save space, the install folder was compressed too, and so was everything written into
   ; it: node.exe and the server's files. On a busy hard disk Node then needed minutes just to load (0% CPU, before any
@@ -223,19 +241,25 @@ FunctionEnd
   ${EndIf}
   ${If} $RexResult == ok
     RMDir /r "$INSTDIR\payload.old"
+    Delete "$INSTDIR\payload.pending"
     System::Call 'kernel32::ReleaseMutex(p $RexSwapLock)'
     System::Call 'kernel32::CloseHandle(p $RexSwapLock)'
   ${Else}
     ${If} ${FileExists} "$INSTDIR\payload.old\*.*"
       Call RexRestoreBackup
       ${If} $RexResult == ok
+        Delete "$INSTDIR\payload.pending"
         StrCpy $RexLine "The new version of Rex Desk did not install completely, so the last version was put back. Run the update again."
       ${Else}
         StrCpy $RexLine "The new version of Rex Desk did not install completely. The last version is kept and goes back when Rex Desk next starts. Run the update again."
       ${EndIf}
     ${Else}
       RMDir /r "$INSTDIR\payload.broken"
+      ClearErrors
       Rename "$INSTDIR\payload" "$INSTDIR\payload.broken"
+      ${IfNot} ${Errors}
+        Delete "$INSTDIR\payload.pending"
+      ${EndIf}
       StrCpy $RexLine "Rex Desk did not install completely. Run the installer again."
     ${EndIf}
     System::Call 'kernel32::ReleaseMutex(p $RexSwapLock)'
