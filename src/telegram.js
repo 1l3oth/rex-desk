@@ -36,7 +36,7 @@ export function splitReply(text, size = 3800, maxParts = 4) {
 export const TELEGRAM_MARK = '[Telegram]';
 // The mark's line also says where it came from and the chat's own tag (tg:N), which the agent can pass to desk_telegram to
 // text exactly that chat. The app chat never shows that line (hideTelegramTag): it shows the message as before.
-const fromTelegram = (text, key, source = '') => source ? `[Telegram #${key}] ${source}\n${text}` : `[Telegram #${key}] ${text}`;
+export const fromTelegram = (text, key, source = '') => source ? `[Telegram #${key}] ${source}\n${text}` : `[Telegram #${key}] ${text}`;
 // A message as the app chat shows it: the hidden source and tag line taken out, the mark and the words kept.
 export const hideTelegramTag = text => String(text ?? '').replace(/^(\[Telegram #[0-9a-f]{12}\]) Telegram, [^\n]*\(tg:\d+\)\n/gm, '$1 ');
 // The id in a queue entry's mark, or '' for a message that did not come from Telegram.
@@ -192,6 +192,8 @@ export class TelegramBridge {
     const turn = this.store.get('tgturn', runId); if (!turn) return;
     this.store.delete('tgturn', runId);
     if (turn.sent || Date.now() - Date.parse(turn.at) > TURN_TTL_MS || !String(text || '').trim()) return;
+    // A message that came through an agent's own bot (src/agent-bots.js) is answered by that bot.
+    if (String(turn.linkId).startsWith('agentbot:')) { try { await this.desk.agentBots?.reply(turn, text); } catch (error) { this.store.event?.('', 'telegram-error', { message: `agent bot reply: ${error.message}` }, true); } return; }
     const found = telegramLink(this.store);
     // Only to the chat the message came from: a Relink keeps the connection but may link another chat, which never gets it.
     if (!found?.values?.chatId || found.link.id !== turn.linkId || String(found.values.chatId) !== String(turn.chatId ?? '')) return;

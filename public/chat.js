@@ -1313,20 +1313,66 @@ function teamPanel(agent, team) {
   if (!team.tasks.length) return `<div class="side-body"><div class="side-empty">${'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.8c1.5.6 2.6 1.9 3 4.2"/></svg>'}<p>${t`No team task yet. Ask ${esc(agent.name)} to hand work to your other agents, like "ask Dev to build it and QA to check it".`}</p></div></div>`;
   return `<div class="side-body tm">${open.length ? `<h3 class="tm-sec">${t`Now`}<span class="cnt">${open.length}</span></h3><ul class="tm-list">${open.map(row).join('')}</ul>` : ''}${past.length ? `<h3 class="tm-sec">${t`Finished`}<span class="cnt">${past.length}</span></h3><ul class="tm-list">${past.slice(0, 30).map(row).join('')}</ul>` : ''}</div>`;
 }
+// The Connectors tab (L105): this agent's own Telegram bot. First the connection, then (once connected) the groups it may work in.
+function connectorsPanel(agent) {
+  const bot = ui.agentBots?.[agent.id];
+  if (!bot) {
+    if (!ui.agentBotsLoading?.[agent.id]) { ui.agentBotsLoading = { ...(ui.agentBotsLoading || {}), [agent.id]: true }; void api(`/agents/${encodeURIComponent(agent.id)}/telegram`).then(status => { ui.agentBots = { ...(ui.agentBots || {}), [agent.id]: status }; }, () => { ui.agentBots = { ...(ui.agentBots || {}), [agent.id]: { connected: false } }; }).finally(() => { delete ui.agentBotsLoading[agent.id]; renderAll(); }); }
+    return `<div class="side-body aps"><p class="muted">${t`Loading…`}</p></div>`;
+  }
+  const id = esc(agent.id), draft = ui.agentBotDraft || {};
+  const head = `<div class="cn-head"><b>Telegram</b>${bot.connected ? `<span class="cn-state"><span class="dot good"></span>${t`Connected`}</span>` : ''}</div>`;
+  if (!bot.connected) {
+    return `<div class="side-body aps cn">
+      <section class="aps-sec">${head}<p class="cn-note">${t`Give ${esc(agent.name)} its own Telegram bot, so people can talk to it there. Make one with @BotFather and paste its token here.`}</p>
+        <input class="cn-input" data-ab-token type="password" autocomplete="off" spellcheck="false" placeholder="123456:ABC-..." value="${esc(draft.token || '')}" aria-label="${t`Bot token`}">
+        <button type="button" class="btn small primary cn-wide" data-action="ab-connect" data-agent="${id}">${t`Connect bot`}</button></section></div>`;
+  }
+  const groupRow = (group, button) => `<li class="cn-row"><span class="cn-text"><b>${esc(group.title || t('Group'))}</b><small>${esc(String(group.id))}</small></span>${button}</li>`;
+  const owner = bot.ownerLinked
+    ? `<div class="aps-row"><span>${t`Owner`}</span><div>${esc(bot.owner || t('Linked'))}</div></div><button type="button" class="btn small quiet cn-wide" data-action="ab-code" data-agent="${id}">${t`Link another owner`}</button>`
+    : `<p class="cn-note">${bot.pairCode ? t`Open @${esc(bot.botUsername)} in Telegram and send it this code to make you its owner:` : t`Make a new code, then send it to the bot in Telegram.`}</p>${bot.pairCode ? `<p class="cn-code">${esc(bot.pairCode)}</p>` : `<button type="button" class="btn small cn-wide" data-action="ab-code" data-agent="${id}">${t`Make a code`}</button>`}`;
+  const groups = `<section class="aps-sec"><h3>${t`Allow in groups`}</h3><p class="cn-note">${t`The bot works only in groups you allow, and only when someone mentions it. Add it to a group, then allow it here.`}</p>
+    ${bot.pending.length ? `<ul class="cn-list">${bot.pending.map(group => groupRow(group, `<button type="button" class="btn small" data-action="ab-allow" data-agent="${id}" data-gid="${esc(String(group.id))}" data-title="${esc(group.title || '')}">${t`Allow`}</button>`)).join('')}</ul>` : ''}
+    ${bot.groups.length ? `<ul class="cn-list">${bot.groups.map(group => groupRow(group, `<button type="button" class="btn small quiet danger" data-action="ab-remove" data-agent="${id}" data-gid="${esc(String(group.id))}">${t`Remove`}</button>`)).join('')}</ul>` : (bot.pending.length ? '' : `<p class="cn-note">${t`No groups yet.`}</p>`)}</section>`;
+  return `<div class="side-body aps cn">
+    <section class="aps-sec">${head}<div class="aps-row"><span>${t`Bot`}</span><div>@${esc(bot.botUsername)}</div></div>${owner}
+      <button type="button" class="btn small quiet danger cn-wide" data-action="ab-disconnect" data-agent="${id}">${t`Disconnect`}</button></section>
+    ${groups}</div>`;
+}
+document.addEventListener('input', event => { if (event.target.matches?.('[data-ab-token]')) ui.agentBotDraft = { token: event.target.value }; });
+document.addEventListener('click', async event => {
+  const target = event.target.closest?.('[data-action^="ab-"]'); if (!target) return;
+  event.stopPropagation();
+  const agentId = target.dataset.agent, base = `/agents/${encodeURIComponent(agentId)}/telegram`, set = status => { ui.agentBots = { ...(ui.agentBots || {}), [agentId]: status }; renderAll(); };
+  try {
+    switch (target.dataset.action) {
+      case 'ab-connect': { const token = document.querySelector('[data-ab-token]')?.value.trim() || ''; if (!token) return toast(t('Paste the bot token first.'), true); target.disabled = true; set(await api(`${base}/connect`, { method: 'POST', data: { botToken: token } })); ui.agentBotDraft = {}; toast(t('Bot connected.')); break; }
+      case 'ab-disconnect': if (await askConfirm(t`Disconnect this bot?
+
+The agent stops getting messages from it.`, { ok: t('Disconnect') })) set(await api(`${base}/disconnect`, { method: 'POST', data: {} })); break;
+      case 'ab-code': set(await api(`${base}/code`, { method: 'POST', data: {} })); break;
+      case 'ab-allow': set(await api(`${base}/groups`, { method: 'POST', data: { id: target.dataset.gid, title: target.dataset.title } })); break;
+      case 'ab-remove': set(await api(`${base}/groups/remove`, { method: 'POST', data: { id: target.dataset.gid } })); break;
+    }
+  } catch (error) { target.disabled = false; toast(error.message, true); }
+}, true);
 function personalSide(run, agent, items, shells) {
   // Tabs, like a messenger's chat info: Profile (with what was shared in the chat), the worktrees of this chat, and the agent's Terminal.
   const trees = chatWorktrees(ui, { runId: run.id, agentId: agent.id });
   const subs = items.filter(item => item.role === 'subagent');
   const team = teamOf(agent.id);
-  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'worktrees' ? 'worktrees' : ui.chatTab === 'subagents' || ui.chatTab === 'team' ? 'team' : 'profile', part = ['media', 'files', 'links', 'pinned'].includes(ui.chatShared) ? ui.chatShared : 'media';
+  const tab = ui.chatTab === 'terminal' && shells.length ? 'terminal' : ui.chatTab === 'connectors' ? 'connectors' : ui.chatTab === 'worktrees' ? 'worktrees' : ui.chatTab === 'subagents' || ui.chatTab === 'team' ? 'team' : 'profile', part = ['media', 'files', 'links', 'pinned'].includes(ui.chatShared) ? ui.chatShared : 'media';
   const entries = items.filter(item => item.role === 'human' || item.role === 'agent').map(item => ({ from: item.role === 'human' ? t('You') : agent.name, at: item.at, text: item.text }));
   const shared = collectShared(entries, (ui.snap.artifacts || []).filter(item => item.runId === run.id).map(item => ({ ...item, from: agent.name })));
   const close = `<button type="button" class="side-x" data-action="chat-info-close" aria-label="${t`Close the side panel`}" title="${t`Close`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
   const tabs = sideTabsHtml(esc, { action: 'chat-tab', current: tab, close, tabs: [
     { id: 'profile', label: t('Profile'), group: 'about' },
+    { id: 'connectors', label: t('Connectors'), group: 'about' },
     { id: 'team', label: t('Team'), count: team.open + (stateTone(run) === 'working' ? subs.filter(item => !item.done).length : 0), owed: team.owed, group: 'work' },
     { id: 'worktrees', label: t('Worktrees'), count: trees.length, group: 'code' },
     ...(shells.length ? [{ id: 'terminal', label: t('Terminal'), count: shells.length, group: 'code' }] : [])] });
+  if (tab === 'connectors') return tabs + connectorsPanel(agent);
   if (tab === 'worktrees') return tabs + worktreeSideHtml(ctx, trees);
   if (tab === 'team') return tabs + crewHtml({ taskBody: teamPanel(agent, team), taskCount: team.tasks.length, subBody: subagentsPanel(subs.map(item => ({ ...item, runId: run.id })), ctx, { live: () => stateTone(run) === 'working', jump: true }), subCount: subs.length, labels: { tasks: t('Team tasks'), subs: t('Sub-agents') },
     empty: `<div class="side-body"><div class="side-empty">${'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.8c1.5.6 2.6 1.9 3 4.2"/></svg>'}<p>${t`No team work yet. When ${esc(agent.name)} hands work to another agent or runs a sub-agent, it shows here.`}</p></div></div>` });

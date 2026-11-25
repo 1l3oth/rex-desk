@@ -76,6 +76,7 @@ import { ORBIT_URL, orbitDeviceStart, orbitDevicePoll } from './orbit.js';
 import { catalog as connectorCatalog, connections as connectionList, connector as connectorOf } from './connectors.js';
 import { loadCatalog, catalogItem, probe as probeConnector, saveConnector, catalogConnections, removeCatalogConnection } from './connector-catalog.js';
 import { TelegramBridge } from './telegram.js';
+import { AgentBots } from './agent-bots.js';
 import { BugBot } from './bug-bot.js';
 import { Anywhere } from './anywhere.js';
 import { Commander } from './command.js';
@@ -320,6 +321,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     desk.telegram = new TelegramBridge(desk, { transcribe: transcribeVoiceNote });
     if (!process.env.NODE_TEST_CONTEXT) desk.telegram.start();
     // The bug-report group bot: a separate bot added to customer groups that only files bug reports (src/bug-bot.js).
+    desk.agentBots = new AgentBots(desk);
+    if (!process.env.NODE_TEST_CONTEXT) desk.agentBots.start();
     desk.bugBot = new BugBot(desk);
     if (!process.env.NODE_TEST_CONTEXT) desk.bugBot.start();
     // Agents from before avatars each get their own picture (this computer's agents only; the others get theirs at home).
@@ -341,7 +344,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     const { desk, store, id } = session; session = null;
     if (forget) accounts?.forget(id);
     // Telegram polling writes the update offset to the store, so it is stopped (and its loop awaited) before the store closes.
-    desk.phoneRelay?.stop(); await desk.telegram?.stop(); await desk.bugBot?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
+    desk.phoneRelay?.stop(); await desk.telegram?.stop(); await desk.agentBots?.stop(); await desk.bugBot?.stop(); await desk.shutdown(); await store.cloud.close(); store.close(); notify();
   }
   const speakerOf = () => (session.speaker ||= new Speaker(session.store));
   const role = () => accounts ? accounts.role(session?.email) : 'superadmin';
@@ -1085,6 +1088,19 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
         const input = await body(request).catch(() => ({}));
         try { const result = await desk.telegram.link(input.id || ''); if (result.linked) notify(); return json(response, 200, result); }
         catch (error) { return json(response, 400, { error: error.message }); }
+      }
+      // One Telegram bot per agent (src/agent-bots.js): the agent's Connectors tab connects it, links its owner and allows groups.
+      const agentBot = url.pathname.match(/^\/api\/agents\/([^/]+)\/telegram(?:\/(connect|disconnect|code|groups|groups\/remove))?$/);
+      if (agentBot) {
+        const agentId = decodeURIComponent(agentBot[1]), action = agentBot[2] || '';
+        if (!action && request.method === 'GET') return json(response, 200, desk.agentBots.status(agentId));
+        if (request.method !== 'POST') return json(response, 405, { error: 'Not allowed.' });
+        const input = await body(request).catch(() => ({}));
+        try {
+          const result = action === 'connect' ? await desk.agentBots.connect(agentId, input.botToken) : action === 'disconnect' ? desk.agentBots.disconnect(agentId)
+            : action === 'code' ? desk.agentBots.newCode(agentId) : action === 'groups' ? desk.agentBots.allowGroup(agentId, input.id, input.title) : desk.agentBots.removeGroup(agentId, input.id);
+          notify(); return json(response, 200, result);
+        } catch (error) { return json(response, 400, { error: error.message }); }
       }
       // The bug-report group bot (a separate bot, src/bug-bot.js): its own setup screen connects the token, allows groups,
       // sets the morning-report time, and approves or rejects queued bugs. All server-side; the token never leaves here.
