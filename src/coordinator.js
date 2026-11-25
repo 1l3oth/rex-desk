@@ -63,9 +63,6 @@ import { createWorktree, git, slug, freePort, shellCommand, fingerprint } from '
 import { hideTelegramTag } from './telegram.js';
 
 const exec = promisify(execFile);
-// A room message handed to an agent mid-turn names the message it answers in its own queue entry (Desk.roomTarget).
-const ROOM_TAG = /\[room message ([0-9a-f-]{36})\]/i;
-export const roomEntry = (messageId, prompt) => `[room message ${messageId}] ${prompt}`;
 const EVIDENCE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.webm': 'video/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.pdf': 'application/pdf', '.txt': 'text/plain', '.log': 'text/plain', '.json': 'application/json', '.html': 'text/html', '.zip': 'application/zip' };
 // qa_* belong to QA checks, which Rex Desk no longer runs; they stay listed so older runs still count as finished.
 // What a background job is told (desk_background): do the one task, quickly, without asking anyone, and end with a short
@@ -326,8 +323,9 @@ export class Desk {
     const back = (Array.isArray(text) ? text : [text]).map(entry => String(entry ?? '')).filter(entry => entry.trim());
     const run = this.store.get('run', runId); if (!run || !back.length) return;
     // A room message given back unread keeps its reply target in its own entry; the turn answers its earlier message again.
-    const restore = run.inboxPrev && this.roomTarget(back) ? { ...run.inboxPrev, inboxPrev: undefined } : {};
-    this.store.put('run', runId, { ...run, ...restore, queued: [...back, ...(run.queued || [])] });
+    const returned = (run.inboxPrev?.rooms || []).filter(meta => back.includes(meta.entry));
+    const restore = run.inboxPrev && returned.length ? { roomTurn: run.inboxPrev.roomTurn, roomPosted: run.inboxPrev.roomPosted, roomTurnAt: run.inboxPrev.roomTurnAt, inboxPrev: undefined } : {};
+    this.store.put('run', runId, { ...run, ...restore, queued: [...back, ...(run.queued || [])], queuedRooms: [...returned, ...(run.queuedRooms || [])] });
     this.store.event(runId, 'inbox-returned', {});
     // The turn already ended: the message starts the next one now.
     const waiting = this.store.get('run', runId);
@@ -341,20 +339,28 @@ export class Desk {
     const taken = run.queued.filter(entry => !this.telegram?.queuedChat?.(runId, entry));
     if (!taken.length) return [];
     // The reply target moves to the newest room message only now that the agent really reads it (not when it was queued).
-    const turn = this.roomTarget(taken);
-    const target = turn ? { roomTurn: turn, roomPosted: false, roomTurnAt: now(), inboxPrev: { roomTurn: run.roomTurn ?? null, roomPosted: Boolean(run.roomPosted), roomTurnAt: run.roomTurnAt } } : {};
-    this.store.put('run', runId, { ...run, ...target, queued: run.queued.filter(entry => !taken.includes(entry)) });
+    const { turn, used, left } = this.roomTargets(run, taken);
+    const target = turn ? { roomTurn: turn, roomPosted: false, roomTurnAt: now(), inboxPrev: { roomTurn: run.roomTurn ?? null, roomPosted: Boolean(run.roomPosted), roomTurnAt: run.roomTurnAt, rooms: used } } : {};
+    this.store.put('run', runId, { ...run, ...target, queued: run.queued.filter(entry => !taken.includes(entry)), queuedRooms: left });
     this.store.event(runId, 'inbox-delivered', { count: taken.length });
     return taken;
   }
-  // The room message a queued prompt answers is written in the entry itself (roomEntry), like a Telegram entry's mark, so two
-  // hand-overs at once can never tag each other's entry, and the target survives a requeue. The newest one taken wins.
-  roomTarget(entries) {
-    for (const entry of [...entries].reverse()) {
-      const id = ROOM_TAG.exec(String(entry ?? ''))?.[1], message = id ? this.store.get('roommsg', id) : null;
-      if (message) return { roomId: message.roomId, messageId: message.id };
-    }
-    return null;
+  // A queued room prompt keeps the message it answers beside it in the run (queuedRooms: { entry, roomId, messageId }), never in
+  // its text, so nothing written in a message can name a target, and a target from another room than this session's is never
+  // used. Each record goes with one entry taken; the newest one taken is the turn's reply target.
+  roomTargets(run, entries) {
+    const room = this.runRoom(run), left = [...(run.queuedRooms || [])], used = [];
+    for (const entry of entries) { const at = left.findIndex(meta => meta.entry === entry); if (at >= 0) used.push(...left.splice(at, 1)); }
+    const valid = used.filter(meta => room && meta.roomId === room && this.store.get('roommsg', meta.messageId)?.roomId === room);
+    const last = valid.at(-1);
+    return { turn: last ? { roomId: last.roomId, messageId: last.messageId } : null, used, left };
+  }
+  roomTarget(runId, entries) { const run = this.store.get('run', runId); return run ? this.roomTargets(run, entries).turn : null; }
+  // The room a room session belongs to: set when it was made, or found from its agent's room sessions.
+  runRoom(run) {
+    if (run?.roomOf) return run.roomOf;
+    const rooms = run?.roomAgent ? this.store.get('specialist', run.roomAgent)?.roomRuns || {} : {};
+    return Object.keys(rooms).find(roomId => rooms[roomId] === run.id) || '';
   }
   // The messages the next queued turn takes: the leading ones from one place only (the app, or one Telegram chat), so a
   // Telegram chat's turn never carries app messages or another chat's, and its reply holds only its own answer.
@@ -1649,7 +1655,11 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     // A message handed over mid-turn starts a new room reply: what was already posted for the earlier message is not posted again for it.
     // The target stays with the queued prompt and becomes the run's only when the runner reads it (takeInbox, resumeQueued):
     // switching it here let the answer still coming for the earlier message land on the new thread.
-    if (this.live.has(run.id)) { await this.say(run.id, turn ? roomEntry(turn.messageId, prompt) : prompt, {}, { raw: true }); return run; }
+    if (this.live.has(run.id)) {
+      // Its reply target is noted beside the queue before the prompt joins it, so a hand-over never takes the prompt without it.
+      if (turn) { const current = this.store.get('run', run.id); this.store.put('run', run.id, { ...current, queuedRooms: [...(current.queuedRooms || []), { entry: String(prompt).trim(), ...turn }] }); }
+      await this.say(run.id, prompt, {}, { raw: true }); return run;
+    }
     // The card's model reaches the chat at the turn start (Specialists.syncRuns), so a model picked in the chat itself stays.
     await this.resume(run.id, { provider: agent.provider, prompt, silent: Boolean(roomId) || quiet, roomTurn: turn, greeting, telegram }); return this.run(run.id);
   }
@@ -1907,14 +1917,14 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
   // during it waits for the turn after; when resume fails they go back in front, so no report is lost.
   resumeQueued(runId, waiting) {
     const taken = this.nextQueuedBatch(runId, waiting.queued);
-    // A queued room message starts this turn with its own reply target, written in its entry when it was queued.
-    const turn = this.roomTarget(taken);
-    this.store.put('run', runId, { ...waiting, queued: waiting.queued.slice(taken.length) });
+    // A queued room message starts this turn with its own reply target, noted beside it when it was queued.
+    const { turn, used, left } = this.roomTargets(waiting, taken);
+    this.store.put('run', runId, { ...waiting, queued: waiting.queued.slice(taken.length), queuedRooms: left });
     // A Telegram chat's messages start this turn: its final reply goes back to that chat (src/telegram.js). Their records stay
     // until the turn really starts, so a failed resume puts them back as they were.
     const telegram = this.telegram?.batchReplyTo?.(runId, taken) || undefined;
     void this.resume(runId, { prompt: taken.join('\n'), silent: true, telegram, ...(turn ? { roomTurn: turn } : {}) }).catch(error => {
-      const current = this.store.get('run', runId); if (current) this.store.put('run', runId, { ...current, queued: [...taken, ...(current.queued || [])] });
+      const current = this.store.get('run', runId); if (current) this.store.put('run', runId, { ...current, queued: [...taken, ...(current.queued || [])], queuedRooms: [...used, ...(current.queuedRooms || [])] });
       this.store.event(runId, 'error', { message: error.message }, true);
     });
   }
