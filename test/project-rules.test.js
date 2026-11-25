@@ -232,3 +232,29 @@ test('a message kept while an agent moves here is passed on once after Rex Desk 
     assert.deepEqual(store.events('r16', { visible: true, limit: 50 }).filter(event => event.kind === 'human-message').map(event => event.text), ['fix the cart', 'and the checkout'], 'each shows once');
   } finally { await close(); }
 });
+
+test('a failed fresh start keeps the first message in front of the ones that waited, and the next send takes them all (L114 review)', async () => {
+  const { store, desk, close } = setup();
+  try {
+    store.put('run', 'r17', { id: 'r17', role: 'specialist', provider: 'claude', state: 'finished', sessionId: '1f3a8d71-d78d-409a-9a84-91fb162c1be5', createdAt: new Date().toISOString() });
+    const runnerFactory = desk.runnerFactory; desk.runnerFactory = null;
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    const fresh = desk.freshStart.bind(desk); desk.freshStart = async () => { await gate; throw new Error('The handoff could not be written.'); };
+    await desk.resume('r17', { prompt: 'fix the cart' });
+    await desk.say('r17', 'and the checkout');
+    release();
+    for (let tries = 0; tries < 100 && !store.get('run', 'r17').freshRetry; tries++) await new Promise(resolve => setTimeout(resolve, 20));
+    let run = store.get('run', 'r17');
+    assert.deepEqual(run.queued, ['fix the cart', 'and the checkout'], 'the first message is kept, in front');
+    assert.equal(run.freshRetry, true); assert.notEqual(run.state, 'queued', 'nothing waits on a runner that never comes');
+    assert.match(store.events('r17', { visible: true, limit: 50 }).filter(event => event.kind === 'error').at(-1).message, /kept: send again or press Resume/);
+    // Retried with the next send: the fresh start works now and the whole batch goes in one turn.
+    desk.freshStart = fresh;
+    await desk.resume('r17', { prompt: 'and the total' });
+    for (let tries = 0; tries < 100 && store.get('run', 'r17').state !== 'queued'; tries++) await new Promise(resolve => setTimeout(resolve, 20));
+    run = store.get('run', 'r17');
+    assert.equal(run.state, 'queued'); assert.equal(run.followUp, 'fix the cart\nand the checkout\nand the total'); assert.deepEqual(run.queued, []); assert.equal(run.freshRetry, undefined);
+    assert.deepEqual(store.events('r17', { visible: true, limit: 50 }).filter(event => event.kind === 'human-message').map(event => event.text), ['fix the cart', 'and the checkout', 'and the total'], 'each shows once');
+    desk.runnerFactory = runnerFactory;
+  } finally { await close(); }
+});

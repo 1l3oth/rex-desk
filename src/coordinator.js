@@ -1942,13 +1942,24 @@ Rex Desk keeps notes about the projects on this computer (what each is for, how 
     // here to reopen: the agent starts a fresh session that first reads a handoff of the chat, which this computer has in full.
     // The message shows at once and the fresh start runs after it (L114); a message sent meanwhile waits behind it.
     const starting = this.starting?.has(runId);
+    // A fresh start that failed kept its messages (first one first): the next send, or Resume, takes them all in one turn.
+    if (run.freshRetry && !starting) {
+      if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: hideTelegramTag(keepLines(prompt)), via: 'rex' }, true);
+      prompt = [...(run.queued || []), String(prompt).trim()].filter(Boolean).join('\n'); silent = true;
+      this.patchRun(runId, { queued: [], freshRetry: undefined }); run = this.run(runId);
+    }
     if (starting || (run.provider === 'claude' && provider === 'claude' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(run.sessionId || '')) && !this.runnerFactory && !conversationHere(run.sessionId))) {
       if (String(prompt).trim() && !silent) this.store.event(runId, 'human-message', { text: hideTelegramTag(keepLines(prompt)), via: 'rex', ...(starting ? { queued: true } : {}) }, true);
       if (starting) { if (String(prompt).trim()) this.patchRun(runId, { queued: [...(this.run(runId).queued || []), String(prompt).trim()] }); return this.run(runId); }
       (this.starting ||= new Set()).add(runId);
       void this.freshStart(runId, { reason: 'because its earlier conversation is on another computer', notice: 'This conversation started on another computer, so it continues here in a fresh session that first reads a handoff of this chat.' })
         .then(() => { this.starting.delete(runId); return this.resume(runId, { prompt, targetBranch, execution, silent: true, roomTurn, greeting, telegram, ...picked }); })
-        .catch(error => { this.starting.delete(runId); this.store.event(runId, 'error', { message: error.message }, true); });
+        .catch(error => {
+          // Nothing is dropped: the first message goes back in front of the ones that waited, ready for a retry.
+          this.starting.delete(runId);
+          const current = this.store.get('run', runId); if (current) this.store.put('run', runId, { ...current, queued: [String(prompt).trim(), ...(current.queued || [])].filter(Boolean), freshRetry: true });
+          this.store.event(runId, 'error', { message: `${error.message} Your messages are kept: send again or press Resume to retry.` }, true);
+        });
       return this.run(runId);
     }
     const sameProvider = run.provider === provider;
