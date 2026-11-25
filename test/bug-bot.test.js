@@ -253,6 +253,16 @@ test('the bug bot stays with its agent by id: renaming that agent changes nothin
   assert.equal(bot.appAgentName(), 'Builder');
 });
 
+test('a bug bot connected before ids were kept is pinned on first use, so a later rename keeps it', async () => {
+  const { desk, store } = makeDesk({ groups: [{ id: '-100' }] });
+  store.put('specialist', 'app', { id: 'app', name: 'RexDesk_App_Agent' });
+  const bot = new BugBot(desk, {});
+  assert.equal(bugBotLink(store).values.agentId, undefined);
+  assert.equal(bot.status().agentId, 'app');
+  store.put('specialist', 'app', { id: 'app', name: 'Builder' });
+  assert.equal(bot.status().agentId, 'app');
+});
+
 // A fetcher that records Telegram calls, shared by the live-flow tests.
 async function mkFetcher(calls) {
   return async (url, options) => {

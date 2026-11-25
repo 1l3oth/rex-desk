@@ -501,8 +501,12 @@ export class BugBot {
   }
   // The agent the bug bot belongs to: the one pinned at connect time, else the first agent named like the App Agent.
   appAgent() {
-    const pinned = bugBotLink(this.store)?.values?.agentId, kept = pinned ? this.store.get('specialist', pinned) : null;
-    return kept || this.store.list('specialist').find(item => /app[\s_-]?agent/i.test(String(item.name || ''))) || null;
+    const found = bugBotLink(this.store), pinned = found?.values?.agentId, kept = pinned ? this.store.get('specialist', pinned) : null;
+    if (kept) return kept;
+    const byName = this.store.list('specialist').find(item => /app[\s_-]?agent/i.test(String(item.name || ''))) || null;
+    // A bot connected before the id was kept: pin it now, so a later rename of that agent keeps its controls and tasks.
+    if (byName && found?.values?.botToken && !pinned) this.saveValues(found.link.id, { ...found.values, agentId: byName.id });
+    return byName;
   }
   appAgentName() { return this.appAgent()?.name || ''; }
 
