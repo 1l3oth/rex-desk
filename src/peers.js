@@ -3,7 +3,7 @@
 // another computer are copied between the person's computers over their private network (Tailscale), so every computer
 // and the phone shows the same chats. A computer that is off only takes its own agents offline; messages for them wait.
 import { seal } from './sealed.js';
-import { doing } from './stall-watch.js';
+import { doing, step, waitStep } from './stall-watch.js';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -335,9 +335,9 @@ export class Peers {
   // have stamped a little in the past; reading a message twice changes nothing.
   async pullChats() {
     if (!this.store.cloud?.ready || !this.store.cloud.pullChat) return 0;
-    doing('sync: reading chat messages');
+    // Each database call is named while it runs (step), so the freeze log names the one that is really running.
     // chatRead 2: read everything once more, so messages dropped by an id clash (see Store.applyChatEvents) come in.
-    const settings = this.settings(), again = settings.chatNode !== this.self.id || settings.chatRead !== 2;
+    const settings = step('sync chat: read peer settings', () => this.settings()), again = settings.chatNode !== this.self.id || settings.chatRead !== 2;
     let since = again ? '' : String(settings.chatAt || ''), newest = since, total = 0; const read = String(settings.chatAt || '');
     // Once an hour the last day is read again: a message stamped below what was already read (the writer's clock was behind,
     // or it uploaded late) would otherwise stay missing on this computer for good. Reading a message twice changes nothing.
@@ -349,17 +349,17 @@ export class Peers {
     else if (since) { const time = parseInt(since.split('.')[0], 36) || 0; since = Math.max(0, time - (deep ? CHAT_DEEP_SPAN : 120000)).toString(36).padStart(9, '0'); }
     let finished = false;
     for (let page = 0; page < 40; page++) {
-      const rows = await this.store.cloud.pullChat(since);
+      const rows = await waitStep(`sync chat: cloud page ${page + 1}`, () => this.store.cloud.pullChat(since));
       if (!rows?.length) { finished = true; break; }
-      total += this.store.applyChatEvents(rows);
+      total += step(`sync chat: applyChatEvents (${rows.length} rows, page ${page + 1})`, () => this.store.applyChatEvents(rows));
       // Only a message newer than the last one read is a sign of life: the overlap reads the same last rows on every pull,
       // and counting those kept a computer that went off "online" forever (L26). An old message read for the first time is not either.
-      for (const row of rows) { const [time, , ...node] = String(row.v).split('.'); if (String(row.v) <= read || Date.now() - (parseInt(time, 36) || 0) > CLOUD_MS) continue; this.hear(node.join('.')); }
+      step('sync chat: mark computers heard', () => { for (const row of rows) { const [time, , ...node] = String(row.v).split('.'); if (String(row.v) <= read || Date.now() - (parseInt(time, 36) || 0) > CLOUD_MS) continue; this.hear(node.join('.')); } });
       newest = String(rows.at(-1).v) > newest ? String(rows.at(-1).v) : newest; since = String(rows.at(-1).v);
       if (rows.length < 500) { finished = true; break; }
     }
     const look = deep && !finished ? { chatDeepFrom: since } : again || deep ? { chatDeepAt: Date.now(), chatDeepFrom: '' } : {};
-    if (again || deep || newest !== String(settings.chatAt || '')) this.save({ chatAt: newest, chatNode: this.self.id, chatRead: 2, ...look });
+    if (again || deep || newest !== String(settings.chatAt || '')) step('sync chat: save read position', () => this.save({ chatAt: newest, chatNode: this.self.id, chatRead: 2, ...look }));
     return total;
   }
   // Messages written here before chats were shared (or while offline with nothing queued) go up once.
@@ -381,24 +381,23 @@ export class Peers {
 
   // With the same Turso database on every computer, the chats also arrive from there, even while the other computer is off.
   async pullTurso() {
-    doing('sync: reading other computers');
     if (!this.store.cloud?.ready) return;
     // Under another computer id (a restore that got its own), what was skipped as "this computer's own" is read again from the start.
-    const settings = this.settings(), again = settings.tursoNode !== this.self.id, at = again ? 0 : settings.tursoAt || 0;
+    const settings = step('sync shared: read peer settings', () => this.settings()), again = settings.tursoNode !== this.self.id, at = again ? 0 : settings.tursoAt || 0;
     let since = `${Math.max(0, at - 120000).toString(36).padStart(9, '0')}`, newest = at;
     try {
       // Page by the last version read: more than one page of changes inside the 2-minute overlap (a first upload stamps
       // everything at once) would otherwise re-read the same first page on every poll and never get past it.
       for (let page = 0; page < 50; page++) {
-        const rows = await this.store.cloud.pullShared(since);
-        if (rows?.length) this.applyAll(rows);
+        const rows = await waitStep(`sync shared: cloud page ${page + 1}`, () => this.store.cloud.pullShared(since));
+        if (rows?.length) step(`sync shared: applyAll (${rows.length} rows, page ${page + 1})`, () => this.applyAll(rows));
         // Anything new from a computer means it is on (its own stamp is only used to tell new from already seen).
         for (const row of rows || []) { const [time, , ...node] = String(row.v).split('.'), stamp = parseInt(time, 36) || 0, from = node.join('.'); if (from && stamp > ((this.newestFrom ||= new Map()).get(from) || 0)) { if (this.newestFrom.has(from)) this.hear(from); this.newestFrom.set(from, stamp); } }
         newest = Math.max(newest, ...(rows || []).map(row => parseInt(String(row.v).split('.')[0], 36) || 0));
         if (!rows || rows.length < 400) break;
         since = String(rows.at(-1).v);
       }
-      if (again || newest > at) this.save({ tursoAt: newest, tursoNode: this.self.id });
+      if (again || newest > at) step('sync shared: save read position', () => this.save({ tursoAt: newest, tursoNode: this.self.id }));
     } catch { /* Turso shows its own state in Settings */ }
   }
   // What this computer's agents are doing, as the other computers show it in their sidebar.
@@ -679,7 +678,7 @@ export class Peers {
       if ((this.timers.get('turso') || 0) <= Date.now()) { this.timers.set('turso', Date.now() + (this.inFlight() ? 1500 : 5000)); await bounded(() => this.pullTurso()); this.timers.set('turso', Date.now() + (this.inFlight() ? 1500 : 5000)); }
       // Chat messages: about every second while an agent works or a message is on its way, every 5 seconds otherwise.
       if ((this.timers.get('chat') || 0) <= Date.now()) { this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); await bounded(() => this.pullChats()); doing(''); this.timers.set('chat', Date.now() + (this.inFlight() ? 1000 : 5000)); }
-      if ((this.timers.get('chatpush') || 0) <= Date.now()) { this.timers.set('chatpush', Date.now() + 60000); try { doing('sync: settling split chats'); this.desk.chatSplits?.settleAll(); doing('sync: detecting split chats'); this.desk.chatSplits?.detect(); doing('sync: pushing chat messages'); this.pushChats(); } catch { /* tried again in a minute */ } finally { doing(''); } }
+      if ((this.timers.get('chatpush') || 0) <= Date.now()) { this.timers.set('chatpush', Date.now() + 60000); try { step('sync: settling split chats', () => this.desk.chatSplits?.settleAll()); step('sync: detecting split chats', () => this.desk.chatSplits?.detect()); step('sync: pushing chat messages', () => this.pushChats()); } catch { /* tried again in a minute */ } finally { doing(''); } }
       // Rex Desk tasks from another computer: a number both computers gave out is settled (LocalTasks.settle).
       if (this.tasksArrived || (this.timers.get('tasks') || 0) <= Date.now()) { this.tasksArrived = false; this.timers.set('tasks', Date.now() + 60000); await bounded(() => this.desk.localTasks?.settle()); }
       if ((this.timers.get('commands') || 0) <= Date.now()) { this.timers.set('commands', Date.now() + 3000); this.pendingCommands(); }
