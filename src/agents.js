@@ -45,7 +45,7 @@ const terminalEnvironment = (env, keep) => Object.fromEntries(Object.entries(env
 const psQuote = value => `'${String(value).replace(/'/g, "''")}'`;
 const shQuote = value => `'${String(value).replace(/'/g, `'\\''`)}'`;
 const signedInLine = 'When the browser says you are signed in, close this window and go back to Rex Desk.';
-const notFoundLine = name => `${name} sign-in failed: ${name} was not found. Press Install to reinstall.`;
+const notFoundLine = name => `${name} sign-in failed: ${name} was not found. Press Set up or Sign in in Rex Desk again to install it.`;
 const exitLine = name => `${name} sign-in failed. Read the message above, then press Sign in again in Rex Desk.`;
 // The file a found CLI really runs: npm's script for a node.exe launch, else the binary. Checked again in the window, since it can
 // be gone by then (an nvm4w switch or an npm uninstall), and a run that never started must not say the browser is next.

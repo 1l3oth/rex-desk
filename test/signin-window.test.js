@@ -18,7 +18,7 @@ test('the sign-in window checks the file and the exit code before it says the br
   const script = window(true);
   assert.match(script, /Test-Path -LiteralPath '.*codex\.js'/);
   assert.match(script, /if \(\$rexCode -eq 0\) \{ Write-Host 'When the browser says you are signed in/);
-  assert.match(script, /Codex sign-in failed: Codex was not found\. Press Install to reinstall\./);
+  assert.match(script, /Codex sign-in failed: Codex was not found\. Press Set up or Sign in in Rex Desk again to install it\./);
   assert.match(script, /irm https:\/\/example\.invalid\/install\.ps1 \| iex/);
   const line = signInShellLine({ name: 'Codex', found: true, install: 'curl -fsSL https://example.invalid/install.sh | sh', executable: { command: '/usr/bin/node', args: ['/gone/codex.js'] }, bare: 'codex', args: ['login'] });
   assert.match(line, /if \[ -e '\/gone\/codex\.js' \]; then .*rc=\$\?; else rc=127; fi/);
@@ -34,7 +34,7 @@ test('a bare command found on PATH is run in try, not tested as a file in the cu
 
 test('in PowerShell, a missing codex.js prints the failure and the installer, never the browser line', { skip: process.platform !== 'win32' }, () => {
   const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(window(true).replace("$Host.UI.RawUI.WindowTitle = 'Rex Desk sign-in'", ''), 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 60000 });
-  assert.match(out, /Codex sign-in failed: Codex was not found\. Press Install to reinstall\./);
+  assert.match(out, /Codex sign-in failed: Codex was not found\. Press Set up or Sign in in Rex Desk again to install it\./);
   assert.match(out, /example\.invalid\/install\.ps1/);
   assert.doesNotMatch(out, /When the browser says you are signed in/);
 });
