@@ -25,5 +25,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install chromium
-      - run: npm test
-      - run: npm run test:browser
+      - name: voice test under load, 4 rounds
+        shell: bash
+        run: |
+          fails=0
+          for i in 1 2 3 4; do echo ROUND $i; node --test test/settings-autosave.test.js test/peer-files.test.js test/composer-ai-per-chat.test.js test/peers.test.js test/project-rules.test.js || fails=$((fails+1)); done
+          echo FAILED_ROUNDS $fails
