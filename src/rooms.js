@@ -276,14 +276,19 @@ export class Rooms {
       // An agent on another computer answers there; while that computer is off, the message waits for it.
       const peers = this.desk.peers;
       if (peers && !peers.owns(agentId, message)) { if (peers.isRemote(agent) && !peers.online(agent.node)) peers.offlineNote(room.id, agent); return; }
+      // A file attached on another computer is waited for first (L27). Everything after the wait reads the agent afresh: a model
+      // changed or a room session made meanwhile is kept, and whether it is working is decided now, not before the wait.
+      if (peers?.arrivedFiles) await peers.arrivedFiles(message.instruction || message.text);
+      const fresh = this.agent(agentId); if (!fresh) return;
       // An agent already working in its room session gets the message handed to it between steps, as one short line.
-      const session = agent.roomRuns?.[room.id], working = session && this.desk.live?.has(session);
+      const session = fresh.roomRuns?.[room.id], working = session && this.desk.live?.has(session);
       const sender = message.from.type === 'human' ? 'The person' : message.from.label;
       const asked = working ? `[Room "${room.name}"] ${sender} → you: ${message.instruction || message.text}` : this.promptFor(this.room(room.id), message, agentId);
-      // A file attached on another computer is named by this computer's own copy of it (L27).
-      const prompt = peers?.arrivedFiles ? await peers.arrivedFiles(asked) : peers?.localFiles ? peers.localFiles(asked) : asked;
+      // A file attached on another computer is named by this computer's own copy of it, or said not to have arrived.
+      const prompt = peers?.arrivedFiles ? await peers.arrivedFiles(asked, { wait: 0 }) : peers?.localFiles ? peers.localFiles(asked) : asked;
       // The agent has now seen the room up to this message, whatever else happens with its turn.
-      this.store.put('specialist', agentId, { ...agent, roomSeen: { ...(agent.roomSeen || {}), [room.id]: message.seq } });
+      const current = this.agent(agentId) || fresh;
+      this.store.put('specialist', agentId, { ...current, roomSeen: { ...(current.roomSeen || {}), [room.id]: Math.max(message.seq, current.roomSeen?.[room.id] || 0) } });
       await this.desk.specialistTurn(agentId, { prompt, roomId: room.id, messageId: message.id }).catch(error => this.system(room.id, `${this.member(agentId).name} could not take the message: ${error.message}`));
     };
     if (!targets.length) return;

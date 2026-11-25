@@ -806,3 +806,20 @@ test('two room messages handed over at once each keep their own reply target in 
   assert.equal(queued.length, 2);
   assert.deepEqual(queued.map(entry => desk.roomTarget([entry]).messageId), [second.id, third.id]);
 });
+
+test('an agent changed while its message waited for a file keeps that change, and still gets the message (L27)', async () => {
+  const { desk, store, turns, vanna, room } = setup();
+  desk.rooms.quietSettle = 10;
+  let waited = 0;
+  desk.peers.owns = () => true;
+  desk.peers.arrivedFiles = async (text, { wait } = {}) => {
+    if (wait !== 0) { waited += 1; await new Promise(resolve => setTimeout(resolve, 30)); store.put('specialist', vanna.id, { ...store.get('specialist', vanna.id), rules: 'changed during the wait' }); }
+    return text;
+  };
+  const sent = await desk.rooms.post(room.id, { text: '@vanna look at this file' });
+  await waitFor(() => turns.some(item => item.run.specialistId === vanna.id));
+  const after = store.get('specialist', vanna.id);
+  assert.equal(waited, 1);
+  assert.equal(after.rules, 'changed during the wait', 'the change made during the wait is not undone');
+  assert.equal(after.roomSeen[room.id], store.get('roommsg', sent.id).seq);
+});
