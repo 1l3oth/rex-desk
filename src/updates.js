@@ -16,7 +16,7 @@ export function plainProblem(error, folder, free = freeSpace) {
   if (error?.code === 'ENOSPC' || /ENOSPC|no space left/i.test(message)) { const left = folder ? free(folder) : Infinity; return `The ${driveOf(folder)} drive is full${Number.isFinite(left) ? ` (${mb(left)} MB free)` : ''}. Free some space, then try again.`; }
   return message;
 }
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 // Installers are published with an Ed25519 signature made by the release key, which only the release workflow holds.
 // The app trusts only the public keys below, so an installer changed in the downloads bucket or on the way is refused.
@@ -48,12 +48,6 @@ export const updaters = { 'win32-x64': '-setup.exe', 'darwin-arm64': '.app.tar.g
 const quoted = value => `'${String(value).replaceAll("'", `'\\''`)}'`;
 // The Mac helper: waits for the server to exit, closes the app, unpacks the new app beside the old one (same disk, so the
 // swap is a rename), and reopens Rex Desk. When anything fails the old app is put back and opened, so nobody is left without it.
-// Only #rrggbb colours reach the update window's script, whatever the page sent.
-export function safeTheme(theme) {
-  const out = {};
-  for (const key of ['panel', 'ink', 'muted', 'accent', 'line']) if (/^#[0-9a-f]{6}$/i.test(String(theme?.[key] || ''))) out[key] = theme[key];
-  return out;
-}
 export function macInstallScript({ serverPid, archive, app, log }) {
   return `#!/bin/sh
 exec >${quoted(log)} 2>&1
@@ -87,11 +81,11 @@ export class Updates {
     let log = ''; try { log = readFileSync(path.join(this.directory, 'install-update.log'), 'utf8'); } catch { /* never written */ }
     const installer = String(settings.installer || ''), gone = !installer || !existsSync(installer);
     const reason = gone ? 'The downloaded installer is gone. Your antivirus may have removed it. Add the Rex Desk folder to its exclusions, then check for updates again.'
-      : !/update helper started/.test(log) ? 'The update did not start. Your antivirus may have blocked it. Add the Rex Desk folder to its exclusions, or run the installer yourself.'
-        : 'The update did not install. Your antivirus may have blocked it. Add the Rex Desk folder to its exclusions, or run the installer yourself.';
+      : !/started the installer/.test(log) ? 'The installer did not start. Your antivirus may have blocked it. Add the Rex Desk folder to its exclusions, or press Install manually and run it yourself.'
+        : 'The update did not install. Your antivirus may have blocked it. Add the Rex Desk folder to its exclusions, or press Install manually and run it yourself.';
     return { version: String(settings.version), reason, installer: gone ? '' : installer, log: log.trim().split(/\r?\n/).slice(-6).join('\n') };
   }
-  // Writes one line to install-update.log from this server, so the log exists and says what happened even when the helper
+  // Writes one line to install-update.log from this server, so the log exists and says what happened even when the installer
   // never runs (it was missing on a computer where antivirus stopped the update).
   note(text) { try { mkdirSync(this.directory, { recursive: true }); appendFileSync(path.join(this.directory, 'install-update.log'), `${new Date().toISOString().slice(0, 19)} server: ${text}\r\n`); } catch { /* best effort */ } }
   // problem: why updating cannot go on right now, in plain words (the drive is full, the last start could not move the data
@@ -152,132 +146,67 @@ export class Updates {
     try { verifyInstaller(bytes, update, this.key); } catch (error) { rmSync(file, { force: true }); throw error; }
     try { writeFileSync(file, bytes); } catch (error) { rmSync(file, { force: true }); throw new Error(plainProblem(error, this.directory, this.freeSpace || freeSpace)); } this.file = file; this.state.ready = true;
   }
-  // A helper waits for this server to exit, closes the app window, runs the installer silently, and reopens Rex Desk.
-  // Windows creates it through WMI: a child of this server would be killed when the server exits, and a detached
-  // PowerShell has no console and never starts. A WMI-created process inherits no environment, so values go as arguments.
-  install(serverPid) {
+  // Windows: the signed-by-us NSIS installer runs by itself, nothing in between. It closes Rex Desk (its own pre-install step
+  // stops everything running from the install folder), installs over this copy, and reopens it (/R). /P shows its small
+  // progress window without asking anything.
+  // There used to be a PowerShell helper started through Task Scheduler (with Windows Explorer and a .cmd file as the
+  // fallback). Kaspersky took that for malware ("PDM:Exploit.Win32.Generic" on node.exe: a script written to disk and run
+  // with -ExecutionPolicy Bypass through a scheduled task) and blocked every update on that computer.
+  // When the Rex Desk window is open, it starts the installer (rex-desk.exe is the program the person opened, outside any
+  // job that would end the installer with it). With no window (Rex Desk running in the background), or an older window that
+  // does not know this request, this server starts the installer itself, detached, so it keeps running after this server
+  // ends. Returns who started it.
+  async install() {
     if (!this.state.ready || !this.file) throw new Error('No checked update is ready yet.');
-    this.state.installFailed = null;
-    rmSync(path.join(this.directory, 'install-update.log'), { force: true });
-    this.note(`installing ${this.state.available?.version || ''} from ${this.file}`);
     // The installer unpacks in the temp folder and writes into the app's folder: both drives need room.
     for (const folder of [os.tmpdir(), this.executable ? path.dirname(this.executable) : ''].filter(Boolean)) {
       const free = (this.freeSpace || freeSpace)(folder);
       if (free < INSTALL_ROOM) throw new Error(`Not enough free space to install the update: ${mb(free)} MB free on the ${driveOf(folder)} drive, and it needs 500 MB. Free some space, then press Update now again.`);
     }
+    this.state.installFailed = null;
+    rmSync(path.join(this.directory, 'install-update.log'), { force: true });
+    const version = this.state.available?.version || '';
+    this.note(`installing ${version} from ${this.file}`);
     if (this.platform.startsWith('darwin')) {
       // The executable is "Rex Desk.app/Contents/MacOS/rex-desk"; the app is the folder three levels up.
       const helper = path.join(this.directory, 'install-update.sh');
-      writeFileSync(helper, macInstallScript({ serverPid, archive: this.file, app: path.resolve(this.executable, '../../..'), log: path.join(this.directory, 'install-update.log') }));
+      writeFileSync(helper, macInstallScript({ serverPid: process.pid, archive: this.file, app: path.resolve(this.executable, '../../..'), log: path.join(this.directory, 'install-update.log') }));
       spawn('/bin/sh', [helper], { detached: true, stdio: 'ignore' }).unref();
-      return;
+      return 'helper';
     }
-    const helper = path.join(this.directory, 'install-update.ps1');
-    writeFileSync(path.join(this.directory, 'install-update.json'), JSON.stringify({ serverPid: Number(serverPid), installer: this.file, app: this.executable, version: this.state.available?.version || '', log: path.join(this.directory, 'install-update.log'), theme: safeTheme(this.theme) }));
-    writeFileSync(helper, [
-      '$settings = Get-Content -Raw (Join-Path $PSScriptRoot "install-update.json") | ConvertFrom-Json',
-      '$ServerPid = [int]$settings.serverPid; $Installer = $settings.installer; $App = $settings.app; $Log = $settings.log',
-      // Any error is written to the log and the helper goes on, so it still reopens Rex Desk and the log says what went wrong.
-      'trap { try { Add-Content -Path $Log -Value "$(Get-Date -Format s) helper error: $($_.Exception.Message)" } catch {}; continue }',
-      // Each step is written as it happens (a transcript is lost if the helper is cut off), so a stuck update shows where.
-      // While Rex Desk is closed for the update, a small window says which step it is on and how far along, until Rex Desk
-      // answers again. The window is a nicety: if it cannot be shown, the update goes on without it.
-      '$Version = [string]$settings.version',
-      '$ui = $null',
-      // The update window looks like Rex Desk: no Windows frame, rounded, the colours of the theme the person sees, the four-square
-      // logo, and a thin accent bar (a filled panel, not the green Windows progress bar). It is a normal window, not always on top:
-      // the person can work in other apps, drag it by any part, or minimize it with its own button. It comes to the front by
-      // itself only when something goes wrong.
-      '$t = $settings.theme; function Col($value, $fallback) { try { if ($value) { return [Drawing.ColorTranslator]::FromHtml($value) } } catch {}; return [Drawing.ColorTranslator]::FromHtml($fallback) }',
-      'try { Add-Type -AssemblyName System.Windows.Forms, System.Drawing; [Windows.Forms.Application]::EnableVisualStyles()',
-      '  $panel = Col $t.panel "#16181d"; $ink = Col $t.ink "#e6e8eb"; $muted = Col $t.muted "#9aa3b1"; $accent = Col $t.accent "#5a97ff"; $line = Col $t.line "#2a2f37"',
-      '  $form = New-Object Windows.Forms.Form -Property @{ Text = "Updating Rex Desk"; ClientSize = New-Object Drawing.Size(460, 132); StartPosition = "CenterScreen"; FormBorderStyle = "None"; TopMost = $false; ShowInTaskbar = $true; BackColor = $panel }',
-      // The taskbar shows Rex Desk's own icon (taken from the app being updated), not PowerShell's.
-      '  try { $form.Icon = [Drawing.Icon]::ExtractAssociatedIcon($App) } catch {}',
-      '  $path = New-Object Drawing.Drawing2D.GraphicsPath; $r = 28; $w = $form.Width; $h = $form.Height; $path.AddArc(0, 0, $r, $r, 180, 90); $path.AddArc($w - $r, 0, $r, $r, 270, 90); $path.AddArc($w - $r, $h - $r, $r, $r, 0, 90); $path.AddArc(0, $h - $r, $r, $r, 90, 90); $path.CloseFigure(); $form.Region = New-Object Drawing.Region($path)',
-      '  $form.Add_Paint({ param($s, $e) $e.Graphics.SmoothingMode = "AntiAlias"; $pen = New-Object Drawing.Pen($line, 1); $e.Graphics.DrawPath($pen, $path); $pen.Dispose() })',
-      '  $logo = New-Object Windows.Forms.Panel -Property @{ Location = New-Object Drawing.Point(24, 24); Size = New-Object Drawing.Size(30, 30); BackColor = $panel }',
-      '  $logo.Add_Paint({ param($s, $e) $g = $e.Graphics; $g.SmoothingMode = "AntiAlias"; $brush = New-Object Drawing.SolidBrush($accent); foreach ($p in @(@(0,0),@(16,0),@(0,16),@(16,16))) { $box = New-Object Drawing.Drawing2D.GraphicsPath; $x = $p[0]; $y = $p[1]; $box.AddArc($x, $y, 6, 6, 180, 90); $box.AddArc($x + 8, $y, 6, 6, 270, 90); $box.AddArc($x + 8, $y + 8, 6, 6, 0, 90); $box.AddArc($x, $y + 8, 6, 6, 90, 90); $box.CloseFigure(); $g.FillPath($brush, $box) }; $brush.Dispose() })',
-      '  $title = New-Object Windows.Forms.Label -Property @{ Text = "Updating Rex Desk $Version"; Location = New-Object Drawing.Point(66, 22); AutoSize = $true; Font = New-Object Drawing.Font("Segoe UI Semibold", 11.5); ForeColor = $ink; BackColor = $panel }',
-      '  $label = New-Object Windows.Forms.Label -Property @{ Text = "Getting ready"; Location = New-Object Drawing.Point(67, 48); Size = New-Object Drawing.Size(370, 38); Font = New-Object Drawing.Font("Segoe UI", 9.5); ForeColor = $muted; BackColor = $panel }',
-      '  $track = New-Object Windows.Forms.Panel -Property @{ Location = New-Object Drawing.Point(24, 92); Size = New-Object Drawing.Size(412, 6); BackColor = $line }',
-      '  $fill = New-Object Windows.Forms.Panel -Property @{ Location = New-Object Drawing.Point(0, 0); Size = New-Object Drawing.Size(0, 6); BackColor = $accent }; $track.Controls.Add($fill)',
-      '  $foot = New-Object Windows.Forms.Label -Property @{ Text = "Rex Desk opens again by itself when this is done."; Location = New-Object Drawing.Point(23, 106); AutoSize = $true; Font = New-Object Drawing.Font("Segoe UI", 8.5); ForeColor = $muted; BackColor = $panel }',
-      '  $bar = [pscustomobject]@{ Track = $track; Fill = $fill }',
-      // Its own minimize button, top right, in the theme colours (a frameless window has no Windows title bar to minimize from).
-      '  $min = New-Object Windows.Forms.Label -Property @{ Text = [string][char]0x2013; Location = New-Object Drawing.Point(420, 12); Size = New-Object Drawing.Size(28, 24); TextAlign = "MiddleCenter"; Font = New-Object Drawing.Font("Segoe UI", 11); ForeColor = $muted; BackColor = $panel; Cursor = [Windows.Forms.Cursors]::Hand }',
-      '  $min.Add_MouseEnter({ $min.BackColor = $line; $min.ForeColor = $ink }); $min.Add_MouseLeave({ $min.BackColor = $panel; $min.ForeColor = $muted }); $min.Add_Click({ $form.WindowState = "Minimized" })',
-      '  try { (New-Object Windows.Forms.ToolTip).SetToolTip($min, "Minimize") } catch {}',
-      // Dragged by any part but the button: there is no title bar to hold.
-      '  $drag = [pscustomobject]@{ On = $false; X = 0; Y = 0 }',
-      '  foreach ($c in @($form, $logo, $title, $label, $foot)) { $c.Add_MouseDown({ param($s, $e) if ($e.Button -eq "Left") { $drag.On = $true; $drag.X = [Windows.Forms.Cursor]::Position.X - $form.Left; $drag.Y = [Windows.Forms.Cursor]::Position.Y - $form.Top } }); $c.Add_MouseMove({ if ($drag.On) { $form.Left = [Windows.Forms.Cursor]::Position.X - $drag.X; $form.Top = [Windows.Forms.Cursor]::Position.Y - $drag.Y } }); $c.Add_MouseUp({ $drag.On = $false }) }',
-      '  $form.Controls.AddRange(@($logo, $title, $label, $track, $foot, $min)); $form.Show(); [Windows.Forms.Application]::DoEvents(); $ui = $form } catch { $ui = $null }',
-      // Only a problem brings the window back and in front of other apps, once, so the person sees it.
-      'function Alert { if ($ui) { try { if ($ui.WindowState -eq "Minimized") { $ui.WindowState = "Normal" }; $ui.TopMost = $true; $ui.Activate(); [Windows.Forms.Application]::DoEvents(); $ui.TopMost = $false } catch {} } }',
-      'function Set-Bar($percent) { if ($ui) { $bar.Fill.Width = [int]($bar.Track.Width * [Math]::Min(100, [Math]::Max(0, $percent)) / 100) } }',
-      'function Pump { if ($ui) { [Windows.Forms.Application]::DoEvents() } }',
-      'function Step($text, $say, $percent) { Add-Content -Path $Log -Value "$(Get-Date -Format s) $text"; if ($ui -and $say) { $label.Text = $say; if ($percent -ge 0) { Set-Bar $percent }; Pump } }',
-      // Started twice (Task Scheduler late, and the Explorer fallback), only the first one runs.
-      '$lock = New-Object Threading.Mutex($false, "Local\\RexDeskUpdate"); if (-not $lock.WaitOne(0)) { exit }',
-      'Add-Content -Path $Log -Value "$(Get-Date -Format s) update helper started"',
-      // Antivirus can remove the installer between the download and now.
-      'if (-not (Test-Path $Installer)) { Step "installer missing: $Installer" "The installer is gone. Your antivirus may have removed it." 10; Alert }',
-      'Step "closing" "Closing Rex Desk" 5',
-      '$until = (Get-Date).AddSeconds(60); while ((Get-Process -Id $ServerPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $until) { Pump; Start-Sleep -Milliseconds 200 }',
-      'Step "server stopped" "Closing Rex Desk" 15',
-      // The window and any bundled Node still running from the install folder would lock files the installer replaces.
-      '$folder = Split-Path -Parent $App; $node = Join-Path $folder "payload\\node\\node.exe"; $server = Join-Path $folder "payload\\app\\src\\server.js"',
-      // Everything running from the install folder ends first, and stays ended: the installer cannot replace a file that is
-      // open (a 0.0.15 update left node.exe empty when something still held it). Antivirus may hold a file for a moment too,
-      // so the helper waits until node.exe can really be written.
-      'function Clear-Folder { for ($i = 0; $i -lt 40; $i++) { $left = @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($folder, [StringComparison]::OrdinalIgnoreCase) }); if (-not $left.Count) { break }; $left | Stop-Process -Force -ErrorAction SilentlyContinue; Pump; Start-Sleep -Milliseconds 300 }; for ($i = 0; $i -lt 40; $i++) { try { if (-not (Test-Path $node)) { break }; $handle = [IO.File]::Open($node, "Open", "ReadWrite", "None"); $handle.Close(); break } catch { Pump; Start-Sleep -Milliseconds 300 } } }',
-      // A good install has the whole app: node.exe at full size and the server code.
-      'function Whole { (Test-Path $node) -and ((Get-Item $node).Length -gt 1000000) -and (Test-Path $server) }',
-      // Waits for the installer process only (-Wait would also wait for anything the installer starts). The installer does not
-      // report its own progress, so the bar moves on time (it usually takes about a minute) and never claims to be done early.
-      // /D= installs over the copy that is running, wherever it is: the installer's own guess from the registry once put a second
-      // copy in AppData while the person's Rex Desk stayed on the old version (0.0.21, after the publisher name changed).
-      'function Install($try) { Clear-Folder; Step "installing (try $try)" "Installing the new version" 20; try { $setup = Start-Process -FilePath $Installer -ArgumentList "/S /D=$folder" -PassThru; $started = Get-Date; while (-not $setup.HasExited) { if ($ui) { Set-Bar ([Math]::Min(80, 20 + [int](((Get-Date) - $started).TotalSeconds / 1.2))) }; Pump; Start-Sleep -Milliseconds 250 }; Step "installer exit code $($setup.ExitCode)" "Checking the install" 82; return ($setup.ExitCode -eq 0) } catch { Step "installer failed: $($_.Exception.Message)" "The installer did not finish" 82; return $false } }',
-      // Up to three tries; an install is only done when the app is whole, whatever the installer says.
-      '$ok = $false; for ($try = 1; $try -le 3 -and -not $ok; $try++) { $ran = Install $try; $ok = $ran -and (Whole); if (-not $ok) { Step "install incomplete (node $(if (Test-Path $node) { (Get-Item $node).Length } else { 0 }) bytes)" "The install did not finish. Trying again" 20; Alert; Start-Sleep -Seconds 3 } }',
-      'if ($ok) { Step "installed" "Installed" 85 } else { Step "install failed after 3 tries" "The update could not be installed. Run the installer again from the updates folder." 85; Alert; for ($i = 0; $i -lt 40; $i++) { Pump; Start-Sleep -Milliseconds 250 } }',
-      // Rex Desk opens again whatever happened, so an update never leaves it closed.
-      'Start-Process -FilePath $App; Step "app opened" "Starting Rex Desk" 90',
-      // The window stays until Rex Desk answers (at most two minutes), so there is never a gap with nothing on screen.
-      // Any answer counts (an older Rex Desk has no /api/boot and answers "not found"); only no answer at all means it is not up yet.
-      '$until = (Get-Date).AddMinutes(2); while ((Get-Date) -lt $until) { try { Invoke-WebRequest "http://127.0.0.1:4317/api/boot" -UseBasicParsing -TimeoutSec 2 | Out-Null; break } catch { if ($_.Exception.Response) { break }; Pump; Start-Sleep -Milliseconds 500 } }',
-      'Step "rex desk answered" "Rex Desk is open" 100',
-      'for ($i = 0; $i -lt 6; $i++) { Pump; Start-Sleep -Milliseconds 200 }',
-      'if ($ui) { $ui.Close() }',
-      'schtasks.exe /Delete /TN "Rex Desk update" /F | Out-Null',
-      'Step "done"',
-    ].join('\r\n'));
-    // Task Scheduler runs the helper in this person's desktop session, outside this server's process tree and free of the
-    // memory limits a WMI-created process gets (which cut the installer off mid-copy). Settings travel in the JSON beside it.
-    if (this.startHelper) return this.startHelper(helper); // tests read the helper instead of running it
-    const task = `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${helper}"`;
-    if (task.length > 260) throw new Error('The update folder path is too long for Windows Task Scheduler.');
-    const log = path.join(this.directory, 'install-update.log');
-    const started = () => { try { return /update helper started/.test(readFileSync(log, 'utf8')); } catch { return false; } };
-    // Some computers do not let an app start Task Scheduler (a security setting or antivirus: "spawnSync schtasks.exe EPERM"),
-    // and on some the task is made but never runs. Then Windows Explorer starts the helper: like a double-click, it runs in the
-    // person's own session, outside this server, so it keeps going when the old Rex Desk closes for the install.
-    const explorer = () => {
-      const launcher = path.join(path.dirname(helper), 'rex-desk-update.cmd');
-      writeFileSync(launcher, `@echo off\r\nstart "" /min ${task}\r\n`);
-      spawn(path.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe'), [launcher], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-      this.note('started the helper through Windows Explorer');
-    };
-    try {
-      execFileSync('schtasks.exe', ['/Create', '/TN', 'Rex Desk update', '/TR', task, '/SC', 'ONCE', '/ST', '00:00', '/RL', 'LIMITED', '/F'], { windowsHide: true, timeout: 30000, stdio: 'ignore' });
-      execFileSync('schtasks.exe', ['/Run', '/TN', 'Rex Desk update'], { windowsHide: true, timeout: 30000, stdio: 'ignore' });
-      this.note('started the helper through Task Scheduler');
-    } catch (error) {
-      this.note(`Task Scheduler refused (${error.message})`);
-      try { explorer(); } catch { throw new Error(`Windows did not let Rex Desk start the update (${error.message}). Close Rex Desk and run the installer in ${path.dirname(helper)} yourself.`); }
-      return;
-    }
-    // The helper writes "update helper started" the moment it starts; nothing after a few seconds means the task never ran.
-    setTimeout(() => { if (!started()) { this.note('the helper did not start within 6 seconds'); try { explorer(); } catch (error) { this.note(`Windows Explorer refused too (${error.message})`); } } }, 6000).unref?.();
+    // Remembered for the next start: still on an older version then means the install did not take (see lastInstall).
+    const folder = path.dirname(this.executable);
+    writeFileSync(path.join(this.directory, 'install-update.json'), JSON.stringify({ version, installer: this.file, app: this.executable, at: new Date().toISOString() }));
+    if (await this.askWindow(folder)) return 'window';
+    await this.launch(folder);
+    return 'server';
+  }
+  // The window takes a request file (renames it, so only one of them starts the installer) and answers in a result file.
+  async askWindow(folder) {
+    const request = path.join(this.directory, 'install-now.txt'), result = path.join(this.directory, 'install-now.result.txt'), taken = `${request}.taken`;
+    for (const file of [result, taken]) rmSync(file, { force: true });
+    writeFileSync(request, `${this.file}\n${folder}\n`);
+    const wait = this.windowWait ?? 4000, pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    for (let waited = 0; waited < wait && existsSync(request); waited += 100) await pause(100);
+    if (existsSync(request)) { rmSync(request, { force: true }); this.note('no Rex Desk window took the update, so the server starts the installer'); return false; }
+    // Taken: the window says within a few seconds whether the installer started.
+    for (let waited = 0; waited < 10000 && !existsSync(result); waited += 100) await pause(100);
+    const answer = existsSync(result) ? readFileSync(result, 'utf8').trim() : '';
+    if (answer === 'ok') { this.note('the Rex Desk window started the installer'); return true; }
+    this.note(`the Rex Desk window could not start the installer (${answer || 'no answer'}), so the server tries`);
+    return false;
+  }
+  // Started detached and outside this server's console, with the command line written as is: NSIS reads /D= only as the
+  // last word, unquoted, even when the folder has spaces. Written as is, the installer's own path would lose its quotes and
+  // NSIS would read the rest of a path with spaces as options, so it is quoted by hand (argv0).
+  launch(folder) {
+    return new Promise((resolve, reject) => {
+      let child;
+      const failed = error => { const reason = plainProblem(error, this.directory, this.freeSpace || freeSpace); this.note(`the installer did not start: ${reason}`); reject(new Error(`The installer did not start (${reason}). Your antivirus may have blocked it. Press Install manually to run it yourself.`)); };
+      try { child = (this.spawner || spawn)(this.file, ['/P', '/R', `/D=${folder}`], { detached: true, stdio: 'ignore', windowsHide: false, windowsVerbatimArguments: true, argv0: `"${this.file}"` }); }
+      catch (error) { failed(error); return; }
+      child.once('error', failed);
+      child.once('spawn', () => { this.note(`the server started the installer (process ${child.pid})`); child.unref(); resolve(); });
+    });
   }
 }

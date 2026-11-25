@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, existsSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { Updates, newer, verifyInstaller } from '../src/updates.js';
 
@@ -71,21 +72,66 @@ test('only the newest installer is kept, and an update is not installed without 
   assert.equal((await updates.check()).ready, true);
   assert.deepEqual(list(path.join(data, 'updates')).filter(name => name.endsWith('.exe')), ['Rex-Desk-0.3.0-setup.exe']);
   updates.freeSpace = () => 100 * 1024 * 1024;
-  assert.throws(() => updates.install(1), /Not enough free space to install the update: 100 MB free/);
+  await assert.rejects(updates.install(), /Not enough free space to install the update: 100 MB free/);
 });
 
-test('the Windows update installs over the copy that is running, not where the installer would guess', async () => {
-  const { readFileSync: read } = await import('node:fs');
+// A stand-in for child_process.spawn: records the call and reports the start (or an error, like antivirus refusing it).
+const fakeSpawn = (calls, error) => (file, args, options) => {
+  const child = new EventEmitter(); child.pid = 4242; child.unref = () => {};
+  calls.push({ file, args, options });
+  setImmediate(() => error ? child.emit('error', error) : child.emit('spawn'));
+  return child;
+};
+
+test('Windows: with no Rex Desk window, the server starts the installer itself, detached, over the running copy (no PowerShell, no scheduled task)', async () => {
+  const { readFileSync: read, readdirSync: list } = await import('node:fs');
   const data = temporary('install-folder');
   const updates = new Updates(data, { version: '0.2.0', executable: String.raw`D:\Rex Desk\rex-desk.exe`, key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
   assert.equal((await updates.check()).ready, true);
-  updates.freeSpace = () => 10 * 2 ** 30; let started = '';
-  updates.startHelper = helper => { started = helper; };
-  updates.install(1);
-  const script = read(started, 'utf8'), settings = JSON.parse(read(path.join(path.dirname(started), 'install-update.json'), 'utf8'));
-  assert.equal(settings.app, String.raw`D:\Rex Desk\rex-desk.exe`);
-  assert.match(script, /\$folder = Split-Path -Parent \$App/);
-  assert.match(script, /-ArgumentList "\/S \/D=\$folder"/, 'the installer is told the folder of the running copy');
+  updates.freeSpace = () => 10 * 2 ** 30; updates.windowWait = 200;
+  const calls = []; updates.spawner = fakeSpawn(calls);
+  assert.equal(await updates.install(), 'server');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].file, path.join(data, 'updates', 'Rex-Desk-0.3.0-setup.exe'));
+  assert.deepEqual(calls[0].args, ['/P', '/R', String.raw`/D=D:\Rex Desk`], 'the installer is told the folder of the running copy, and reopens it');
+  assert.equal(calls[0].options.detached, true); assert.equal(calls[0].options.windowsVerbatimArguments, true, '/D= must stay unquoted');
+  assert.equal(calls[0].options.argv0, `"${calls[0].file}"`, 'the installer path keeps its quotes in the command line');
+  const settings = JSON.parse(read(path.join(data, 'updates', 'install-update.json'), 'utf8'));
+  assert.equal(settings.app, String.raw`D:\Rex Desk\rex-desk.exe`); assert.equal(settings.version, '0.3.0');
+  const files = list(path.join(data, 'updates'));
+  assert.ok(!files.some(name => /\.ps1$|\.cmd$|install-now\.txt$/.test(name)), `no script or leftover request: ${files}`);
+  const log = read(path.join(data, 'updates', 'install-update.log'), 'utf8');
+  assert.match(log, /server: installing 0\.3\.0/); assert.match(log, /no Rex Desk window took the update/); assert.match(log, /the server started the installer \(process 4242\)/);
+});
+
+test('Windows: an open Rex Desk window takes the request and starts the installer, so node.exe does not', async () => {
+  const { readFileSync: read, renameSync, writeFileSync: write, existsSync: exists } = await import('node:fs');
+  const data = temporary('install-window'), folder = path.join(data, 'updates');
+  const updates = new Updates(data, { version: '0.2.0', executable: String.raw`D:\Rex Desk\rex-desk.exe`, key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
+  assert.equal((await updates.check()).ready, true);
+  updates.freeSpace = () => 10 * 2 ** 30;
+  const calls = []; updates.spawner = fakeSpawn(calls);
+  // What rex-desk.exe does (watch_for_install in main.rs): claim the request by renaming it, then answer.
+  let request = '';
+  const window = setInterval(() => { const file = path.join(folder, 'install-now.txt'); if (exists(file)) { renameSync(file, `${file}.taken`); request = read(`${file}.taken`, 'utf8'); write(path.join(folder, 'install-now.result.txt'), 'ok'); } }, 50);
+  try { assert.equal(await updates.install(), 'window'); } finally { clearInterval(window); }
+  assert.equal(calls.length, 0, 'the server did not start a second installer');
+  assert.deepEqual(request.trim().split('\n'), [path.join(folder, 'Rex-Desk-0.3.0-setup.exe'), String.raw`D:\Rex Desk`]);
+  assert.match(read(path.join(folder, 'install-update.log'), 'utf8'), /the Rex Desk window started the installer/);
+});
+
+test('Windows: an installer that cannot start (antivirus) says so, with Install manually, and the log keeps the reason', async () => {
+  const { readFileSync: read } = await import('node:fs');
+  const data = temporary('install-blocked');
+  const updates = new Updates(data, { version: '0.2.0', executable: String.raw`D:\Rex Desk\rex-desk.exe`, key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
+  assert.equal((await updates.check()).ready, true);
+  updates.freeSpace = () => 10 * 2 ** 30; updates.windowWait = 100;
+  updates.spawner = fakeSpawn([], Object.assign(new Error('spawn EPERM'), { code: 'EPERM' }));
+  await assert.rejects(updates.install(), /The installer did not start \(spawn EPERM\)\. Your antivirus may have blocked it\. Press Install manually/);
+  assert.match(read(path.join(data, 'updates', 'install-update.log'), 'utf8'), /the installer did not start: spawn EPERM/);
+  // On the next start, still on 0.2.0: the card says the installer did not start.
+  const next = new Updates(data, { version: '0.2.0', executable: String.raw`D:\Rex Desk\rex-desk.exe`, key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
+  assert.match(next.status().installFailed.reason, /^The installer did not start\. Your antivirus may have blocked it/);
 });
 
 test('a full drive is said in plain words: no download without room, and the card gets the reason', async () => {
@@ -116,8 +162,8 @@ test('an update that did not take (antivirus blocked it) is told on the next sta
   settings('0.3.0'); write(path.join(folder, 'install-update.log'), '2026-11-25T10:00:00 server: installing 0.3.0\r\n');
   let failed = open('0.2.0').status().installFailed;
   assert.equal(failed.version, '0.3.0'); assert.equal(failed.installer, installerFile);
-  assert.match(failed.reason, /did not start\. Your antivirus may have blocked it\. Add the Rex Desk folder to its exclusions, or run the installer yourself/);
-  write(path.join(folder, 'install-update.log'), 'x update helper started\r\nx install failed after 3 tries\r\n');
+  assert.match(failed.reason, /^The installer did not start\. Your antivirus may have blocked it\. Add the Rex Desk folder to its exclusions, or press Install manually/);
+  write(path.join(folder, 'install-update.log'), 'x server: the Rex Desk window started the installer\r\n');
   assert.match(open('0.2.0').status().installFailed.reason, /^The update did not install\. Your antivirus may have blocked it/);
   rmSync(installerFile);
   failed = open('0.2.0').status().installFailed;
@@ -128,12 +174,8 @@ test('an update that did not take (antivirus blocked it) is told on the next sta
   settings('0.3.0');
   const updates = open('0.2.0'); assert.ok(updates.status().installFailed);
   assert.equal((await updates.check()).ready, true);
-  updates.freeSpace = () => 10 * 2 ** 30; let helper = '';
-  updates.startHelper = file => { helper = file; };
-  updates.install(1);
+  updates.freeSpace = () => 10 * 2 ** 30; updates.windowWait = 100; updates.spawner = fakeSpawn([]);
+  await updates.install();
   assert.equal(updates.status().installFailed, null);
   assert.match(read(path.join(folder, 'install-update.log'), 'utf8'), /server: installing 0\.3\.0/);
-  const script = read(helper, 'utf8');
-  assert.match(script, /trap \{ try \{ Add-Content -Path \$Log -Value .*helper error/); assert.match(script, /Add-Content -Path \$Log -Value .*update helper started/);
-  assert.doesNotMatch(script, /Set-Content -Path \$Log/, 'the helper adds to the log, it never wipes what the server wrote');
 });

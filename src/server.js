@@ -535,10 +535,11 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       .map(run => { const id = run.roomAgent || run.specialistId; return (id && id !== 'main' ? store.get('specialist', id)?.name : '') || (run.main || run.role === 'coordinator' ? 'Rex Agent' : run.title) || 'An agent'; });
     return [...new Set(names)];
   }
-  function installNow() {
+  // Resolves once the installer has started (or throws why it could not, for the card).
+  async function installNow() {
     updateWhenIdle = false;
-    updates.install(process.pid);
-    // The helper waits for this process to exit before the installer replaces its files.
+    await updates.install();
+    // This server closes its database and ends, so the installer can replace node.exe (its pre-install step would end it anyway).
     setTimeout(() => void handle.close().finally(() => process.exit(0)), 300);
   }
   const handler = async (request, response) => {
@@ -871,6 +872,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       // The installer of an update that did not install, shown selected in its folder so the person can run it by hand.
       if (url.pathname === '/api/update/reveal' && request.method === 'POST') {
         const file = updates.state.installFailed?.installer || updates.file || '';
+        updates.note('the person opened the installer folder to install by hand');
         if (!file || !existsSync(file) || path.dirname(path.resolve(file)) !== path.resolve(updates.directory)) throw new Error('The installer is not in the updates folder any more. Check for updates to download it again.');
         if (process.platform === 'win32') spawn('explorer.exe', [`/select,${file}`], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
         else spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [path.dirname(file)], { detached: true, stdio: 'ignore' }).unref();
@@ -878,15 +880,13 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       }
       if (url.pathname === '/api/update/install' && request.method === 'POST') {
         const input = await body(request), busy = busyAgents(store);
-        // The update window takes the colours of the theme the person sees (sent by the page).
-        if (input.theme) updates.theme = input.theme;
         if (input.cancel) { updateWhenIdle = false; notify(); return json(response, 200, { whenIdle: false }); }
         if (busy.length) {
           // Installing restarts Rex Desk and would cut the working agents off: it can wait for them instead.
           if (input.whenIdle) { updateWhenIdle = true; notify(); return json(response, 200, { whenIdle: true, busy }); }
           throw new Error(`${busy.join(', ')} ${busy.length === 1 ? 'is' : 'are'} still working. Update when ${busy.length === 1 ? 'it finishes' : 'they finish'}, or stop ${busy.length === 1 ? 'it' : 'them'} first.`);
         }
-        installNow(); return json(response, 200, { restarting: true });
+        await installNow(); return json(response, 200, { restarting: true });
       }
       if (url.pathname === '/api/autostart' && request.method === 'GET') return json(response, 200, autostartStatus());
       if (url.pathname === '/api/autostart' && request.method === 'POST') return json(response, 200, await setAutostart(Boolean((await body(request)).enabled), root));
@@ -1534,7 +1534,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
     if (!session) { awake.set(false); return; }
     const { store, desk } = session;
     // "Update when it finishes": the last agent is done, so the update goes in now.
-    if (updateWhenIdle && updates.state.ready && !busyAgents(store).length && ![...(desk.live?.keys?.() || [])].some(id => !store.get('run', id)?.inApp)) { try { installNow(); } catch (error) { updateWhenIdle = false; store.event('', 'update-error', { message: error.message }, true); notify(); } return; }
+    if (updateWhenIdle && updates.state.ready && !busyAgents(store).length && ![...(desk.live?.keys?.() || [])].some(id => !store.get('run', id)?.inApp)) { installNow().catch(error => { updateWhenIdle = false; store.event('', 'update-error', { message: error.message }, true); notify(); }); return; }
     const minutes = store.config().syncMinutes;
     if (minutes && Date.now() - lastSync >= minutes * 60000 && !desk.sources.syncing) {
       lastSync = Date.now(); void desk.sources.sync().catch(error => store.event('', 'sync-error', { message: error.message }));

@@ -57,7 +57,7 @@ function renderFoot(card, update) {
     const key = `failed#${update.ready ? 1 : 0}`;
     if (foot.dataset.key !== key) {
       foot.dataset.key = key;
-      foot.innerHTML = `<p class="uc-hint"></p><div class="uc-actions"><button type="button" class="btn quiet" data-action="update-later">${t`Later`}</button>${update.installFailed.installer ? `<button type="button" class="btn quiet" data-action="update-reveal">${t`Open installer folder`}</button>` : ''}${update.ready ? `<button type="button" class="btn primary" data-action="update-install">${t`Try again`}</button>` : ''}</div>`;
+      foot.innerHTML = `<p class="uc-hint"></p><div class="uc-actions"><button type="button" class="btn quiet" data-action="update-later">${t`Later`}</button>${update.installFailed.installer ? `<button type="button" class="btn quiet" data-action="update-reveal">${t`Install manually`}</button>` : ''}${update.ready ? `<button type="button" class="btn primary" data-action="update-install">${t`Try again`}</button>` : ''}</div>`;
     }
     return;
   }
@@ -86,21 +86,13 @@ function renderFoot(card, update) {
       : [t('Rex Desk restarts and opens again in about a minute.'), `<button type="button" class="btn quiet" data-action="update-later">${t`Later`}</button><button type="button" class="btn primary" data-action="update-install">${t`Update now`}</button>`];
   foot.innerHTML = `<p class="uc-hint">${hint}</p><div class="uc-actions">${actions}</div>`;
 }
-// The colours of the theme on screen, as #rrggbb, so the update window that runs while Rex Desk restarts looks like it.
-function themeColours() {
-  const probe = document.createElement('i'); probe.style.display = 'none'; document.body.append(probe);
-  const hex = (value, fallback) => { probe.style.color = ''; probe.style.color = value; const resolved = getComputedStyle(probe).color, unit = resolved.startsWith('color(') ? 255 : 1, match = resolved.replace(/^color\(\s*srgb/, '').match(/\d*\.?\d+/g); return match && match.length >= 3 ? `#${match.slice(0, 3).map(part => Math.min(255, Math.round(Number(part) * unit)).toString(16).padStart(2, '0')).join('')}` : fallback; };
-  const style = getComputedStyle(document.documentElement), read = (name, fallback) => hex(style.getPropertyValue(name).trim() || fallback, fallback);
-  const colours = { panel: read('--solid', read('--panel', '#16181d')), ink: read('--ink', '#e6e8eb'), muted: read('--muted', '#9aa3b1'), accent: read('--accent', '#5a97ff'), line: read('--line', '#2a2f37') };
-  probe.remove(); return colours;
-}
 const esc = text => String(text).replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
 
 // "Update when it finishes" (or cancel it): the server installs by itself once no agent is working.
 export async function updateWhenIdle(api, wait = true) {
   const card = document.getElementById('update-card'), error = card?.querySelector('.uc-error');
   if (error) error.hidden = true;
-  try { await api('/update/install', { method: 'POST', data: wait ? { whenIdle: true, theme: themeColours() } : { cancel: true } }); }
+  try { await api('/update/install', { method: 'POST', data: wait ? { whenIdle: true } : { cancel: true } }); }
   catch (failure) { if (error) { error.textContent = failure.message; error.hidden = false; } }
 }
 
@@ -151,10 +143,12 @@ export async function installUpdate(api) {
   const card = document.getElementById('update-card'), button = card?.querySelector('[data-action="update-install"]'), error = card?.querySelector('.uc-error');
   if (button) { button.disabled = true; button.textContent = t('Updating…'); }
   if (error) error.hidden = true;
-  try { await api('/update/install', { method: 'POST', data: { theme: themeColours() } }); }
+  try { await api('/update/install', { method: 'POST', data: {} }); }
   catch (failure) {
     // Agents still working, or the download went away: say why here and let the person try again.
     if (button) { button.disabled = false; button.textContent = t('Update now'); }
+    // The installer did not start (antivirus): a button opens its folder with the file selected, to run it by hand.
+    if (button && /installer did not start/i.test(failure.message) && !card.querySelector('[data-action="update-reveal"]')) { const manual = document.createElement('button'); manual.type = 'button'; manual.className = 'btn quiet'; manual.dataset.action = 'update-reveal'; manual.textContent = t('Install manually'); button.before(manual); }
     if (error) { error.textContent = await whyUnreachable(api, failure); error.hidden = false; return; }
     throw failure;
   }

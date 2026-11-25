@@ -2720,12 +2720,12 @@
  "Not downloaded yet": "មិនទាន់ទាញយកនៅឡើយ",
  "Rex Desk {0} did not install": "Rex Desk {0} មិនបានដំឡើងទេ",
  "You still have {0}": "អ្នកនៅតែមាន {0}",
- "Open installer folder": "បើកថតកម្មវិធីដំឡើង",
  "Needs a paid Rex Desk plan.": "ត្រូវការគម្រោង Rex Desk ដែលបង់ប្រាក់។",
  "How to connect your phone": "របៀបភ្ជាប់ទូរសព្ទរបស់អ្នក",
  "Turn on the switch above.": "បើកប៊ូតុងខាងលើ។",
  "On your phone, open this link and sign in with the same account:": "នៅលើទូរសព្ទ សូមបើកតំណនេះ ហើយចូលដោយគណនីតែមួយ៖",
  "Keep this computer on and awake while you use the phone.": "រក្សាកុំព្យូទ័រនេះឱ្យបើក និងមិនដេក ពេលអ្នកប្រើទូរសព្ទ។",
  "No paid plan? Use Tailscale under Advanced instead.": "មិនមានគម្រោងបង់ប្រាក់? សូមប្រើ Tailscale នៅក្នុងកម្រិតខ្ពស់ជំនួស។",
- "Connected. Open the link below on your phone.": "បានភ្ជាប់។ បើកតំណខាងក្រោមនៅលើទូរសព្ទរបស់អ្នក។"
+ "Connected. Open the link below on your phone.": "បានភ្ជាប់។ បើកតំណខាងក្រោមនៅលើទូរសព្ទរបស់អ្នក។",
+ "Install manually": "ដំឡើងដោយដៃ"
 }
