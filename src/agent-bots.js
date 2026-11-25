@@ -157,6 +157,20 @@ export class AgentBots {
     try { await this.desk.specialistTurn(agentId, { prompt, telegram: replyTo }); } catch (error) { this.store.delete('tgqueued', key); throw error; }
     bridge.noteInbox(agentId, { values: { chatName: `${this.agent(agentId)?.name || 'Agent'} bot: ${who}` } }, tag, text);
   }
+  // The agent starts a message itself (desk_text_person): to its owner, or to one allowed group. Only these two can ever be written to.
+  async send(agentId, text, to = 'owner') {
+    const record = this.record(agentId), token = this.token(agentId);
+    if (!record || !token) throw new Error('This agent has no Telegram bot. Connect one in its Connectors tab.');
+    const body = String(text ?? '').trim(); if (!body) throw new Error('Write the message first.');
+    let chatId = record.ownerChatId;
+    if (to !== 'owner') {
+      const group = (record.groups || []).find(item => String(item.id) === String(to) || (item.title && item.title.toLowerCase() === String(to).toLowerCase()));
+      if (!group) throw new Error('That group is not allowed for this bot. The person allows groups in the Connectors tab.');
+      chatId = group.id;
+    } else if (!chatId) throw new Error('The owner has not linked this bot yet. They send the code from the Connectors tab to the bot.');
+    await this.call(token, 'sendMessage', { chat_id: chatId, text: clip(body) });
+    return { sent: true, to: to === 'owner' ? 'owner' : String(chatId) };
+  }
   // The agent's final reply, back to the chat that asked (called from TelegramBridge.onTurnResult).
   async reply(turn, text) {
     const agentId = String(turn.linkId).slice('agentbot:'.length), record = this.record(agentId), token = this.token(agentId);

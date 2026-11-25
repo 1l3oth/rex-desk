@@ -68,3 +68,18 @@ test('groups: unknown groups wait to be allowed, allowed groups answer only when
   assert.equal(turns.length, 1); assert.match(turns[0].prompt, /what is the status\?/); assert.doesNotMatch(turns[0].prompt, /@ann_bot/);
   agentBots.disconnect('a1'); assert.equal(agentBots.status('a1').connected, false);
 });
+
+test('the agent can text its owner or an allowed group itself, and nobody else', async () => {
+  const { agentBots, sent } = setup();
+  await assert.rejects(() => agentBots.send('a1', 'hi'), /no Telegram bot/);
+  const { pairCode } = await agentBots.connect('a1', T1);
+  await assert.rejects(() => agentBots.send('a1', 'hi'), /not linked/);
+  await agentBots.handle('a1', private1(`/start ${pairCode}`));
+  assert.deepEqual(await agentBots.send('a1', 'Build is done.'), { sent: true, to: 'owner' });
+  assert.deepEqual(sent.at(-1), { token: T1, method: 'sendMessage', chat_id: '7', text: 'Build is done.' });
+  await assert.rejects(() => agentBots.send('a1', 'hi', '-100999'), /not allowed/);
+  agentBots.allowGroup('a1', '-100123', 'Team');
+  await agentBots.send('a1', 'Hello team', 'team');
+  assert.equal(sent.at(-1).chat_id, '-100123');
+  await assert.rejects(() => agentBots.send('a1', '  '), /Write the message/);
+});

@@ -45,7 +45,7 @@ export const DEFERRED_TOOLS = new Set([
   'desk_set_profile_photo', 'desk_second_brain', 'desk_set_task_sources', 'desk_confirm_workflow', 'desk_source_catalog',
   'desk_browser', 'desk_run_for_me',
   'desk_categorize',
-  'desk_telegram',
+  'desk_telegram', 'desk_text_person',
   'desk_tell_run', 'desk_close_run', 'desk_stop_run', 'desk_move_to_chat',
   'desk_meeting_join', 'desk_meeting_leave',
 ]);
@@ -560,6 +560,8 @@ export function createMcp(desk, scope) {
   tool('desk_team_cancel', 'Cancel a task you gave to another agent that has not ended yet.', { id: z.string().min(4).describe('Task id from desk_team.') }, input => desk.team.cancel(scope.runId, input));
   tool('desk_move_to_chat', "Main agent only: make a run an agent did (a task run, or another agent's chat on the same project) that agent's personal chat, so the person sees the work when they click the agent and keeps talking there. Its old personal chat stays under Earlier chats. Pass agent to give the run to another agent on the same project; it defaults to the agent that did the run.", { runId: z.string().min(1), agent: z.string().optional().describe('Agent name, handle or id. Defaults to the agent that did the run.') }, async input => { desk.authorize(scope, null, { coordinator: true }); const run = desk.run(input.runId), agent = desk.specialists.moveToChat(run.id, input.agent ? findAgent(input.agent).id : ''); return { moved: true, runId: run.id, agent: agent.name, earlierChats: (agent.earlierRuns || []).length }; });
   tool('desk_my_chat', 'Read your personal chat with the person (a separate conversation from your group chats), most recent last.', { limit: z.number().int().min(1).max(100).default(30) }, input => ({ messages: desk.personalChat(myAgent().id, input.limit) }), true);
+  tool('desk_text_person', 'Text someone through your own Telegram bot (set up in your Connectors tab): your owner by default, or one group the person allowed. Use it only when the person asked you to message them there or something needs their attention away from the app.',
+    { text: z.string().min(1).max(3800), to: z.string().max(80).default('owner').describe('"owner", or the id or name of an allowed group.') }, input => { requireEnglish(input.text, 'this message'); return desk.agentBots.send(myAgent().id, input.text, input.to); });
   tool('desk_room_history', 'Read the recent messages of one of your group chats, as a person catching up on a chat would.', { roomId: z.string().optional().describe('Omit it when you are in one room.'), limit: z.number().int().min(1).max(100).default(30) }, input => {
     // A group chat session reads only its own room: what is said in one group chat stays there.
     const agent = myAgent(), own = desk.store.get('run', scope.runId)?.roomOf, rooms = desk.rooms.roomsOf(agent.id).filter(item => !own || item.id === own);
