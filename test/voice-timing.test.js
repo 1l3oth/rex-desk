@@ -84,36 +84,52 @@ test('looksTruncated flags a tiny answer for long audio, not slow or short speec
   assert.equal(looksTruncated('one two three four five six seven eight nine ten', 10), false);
 });
 
-test('finalChunks splits a long recording into short windows that cover it and cut in the quiet gaps', () => {
-  const rate = 22050, per = FRAME / rate, count = Math.round(13 / per);
-  const rec = { rate, chunks: Array.from({ length: count }, () => 0), levels: Array.from({ length: count }, () => 0.1) };
-  // A quiet gap just inside the first window (its last ~1s): the boundary should snap to it, not the hard cut.
-  const g1 = Math.round(4.3 / per); rec.levels[g1] = 0.001;
-  const windows = finalChunks(rec);
-  assert.ok(windows.length >= 3, 'a 13s clip becomes several short windows');
+test('finalChunks cuts a long recording only at confirmed pauses, covering it with short windows', () => {
+  const rate = 22050, per = FRAME / rate;
+  // Two sustained pauses (half a second of sub-floor chunks each), around 4.3s and 8.6s into a 13s clip.
+  const rec = pauseAt(pauseAt(speaking(13, rate), 4.3), 8.6);
+  const count = rec.chunks.length, windows = finalChunks(rec);
+  assert.ok(windows.length >= 3, 'a 13s clip with two pauses becomes several short windows');
   assert.equal(windows[0][0], 0); assert.equal(windows[windows.length - 1][1], count, 'the windows cover the whole recording with no gap');
   for (let i = 1; i < windows.length; i++) assert.equal(windows[i][0], windows[i - 1][1], 'each window starts where the last ended');
   for (const [from, to] of windows) assert.ok((to - from) * per <= LIVE_PIECE_S + 0.01, 'each window is at most the live piece length');
-  assert.equal(windows[0][1], g1, 'the first cut snaps to the quiet gap');
+  const firstPause = Math.round(4.3 / per);
+  assert.equal(windows[0][1], firstPause, 'the first cut lands at the start of the confirmed pause, never mid-word');
+  // Every boundary (except the last, which is the end) sits on a sub-floor frame, i.e. inside a real pause.
+  for (let i = 0; i < windows.length - 1; i++) assert.ok(rec.levels[windows[i][1]] < 0.012, 'a cut only ever lands in a sub-floor pause');
 });
 
-test('the whole-recording final is heard in short windows, so a long request that would stop early never happens', async () => {
-  // Under a fully loaded machine one long request stays correct but slow and can be cut off; short requests complete.
-  // The stub models that: any request over 6s of audio comes back as just the first two words; shorter ones return the
-  // full words for their slice. Because the whole pass now always windows, no single request ever exceeds a window.
+test('finalChunks never splits continuous speech: with no pause it is one window, and a too-short answer is flagged', () => {
+  // The reviewer's case: cutting continuous speech at the single quietest frame could split a word, and joining
+  // the pieces cannot put it back. So with no confirmed pause the whole recording stays one request. That request
+  // can be slow (not truncated) under load; a genuinely cut-off answer is caught by looksTruncated and cleared.
   const rate = 22050, per = FRAME / rate, count = Math.round(13 / per);
-  const chunks = Array.from({ length: count }, () => new Float32Array(FRAME).fill(0.1)); // continuous, no pause -> whole path
+  const rec = speaking(13, rate); // continuous 0.1 RMS, no sub-floor frame anywhere
+  assert.deepEqual(finalChunks(rec), [[0, count]], 'no confirmed pause: a single window, so no word is ever split');
+  assert.equal(looksTruncated('w0 w1', count * per), true, 'a two-word answer for 13s is flagged truncated, so it is cleared not sent');
+});
+
+test('the whole pass is heard window by window at the pauses, so the full text comes back under load', async () => {
+  // Under a fully loaded machine one long request stays correct but slow and can be cut off by the client timeout;
+  // short requests complete. The stub models that: any request over 6s of audio comes back as just the first two
+  // words; shorter requests return the full words for their slice. finalChunks cuts at the confirmed pauses so
+  // every window is short enough to complete, and joining them returns the whole text.
+  const rate = 22050, per = FRAME / rate, count = Math.round(13 / per);
+  const chunks = Array.from({ length: count }, () => new Float32Array(FRAME).fill(0.1));
+  const need = Math.max(2, Math.ceil(0.5 / per));
+  for (const at of [3.5, 7, 10.5]) { const i0 = Math.round(at / per); for (let i = 0; i < need; i++) chunks[i0 + i] = new Float32Array(FRAME); } // silent pauses
+  const levels = levelsOf(chunks), windows = finalChunks({ rate, chunks, levels });
+  assert.ok(windows.length >= 3, 'the whole pass splits into several short windows at the pauses');
+  assert.ok(windows.every(([from, to]) => (to - from) * per <= LIVE_PIECE_S + 0.01), 'every window is short enough to complete under load');
   const transcribe = async wav => {
     const seconds = (wav.length - 44) / 2 / 16000, words = Math.max(1, Math.round(seconds * 2));
-    const full = Array.from({ length: words }, (_, i) => `w${i}`).join(' ');
-    return seconds > 6 ? 'w0 w1' : full; // a long request stops early at two words
+    return seconds > 6 ? 'w0 w1' : Array.from({ length: words }, (_, i) => `w${i}`).join(' '); // a long request stops early
   };
-  let clock = 0; const now = () => (clock += 40);
-  const out = await runTiming({ chunks, rate, transcribe, now, everyMs: 1 });
-  assert.equal(out.finalPath, 'whole', 'continuous speech: the whole-recording final path');
-  assert.equal(out.windowedFinal, true, 'the whole pass is heard window by window');
-  assert.equal(out.truncated, false, 'every window is short enough to complete, so the whole text comes back');
-  assert.ok(out.text.trim().split(/\s+/).length > 10, 'the whole text comes back, not just the first two words');
+  const parts = [];
+  for (const [from, to] of windows) parts.push((await transcribe(wav16(chunks.slice(from, to), rate))).trim());
+  const text = parts.filter(Boolean).join(' ');
+  assert.ok(text.split(/\s+/).length > 10, 'joining the windows returns the whole text, not just the first two words');
+  assert.equal(looksTruncated(text, count * per), false, 'the joined whole text is not flagged truncated');
 });
 
 test('runTiming drives the real cut and reports the tail-only pass when a clip has a pause', async () => {

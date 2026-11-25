@@ -51,22 +51,34 @@ export function audioSeconds(recording) { return recording.chunks.length * FRAME
 // Split a long recording into short windows for the final pass. One whole-recording request for many
 // seconds of continuous speech can come back with only the opening words when the machine is fully loaded
 // (the engine stops early under contention; short requests always complete). So a long final is heard in
-// windows of at most maxChunks (about LIVE_PIECE_S), each cut at the quietest frame in the last ~second of
-// the window so the boundary lands in a gap between words, not mid-word. Slower (more requests) but the
-// whole text comes back under load. Returns [from, to) chunk-index pairs covering the whole recording.
+// windows of at most about maxChunks (about LIVE_PIECE_S), each cut only at a CONFIRMED pause between
+// words: a sustained run of about half a second below the speech floor (the same sustained-silence rule
+// livePieces uses). A cut at the single quietest frame could still land mid-word in continuous speech and
+// split it, and joining the transcripts cannot put the word back; a confirmed pause is a real gap, so the
+// boundary never splits a word. When speech runs on with no pause inside the target window, the window is
+// extended to the next confirmed pause (or the end) rather than cut mid-word: that one request is slower,
+// but it stays whole. Returns [from, to) chunk-index pairs covering the whole recording.
 export function finalChunks(recording, maxChunks = Math.floor(LIVE_PIECE_S * recording.rate / FRAME)) {
-  const n = recording.chunks.length, windows = [];
-  const back = Math.max(1, Math.round(recording.rate / FRAME)); // ~1s of frames
+  const n = recording.chunks.length, per = FRAME / recording.rate, windows = [];
+  const need = Math.max(2, Math.ceil(PAUSE_S / per)); // frames of sustained silence that confirm a pause
+  const minChunks = Math.max(1, Math.floor(LIVE_CUT_S / per)); // do not cut before this, so windows are not tiny
   let from = 0;
   while (from < n) {
-    let end = Math.min(n, from + maxChunks);
-    if (end < n) {
-      let best = end, bestLevel = Infinity;
-      for (let index = Math.max(from + 1, end - back); index < end; index++) {
-        const level = recording.levels[index] ?? 1;
-        if (level < bestLevel) { bestLevel = level; best = index; }
-      }
-      end = best;
+    const target = Math.min(n, from + maxChunks);
+    if (target >= n) { windows.push([from, n]); break; }
+    // Prefer the latest confirmed pause at or before the target window end: scan [from, target), and each
+    // time a run of `need` sub-floor frames completes (and we are past minChunks in), remember its start.
+    let cut = 0, run = 0;
+    for (let index = from; index < target; index++) {
+      if ((recording.levels[index] ?? 1) < VOICE_FLOOR) { if (++run === need && index - need + 1 >= from + minChunks) cut = index - need + 1; }
+      else run = 0;
+    }
+    if (cut > from) { windows.push([from, cut]); from = cut; continue; }
+    // No pause inside the window (continuous speech): extend to the next confirmed pause, or to the end.
+    let end = n; run = 0;
+    for (let index = target; index < n; index++) {
+      if ((recording.levels[index] ?? 1) < VOICE_FLOOR) { if (++run === need) { end = index - need + 1; break; } }
+      else run = 0;
     }
     windows.push([from, end]);
     from = end;

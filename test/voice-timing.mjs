@@ -97,8 +97,9 @@ export async function runTiming({ chunks, rate, transcribe, now = () => performa
       while (busy) await new Promise(r => setTimeout(r, 20));
       const finalStart = now();
       // finishMic on stop: the shared finalPass picks the tail-only or the whole-recording pass. The whole-recording
-      // pass is heard in short windows (finalChunks), since on a fully loaded machine one long request stays correct but
-      // turns very slow and can be cut off by the request timeout; short windows each complete in a few seconds.
+      // pass is heard in short windows (finalChunks) cut only at confirmed pauses, since on a fully loaded machine one
+      // long request stays correct but turns very slow and can be cut off by the request timeout; each short window
+      // completes in a few seconds. Pause-free audio has no safe cut, so it stays one request (slower, never split).
       const pass = finalPass({ rate, chunks, levels, liveFrom, liveKept });
       const hearWindowed = async () => {
         const windows = finalChunks({ rate, chunks, levels });

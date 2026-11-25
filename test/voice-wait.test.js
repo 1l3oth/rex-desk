@@ -99,7 +99,7 @@ test('the whole-recording final is heard in short windows, and a still-truncated
   assert.match(wholeBlock, /finalText = await hearInWindows\(ctx, recording\);/, 'the whole pass is heard in windows, never one long request');
   // A still-too-short final errors rather than finalizing partial text, and the error clears the dictation so nothing partial can be sent.
   assert.match(composer, /if \(looksTruncated\(finalText, seconds\)\) throw Object\.assign\(new Error\(t\('The voice model returned only part of what was said[^']*'\)\), \{ truncated: true \}\);/, 'still truncated surfaces an error instead of finalizing partial text');
-  assert.match(composer, /liveShow\(ctx, live, error\.truncated \? '' : \(live\?\.said \|\| ''\)\);/, 'a truncated error clears the box so partial text is never left to send');
+  assert.match(composer, /liveShow\(ctx, live, ''\);/, 'any failed final pass clears the box so partial dictation is never left to send');
 });
 
 test('microphone errors keep their real name', async () => {

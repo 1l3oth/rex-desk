@@ -508,8 +508,10 @@ async function finishMic(ctx) {
     if (looksTruncated(finalText, seconds)) throw Object.assign(new Error(t('The voice model returned only part of what was said. Press the mic and try again in a moment.')), { truncated: true });
     liveShow(ctx, live, finalText, { final: true });
   } catch (error) {
-    // A truncated/failed final must never leave partial dictation in the box to be sent: clear it and show the error.
-    liveShow(ctx, live, error.truncated ? '' : (live?.said || ''));
+    // A failed final pass must never leave partial dictation in the box to be sent, truncated or not: clear the
+    // dictated portion and show the error. If an online or install offer below then re-hears the recording, it
+    // sets the box itself with the full final text.
+    liveShow(ctx, live, '');
     clearTimeout(slow);
     // The free on-computer voice is not set up yet: offer to set it up here. If they would rather use an online voice they
     // already connected, that is offered next. Never a silent wait, never a "go to Settings".
