@@ -10,6 +10,7 @@ const ICON = {
 };
 import { pickerHtml } from '/chat-pick.js';
 import { micProblem, openMicrophone, startRecorder, transcribe, wavFrom } from '/recorder.js';
+import { askConfirm } from '/confirm.js';
 const EFFORT_LABEL = { low: t('Low'), medium: t('Medium'), high: t('High'), xhigh: t('Extra high'), max: t('Max') };
 const EFFORT_HINT = { low: t('Fast, light thinking'), medium: t('Balanced'), high: t('Thinks longer'), xhigh: t('Thinks a lot longer'), max: t('Longest thinking, slowest') };
 const MODE_HINT = { bypassPermissions: t('Runs tools without asking'), manual: t('Asks you for each tool, in the chat'), auto: t('A checker decides what is safe'), plan: t('Plans only, runs nothing'), acceptEdits: t('Edits files freely, asks for the rest') };
@@ -298,10 +299,11 @@ function liveShow(ctx, live, text, { final = false } = {}) {
   if (final && words) box.focus();
   box.dispatchEvent(new Event('input', { bubbles: true }));
 }
-// Where words cannot come live (the on-computer engine), the box says it is listening until the words arrive.
-function liveWaiting(live, on) {
+// Where words cannot come live (the on-computer engine), the box says it is listening, or preparing while the model loads,
+// until the words arrive, so it never sits silent and frozen.
+function liveWaiting(live, on, text) {
   const box = document.getElementById('draft'); if (!live || !box) return;
-  box.setAttribute('placeholder', on ? t('Listening…') : live.placeholder); box.classList.toggle('listening', on);
+  box.setAttribute('placeholder', on ? (text || t('Listening…')) : live.placeholder); box.classList.toggle('listening', on);
 }
 // The on-computer engine has no live results, so the recording is turned into words piece by piece while the person talks.
 // Every 1.5 seconds only the part since the last finished piece is sent, so each request stays short however long they
@@ -323,8 +325,15 @@ function liveLocal(ctx, recording) {
   if (!live.written.trim()) liveWaiting(live, true);
   let busy = false, kept = '', from = 0;
   const hear = async (start, stop) => {
-    const heard = await transcribe(wavFrom(recording.chunks.slice(start, stop), recording.rate), voiceLanguage(ctx)).catch(() => null);
-    return heard ? String(heard.text || '').trim() : null;
+    try {
+      const heard = await transcribe(wavFrom(recording.chunks.slice(start, stop), recording.rate), voiceLanguage(ctx));
+      recording.notReady = false;
+      return heard ? String(heard.text || '').trim() : null;
+    } catch (error) {
+      // The model is still loading, or not installed: keep this piece for the next try and let the box say so.
+      if (error.starting || /not installed|starting|\binstall\b/i.test(error.message || '')) recording.notReady = true;
+      return null;
+    }
   };
   const tick = async () => {
     if (busy || recording.stopped || !recording.heard) return;
@@ -334,7 +343,9 @@ function liveLocal(ctx, recording) {
       if (cut) { const words = await hear(from, cut); if (recording.stopped || words === null) return; kept = [kept, words].filter(Boolean).join(' '); from = cut; }
       const words = cut ? '' : await hear(from, end);
       const text = [kept, words].filter(Boolean).join(' ');
-      if (!recording.stopped && text) { liveWaiting(live, false); liveShow(ctx, live, text); }
+      if (recording.stopped) return;
+      if (text) { liveWaiting(live, false); liveShow(ctx, live, text); }
+      else if (recording.notReady && !live.written.trim()) liveWaiting(live, true, t('Preparing the voice model…'));
     } finally { busy = false; }
   };
   recording.liveTimer = setInterval(() => void tick(), LIVE_EVERY_MS);
@@ -396,6 +407,36 @@ async function hearWords(ctx, wav, { alive = () => true } = {}) {
     }
   }
 }
+// The desktop app runs in a webview with no live browser speech, so dictation there leans on the on-computer model. When
+// that model is not installed yet, or is still loading, and the person has already connected an online voice (their
+// OpenRouter key for Gemini, or an ElevenLabs key), offer it: one tap turns this recording into words online in a second
+// or two, and keeps voice on that engine, so from then on the words stream in live while they speak (the live pieces go to
+// whichever engine is chosen). Nothing is sent online until this tap, so the on-this-computer promise still holds.
+async function onlineVoice(ctx) {
+  let info; try { info = await ctx.api('/voice/engines'); } catch { return ''; }
+  if (info?.engine && info.engine !== 'local') return ''; // already on an online engine
+  return info?.available?.gemini ? 'gemini' : info?.available?.elevenlabs ? 'elevenlabs' : '';
+}
+async function offerOnlineVoice(ctx, error, recording, live) {
+  if (!error.starting && !/not installed|still starting|is starting|\binstall\b/i.test(error.message || '')) return false;
+  const engine = await onlineVoice(ctx); if (!engine) return false;
+  const name = engine === 'gemini' ? t('your online voice (Gemini)') : t('ElevenLabs');
+  const yes = await askConfirm(
+    t`The voice model on this computer is not ready yet.
+
+Use ${name} instead? It turns speech into words online in a moment, and your voice stays fast from now on. This recording is sent to that service.`,
+    { ok: t('Use online voice') });
+  if (!yes) return false;
+  liveWaiting(live, true);
+  try {
+    await ctx.api('/voice/engine', { method: 'POST', data: { engine } });
+    const heard = await transcribe(recording.wav(), voiceLanguage(ctx));
+    liveShow(ctx, live, heard.text, { final: true });
+    ctx.toast(t('Voice now uses your online engine, so the words come back fast. Change it in the mic menu → Voice.'));
+  } catch (failed) { ctx.toast(t`Voice input: ${failed.message}`, true); }
+  finally { liveWaiting(live, false); }
+  return true;
+}
 async function finishMic(ctx) {
   const recording = listening; if (!recording) return;
   // The browser's recognition puts the words in the box itself when it ends.
@@ -410,7 +451,9 @@ async function finishMic(ctx) {
     liveShow(ctx, live, heard.text, { final: true });
   } catch (error) {
     liveShow(ctx, live, live?.said || '');
-    ctx.toast(/not installed|install/i.test(error.message) ? t('Voice is not installed yet. Install it in Settings → Jev and voice.') : t`Voice input: ${error.message}`, true);
+    clearTimeout(slow);
+    if (await offerOnlineVoice(ctx, error, recording, live)) return;
+    ctx.toast(/not installed|install/i.test(error.message) ? t('Voice is not installed yet. Install it in Settings → Jev and voice, or connect an online voice there.') : t`Voice input: ${error.message}`, true);
   } finally { clearTimeout(slow); liveWaiting(live, false); transcribing = false; micButton()?.classList.remove('busy'); }
 }
 async function toggleMic(ctx) {
