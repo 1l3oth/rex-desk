@@ -144,11 +144,11 @@ test('a failed relay connect says why: not signed in, plan, server unreachable, 
   assert.deepEqual(relayProblem({ code: 4002, opened: true }), { reason: 'not-paid', detail: '' });
   assert.deepEqual(relayProblem({ code: 4003, opened: true }), { reason: 'signed-out', detail: '' });
   assert.equal(relayProblem({ code: 1006, error: 'getaddrinfo ENOTFOUND api.rexdesk.dev' }).reason, 'unreachable');
-  assert.deepEqual(relayProblem({ code: 1011, reason: 'relay restarting', opened: true }), { reason: 'other', detail: 'relay restarting' });
+  assert.deepEqual(relayProblem({ code: 1011, reason: 'relay restarting', opened: true }), { reason: 'other', detail: 'relay restarting, code 1011' });
   const { desk, events } = fakeDesk(1), socket = fakeSocket(), relay = new PhoneRelay(desk, { socket: () => socket });
   relay.setEnabled(true); socket.emit('error', { message: 'connect ECONNREFUSED' }); socket.emit('close', { code: 1006 });
   assert.equal(relay.view().state, 'offline');
-  assert.deepEqual(relay.view().problem, { reason: 'unreachable', detail: 'connect ECONNREFUSED' }, 'the real error is kept');
+  assert.deepEqual(relay.view().problem, { reason: 'unreachable', detail: 'connect ECONNREFUSED, code 1006' }, 'the real error is kept');
   assert.ok(events.some(([, kind, data]) => kind === 'phone-relay-error' && /ECONNREFUSED/.test(data.message)), 'and logged');
   relay.stop();
   const signedOut = fakeDesk(1), gone = fakeSocket(), other = new PhoneRelay(signedOut.desk, { socket: () => gone });

@@ -26,7 +26,7 @@ const STOP_CODES = { 4001: 'replaced', 4002: 'not-paid', 4003: 'signed-out' };
 // never opened could not reach the server (or it refused the handshake); anything after it opened is shown with its own words.
 export function relayProblem({ code, reason = '', error = '', opened = false } = {}) {
   if (STOP_CODES[code]) return { reason: STOP_CODES[code], detail: '' };
-  const detail = String(reason || error || (code ? `closed with code ${code}` : '')).slice(0, 200);
+  const words = String(reason || error || '').trim(), detail = (words && code ? `${words}, code ${code}` : words || (code ? `closed with code ${code}` : '')).slice(0, 200);
   return { reason: opened ? 'other' : 'unreachable', detail };
 }
 export class PhoneRelay {
