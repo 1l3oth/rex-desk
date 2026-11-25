@@ -39,6 +39,15 @@ The installers are **not code-signed yet**. A Certum open-source code signing ce
   xattr -cr "/Applications/Rex Desk.app"
   ```
 
+### If your antivirus blocks updates
+
+Some antivirus programs (Kaspersky, for example) stop the silent update. The update card then says **did not install** and has an **Open installer folder** button. Either run that installer yourself, or add these to your antivirus exclusions (trusted programs) and press **Try again**:
+
+- The install folder, usually `%LOCALAPPDATA%\Rex Desk`, including `rex-desk.exe` in it.
+- The updates folder, `updates` inside your Rex Desk data folder (usually `%APPDATA%\Rex Desk\updates`; Settings, Folders shows where yours is). The update helper `install-update.ps1` and the downloaded `Rex-Desk-<version>-setup.exe` run from there.
+
+What happened is written to `install-update.log` in the updates folder.
+
 ## Set up
 
 1. **Install at least one AI tool and sign in to it:**

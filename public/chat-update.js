@@ -19,21 +19,23 @@ export function showUpdateCard(update) {
   if (document.documentElement.classList.contains('embed')) { card?.remove(); return; }
   // Shown from the moment a new version starts downloading (with how much has arrived), then as ready to install.
   // A new version that cannot download or install yet (the drive is full) shows too, with the reason, instead of nothing.
-  const loading = !update?.ready && update?.downloading, blocked = !update?.ready && !loading && update?.problem && update?.available?.version;
-  const version = update?.ready ? update.available?.version : loading ? update.downloading.version : blocked ? update.available.version : '', later = laterChoice();
+  // An install that did not take (antivirus blocked it) shows first: what happened, and where the installer is to run it by hand.
+  const failed = !update?.downloading && update?.installFailed?.version ? update.installFailed : null;
+  const loading = !failed && !update?.ready && update?.downloading, blocked = !failed && !update?.ready && !loading && update?.problem && update?.available?.version;
+  const version = failed ? failed.version : update?.ready ? update.available?.version : loading ? update.downloading.version : blocked ? update.available.version : '', later = laterChoice();
   if (!version || (later.version === version && later.until > Date.now())) { card?.remove(); return; }
-  if (card?.dataset.version === version && card.dataset.ready === String(Boolean(update.ready))) { renderFoot(card, update); return; }
+  if (card?.dataset.version === version && card.dataset.ready === String(Boolean(update.ready)) && card.dataset.failed === String(Boolean(failed))) { renderFoot(card, update); return; }
   card?.remove();
-  card = document.createElement('aside'); card.id = 'update-card'; card.dataset.version = version; card.dataset.ready = String(Boolean(update.ready));
+  card = document.createElement('aside'); card.id = 'update-card'; card.dataset.version = version; card.dataset.ready = String(Boolean(update.ready)); card.dataset.failed = String(Boolean(failed));
   card.setAttribute('role', 'region'); card.setAttribute('aria-labelledby', 'update-card-title');
   card.innerHTML = `<header class="uc-head"><span class="uc-mark">${ICON}</span><div class="uc-title"><h2 id="update-card-title"></h2><p class="uc-meta"></p></div>
       <button type="button" class="uc-close" data-action="update-later" aria-label="${t`Remind me later`}">${CLOSE}</button></header>
     <ul class="uc-notes"></ul><button type="button" class="uc-more" hidden></button>
     <p class="uc-error" role="alert" hidden></p>
     <footer class="uc-foot"></footer>`;
-  card.querySelector('h2').textContent = update.ready ? t`Rex Desk ${version} is ready` : blocked ? t`Rex Desk ${version} is waiting` : t`Downloading Rex Desk ${version}`;
-  card.querySelector('.uc-meta').textContent = update.ready ? (update.current ? t`Downloaded and checked · you have ${update.current}` : t('Downloaded and checked')) : blocked ? (update.current ? t`Not downloaded yet · you have ${update.current}` : t('Not downloaded yet')) : (update.current ? t`In the background · you have ${update.current}` : t('In the background'));
-  const items = noteItems(update.available?.notes);
+  card.querySelector('h2').textContent = failed ? t`Rex Desk ${version} did not install` : update.ready ? t`Rex Desk ${version} is ready` : blocked ? t`Rex Desk ${version} is waiting` : t`Downloading Rex Desk ${version}`;
+  card.querySelector('.uc-meta').textContent = failed ? (update.current ? t`You still have ${update.current}` : '') : update.ready ? (update.current ? t`Downloaded and checked · you have ${update.current}` : t('Downloaded and checked')) : blocked ? (update.current ? t`Not downloaded yet · you have ${update.current}` : t('Not downloaded yet')) : (update.current ? t`In the background · you have ${update.current}` : t('In the background'));
+  const items = failed ? [] : noteItems(update.available?.notes);
   const list = card.querySelector('.uc-notes'), more = card.querySelector('.uc-more');
   for (const [index, text] of items.entries()) { const item = document.createElement('li'); item.textContent = text; if (index >= SHOWN) item.hidden = true; list.append(item); }
   list.hidden = !items.length;
@@ -50,6 +52,15 @@ const who = names => names.length === 1 ? names[0] : names.length === 2 ? t`${na
 // waiting for them to finish. Only this part redraws, so an expanded list of changes stays open.
 function renderFoot(card, update) {
   const foot = card.querySelector('.uc-foot'), error = card.querySelector('.uc-error');
+  if (card.dataset.failed === 'true' && update.installFailed) {
+    error.textContent = update.installFailed.reason; error.hidden = false;
+    const key = `failed#${update.ready ? 1 : 0}`;
+    if (foot.dataset.key !== key) {
+      foot.dataset.key = key;
+      foot.innerHTML = `<p class="uc-hint"></p><div class="uc-actions"><button type="button" class="btn quiet" data-action="update-later">${t`Later`}</button>${update.installFailed.installer ? `<button type="button" class="btn quiet" data-action="update-reveal">${t`Open installer folder`}</button>` : ''}${update.ready ? `<button type="button" class="btn primary" data-action="update-install">${t`Try again`}</button>` : ''}</div>`;
+    }
+    return;
+  }
   // Why updating cannot go on (the drive is full, the last start could not move the data), said on the card from the server.
   if (update.problem) { error.textContent = update.problem; error.hidden = false; error.dataset.problem = '1'; }
   else if (error.dataset.problem) { error.hidden = true; delete error.dataset.problem; }
@@ -128,6 +139,12 @@ export async function whyUnreachable(api, failure, { tries = 4, pause = 2500 } =
     try { const state = await api('/state', { timeout: 5000 }); return state?.update?.problem || t('Rex Desk was busy for a moment. Press Update now again.'); } catch { /* still not answering */ }
   }
   return t('Rex Desk is not answering. The drive may be full, or the old Rex Desk is still closing. Close Rex Desk, open it again, then press Update now.');
+}
+
+// Opens the folder of the installer that did not install, with the file selected, so the person can run it by hand.
+export async function revealInstaller(api) {
+  const error = document.querySelector('#update-card .uc-error');
+  try { await api('/update/reveal', { method: 'POST' }); } catch (failure) { if (error) { error.textContent = failure.message; error.hidden = false; } }
 }
 
 export async function installUpdate(api) {
