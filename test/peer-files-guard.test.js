@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Writable } from 'node:stream';
 import { createApp, serveFile } from '../src/server.js';
@@ -51,7 +51,7 @@ test('the holding computer serves only regular files inside its data folders, ne
       const media = await ask(`data/uploads/${RUN}/secret.txt`); assert.equal(media.status, 404, 'a junction at the uploads folder is refused');
       assert.doesNotMatch(await media.text(), /not for other computers/);
       assert.equal(servableFile(desk.store, `data/uploads/${RUN}/secret.txt`), null);
-    } finally { rmdirSync(uploads); }
+    } finally { unlinkSync(uploads); }
 
     desk.desk.peerFiles.max = 3;
     const big = await ask(`data/artifacts/${RUN}/ok.txt`);
