@@ -38,10 +38,20 @@
     // would leave an error page that never tries again.
     const count = boot.querySelector('.boot-count'), why = boot.querySelector('.boot-why');
     let left = 10;
+    // A script that fails after this screen showed is retried too: the countdown pauses while any retry is pending, and stops
+    // if a retried script started the page.
+    const gone = () => document.querySelector('#app > .boot') !== boot || boot.dataset.started;
+    const waitRetry = () => { count.textContent = L('Trying the page file again…', 'កំពុងសាកល្បងឯកសារទំព័រម្ដងទៀត…'); setTimeout(tick, 500); };
     const tick = async () => {
+      if (gone()) return;
+      if (retrying) return waitRetry();
       if (left-- > 0) { count.textContent = L(`Checking again in ${left + 1}s`, `នឹងពិនិត្យម្ដងទៀតក្នុង ${left + 1} វិនាទី`); setTimeout(tick, 1000); return; }
       count.textContent = L('Checking…', 'កំពុងពិនិត្យ…');
-      if (await serverUp()) location.reload();
+      const up = await serverUp();
+      if (gone()) return;
+      // A retry may have been planned while the server was being asked: never reload over it.
+      if (retrying) { left = 0; return waitRetry(); }
+      if (up) location.reload();
       else { why.textContent = L('The Rex Desk server is not running. The desktop app starts it again by itself; in a browser, run Start-RexDesk.ps1.', 'ម៉ាស៊ីនមេ Rex Desk មិនកំពុងដំណើរការទេ។ កម្មវិធីលើកុំព្យូទ័របើកវាម្ដងទៀតដោយខ្លួនឯង។ ក្នុងកម្មវិធីរុករក សូមដំណើរការ Start-RexDesk.ps1។'); left = 5; setTimeout(tick, 1000); }
     };
     tick();
