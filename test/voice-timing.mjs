@@ -1,19 +1,24 @@
 // Replayable voice timing harness. Feeds a saved WAV through the on-computer model the same way live
-// dictation does (a sliding window every 1.5s, mirroring liveLocal in public/chat-composer.js), and
-// prints the two numbers QA records: first-word latency and final-text latency.
+// dictation does, driving the REAL cut and final-pass logic from public/voice-live.js (the same code the
+// app runs), and prints the numbers QA records: first live word, final text, and which final pass ran.
 //
-//   node test/voice-timing.mjs test/fixtures/voice/en5.wav en
+//   node test/voice-timing.mjs test/fixtures/voice/en-pauses.wav en
 //   REX_VOICE_DIR="<app data>/voice" node test/voice-timing.mjs test/fixtures/voice/en30.wav en
 //
 // It uses the real installed model (the same Voice class the app uses), so run it on a build where
-// "Voice on this computer" is installed. --selftest replaces the model with a stub so the schedule and
-// timing maths can be checked with no model present (used by test/voice-timing.test.js).
+// "Voice on this computer" is installed. test/voice-timing.test.js drives runTiming with a stub model and
+// a virtual clock, so the schedule and the path choice can be checked with no model present.
+//
+// en-pauses.wav has clear pauses between phrases, so livePieces commits cuts and finishMic takes the
+// tail-only final pass. en30.wav is continuous (pause-free), so nothing commits and the whole-recording
+// pass runs. The harness prints finalPath ("tail" or "whole") for each clip, so QA can tell them apart.
 import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { livePieces, finalPass, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S } from '../public/voice-live.js';
 
-export const LIVE_EVERY_MS = 1500, LIVE_PIECE_S = 5, LIVE_CUT_S = 2.5, FRAME = 4096;
+export { livePieces, finalPass, FRAME, LIVE_EVERY_MS, LIVE_PIECE_S };
 
 // Parse a 16-bit PCM mono WAV into { rate, samples: Float32Array in -1..1 }.
 export function parseWav(buffer) {
@@ -38,14 +43,10 @@ export function frame(samples) {
   return chunks;
 }
 
-// Mirror livePieces (public/chat-composer.js): given how many chunks have arrived and the cursor, say
-// which committed cut to take (0 = still inside the live window). The app also nudges the cut to the
-// quietest frame; levels are not needed for timing, so the plain cut is used.
-export function livePieces(count, rate, from = 0) {
-  const per = FRAME / rate, end = count;
-  if ((end - from) * per <= LIVE_PIECE_S) return { cut: 0, end };
-  const cut = from + Math.ceil(LIVE_CUT_S / per);
-  return { cut, end };
+// Per-chunk RMS loudness, the exact number recorder.js stores in recording.levels, so the real livePieces
+// sees the same pauses the app would.
+export function levelsOf(chunks) {
+  return chunks.map(chunk => { let sum = 0; for (const value of chunk) sum += value * value; return chunk.length ? Math.sqrt(sum / chunk.length) : 0; });
 }
 
 // Build a 16 kHz 16-bit mono WAV Buffer from a slice of chunks at `rate`, like wavFrom in recorder.js.
@@ -62,26 +63,32 @@ export function wav16(chunks, rate) {
   return Buffer.concat([header, pcm]);
 }
 
-// Run the live schedule against a transcriber, in real time (now = performance.now()). Returns the
-// timings. `transcribe(wavBuffer)` resolves to the recognized text for that slice.
+// Run the real live schedule against a transcriber, in real time (now = performance.now()). It mirrors
+// liveLocal + finishMic in public/chat-composer.js, but calls the shared livePieces and finalPass so the
+// path it reports is the path the app would take. `transcribe(wavBuffer)` resolves to the recognized text
+// for that slice. Returns the timings plus finalPath and how many live cuts committed.
 export async function runTiming({ chunks, rate, transcribe, now = () => performance.now(), everyMs = LIVE_EVERY_MS }) {
   const per = (FRAME / rate) * 1000, audioMs = chunks.length * per;
+  const levels = levelsOf(chunks);
   const t0 = now();
   const arrived = () => Math.min(chunks.length, Math.floor((now() - t0) / per));
-  let busy = false, from = 0, kept = '', firstWordAt = null, lastShownAt = null, shown = '';
+  let busy = false, from = 0, kept = '', liveFrom = 0, liveKept = '', committedCuts = 0;
+  let firstWordAt = null, shown = '';
   const hear = async (start, stop) => (await transcribe(wav16(chunks.slice(start, stop), rate)).catch(() => '')).trim();
+  // One live tick, like liveLocal's tick: hear the kept cut (if any) then the live tail, and show the text.
   const tick = async () => {
     if (busy) return; busy = true;
     try {
       const count = arrived();
-      const { cut, end } = livePieces(count, rate, from);
-      if (cut) { const words = await hear(from, cut); kept = [kept, words].filter(Boolean).join(' '); from = cut; }
+      const recording = { rate, chunks: chunks.slice(0, count), levels: levels.slice(0, count) };
+      const { cut, end } = livePieces(recording, from);
+      if (cut) { const words = await hear(from, cut); kept = [kept, words].filter(Boolean).join(' '); from = cut; liveFrom = from; liveKept = kept; committedCuts++; }
       const tail = cut ? '' : await hear(from, end);
       const text = [kept, tail].filter(Boolean).join(' ');
-      if (text) { if (!firstWordAt) firstWordAt = now(); shown = text; lastShownAt = now(); }
+      if (text) { if (!firstWordAt) firstWordAt = now(); shown = text; }
     } finally { busy = false; }
   };
-  await new Promise(resolve => {
+  const final = await new Promise(resolve => {
     const timer = setInterval(() => void tick(), everyMs);
     const stopAt = t0 + audioMs;
     const waitStop = setInterval(async () => {
@@ -89,16 +96,21 @@ export async function runTiming({ chunks, rate, transcribe, now = () => performa
       clearInterval(waitStop); clearInterval(timer);
       while (busy) await new Promise(r => setTimeout(r, 20));
       const finalStart = now();
-      const finalText = (await transcribe(wav16(chunks, rate)).catch(() => '')).trim();
+      // finishMic on stop: the shared finalPass picks the tail-only or the whole-recording pass.
+      const pass = finalPass({ rate, chunks, levels, liveFrom, liveKept });
+      const finalText = pass.path === 'tail'
+        ? [pass.kept, await hear(pass.from, chunks.length)].filter(Boolean).join(' ')
+        : await hear(0, chunks.length);
       if (finalText) { shown = finalText; if (!firstWordAt) firstWordAt = now(); }
-      resolve({ finalAt: now(), finalStart, finalText });
+      resolve({ finalAt: now(), finalStart, finalText, path: pass.path });
     }, 50);
-  }).then(final => (runTiming._final = final));
-  const { finalAt } = runTiming._final;
+  });
   return {
     audioMs: Math.round(audioMs),
     firstWordMs: firstWordAt === null ? null : Math.round(firstWordAt - t0),
-    finalTextMs: Math.round(finalAt - (t0 + audioMs)),
+    finalTextMs: Math.round(final.finalAt - (t0 + audioMs)),
+    finalPath: final.path,
+    committedCuts,
     text: shown,
   };
 }
@@ -121,6 +133,7 @@ async function main() {
   const transcribe = async wav => (await voice.transcribe(wav, language)).text || '';
   const out = await runTiming({ chunks, rate, transcribe });
   console.log(JSON.stringify({ wav: path.basename(wavPath), language, ...out }, null, 2));
+  process.stderr.write(`Final pass: ${out.finalPath === 'tail' ? 'tail only (a pause committed live)' : 'whole recording (no pause committed)'}; ${out.committedCuts} live cut(s).\n`);
   voice.stopAll();
 }
 

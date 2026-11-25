@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseWav, frame, livePieces, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
+import { parseWav, frame, levelsOf, livePieces, finalPass, wav16, runTiming, FRAME, LIVE_PIECE_S } from './voice-timing.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = name => readFileSync(path.join(here, 'fixtures', 'voice', name));
@@ -23,13 +23,30 @@ test('frame cuts audio into 4096-sample chunks', () => {
   assert.ok(chunks.slice(0, -1).every(c => c.length === FRAME));
 });
 
-test('livePieces holds inside the live window then commits a cut', () => {
-  const rate = 22050, per = FRAME / rate;
-  const insideCount = Math.floor(LIVE_PIECE_S / per); // ~5s of audio, still the live tail
-  assert.deepEqual(livePieces(insideCount, rate, 0), { cut: 0, end: insideCount });
-  const longCount = Math.ceil((LIVE_PIECE_S + 2) / per); // past the window: a cut is committed
-  const { cut, end } = livePieces(longCount, rate, 0);
+// A recording view of `seconds` of audio, all at speaking loudness unless a pause is added.
+const speaking = (seconds, rate = 22050) => {
+  const per = FRAME / rate, count = Math.round(seconds / per);
+  return { rate, chunks: Array.from({ length: count }, () => 0), levels: Array.from({ length: count }, () => 0.1) };
+};
+// Drop a run of chunks below the speech floor at `atSeconds` to make a sustained pause.
+const pauseAt = (rec, atSeconds) => { const per = FRAME / rec.rate, need = Math.max(2, Math.ceil(0.5 / per)), at = Math.round(atSeconds / per); for (let i = 0; i < need; i++) rec.levels[at + i] = 0.001; return rec; };
+
+test('livePieces holds inside the live window then commits a cut at a pause', () => {
+  const inside = speaking(LIVE_PIECE_S); // ~5s of audio, still the live tail
+  assert.deepEqual(livePieces(inside, 0), { cut: 0, end: inside.chunks.length });
+  const talky = speaking(LIVE_PIECE_S + 2); // past the window but no pause: nothing commits
+  assert.equal(livePieces(talky, 0).cut, 0);
+  const paused = pauseAt(speaking(LIVE_PIECE_S + 2), 4); // a sustained pause around 4s commits a cut
+  const { cut, end } = livePieces(paused, 0);
   assert.ok(cut > 0 && cut < end);
+});
+
+test('finalPass takes the tail-only pass after a commit, the whole recording otherwise', () => {
+  const rec = speaking(10);
+  assert.equal(finalPass({ ...rec, liveFrom: 0, liveKept: '' }).path, 'whole', 'nothing committed: hear it all');
+  const tail = finalPass({ ...rec, liveFrom: 30, liveKept: 'open the project' });
+  assert.equal(tail.path, 'tail'); assert.equal(tail.kept, 'open the project');
+  assert.equal(tail.tail.length, rec.chunks.length - 30, 'only the uncommitted tail is heard again');
 });
 
 test('wav16 downsamples a slice to a valid 16 kHz 16-bit mono WAV', () => {
@@ -52,4 +69,20 @@ test('runTiming reports first-word before final-text, with a stub model', async 
   assert.ok(out.finalTextMs >= 0, 'final text comes after speech ends');
   assert.ok(out.text.length > 0, 'should end with some text');
   assert.ok(out.audioMs > 2000, 'audioMs reflects the ~2.7s clip');
+  assert.equal(out.finalPath, 'whole', 'a short clip commits nothing, so the whole recording is the final pass');
+  assert.equal(out.committedCuts, 0);
+});
+
+test('runTiming drives the real cut and reports the tail-only pass when a clip has a pause', async () => {
+  // Synthetic 8s clip: speech at 0.1 RMS with a half-second silent gap at ~3.5s, so livePieces commits a
+  // cut there and finishMic takes the tail-only final pass. No model: a stub returns one word per chunk.
+  const rate = 22050, per = FRAME / rate, make = seconds => Array.from({ length: Math.round(seconds / per) }, () => new Float32Array(FRAME).fill(0.1));
+  const chunks = make(8), gapAt = Math.round(3.5 / per), gap = Math.max(2, Math.ceil(0.5 / per));
+  for (let i = 0; i < gap; i++) chunks[gapAt + i] = new Float32Array(FRAME); // the silent pause
+  let clock = 0; const now = () => (clock += 40);
+  const transcribe = async wav => Array.from({ length: Math.max(1, Math.floor(wav.length / 16000)) }, (_, i) => `w${i}`).join(' ');
+  const out = await runTiming({ chunks, rate, transcribe, now, everyMs: 1 });
+  assert.ok(out.committedCuts >= 1, 'the sustained pause commits at least one live cut');
+  assert.equal(out.finalPath, 'tail', 'with a committed cut the final pass hears only the uncommitted tail');
+  assert.ok(out.firstWordMs !== null && out.text.length > 0);
 });

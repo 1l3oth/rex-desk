@@ -61,20 +61,23 @@ test('the on-computer voice engine is pinned to half the logical CPUs, so it nev
 
 test('the final pass only re-hears the uncommitted tail, not the whole recording, so a long dictation finishes in a few seconds', () => {
   const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
+  const voiceLive = readFileSync(new URL('../public/voice-live.js', import.meta.url), 'utf8');
   // The live loop records where the committed words end on the recording, so the final pass can start from there.
   assert.match(composer, /recording\.liveKept = kept; recording\.liveFrom = from;/, 'each committed cut advances the live cursor on the recording');
-  // On stop, the tail from that cursor is heard, joined to the kept words, instead of recording.wav() for the whole thing.
-  assert.match(composer, /const tail = from > 0 \? recording\.chunks\.slice\(from\) : \[\];/, 'the final pass hears only the tail after the last cut');
-  // Every tail with audio is heard (no minimum length that silently drops a short tail).
-  assert.match(composer, /if \(tail\.length\) \{/, 'any non-empty tail is processed');
+  // The path is chosen by the shared finalPass, so the app and the QA harness pick the same one.
+  assert.match(composer, /import \{ LIVE_EVERY_MS, livePieces, finalPass \} from '\/voice-live\.js';/, 'the composer uses the shared cut and final-pass logic');
+  assert.match(composer, /const pass = finalPass\(recording\);/, 'finishMic asks finalPass which path to take');
+  // finalPass hears only the tail after the last cut, and reports the tail-only path when there is audio after it.
+  assert.match(voiceLive, /const tail = from > 0 \? recording\.chunks\.slice\(from\) : \[\];/, 'the final pass hears only the tail after the last cut');
+  assert.match(voiceLive, /if \(tail\.length\) return \{ path: 'tail'/, 'any non-empty tail is the tail-only pass');
   assert.doesNotMatch(composer, /tailSeconds/, 'the old 300 ms skip is gone');
-  assert.match(composer, /\[kept, tailText\]\.filter\(Boolean\)\.join\(' '\), \{ final: true \}\)/, 'the committed words and the fresh tail make the final text');
-  // A short recording that never committed anything is still heard whole.
+  assert.match(composer, /\[pass\.kept, tailText\]\.filter\(Boolean\)\.join\(' '\), \{ final: true \}\)/, 'the committed words and the fresh tail make the final text');
+  // A recording that never committed anything is still heard whole.
   assert.match(composer, /const heard = await hearWords\(ctx, recording\.wav\(\)\);/, 'nothing-committed recordings keep the whole-recording pass');
   // Model-not-ready still bubbles so the install/online offer runs.
   assert.ok(composer.includes("if (error.starting || /not installed|\\binstall\\b/i.test(error.message || '')) throw error;"), 'not-ready errors still bubble to the install/online offer');
   // A tail that fails for any other reason never finalizes partial text: the whole recording is heard instead.
-  const tailBlock = composer.slice(composer.indexOf('if (tail.length) {'), composer.indexOf('} else {', composer.indexOf('if (tail.length) {')));
+  const tailBlock = composer.slice(composer.indexOf("if (pass.path === 'tail') {"), composer.indexOf('} else {', composer.indexOf("if (pass.path === 'tail') {")));
   assert.match(tailBlock, /const heard = await hearWords\(ctx, recording\.wav\(\)\);[\s\S]*liveShow\(ctx, live, heard\.text, \{ final: true \}\);[\s\S]*return;/, 'a failed tail falls back to the whole recording, not the committed words alone');
 });
 
@@ -173,10 +176,9 @@ test('Send ends a dictation, so its later words never bring the sent message bac
   assert.match(composer, /if \(start !== micStarts\) \{ hold\.active = hold\.pending = hold\.releasedEarly = false;/);
 });
 
-test('desktop live words are heard in short pieces cut at a quiet moment, so they keep coming however long the person talks', () => {
+test('desktop live words are heard in short pieces cut at a quiet moment, so they keep coming however long the person talks', async () => {
   const composer = readFileSync(new URL('../public/chat-composer.js', import.meta.url), 'utf8');
-  const at = composer.indexOf('const LIVE_EVERY_MS'), code = composer.slice(at, composer.indexOf('\nfunction liveLocal', at)).replace('export function', 'function');
-  const livePieces = new Function(`${code}; return livePieces;`)();
+  const { livePieces } = await import('../public/voice-live.js');
   const per = 4096 / 48000, chunks = seconds => Array.from({ length: Math.round(seconds / per) }, () => 0);
   const need = Math.max(2, Math.ceil(0.5 / per)); // a sustained pause is about half a second of chunks below the floor
   const hush = (rec, at, count = need) => { for (let i = 0; i < count; i++) rec.levels[at + i] = 0.001; return rec; };
