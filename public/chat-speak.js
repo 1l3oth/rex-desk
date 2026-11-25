@@ -30,9 +30,13 @@ function language(text) {
 }
 // The voice list arrives a moment after the page opens; asking before that gave the computer's default voice (Korean on a Korean
 // Windows) for English text.
+// The computer's own voices, or null where the browser has none (some phone and embedded browsers): every use goes through
+// this, since touching speechSynthesis there throws "Can't find variable: speechSynthesis".
+export const synth = () => (typeof speechSynthesis !== 'undefined' && typeof SpeechSynthesisUtterance !== 'undefined' ? speechSynthesis : null);
 function voices() {
-  const now = speechSynthesis.getVoices(); if (now.length) return Promise.resolve(now);
-  return new Promise(resolve => { const done = () => resolve(speechSynthesis.getVoices()); speechSynthesis.addEventListener?.('voiceschanged', done, { once: true }); setTimeout(done, 1500); });
+  const engine = synth(); if (!engine) return Promise.resolve([]);
+  const now = engine.getVoices(); if (now.length) return Promise.resolve(now);
+  return new Promise(resolve => { const done = () => resolve(engine.getVoices()); engine.addEventListener?.('voiceschanged', done, { once: true }); setTimeout(done, 1500); });
 }
 export const chosenVoice = lang => { try { return localStorage.getItem(`rex-desk-voice-${lang}`) || ''; } catch { return ''; } };
 export async function voicesFor(lang) { return (await voices()).filter(voice => voice.lang.toLowerCase().replace('_', '-').startsWith(lang)); }
@@ -58,10 +62,10 @@ function unlockSound() {
   player ||= new Audio();
   try { player.src = URL.createObjectURL(new Blob([SILENCE], { type: 'audio/wav' })); const started = player.play(); started?.catch?.(() => {}); } catch { /* the voice still tries */ }
   // The computer's own voices on a phone need the same first touch.
-  try { if ('speechSynthesis' in window) speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch { /* no voices */ }
+  try { synth()?.speak(new SpeechSynthesisUtterance(' ')); } catch { /* no voices */ }
 }
 function stop() {
-  speechSynthesis.cancel?.();
+  synth()?.cancel?.();
   if (playing?.audio) { playing.audio.pause(); playing.audio.onended = null; playing.audio.onerror = null; URL.revokeObjectURL(playing.audio.src); }
   if (playing) { playing.button.innerHTML = SPEAKER; playing.button.classList.remove('on', 'loading'); playing.button.title = t('Listen'); }
   playing = null;
@@ -79,7 +83,7 @@ async function playLocal(text, lang, mine) {
       utterance.rate = 1.05;
       if (index === parts.length - 1) utterance.onend = () => { if (playing === mine) stop(); resolve(); };
       utterance.onerror = () => { if (playing === mine) stop(); resolve(); };
-      speechSynthesis.speak(utterance);
+      synth()?.speak(utterance);
     });
   });
 }
@@ -110,7 +114,7 @@ async function play(button) {
     } catch (error) { if (playing !== mine) return; button.classList.remove('loading'); ctxToast?.(t`Using this computer's voice: ${error.message}`, true); }
   }
   button.classList.remove('loading');
-  if ('speechSynthesis' in window) await playLocal(text, lang, mine); else stop();
+  if (synth()) await playLocal(text, lang, mine); else stop();
 }
 // Read replies aloud: a switch in every chat that has the play button (personal chats, Rex Agent and group chats). While
 // it is on, each new reply is read out once it is finished (not while the AI is still typing), one after another, in the
@@ -162,7 +166,7 @@ export function toggleVoiceMode(key) {
 const WAVE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>';
 export const voiceModeButton = key => { const on = voiceModeOn(key); return `<button type="button" class="icon-btn voice-mode${on ? ' on' : ''}" data-action="voice-mode" aria-pressed="${on}" title="${on ? t('Voice mode is on: talk, and the reply is spoken as it is written. Press to end') : t('Voice mode: talk with this agent')}" aria-label="${t`Voice mode`}">${WAVE}</button>`; };
 // Nothing is being said or waiting to be said.
-export const speechIdle = () => live.pending === 0 && !(typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking);
+export const speechIdle = () => live.pending === 0 && !synth()?.speaking;
 // How loud Rex's own voice is right now (0 to 1), for the body in Voice mode to glow with. It listens to a copy of the
 // player's sound (captureStream), so the voice itself always plays straight out: routing the player through a meter made
 // it silent whenever the browser had not let the meter start yet. Where no copy can be taken, and for the computer's own
@@ -184,7 +188,7 @@ export function outputLevel() {
     const level = Math.sqrt(sum / meter.data.length) * 3;
     return level > 0.01 ? Math.min(1, level) : rhythm();
   }
-  if (live.pending || (typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking)) return rhythm();
+  if (live.pending || synth()?.speaking) return rhythm();
   return 0;
 }
 const fingerprint = text => String(text).toLowerCase().replace(/[^a-z0-9ក-៿가-힯]+/g, '').slice(0, 60);
@@ -262,7 +266,7 @@ function sayPhrase(phrase, token, notBefore = 0) {
   const due = () => (notBefore > performance.now() ? new Promise(resolve => setTimeout(resolve, notBefore - performance.now())) : null);
   if (!viaServer(lang, chosen)) {
     // The computer's own voice queues phrases by itself.
-    void Promise.all([voiceFor(lang), due()]).then(([voice]) => { if (token !== live.token) return; const utterance = new SpeechSynthesisUtterance(text); utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice; utterance.rate = 1.05; speechSynthesis.speak(utterance); });
+    void Promise.all([voiceFor(lang), due()]).then(([voice]) => { if (token !== live.token || !synth()) return; const utterance = new SpeechSynthesisUtterance(text); utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice; utterance.rate = 1.05; synth().speak(utterance); });
     return;
   }
   // The neural voice: each phrase is fetched at once, and played in order as soon as the one before it ends.
@@ -302,14 +306,14 @@ function sayPhrase(phrase, token, notBefore = 0) {
   }).finally(() => { live.pending = Math.max(0, live.pending - 1); });
 }
 // Sound is coming out right now (not only waiting to be made): what the body's "Speaking" means.
-export const speechPlaying = () => live.playing || (typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking);
+export const speechPlaying = () => live.playing || Boolean(synth()?.speaking);
 // One phrase in this computer's own voice, resolved when it has been said.
 async function sayHere(text, lang, token) {
-  if (typeof speechSynthesis === 'undefined' || token !== live.token) return;
+  if (!synth() || token !== live.token) return;
   const voice = await voiceFor(lang);
   await new Promise(resolve => {
     const utterance = new SpeechSynthesisUtterance(text); utterance.lang = voice?.lang || { en: 'en-US', ko: 'ko-KR', km: 'km-KH' }[lang]; if (voice) utterance.voice = voice; utterance.rate = 1.05;
-    utterance.onend = resolve; utterance.onerror = resolve; speechSynthesis.speak(utterance); setTimeout(resolve, 20000);
+    utterance.onend = resolve; utterance.onerror = resolve; synth()?.speak(utterance); setTimeout(resolve, 20000);
   });
 }
 // While the agent works instead of talking, Voice mode says so in a few words ("Let me look at the files."), at most one
@@ -355,12 +359,12 @@ export function speakLive({ runId, text = '', done = false, tool = '', input = {
 // now, during the opening, and played at `at`. The agent meanwhile reads its report quietly.
 export function welcome(text, at) { sayPhrase(text, live.token, at); }
 // Stops live speech (read-aloud turned off, another chat opened).
-export function stopLive() { live.token += 1; live.queue = Promise.resolve(); live.pending = 0; live.playing = false; live.said = 0; live.text = ''; live.runId = ''; try { speechSynthesis.cancel(); } catch { /* no voices */ } if (player) { try { player.pause(); } catch { /* not playing */ } } }
+export function stopLive() { live.token += 1; live.queue = Promise.resolve(); live.pending = 0; live.playing = false; live.said = 0; live.text = ''; live.runId = ''; try { synth()?.cancel(); } catch { /* no voices */ } if (player) { try { player.pause(); } catch { /* not playing */ } } }
 export const readAloudButton = key => { const on = readAloudOn(key); return `<button type="button" class="icon-btn read-aloud${on ? ' on' : ''}" data-action="read-aloud" aria-pressed="${on}" title="${on ? t('Replies are read aloud. Press to stop') : t('Read replies aloud')}" aria-label="${t`Read replies aloud`}">${SPEAKER}</button>`; };
 let ctxToast = null;
 export function wireSpeak(toast) {
   ctxToast = toast; void loadSpeechEngine();
-  if ('speechSynthesis' in window) { speechSynthesis.getVoices(); speechSynthesis.addEventListener?.('voiceschanged', () => speechSynthesis.getVoices()); }
+  const engine = synth(); if (engine) { engine.getVoices(); engine.addEventListener?.('voiceschanged', () => engine.getVoices()); }
   document.addEventListener('click', event => {
     const button = event.target.closest?.('[data-speak]'); if (!button) return;
     event.preventDefault(); event.stopPropagation();
