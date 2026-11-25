@@ -290,7 +290,8 @@ export function tasksStage(ctx) {
   const agentOf = task => agentOnTask(ui, task)?.agent?.id || task.assignee || '';
   const inPicks = task => (!agentPick || (agentPick === 'none' ? !agentOf(task) : agentOf(task) === agentPick)) && (!priorityPick || (task.priority || 'normal') === priorityPick);
   const all = everything.filter(inSource).filter(inState).filter(inPicks), filtering = Boolean(filter || agentPick || priorityPick || state !== 'open');
-  const shown = all.filter(task => !filter || `${taskNumber(task)} ${taskName(task)} ${task.title} ${task.statusName || task.status || ''} ${task.projectName || ''} ${(task.tags || []).join(' ')}`.toLowerCase().includes(filter));
+  const needle = filter.replace(/#/g, '');
+  const shown = all.filter(task => !needle || `${taskNumber(task)} ${taskName(task)} ${task.title} ${task.statusName || task.status || ''} ${task.projectName || ''} ${(task.tags || []).join(' ')}`.toLowerCase().includes(needle));
   ensureNames(ctx, shown.filter(task => !task.local));
   const count = test => everything.filter(test).filter(inState).filter(inPicks).length;
   // Left: where tasks come from.
