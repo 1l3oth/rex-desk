@@ -123,3 +123,13 @@ test('a development copy keeps its own home folder; the installed app and a chec
   }
   assert.equal(development({ PORT: '4318', REX_RESTART_AFTER: '123' }), true, 'a development copy that updated itself stays development');
 });
+
+test('a data move stops before copying when the new drive has no room, and keeps the old folder', async () => {
+  const { copyAll } = await import('../src/folders.js');
+  const home = mkdtempSync(path.join(os.tmpdir(), 'rex-move-room-')), from = path.join(home, 'old'), to = path.join(home, 'new');
+  mkdirSync(from); writeFileSync(path.join(from, 'desk.sqlite'), 'x'.repeat(1000));
+  await assert.rejects(copyAll(from, to, () => false, () => {}, () => 10 * 1048576), /Not enough free space on the .* drive: your data needs 200 MB and 10 MB is free\. .*Nothing was moved\./);
+  assert.equal(existsSync(to), false, 'nothing was written to the full drive');
+  await copyAll(from, to, () => false, () => {}, () => 10 * 2 ** 30);
+  assert.equal(readFileSync(path.join(to, 'desk.sqlite'), 'utf8').length, 1000);
+});

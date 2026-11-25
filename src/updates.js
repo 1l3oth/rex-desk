@@ -7,6 +7,15 @@ import os from 'node:os';
 // 0.0.15 install wrote an empty node.exe and Rex Desk could not start.
 const INSTALL_ROOM = 500 * 1024 * 1024;
 export const freeSpace = folder => { try { const disk = statfsSync(folder); return Number(disk.bavail) * Number(disk.bsize); } catch { return Infinity; } };
+// The drive a folder is on, for messages: "C:" on Windows, the folder itself elsewhere.
+export const driveOf = folder => { const resolved = path.resolve(String(folder || '.')); return /^[a-z]:/i.test(resolved) ? resolved.slice(0, 2).toUpperCase() : resolved; };
+const mb = bytes => Math.max(0, Math.round(bytes / 1048576));
+// A full drive is the usual reason an update or a data move stops (ENOSPC), so it is said in plain words with how much is free.
+export function plainProblem(error, folder, free = freeSpace) {
+  const message = String(error?.message || error || '');
+  if (error?.code === 'ENOSPC' || /ENOSPC|no space left/i.test(message)) { const left = folder ? free(folder) : Infinity; return `The ${driveOf(folder)} drive is full${Number.isFinite(left) ? ` (${mb(left)} MB free)` : ''}. Free some space, then try again.`; }
+  return message;
+}
 import { execFileSync, spawn } from 'node:child_process';
 
 // Installers are published with an Ed25519 signature made by the release key, which only the release workflow holds.
@@ -66,7 +75,13 @@ export class Updates {
     Object.assign(this, { fetcher, version, executable, key, platform, directory: path.join(dataDirectory, 'updates') });
     this.state = { supported: Boolean(version && executable && updaters[platform]), current: version || '', stage: 'Beta', checkedAt: '', available: null, ready: false, error: '' };
   }
-  status() { return { ...this.state }; }
+  // problem: why updating cannot go on right now, in plain words (the drive is full, the last start could not move the data
+  // or get its port). The update card shows it instead of a bare "Cannot reach your computer".
+  status() {
+    const free = (this.freeSpace || freeSpace)(existsSync(this.directory) ? this.directory : path.dirname(this.directory));
+    const disk = this.state.supported && free < INSTALL_ROOM ? `The ${driveOf(this.directory)} drive is almost full (${mb(free)} MB free). Rex Desk needs 500 MB to update. Free some space, then try again.` : '';
+    return { ...this.state, problem: this.startProblem || disk || (/free space|drive is full/i.test(this.state.error) ? this.state.error : '') };
+  }
   async check() {
     if (!this.state.supported || this.checking) return this.status();
     this.checking = true;
@@ -87,7 +102,7 @@ export class Updates {
       this.state.available = { version: manifest.version, notes: String(manifest.notes || '').slice(0, 4000), publishedAt: manifest.publishedAt || '' };
       await this.download(manifest.version, update);
       this.etag = etag;
-    } catch (error) { this.state.error = error.message; }
+    } catch (error) { this.state.error = plainProblem(error, this.directory, this.freeSpace || freeSpace); }
     finally { this.checking = false; }
     return this.status();
   }
@@ -100,6 +115,8 @@ export class Updates {
     for (const name of readdirSync(this.directory)) if (/^Rex-Desk-.+-setup\.exe$|^Rex-Desk-.+\.app\.tar\.gz$/i.test(name) && path.join(this.directory, name) !== file) rmSync(path.join(this.directory, name), { force: true });
     let bytes = existsSync(file) ? readFileSync(file) : null;
     if (!bytes) {
+      const free = (this.freeSpace || freeSpace)(this.directory), need = Math.max(INSTALL_ROOM, 2 * (Number(update.size) || 0));
+      if (free < need) throw new Error(`Not enough free space to download the update: ${mb(free)} MB free on the ${driveOf(this.directory)} drive, and it needs ${mb(need)} MB. Free some space and Rex Desk tries again by itself.`);
       const response = await this.fetcher(update.url, { redirect: 'follow', signal: AbortSignal.timeout(15 * 60000) });
       if (!response.ok) throw new Error(`Update download failed (${response.status}).`);
       // Read in pieces so the update card can show how much has arrived (state.downloading), as it arrives.
@@ -114,15 +131,18 @@ export class Updates {
       } finally { this.state.downloading = null; }
     }
     try { verifyInstaller(bytes, update, this.key); } catch (error) { rmSync(file, { force: true }); throw error; }
-    writeFileSync(file, bytes); this.file = file; this.state.ready = true;
+    try { writeFileSync(file, bytes); } catch (error) { rmSync(file, { force: true }); throw new Error(plainProblem(error, this.directory, this.freeSpace || freeSpace)); } this.file = file; this.state.ready = true;
   }
   // A helper waits for this server to exit, closes the app window, runs the installer silently, and reopens Rex Desk.
   // Windows creates it through WMI: a child of this server would be killed when the server exits, and a detached
   // PowerShell has no console and never starts. A WMI-created process inherits no environment, so values go as arguments.
   install(serverPid) {
     if (!this.state.ready || !this.file) throw new Error('No checked update is ready yet.');
-    const free = (this.freeSpace || freeSpace)(os.tmpdir());
-    if (free < INSTALL_ROOM) throw new Error(`Not enough free space to install the update: ${Math.max(0, Math.round(free / 1048576))} MB free on the drive of ${os.tmpdir()}, and it needs 500 MB. Free some space, then press Update now again.`);
+    // The installer unpacks in the temp folder and writes into the app's folder: both drives need room.
+    for (const folder of [os.tmpdir(), this.executable ? path.dirname(this.executable) : ''].filter(Boolean)) {
+      const free = (this.freeSpace || freeSpace)(folder);
+      if (free < INSTALL_ROOM) throw new Error(`Not enough free space to install the update: ${mb(free)} MB free on the ${driveOf(folder)} drive, and it needs 500 MB. Free some space, then press Update now again.`);
+    }
     if (this.platform.startsWith('darwin')) {
       // The executable is "Rex Desk.app/Contents/MacOS/rex-desk"; the app is the folder three levels up.
       const helper = path.join(this.directory, 'install-update.sh');

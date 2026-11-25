@@ -5,7 +5,7 @@
 // A move copies first and switches only after the copy is complete; the old folder stays as a backup the person can delete.
 import { copyFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
-import { constants, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { constants, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, statfsSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -22,6 +22,12 @@ export const development = (env = process.env) => !env.NODE_TEST_CONTEXT
 export const pointerHome = (home = os.homedir(), env = process.env) => path.join(home, development(env) ? '.rexdesk-dev' : '.rexdesk');
 const readLine = file => { try { return readFileSync(file, 'utf8').split(/\r?\n/)[0].replace(/^\uFEFF/, '').trim(); } catch { return ''; } };
 const inside = (child, parent) => { const relative = path.relative(parent, child); return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative)); };
+// Free bytes on the drive of a folder, or of its nearest parent that exists (the target of a move is often not made yet).
+export const freeOn = folder => { let at = path.resolve(folder); while (!existsSync(at) && path.dirname(at) !== at) at = path.dirname(at); try { const disk = statfsSync(at); return Number(disk.bavail) * Number(disk.bsize); } catch { return Infinity; } };
+const drive = folder => { const resolved = path.resolve(folder); return /^[a-z]:/i.test(resolved) ? resolved.slice(0, 2).toUpperCase() : resolved; };
+const mb = bytes => Math.max(0, Math.round(bytes / 1048576));
+// Room kept free on the drive after a move, so the database still has space to grow and Windows keeps working.
+const MOVE_SPARE = 200 * 1048576;
 const holdsWorkspace = folder => existsSync(path.join(folder, 'desk.sqlite')) || existsSync(path.join(folder, 'accounts.json'));
 
 // The AI memory folder: an override from the environment, else the folder it was moved to, else ~/.rexdesk.
@@ -47,7 +53,9 @@ export function checkTarget(from, to) {
 // Not Node's cpSync: it is native code, and on Windows it ended the whole server while moving a data folder (exit 0xC0000409,
 // no message), which left Rex Desk unable to start. Copying file by file turns any problem into an error that is reported.
 // It reports progress for the waiting page.
-export async function copyAll(from, to, skip = () => false, progress = () => {}) {
+// It first checks the new drive has room for everything (plus a spare 200 MB): a copy that ran out of space partway
+// ("ENOSPC: no space left on device") left a half-copied folder that filled the drive even more.
+export async function copyAll(from, to, skip = () => false, progress = () => {}, free = freeOn) {
   const files = [], folders = [];
   const walk = (folder, relative) => {
     for (const entry of readdirSync(folder, { withFileTypes: true })) {
@@ -57,6 +65,8 @@ export async function copyAll(from, to, skip = () => false, progress = () => {})
     }
   };
   walk(from, '');
+  const size = files.reduce((sum, name) => { try { return sum + statSync(path.join(from, name)).size; } catch { return sum; } }, 0), left = free(to);
+  if (left < size + MOVE_SPARE) throw new Error(`Not enough free space on the ${drive(to)} drive: your data needs ${mb(size + MOVE_SPARE)} MB and ${mb(left)} MB is free. Free some space or pick another drive. Nothing was moved.`);
   mkdirSync(to, { recursive: true });
   for (const folder of folders) mkdirSync(path.join(to, folder), { recursive: true });
   for (let index = 0; index < files.length; index++) {
@@ -96,6 +106,7 @@ export async function followDataMove(dataRoot, { home = os.homedir(), waitForOld
   const pendingFile = path.join(dataRoot, PENDING);
   if (!existsSync(pendingFile)) return dataRoot;
   let plan; try { plan = JSON.parse(readFileSync(pendingFile, 'utf8')); } catch { rmSync(pendingFile, { force: true }); return dataRoot; }
+  let copying = null;
   try {
     // A move that stopped the server partway (twice) is given up, so Rex Desk opens from the old folder instead of never opening.
     const tries = Number(plan.tries) || 0;
@@ -103,6 +114,7 @@ export async function followDataMove(dataRoot, { home = os.homedir(), waitForOld
     writeFileSync(pendingFile, JSON.stringify({ ...plan, tries: tries + 1 }));
     await waitForOld();
     const target = checkTarget(dataRoot, plan.to);
+    copying = { target, existed: existsSync(target) };
     await copyAll(dataRoot, target, source => [PENDING, 'runtime.lock'].includes(path.basename(source)) && path.dirname(source) === dataRoot, progress);
     await uncompress(target);
     writeFileSync(path.join(dataRoot, MOVED), target);
@@ -112,9 +124,13 @@ export async function followDataMove(dataRoot, { home = os.homedir(), waitForOld
     log(`Moved Rex Desk data from ${dataRoot} to ${target}. The old folder is kept as a backup.`);
     return target;
   } catch (error) {
-    writeFileSync(pendingFile.replace(/\.json$/, '.failed.json'), JSON.stringify({ ...plan, error: error.message }));
+    // A full drive is said in plain words, and the half-made copy is removed so it does not keep the space (the folder was
+    // empty or new before the copy, so only what this move wrote is removed).
+    const message = error?.code === 'ENOSPC' || /ENOSPC/.test(String(error?.message)) ? `The ${drive(plan.to)} drive ran out of space while moving your data (${mb(freeOn(plan.to))} MB free). Free some space or pick another drive. Your data stays in the old folder.` : error.message;
+    if (copying) { try { if (copying.existed) for (const name of readdirSync(copying.target)) rmSync(path.join(copying.target, name), { recursive: true, force: true }); else rmSync(copying.target, { recursive: true, force: true }); } catch { /* best effort */ } }
+    writeFileSync(pendingFile.replace(/\.json$/, '.failed.json'), JSON.stringify({ ...plan, error: message }));
     rmSync(pendingFile, { force: true });
-    log(`Could not move Rex Desk data: ${error.message}`);
+    log(`Could not move Rex Desk data: ${message}`);
     return dataRoot;
   }
 }

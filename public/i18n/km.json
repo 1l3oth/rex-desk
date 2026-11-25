@@ -2711,5 +2711,11 @@
  "Stop waiting for this task": "ឈប់រង់ចាំកិច្ចការនេះ",
  "Add a task it waits for": "បន្ថែមកិច្ចការដែលវារង់ចាំ",
  "Add a task it waits for…": "បន្ថែមកិច្ចការដែលវារង់ចាំ…",
- "{0} Mark it done anyway?": "{0} សម្គាល់ថារួចរាល់ទោះយ៉ាងណា?"
+ "{0} Mark it done anyway?": "{0} សម្គាល់ថារួចរាល់ទោះយ៉ាងណា?",
+ "Rex Desk {0} is waiting": "Rex Desk {0} កំពុងរង់ចាំ",
+ "It downloads by itself once there is room.": "វានឹងទាញយកដោយខ្លួនឯង នៅពេលមានទំហំទំនេរគ្រប់គ្រាន់។",
+ "Rex Desk was busy for a moment. Press Update now again.": "Rex Desk រវល់មួយភ្លែត។ សូមចុច ធ្វើបច្ចុប្បន្នភាពឥឡូវនេះ ម្ដងទៀត។",
+ "Rex Desk is not answering. The drive may be full, or the old Rex Desk is still closing. Close Rex Desk, open it again, then press Update now.": "Rex Desk មិនឆ្លើយតបទេ។ ថាសអាចពេញ ឬ Rex Desk ចាស់នៅតែកំពុងបិទ។ សូមបិទ Rex Desk បើកវាម្ដងទៀត រួចចុច ធ្វើបច្ចុប្បន្នភាពឥឡូវនេះ។",
+ "Not downloaded yet · you have {0}": "មិនទាន់ទាញយកនៅឡើយ · អ្នកមាន {0}",
+ "Not downloaded yet": "មិនទាន់ទាញយកនៅឡើយ"
 }

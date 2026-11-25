@@ -87,3 +87,22 @@ test('the Windows update installs over the copy that is running, not where the i
   assert.match(script, /\$folder = Split-Path -Parent \$App/);
   assert.match(script, /-ArgumentList "\/S \/D=\$folder"/, 'the installer is told the folder of the running copy');
 });
+
+test('a full drive is said in plain words: no download without room, and the card gets the reason', async () => {
+  const { plainProblem } = await import('../src/updates.js');
+  const data = temporary('full-drive');
+  const updates = new Updates(data, { version: '0.2.0', executable: 'C:/Rex Desk/rex-desk.exe', key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
+  updates.freeSpace = () => 50 * 1024 * 1024;
+  const status = await updates.check();
+  assert.equal(status.ready, false);
+  assert.match(status.error, /Not enough free space to download the update: 50 MB free/);
+  assert.match(status.problem, /drive is almost full \(50 MB free\)/);
+  assert.equal(status.available.version, '0.3.0', 'the card still knows which version waits');
+  updates.freeSpace = () => 10 * 2 ** 30;
+  assert.equal((await updates.check()).ready, true);
+  assert.equal(updates.status().problem, '');
+  updates.startProblem = 'Your data was not moved. The C: drive is full.';
+  assert.equal(updates.status().problem, 'Your data was not moved. The C: drive is full.');
+  assert.match(plainProblem(Object.assign(new Error('ENOSPC: no space left on device, copyfile'), { code: 'ENOSPC' }), 'C:/Users/x', () => 3 * 1048576), /^The C: drive is full \(3 MB free\)\./);
+  assert.equal(plainProblem(new Error('Update download failed (500).'), data), 'Update download failed (500).');
+});

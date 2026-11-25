@@ -18,7 +18,9 @@ export function showUpdateCard(update) {
   // A split pane is the same app in an iframe (?embed=1): the card shows once, in the main window, never in each pane.
   if (document.documentElement.classList.contains('embed')) { card?.remove(); return; }
   // Shown from the moment a new version starts downloading (with how much has arrived), then as ready to install.
-  const loading = !update?.ready && update?.downloading, version = update?.ready ? update.available?.version : loading ? update.downloading.version : '', later = laterChoice();
+  // A new version that cannot download or install yet (the drive is full) shows too, with the reason, instead of nothing.
+  const loading = !update?.ready && update?.downloading, blocked = !update?.ready && !loading && update?.problem && update?.available?.version;
+  const version = update?.ready ? update.available?.version : loading ? update.downloading.version : blocked ? update.available.version : '', later = laterChoice();
   if (!version || (later.version === version && later.until > Date.now())) { card?.remove(); return; }
   if (card?.dataset.version === version && card.dataset.ready === String(Boolean(update.ready))) { renderFoot(card, update); return; }
   card?.remove();
@@ -29,8 +31,8 @@ export function showUpdateCard(update) {
     <ul class="uc-notes"></ul><button type="button" class="uc-more" hidden></button>
     <p class="uc-error" role="alert" hidden></p>
     <footer class="uc-foot"></footer>`;
-  card.querySelector('h2').textContent = update.ready ? t`Rex Desk ${version} is ready` : t`Downloading Rex Desk ${version}`;
-  card.querySelector('.uc-meta').textContent = update.ready ? (update.current ? t`Downloaded and checked · you have ${update.current}` : t('Downloaded and checked')) : (update.current ? t`In the background · you have ${update.current}` : t('In the background'));
+  card.querySelector('h2').textContent = update.ready ? t`Rex Desk ${version} is ready` : blocked ? t`Rex Desk ${version} is waiting` : t`Downloading Rex Desk ${version}`;
+  card.querySelector('.uc-meta').textContent = update.ready ? (update.current ? t`Downloaded and checked · you have ${update.current}` : t('Downloaded and checked')) : blocked ? (update.current ? t`Not downloaded yet · you have ${update.current}` : t('Not downloaded yet')) : (update.current ? t`In the background · you have ${update.current}` : t('In the background'));
   const items = noteItems(update.available?.notes);
   const list = card.querySelector('.uc-notes'), more = card.querySelector('.uc-more');
   for (const [index, text] of items.entries()) { const item = document.createElement('li'); item.textContent = text; if (index >= SHOWN) item.hidden = true; list.append(item); }
@@ -47,7 +49,14 @@ const who = names => names.length === 1 ? names[0] : names.length === 2 ? t`${na
 // The bottom of the card follows what is going on: free to update, agents working (updating would cut them off), or
 // waiting for them to finish. Only this part redraws, so an expanded list of changes stays open.
 function renderFoot(card, update) {
-  const foot = card.querySelector('.uc-foot');
+  const foot = card.querySelector('.uc-foot'), error = card.querySelector('.uc-error');
+  // Why updating cannot go on (the drive is full, the last start could not move the data), said on the card from the server.
+  if (update.problem) { error.textContent = update.problem; error.hidden = false; error.dataset.problem = '1'; }
+  else if (error.dataset.problem) { error.hidden = true; delete error.dataset.problem; }
+  if (!update.ready && !update.downloading) {
+    if (foot.dataset.key !== 'blocked') { foot.dataset.key = 'blocked'; foot.innerHTML = `<p class="uc-hint">${t`It downloads by itself once there is room.`}</p><div class="uc-actions"><button type="button" class="btn quiet" data-action="update-later">${t`Later`}</button></div>`; }
+    return;
+  }
   // Downloading: a bar with how much has arrived, and Later.
   if (!update.ready && update.downloading) {
     const { received = 0, total = 0 } = update.downloading, mb = bytes => (bytes / 1048576).toFixed(1), share = total ? Math.min(100, Math.round(received / total * 100)) : 0;
@@ -110,6 +119,17 @@ export function updateLater() {
   card.remove();
 }
 
+// "Cannot reach your computer" says nothing about what to do. When the server did not answer, it is asked again for a few
+// seconds (a restart can hold it up), and the reason it gives (a full drive, a busy port) is shown instead.
+export async function whyUnreachable(api, failure, { tries = 4, pause = 2500 } = {}) {
+  if (failure?.message !== t('Cannot reach your computer. Trying again.') && failure?.message !== t('Your computer answered too slowly. Trying again.')) return failure?.message || '';
+  for (let index = 0; index < tries; index++) {
+    await new Promise(resolve => setTimeout(resolve, pause));
+    try { const state = await api('/state', { timeout: 5000 }); return state?.update?.problem || t('Rex Desk was busy for a moment. Press Update now again.'); } catch { /* still not answering */ }
+  }
+  return t('Rex Desk is not answering. The drive may be full, or the old Rex Desk is still closing. Close Rex Desk, open it again, then press Update now.');
+}
+
 export async function installUpdate(api) {
   const card = document.getElementById('update-card'), button = card?.querySelector('[data-action="update-install"]'), error = card?.querySelector('.uc-error');
   if (button) { button.disabled = true; button.textContent = t('Updating…'); }
@@ -118,7 +138,7 @@ export async function installUpdate(api) {
   catch (failure) {
     // Agents still working, or the download went away: say why here and let the person try again.
     if (button) { button.disabled = false; button.textContent = t('Update now'); }
-    if (error) { error.textContent = failure.message; error.hidden = false; return; }
+    if (error) { error.textContent = await whyUnreachable(api, failure); error.hidden = false; return; }
     throw failure;
   }
   card?.remove();

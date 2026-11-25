@@ -152,6 +152,8 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   const ACCOUNT_ONLY = 'Cloud backup comes with your Rex Desk account. Turn it on in Settings, Backup and updates.';
   const ownDatabaseOnly = () => { if (!ownDatabase) throw Object.assign(new Error(ACCOUNT_ONLY), { status: 403 }); };
   let dataRoot = dataDirectory || process.env.REX_DATA_DIR || path.join(root, '.local');
+  // Why this start went wrong in a way the person should know (the data move ran out of space), shown on the update card.
+  let startProblem = '';
   // The real app follows a data folder the person moved, or finishes a move they asked for, before anything opens it.
   // The AI memory moves the same way. Tests pass their own folder and never move anything.
   if (!dataDirectory && existsSync(dataRoot)) {
@@ -169,7 +171,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
       });
       item.once('error', () => resolve(null)); item.listen(port, '127.0.0.1', () => resolve(item));
     });
-    dataRoot = await followDataMove(dataRoot, { waitForOld: async () => { await waitForOld(); standIn = await holdPort(); }, log: message => console.log(message),
+    dataRoot = await followDataMove(dataRoot, { waitForOld: async () => { await waitForOld(); standIn = await holdPort(); }, log: message => { console.log(message); if (message.startsWith('Could not move Rex Desk data: ')) startProblem = `Your data was not moved. ${message.slice('Could not move Rex Desk data: '.length)}`; },
       progress: (done, total) => { moveStage = `Moving your Rex Desk data to its new folder: ${done} of ${total} files`; } });
     if (standIn) { standIn.closeAllConnections(); await new Promise(resolve => standIn.close(resolve)); }
   }
@@ -200,6 +202,7 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   // installed app and their shells carry its version and path, so every such copy took itself for the app and downloaded
   // the 31 MB installer into its temporary folder: hundreds of them filled drive C:.
   const updates = new Updates(dataRoot, updateOptions || (dataDirectory ? { version: '' } : undefined));
+  updates.startProblem = startProblem;
   // One computer and one voice engine for every account on it: the models are large, so they live beside the accounts.
   const computer = computerFactory ? computerFactory() : new Computer({ directory: path.join(dataRoot, 'screens') });
   // A plain data folder (tests, scripts) never holds the computer awake.
@@ -1490,8 +1493,21 @@ export async function createApp({ dataDirectory, port = defaultPort(), runnerFac
   // The window key file exists before the server answers, so the desktop app can read it as soon as it sees the server up.
   windowKey();
   const server = http.createServer(handler);
-  try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); }); }
-  catch (error) { await closeSession(); unlinkSync(lockPath); throw error; }
+  // A restart or an update starts this server while the old one is still closing, and the old one can hold the port a few
+  // seconds after it let go of the data folder ("EADDRINUSE" ended the new server, and Rex Desk stayed down). So a busy port
+  // is tried again every half second for up to a minute before giving up with a plain reason.
+  const listen = () => new Promise((resolve, reject) => { const fail = error => { server.off('listening', done); reject(error); }, done = () => { server.off('error', fail); resolve(); }; server.once('error', fail); server.once('listening', done); server.listen(port, '127.0.0.1'); });
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try { await listen(); break; }
+      catch (error) {
+        if (error?.code !== 'EADDRINUSE' || !port) throw error;
+        if (attempt >= 120) throw new Error(`Port ${port} is still used by another program (often an old Rex Desk that did not close). Close it or restart the computer, then open Rex Desk again.`);
+        if (attempt === 0) console.log(`Port ${port} is busy, waiting for the old Rex Desk to let go of it.`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+  } catch (error) { await closeSession(); unlinkSync(lockPath); throw error; }
   address = `http://127.0.0.1:${server.address().port}`;
   listenPort = server.address().port;
   // The installed app's version of the server that is listening now, so a newer app can tell a leftover server from its own
