@@ -326,8 +326,14 @@ test('a slow voice engine load cannot overwrite a newer voice save in the cache'
     assert.ok(held, 'test setup: the first load holds an old answer');
     // Waits on what really happens, not on fixed times: a slow CI runner once took longer than the old 5 s and 1 s sleeps,
     // so the old answer was let go before the newer save had landed and the check read the cache too early.
+    const short = u => u.slice(u.indexOf('/api'));
+    page.on('request', r => { if (r.url().includes('/api/')) console.log('REQ', Date.now() % 100000, r.method(), short(r.url())); });
+    page.on('requestfinished', r => { if (r.url().includes('/api/')) console.log('FIN', Date.now() % 100000, r.method(), short(r.url())); });
+    page.on('console', m => console.log('PAGE', m.text()));
+    console.log('DIAG select', JSON.stringify(await page.locator('.settings-pop [data-st-tts="engine"]').evaluate(el => ({ value: el.value, options: [...el.options].map(o => o.value), pops: document.querySelectorAll('.settings-pop').length }))));
     const saved = page.waitForResponse(response => response.url().endsWith('/api/speak/engine') && response.request().method() === 'POST', { timeout: 30000 });
     await pickEngine(page, 'fish');
+    console.log('PICKED', Date.now() % 100000, JSON.stringify(await page.evaluate(() => ({ value: document.querySelector('.settings-pop [data-st-tts="engine"]')?.value, toast: document.getElementById('toast')?.textContent, pops: document.querySelectorAll('.settings-pop').length }))));
     assert.equal((await (await saved).json()).engine, 'fish', 'test setup: the newer save answered');
     const cachedEngine = () => page.evaluate(() => JSON.parse(localStorage.getItem('rex-desk-speak-cache') || '{}').tts?.engine);
     for (let i = 0; i < 300 && await cachedEngine() !== 'fish'; i++) await page.waitForTimeout(100);
