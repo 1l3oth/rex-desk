@@ -9,18 +9,28 @@
   let reason = '';
   // A page script that fails to load is asked for again twice (after 1 s, then 3 s) under a new address, so a slow or failed first answer
   // (the phone relay can take 30 s to answer) is not cached as a failure. Only a script that still fails is shown as the reason.
+  // A retry counts as pending from the moment it is planned until the new script loads or fails, and the could not open
+  // screen waits while any is pending, so it never shows (and reloads) over a script that may still arrive.
   const RETRY_AFTER = [1000, 3000];
+  let retrying = 0;
   function retryScript(el) {
     const url = new URL(el.src, location.href), tries = Number(url.searchParams.get('rex-retry')) || 0;
     if (tries >= RETRY_AFTER.length || !el.src.startsWith(location.origin)) return false;
     url.searchParams.set('rex-retry', String(tries + 1));
-    setTimeout(() => { const again = document.createElement('script'); if (el.type) again.type = el.type; again.src = url.href; document.head.append(again); }, RETRY_AFTER[tries]);
+    retrying++;
+    setTimeout(() => {
+      const again = document.createElement('script'); if (el.type) again.type = el.type;
+      again.onload = again.onerror = () => { retrying = Math.max(0, retrying - 1); };
+      again.src = url.href; document.head.append(again);
+    }, RETRY_AFTER[tries]);
     return true;
   }
   addEventListener('error', event => { if (event.target?.tagName === 'SCRIPT' && event.target.src && retryScript(event.target)) return; reason ||= event.message ? `${event.message}${event.filename ? ` in ${event.filename.replace(location.origin, '')}${event.lineno ? `:${event.lineno}` : ''}` : ''}` : (event.target?.src ? `Could not load ${event.target.src.replace(location.origin, '')}` : ''); }, true);
-  setTimeout(() => {
+  const showFailed = () => {
     // The page script started (chat.js marks the screen) and is only waiting for a slow first answer: that is not a broken page.
     const boot = document.querySelector('#app > .boot'); if (!boot || boot.querySelector('h2') || boot.dataset.started) return;
+    // A script retry is still on its way: look again once it has loaded or failed.
+    if (retrying) { setTimeout(showFailed, 500); return; }
     boot.innerHTML = MARK + '<h2>' + L('Rex Desk could not open', 'Rex Desk មិនអាចបើកបានទេ') + '</h2><p class="boot-why"></p><p>' + L('A page file may be mid-edit, or the server may be updating.', 'ឯកសារទំព័រប្រហែលជាកំពុងត្រូវបានកែ ឬម៉ាស៊ីនមេកំពុងធ្វើបច្ចុប្បន្នភាព។') + '</p><div class="boot-actions"><button type="button" class="btn primary">' + L('Reload now', 'ផ្ទុកឡើងវិញឥឡូវនេះ') + '</button><span class="boot-count"></span></div>';
     boot.querySelector('.boot-why').textContent = reason || L('The page script did not start.', 'ស្គ្រីបទំព័រមិនបានចាប់ផ្ដើមទេ។');
     boot.querySelector('button').onclick = () => location.reload();
@@ -35,7 +45,8 @@
       else { why.textContent = L('The Rex Desk server is not running. The desktop app starts it again by itself; in a browser, run Start-RexDesk.ps1.', 'ម៉ាស៊ីនមេ Rex Desk មិនកំពុងដំណើរការទេ។ កម្មវិធីលើកុំព្យូទ័របើកវាម្ដងទៀតដោយខ្លួនឯង។ ក្នុងកម្មវិធីរុករក សូមដំណើរការ Start-RexDesk.ps1។'); left = 5; setTimeout(tick, 1000); }
     };
     tick();
-  }, 8000);
+  };
+  setTimeout(showFailed, 8000);
   // While Rex Desk opens, the loading screen says what it is doing (unlocking, opening chats, restoring a backup).
   const stageTimer = setInterval(async () => {
     const label = document.querySelector('#app > .boot:not(.boot-failed) span'); if (!label) { clearInterval(stageTimer); return; }
