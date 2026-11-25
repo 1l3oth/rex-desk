@@ -109,3 +109,49 @@ for (const [label, viewport] of [['desktop', { width: 1440, height: 900 }], ['ph
     }
   });
 }
+
+// L111 review 2: a confirmed AI switch starts on the new AI's own defaults (Dangerous on Claude never carries to Codex),
+// and the switch lands on the chat it was picked in even when another chat is open by the time the warning is answered.
+test('a confirmed AI switch uses the new AI\'s defaults and lands on the chat it was picked in', async () => {
+  const dir = mkdtempSync(path.join(process.env.TEMP || process.cwd(), 'rex-ai-pick3-'));
+  const memory = process.env.REX_DESK_MEMORY; process.env.REX_DESK_MEMORY = path.join(dir, 'memory');
+  const app = await createApp({ dataDirectory: path.join(dir, 'data'), port: 0, requireAccount: false, runnerFactory });
+  const at = new Date().toISOString();
+  app.store.put('run', 'chat-a', { id: 'chat-a', role: 'worker', title: 'Chat A', provider: 'claude', sessionId: 'sess-a', permissionMode: 'bypassPermissions', effort: 'max', state: 'finished', createdAt: at });
+  app.store.put('run', 'chat-c', { id: 'chat-c', role: 'worker', title: 'Chat C', provider: 'claude', sessionId: 'sess-c', state: 'finished', createdAt: at });
+  app.store.put('run', 'chat-d', { id: 'chat-d', role: 'worker', title: 'Chat D', provider: 'claude', state: 'finished', createdAt: at });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, bypassCSP: true })).newPage();
+    const sent = [];
+    await page.route('**/api/runs/*/resume', route => { sent.push({ run: route.request().url().split('/runs/')[1].split('/')[0], ...route.request().postDataJSON() }); return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }); });
+    const value = id => page.locator(`#${id}`).inputValue();
+    const go = async id => { await page.evaluate(h => { location.hash = h; }, `#/run/${id}`); await page.waitForTimeout(600); };
+    const sendOn = async (text, count) => { await page.locator('#draft').fill(text); await page.locator('[data-action="send"]').click(); for (let i = 0; i < 200 && sent.length < count; i++) await page.waitForTimeout(100); return sent[count - 1]; };
+    const pickCodex = async () => { await page.locator('.composer [data-pick="opt-provider"] .pick2-btn').click(); await page.locator('.pop .pop-item', { hasText: 'Codex' }).click(); await page.locator('[data-confirm="yes"]').waitFor({ timeout: 5000 }); };
+    await page.goto(`${base}/#/run/chat-a`); await page.addStyleTag({ content: ':has(>.tour-card){display:none!important}' }); await page.waitForSelector('#opt-mode', { state: 'attached', timeout: 15000 });
+
+    // Chat A runs Dangerous on Claude. Switched to Codex and confirmed: Codex starts on its defaults, not Dangerous.
+    assert.equal(await value('opt-mode'), 'bypassPermissions');
+    await pickCodex(); await page.locator('[data-confirm="yes"]').click(); await page.waitForTimeout(300);
+    assert.equal(await value('opt-provider'), 'codex');
+    assert.notEqual(await value('opt-mode'), 'bypassPermissions', 'Dangerous does not carry from Claude to Codex');
+    const first = await sendOn('Hello A', 1);
+    assert.equal(first?.provider, 'codex'); assert.notEqual(first?.permissionMode, 'bypassPermissions'); assert.notEqual(first?.effort, 'max');
+
+    // Chat C asks before switching; meanwhile the person opens chat D and then says yes. Chat D keeps Claude, chat C gets Codex.
+    await go('chat-c'); await pickCodex();
+    await go('chat-d'); await page.locator('[data-confirm="yes"]').click(); await page.waitForTimeout(300);
+    assert.equal(await value('opt-provider'), 'claude', 'the open chat D is not switched');
+    assert.equal((await sendOn('Hello D', 2))?.provider, 'claude');
+    await go('chat-c');
+    assert.equal(await value('opt-provider'), 'codex', 'chat C, where it was picked, is switched');
+    const third = await sendOn('Hello C', 3);
+    assert.equal(third?.run, 'chat-c'); assert.equal(third?.provider, 'codex');
+  } finally {
+    await browser.close(); await app.close?.();
+    if (memory === undefined) delete process.env.REX_DESK_MEMORY; else process.env.REX_DESK_MEMORY = memory;
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* still locked on Windows */ }
+  }
+});

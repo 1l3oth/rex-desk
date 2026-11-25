@@ -39,10 +39,13 @@ const sentProvider = provider => (provider === LOCAL ? 'claude' : provider);
 export function currentOptions(ctx) {
   const { ui } = ctx, run = ui.view.type === 'main' ? ctx.mainRun() : ui.view.type === 'run' ? ctx.runById(ui.view.id) : null, provider = providerOf(ctx, run), choices = choicesFor(ctx, provider);
   const configured = ui.snap?.config?.models?.[sentProvider(provider)], mine = ui.composerPick?.[ctx.draftKey()] || {};
+  // A chat switched to another AI starts on that AI's own defaults: the old AI's model, effort and mode (Dangerous on
+  // Claude, say) never carry over to the new one.
+  const own = run && sentProvider(provider) === (run.provider || ui.snap?.config?.provider || 'claude') ? run : null;
   // Only a model that is on the current list is shown and sent; anything else falls back to the first one (the recommended default).
-  const ids = choices.models.filter(item => !item.disabled).map(item => item.id), model = [mine.model, run?.model, configured].find(value => value && ids.includes(value)) || ids[0] || '';
-  const modeIds = choices.modes.map(item => item.id), wanted = ui.snap?.config?.defaultMode || DEFAULT_MODE, mode = [mine.permissionMode, run?.permissionMode, wanted].find(value => value && modeIds.includes(value)) || (modeIds.includes('manual') ? 'manual' : modeIds[0]);
-  const effort = [mine.effort, run?.effort, 'medium'].find(value => value && choices.efforts.includes(value)) || choices.efforts[0];
+  const ids = choices.models.filter(item => !item.disabled).map(item => item.id), model = [mine.model, own?.model, configured].find(value => value && ids.includes(value)) || ids[0] || '';
+  const modeIds = choices.modes.map(item => item.id), wanted = ui.snap?.config?.defaultMode || DEFAULT_MODE, mode = [mine.permissionMode, own?.permissionMode, wanted].find(value => value && modeIds.includes(value)) || (modeIds.includes('manual') ? 'manual' : modeIds[0]);
+  const effort = [mine.effort, own?.effort, 'medium'].find(value => value && choices.efforts.includes(value)) || choices.efforts[0];
   return { provider, model, effort, permissionMode: mode };
 }
 export function pickedOptions(ctx) {
@@ -622,9 +625,15 @@ export function initComposer(ctx) {
     // Switching the AI shows that AI's models and modes; the next message goes to it, with the chat so far handed over.
     if (event.target.id === 'opt-provider') {
       const value = event.target.value, run = ctx.ui.view.type === 'main' ? ctx.mainRun() : ctx.ui.view.type === 'run' ? ctx.runById(ctx.ui.view.id) : null;
-      const pick = () => { ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [ctx.draftKey()]: value }; delete ctx.ui.composerPick?.[ctx.draftKey()]; redrawOptionPickers(ctx); ctx.render(); ctx.toast(t`Your next message goes to ${value === LOCAL ? t('Local AI, on this computer') : aiName(value)}.`); };
+      // The switch belongs to the chat it was picked in (key, read now): the person may open another chat while the warning is up.
+      const key = ctx.draftKey(), here = () => ctx.draftKey() === key;
+      const pick = () => {
+        ctx.ui.providerPick = { ...(ctx.ui.providerPick || {}), [key]: value }; delete ctx.ui.composerPick?.[key]; delete ctx.ui.modelPick?.[key];
+        if (here()) { redrawOptionPickers(ctx); ctx.render(); }
+        ctx.toast(t`Your next message goes to ${value === LOCAL ? t('Local AI, on this computer') : aiName(value)}.`);
+      };
       // A chat that already talked on another AI is handed over: warn first, since the new AI rereads all of it.
-      if (run?.sessionId && sentProvider(value) !== (run.provider || 'claude')) { void confirmAiSwitch(run.title || t('This chat'), sentProvider(value)).then(yes => yes ? pick() : redrawOptionPickers(ctx)); return; }
+      if (run?.sessionId && sentProvider(value) !== (run.provider || 'claude')) { void confirmAiSwitch(run.title || t('This chat'), sentProvider(value)).then(yes => yes ? pick() : here() && redrawOptionPickers(ctx)); return; }
       pick(); return;
     }
     // The chat keeps what was picked in it, so a redraw (or coming back to it) shows its own choice, not another chat's.
