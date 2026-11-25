@@ -257,6 +257,25 @@ test('after "replaced" the desk dials again a few times quickly, then every five
   } finally { mock.timers.reset(); }
 });
 
+test('a reply read before the late beat after a freeze is not pushed into the future', () => {
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+  try {
+    const { desk } = fakeDesk(1), socket = fakeSocket(); let closed = 0; socket.close = () => { closed++; socket.emit('close', { code: 1006 }); };
+    const relay = new PhoneRelay(desk, { socket: () => socket });
+    relay.setEnabled(true); socket.emit('open');
+    mock.timers.tick(20000);
+    // The event loop stalls for 75 s. When it wakes, the relay's queued pong is read before the late beat runs.
+    mock.timers.setTime(Date.now() + 75000); socket.play(RELAY_OP.PONG, 0, Buffer.from('{}'));
+    const replied = Date.now();
+    mock.timers.tick(1);
+    assert.ok(relay.heard <= Date.now(), 'the last reply time is never later than now');
+    assert.equal(relay.heard - replied, 1, 'only the 1 ms after that reply is credited, not the 75 s stall before it');
+    beats(80000);
+    assert.equal(closed, 1, 'a link that stays silent after that reply is closed on time');
+    relay.stop();
+  } finally { mock.timers.reset(); }
+});
+
 test('an old socket closing late does not stop the heartbeat of the one that took over', () => {
   mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
   try {

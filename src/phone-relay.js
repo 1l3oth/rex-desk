@@ -124,7 +124,7 @@ export class PhoneRelay {
   }
   // A ping every PING_MS; if nothing at all came back for DEAD_MS the link is closed, and the close handler dials again.
   // When this desk's own server was frozen (a long sync step), the relay's answers wait unread behind the freeze, so the
-  // silence is ours, not the link's: the time the beat came late is added back before the link is judged dead.
+  // silence is ours, not the link's: the part of the late beat's delay after the last reply is added back before the link is judged dead.
   keepAlive(socket) {
     // Each socket owns its own timers, so an old socket closing late never stops the heartbeat of the one that replaced it.
     this.release(socket);
@@ -132,7 +132,9 @@ export class PhoneRelay {
     const beat = setInterval(() => {
       if (this.socket !== socket) return this.release(socket);
       const now = Date.now(), late = now - last - PING_MS; last = now;
-      if (late > STALL_MS) this.heard += late;
+      // Only the stall after the latest reply is credited: a reply read just before this late beat already counts from now,
+      // and adding the whole stall to it would push the last-reply time into the future.
+      if (late > STALL_MS) this.heard += Math.max(0, Math.min(late, now - this.heard));
       if (now - this.heard > DEAD_MS) { try { socket.close(); } catch {} return; }
       this.send(RELAY_OP.PING, 0, json({ at: Date.now() }));
     }, PING_MS); beat.unref?.();
