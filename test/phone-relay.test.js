@@ -232,3 +232,35 @@ test('after "replaced" the desk dials again a few times, then waits for the swit
     relay.stop();
   } finally { mock.timers.reset(); }
 });
+
+test('an old socket closing late does not stop the heartbeat of the one that took over', () => {
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+  try {
+    const { desk } = fakeDesk(1), sockets = [];
+    const relay = new PhoneRelay(desk, { socket: () => { const socket = fakeSocket(); sockets.push(socket); return socket; } });
+    relay.setEnabled(true); sockets[0].emit('open');
+    relay.socket = null; relay.start(); sockets[1].emit('open'); // a newer socket took over before the old one reported its close
+    sockets[0].emit('close', { code: 1006 });
+    mock.timers.tick(20000);
+    assert.ok(sockets[1].sent.some(frame => frame.op === RELAY_OP.PING), 'the new socket still pings');
+    relay.stop();
+  } finally { mock.timers.reset(); }
+});
+
+test('being welcomed for a moment does not give back the replaced retries; a stable minute does', () => {
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  try {
+    const { desk } = fakeDesk(1), sockets = [];
+    const relay = new PhoneRelay(desk, { socket: () => { const socket = fakeSocket(); sockets.push(socket); return socket; } });
+    const welcome = socket => { socket.emit('open'); socket.play(RELAY_OP.WELCOME, 0, Buffer.from('{}')); };
+    relay.setEnabled(true);
+    for (let i = 0; i < 3; i++) { welcome(sockets.at(-1)); mock.timers.tick(5000); sockets.at(-1).emit('close', { code: 4001 }); mock.timers.tick(30000); }
+    assert.equal(sockets.length, 4, 'three retries, each welcomed briefly');
+    welcome(sockets.at(-1)); mock.timers.tick(5000); sockets.at(-1).emit('close', { code: 4001 }); mock.timers.tick(120000);
+    assert.equal(sockets.length, 4, 'a brief welcome did not reset the cap, so it stops');
+    relay.replacedTries = 0; relay.setEnabled(false); relay.setEnabled(true);
+    welcome(sockets.at(-1)); relay.replacedTries = 2; mock.timers.tick(60000);
+    assert.equal(relay.replacedTries, 0, 'a minute up gives the retries back');
+    relay.stop();
+  } finally { mock.timers.reset(); }
+});

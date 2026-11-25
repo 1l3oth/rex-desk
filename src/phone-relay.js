@@ -10,7 +10,7 @@ export const RELAY_URL = 'wss://api.rexdesk.dev/v1/relay/desk';
 const PENDING_MS = 10 * 60000, MAX_PENDING = 5, MAX_BODY = 50 * 1024 * 1024, CHUNK = 64 * 1024;
 const RETRY_MS = [2000, 5000, 15000, 30000, 60000];
 // The desk pings the relay now and then, so an idle link is not cut as idle; a link that stays silent for DEAD_MS is dead and is dialled again.
-const REPLACED_MS = 30000, MAX_REPLACED = 3;
+const REPLACED_MS = 30000, MAX_REPLACED = 3, STABLE_MS = 60000;
 const PING_MS = 20000, DEAD_MS = 70000;
 // Headers that belong to one hop, or that only this desk may set on a relayed request.
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-connection', 'te', 'trailer', 'content-length']);
@@ -37,7 +37,7 @@ export class PhoneRelay {
     this.desk = desk; this.url = url; this.makeSocket = socket; this.port = port;
     // Only requests carrying this secret count as relayed. It never leaves this process.
     this.secret = randomBytes(24).toString('base64url');
-    this.streams = new Map(); this.socket = null; this.state = 'off'; this.tries = 0; this.timer = null; this.publicUrl = ''; this.problem = null; this.account = ''; this.replacedTries = 0;
+    this.streams = new Map(); this.socket = null; this.state = 'off'; this.tries = 0; this.timer = null; this.publicUrl = ''; this.problem = null; this.account = ''; this.replacedTries = 0; this.timers = new Map();
   }
   get store() { return this.desk.store; }
   settings() { return this.store.get('phone-relay', 'main') || { enabled: false, devices: [], pending: [] }; }
@@ -115,21 +115,30 @@ export class PhoneRelay {
     this.socket = socket; socket.binaryType = 'arraybuffer';
     let opened = false, error = '';
     socket.addEventListener('open', () => { opened = true; this.heard = Date.now(); this.keepAlive(socket); this.send(RELAY_OP.HELLO, 0, json({ token, desk: this.store.nodeId, name: this.desk.peers?.self?.name || '' })); });
-    socket.addEventListener('message', event => { this.heard = Date.now(); try { this.onFrame(readRelayFrame(Buffer.from(event.data))); } catch (error) { this.store.event('', 'phone-relay-error', { message: error.message }); } });
+    socket.addEventListener('message', event => { if (this.socket !== socket) return; this.heard = Date.now(); try { this.onFrame(readRelayFrame(Buffer.from(event.data))); } catch (error) { this.store.event('', 'phone-relay-error', { message: error.message }); } });
     // The relay closes with 4001 when a newer connection of this desk took over, 4002 when the plan has no relay and 4003 when the sign-in
     // is no longer good. Those do not get better by dialling again, so the desk waits for the switch or a new sign-in instead.
-    socket.addEventListener('close', event => { clearInterval(this.beat); if (this.socket !== socket) return; this.socket = null; this.account = ''; this.dropStreams(); this.failed({ code: event?.code, reason: event?.reason, error, opened }); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); else if (event?.code === 4001) this.retryReplaced(); });
+    socket.addEventListener('close', event => { this.release(socket); if (this.socket !== socket) return; this.socket = null; this.account = ''; this.dropStreams(); this.failed({ code: event?.code, reason: event?.reason, error, opened }); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); else if (event?.code === 4001) this.retryReplaced(); });
     // The error itself is kept for the close that always follows it, which says what went wrong.
     socket.addEventListener('error', event => { error = String(event?.message || event?.error?.message || 'connection error'); });
   }
   // A ping every PING_MS; if nothing at all came back for DEAD_MS the link is closed, and the close handler dials again.
   keepAlive(socket) {
-    clearInterval(this.beat);
-    this.beat = setInterval(() => {
-      if (this.socket !== socket) return clearInterval(this.beat);
+    // Each socket owns its own timers, so an old socket closing late never stops the heartbeat of the one that replaced it.
+    this.release(socket);
+    const beat = setInterval(() => {
+      if (this.socket !== socket) return this.release(socket);
       if (Date.now() - this.heard > DEAD_MS) { try { socket.close(); } catch {} return; }
       this.send(RELAY_OP.PING, 0, json({ at: Date.now() }));
-    }, PING_MS); this.beat.unref?.();
+    }, PING_MS); beat.unref?.();
+    this.timers.set(socket, { beat });
+  }
+  release(socket) { const own = this.timers.get(socket); if (!own) return; clearInterval(own.beat); clearTimeout(own.stable); this.timers.delete(socket); }
+  // The "replaced" budget comes back only once a connection has stayed up for STABLE_MS, so two desks that keep taking the line
+  // from each other (each is welcomed for a moment) cannot go on for ever.
+  markStable(socket) {
+    const own = this.timers.get(socket); if (!own) return; clearTimeout(own.stable);
+    own.stable = setTimeout(() => { if (this.socket === socket) this.replacedTries = 0; }, STABLE_MS); own.stable.unref?.();
   }
   failed(what) {
     this.problem = relayProblem(what);
@@ -137,7 +146,7 @@ export class PhoneRelay {
     this.store.event('', 'phone-relay-error', { message }); console.warn(`Phone relay: ${message}`);
   }
   stop() {
-    clearTimeout(this.timer); clearInterval(this.beat); this.timer = null; const socket = this.socket; this.socket = null; this.account = ''; this.dropStreams();
+    clearTimeout(this.timer); this.timer = null; const socket = this.socket; this.release(socket); this.socket = null; this.account = ''; this.dropStreams();
     try { socket?.close(); } catch {} this.state = 'off';
   }
   // "replaced" is often this desk's own older link (after a freeze or a network change), so it dials again after a pause. A few
@@ -155,7 +164,7 @@ export class PhoneRelay {
   dropStreams() { for (const stream of this.streams.values()) stream.request?.destroy(); this.streams.clear(); }
 
   onFrame({ op, streamId, payload }) {
-    if (op === RELAY_OP.WELCOME) { this.state = 'online'; this.tries = 0; this.replacedTries = 0; this.problem = null; try { const hello = JSON.parse(payload.toString('utf8')); this.publicUrl = String(hello.url || ''); this.account = cleanId(hello.account); } catch {} return; }
+    if (op === RELAY_OP.WELCOME) { this.state = 'online'; this.tries = 0; this.markStable(this.socket); this.problem = null; try { const hello = JSON.parse(payload.toString('utf8')); this.publicUrl = String(hello.url || ''); this.account = cleanId(hello.account); } catch {} return; }
     if (op === RELAY_OP.PING) return this.send(RELAY_OP.PONG, streamId, payload);
     if (op === RELAY_OP.REQ) return this.openStream(streamId, JSON.parse(payload.toString('utf8')));
     if (op === RELAY_OP.REQ_BODY) return this.bodyChunk(streamId, payload);
