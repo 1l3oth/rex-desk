@@ -51,15 +51,11 @@ pub fn recover_with(folder: &Path, node: &str, lock: &str) -> Outcome {
     let Some(_held) = lock::take(lock) else {
         return Outcome::Waiting;
     };
-    let outcome = recover_now(folder, node);
-    if matches!(outcome, Outcome::Restored | Outcome::KeptNew) {
-        // The payload in place is the checked new copy or the last one that ran: nothing is pending any more.
-        let _ = fs::remove_file(folder.join(PENDING));
-    }
-    outcome
+    recover_now(folder, node, &mut || false)
 }
 
-fn recover_now(folder: &Path, node: &str) -> Outcome {
+// exit_here: tests return true to stop at that point, as if the app were closed between two steps.
+pub(crate) fn recover_now(folder: &Path, node: &str, exit_here: &mut dyn FnMut() -> bool) -> Outcome {
     let (payload, backup) = (folder.join("payload"), folder.join(BACKUP));
     if !backup.is_dir() {
         let pending = folder.join(PENDING);
@@ -82,10 +78,21 @@ fn recover_now(folder: &Path, node: &str) -> Outcome {
         // file in it held open) does not stop Rex Desk, since the copy in use is the checked one; the next start or the
         // next installer removes it.
         let _ = fs::remove_dir_all(&backup);
+        let _ = fs::remove_file(folder.join(PENDING));
         return Outcome::KeptNew;
     }
     if !usable(&backup, node) {
         return Outcome::Failed("neither the new nor the old payload is complete".into());
+    }
+    // payload.pending goes before anything moves. While the backup is there it decides on its own, so dropping it early
+    // loses nothing; dropping it after the swap would leave, on an exit in between, a restored copy from before the marker
+    // next to payload.pending, which looks like an unfinished first install and the next installer would delete it.
+    let pending = folder.join(PENDING);
+    if pending.exists() && fs::remove_file(&pending).is_err() {
+        return Outcome::Failed("could not clear payload.pending".into());
+    }
+    if exit_here() {
+        return Outcome::Waiting;
     }
     // The broken copy is moved out of the way first, so the swap itself is one rename. Nothing is deleted until the old
     // copy is back in place; when a rename fails, the backup stays where it is for the next try.
@@ -96,9 +103,15 @@ fn recover_now(folder: &Path, node: &str) -> Outcome {
             return Outcome::Failed(format!("could not move the broken payload: {error}"));
         }
     }
+    if exit_here() {
+        return Outcome::Waiting;
+    }
     if let Err(error) = fs::rename(&backup, &payload) {
         let _ = fs::rename(&broken, &payload);
         return Outcome::Failed(format!("could not put the old payload back: {error}"));
+    }
+    if exit_here() {
+        return Outcome::Waiting;
     }
     let _ = fs::remove_dir_all(&broken);
     Outcome::Restored
@@ -226,6 +239,33 @@ mod tests {
         assert_eq!(recover_with(&dir, NODE, &lock_name("fresh-done")), Outcome::Nothing);
         assert!(!dir.join(PENDING).exists());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // What the installer (hooks.nsh, NSIS_HOOK_PREINSTALL) deletes as an unfinished first install.
+    fn installer_would_delete(dir: &Path) -> bool {
+        dir.join(PENDING).exists() && !dir.join(BACKUP).exists() && !finished(&dir.join("payload"))
+    }
+
+    #[test]
+    fn an_exit_between_any_two_restore_steps_never_leaves_a_copy_the_installer_deletes() {
+        for stop_at in 1..=3 {
+            let dir = folder(&format!("exit-{stop_at}"));
+            payload(&dir.join(BACKUP), "old", true, false);
+            payload(&dir.join("payload"), "new", true, false);
+            fs::write(dir.join(PENDING), "").unwrap();
+            let mut step = 0;
+            let first = recover_now(&dir, NODE, &mut || {
+                step += 1;
+                step == stop_at
+            });
+            assert_eq!(first, Outcome::Waiting, "stopped at step {stop_at}");
+            assert!(!installer_would_delete(&dir), "after an exit at step {stop_at}, the next installer would delete the payload");
+            let again = recover_with(&dir, NODE, &lock_name(&format!("exit-{stop_at}")));
+            assert!(matches!(again, Outcome::Restored | Outcome::Nothing), "step {stop_at}: {again:?}");
+            assert_eq!(version(&dir), "old");
+            assert!(!installer_would_delete(&dir));
+            fs::remove_dir_all(&dir).unwrap();
+        }
     }
 
     #[test]

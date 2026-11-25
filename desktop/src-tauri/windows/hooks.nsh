@@ -179,6 +179,9 @@ FunctionEnd
     ${If} ${FileExists} "$INSTDIR\payload\.rex-desk-complete"
       RMDir /r "$INSTDIR\payload.old"
     ${Else}
+      ; payload.pending goes first: once the old copy is back, an exit before it was cleared would leave a working copy
+      ; that looks like an unfinished first install. While the backup is there, it decides on its own.
+      Delete "$INSTDIR\payload.pending"
       Call RexRestoreBackup
       ${If} $RexResult != ok
         Abort "Rex Desk could not put its last working version back (a file in its folder is in use), so the update stopped and nothing was removed. Close Rex Desk and run the update again."
@@ -246,9 +249,9 @@ FunctionEnd
     System::Call 'kernel32::CloseHandle(p $RexSwapLock)'
   ${Else}
     ${If} ${FileExists} "$INSTDIR\payload.old\*.*"
+      Delete "$INSTDIR\payload.pending"
       Call RexRestoreBackup
       ${If} $RexResult == ok
-        Delete "$INSTDIR\payload.pending"
         StrCpy $RexLine "The new version of Rex Desk did not install completely, so the last version was put back. Run the update again."
       ${Else}
         StrCpy $RexLine "The new version of Rex Desk did not install completely. The last version is kept and goes back when Rex Desk next starts. Run the update again."
