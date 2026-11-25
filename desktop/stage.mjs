@@ -38,8 +38,9 @@ if (process.env.REX_STAGE_FULL === '1') {
 writeFileList();
 console.log(`Staged Node ${process.version} and Rex Desk into ${payload} (${count(app)} files)`);
 
-// Every payload file with its size, one "size|relative\path" line each. The Windows installer checks the copy it wrote
-// against this list before it marks the new version complete and drops the old one (desktop/src-tauri/windows/hooks.nsh).
+// Every payload file with its size, one "size|relative\path" line each, and last "end|<number of files>". The Windows
+// installer checks the copy it wrote against this list before it marks the new version complete and drops the old one
+// (desktop/src-tauri/windows/hooks.nsh); a list cut short has no end line, or one whose count does not match, and fails.
 function writeFileList() {
   const list = path.join(payload, '.rex-desk-files');
   const lines = readdirSync(payload, { withFileTypes: true, recursive: true }).filter(entry => entry.isFile()).map(entry => {
@@ -49,7 +50,7 @@ function writeFileList() {
     if (!/^[\x20-\x7e]+$/.test(relative) || relative.includes('|') || relative.length > 900) throw new Error(`Payload file name the installer cannot check: ${relative}`);
     return `${statSync(file).size}|${relative}\n`;
   });
-  writeFileSync(list, lines.join(''));
+  writeFileSync(list, `${lines.join('')}end|${lines.length}\n`);
 }
 
 async function bundle() {

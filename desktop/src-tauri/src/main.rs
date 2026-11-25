@@ -385,24 +385,32 @@ fn choose_data(default: PathBuf, ask: bool) -> PathBuf {
 // The installed app carries its own Node and server next to the executable and keeps data in %APPDATA%\Rex Desk
 // unless the person picked another folder. A development build falls back to a checkout and the system Node.
 // On a Mac the payload sits in Contents/Resources, and the data in ~/Library/Application Support/Rex Desk.
-fn runtime() -> Option<Runtime> {
+fn runtime() -> Result<Runtime, String> {
     runtime_with(false)
 }
 
-fn runtime_with(ask: bool) -> Option<Runtime> {
-    let exe = std::env::current_exe().ok()?;
-    let folder = exe.parent()?;
-    // An update the installer never finished: put the old payload back before looking for it (payload_swap.rs).
+const MISSING: &str = "Rex Desk files are missing. Reinstall Rex Desk.";
+
+fn runtime_with(ask: bool) -> Result<Runtime, String> {
+    let exe = std::env::current_exe().map_err(|_| MISSING.to_string())?;
+    let folder = exe.parent().ok_or(MISSING)?;
+    // An update the installer never finished: put the old payload back before looking for it (payload_swap.rs). While an
+    // installer is still writing, or when the old copy could not be put back, the payload may be half written, so Rex
+    // Desk does not start it.
     if cfg!(windows) {
-        let _ = payload_swap::recover(folder, NODE);
+        match payload_swap::recover(folder, NODE) {
+            payload_swap::Outcome::Waiting => return Err("Rex Desk is being updated right now. Open it again once the update has finished.".into()),
+            payload_swap::Outcome::Failed(why) => return Err(format!("Rex Desk could not finish its last update or put the previous version back ({why}). Run the Rex Desk installer again; your data is kept.")),
+            _ => {}
+        }
     }
     for beside in [folder.join("payload"), folder.join("..").join("Resources").join("payload")] {
         let (node, app) = (beside.join("node").join(NODE), beside.join("app"));
         if node.is_file() && app.join("src").join("server.js").is_file() {
-            return Some(Runtime { node, app, data: choose_data(data_home(&beside), ask), bundled: true });
+            return Ok(Runtime { node, app, data: choose_data(data_home(&beside), ask), bundled: true });
         }
     }
-    checkout().map(|root| Runtime { node: PathBuf::from("node"), data: root.join(".local"), app: root, bundled: false })
+    checkout().map(|root| Runtime { node: PathBuf::from("node"), data: root.join(".local"), app: root, bundled: false }).ok_or_else(|| MISSING.to_string())
 }
 
 fn hidden(command: &mut Command) -> &mut Command {
@@ -560,7 +568,7 @@ fn restart(runtime: &Runtime) -> Result<(), String> {
 
 #[tauri::command]
 async fn restart_server() -> Result<(), String> {
-    let runtime = runtime().ok_or("Rex Desk files are missing. Reinstall Rex Desk.")?;
+    let runtime = runtime()?;
     tauri::async_runtime::spawn_blocking(move || restart(&runtime)).await.map_err(|error| error.to_string())?
 }
 
@@ -582,7 +590,7 @@ fn ensure_browser(runtime: &Runtime) {
 fn main() {
     // Started at Windows sign-in: run the server without a window, then exit.
     if std::env::args().any(|arg| arg == "--background") {
-        if let Some(runtime) = runtime() {
+        if let Ok(runtime) = runtime() {
             if server_running() && server_outdated(&runtime) {
                 let _ = restart(&runtime);
             } else if !server_running() && start_server(&runtime).map(drop).is_ok() {
@@ -631,7 +639,7 @@ fn main() {
                     "open" => show_window(app),
                     "solid" => { if let Some(window) = app.get_webview_window("main") { make_solid(&window); show_window(app); } }
                     "restart" => {
-                        if let Some(runtime) = runtime() {
+                        if let Ok(runtime) = runtime() {
                             thread::spawn(move || { let _ = restart(&runtime); });
                         }
                     }
@@ -662,8 +670,9 @@ fn main() {
             let home = window.url().ok();
             thread::spawn(move || {
                 let fail = |message: String| { set_error(&message); let _ = window.eval(&format!("showError({message:?})")); };
-                let Some(runtime) = runtime_with(true) else {
-                    return fail("Rex Desk files are missing. Reinstall Rex Desk.".into());
+                let runtime = match runtime_with(true) {
+                    Ok(runtime) => runtime,
+                    Err(message) => return fail(message),
                 };
                 if server_running() && server_outdated(&runtime) {
                     if let Err(error) = restart(&runtime) {

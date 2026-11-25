@@ -56,11 +56,11 @@ fn recover_now(folder: &Path, node: &str) -> Outcome {
         return Outcome::Nothing;
     }
     if finished(&payload) {
-        // The copy finished and only the clean-up was lost: keep the new version.
-        return match fs::remove_dir_all(&backup) {
-            Ok(()) => Outcome::KeptNew,
-            Err(error) => Outcome::Failed(format!("could not remove {}: {error}", backup.display())),
-        };
+        // The copy finished and only the clean-up was lost: keep the new version. A backup that cannot be removed yet (a
+        // file in it held open) does not stop Rex Desk, since the copy in use is the checked one; the next start or the
+        // next installer removes it.
+        let _ = fs::remove_dir_all(&backup);
+        return Outcome::KeptNew;
     }
     if !usable(&backup, node) {
         return Outcome::Failed("neither the new nor the old payload is complete".into());
@@ -224,6 +224,23 @@ mod tests {
         payload(&dir.join("payload"), "new", true, true);
         assert_eq!(recover_with(&dir, NODE, &lock_name("complete")), Outcome::KeptNew);
         assert_eq!(version(&dir), "new");
+        assert!(!dir.join(BACKUP).exists());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_backup_that_cannot_be_removed_does_not_stop_a_finished_copy() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = folder("stuck");
+        payload(&dir.join(BACKUP), "old", true, true);
+        payload(&dir.join("payload"), "new", true, true);
+        // A file in the backup held open with no sharing, as a virus scanner may.
+        let held = fs::OpenOptions::new().read(true).share_mode(0).open(dir.join(BACKUP).join("app").join("version.txt")).unwrap();
+        assert_eq!(recover_with(&dir, NODE, &lock_name("stuck")), Outcome::KeptNew);
+        assert_eq!(version(&dir), "new");
+        drop(held);
+        assert_eq!(recover_with(&dir, NODE, &lock_name("stuck")), Outcome::KeptNew, "removed on the next start");
         assert!(!dir.join(BACKUP).exists());
         fs::remove_dir_all(&dir).unwrap();
     }

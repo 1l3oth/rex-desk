@@ -73,7 +73,8 @@ Function RexRestoreBackup
   RMDir /r "$INSTDIR\payload.broken"
 FunctionEnd
 
-; Checks the new payload against the list the build wrote: every file there, with its size. $RexResult: ok or bad.
+; Checks the new payload against the list the build wrote: every file there, with its size, and the list itself whole
+; (its last line "end|<number of files>" matches the files checked). $RexResult: ok or bad.
 Function RexCheckPayload
   StrCpy $RexResult bad
   StrCpy $RexCount 0
@@ -116,6 +117,22 @@ Function RexCheckPayload
     StrCpy $RexSize $RexLine $RexAt
     IntOp $RexAt $RexAt + 1
     StrCpy $RexPath $RexLine "" $RexAt
+    ; The last line, "end|<number of files>": only a whole list has it, with the count of the lines checked above it.
+    ${If} $RexSize == "end"
+      ${If} $RexPath == $RexCount
+      ${AndIf} $RexCount > 0
+        ClearErrors
+        FileRead $RexList $RexLine
+        ${If} ${Errors}
+          StrCpy $RexResult ok
+        ${EndIf}
+      ${EndIf}
+      FileClose $RexList
+      ${If} $RexResult != ok
+        DetailPrint "The file list of the new version does not end as it should."
+      ${EndIf}
+      Return
+    ${EndIf}
     ClearErrors
     FileOpen $RexFile "$INSTDIR\payload\$RexPath" r
     ${If} ${Errors}
@@ -132,10 +149,9 @@ Function RexCheckPayload
     ${EndIf}
     IntOp $RexCount $RexCount + 1
   ${Loop}
+  ; The list stopped before its end line: a readable start of it is not a whole copy.
   FileClose $RexList
-  ${If} $RexCount > 0
-    StrCpy $RexResult ok
-  ${EndIf}
+  DetailPrint "The file list of the new version is cut short."
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
@@ -166,6 +182,8 @@ FunctionEnd
       ${EndIf}
     ${EndIf}
   ${EndIf}
+  ; payload.broken only ever holds a copy that failed its check.
+  RMDir /r "$INSTDIR\payload.broken"
   ${If} ${FileExists} "$INSTDIR\payload\*.*"
     ${If} ${FileExists} "$INSTDIR\payload.old\*.*"
       Abort "An old Rex Desk backup could not be cleared (a file in it is in use), so the update stopped and the current version stays. Run the update again in a minute."
@@ -186,8 +204,10 @@ FunctionEnd
   Pop $0
 !macroend
 
-; The new files are in. A copy that matches the file list gets the completion marker and the backup goes; any other copy
-; is replaced by the backup. If even that cannot be done now, the backup stays for the app or the next installer.
+; The new files are in. A copy that matches the file list gets the completion marker and the backup goes. Any other copy
+; fails the install (exit code 2, so the updater and the person see it): on an update the backup goes back first (or
+; stays, for the app or the next installer, when that cannot be done now); on a first install the half-written copy is
+; moved to payload.broken, so Rex Desk never starts it.
 !macro NSIS_HOOK_POSTINSTALL
   ; Windows will not rename a folder the installer is working in, so it steps out of payload first.
   SetOutPath "$INSTDIR"
@@ -203,13 +223,24 @@ FunctionEnd
   ${EndIf}
   ${If} $RexResult == ok
     RMDir /r "$INSTDIR\payload.old"
-  ${ElseIf} ${FileExists} "$INSTDIR\payload.old\*.*"
-    DetailPrint "The new version did not install completely, so the last version is put back."
-    Call RexRestoreBackup
-    ${If} $RexResult != ok
-      DetailPrint "The last version could not be put back yet; Rex Desk puts it back when it next starts."
+    System::Call 'kernel32::ReleaseMutex(p $RexSwapLock)'
+    System::Call 'kernel32::CloseHandle(p $RexSwapLock)'
+  ${Else}
+    ${If} ${FileExists} "$INSTDIR\payload.old\*.*"
+      Call RexRestoreBackup
+      ${If} $RexResult == ok
+        StrCpy $RexLine "The new version of Rex Desk did not install completely, so the last version was put back. Run the update again."
+      ${Else}
+        StrCpy $RexLine "The new version of Rex Desk did not install completely. The last version is kept and goes back when Rex Desk next starts. Run the update again."
+      ${EndIf}
+    ${Else}
+      RMDir /r "$INSTDIR\payload.broken"
+      Rename "$INSTDIR\payload" "$INSTDIR\payload.broken"
+      StrCpy $RexLine "Rex Desk did not install completely. Run the installer again."
     ${EndIf}
+    System::Call 'kernel32::ReleaseMutex(p $RexSwapLock)'
+    System::Call 'kernel32::CloseHandle(p $RexSwapLock)'
+    SetErrorLevel 2
+    Abort "$RexLine"
   ${EndIf}
-  System::Call 'kernel32::ReleaseMutex(p $RexSwapLock)'
-  System::Call 'kernel32::CloseHandle(p $RexSwapLock)'
 !macroend
