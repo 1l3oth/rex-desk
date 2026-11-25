@@ -33,13 +33,52 @@ ${stderr}`, out = /not logged in/i.test(text);
   return { loggedIn: code === 0 && (chatgpt || apiKey), method: chatgpt ? 'ChatGPT' : apiKey ? 'API key' : '', account: '', plan: '' };
 }
 const bareName = { claude: 'claude', codex: 'codex', gemini: 'agy' };
-const cliFound = ({ command }) => {
-  if (path.isAbsolute(command)) return existsSync(command);
+// A CLI run as a script by Rex Desk's own node.exe (npm's codex.js) is only there when that script still is: node.exe always is.
+export const cliFound = ({ command, args = [] }, exists = existsSync) => {
+  const script = args.find(arg => /\.(c|m)?js$/i.test(String(arg)));
+  if (script && !exists(script)) return false;
+  if (path.isAbsolute(command)) return exists(command);
   try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { windowsHide: true, stdio: 'ignore', timeout: 10000 }); return true; } catch { return false; }
 };
 // The person's own terminal for a sign-in: without the markers of an AI agent, which make CLIs refuse to ask questions.
 const terminalEnvironment = (env, keep) => Object.fromEntries(Object.entries(env).filter(([key]) => key === keep || !/^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_AGENT.*|ANTHROPIC_.*|REX_.*|AI_AGENT|AGENT|CI|NODE_TEST_CONTEXT)$/i.test(key)));
 const psQuote = value => `'${String(value).replace(/'/g, "''")}'`;
+const shQuote = value => `'${String(value).replace(/'/g, `'\\''`)}'`;
+const signedInLine = 'When the browser says you are signed in, close this window and go back to Rex Desk.';
+const notFoundLine = name => `${name} sign-in failed: ${name} was not found. Press Install to reinstall.`;
+const exitLine = name => `${name} sign-in failed. Read the message above, then press Sign in again in Rex Desk.`;
+// The file a found CLI really runs: npm's script for a node.exe launch, else the binary. Checked again in the window, since it can
+// be gone by then (an nvm4w switch or an npm uninstall), and a run that never started must not say the browser is next.
+const runFile = ({ command, args = [] }) => args.find(arg => /\.(c|m)?js$/i.test(String(arg))) || command;
+
+// The PowerShell sign-in window. Says "close this window" only when the CLI exited 0; a missing CLI or a failed run says so, with
+// the official installer, instead.
+export function signInWindowScript({ name, found, install, executable, bare, args }) {
+  const call = found ? `& ${[executable.command, ...executable.args, ...args].map(psQuote).join(' ')}` : `& ${psQuote(bare)} ${args.map(psQuote).join(' ')}`;
+  const file = found && runFile(executable), checked = file && path.isAbsolute(file);
+  const run = checked
+    ? `if (Test-Path -LiteralPath ${psQuote(file)}) { ${call}; $rexCode = $LASTEXITCODE } else { $rexCode = 127 }`
+    : `try { ${call}; $rexCode = $LASTEXITCODE } catch { $rexCode = 127 }`;
+  return [
+    "$Host.UI.RawUI.WindowTitle = 'Rex Desk sign-in'",
+    `Write-Host ${psQuote(`Rex Desk: signing in to ${name}. Your browser opens next.`)}`, "Write-Host ''",
+    ...(found ? [] : [`Write-Host ${psQuote(`${name} is not on this computer yet. Installing it first...`)}`, install,
+      "$env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + $env:Path",
+      "$env:Path = (Join-Path $HOME '.local\\bin') + ';' + (Join-Path $env:LOCALAPPDATA 'Programs\\OpenAI\\Codex\\bin') + ';' + (Join-Path $env:LOCALAPPDATA 'agy\\bin') + ';' + (Join-Path $env:APPDATA 'npm') + ';' + $env:Path"]),
+    run, "Write-Host ''",
+    `if ($rexCode -eq 0) { Write-Host ${psQuote(signedInLine)} }`,
+    `elseif ($rexCode -eq 127) { Write-Host ${psQuote(notFoundLine(name))}; Write-Host 'Or run its official installer in PowerShell:'; Write-Host ${psQuote(install)} }`,
+    `else { Write-Host ${psQuote(exitLine(name))} }`
+  ].join('\n');
+}
+// The same for the Mac and Linux terminal: one shell line.
+export function signInShellLine({ name, found, install, executable, bare, args }) {
+  const call = (found ? [executable.command, ...executable.args, ...args] : [bare, ...args]).map(shQuote).join(' ');
+  const file = found && runFile(executable);
+  const run = file && file.startsWith('/') ? `if [ -e ${shQuote(file)} ]; then ${call}; rc=$?; else rc=127; fi` : `${call}; rc=$?`;
+  return `echo ${shQuote(`Rex Desk: signing in to ${name}.`)}; ${found ? '' : `${install}; export PATH="$HOME/.local/bin:$PATH"; `}${run}; echo; `
+    + `if [ $rc -eq 0 ]; then echo ${shQuote(signedInLine)}; elif [ $rc -eq 127 ]; then echo ${shQuote(notFoundLine(name))}; echo 'Or run its official installer:'; echo ${shQuote(install)}; else echo ${shQuote(exitLine(name))}; fi`;
+}
 
 // Agent sign-in lives in each CLI profile. Rex Desk only reads status; it never reads or copies credentials.
 const home = os.homedir();
@@ -246,23 +285,13 @@ export class AgentProfiles {
     if (background) return this.loginHidden({ provider, profile, executable, found, install, name, env: terminalEnv, args });
     let child;
     if (process.platform === 'win32') {
-      const run = found ? `& ${[executable.command, ...executable.args, ...args].map(psQuote).join(' ')}` : `& ${psQuote(bareName[provider])} ${args.map(psQuote).join(' ')}`;
-      const script = [
-        "$Host.UI.RawUI.WindowTitle = 'Rex Desk sign-in'",
-        `Write-Host 'Rex Desk: signing in to ${name}. Your browser opens next.'`, "Write-Host ''",
-        ...(found ? [] : [`Write-Host '${name} is not on this computer yet. Installing it first...'`, install,
-          "$env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + $env:Path",
-          "$env:Path = (Join-Path $HOME '.local\\bin') + ';' + (Join-Path $env:LOCALAPPDATA 'Programs\\OpenAI\\Codex\\bin') + ';' + (Join-Path $env:LOCALAPPDATA 'agy\\bin') + ';' + (Join-Path $env:APPDATA 'npm') + ';' + $env:Path"]),
-        run, "Write-Host ''", "Write-Host 'When the browser says you are signed in, close this window and go back to Rex Desk.'"
-      ].join('\n');
+      const script = signInWindowScript({ name, found, install, executable, bare: bareName[provider], args });
       // `start` gives it a window of its own (a console started straight from Rex Desk closes at once), and the encoded script
       // passes through cmd untouched, so `|`, `&` and quotes in it are not read by cmd.
       child = spawn('cmd.exe', ['/c', 'start', 'Rex Desk sign-in', 'powershell.exe', '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: terminalEnv, windowsHide: false, detached: true, stdio: 'ignore' });
     } else {
-      const quote = value => `'${String(value).replace(/'/g, `'\\''`)}'`;
-      const run = found ? [executable.command, ...executable.args, ...args].map(quote).join(' ') : [bareName[provider], ...args].map(quote).join(' ');
-      const key = profileKey(aiProvider(provider)), profileSet = env[key] ? `export ${key}=${quote(env[key])}; ` : '';
-      const line = `${profileSet}echo 'Rex Desk: signing in to ${name}.'; ${found ? '' : `${install}; export PATH="$HOME/.local/bin:$PATH"; `}${run}; echo; echo 'When the browser says you are signed in, close this window and go back to Rex Desk.'`;
+      const key = profileKey(aiProvider(provider)), profileSet = env[key] ? `export ${key}=${shQuote(env[key])}; ` : '';
+      const line = profileSet + signInShellLine({ name, found, install, executable, bare: bareName[provider], args });
       child = process.platform === 'darwin'
         ? spawn('osascript', ['-e', `tell application "Terminal" to do script ${JSON.stringify(line)}`, '-e', 'tell application "Terminal" to activate'], { env: terminalEnv, detached: true, stdio: 'ignore' })
         : spawn('x-terminal-emulator', ['-e', 'bash', '-lc', `${line}; exec bash`], { env: terminalEnv, detached: true, stdio: 'ignore' });
