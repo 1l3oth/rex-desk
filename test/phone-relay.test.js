@@ -132,7 +132,7 @@ test('a relay "not paid" or "signed out" close stops the desk dialling again', (
     const relay = new PhoneRelay(desk, { socket: () => { const socket = fakeSocket(); sockets.push(socket); return socket; } });
     relay.setEnabled(true); sockets[0].emit('close', { code });
     assert.equal(relay.view().state, state);
-    assert.equal(relay.timer, null);
+    assert.equal(relay.timer === null, code !== 4001, 'only "replaced" is dialled again, after a pause');
     relay.stop();
   }
   const { desk } = fakeDesk(1), socket = fakeSocket(), relay = new PhoneRelay(desk, { socket: () => socket });
@@ -216,6 +216,19 @@ test('the desk pings the relay now and then, and dials again when the link has g
     mock.timers.tick(80000);
     assert.equal(closed, 1, 'a silent link is closed');
     assert.equal(relay.view().state, 'offline'); assert.ok(relay.timer, 'and dialled again');
+    relay.stop();
+  } finally { mock.timers.reset(); }
+});
+
+test('after "replaced" the desk dials again a few times, then waits for the switch', () => {
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  try {
+    const { desk } = fakeDesk(1), sockets = [];
+    const relay = new PhoneRelay(desk, { socket: () => { const socket = fakeSocket(); sockets.push(socket); return socket; } });
+    relay.setEnabled(true);
+    for (let i = 0; i < 3; i++) { sockets.at(-1).emit('close', { code: 4001 }); mock.timers.tick(30000); assert.equal(sockets.length, i + 2, 'dialled again'); }
+    sockets.at(-1).emit('close', { code: 4001 }); mock.timers.tick(120000);
+    assert.equal(sockets.length, 4, 'and then it stops'); assert.equal(relay.view().state, 'replaced');
     relay.stop();
   } finally { mock.timers.reset(); }
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
@@ -105,4 +105,35 @@ test('a full drive is said in plain words: no download without room, and the car
   assert.equal(updates.status().problem, 'Your data was not moved. The C: drive is full.');
   assert.match(plainProblem(Object.assign(new Error('ENOSPC: no space left on device, copyfile'), { code: 'ENOSPC' }), 'C:/Users/x', () => 3 * 1048576), /^The C: drive is full \(3 MB free\)\./);
   assert.equal(plainProblem(new Error('Update download failed (500).'), data), 'Update download failed (500).');
+});
+
+test('an update that did not take (antivirus blocked it) is told on the next start, and the log is written by the server too', async () => {
+  const { writeFileSync: write, readFileSync: read, mkdirSync: make } = await import('node:fs');
+  const data = temporary('blocked-install'), folder = path.join(data, 'updates'), installerFile = path.join(folder, 'Rex-Desk-0.3.0-setup.exe');
+  make(folder, { recursive: true }); write(installerFile, 'setup');
+  const settings = version => write(path.join(folder, 'install-update.json'), JSON.stringify({ version, installer: installerFile }));
+  const open = version => new Updates(data, { version, executable: 'C:/Rex Desk/rex-desk.exe', key: keys.publicKey, platform: 'win32-x64', fetcher: fetcher(manifest()) });
+  settings('0.3.0'); write(path.join(folder, 'install-update.log'), '2026-11-25T10:00:00 server: installing 0.3.0\r\n');
+  let failed = open('0.2.0').status().installFailed;
+  assert.equal(failed.version, '0.3.0'); assert.equal(failed.installer, installerFile);
+  assert.match(failed.reason, /did not start\. Your antivirus may have blocked it\. Add the Rex Desk folder to its exclusions, or run the installer yourself/);
+  write(path.join(folder, 'install-update.log'), 'x update helper started\r\nx install failed after 3 tries\r\n');
+  assert.match(open('0.2.0').status().installFailed.reason, /^The update did not install\. Your antivirus may have blocked it/);
+  rmSync(installerFile);
+  failed = open('0.2.0').status().installFailed;
+  assert.match(failed.reason, /installer is gone\. Your antivirus may have removed it/); assert.equal(failed.installer, '');
+  assert.equal(open('0.3.0').status().installFailed, null, 'installed: forgotten');
+  assert.equal(existsSync(path.join(folder, 'install-update.json')), false);
+  // Pressing Update now again clears it, and the server writes the first lines of the log itself.
+  settings('0.3.0');
+  const updates = open('0.2.0'); assert.ok(updates.status().installFailed);
+  assert.equal((await updates.check()).ready, true);
+  updates.freeSpace = () => 10 * 2 ** 30; let helper = '';
+  updates.startHelper = file => { helper = file; };
+  updates.install(1);
+  assert.equal(updates.status().installFailed, null);
+  assert.match(read(path.join(folder, 'install-update.log'), 'utf8'), /server: installing 0\.3\.0/);
+  const script = read(helper, 'utf8');
+  assert.match(script, /trap \{ try \{ Add-Content -Path \$Log -Value .*helper error/); assert.match(script, /Add-Content -Path \$Log -Value .*update helper started/);
+  assert.doesNotMatch(script, /Set-Content -Path \$Log/, 'the helper adds to the log, it never wipes what the server wrote');
 });

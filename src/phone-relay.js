@@ -10,6 +10,7 @@ export const RELAY_URL = 'wss://api.rexdesk.dev/v1/relay/desk';
 const PENDING_MS = 10 * 60000, MAX_PENDING = 5, MAX_BODY = 50 * 1024 * 1024, CHUNK = 64 * 1024;
 const RETRY_MS = [2000, 5000, 15000, 30000, 60000];
 // The desk pings the relay now and then, so an idle link is not cut as idle; a link that stays silent for DEAD_MS is dead and is dialled again.
+const REPLACED_MS = 30000, MAX_REPLACED = 3;
 const PING_MS = 20000, DEAD_MS = 70000;
 // Headers that belong to one hop, or that only this desk may set on a relayed request.
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-connection', 'te', 'trailer', 'content-length']);
@@ -36,7 +37,7 @@ export class PhoneRelay {
     this.desk = desk; this.url = url; this.makeSocket = socket; this.port = port;
     // Only requests carrying this secret count as relayed. It never leaves this process.
     this.secret = randomBytes(24).toString('base64url');
-    this.streams = new Map(); this.socket = null; this.state = 'off'; this.tries = 0; this.timer = null; this.publicUrl = ''; this.problem = null; this.account = '';
+    this.streams = new Map(); this.socket = null; this.state = 'off'; this.tries = 0; this.timer = null; this.publicUrl = ''; this.problem = null; this.account = ''; this.replacedTries = 0;
   }
   get store() { return this.desk.store; }
   settings() { return this.store.get('phone-relay', 'main') || { enabled: false, devices: [], pending: [] }; }
@@ -117,7 +118,7 @@ export class PhoneRelay {
     socket.addEventListener('message', event => { this.heard = Date.now(); try { this.onFrame(readRelayFrame(Buffer.from(event.data))); } catch (error) { this.store.event('', 'phone-relay-error', { message: error.message }); } });
     // The relay closes with 4001 when a newer connection of this desk took over, 4002 when the plan has no relay and 4003 when the sign-in
     // is no longer good. Those do not get better by dialling again, so the desk waits for the switch or a new sign-in instead.
-    socket.addEventListener('close', event => { clearInterval(this.beat); if (this.socket !== socket) return; this.socket = null; this.account = ''; this.dropStreams(); this.failed({ code: event?.code, reason: event?.reason, error, opened }); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); });
+    socket.addEventListener('close', event => { clearInterval(this.beat); if (this.socket !== socket) return; this.socket = null; this.account = ''; this.dropStreams(); this.failed({ code: event?.code, reason: event?.reason, error, opened }); const stay = STOP_CODES[event?.code]; this.state = stay || 'offline'; if (!stay) this.retry(); else if (event?.code === 4001) this.retryReplaced(); });
     // The error itself is kept for the close that always follows it, which says what went wrong.
     socket.addEventListener('error', event => { error = String(event?.message || event?.error?.message || 'connection error'); });
   }
@@ -139,6 +140,12 @@ export class PhoneRelay {
     clearTimeout(this.timer); clearInterval(this.beat); this.timer = null; const socket = this.socket; this.socket = null; this.account = ''; this.dropStreams();
     try { socket?.close(); } catch {} this.state = 'off';
   }
+  // "replaced" is often this desk's own older link (after a freeze or a network change), so it dials again after a pause. A few
+  // tries only: if another computer really holds the line, they would otherwise take it from each other for ever.
+  retryReplaced() {
+    if (!this.settings().enabled || this.desk.closed || this.timer || this.replacedTries >= MAX_REPLACED) return;
+    this.replacedTries++; this.timer = setTimeout(() => { this.timer = null; this.start(); }, REPLACED_MS); this.timer.unref?.();
+  }
   retry() {
     if (!this.settings().enabled || this.desk.closed || this.timer) return;
     const wait = RETRY_MS[Math.min(this.tries++, RETRY_MS.length - 1)];
@@ -148,7 +155,7 @@ export class PhoneRelay {
   dropStreams() { for (const stream of this.streams.values()) stream.request?.destroy(); this.streams.clear(); }
 
   onFrame({ op, streamId, payload }) {
-    if (op === RELAY_OP.WELCOME) { this.state = 'online'; this.tries = 0; this.problem = null; try { const hello = JSON.parse(payload.toString('utf8')); this.publicUrl = String(hello.url || ''); this.account = cleanId(hello.account); } catch {} return; }
+    if (op === RELAY_OP.WELCOME) { this.state = 'online'; this.tries = 0; this.replacedTries = 0; this.problem = null; try { const hello = JSON.parse(payload.toString('utf8')); this.publicUrl = String(hello.url || ''); this.account = cleanId(hello.account); } catch {} return; }
     if (op === RELAY_OP.PING) return this.send(RELAY_OP.PONG, streamId, payload);
     if (op === RELAY_OP.REQ) return this.openStream(streamId, JSON.parse(payload.toString('utf8')));
     if (op === RELAY_OP.REQ_BODY) return this.bodyChunk(streamId, payload);

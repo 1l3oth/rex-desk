@@ -17,3 +17,10 @@ test('an update press that cannot reach the server shows the reason the server g
   assert.match(await whyUnreachable(async () => { throw lost; }, lost, { tries: 2, pause: 1 }), /^Rex Desk is not answering\. The drive may be full/);
   assert.equal(await whyUnreachable(answers, new Error('Rex Agent is still working.')), 'Rex Agent is still working.', 'other errors stay as they are');
 });
+
+test('the update card has a state for an install antivirus blocked, with a button to the installer folder', async () => {
+  const { readFileSync } = await import('node:fs');
+  const code = readFileSync(new URL('../public/chat-update.js', import.meta.url), 'utf8'), chat = readFileSync(new URL('../public/chat.js', import.meta.url), 'utf8');
+  assert.match(code, /did not install/); assert.match(code, /data-action="update-reveal"/); assert.match(code, /api\('\/update\/reveal'/);
+  assert.match(chat, /'update-reveal'\) await revealInstaller\(api\)/);
+});
