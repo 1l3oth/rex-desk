@@ -53,3 +53,58 @@ test('review 731d387d (2): a short credential sitting in binary data makes the w
   const plain = b64('a plain picture');
   assert.deepEqual(guard.redactor(['Z9'])({ content: [{ type: 'image', mimeType: 'image/png', data: plain }] }).content[0], { type: 'image', mimeType: 'image/png', data: plain });
 });
+
+// L30 review 238e5326: the DNS check uses an injected resolver so it is deterministic and tied to each request, the hex
+// canonical of IPv4-mapped IPv6 is caught, and a private HTTPS server the person set up can run its own same-origin sign-in.
+test('review 238e5326 (1): a public name the resolver maps to a private IP is refused on a discovery redirect', async () => {
+  const asked = [];
+  const resolver = async host => host === 'sneaky.example.test' ? [{ address: '10.0.0.5', family: 4 }] : [{ address: '93.184.216.34', family: 4 }];
+  const fetcher = async target => {
+    const url = String(target); asked.push(url);
+    if (url === 'https://mcp.example.test/mcp') return new Response('{}', { status: 401, headers: { 'www-authenticate': 'Bearer resource_metadata="https://meta.example.test/.well-known/oauth-protected-resource"' } });
+    if (url === 'https://meta.example.test/.well-known/oauth-protected-resource') return new Response(null, { status: 302, headers: { location: 'https://sneaky.example.test/meta' } });
+    return new Response('{}', { status: 404 });
+  };
+  const signIn = new McpSignIn(memoryStore(), { fetcher, resolver });
+  await assert.rejects(() => signIn.start('flow-mcp', 'https://mcp.example.test/mcp'));
+  assert.ok(!asked.includes('https://sneaky.example.test/meta'), `never asked the rebinding host: ${asked.join(', ')}`);
+  signIn.stop();
+});
+
+test('review 238e5326 (1): privateHost catches the hex canonical of an IPv4-mapped IPv6 address', () => {
+  assert.equal(privateHost('::ffff:7f00:1'), true, '127.0.0.1');
+  assert.equal(privateHost('::ffff:7f00:0001'), true);
+  assert.equal(privateHost('::ffff:c0a8:0101'), true, '192.168.1.1');
+  assert.equal(privateHost('[::ffff:a00:1]'), true, '10.0.0.1 in brackets');
+  assert.equal(privateHost('::ffff:5db8:d822'), false, '93.184.216.34 is public');
+});
+
+test('review 238e5326 (2): a private HTTPS server the person set up runs its own same-origin discovery', async () => {
+  const asked = [];
+  const fetcher = async target => {
+    const url = String(target); asked.push(url);
+    if (url === 'https://10.1.2.3/mcp') return new Response('{}', { status: 401, headers: { 'www-authenticate': 'Bearer resource_metadata="https://10.1.2.3/.well-known/oauth-protected-resource"' } });
+    if (url === 'https://10.1.2.3/.well-known/oauth-protected-resource') return new Response(JSON.stringify({ resource: 'https://10.1.2.3/mcp', authorization_servers: ['https://10.1.2.3'] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (url.startsWith('https://10.1.2.3/.well-known/oauth-authorization-server')) return new Response(JSON.stringify({ issuer: 'https://10.1.2.3', authorization_endpoint: 'https://10.1.2.3/authorize', token_endpoint: 'https://10.1.2.3/token', registration_endpoint: 'https://10.1.2.3/register', response_types_supported: ['code'], code_challenge_methods_supported: ['S256'] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response('{}', { status: 404 });
+  };
+  const signIn = new McpSignIn(memoryStore(), { fetcher });
+  await signIn.start('corp', 'https://10.1.2.3/mcp').catch(() => {}); // may fail later at registration; discovery must be allowed
+  assert.ok(asked.some(u => u.includes('10.1.2.3/.well-known/')), `same-origin discovery is allowed for the private server: ${asked.join(', ')}`);
+  signIn.stop();
+});
+
+test('review 238e5326 (2): a private server may not point its sign-in at a different private address', async () => {
+  const asked = [];
+  const fetcher = async target => {
+    const url = String(target); asked.push(url);
+    if (url === 'https://10.1.2.3/mcp') return new Response('{}', { status: 401, headers: { 'www-authenticate': 'Bearer resource_metadata="https://10.1.2.3/.well-known/oauth-protected-resource"' } });
+    if (url === 'https://10.1.2.3/.well-known/oauth-protected-resource') return new Response(JSON.stringify({ resource: 'https://10.1.2.3/mcp', authorization_servers: ['https://10.9.9.9'] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (url.startsWith('https://10.9.9.9/')) return new Response(JSON.stringify({ issuer: 'https://10.9.9.9', authorization_endpoint: 'https://10.9.9.9/authorize', token_endpoint: 'https://10.9.9.9/token', registration_endpoint: 'https://10.9.9.9/register', response_types_supported: ['code'], code_challenge_methods_supported: ['S256'] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response('{}', { status: 404 });
+  };
+  const signIn = new McpSignIn(memoryStore(), { fetcher });
+  await assert.rejects(() => signIn.start('corp', 'https://10.1.2.3/mcp'));
+  assert.ok(!asked.some(u => u.startsWith('https://10.9.9.9/')), `the other private host is never asked: ${asked.join(', ')}`);
+  signIn.stop();
+});

@@ -50,19 +50,18 @@ const local = url => ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
 // and fe80::/10, or the IPv4 ranges 127/8, 10/8, 192.168/16, 172.16-31 and 169.254/16. A tool server must never be able to
 // name one for Rex Desk to reach, so it cannot point the sign-in at this computer or the private network around it.
 export function privateHost(host) {
-  const name = String(host || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/^::ffff:/, '');
+  let name = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  // IPv4-mapped IPv6 in either canonical form: the dotted ::ffff:127.0.0.1 and the hex ::ffff:7f00:1 both mean the IPv4 address.
+  const hex = name.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) { const hi = parseInt(hex[1], 16), lo = parseInt(hex[2], 16); name = `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`; }
+  else name = name.replace(/^::ffff:/, '');
   if (!name || name === 'localhost' || name.endsWith('.localhost') || name.endsWith('.local') || name === '::1' || name === '0.0.0.0') return true;
   if (/^(fc|fd)[0-9a-f]{2}:/.test(name) || name.startsWith('fe80:')) return true;
   const parts = name.split('.').map(Number);
   if (parts.length !== 4 || parts.some(part => !Number.isInteger(part))) return false;
   return parts[0] === 127 || parts[0] === 10 || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 169 && parts[1] === 254);
 }
-// A host is private if it is one literally, or if its name resolves to one (so a public name pointed at a private IP is
-// caught too). A name that cannot be resolved is left to the fetch, which then fails on its own.
-async function resolvesPrivate(host) {
-  if (privateHost(host)) return true;
-  try { return (await dns.lookup(host, { all: true })).some(entry => privateHost(entry.address)); } catch { return false; }
-}
+const originOf = value => { try { return new URL(String(value)).origin; } catch { return ''; } };
 // Only https; plain http only to this computer, and only when the owner allowed it (tests and local servers under test).
 function safeAddress(value, what, loopback = false) {
   let url; try { url = new URL(String(value)); } catch { throw new Plain(`The ${what} is not a valid address, so Rex Desk does not sign in there.`); }
@@ -76,12 +75,13 @@ export const carriesCredential = url => Boolean(url.username || url.password || 
 export const MOVED_SIGN_IN = 'The sign-in server tried to send Rex Desk to another address, so Rex Desk stopped there to keep your sign-in safe.';
 // The fetch for a request that carries a code, a PKCE verifier, a refresh token or a registration: only to the one address
 // found at sign-in, over https, never following a redirect, and never waiting long.
-function pinnedTo(address, what, { fetcher, loopback, ms = ASK_MS }) {
+function pinnedTo(address, what, { fetcher, loopback, ms = ASK_MS, guard }) {
   const home = safeAddress(address, what, loopback); home.hash = '';
   if (carriesCredential(home)) throw new Plain(`The ${what} has a key or password in it, so Rex Desk does not sign in there.`);
   return async (target, init = {}) => {
     const to = new URL(String(target)); to.hash = '';
     if (to.href !== home.href) throw new Plain(MOVED_SIGN_IN);
+    if (guard) await guard(to, what); // validate the address this actually connects to, right before the token leaves
     const limit = AbortSignal.timeout(ms), signal = init.signal ? AbortSignal.any([init.signal, limit]) : limit;
     const response = await fetcher(to.href, { ...init, redirect: 'manual', signal });
     if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) { await response.body?.cancel?.().catch(() => {}); throw new Plain(MOVED_SIGN_IN); }
@@ -109,8 +109,8 @@ function checkedFetch(fetcher, check, ms = ASK_MS) {
 const page = text => `<!doctype html><meta charset="utf-8"><title>Rex Desk</title><body style="font:18px system-ui;padding:40px">${text}</body>`;
 
 export class McpSignIn {
-  constructor(store, { fetcher = fetch, changed = () => {}, loopback = false, askMs = ASK_MS } = {}) {
-    this.store = store; this.fetcher = fetcher; this.changed = changed; this.loopback = loopback; this.ms = askMs; this.waiting = new Map(); this.refreshing = new Map(); this.timer = null;
+  constructor(store, { fetcher = fetch, changed = () => {}, loopback = false, askMs = ASK_MS, resolver = host => dns.lookup(host, { all: true }) } = {}) {
+    this.store = store; this.fetcher = fetcher; this.changed = changed; this.loopback = loopback; this.ms = askMs; this.resolver = resolver; this.waiting = new Map(); this.refreshing = new Map(); this.timer = null;
   }
   record(url) { return url ? this.store.get(KIND, idOf(url)) || null : null; }
   secret(record) { try { return JSON.parse(this.store.decrypt(record.sealed)); } catch { return null; } }
@@ -133,6 +133,8 @@ export class McpSignIn {
 
   // ---- signing in ----
   async discover(url) {
+    // The person's own server, and its own same-origin sign-in endpoints, may be private; every other destination must be public.
+    const home = originOf(url);
     // The server's 401 may name where its metadata is; without that the well-known addresses are tried (the SDK does both).
     let challenge = {};
     try {
@@ -140,23 +142,25 @@ export class McpSignIn {
       const response = await this.fetcher(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }), signal: AbortSignal.timeout(15000), redirect: 'manual' });
       challenge = extractWWWAuthenticateParams(response); await response.body?.cancel?.().catch(() => {});
     } catch { /* discovery below reports a server that cannot be reached */ }
-    const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: checkedFetch(this.fetcher, address => this.named(address, 'sign-in information address'), this.ms) });
+    const check = async address => { this.endpoint(address, 'sign-in information address'); await this.ensurePublic(new URL(String(address)), 'sign-in information address', home); };
+    const info = await discoverOAuthServerInfo(url, { resourceMetadataUrl: challenge.resourceMetadataUrl, fetchFn: checkedFetch(this.fetcher, check, this.ms) });
     const metadata = info.authorizationServerMetadata;
     if (!metadata) throw new Plain('This server does not say how to sign in to it.');
     // Every address the server named is checked like the one the person added: secure, with no key or password in it, and
-    // never a private or loopback destination.
-    await this.named(info.authorizationServerUrl, 'sign-in server');
-    for (const [key, what] of [['authorization_endpoint', 'sign-in page'], ['token_endpoint', 'token address']]) await this.named(metadata[key], what);
+    // never a private or loopback destination off the server's own origin.
+    await this.named(info.authorizationServerUrl, 'sign-in server', home);
+    for (const [key, what] of [['authorization_endpoint', 'sign-in page'], ['token_endpoint', 'token address']]) await this.named(metadata[key], what, home);
     if (!metadata.code_challenge_methods_supported?.includes('S256')) throw new Plain('This server does not offer the safe sign-in (PKCE) that MCP requires.');
     if (!metadata.registration_endpoint) throw new Plain('This server lets only apps it approved sign in, so Rex Desk cannot sign in to it yet.');
-    await this.named(metadata.registration_endpoint, 'registration address');
+    await this.named(metadata.registration_endpoint, 'registration address', home);
     const resource = await selectResourceURL(url, {}, info.resourceMetadata);
-    if (resource) await this.named(info.resourceMetadata.resource, 'server address');
+    if (resource) await this.named(info.resourceMetadata.resource, 'server address', home);
     return { server: info.authorizationServerUrl, metadata, resource: resource ? String(info.resourceMetadata.resource) : url, scope: challenge.scope || info.resourceMetadata?.scopes_supported?.join(' ') || undefined };
   }
   // Starts a sign-in and gives back the page to open. done resolves when the browser came back and the tokens are saved.
   async start(name, address) {
     const url = addressOf({ url: address }); if (!url) throw new Plain('This server has no web address to sign in to.');
+    const home = originOf(url);
     const couldNot = error => new Error(error instanceof Plain ? error.message : `Rex Desk could not start the sign-in. ${signInError(error)}`);
     let found;
     try {
@@ -184,16 +188,16 @@ export class McpSignIn {
     let timer = null; const close = () => { clearTimeout(timer); listener.close(); };
     try {
       // Registration is bounded by its own fetch (pinnedTo); the wait for the browser starts once the answer is waited on.
-      const client = await registerClient(found.server, { metadata: found.metadata, scope: found.scope, fetchFn: this.pinned(found.metadata.registration_endpoint, 'registration address'),
+      const client = await registerClient(found.server, { metadata: found.metadata, scope: found.scope, fetchFn: this.pinned(found.metadata.registration_endpoint, 'registration address', home),
         clientMetadata: { client_name: 'Rex Desk', redirect_uris: [redirectUri], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' } });
       const { authorizationUrl, codeVerifier } = await startAuthorization(found.server, { metadata: found.metadata, clientInformation: client, redirectUrl: redirectUri, scope: found.scope, state, resource: found.resource });
       // The page handed to the screen is the checked sign-in page with Rex Desk's own sign-in values added, nothing else.
-      const opened = new URL(authorizationUrl), home = this.endpoint(found.metadata.authorization_endpoint, 'sign-in page');
-      if (opened.origin !== home.origin || opened.pathname !== home.pathname) throw new Plain('The sign-in page this server named does not match, so Rex Desk stopped.');
+      const opened = new URL(authorizationUrl), signInPage = this.endpoint(found.metadata.authorization_endpoint, 'sign-in page');
+      if (opened.origin !== signInPage.origin || opened.pathname !== signInPage.pathname) throw new Plain('The sign-in page this server named does not match, so Rex Desk stopped.');
       const attempt = { link: authorizationUrl.toString(), error: '', cancel: () => fail(new Plain('The sign-in was cancelled.')) };
       this.waiting.set(url, attempt);
       attempt.done = code.then(async value => {
-        const tokens = await exchangeAuthorization(found.server, { metadata: found.metadata, clientInformation: client, authorizationCode: value, codeVerifier, redirectUri, resource: found.resource, fetchFn: this.pinned(found.metadata.token_endpoint, 'token address') });
+        const tokens = await exchangeAuthorization(found.server, { metadata: found.metadata, clientInformation: client, authorizationCode: value, codeVerifier, redirectUri, resource: found.resource, fetchFn: this.pinned(found.metadata.token_endpoint, 'token address', home) });
         if (this.waiting.get(url) !== attempt) return;
         this.save(url, name, this.kept({ server: found.server, metadata: found.metadata, resource: found.resource, client }, tokens));
         this.waiting.delete(url); this.changed(url);
@@ -208,15 +212,29 @@ export class McpSignIn {
   }
   // A discovered address: secure, and with no credential of its own, so nothing the server named carries one onward.
   endpoint(value, what) { const url = safeAddress(value, what, this.loopback); if (carriesCredential(url)) throw new Plain(`The ${what} this server named has a key or password in it, so Rex Desk does not sign in there.`); return url; }
+  // A host is private if it is one literally, or if the injected resolver maps it to one (so a public name pointed at a
+  // private IP is caught too). A name that cannot be resolved is left to the fetch, which then fails on its own.
+  async isPrivate(host) {
+    if (privateHost(host)) return true;
+    try { return (await this.resolver(host)).some(entry => privateHost(entry.address)); } catch { return false; }
+  }
+  // Refuse any request that would reach a private or loopback address, resolved and checked right before it is made so the
+  // address checked is the address connected to. The server the person configured (home) and its own same-origin endpoints
+  // may be private, so a private server they set up still signs in; every other destination the server names must be public.
+  async ensurePublic(url, what, home) {
+    if (this.loopback) return;
+    if (home && url.origin === home) return;
+    if (await this.isPrivate(url.hostname)) throw new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
+  }
   // An address the SERVER named (a discovery address, a redirect, its sign-in, token or registration address): checked like
-  // the one the person added, and, unless this computer runs local servers under test, never a private or loopback
-  // destination. The server the person configured themselves keeps using endpoint(), so their own local server still works.
-  async named(value, what) {
+  // the one the person added (secure, no key), and then resolved and refused if it points at a private destination off the
+  // server's own origin.
+  async named(value, what, home) {
     const url = this.endpoint(value, what);
-    if (!this.loopback && await resolvesPrivate(url.hostname)) throw new Plain(`The ${what} this server named points inside this computer or network, so Rex Desk does not sign in there.`);
+    await this.ensurePublic(url, what, home);
     return url;
   }
-  pinned(address, what) { return pinnedTo(address, what, { fetcher: this.fetcher, loopback: this.loopback, ms: this.ms }); }
+  pinned(address, what, home) { return pinnedTo(address, what, { fetcher: this.fetcher, loopback: this.loopback, ms: this.ms, guard: to => this.ensurePublic(to, what, home) }); }
   cancel(url) { const attempt = this.waiting.get(url); if (!attempt) return; this.waiting.delete(url); attempt.cancel(); }
   signOut(url) { this.cancel(url); const record = this.record(url); if (record) { this.store.delete(KIND, record.id); this.changed(url); } }
   kept(base, tokens, before = {}) {
@@ -235,7 +253,7 @@ export class McpSignIn {
     if (!secret || record.status === 'expired') return false;
     if (!secret.refreshToken) { if (secret.expiresAt && secret.expiresAt <= Date.now()) this.expire(record); return false; }
     try {
-      const tokens = await refreshAuthorization(secret.server, { metadata: secret.metadata, clientInformation: secret.client, refreshToken: secret.refreshToken, resource: secret.resource, fetchFn: this.pinned(secret.metadata?.token_endpoint, 'token address') });
+      const tokens = await refreshAuthorization(secret.server, { metadata: secret.metadata, clientInformation: secret.client, refreshToken: secret.refreshToken, resource: secret.resource, fetchFn: this.pinned(secret.metadata?.token_endpoint, 'token address', originOf(url)) });
       // Signed out or signed in again while this ran: the old answer is dropped.
       if (this.store.get(KIND, record.id)?.sealed !== record.sealed) return false;
       this.save(url, record.name, this.kept(secret, tokens, secret));
