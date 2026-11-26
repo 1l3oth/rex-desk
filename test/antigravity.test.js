@@ -240,3 +240,54 @@ test('ensureAntigravityMcp creates the config folder when it does not exist', ()
   assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), true);
   assert.equal(antigravityMcpInstalled(home), true);
 });
+
+// Review e1711ee8 (1): read and replace are coordinated by a lock, so a live writer never has its entry overwritten.
+test('a live writer holding the lock makes ensureAntigravityMcp leave the file untouched', () => {
+  const home = tempHome();
+  mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+  const before = JSON.stringify({ mcpServers: { other: { command: 'x', args: ['y'] } } });
+  const file = antigravityMcpPath(home);
+  writeFileSync(file, before);
+  writeFileSync(file + '.lock', String(process.pid)); // this live process "holds" the lock
+  try {
+    assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), false, 'does not write while another writer holds the lock');
+    assert.equal(readFileSync(file, 'utf8'), before, 'the file is left exactly as it was');
+  } finally { writeFileSync(file + '.lock', ''); }
+  // A stale lock (an owner that is gone) is cleared and the write goes through.
+  writeFileSync(file + '.lock', '999999999'); // a pid that is not running
+  assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), true, 'a stale lock does not block forever');
+  assert.ok(JSON.parse(readFileSync(file, 'utf8')).mcpServers.rex_desk, 'rex_desk is added after the stale lock is cleared');
+  assert.equal(existsSync(file + '.lock'), false, 'the lock is released');
+});
+
+// Review e1711ee8 (2): a rex_desk entry the person owns (not this proxy) keeps its command, args and env.
+test('a user-owned rex_desk entry is kept untouched', () => {
+  const home = tempHome();
+  mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+  const mine = { command: 'my-own-server', args: ['serve', '--port', '9'], env: { MINE: '1' } };
+  writeFileSync(antigravityMcpPath(home), JSON.stringify({ mcpServers: { rex_desk: mine } }));
+  assert.equal(ensureAntigravityMcp({ home, node: 'node', root: 'D:/rex' }), true);
+  assert.deepEqual(JSON.parse(readFileSync(antigravityMcpPath(home), 'utf8')).mcpServers.rex_desk, mine, 'the person-owned entry is left exactly as it was');
+  assert.equal(existsSync(antigravityMcpPath(home) + '.bak'), false, 'nothing was rewritten, so no backup was made');
+});
+
+// Review e1711ee8 (3): the lookup finds the real shipped payload/app beside payload/node (main.rs:407-410).
+test('installedPayload finds the shipped payload/app and payload/node layout', () => {
+  const tmp = tempHome();
+  const nodeName = process.platform === 'win32' ? 'node.exe' : 'node';
+  const app = path.join(tmp, 'payload', 'app');
+  mkdirSync(path.join(app, 'src'), { recursive: true });
+  mkdirSync(path.join(tmp, 'payload', 'node'), { recursive: true });
+  writeFileSync(path.join(app, 'src', 'stdio.js'), '');
+  writeFileSync(path.join(tmp, 'payload', 'node', nodeName), '');
+  const found = installedPayload({ REX_DESK_EXE: path.join(tmp, 'Rex Desk.exe') }, path.join('C:/runtime/node', nodeName));
+  assert.deepEqual(found, { node: path.join(tmp, 'payload', 'node', nodeName), root: app });
+});
+
+// Review e1711ee8 (4): the entry carries this desk's real address, so a standalone agy run does not fall back to 4317.
+test('the entry carries REX_DESK_URL so a standalone run reaches the real port', () => {
+  const entry = antigravityMcpEntry({ node: 'node', root: 'D:/rex', env: { REX_DESK_URL: 'http://127.0.0.1:4319/mcp', REX_DATA_DIR: 'D:/data' } });
+  assert.deepEqual(entry.env, { REX_DATA_DIR: 'D:/data', REX_DESK_URL: 'http://127.0.0.1:4319/mcp' });
+  const none = antigravityMcpEntry({ node: 'node', root: 'D:/rex', env: {} });
+  assert.equal(none.env, undefined, 'no env is written when there is nothing to carry');
+});

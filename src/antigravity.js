@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -44,52 +44,89 @@ export function installedPayload(env = process.env, execPath = process.execPath)
   let install = path.dirname(path.resolve(exe));
   if (path.basename(install) === 'MacOS' && path.basename(path.dirname(install)) === 'Contents') install = path.dirname(path.dirname(install));
   const base = path.basename(execPath);
-  for (const root of [install, path.join(install, 'app'), path.join(install, 'resources', 'app'), path.join(install, 'Contents', 'Resources', 'app')]) {
+  // The real shipped layout is payload/app (the app root) beside payload/node/<node> (desktop/src-tauri/src/main.rs:407-410),
+  // Windows as install/payload and Mac as install/Contents/Resources/payload. The flatter guesses stay as a fallback.
+  const roots = [path.join(install, 'payload', 'app'), path.join(install, 'Contents', 'Resources', 'payload', 'app'),
+    install, path.join(install, 'app'), path.join(install, 'resources', 'app'), path.join(install, 'Contents', 'Resources', 'app')];
+  for (const root of roots) {
     if (!existsSync(path.join(root, 'src', 'stdio.js'))) continue;
-    const node = [path.join(root, base), path.join(install, base), path.join(install, 'node', base)].find(existsSync);
+    // node sits in a sibling node/ folder under the same payload, or beside the app, or in install/node.
+    const node = [path.join(path.dirname(root), 'node', base), path.join(root, base), path.join(install, base), path.join(install, 'node', base)].find(existsSync);
     if (node) return { node, root };
   }
   return null;
 }
 // The rex_desk stdio entry: run this Rex Desk's proxy. No token is written here (the proxy reads the encrypted vault at run
-// time); only the stable data folder is carried, so the proxy still finds the local sign-in key when agy runs the entry on
-// its own, outside Rex Desk and after an update.
+// time); the stable data folder is carried so the proxy still finds the local sign-in key when agy runs the entry on its own,
+// and this desk's real address is carried so a standalone run reaches the port it actually listens on, not stdio.js's 4317
+// default (the installed app moves off 4317 when it is taken). With Rex Desk closed nothing answers there, so the proxy fails
+// with a plain connection error instead of talking to a stranger on 4317.
 export function antigravityMcpEntry({ node = process.execPath, root = packageRoot, env = process.env } = {}) {
   const stable = installedPayload(env, node);
   const entry = { command: stable ? stable.node : node, args: [path.join(stable ? stable.root : root, 'src', 'stdio.js')] };
-  if (env.REX_DATA_DIR) entry.env = { REX_DATA_DIR: env.REX_DATA_DIR };
+  const carried = {};
+  if (env.REX_DATA_DIR) carried.REX_DATA_DIR = env.REX_DATA_DIR;
+  if (env.REX_DESK_URL) carried.REX_DESK_URL = env.REX_DESK_URL;
+  if (Object.keys(carried).length) entry.env = carried;
   return entry;
 }
+// A pid is still running (EPERM means it exists but is another user's), so its lock is live, not stale.
+const pidAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
+const lockSleep = ms => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* sleep best effort */ } };
+// A short cross-process lock, so two writers (two Gemini runs, or another Rex Desk) never read one file and then both replace
+// it, losing one's entry. pid-based like the server's runtime.lock: a lock whose owner is gone is stale and cleared. Returns a
+// release function, or null when a live writer still holds it (the caller then leaves the file untouched).
+function lockMcpFile(file, { tries = 40, waitMs = 25 } = {}) {
+  const lockPath = `${file}.lock`;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    try { writeFileSync(lockPath, String(process.pid), { flag: 'wx' }); return () => { try { unlinkSync(lockPath); } catch { /* already gone */ } }; }
+    catch (error) {
+      if (error.code !== 'EEXIST') return null;
+      let stale = false;
+      try { const owner = Number(readFileSync(lockPath, 'utf8')); stale = !(Number.isInteger(owner) && owner > 0) || !pidAlive(owner); } catch { stale = false; }
+      if (stale) { try { unlinkSync(lockPath); continue; } catch { /* someone else took it */ } }
+      lockSleep(waitMs);
+    }
+  }
+  return null;
+}
+
 // Put the rex_desk entry into agy's own MCP list, so a Gemini run has the desk tools instead of none (the agent then tells
 // the person to switch to Claude). It is merged in, keeping every other server and every other key. The person's file is
-// never destroyed: an unreadable or unparseable file is left exactly as it is (never treated as empty and overwritten), a
-// valid file is backed up to mcp_config.json.bak once (an existing backup is never clobbered) before it is replaced, and if
-// that backup cannot be written the original is kept untouched. The replacement itself is written to a temp file and renamed
-// into place, so agy never reads a half-written file. Returns whether the entry is in place afterwards.
+// never destroyed: the read and the replace happen under a lock so two writers cannot overwrite each other; an unreadable or
+// unparseable file is left exactly as it is (never treated as empty and overwritten); a rex_desk entry the person owns (one
+// that does not run this proxy's stdio.js) is kept untouched; a valid file is backed up to mcp_config.json.bak, created
+// exclusively so it is written once and an existing recovery copy is never clobbered, and if that backup cannot be written
+// the original is kept untouched. The replacement is written to a temp file and renamed into place, so agy never reads a
+// half-written file. Returns whether the entry is in place afterwards.
 export function ensureAntigravityMcp({ home = os.homedir(), node = process.execPath, root = packageRoot, env = process.env } = {}) {
   const file = antigravityMcpPath(home), entry = antigravityMcpEntry({ node, root, env });
-  const exists = existsSync(file);
-  let raw = null;
-  if (exists) { try { raw = readFileSync(file, 'utf8'); } catch { return false; } } // unreadable: never wipe what we cannot read
-  let data = {};
-  if (raw !== null && raw.trim()) {
-    try { data = JSON.parse(raw); } catch { return false; } // broken JSON: not empty; keep the user's file, do not overwrite
-    if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
-  }
-  if (!data.mcpServers || typeof data.mcpServers !== 'object' || Array.isArray(data.mcpServers)) data.mcpServers = {};
-  const current = data.mcpServers.rex_desk;
-  if (current && typeof current === 'object' && current.command === entry.command && Array.isArray(current.args) && current.args[0] === entry.args[0]
-    && JSON.stringify(current.env ?? null) === JSON.stringify(entry.env ?? null)) return true;
-  // Keep any extra fields someone added (cwd, timeout), only set command, args and our data-dir env.
-  data.mcpServers.rex_desk = { ...(current && typeof current === 'object' ? current : {}), ...entry };
+  try { mkdirSync(path.dirname(file), { recursive: true }); } catch { return false; }
+  const release = lockMcpFile(file);
+  if (!release) return false; // a live writer holds it: leave the file untouched rather than risk overwriting it
   try {
-    mkdirSync(path.dirname(file), { recursive: true });
-    if (exists && raw && raw.trim() && !existsSync(file + '.bak')) { try { writeFileSync(file + '.bak', raw); } catch { return false; } }
+    const exists = existsSync(file);
+    let raw = null;
+    if (exists) { try { raw = readFileSync(file, 'utf8'); } catch { return false; } } // unreadable: never wipe what we cannot read
+    let data = {};
+    if (raw !== null && raw.trim()) {
+      try { data = JSON.parse(raw); } catch { return false; } // broken JSON: not empty; keep the user's file, do not overwrite
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+    }
+    if (!data.mcpServers || typeof data.mcpServers !== 'object' || Array.isArray(data.mcpServers)) data.mcpServers = {};
+    const current = data.mcpServers.rex_desk, isObject = Boolean(current) && typeof current === 'object' && !Array.isArray(current);
+    // Ours runs this Rex Desk's stdio proxy; a rex_desk entry pointing anywhere else is the person's own, left as it is.
+    const ours = isObject && Array.isArray(current.args) && typeof current.args[0] === 'string' && /(^|[\\/])src[\\/]stdio\.js$/.test(current.args[0]);
+    if (isObject && !ours) return true;
+    if (ours && current.command === entry.command && current.args[0] === entry.args[0] && JSON.stringify(current.env ?? null) === JSON.stringify(entry.env ?? null)) return true;
+    // Keep any extra fields on our own entry (cwd, timeout), only set command, args and our carried env.
+    data.mcpServers.rex_desk = { ...(ours ? current : {}), ...entry };
+    if (exists && raw && raw.trim()) { try { writeFileSync(`${file}.bak`, raw, { flag: 'wx' }); } catch (error) { if (error.code !== 'EEXIST') return false; } }
     const tmp = `${file}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n');
     renameSync(tmp, file);
     return antigravityMcpInstalled(home);
-  } catch { return false; }
+  } catch { return false; } finally { release(); }
 }
 
 // Signed in when agy can list the account's models; the list is the proof, nothing is read from the sign-in itself.
@@ -213,7 +250,7 @@ export class AntigravityRunner {
     // Gemini's CLI reads only its own MCP list, so put the Rex Desk tools in it before agy starts, or the agent has none of
     // the desk_ tools and tells the person to switch to Claude. Merged in, keeping every other server (#a93b8959). Not in a
     // test run, which must not write the real home folder.
-    const rexToolsReady = process.env.NODE_TEST_CONTEXT ? true : ensureAntigravityMcp({ node: process.execPath });
+    const rexToolsReady = process.env.NODE_TEST_CONTEXT ? true : ensureAntigravityMcp({ node: process.execPath, env: { ...process.env, REX_DESK_URL: this.mcpUrl || '' } });
     const env = { ...this.agentEnv, REX_DESK_TOKEN: this.token || '', REX_AGENT_TOKEN: this.token || '', REX_DESK_URL: this.mcpUrl || '' };
     let failed; const broken = new Promise((resolve, reject) => { failed = reject; }); broken.catch(() => {});
     this.client = (this.clientFactory || (options => new AcpClient(options)))({ env, cwd: this.cwd, args: dangerous(this.run.permissionMode) ? ['--dangerously-skip-permissions'] : [],
