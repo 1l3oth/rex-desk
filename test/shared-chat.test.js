@@ -220,6 +220,56 @@ test('the hourly second look at the last day goes on from where its 40 pages sto
   assert.equal(asked.length, 1, 'then the usual short look back');
 });
 
+// A note's hint below the read position, read by the real loop (Peers.start) against a stand-in cloud (L88 review).
+function hinted(count) {
+  const { b } = account(), peers = b.desk.peers, start = Date.now() - 3600000;
+  const stamp = i => `${(start + i * 10).toString(36).padStart(9, '0')}.0000.other`;
+  const rows = Array.from({ length: count }, (_, i) => ({ uid: `u${i}`, v: stamp(i) })), asked = [], got = new Set();
+  b.store.applyChatEvents = list => { for (const row of list) got.add(row.uid); return list.length; };
+  peers.save({ chatNode: peers.self.id, chatRead: 2, chatAt: stamp(count - 1), chatSettled: stamp(count - 1), chatDeepAt: Date.now(), chatDeepFrom: '' });
+  peers.moreMs = 30; peers.timers.set('chat', Date.now() + 600000); peers.timers.set('turso', Date.now() + 600000);
+  return { b, peers, stamp, rows, asked, got, page: since => rows.filter(row => row.v > since).slice(0, 500) };
+}
+
+test("a note's hint stays past the page limit: the next look goes on from where it stopped, not from the hint, until the newest row (L88 review)", async () => {
+  const { b, peers, stamp, asked, got, page } = hinted(25000);
+  b.store.cloud.pullChat = async since => { asked.push(since); return page(since); };
+  (peers.due ||= {}).chat = stamp(0);
+  peers.start();
+  try {
+    await waitFor(() => !('chat' in peers.due));
+    assert.equal(got.size, 25000, 'every row from the hint on, also past the first 40 pages');
+    assert.equal(asked.length, 51, 'no page read twice: 40, then 11 more from where it stopped');
+    assert.equal(new Set(asked).size, asked.length);
+  } finally { peers.stop(); }
+});
+
+test("a note's hint stays while the cloud is not there, and its rows are read once it is back (L88 review)", async () => {
+  const { b, peers, stamp, asked, got, page } = hinted(10);
+  let down = 2;
+  b.store.cloud.pullChat = async since => { asked.push(since); if (down > 0) { down--; return null; } return page(since); };
+  (peers.due ||= {}).chat = stamp(2);
+  peers.start();
+  try {
+    await waitFor(() => got.size === 8);
+    assert.deepEqual([...got].sort(), ['u2', 'u3', 'u4', 'u5', 'u6', 'u7', 'u8', 'u9']);
+    assert.ok(asked.length >= 3, 'tried again after each look the cloud did not answer');
+    await waitFor(() => !('chat' in peers.due));
+  } finally { peers.stop(); }
+});
+
+test('the shared records look says when the cloud did not answer and when it stopped at its page limit (L88 review)', async () => {
+  const { b, peers } = hinted(1);
+  peers.applyAll = () => {};
+  b.store.cloud.pullShared = async () => null;
+  assert.equal(await peers.pullTurso(), false, 'not reached: not done');
+  let next = Date.now() - 3600000;
+  b.store.cloud.pullShared = async () => Array.from({ length: 400 }, () => ({ kind: 'roommsg', id: String(next), deleted: false, value: null, v: `${(next++).toString(36).padStart(9, '0')}.0000.other` }));
+  const answer = await peers.pullTurso();
+  assert.equal(answer.done, false, 'stopped at 50 pages');
+  assert.ok(answer.next, 'with where it stopped');
+});
+
 test('a different file already under the same upload name is never given out as the arriving one (L27)', () => {
   const { b } = account();
   const folder = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', mine = path.join(b.store.media('uploads'), folder, 'note.txt');

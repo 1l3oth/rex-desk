@@ -28,7 +28,8 @@ const CHAT_DEEP_MS = 6 * 3600000, CHAT_DEEP_SPAN = 24 * 3600000;
 // CLOUD_BEAT_MS: this computer's heartbeat row in the cloud, for computers without the line; a change is written at once too.
 // NOTE_BYTES: a note bigger than this leaves its records and messages out, and the other computers read them instead.
 // SETTLE_MS: a safety look this long past the overlap after the newest row read settles it (see pullChats).
-const SAFETY_MS = 5 * 60000, SETTLE_MS = 60000, FALLBACK_MS = 20000, BEAT_MS = 60000, CLOUD_BEAT_MS = 5 * 60000, NOTE_BYTES = 16000;
+// MORE_MS: a look that stopped at its page limit goes on from where it stopped this much later, not in a tight loop.
+const SAFETY_MS = 5 * 60000, SETTLE_MS = 60000, MORE_MS = 2000, FALLBACK_MS = 20000, BEAT_MS = 60000, CLOUD_BEAT_MS = 5 * 60000, NOTE_BYTES = 16000;
 // How often the other computers' agent states are read while one of them is on but sends no notes.
 const LOOK_MS = FALLBACK_MS;
 const older = (left, right) => !left ? right || '' : !right ? left : left < right ? left : right;
@@ -352,7 +353,8 @@ export class Peers {
   // A safety look (no arguments) starts two minutes back, and now and then a day back. from: a note said messages from this
   // version on were uploaded; the look then starts there (or at the last one read, if that is older) and reads nothing twice.
   async pullChats({ from = '', overlap = 120000 } = {}) {
-    // false: nothing was read (the tick then keeps a note's hint for the next look).
+    // What a look answers (the tick keeps a note's hint until one says done): false when the cloud could not be read (nothing
+    // is saved then), { done: false, next } when it stopped at its page limit at next, { done: true } once it read to the end.
     if (!this.store.cloud?.ready || !this.store.cloud.pullChat) return false;
     // Each database call is named while it runs (step), so the freeze log names the one that is really running.
     // chatRead 2: read everything once more, so messages dropped by an id clash (see Store.applyChatEvents) come in.
@@ -375,6 +377,8 @@ export class Peers {
     let finished = false;
     for (let page = 0; page < 40; page++) {
       const rows = await waitStep(`sync chat: cloud page ${page + 1}`, () => this.store.cloud.pullChat(since));
+      // No answer (the cloud closed or not reached) is not an empty page: nothing is saved, and the hint stays for the next look.
+      if (!Array.isArray(rows)) return false;
       // scanned and last count this computer's own rows too (TursoSync.pullChat), so the read position moves past them and
       // they are read once, not on every look (L88). The overlap, the note's from and the daily look still catch a late row.
       const count = rows?.scanned ?? rows?.length ?? 0, last = rows?.last || (rows?.length ? String(rows.at(-1).v) : '');
@@ -386,10 +390,12 @@ export class Peers {
       newest = last > newest ? last : newest; since = last;
       if (count < 500) { finished = true; break; }
     }
-    const look = deep && !finished ? { chatDeepFrom: since } : again || deep ? { chatDeepAt: Date.now(), chatDeepFrom: '' } : {};
+    // A look from a note that went on from the second look's place (chatDeepFrom) to the newest row finished that one too.
+    const through = !deep && finished && from && settings.chatDeepFrom && from <= String(settings.chatDeepFrom);
+    const look = deep && !finished ? { chatDeepFrom: since } : again || deep || through ? { chatDeepAt: Date.now(), chatDeepFrom: '' } : {};
     const calm = safety ? { chatSettled: newest && Date.now() >= (parseInt(newest.split('.')[0], 36) || 0) + overlap + SETTLE_MS ? newest : '' } : {};
     if (again || deep || newest !== String(settings.chatAt || '') || (safety && calm.chatSettled !== String(settings.chatSettled || ''))) step('sync chat: save read position', () => this.save({ chatAt: newest, chatNode: this.self.id, chatRead: 2, ...look, ...calm }));
-    return total;
+    return finished ? { done: true, total } : { done: false, next: since, total };
   }
   // Messages written here before chats were shared (or while offline with nothing queued) go up once.
   // Only the computer running the agent: another computer's own unsent messages of that chat are a story of their own,
@@ -410,7 +416,7 @@ export class Peers {
 
   // With the same Turso database on every computer, the chats also arrive from there, even while the other computer is off.
   // Like pullChats: a safety look starts two minutes back; one after a note starts where the note says (or at the last one read).
-  // true once the look read to the end; false when the cloud could not be read, so the tick keeps a note's hint.
+  // Answers like pullChats: false when the cloud could not be read, { done: false, next } at the page limit, true at the end.
   async pullTurso({ from = '', overlap = 120000 } = {}) {
     if (!this.store.cloud?.ready) return false;
     // Under another computer id (a restore that got its own), what was skipped as "this computer's own" is read again from the start.
@@ -420,23 +426,25 @@ export class Peers {
     const settled = overlap > 0 && !again && at > 0 && Boolean(settings.tursoSettled) && (parseInt(String(settings.tursoSettled).split('.')[0], 36) || 0) === at;
     let since = settled ? String(settings.tursoSettled) : `${Math.max(0, at - overlap).toString(36).padStart(9, '0')}`, newest = at, newestV = settled ? since : '';
     if (from && !again && from <= since) since = justBelow(from);
+    let finished = false;
     try {
       // Page by the last version read: more than one page of changes inside the 2-minute overlap (a first upload stamps
       // everything at once) would otherwise re-read the same first page on every poll and never get past it.
       for (let page = 0; page < 50; page++) {
         const rows = await waitStep(`sync shared: cloud page ${page + 1}`, () => this.store.cloud.pullShared(since));
+        if (!Array.isArray(rows)) return false; // not reached: nothing saved, the hint stays
         if (rows?.length) step(`sync shared: applyAll (${rows.length} rows, page ${page + 1})`, () => this.applyAll(rows));
         // Anything new from a computer means it is on (its own stamp is only used to tell new from already seen).
         for (const row of rows || []) { const [time, , ...node] = String(row.v).split('.'), stamp = parseInt(time, 36) || 0, from = node.join('.'); if (from && stamp > ((this.newestFrom ||= new Map()).get(from) || 0)) { if (this.newestFrom.has(from)) this.hear(from); this.newestFrom.set(from, stamp); } }
         // Past this computer's own rows too (TursoSync.pullShared counts them in scanned and last), so they are read once (L88).
         const count = rows?.scanned ?? rows?.length ?? 0, last = rows?.last || (rows?.length ? String(rows.at(-1).v) : '');
         if (last) { newest = Math.max(newest, parseInt(last.split('.')[0], 36) || 0); if (last > newestV) newestV = last; }
-        if (count < 400) break;
+        if (count < 400) { finished = true; break; }
         since = last;
       }
       const calm = overlap > 0 ? { tursoSettled: newestV && Date.now() >= (parseInt(newestV.split('.')[0], 36) || 0) + overlap + SETTLE_MS ? newestV : '' } : {};
       if (again || newest > at || (overlap > 0 && calm.tursoSettled !== String(settings.tursoSettled || ''))) step('sync shared: save read position', () => this.save({ tursoAt: newest, tursoNode: this.self.id, ...calm }));
-      return true;
+      return finished ? true : { done: false, next: since };
     } catch { /* Turso shows its own state in Settings */ return false; }
   }
   // What this computer's agents are doing, as the other computers show it in their sidebar.
@@ -758,10 +766,10 @@ export class Peers {
       const seen = this.store.cloud?.pulled; if (seen) for (const item of body.records) seen.set(`${item.kind}\u001f${item.id}`, item.v);
     }
     if (Array.isArray(body.rows) && body.rows.length) step('sync note: chat messages', () => this.store.applyChatEvents(body.rows));
-    // dueCount: a note that comes while a look is running keeps its hint, even when the look then succeeds (see start).
-    const count = this.dueCount ||= { shared: 0, chat: 0 };
-    if (body.shared && (body.more || !Array.isArray(body.records))) { due.shared = older(due.shared, String(body.shared)); count.shared++; }
-    if (body.chat && (body.more || !Array.isArray(body.rows))) { due.chat = older(due.chat, String(body.chat)); count.chat++; }
+    // late: a note that comes while a look is running; its hint stays after that look, even when the look read to the end (see start).
+    const late = this.lateHint ||= {}, reading = this.reading || {};
+    if (body.shared && (body.more || !Array.isArray(body.records))) { due.shared = older(due.shared, String(body.shared)); if (reading.shared) late.shared = older(late.shared, String(body.shared)); }
+    if (body.chat && (body.more || !Array.isArray(body.rows))) { due.chat = older(due.chat, String(body.chat)); if (reading.chat) late.chat = older(late.chat, String(body.chat)); }
     if ('shared' in due || 'chat' in due) this.kick?.();
   }
   // Another computer that is on but sends no notes (its line is down, or it runs a version without them): it is still looked
@@ -790,10 +798,23 @@ export class Peers {
       for (const [part, pull] of [['shared', options => this.pullTurso(options)], ['chat', options => this.pullChats(options)]]) {
         // A note's hint (where its rows start) goes with the safety look too, and stays until a look read to the end: dropped at
         // the start, a look that failed or timed out lost a late row stamped below the settled read position (L88 review).
-        const timer = part === 'shared' ? 'turso' : 'chat', from = due[part], count = (this.dueCount ||= { shared: 0, chat: 0 })[part];
-        const read = async options => { const ok = await bounded(async () => (await pull(options)) !== false); doing(''); if (ok === true && from === due[part] && count === this.dueCount[part]) delete due[part]; };
+        // The hint is cleared only by a look that says it read to the end. One that failed, timed out or found the cloud not there
+        // leaves it as it was; one that stopped at its page limit leaves where it stopped instead (rows below that are read), and
+        // the next look goes on from there MORE_MS later. A note that came during the look keeps its own hint.
+        const timer = part === 'shared' ? 'turso' : 'chat', from = due[part], more = this.more ||= {};
+        const read = async options => {
+          const reading = this.reading ||= {}, late = this.lateHint ||= {};
+          reading[part] = true; delete late[part];
+          let result;
+          try { result = await bounded(async () => { const answer = await pull(options); return answer === false ? null : answer && typeof answer === 'object' ? answer : { done: true }; }); }
+          finally { reading[part] = false; doing(''); }
+          const later = late[part]; delete late[part];
+          if (!result) return;
+          if (result.done) { if (later) due[part] = later; else if (due[part] === from) delete due[part]; return; }
+          if (result.next) { due[part] = older(String(result.next), later); more[part] = Date.now() + (this.moreMs ?? MORE_MS); }
+        };
         if (catchUp || (this.timers.get(timer) || 0) <= Date.now()) { this.timers.set(timer, Date.now() + safety); await read(from ? { from } : undefined); }
-        else if (part in due) await read({ from, overlap: 0 });
+        else if (part in due && (more[part] || 0) <= Date.now()) await read({ from, overlap: 0 });
         else if ((this.timers.get(timer) || 0) > Date.now() + safety) this.timers.set(timer, Date.now() + safety);
       }
       if ((this.timers.get('chatpush') || 0) <= Date.now()) { this.timers.set('chatpush', Date.now() + 60000); try { step('sync: settling split chats', () => this.desk.chatSplits?.settleAll()); step('sync: detecting split chats', () => this.desk.chatSplits?.detect()); step('sync: pushing chat messages', () => this.pushChats()); } catch { /* tried again in a minute */ } finally { doing(''); } }
